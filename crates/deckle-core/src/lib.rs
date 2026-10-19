@@ -3,6 +3,7 @@
 
 pub mod cover_rule;
 pub mod deliver;
+pub mod devices;
 pub mod epub;
 pub mod inspect;
 pub mod matcher;

@@ -1,0 +1,253 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! PTP transactions over any bulk transport: command, optional data phase, response.
+
+use std::any::Any;
+
+use crate::ptp::{Container, ContainerKind, ObjectInfo, PtpError, decode_u32_array, fmt, op, rsp};
+
+#[derive(Debug, thiserror::Error)]
+pub enum TransportError {
+    #[error("USB transfer timed out")]
+    Timeout,
+    #[error("USB error: {0}")]
+    Usb(String),
+}
+
+/// A bulk pipe to the device.
+pub trait Transport: Any {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), TransportError>;
+    /// Reads one container (or one chunk of a large data phase); returns bytes read.
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MtpError {
+    #[error(transparent)]
+    Transport(#[from] TransportError),
+    #[error(transparent)]
+    Ptp(#[from] PtpError),
+    #[error("device answered {op:#06x} with response code {code:#06x}")]
+    Response { op: u16, code: u16 },
+    #[error("unexpected container {0:?} during {1:#06x}")]
+    Unexpected(ContainerKind, u16),
+    #[error("device returned no {0}")]
+    Missing(&'static str),
+}
+
+/// Bulk reads of a data phase are at most this large per USB transfer.
+const READ_CHUNK: usize = 1024 * 1024;
+/// Bulk writes are split into this size so the device's buffers keep up.
+const WRITE_CHUNK: usize = 512 * 1024;
+
+pub struct Mtp {
+    transport: Box<dyn Transport>,
+    tx: u32,
+}
+
+impl Mtp {
+    pub fn new(transport: Box<dyn Transport>) -> Self {
+        Mtp { transport, tx: 0 }
+    }
+
+    /// Access the concrete transport (tests).
+    pub fn transport_mut<T: Transport>(&mut self) -> Option<&mut T> {
+        (self.transport.as_mut() as &mut dyn Any).downcast_mut::<T>()
+    }
+
+    fn next_tx(&mut self) -> u32 {
+        self.tx += 1;
+        self.tx
+    }
+
+    fn read_container(&mut self) -> Result<(Container, Vec<u8>), MtpError> {
+        let mut buf = vec![0u8; READ_CHUNK];
+        let n = self.transport.read(&mut buf)?;
+        buf.truncate(n);
+        let (c, mut payload) = Container::decode(&buf)?;
+        if c.kind == ContainerKind::Data {
+            let total = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
+            let mut have = buf.len();
+            while have < total {
+                let mut more = vec![0u8; READ_CHUNK.min(total - have)];
+                let n = self.transport.read(&mut more)?;
+                if n == 0 {
+                    break;
+                }
+                payload.extend_from_slice(&more[..n]);
+                have += n;
+            }
+        }
+        Ok((c, payload))
+    }
+
+    /// Command with no outgoing data; returns (incoming data if any, response params).
+    fn transact(
+        &mut self,
+        code: u16,
+        params: &[u32],
+        data_out: Option<&[u8]>,
+    ) -> Result<(Option<Vec<u8>>, Vec<u32>), MtpError> {
+        let tx = self.next_tx();
+        let cmd = Container {
+            kind: ContainerKind::Command,
+            code,
+            tx_id: tx,
+            params: params.to_vec(),
+        };
+        self.transport.write(&cmd.encode(&[]))?;
+        if let Some(data) = data_out {
+            let header = Container {
+                kind: ContainerKind::Data,
+                code,
+                tx_id: tx,
+                params: vec![],
+            };
+            let bytes = header.encode(data);
+            for chunk in bytes.chunks(WRITE_CHUNK) {
+                self.transport.write(chunk)?;
+            }
+        }
+        let mut data_in = None;
+        loop {
+            let (c, payload) = self.read_container()?;
+            match c.kind {
+                ContainerKind::Data => data_in = Some(payload),
+                ContainerKind::Response => {
+                    if c.code != rsp::OK {
+                        return Err(MtpError::Response {
+                            op: code,
+                            code: c.code,
+                        });
+                    }
+                    return Ok((data_in, c.params));
+                }
+                ContainerKind::Event => continue,
+                other => return Err(MtpError::Unexpected(other, code)),
+            }
+        }
+    }
+
+    pub fn open_session(&mut self) -> Result<(), MtpError> {
+        self.tx = 0;
+        self.transact(op::OPEN_SESSION, &[1], None).map(|_| ())
+    }
+
+    pub fn close_session(&mut self) -> Result<(), MtpError> {
+        self.transact(op::CLOSE_SESSION, &[], None).map(|_| ())
+    }
+
+    pub fn storages(&mut self) -> Result<Vec<u32>, MtpError> {
+        let (data, _) = self.transact(op::GET_STORAGE_IDS, &[], None)?;
+        Ok(decode_u32_array(
+            &data.ok_or(MtpError::Missing("storage ids"))?,
+        )?)
+    }
+
+    /// Object handles directly under `parent` (0 = storage root).
+    pub fn object_handles(&mut self, storage: u32, parent: u32) -> Result<Vec<u32>, MtpError> {
+        let parent_param = if parent == 0 { 0xFFFF_FFFF } else { parent };
+        let (data, _) = self.transact(op::GET_OBJECT_HANDLES, &[storage, 0, parent_param], None)?;
+        Ok(decode_u32_array(
+            &data.ok_or(MtpError::Missing("object handles"))?,
+        )?)
+    }
+
+    pub fn object_info(&mut self, handle: u32) -> Result<ObjectInfo, MtpError> {
+        let (data, _) = self.transact(op::GET_OBJECT_INFO, &[handle], None)?;
+        Ok(ObjectInfo::decode(
+            &data.ok_or(MtpError::Missing("object info"))?,
+        )?)
+    }
+
+    /// Children of `parent` as (handle, info).
+    pub fn list(&mut self, storage: u32, parent: u32) -> Result<Vec<(u32, ObjectInfo)>, MtpError> {
+        let mut out = Vec::new();
+        for h in self.object_handles(storage, parent)? {
+            out.push((h, self.object_info(h)?));
+        }
+        Ok(out)
+    }
+
+    /// Handle of the child named `name` (case-insensitive) under `parent`.
+    pub fn find_child(
+        &mut self,
+        storage: u32,
+        parent: u32,
+        name: &str,
+    ) -> Result<Option<u32>, MtpError> {
+        for (h, info) in self.list(storage, parent)? {
+            if info.filename.eq_ignore_ascii_case(name) {
+                return Ok(Some(h));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Creates a folder and returns its handle.
+    pub fn make_folder(&mut self, storage: u32, parent: u32, name: &str) -> Result<u32, MtpError> {
+        let info = ObjectInfo {
+            storage_id: storage,
+            format: fmt::ASSOCIATION,
+            size: 0,
+            parent,
+            association: true,
+            filename: name.to_owned(),
+        };
+        let (_, params) = self.transact(
+            op::SEND_OBJECT_INFO,
+            &[storage, parent],
+            Some(&info.encode()),
+        )?;
+        params
+            .get(2)
+            .copied()
+            .ok_or(MtpError::Missing("new object handle"))
+    }
+
+    /// Finds or creates `name` under `parent`.
+    pub fn ensure_folder(
+        &mut self,
+        storage: u32,
+        parent: u32,
+        name: &str,
+    ) -> Result<u32, MtpError> {
+        match self.find_child(storage, parent, name)? {
+            Some(h) => Ok(h),
+            None => self.make_folder(storage, parent, name),
+        }
+    }
+
+    /// Sends a file (SendObjectInfo then SendObject) and returns its handle.
+    pub fn send_file(
+        &mut self,
+        storage: u32,
+        parent: u32,
+        name: &str,
+        bytes: &[u8],
+    ) -> Result<u32, MtpError> {
+        let info = ObjectInfo {
+            storage_id: storage,
+            format: fmt::UNDEFINED,
+            size: bytes.len() as u32,
+            parent,
+            association: false,
+            filename: name.to_owned(),
+        };
+        let (_, params) = self.transact(
+            op::SEND_OBJECT_INFO,
+            &[storage, parent],
+            Some(&info.encode()),
+        )?;
+        let handle = params
+            .get(2)
+            .copied()
+            .ok_or(MtpError::Missing("new object handle"))?;
+        self.transact(op::SEND_OBJECT, &[], Some(bytes))?;
+        Ok(handle)
+    }
+
+    pub fn delete(&mut self, handle: u32) -> Result<(), MtpError> {
+        self.transact(op::DELETE_OBJECT, &[handle, 0], None)
+            .map(|_| ())
+    }
+}
