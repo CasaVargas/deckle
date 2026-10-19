@@ -2,8 +2,10 @@
 //! Turns a pre-publication KPF into the fragment set of a device KFX. Port of kfxlib's
 //! `kpf_book.fix_kpf_prepub_book` and the structure/position helpers it calls.
 
+mod content;
 mod structural;
 
+pub use content::{create_content_fragments, section_story_names};
 pub use structural::fix_structural;
 
 use crate::fragment::{Fragment, FragmentList};
