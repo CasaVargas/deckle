@@ -113,12 +113,13 @@ impl<'s> Decoder<'s> {
         Decoder { symtab }
     }
 
+    /// Resolves a symbol id; unknown ids become `$N` placeholders, as kfxlib does.
     fn symbol(&self, id: u64) -> Result<Sym, IonError> {
         let id = u32::try_from(id).map_err(|_| IonError::UnknownSymbolId(u32::MAX))?;
-        self.symtab
-            .symbol_of(id)
-            .map(Sym::new)
-            .ok_or(IonError::UnknownSymbolId(id))
+        Ok(match self.symtab.symbol_of(id) {
+            Some(text) => Sym::new(text),
+            None => Sym(format!("${id}")),
+        })
     }
 
     /// Decodes all top-level values of a stream that starts with the BVM. NOP padding is skipped.
