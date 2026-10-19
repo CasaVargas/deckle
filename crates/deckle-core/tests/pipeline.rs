@@ -156,3 +156,51 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         report.warnings
     );
 }
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn run_with_progress_reports_each_stage_in_order() {
+    use deckle_core::pipeline::run_with_progress;
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+    };
+    let mut seen: Vec<&'static str> = Vec::new();
+    let report = run_with_progress(
+        &deckle_kfx::fixtures::path("deckle-mini.epub"),
+        &opts,
+        &mut |stage| seen.push(stage),
+    );
+    assert_eq!(report.error, None);
+    assert_eq!(
+        seen,
+        ["inspect", "normalize", "convert", "repackage", "deliver"]
+    );
+}
+
+#[test]
+fn run_with_progress_stops_at_the_failing_stage() {
+    use deckle_core::pipeline::run_with_progress;
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(PathBuf::from("/nonexistent/previewer")),
+        keep_work_dir: false,
+    };
+    let mut seen: Vec<&'static str> = Vec::new();
+    let report = run_with_progress(
+        &deckle_kfx::fixtures::path("deckle-mini.epub"),
+        &opts,
+        &mut |stage| seen.push(stage),
+    );
+    assert!(report.error.is_some());
+    assert!(seen.is_empty());
+}

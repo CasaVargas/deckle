@@ -80,6 +80,15 @@ pub fn asin_seed(info: &BookInfo) -> Vec<u8> {
 
 /// Runs every stage; never panics, failures land in `report.error`.
 pub fn run(epub: &Path, opts: &RunOptions) -> RunReport {
+    run_with_progress(epub, opts, &mut |_| {})
+}
+
+/// Like [`run`], calling `on_stage` with the stage name just before each stage starts.
+pub fn run_with_progress(
+    epub: &Path,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+) -> RunReport {
     let mut report = RunReport {
         input: epub.to_path_buf(),
         ..Default::default()
@@ -93,6 +102,7 @@ pub fn run(epub: &Path, opts: &RunOptions) -> RunReport {
     };
     macro_rules! stage {
         ($name:literal, $expr:expr) => {{
+            on_stage($name);
             let t = Instant::now();
             let r = $expr;
             report
