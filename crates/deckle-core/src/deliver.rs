@@ -30,6 +30,8 @@ pub enum Target {
 pub struct DeliverOptions {
     /// `(file name, JPEG bytes)` for `system/thumbnails/` on mass-storage Kindles.
     pub thumbnail: Option<(String, Vec<u8>)>,
+    /// `(file name, bytes)` for `<book>.sdr/` next to the KFX (X-Ray etc.).
+    pub sidecars: Vec<(String, Vec<u8>)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -173,9 +175,14 @@ pub fn deliver_with(
 ) -> Result<PathBuf, DeliverError> {
     let name = device_filename(info);
     match target {
-        Target::Folder(dir) => write_file(&dir.join(name), kfx),
+        Target::Folder(dir) => {
+            let path = write_file(&dir.join(&name), kfx)?;
+            write_sidecars(&path, &opts.sidecars)?;
+            Ok(path)
+        }
         Target::MassStorage(dev) => {
-            let path = write_file(&dev.root.join("documents").join(name), kfx)?;
+            let path = write_file(&dev.root.join("documents").join(&name), kfx)?;
+            write_sidecars(&path, &opts.sidecars)?;
             if let Some((thumb_name, jpeg)) = &opts.thumbnail {
                 crate::thumbnail::install(&dev.root, thumb_name, jpeg)
                     .map_err(|e| DeliverError::Thumbnail(e.to_string()))?;
@@ -183,8 +190,28 @@ pub fn deliver_with(
             let _ = crate::thumbnail::sync(&dev.root);
             Ok(path)
         }
-        Target::Mtp(mtp) => deliver_mtp(kfx, &name, mtp),
+        Target::Mtp(mtp) => deliver_mtp(kfx, &name, mtp, &opts.sidecars),
     }
+}
+
+/// `<book>.sdr/<name>` files beside a delivered KFX (book first, sidecars after).
+fn write_sidecars(book: &Path, sidecars: &[(String, Vec<u8>)]) -> Result<(), DeliverError> {
+    let sdr = book.with_extension("sdr");
+    // A re-run with another ASIN (or X-Ray off) must not leave yesterday's sidecar behind.
+    if let Ok(entries) = std::fs::read_dir(&sdr) {
+        for e in entries.flatten() {
+            if is_xray_sidecar(&e.file_name().to_string_lossy()) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    if sidecars.is_empty() {
+        return Ok(());
+    }
+    for (name, bytes) in sidecars {
+        write_file(&sdr.join(name), bytes)?;
+    }
+    Ok(())
 }
 
 fn write_file(path: &Path, data: &[u8]) -> Result<PathBuf, DeliverError> {
@@ -201,12 +228,18 @@ fn write_file(path: &Path, data: &[u8]) -> Result<PathBuf, DeliverError> {
     Ok(path.to_path_buf())
 }
 
+/// `XRAY.entities.<ASIN>.asc`
+pub fn is_xray_sidecar(name: &str) -> bool {
+    name.starts_with("XRAY.entities.") && name.ends_with(".asc")
+}
+
 /// Sends the book into the Kindle's `documents` folder over MTP, replacing a same-named file.
 /// Returns a pseudo path `mtp://<serial>/documents/<name>`.
 fn deliver_mtp(
     kfx: &[u8],
     name: &str,
     mtp: &deckle_transport::usb::MtpInfo,
+    sidecars: &[(String, Vec<u8>)],
 ) -> Result<PathBuf, DeliverError> {
     let m = |e: &dyn std::fmt::Display| DeliverError::Mtp(e.to_string());
     let mut dev = deckle_transport::usb::open(mtp).map_err(|e| m(&e))?;
@@ -221,6 +254,32 @@ fn deliver_mtp(
             dev.delete(existing).map_err(|e| m(&e))?;
         }
         dev.send_file(storage, docs, name, kfx).map_err(|e| m(&e))?;
+        let sdr_name = Path::new(name)
+            .with_extension("sdr")
+            .to_string_lossy()
+            .into_owned();
+        let existing_sdr = dev
+            .find_child(storage, docs, &sdr_name)
+            .map_err(|e| m(&e))?;
+        if let Some(sdr) = existing_sdr {
+            for (h, info) in dev.list(storage, sdr).map_err(|e| m(&e))? {
+                if is_xray_sidecar(&info.filename) {
+                    dev.delete(h).map_err(|e| m(&e))?;
+                }
+            }
+        }
+        if !sidecars.is_empty() {
+            let sdr = match existing_sdr {
+                Some(h) => h,
+                None => dev
+                    .make_folder(storage, docs, &sdr_name)
+                    .map_err(|e| m(&e))?,
+            };
+            for (sc_name, bytes) in sidecars {
+                dev.send_file(storage, sdr, sc_name, bytes)
+                    .map_err(|e| m(&e))?;
+            }
+        }
         Ok(PathBuf::from(format!(
             "mtp://{}/documents/{name}",
             mtp.serial.clone().unwrap_or_else(|| "kindle".into())

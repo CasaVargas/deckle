@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
 use crate::deliver::{DeliverOptions, Target, deliver_with};
@@ -13,6 +13,7 @@ use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{MatchOutcome, match_book};
 use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
 use crate::previewer;
+use crate::xray::{LlmConfig, XRayOptions, XRaySummary};
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
 use deckle_kfx::metadata::generate_asin;
 
@@ -33,6 +34,20 @@ pub struct RunOptions {
     pub target: Target,
     pub previewer: Option<PathBuf>,
     pub keep_work_dir: bool,
+    /// X-Ray sidecar on EBOK books (design §4.5).
+    pub xray: XRayMode,
+    /// LLM descriptions for X-Ray when set (design §7).
+    pub llm: Option<LlmConfig>,
+    /// Wikipedia summaries for X-Ray terms (opt-in network).
+    pub wikipedia: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum XRayMode {
+    Off,
+    /// Build one whenever the book ships as EBOK.
+    Auto,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -48,6 +63,8 @@ pub struct RunReport {
     pub cde_type: Option<String>,
     pub decision: Option<Decision>,
     pub matched: Option<String>,
+    /// What went into the X-Ray sidecar, when one shipped.
+    pub xray: Option<XRaySummary>,
     pub work_dir: Option<PathBuf>,
     pub warnings: Vec<String>,
     /// `"<stage>: <message>"` of the stage that failed.
@@ -267,10 +284,63 @@ pub fn run_with_progress(
                 .push("thumbnail not written: the book has no cover".into()),
         }
     }
+    if cde_type == CdeType::Ebok && opts.xray == XRayMode::Auto {
+        let xray_opts = XRayOptions {
+            llm: opts.llm.clone(),
+            wikipedia: opts.wikipedia,
+        };
+        on_stage("enrich");
+        let t = Instant::now();
+        let built = enrich(&out.bytes, &asin, &info, &xray_opts);
+        report
+            .stage_ms
+            .insert("enrich", t.elapsed().as_millis() as u64);
+        if work_keep
+            && let Ok(Some(x)) = &built
+            && let Err(e) = std::fs::write(work_path.join(&x.file_name), &x.bytes)
+        {
+            report
+                .warnings
+                .push(format!("could not keep {}: {e}", x.file_name));
+        }
+        attach_xray(&mut report, &mut deliver_opts, built);
+    }
     let delivered = stage!(
         "deliver",
         deliver_with(&out.bytes, &info, &opts.target, &deliver_opts)
     );
     report.delivered = Some(delivered);
     report
+}
+
+/// Puts a built sidecar on the delivery, or turns an X-Ray failure into a warning: the book
+/// still ships (design §4.5: no X-Ray is an accepted outcome, a lost book is not).
+pub fn attach_xray(
+    report: &mut RunReport,
+    deliver_opts: &mut DeliverOptions,
+    built: Result<Option<crate::xray::XRayOutput>, String>,
+) {
+    match built {
+        Ok(Some(x)) => {
+            report.warnings.extend(x.warnings);
+            report.xray = Some(x.summary);
+            deliver_opts.sidecars.push((x.file_name, x.bytes));
+        }
+        Ok(None) => report
+            .warnings
+            .push("X-Ray: no recurring names found in this book; no sidecar written".into()),
+        Err(e) => report.warnings.push(format!("X-Ray skipped: {e}")),
+    }
+}
+
+/// The X-Ray sidecar for an EBOK book, from the final KFX's text runs.
+fn enrich(
+    kfx: &[u8],
+    asin: &str,
+    info: &BookInfo,
+    opts: &XRayOptions,
+) -> Result<Option<crate::xray::XRayOutput>, String> {
+    let (runs, erl) = deckle_kfx::text::content_runs(kfx).map_err(|e| e.to_string())?;
+    crate::xray::build(asin, &info.title, &info.language, &runs, erl, opts)
+        .map_err(|e| e.to_string())
 }

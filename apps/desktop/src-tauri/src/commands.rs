@@ -10,8 +10,9 @@ use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, deci
 use deckle_core::deliver::{Target, detect_mass_storage};
 use deckle_core::devices::{DeviceRegistry, Seen, TransportKind, seen_mass_storage};
 use deckle_core::inspect::inspect;
-use deckle_core::pipeline::{RunOptions, run_with_progress};
+use deckle_core::pipeline::{RunOptions, XRayMode, run_with_progress};
 use deckle_core::previewer;
+use deckle_core::xray::{LlmConfig, XRaySummary};
 use deckle_kfx::convert::CdeType;
 use deckle_transport::usb::MtpInfo;
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,9 @@ pub struct Settings {
     pub llm_provider: String,
     pub llm_model: String,
     pub llm_endpoint: String,
+    /// Optional; empty falls back to ANTHROPIC_API_KEY / OPENAI_API_KEY in the environment.
+    pub llm_api_key: String,
+    pub xray: bool,
     pub word_wise_level: u8,
     pub wikipedia: bool,
     pub amazon_match: bool,
@@ -59,6 +63,8 @@ impl Default for Settings {
             llm_provider: "off".into(),
             llm_model: String::new(),
             llm_endpoint: String::new(),
+            llm_api_key: String::new(),
+            xray: true,
             word_wise_level: 3,
             wikipedia: false,
             amazon_match: false,
@@ -102,6 +108,8 @@ pub struct ProgressEvent {
     pub reason: Option<String>,
     #[serde(default)]
     pub matched: Option<String>,
+    #[serde(default)]
+    pub xray: Option<XRaySummary>,
 }
 
 /// One override chain for both the badge planner and the run: book, then device, then the
@@ -401,6 +409,22 @@ pub fn save_settings_to(file: &Path, s: &Settings) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// The LLM settings as a pipeline config; `off` (or anything unknown) disables it.
+pub fn llm_config(settings: &Settings) -> Option<LlmConfig> {
+    use deckle_xray::llm::Provider;
+    let provider = match settings.llm_provider.as_str() {
+        "anthropic" => Provider::Anthropic,
+        "openai" => Provider::OpenAi,
+        _ => return None,
+    };
+    Some(LlmConfig {
+        provider,
+        model: settings.llm_model.trim().to_owned(),
+        endpoint: settings.llm_endpoint.trim().to_owned(),
+        api_key: settings.llm_api_key.trim().to_owned(),
+    })
+}
+
 fn cde_from(s: &str) -> CdeType {
     if s.eq_ignore_ascii_case("ebok") {
         CdeType::Ebok
@@ -449,6 +473,7 @@ pub fn run_books_with(
                         asin: None,
                         reason: None,
                         matched: None,
+                        xray: None,
                         error: Some("the MTP Kindle is no longer connected".into()),
                     });
                 }
@@ -473,6 +498,7 @@ pub fn run_books_with(
                         asin: None,
                         reason: None,
                         matched: None,
+                        xray: None,
                         error: Some(format!("Kindle at {root} is no longer connected")),
                     });
                 }
@@ -496,6 +522,13 @@ pub fn run_books_with(
             target: target.clone(),
             previewer: settings.previewer_path.as_ref().map(PathBuf::from),
             keep_work_dir: false,
+            xray: if settings.xray {
+                XRayMode::Auto
+            } else {
+                XRayMode::Off
+            },
+            llm: llm_config(settings),
+            wikipedia: settings.wikipedia,
         };
         let id = b.id.clone();
         let report = run_with_progress(Path::new(&b.path), &opts, &mut |stage| {
@@ -511,6 +544,7 @@ pub fn run_books_with(
                 asin: None,
                 reason: None,
                 matched: None,
+                xray: None,
             })
         });
         emit(ProgressEvent {
@@ -529,6 +563,7 @@ pub fn run_books_with(
             asin: report.asin,
             reason: report.decision.map(|d| d.reason),
             matched: report.matched,
+            xray: report.xray,
         });
     }
 }

@@ -14,6 +14,7 @@ path = "src/main.rs"
 deckle-core.workspace = true
 deckle-kfx.workspace = true
 deckle-transport.workspace = true
+deckle-xray.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

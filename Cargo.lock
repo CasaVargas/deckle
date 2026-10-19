@@ -702,6 +702,7 @@ dependencies = [
  "deckle-core",
  "deckle-kfx",
  "deckle-transport",
+ "deckle-xray",
  "predicates",
  "serde",
  "serde_json",
@@ -715,10 +716,12 @@ dependencies = [
  "csv",
  "deckle-kfx",
  "deckle-transport",
+ "deckle-xray",
  "deunicode",
  "image",
  "regex",
  "roxmltree",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
@@ -735,6 +738,7 @@ dependencies = [
  "deckle-core",
  "deckle-kfx",
  "deckle-transport",
+ "deckle-xray",
  "serde",
  "serde_json",
  "tauri",
@@ -766,6 +770,20 @@ dependencies = [
  "rusb",
  "serde",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckle-xray"
+version = "0.1.0"
+dependencies = [
+ "deckle-kfx",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "ureq",
 ]
 
 [[package]]

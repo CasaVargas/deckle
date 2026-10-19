@@ -12,3 +12,4 @@ pub mod kpf;
 pub mod metadata;
 pub mod source_epub;
 pub mod symtab;
+pub mod text;
