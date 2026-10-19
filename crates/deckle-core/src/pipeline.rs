@@ -8,7 +8,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
-use crate::deliver::{DeliverOptions, Target, deliver_with};
+use crate::deliver::{Conn, DeliverOptions, Target, deliver_on};
 use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{MatchOutcome, match_book};
 use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
@@ -289,6 +289,8 @@ pub fn run_with_progress(
                 .push("thumbnail not written: the book has no cover".into()),
         }
     }
+    // One device connection for the probe and the delivery: an MTP Kindle resets on close.
+    let mut conn = Conn::new(&opts.target);
     let want_xray = cde_type == CdeType::Ebok && opts.xray == XRayMode::Auto;
     let word_wise = opts
         .word_wise
@@ -324,7 +326,7 @@ pub fn run_with_progress(
                         &asin,
                         &out.asset_id,
                         ww,
-                        &opts.target,
+                        &mut conn,
                         &mut crate::wordwise::http_get_bytes,
                     );
                     if work_keep && let Ok(Some(w)) = &built {
@@ -343,7 +345,7 @@ pub fn run_with_progress(
     }
     let delivered = stage!(
         "deliver",
-        deliver_with(&out.bytes, &info, &opts.target, &deliver_opts)
+        deliver_on(&out.bytes, &info, &mut conn, &deliver_opts)
     );
     report.delivered = Some(delivered);
     report

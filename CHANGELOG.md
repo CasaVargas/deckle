@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- MTP: Word Wise no longer breaks delivery. Reading the Kindle's dictionary and sending the book
+  now share one MTP connection; closing the first one reset the Kindle, which dropped it to the
+  home screen and off the bus ("device is no longer connected"). Reopening also falls back to the
+  serial number when the bus address is stale.
+
 ## 0.1.0 — first release (pre-alpha)
 
 - EPUB → KFX with Enhanced Typesetting through Kindle Previewer 4, repackaged by a Rust port of

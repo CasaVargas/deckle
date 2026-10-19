@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
+use deckle_transport::session::{Mtp, MtpError, TransportError};
+use deckle_transport::usb::MtpInfo;
+
 use crate::inspect::BookInfo;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -23,6 +26,52 @@ pub enum Target {
     MassStorage(Device),
     /// MTP-only Kindle (Scribe 2024, Colorsoft, Paperwhite 2024).
     Mtp(deckle_transport::usb::MtpInfo),
+}
+
+type MtpOpener = fn(&MtpInfo) -> Result<Mtp, TransportError>;
+
+/// A target plus, for an MTP Kindle, one connection shared by every read and write of a book.
+/// Closing a connection resets the Kindle (see `usb.rs`), which drops it to the home screen and
+/// off the bus, so the Word Wise probe and the delivery must not each open their own.
+pub struct Conn<'a> {
+    pub target: &'a Target,
+    mtp: Option<Mtp>,
+    open: MtpOpener,
+}
+
+impl<'a> Conn<'a> {
+    pub fn new(target: &'a Target) -> Self {
+        Conn {
+            target,
+            mtp: None,
+            open: deckle_transport::usb::open,
+        }
+    }
+
+    /// The open MTP session, opening it on first use. `None` when the target is not MTP.
+    pub fn mtp(&mut self) -> Option<Result<&mut Mtp, MtpError>> {
+        let Target::Mtp(info) = self.target else {
+            return None;
+        };
+        if self.mtp.is_none() {
+            let opened = (self.open)(info)
+                .map_err(MtpError::from)
+                .and_then(|mut dev| dev.open_session().map(|()| dev));
+            match opened {
+                Ok(dev) => self.mtp = Some(dev),
+                Err(e) => return Some(Err(e)),
+            }
+        }
+        self.mtp.as_mut().map(Ok)
+    }
+}
+
+impl Drop for Conn<'_> {
+    fn drop(&mut self) {
+        if let Some(dev) = &mut self.mtp {
+            let _ = dev.close_session();
+        }
+    }
 }
 
 /// Extras to deliver alongside the book.
@@ -176,8 +225,18 @@ pub fn deliver_with(
     target: &Target,
     opts: &DeliverOptions,
 ) -> Result<PathBuf, DeliverError> {
+    deliver_on(kfx, info, &mut Conn::new(target), opts)
+}
+
+/// [`deliver_with`] over a connection the caller may already have used (Word Wise probe).
+pub fn deliver_on(
+    kfx: &[u8],
+    info: &BookInfo,
+    conn: &mut Conn<'_>,
+    opts: &DeliverOptions,
+) -> Result<PathBuf, DeliverError> {
     let name = device_filename(info);
-    match target {
+    match conn.target {
         Target::Folder(dir) => {
             let path = write_file(&dir.join(&name), kfx)?;
             write_sidecars(&path, &opts.sidecars)?;
@@ -195,7 +254,14 @@ pub fn deliver_with(
             let _ = crate::thumbnail::sync(&dev.root);
             Ok(path)
         }
-        Target::Mtp(mtp) => deliver_mtp(kfx, &name, mtp, opts),
+        Target::Mtp(mtp) => {
+            let serial = mtp.serial.clone();
+            match conn.mtp() {
+                Some(Ok(dev)) => deliver_mtp(kfx, &name, serial, dev, opts),
+                Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+                None => unreachable!("an MTP target always has a connection"),
+            }
+        }
     }
 }
 
@@ -257,70 +323,143 @@ pub fn is_deckle_sidecar(name: &str) -> bool {
 fn deliver_mtp(
     kfx: &[u8],
     name: &str,
-    mtp: &deckle_transport::usb::MtpInfo,
+    serial: Option<String>,
+    dev: &mut Mtp,
     opts: &DeliverOptions,
 ) -> Result<PathBuf, DeliverError> {
     let sidecars = &opts.sidecars;
     let m = |e: &dyn std::fmt::Display| DeliverError::Mtp(e.to_string());
-    let mut dev = deckle_transport::usb::open(mtp).map_err(|e| m(&e))?;
-    dev.open_session().map_err(|e| m(&e))?;
-    let result = (|| {
-        let storages = dev.storages().map_err(|e| m(&e))?;
-        let storage = *storages
-            .first()
-            .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
-        let docs = dev.find_documents(storage).map_err(|e| m(&e))?;
-        if let Some(existing) = dev.find_child(storage, docs, name).map_err(|e| m(&e))? {
-            dev.delete(existing).map_err(|e| m(&e))?;
-        }
-        dev.send_file(storage, docs, name, kfx).map_err(|e| m(&e))?;
-        let sdr_name = Path::new(name)
-            .with_extension("sdr")
-            .to_string_lossy()
-            .into_owned();
-        let existing_sdr = dev
-            .find_child(storage, docs, &sdr_name)
-            .map_err(|e| m(&e))?;
-        if let Some(sdr) = existing_sdr {
-            for (h, info) in dev.list(storage, sdr).map_err(|e| m(&e))? {
-                if is_deckle_sidecar(&info.filename) {
-                    dev.delete(h).map_err(|e| m(&e))?;
-                }
+    let storages = dev.storages().map_err(|e| m(&e))?;
+    let storage = *storages
+        .first()
+        .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
+    let docs = dev.find_documents(storage).map_err(|e| m(&e))?;
+    if let Some(existing) = dev.find_child(storage, docs, name).map_err(|e| m(&e))? {
+        dev.delete(existing).map_err(|e| m(&e))?;
+    }
+    dev.send_file(storage, docs, name, kfx).map_err(|e| m(&e))?;
+    let sdr_name = Path::new(name)
+        .with_extension("sdr")
+        .to_string_lossy()
+        .into_owned();
+    let existing_sdr = dev
+        .find_child(storage, docs, &sdr_name)
+        .map_err(|e| m(&e))?;
+    if let Some(sdr) = existing_sdr {
+        for (h, info) in dev.list(storage, sdr).map_err(|e| m(&e))? {
+            if is_deckle_sidecar(&info.filename) {
+                dev.delete(h).map_err(|e| m(&e))?;
             }
         }
-        if !sidecars.is_empty() {
-            let sdr = match existing_sdr {
-                Some(h) => h,
-                None => dev
-                    .make_folder(storage, docs, &sdr_name)
-                    .map_err(|e| m(&e))?,
+    }
+    if !sidecars.is_empty() {
+        let sdr = match existing_sdr {
+            Some(h) => h,
+            None => dev
+                .make_folder(storage, docs, &sdr_name)
+                .map_err(|e| m(&e))?,
+        };
+        for (sc_name, bytes) in sidecars {
+            dev.send_file(storage, sdr, sc_name, bytes)
+                .map_err(|e| m(&e))?;
+        }
+    }
+    if !opts.system_files.is_empty() {
+        let root = dev.object_info(docs).map_err(|e| m(&e))?.parent;
+        for (parts, bytes) in &opts.system_files {
+            let Some((file, folders)) = parts.split_last() else {
+                continue;
             };
-            for (sc_name, bytes) in sidecars {
-                dev.send_file(storage, sdr, sc_name, bytes)
-                    .map_err(|e| m(&e))?;
+            let mut at = root;
+            for f in folders {
+                at = dev.ensure_folder(storage, at, f).map_err(|e| m(&e))?;
             }
-        }
-        if !opts.system_files.is_empty() {
-            let root = dev.object_info(docs).map_err(|e| m(&e))?.parent;
-            for (parts, bytes) in &opts.system_files {
-                let Some((file, folders)) = parts.split_last() else {
-                    continue;
-                };
-                let mut at = root;
-                for f in folders {
-                    at = dev.ensure_folder(storage, at, f).map_err(|e| m(&e))?;
-                }
-                if let Some(old) = dev.find_child(storage, at, file).map_err(|e| m(&e))? {
-                    dev.delete(old).map_err(|e| m(&e))?;
-                }
-                dev.send_file(storage, at, file, bytes).map_err(|e| m(&e))?;
+            if let Some(old) = dev.find_child(storage, at, file).map_err(|e| m(&e))? {
+                dev.delete(old).map_err(|e| m(&e))?;
             }
+            dev.send_file(storage, at, file, bytes).map_err(|e| m(&e))?;
         }
-        Ok(PathBuf::from(format!(
-            "mtp://{}/documents/{name}",
-            mtp.serial.clone().unwrap_or_else(|| "kindle".into())
-        )))
-    })();
-    let _ = dev.close_session();
-    result
+    }
+    Ok(PathBuf::from(format!(
+        "mtp://{}/documents/{name}",
+        serial.unwrap_or_else(|| "kindle".into())
+    )))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::{Cell, RefCell};
+
+    use deckle_transport::ptp::{Container, ContainerKind, op, rsp};
+    use deckle_transport::session::Transport;
+
+    use super::*;
+
+    thread_local! {
+        static OPENS: Cell<u32> = const { Cell::new(0) };
+        static SENT: RefCell<Vec<u16>> = const { RefCell::new(Vec::new()) };
+    }
+
+    /// Answers every command with OK and logs its operation code.
+    struct Ack(Option<Vec<u8>>);
+
+    impl Transport for Ack {
+        fn write(&mut self, bytes: &[u8]) -> Result<(), TransportError> {
+            let (c, _) = Container::decode(bytes).unwrap();
+            SENT.with(|s| s.borrow_mut().push(c.code));
+            self.0 = Some(
+                Container {
+                    kind: ContainerKind::Response,
+                    code: rsp::OK,
+                    tx_id: c.tx_id,
+                    params: Vec::new(),
+                }
+                .encode(&[]),
+            );
+            Ok(())
+        }
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+            let r = self.0.take().ok_or(TransportError::Timeout)?;
+            buf[..r.len()].copy_from_slice(&r);
+            Ok(r.len())
+        }
+    }
+
+    fn open_ack(_: &MtpInfo) -> Result<Mtp, TransportError> {
+        OPENS.with(|n| n.set(n.get() + 1));
+        Ok(Mtp::new(Box::new(Ack(None))))
+    }
+
+    #[test]
+    fn an_mtp_conn_opens_once_for_every_use_and_closes_on_drop() {
+        let target = Target::Mtp(MtpInfo {
+            vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
+            product_id: 1,
+            serial: Some("S".into()),
+            product: None,
+            bus: 1,
+            address: 2,
+        });
+        {
+            let mut conn = Conn {
+                target: &target,
+                mtp: None,
+                open: open_ack,
+            };
+            // the Word Wise probe, then the delivery
+            conn.mtp().unwrap().unwrap();
+            conn.mtp().unwrap().unwrap();
+        }
+        assert_eq!(OPENS.with(Cell::get), 1);
+        assert_eq!(
+            SENT.with(|s| s.borrow().clone()),
+            vec![op::OPEN_SESSION, op::CLOSE_SESSION]
+        );
+    }
+
+    #[test]
+    fn a_folder_conn_has_no_mtp_session() {
+        let target = Target::Folder(PathBuf::from("/nowhere"));
+        assert!(Conn::new(&target).mtp().is_none());
+    }
 }

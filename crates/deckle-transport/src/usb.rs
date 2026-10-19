@@ -156,14 +156,27 @@ impl Drop for UsbTransport {
     }
 }
 
-/// Opens the device and claims its MTP interface (no session yet).
+/// Opens the device and claims its MTP interface (no session yet). Falls back to the serial
+/// when the bus address is stale: a Kindle re-enumerates at a new one after a reset or replug.
 pub fn open(info: &MtpInfo) -> Result<Mtp, TransportError> {
     let ctx = Context::new().map_err(map_err)?;
     let devices = ctx.devices().map_err(map_err)?;
-    for d in devices.iter() {
-        if d.bus_number() != info.bus || d.address() != info.address {
-            continue;
-        }
+    let at_address = devices
+        .iter()
+        .find(|d| d.bus_number() == info.bus && d.address() == info.address);
+    let by_serial = || {
+        let serial = info.serial.as_deref()?;
+        devices.iter().find(|d| {
+            let Ok(desc) = d.device_descriptor() else {
+                return false;
+            };
+            desc.vendor_id() == AMAZON_VENDOR_ID
+                && d.open()
+                    .and_then(|h| h.read_serial_number_string_ascii(&desc))
+                    .is_ok_and(|s| s == serial)
+        })
+    };
+    if let Some(d) = at_address.or_else(by_serial) {
         let ep =
             find_mtp_interface(&d).ok_or_else(|| TransportError::Usb("no MTP interface".into()))?;
         let handle = d.open().map_err(map_err)?;
