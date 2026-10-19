@@ -26,13 +26,35 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "app",
+      "dmg",
+      "nsis",
+      "msi",
+      "deb",
+      "appimage"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "CasaVargas LLC",
+    "copyright": "© 2026 CasaVargas LLC · GPL-3.0-or-later",
+    "category": "Productivity",
+    "license": "GPL-3.0-or-later",
+    "homepage": "https://github.com/prjoni99/deckle",
+    "shortDescription": "Turn EPUBs into store-quality Kindle books",
+    "longDescription": "Deckle turns EPUBs you own into Kindle books with Enhanced Typesetting, covers that show, page numbers, X-Ray and Word Wise, and puts them on your Kindle over USB or MTP.",
+    "macOS": {
+      "minimumSystemVersion": "14.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
