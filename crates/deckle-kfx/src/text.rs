@@ -101,6 +101,7 @@ pub fn content_runs(kfx: &[u8]) -> Result<(Vec<Run>, i64), TextError> {
             continue;
         }
         if let Some(text) = texts.get(&eid) {
+            erl = erl.max(pid + text.chars().count() as i64);
             runs.push(Run {
                 pid,
                 text: text.clone(),

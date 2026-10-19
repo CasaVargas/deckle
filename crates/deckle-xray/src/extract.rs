@@ -311,17 +311,55 @@ fn mentions(runs: &[Run], stop: &[&str]) -> Vec<Mention> {
     out
 }
 
-fn sentence_around(text: &str, byte: usize) -> String {
-    let start = text[..byte]
-        .rfind(['.', '!', '?'])
+/// Is the `.` at `dot` the end of an honorific ("Mr.") or an initial ("F.") rather than a
+/// sentence?
+fn abbreviation_dot(text: &str, dot: usize) -> bool {
+    let before = &text[..dot];
+    let word_start = before
+        .rfind(|c: char| !c.is_alphabetic())
         .map(|i| i + 1)
         .unwrap_or(0);
-    let end = text[byte..]
-        .find(['.', '!', '?'])
-        .map(|i| byte + i + 1)
-        .unwrap_or(text.len());
-    text[start..end].trim().to_owned()
+    let word = &before[word_start..];
+    word.chars().count() == 1 && word.chars().all(char::is_uppercase)
+        || HONORIFICS.contains(&format!("{word}.").as_str())
 }
+
+fn is_terminator(text: &str, i: usize) -> bool {
+    match text.as_bytes()[i] {
+        b'!' | b'?' => true,
+        b'.' => !abbreviation_dot(text, i),
+        _ => false,
+    }
+}
+
+/// The sentence containing the mention at `byte` (whose label spans `len` bytes).
+fn sentence_around(text: &str, byte: usize, len: usize) -> String {
+    let start = (0..byte)
+        .rev()
+        .find(|&i| is_terminator(text, i))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let from = (byte + len).min(text.len());
+    let end = (from..text.len())
+        .find(|&i| is_terminator(text, i))
+        .map(|i| i + 1)
+        .unwrap_or(text.len());
+    let mut out = text[start..end].trim().to_owned();
+    if out.chars().count() > MAX_QUOTE_CHARS {
+        let cut = out
+            .char_indices()
+            .nth(MAX_QUOTE_CHARS)
+            .map(|(b, _)| b)
+            .unwrap_or(out.len());
+        out.truncate(cut);
+        out = out.trim_end().to_owned() + "…";
+    }
+    out
+}
+
+/// Longest first-mention quote we keep as a description (Gutenberg prefaces have 500-char
+/// sentences).
+pub const MAX_QUOTE_CHARS: usize = 300;
 
 /// Entities from the text alone: recurring proper nouns, aliases merged, persons by honorific
 /// or multi-word name, first-mention quote.
@@ -359,7 +397,7 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
     let has_honorific = |s: &str| {
         HONORIFICS
             .iter()
-            .any(|h| s.starts_with(h) && s.len() > h.len())
+            .any(|h| s.strip_prefix(h).is_some_and(|r| r.starts_with(' ')))
     };
     for l in &labels {
         let base = strip(l);
@@ -466,11 +504,11 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
             occ.sort();
             let honorific = HONORIFICS
                 .iter()
-                .any(|h| label.starts_with(h) && label.len() > h.len())
+                .any(|h| label.strip_prefix(h).is_some_and(|r| r.starts_with(' ')))
                 || aliases.iter().any(|a| {
                     HONORIFICS
                         .iter()
-                        .any(|h| a.starts_with(h) && a.len() > h.len())
+                        .any(|h| a.strip_prefix(h).is_some_and(|r| r.starts_with(' ')))
                 });
             let speaks = speaks(runs, &label) || aliases.iter().any(|a| speaks(runs, a));
             let kind = if honorific || speaks {
@@ -487,7 +525,7 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
                         .nth((start - run.pid).max(0) as usize)
                         .map(|(b, _)| b)
                         .unwrap_or(0);
-                    sentence_around(&run.text, byte)
+                    sentence_around(&run.text, byte, label.len())
                 })
                 .unwrap_or_default();
             Candidate {

@@ -196,10 +196,18 @@ pub fn deliver_with(
 
 /// `<book>.sdr/<name>` files beside a delivered KFX (book first, sidecars after).
 fn write_sidecars(book: &Path, sidecars: &[(String, Vec<u8>)]) -> Result<(), DeliverError> {
+    let sdr = book.with_extension("sdr");
+    // A re-run with another ASIN (or X-Ray off) must not leave yesterday's sidecar behind.
+    if let Ok(entries) = std::fs::read_dir(&sdr) {
+        for e in entries.flatten() {
+            if is_xray_sidecar(&e.file_name().to_string_lossy()) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
     if sidecars.is_empty() {
         return Ok(());
     }
-    let sdr = book.with_extension("sdr");
     for (name, bytes) in sidecars {
         write_file(&sdr.join(name), bytes)?;
     }
@@ -218,6 +226,11 @@ fn write_file(path: &Path, data: &[u8]) -> Result<PathBuf, DeliverError> {
     f.write_all(data).map_err(io)?;
     f.sync_all().map_err(io)?;
     Ok(path.to_path_buf())
+}
+
+/// `XRAY.entities.<ASIN>.asc`
+pub fn is_xray_sidecar(name: &str) -> bool {
+    name.starts_with("XRAY.entities.") && name.ends_with(".asc")
 }
 
 /// Sends the book into the Kindle's `documents` folder over MTP, replacing a same-named file.
@@ -241,18 +254,28 @@ fn deliver_mtp(
             dev.delete(existing).map_err(|e| m(&e))?;
         }
         dev.send_file(storage, docs, name, kfx).map_err(|e| m(&e))?;
-        if !sidecars.is_empty() {
-            let sdr_name = Path::new(name)
-                .with_extension("sdr")
-                .to_string_lossy()
-                .into_owned();
-            let sdr = dev
-                .ensure_folder(storage, docs, &sdr_name)
-                .map_err(|e| m(&e))?;
-            for (sc_name, bytes) in sidecars {
-                if let Some(old) = dev.find_child(storage, sdr, sc_name).map_err(|e| m(&e))? {
-                    dev.delete(old).map_err(|e| m(&e))?;
+        let sdr_name = Path::new(name)
+            .with_extension("sdr")
+            .to_string_lossy()
+            .into_owned();
+        let existing_sdr = dev
+            .find_child(storage, docs, &sdr_name)
+            .map_err(|e| m(&e))?;
+        if let Some(sdr) = existing_sdr {
+            for (h, info) in dev.list(storage, sdr).map_err(|e| m(&e))? {
+                if is_xray_sidecar(&info.filename) {
+                    dev.delete(h).map_err(|e| m(&e))?;
                 }
+            }
+        }
+        if !sidecars.is_empty() {
+            let sdr = match existing_sdr {
+                Some(h) => h,
+                None => dev
+                    .make_folder(storage, docs, &sdr_name)
+                    .map_err(|e| m(&e))?,
+            };
+            for (sc_name, bytes) in sidecars {
                 dev.send_file(storage, sdr, sc_name, bytes)
                     .map_err(|e| m(&e))?;
             }

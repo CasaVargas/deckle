@@ -289,23 +289,21 @@ pub fn run_with_progress(
             llm: opts.llm.clone(),
             wikipedia: opts.wikipedia,
         };
-        let built = stage!("enrich", enrich(&out.bytes, &asin, &info, &xray_opts));
-        match built {
-            Some(x) => {
-                report.warnings.extend(x.warnings);
-                if work_keep && let Err(e) = std::fs::write(work_path.join(&x.file_name), &x.bytes)
-                {
-                    report
-                        .warnings
-                        .push(format!("could not keep {}: {e}", x.file_name));
-                }
-                report.xray = Some(x.summary);
-                deliver_opts.sidecars.push((x.file_name, x.bytes));
-            }
-            None => report
+        on_stage("enrich");
+        let t = Instant::now();
+        let built = enrich(&out.bytes, &asin, &info, &xray_opts);
+        report
+            .stage_ms
+            .insert("enrich", t.elapsed().as_millis() as u64);
+        if work_keep
+            && let Ok(Some(x)) = &built
+            && let Err(e) = std::fs::write(work_path.join(&x.file_name), &x.bytes)
+        {
+            report
                 .warnings
-                .push("X-Ray: no recurring names found in this book; no sidecar written".into()),
+                .push(format!("could not keep {}: {e}", x.file_name));
         }
+        attach_xray(&mut report, &mut deliver_opts, built);
     }
     let delivered = stage!(
         "deliver",
@@ -313,6 +311,26 @@ pub fn run_with_progress(
     );
     report.delivered = Some(delivered);
     report
+}
+
+/// Puts a built sidecar on the delivery, or turns an X-Ray failure into a warning: the book
+/// still ships (design §4.5: no X-Ray is an accepted outcome, a lost book is not).
+pub fn attach_xray(
+    report: &mut RunReport,
+    deliver_opts: &mut DeliverOptions,
+    built: Result<Option<crate::xray::XRayOutput>, String>,
+) {
+    match built {
+        Ok(Some(x)) => {
+            report.warnings.extend(x.warnings);
+            report.xray = Some(x.summary);
+            deliver_opts.sidecars.push((x.file_name, x.bytes));
+        }
+        Ok(None) => report
+            .warnings
+            .push("X-Ray: no recurring names found in this book; no sidecar written".into()),
+        Err(e) => report.warnings.push(format!("X-Ray skipped: {e}")),
+    }
 }
 
 /// The X-Ray sidecar for an EBOK book, from the final KFX's text runs.

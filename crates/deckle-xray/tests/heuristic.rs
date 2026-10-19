@@ -45,6 +45,19 @@ fn finds_recurring_names_and_places_with_positions() {
     assert!(find(&c, "Elizabeth Bennet").is_none(), "one mention only");
     let darcy = find(&c, "Mr. Darcy").expect("Mr. Darcy");
     assert_eq!(darcy.kind, EntityKind::Person);
+    assert_eq!(
+        darcy.quote, "Jane smiled at Elizabeth, and Mr. Darcy watched them both from Netherfield.",
+        "the dot in an honorific does not end the sentence"
+    );
+    let bennet = heuristic(
+        &runs(&["Mr. Bennet was among the earliest. Mr. Bennet smiled."]),
+        "en",
+    );
+    assert_eq!(
+        find(&bennet, "Mr. Bennet").unwrap().quote,
+        "Mr. Bennet was among the earliest.",
+        "a quote starting with an honorific keeps its whole sentence"
+    );
     assert!(darcy.occurrences.len() >= 3);
     assert_eq!(find(&c, "Netherfield").unwrap().kind, EntityKind::Term);
     assert_eq!(find(&c, "Longbourn").unwrap().kind, EntityKind::Term);

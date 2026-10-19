@@ -37,7 +37,8 @@ the end. Byte layout does not matter; the device reads it with SQLite.
 
 KFX text lives in storyline content runs. `deckle_kfx::text::content_runs(kfx)` walks the
 `$145` content fragments, the `$259` storylines (eid → text) and `$265` (pid per eid) and
-returns `Vec<Run { pid, text }>` plus `erl` = last run's pid + its length in code points. An
+returns `Vec<Run { pid, text }>` plus `erl` = the larger of the last `$265` position and the
+end of the last text run (pid + length in code points), so no occurrence lies past it. An
 occurrence's `start` is `run.pid + char_offset` and `length` is the label's length in code
 points; both count characters, not bytes.
 
@@ -59,8 +60,12 @@ points; both count characters, not bytes.
   are not entities but count as mentions of each recurring word in them.
 - Minimum 2 mentions. **Person** when the cluster has an honorific form or the name sits next
   to a speech verb ("said", "cried", "laughed" …); otherwise **Term**.
-- Description fallback: the sentence of the first mention (spoiler-free by construction),
-  truncated to 150 characters.
+- Description fallback: the sentence of the first mention (spoiler-free by construction); a
+  `.` after an honorific or a single initial does not end the sentence; capped at 300
+  characters with an ellipsis.
+- English-only stop lists and capitalisation rules for now: German/Dutch capitalised nouns
+  flood the Term list and CJK text (no case) yields no entities. Non-English books get the LLM
+  pass or nothing useful.
 
 Quality on Pride and Prejudice (Gutenberg edition with a long preface), no network:
 62 people, 88 terms; the top 25 are all real (Elizabeth, Mr. Darcy [Darcy], Jane, Mr. Bingley,
@@ -80,7 +85,15 @@ is set; none for local servers). The JSON array is extracted from a possibly fen
 answer. Any failure falls back to the basic descriptions with a warning on the report.
 
 Keys: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or the API key field in the desktop settings
-(stored in Deckle's settings file). Defaults: `claude-sonnet-5-5`, `gpt-5-mini`.
+(stored in Deckle's settings file; the keychain is a follow-up). Defaults: `claude-sonnet-5-5`,
+`gpt-5-mini`. `max_tokens` scales with the candidate count (1024 + 120 per entity, max 16384);
+a `max_tokens` / `length` stop is reported as "answer truncated" rather than "not JSON".
+
+**Deferred from design §7 (decision 2026-10-19):** no chunking, no per-book token budget and
+no cost estimate before the first run yet. One request per book carries at most 120
+candidates (the rest keep their basic quote), which is a few thousand input tokens and well
+under a cent on current models; the estimate and budget come back when Word Wise or longer
+books make the cost visible.
 
 ## Wikipedia (opt-in)
 

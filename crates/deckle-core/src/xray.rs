@@ -11,7 +11,7 @@ use deckle_xray::extract::{Candidate, heuristic};
 use deckle_xray::llm::{self, Provider};
 use deckle_xray::wiki;
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlmConfig {
     pub provider: Provider,
     /// Empty: the provider's default model.
@@ -21,6 +21,27 @@ pub struct LlmConfig {
     /// Empty: read from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`.
     pub api_key: String,
 }
+
+impl std::fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmConfig")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("endpoint", &self.endpoint)
+            .field(
+                "api_key",
+                &if self.api_key.is_empty() {
+                    ""
+                } else {
+                    "<redacted>"
+                },
+            )
+            .finish()
+    }
+}
+
+pub type Post<'a> = dyn FnMut(&str, &[(String, String)], &str) -> Result<String, String> + 'a;
+pub type Fetch<'a> = dyn FnMut(&str) -> Result<String, String> + 'a;
 
 #[derive(Clone, Debug, Default)]
 pub struct XRayOptions {
@@ -57,7 +78,7 @@ pub fn sidecar_name(asin: &str) -> String {
     format!("XRAY.entities.{asin}.asc")
 }
 
-/// Builds the sidecar bytes; `None` when the text has no recurring names.
+/// Builds the sidecar bytes; `None` when the text has no recurring names. Real HTTP.
 pub fn build(
     asin: &str,
     title: &str,
@@ -66,6 +87,37 @@ pub fn build(
     erl: i64,
     opts: &XRayOptions,
 ) -> Result<Option<XRayOutput>, XRayError> {
+    build_with(
+        asin,
+        title,
+        lang,
+        runs,
+        erl,
+        opts,
+        &mut llm::http_post,
+        &mut wiki::http_get,
+    )
+}
+
+/// [`build`] with injected network calls (tests).
+#[allow(clippy::too_many_arguments)]
+pub fn build_with(
+    asin: &str,
+    title: &str,
+    lang: &str,
+    runs: &[Run],
+    erl: i64,
+    opts: &XRayOptions,
+    post: &mut Post<'_>,
+    fetch: &mut Fetch<'_>,
+) -> Result<Option<XRayOutput>, XRayError> {
+    // "en-US" → "en": Wikipedia hosts and the strings table use the primary subtag.
+    let lang = lang
+        .split(['-', '_'])
+        .next()
+        .unwrap_or("en")
+        .to_ascii_lowercase();
+    let lang = if lang.is_empty() { "en" } else { lang.as_str() };
     let cands = heuristic(runs, lang);
     if cands.is_empty() {
         return Ok(None);
@@ -101,7 +153,7 @@ pub fn build(
             title,
             &cands,
             lang,
-            &mut llm::http_post,
+            post,
         );
         match described {
             Ok(items) => {
@@ -119,7 +171,7 @@ pub fn build(
             .iter_mut()
             .filter(|e| e.kind == EntityKind::Term && e.source == DescriptionSource::Deckle)
         {
-            if let Some(s) = wiki::summary(lang, &e.label, &mut wiki::http_get) {
+            if let Some(s) = wiki::summary(lang, &e.label, fetch) {
                 e.description = s;
                 e.source = DescriptionSource::Wikipedia;
                 hits += 1;
@@ -157,10 +209,12 @@ pub fn build(
 }
 
 /// Merges the LLM answer: descriptions and kinds by name, empty description = drop, aliases
-/// fold their occurrences into the named entity.
+/// fold their occurrences into the named entity. Symmetric or chained aliases resolve to one
+/// survivor; an alias whose target is unknown is left alone.
 fn apply_llm(entities: &mut Vec<Entity>, cands: &[Candidate], items: &[llm::Described]) {
+    use std::collections::HashMap;
     let mut drop: Vec<String> = Vec::new();
-    let mut fold: Vec<(String, String)> = Vec::new(); // (alias, into)
+    let mut into: HashMap<String, String> = HashMap::new(); // alias -> canonical
     for it in items {
         let Some(e) = entities.iter_mut().find(|e| e.label == it.name) else {
             continue;
@@ -169,18 +223,42 @@ fn apply_llm(entities: &mut Vec<Entity>, cands: &[Candidate], items: &[llm::Desc
             drop.push(it.name.clone());
             continue;
         }
-        e.kind = it.kind;
+        if let Some(k) = it.kind {
+            e.kind = k;
+        }
         e.description = it.description.clone();
         for a in &it.aliases {
-            if a != &it.name && cands.iter().any(|c| &c.label == a) {
-                fold.push((a.clone(), it.name.clone()));
+            if a != &it.name
+                && cands.iter().any(|c| &c.label == a)
+                && !into.contains_key(a)
+                && into.get(&it.name) != Some(a)
+            {
+                into.insert(a.clone(), it.name.clone());
             }
         }
     }
-    for (alias, into) in fold {
+    // resolve chains; a cycle keeps the first-listed name
+    let resolve = |mut name: String| {
+        for _ in 0..8 {
+            match into.get(&name) {
+                Some(next) if next != &name => name = next.clone(),
+                _ => break,
+            }
+        }
+        name
+    };
+    let folds: Vec<(String, String)> = into
+        .keys()
+        .map(|a| (a.clone(), resolve(a.clone())))
+        .filter(|(a, t)| a != t && !drop.contains(t))
+        .collect();
+    for (alias, target) in folds {
+        if !entities.iter().any(|e| e.label == target) {
+            continue;
+        }
         if let Some(pos) = entities.iter().position(|e| e.label == alias) {
             let occ = entities.remove(pos).occurrences;
-            if let Some(t) = entities.iter_mut().find(|e| e.label == into) {
+            if let Some(t) = entities.iter_mut().find(|e| e.label == target) {
                 t.occurrences.extend(occ);
                 t.occurrences.sort();
                 t.occurrences.dedup();

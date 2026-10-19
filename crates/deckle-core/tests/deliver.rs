@@ -164,3 +164,36 @@ fn sidecars_land_in_the_sdr_folder_next_to_the_book() {
         "{path:?}"
     );
 }
+
+#[test]
+fn stale_xray_sidecars_are_removed_on_redelivery() {
+    use deckle_core::deliver::DeliverOptions;
+    let out = tempfile::tempdir().unwrap();
+    let sdr = out.path().join("B, A - Title.sdr");
+    std::fs::create_dir_all(&sdr).unwrap();
+    std::fs::write(sdr.join("XRAY.entities.OLDASIN.asc"), b"old").unwrap();
+    std::fs::write(sdr.join("keep.txt"), b"x").unwrap();
+    let opts = DeliverOptions {
+        thumbnail: None,
+        sidecars: vec![("XRAY.entities.NEWASIN.asc".into(), b"new".to_vec())],
+    };
+    deckle_core::deliver::deliver_with(
+        b"KFX",
+        &info("Title", "A B"),
+        &Target::Folder(out.path().to_path_buf()),
+        &opts,
+    )
+    .unwrap();
+    assert!(!sdr.join("XRAY.entities.OLDASIN.asc").exists());
+    assert!(sdr.join("XRAY.entities.NEWASIN.asc").exists());
+    assert!(sdr.join("keep.txt").exists());
+    // X-Ray off on a re-run also clears the old one
+    deckle_core::deliver::deliver_with(
+        b"KFX",
+        &info("Title", "A B"),
+        &Target::Folder(out.path().to_path_buf()),
+        &DeliverOptions::default(),
+    )
+    .unwrap();
+    assert!(!sdr.join("XRAY.entities.NEWASIN.asc").exists());
+}

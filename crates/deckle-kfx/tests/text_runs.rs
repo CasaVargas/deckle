@@ -20,7 +20,20 @@ fn runs_from_the_mini_kfx_have_increasing_positions_and_the_right_text() {
         "cover page template (0), cover image (1), section template (2), heading at 3"
     );
     assert!(runs.windows(2).all(|w| w[0].pid < w[1].pid));
-    assert_eq!(erl, 78982, "matches the last $265 entry");
+    let end = runs
+        .iter()
+        .map(|r| r.pid + r.text.chars().count() as i64)
+        .max()
+        .unwrap();
+    assert_eq!(
+        erl,
+        end.max(78982),
+        "erl covers the end of every text run and the last $265 entry"
+    );
+    assert!(
+        runs.iter()
+            .all(|r| r.pid + r.text.chars().count() as i64 <= erl)
+    );
     // position of a word inside a run is pid + char offset
     let p = position_of(&runs[1], "universally").unwrap();
     assert_eq!(p, runs[1].pid + "It is a truth ".chars().count() as i64);

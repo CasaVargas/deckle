@@ -376,3 +376,23 @@ fn folder_target_is_pdoc_and_an_override_wins() {
     assert_eq!(d.cde, CdeType::Ebok);
     assert!(d.reason.contains("override"));
 }
+
+#[test]
+fn a_failed_xray_is_a_warning_not_a_failed_run() {
+    use deckle_core::deliver::DeliverOptions;
+    use deckle_core::pipeline::attach_xray;
+    let mut report = RunReport::default();
+    let mut opts = DeliverOptions::default();
+    attach_xray(&mut report, &mut opts, Err("no position map".into()));
+    assert_eq!(report.error, None);
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("X-Ray skipped: no position map")),
+        "{:?}",
+        report.warnings
+    );
+    assert!(opts.sidecars.is_empty());
+    assert!(report.xray.is_none());
+}

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use deckle_core::xray::{XRayOptions, build};
+use deckle_core::xray::{LlmConfig, XRayOptions, build, build_with};
 use deckle_kfx::text::Run;
+use deckle_xray::llm::Provider;
 
 fn runs() -> (Vec<Run>, i64) {
     let paras = [
@@ -72,4 +73,138 @@ fn nothing_recurring_means_no_sidecar() {
             .unwrap()
             .is_none()
     );
+}
+
+fn llm_opts() -> XRayOptions {
+    XRayOptions {
+        llm: Some(LlmConfig {
+            provider: Provider::OpenAi,
+            model: "m".into(),
+            endpoint: "http://local/v1".into(),
+            api_key: "sk-secret".into(),
+        }),
+        wikipedia: false,
+    }
+}
+
+fn openai(items: &str) -> String {
+    serde_json::json!({"choices":[{"finish_reason":"stop","message":{"content": items}}]})
+        .to_string()
+}
+
+#[test]
+fn symmetric_llm_aliases_keep_the_main_character() {
+    let (runs, erl) = runs();
+    let answer = openai(
+        r#"[{"name":"Darcy","kind":"person","description":"Darcy.","aliases":["Mr. Darcy"]},{"name":"Mr. Darcy","kind":"person","description":"A proud gentleman.","aliases":["Darcy"]},{"name":"Elizabeth","description":"The heroine."},{"name":"Netherfield","kind":"term","description":""},{"name":"Longbourn","kind":"term","description":"The Bennet home.","aliases":["Netherfield"]}]"#,
+    );
+    let out = build_with(
+        "B0ABCDDECK",
+        "T",
+        "en",
+        &runs,
+        erl,
+        &llm_opts(),
+        &mut |_, _, _| Ok(answer.clone()),
+        &mut |_| Err("no".into()),
+    )
+    .unwrap()
+    .expect("entities");
+    assert_eq!(out.summary.source, "llm");
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join(&out.file_name);
+    std::fs::write(&p, &out.bytes).unwrap();
+    let db = rusqlite::Connection::open(&p).unwrap();
+    let labels: Vec<String> = db
+        .prepare("SELECT label FROM entity WHERE id > 0 ORDER BY label")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert!(labels.iter().any(|l| l == "Mr. Darcy"), "{labels:?}");
+    assert!(
+        !labels.iter().any(|l| l == "Netherfield"),
+        "dropped by the LLM: {labels:?}"
+    );
+    assert!(labels.iter().any(|l| l == "Longbourn"));
+    let (darcy_count, darcy_kind): (i64, i64) = db
+        .query_row(
+            "SELECT count, type FROM entity WHERE label = 'Mr. Darcy'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(darcy_kind, 1);
+    assert!(darcy_count >= 3, "{darcy_count}");
+    let eliz_kind: i64 = db
+        .query_row(
+            "SELECT type FROM entity WHERE label = 'Elizabeth'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        eliz_kind, 1,
+        "no kind from the LLM keeps the heuristic's person"
+    );
+}
+
+#[test]
+fn llm_failure_falls_back_to_basic_with_a_warning_and_no_key_in_it() {
+    let (runs, erl) = runs();
+    let out = build_with(
+        "B0ABCDDECK",
+        "T",
+        "en",
+        &runs,
+        erl,
+        &llm_opts(),
+        &mut |_, _, _| Err("HTTP 401 unauthorized".into()),
+        &mut |_| Err("no".into()),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(out.summary.source, "basic");
+    assert!(
+        out.warnings.iter().any(|w| w.contains("401")),
+        "{:?}",
+        out.warnings
+    );
+    assert!(
+        !format!("{:?}", llm_opts()).contains("sk-secret"),
+        "Debug must redact the key"
+    );
+}
+
+#[test]
+fn wikipedia_uses_the_primary_language_subtag() {
+    let (runs, erl) = runs();
+    let opts = XRayOptions {
+        llm: None,
+        wikipedia: true,
+    };
+    let mut urls = Vec::new();
+    let out = build_with(
+        "B0ABCDDECK",
+        "T",
+        "en-US",
+        &runs,
+        erl,
+        &opts,
+        &mut |_, _, _| Err("no".into()),
+        &mut |u| {
+            urls.push(u.to_owned());
+            Ok(r#"{"type":"standard","extract":"A place."}"#.into())
+        },
+    )
+    .unwrap()
+    .unwrap();
+    assert!(!urls.is_empty());
+    assert!(
+        urls.iter()
+            .all(|u| u.starts_with("https://en.wikipedia.org/")),
+        "{urls:?}"
+    );
+    assert_eq!(out.summary.source, "wikipedia");
 }

@@ -41,7 +41,8 @@ impl Provider {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Described {
     pub name: String,
-    pub kind: EntityKind,
+    /// `None` when the model did not say: keep the heuristic's guess.
+    pub kind: Option<EntityKind>,
     pub description: String,
     pub aliases: Vec<String>,
 }
@@ -54,6 +55,10 @@ pub enum LlmError {
     NoContent,
     #[error("LLM answer was not a JSON array of entities")]
     NotJson,
+    #[error(
+        "LLM answer was truncated by the model's output limit; raise max tokens or use a bigger model"
+    )]
+    Truncated,
     #[error("bad LLM response: {0}")]
     Decode(#[from] serde_json::Error),
 }
@@ -97,6 +102,11 @@ else []\n\nEntities:\n"
     p
 }
 
+/// Output tokens to allow: ~120 per entity (two sentences plus JSON) with headroom.
+pub fn output_budget(candidates: usize) -> u64 {
+    (1024 + candidates as u64 * 120).min(16384)
+}
+
 /// The request body for a provider (public so tests can check its shape).
 pub fn request_body(
     provider: Provider,
@@ -106,15 +116,17 @@ pub fn request_body(
     lang: &str,
 ) -> serde_json::Value {
     let user = prompt(title, cands, lang);
+    let max_tokens = output_budget(cands.len().min(MAX_CANDIDATES));
     match provider {
         Provider::Anthropic => serde_json::json!({
             "model": model,
-            "max_tokens": 8192,
+            "max_tokens": max_tokens,
             "system": SYSTEM,
             "messages": [{"role": "user", "content": user}],
         }),
         Provider::OpenAi => serde_json::json!({
             "model": model,
+            "max_tokens": max_tokens,
             "messages": [
                 {"role": "system", "content": SYSTEM},
                 {"role": "user", "content": user},
@@ -151,9 +163,10 @@ fn parse_items(raw: &str) -> Result<Vec<Described>, LlmError> {
         let Ok(it) = serde_json::from_value::<Item>(v) else {
             continue;
         };
-        let kind = match it.kind.as_deref() {
-            Some("term") => EntityKind::Term,
-            _ => EntityKind::Person,
+        let kind = match it.kind.as_deref().map(str::to_ascii_lowercase).as_deref() {
+            Some("term") => Some(EntityKind::Term),
+            Some("person") => Some(EntityKind::Person),
+            _ => None,
         };
         out.push(Described {
             name: it.name,
@@ -201,6 +214,10 @@ pub fn describe(
     };
     let raw = post(&url, &headers, &body).map_err(LlmError::Http)?;
     let v: serde_json::Value = serde_json::from_str(&raw)?;
+    let truncated = match provider {
+        Provider::Anthropic => v["stop_reason"].as_str() == Some("max_tokens"),
+        Provider::OpenAi => v["choices"][0]["finish_reason"].as_str() == Some("length"),
+    };
     let text = match provider {
         Provider::Anthropic => v["content"]
             .as_array()
@@ -211,7 +228,10 @@ pub fn describe(
             .map(str::to_owned),
     }
     .ok_or(LlmError::NoContent)?;
-    parse_items(&text)
+    match parse_items(&text) {
+        Err(LlmError::NotJson) if truncated => Err(LlmError::Truncated),
+        other => other,
+    }
 }
 
 /// Real HTTP POST (ureq), for use as the `post` argument.

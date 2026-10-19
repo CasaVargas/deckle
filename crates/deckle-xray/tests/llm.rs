@@ -77,12 +77,12 @@ fn anthropic_request_has_the_right_shape_and_response_is_parsed() {
         out[0],
         Described {
             name: "Elizabeth".into(),
-            kind: EntityKind::Person,
+            kind: Some(EntityKind::Person),
             description: "The witty second Bennet sister.".into(),
             aliases: vec!["Lizzy".into()]
         }
     );
-    assert_eq!(out[1].kind, EntityKind::Term);
+    assert_eq!(out[1].kind, Some(EntityKind::Term));
 }
 
 #[test]
@@ -90,7 +90,11 @@ fn openai_compatible_request_and_response() {
     let body = request_body(Provider::OpenAi, "llama3", "T", &cands(), "en");
     assert_eq!(body["messages"][0]["role"], "system");
     assert_eq!(body["messages"][1]["role"], "user");
-    let canned = r#"{"choices":[{"message":{"role":"assistant","content":"[{\"name\":\"Elizabeth\",\"kind\":\"person\",\"description\":\"x\"}]"}}]}"#;
+    assert!(
+        body["max_tokens"].as_u64().unwrap() >= 1024,
+        "local servers default to tiny completions"
+    );
+    let canned = r#"{"choices":[{"message":{"role":"assistant","content":"[{\"name\":\"Elizabeth\",\"description\":\"x\"}]"}}]}"#;
     let out = describe(
         Provider::OpenAi,
         "llama3",
@@ -110,6 +114,41 @@ fn openai_compatible_request_and_response() {
     )
     .unwrap();
     assert_eq!(out[0].aliases, Vec::<String>::new());
+    assert_eq!(
+        out[0].kind, None,
+        "an omitted kind keeps the heuristic's guess"
+    );
+}
+
+#[test]
+fn truncated_answers_are_reported_as_such() {
+    let canned = r#"{"choices":[{"finish_reason":"length","message":{"content":"[{\"name\":\"A\",\"description\":\"x\"},{\"name\":\"B\",\"desc"}}]}"#;
+    let err = describe(
+        Provider::OpenAi,
+        "m",
+        "",
+        "http://x/v1",
+        "T",
+        &cands(),
+        "en",
+        &mut |_, _, _| Ok(canned.to_owned()),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("truncated"), "{err}");
+    let canned =
+        r#"{"stop_reason":"max_tokens","content":[{"type":"text","text":"[{\"name\":\"A\""}]}"#;
+    let err = describe(
+        Provider::Anthropic,
+        "m",
+        "k",
+        "",
+        "T",
+        &cands(),
+        "en",
+        &mut |_, _, _| Ok(canned.to_owned()),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("truncated"), "{err}");
 }
 
 #[test]
