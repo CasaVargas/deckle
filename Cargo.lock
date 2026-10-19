@@ -773,6 +773,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-wordwise"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "deckle-kfx",
+ "rusqlite",
+ "serde",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "deckle-xray"
 version = "0.1.0"
 dependencies = [

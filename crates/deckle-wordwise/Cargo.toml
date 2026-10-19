@@ -1,0 +1,18 @@
+[package]
+name = "deckle-wordwise"
+description = "Kindle Word Wise: the .kll sidecar, Deckle's lexicon, phrase matching, and .klld dictionaries"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+deckle-kfx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+rusqlite.workspace = true
+base64.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+base64.workspace = true
