@@ -185,10 +185,9 @@ fn fix_ion(
                 let key = fk.as_str();
                 if key == "$161"
                     && let Value::String(ext) = &fv
+                    && let Some(sym) = format_symbol(ext)
                 {
-                    if let Some(sym) = format_symbol(ext) {
-                        fv = Value::sym(sym);
-                    }
+                    fv = Value::sym(sym);
                 }
                 if key.starts_with("yj.")
                     && [

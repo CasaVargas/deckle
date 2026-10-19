@@ -200,7 +200,7 @@ fn format_g6(x: f64) -> String {
     let (mant, e) = sci.split_once('e').unwrap();
     let e: i32 = e.parse().unwrap();
     let exp = if e != exp { e } else { exp };
-    if exp < -4 || exp >= 6 {
+    if !(-4..6).contains(&exp) {
         let mant = strip_zeros(mant);
         format!("{mant}e{}{:02}", if exp < 0 { '-' } else { '+' }, exp.abs())
     } else {
