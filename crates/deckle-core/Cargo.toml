@@ -18,5 +18,6 @@ csv.workspace = true
 tempfile.workspace = true
 deunicode.workspace = true
 regex.workspace = true
+ureq.workspace = true
 
 [dev-dependencies]

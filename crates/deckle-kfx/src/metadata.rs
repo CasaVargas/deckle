@@ -4,7 +4,8 @@
 use crate::fixup::Book;
 use crate::ion::{Struct, Sym, Value};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum CdeType {
     #[default]
     Pdoc,
