@@ -26,9 +26,19 @@ export interface BookState extends BookRow {
   shipped: { cde: string; asin: string; reason: string; matched: string | null } | null;
   /** X-Ray sidecar summary (from the final progress event). */
   xray: { people: number; terms: number; source: "llm" | "wikipedia" | "basic" } | null;
+  /** Word Wise sidecar summary (from the final progress event). */
+  wordWise: WordWiseSummary | null;
   /** Per-book override of the settings' cde. */
   cdeOverride: "pdoc" | "ebok" | null;
   showReport: boolean;
+}
+
+export interface WordWiseSummary {
+  hints: number;
+  level: number;
+  /** `device`: the Kindle's own English dictionary; `deckle`: Deckle's, in the 中文 slot. */
+  dictionary: "device" | "deckle";
+  downloaded: boolean;
 }
 
 export interface DeviceRow {
@@ -59,6 +69,7 @@ export interface Settings {
   llm_endpoint: string;
   llm_api_key: string;
   xray: boolean;
+  word_wise: boolean;
   word_wise_level: number;
   wikipedia: boolean;
   amazon_match: boolean;
@@ -84,6 +95,7 @@ export interface ProgressEvent {
   reason?: string | null;
   matched?: string | null;
   xray?: { people: number; terms: number; source: "llm" | "wikipedia" | "basic" } | null;
+  word_wise?: WordWiseSummary | null;
 }
 
 export type RunTarget =
@@ -97,7 +109,7 @@ export const STAGE_LABEL: Record<string, string> = {
   normalize: "Cleaning",
   convert: "Kindle Previewer",
   repackage: "Building KFX",
-  enrich: "X-Ray",
+  enrich: "X-Ray & Word Wise",
   deliver: "Copying",
   match: "Matching edition",
 };

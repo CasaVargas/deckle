@@ -12,6 +12,7 @@ use deckle_core::devices::{DeviceRegistry, Seen, TransportKind, seen_mass_storag
 use deckle_core::inspect::inspect;
 use deckle_core::pipeline::{RunOptions, XRayMode, run_with_progress};
 use deckle_core::previewer;
+use deckle_core::wordwise::{WordWiseOptions, WordWiseSummary};
 use deckle_core::xray::{LlmConfig, XRaySummary};
 use deckle_kfx::convert::CdeType;
 use deckle_transport::usb::MtpInfo;
@@ -49,6 +50,9 @@ pub struct Settings {
     /// Optional; empty falls back to ANTHROPIC_API_KEY / OPENAI_API_KEY in the environment.
     pub llm_api_key: String,
     pub xray: bool,
+    /// Word Wise sidecar on EBOK books (M4); the first use downloads Deckle's database.
+    pub word_wise: bool,
+    /// 1 (rarest words only) … 5 (every hint; the Kindle's slider filters further).
     pub word_wise_level: u8,
     pub wikipedia: bool,
     pub amazon_match: bool,
@@ -65,7 +69,8 @@ impl Default for Settings {
             llm_endpoint: String::new(),
             llm_api_key: String::new(),
             xray: true,
-            word_wise_level: 3,
+            word_wise: true,
+            word_wise_level: 5,
             wikipedia: false,
             amazon_match: false,
         }
@@ -110,6 +115,8 @@ pub struct ProgressEvent {
     pub matched: Option<String>,
     #[serde(default)]
     pub xray: Option<XRaySummary>,
+    #[serde(default)]
+    pub word_wise: Option<WordWiseSummary>,
 }
 
 /// One override chain for both the badge planner and the run: book, then device, then the
@@ -327,8 +334,7 @@ fn cover_data_url(epub: &Path, href: &str) -> Option<String> {
 
 /// The mode badge for a book today: everything ships as a cover-first PDOC until the M3 features
 /// exist (design §5 keeps covers non-negotiable).
-const COVER_MODE_REASON: &str =
-    "Enhanced Typesetting, cover and page numbers. X-Ray and Word Wise arrive with M3.";
+const COVER_MODE_REASON: &str = "Enhanced Typesetting, cover and page numbers. X-Ray and Word Wise need the book to ship as EBOK.";
 
 pub fn book_row(path: &Path) -> BookRow {
     let id = format!("{:x}", md5ish(path.to_string_lossy().as_bytes()));
@@ -474,6 +480,7 @@ pub fn run_books_with(
                         reason: None,
                         matched: None,
                         xray: None,
+                        word_wise: None,
                         error: Some("the MTP Kindle is no longer connected".into()),
                     });
                 }
@@ -499,6 +506,7 @@ pub fn run_books_with(
                         reason: None,
                         matched: None,
                         xray: None,
+                        word_wise: None,
                         error: Some(format!("Kindle at {root} is no longer connected")),
                     });
                 }
@@ -529,6 +537,10 @@ pub fn run_books_with(
             },
             llm: llm_config(settings),
             wikipedia: settings.wikipedia,
+            word_wise: settings.word_wise.then(|| WordWiseOptions {
+                level: settings.word_wise_level.clamp(1, 5),
+                ..Default::default()
+            }),
         };
         let id = b.id.clone();
         let report = run_with_progress(Path::new(&b.path), &opts, &mut |stage| {
@@ -545,6 +557,7 @@ pub fn run_books_with(
                 reason: None,
                 matched: None,
                 xray: None,
+                word_wise: None,
             })
         });
         emit(ProgressEvent {
@@ -564,6 +577,7 @@ pub fn run_books_with(
             reason: report.decision.map(|d| d.reason),
             matched: report.matched,
             xray: report.xray,
+            word_wise: report.word_wise,
         });
     }
 }
@@ -889,7 +903,8 @@ mod tests {
         assert_eq!(s.cde, "auto");
         assert!(s.pages_auto);
         assert_eq!(s.llm_provider, "off");
-        assert_eq!(s.word_wise_level, 3);
+        assert_eq!(s.word_wise_level, 5);
+        assert!(s.word_wise);
         let mut changed = s.clone();
         changed.cde = "ebok".into();
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());

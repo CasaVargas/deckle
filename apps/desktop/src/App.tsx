@@ -16,13 +16,14 @@ const DEFAULT_SETTINGS: Settings = {
   llm_endpoint: "",
   llm_api_key: "",
   xray: true,
-  word_wise_level: 3,
+  word_wise: true,
+  word_wise_level: 5,
   wikipedia: false,
   amazon_match: false,
 };
 
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, cdeOverride: null, showReport: false };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, showReport: false };
 }
 
 export default function App() {
@@ -122,6 +123,7 @@ export default function App() {
                     ? { cde: e.cde, asin: e.asin, reason: e.reason ?? "", matched: e.matched ?? null }
                     : b.shipped,
                 xray: e.status === "done" ? (e.xray ?? null) : b.xray,
+                wordWise: e.status === "done" ? (e.word_wise ?? null) : b.wordWise,
               },
         ),
       );
@@ -163,7 +165,7 @@ export default function App() {
     setNotice(null);
     setBusy(true);
     setBooks((prev) =>
-      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null })),
+      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null })),
     );
     try {
       await api.runBooks(

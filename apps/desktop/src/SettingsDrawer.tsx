@@ -133,14 +133,22 @@ export default function SettingsDrawer({ open, settings, previewer, devices, onC
         </label>
       </section>
 
-      <section className="coming">
-        <h3>
-          Word Wise <span className="tag">M4</span>
-        </h3>
-        <label className="field">
-          <span>Hint level: {settings.word_wise_level}</span>
-          <input type="range" min={1} max={5} value={settings.word_wise_level} onChange={(e) => set("word_wise_level", Number(e.target.value))} />
+      <section>
+        <h3>Word Wise</h3>
+        <label className="field check">
+          <input type="checkbox" checked={settings.word_wise} onChange={(e) => set("word_wise", e.target.checked)} />
+          <span>Add Word Wise hints to every book that ships with features (EBOK)</span>
         </label>
+        <label className="field">
+          <span>
+            Hint level: {settings.word_wise_level} ({settings.word_wise_level === 5 ? "all hints; the Kindle's slider decides" : settings.word_wise_level === 1 ? "rarest words only" : "fewer hints"})
+          </span>
+          <input type="range" min={1} max={5} value={settings.word_wise_level} disabled={!settings.word_wise} onChange={(e) => set("word_wise_level", Number(e.target.value))} />
+        </label>
+        <p className="hint">
+          The first book downloads Deckle's dictionary (about 12 MB, from Wiktionary). Kindles that already have Amazon's English Word Wise dictionary use it;
+          others get Deckle's, shown when the Kindle's Word Wise language is set to 中文 (Chinese). The hints are English either way.
+        </p>
       </section>
 
       <section>
