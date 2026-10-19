@@ -116,10 +116,31 @@ impl From<Device> for DeviceRow {
     }
 }
 
-/// App state: the settings file location and books passed on the command line.
+/// App state: the settings file location and what the command line asked for.
 pub struct AppState {
     pub settings_file: PathBuf,
     pub preload: Mutex<Vec<String>>,
+    /// `--export-to <dir>`: run the preloaded books into this folder as soon as they load.
+    pub preload_target: Mutex<Option<String>>,
+}
+
+/// `deckle-desktop [--export-to DIR] [BOOK...]`: books to open and an optional auto-export dir.
+pub fn parse_cli_args(args: &[String]) -> (Vec<String>, Option<String>) {
+    let mut books = Vec::new();
+    let mut target = None;
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--export-to" && i + 1 < args.len() {
+            target = Some(args[i + 1].clone());
+            i += 2;
+            continue;
+        }
+        if !args[i].starts_with('-') {
+            books.push(args[i].clone());
+        }
+        i += 1;
+    }
+    (books, target)
 }
 
 fn is_epub(p: &Path) -> bool {
@@ -353,6 +374,11 @@ pub fn take_preloaded_books(state: State<'_, AppState>) -> Vec<String> {
 }
 
 #[tauri::command]
+pub fn take_preloaded_target(state: State<'_, AppState>) -> Option<String> {
+    state.preload_target.lock().unwrap().take()
+}
+
+#[tauri::command]
 pub fn inspect_books(paths: Vec<String>) -> Vec<BookRow> {
     expand_epub_paths(&paths)
         .iter()
@@ -443,6 +469,21 @@ pub fn settings_file(app: &AppHandle) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cli_args_separate_books_from_the_export_target() {
+        let (books, target) = parse_cli_args(&[
+            "--export-to".into(),
+            "/tmp/out".into(),
+            "a.epub".into(),
+            "b.epub".into(),
+        ]);
+        assert_eq!(books, ["a.epub", "b.epub"]);
+        assert_eq!(target.as_deref(), Some("/tmp/out"));
+        let (books, target) = parse_cli_args(&["c.epub".into(), "--verbose".into()]);
+        assert_eq!(books, ["c.epub"]);
+        assert_eq!(target, None);
+    }
 
     #[test]
     fn expand_paths_finds_epubs_recursively_and_ignores_the_rest() {

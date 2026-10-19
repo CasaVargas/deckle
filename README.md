@@ -10,6 +10,22 @@ Status: pre-alpha. The command line converts EPUB → KFX end to end (M1); the d
 shell (M0). See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
 build plan.
 
+## Desktop app
+
+`apps/desktop` is the Tauri app: drop EPUBs (or **Add books…**), each row shows cover, title,
+author, series and a mode badge (**Cover** = PDOC, covers everywhere; **Features** = EBOK, for
+X-Ray/Word Wise once M3 lands; **Error** with the reason). **Send to Kindle** runs the pipeline
+book by book with per-stage progress; the split button exports to a folder instead. The row menu
+overrides the mode per book, shows the full report, or removes the row. Settings (gear) hold the
+Kindle Previewer path, default mode and page numbers; the M2–M4 options are visible but inert.
+
+```sh
+cd apps/desktop && pnpm install && pnpm tauri dev                 # develop
+./target/debug/deckle-desktop --export-to ./out a.epub b.epub      # open books and convert at once
+```
+
+![Deckle converting a batch](docs/screenshots/gui-running.png)
+
 ## Command line
 
 ```sh
