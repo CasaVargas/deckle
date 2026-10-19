@@ -3,3 +3,5 @@
 
 pub mod asc;
 pub mod extract;
+pub mod llm;
+pub mod wiki;
