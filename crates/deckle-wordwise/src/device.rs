@@ -40,7 +40,13 @@ impl DeviceDictionary {
             ("lemmas", &["id", "lemma"][..]),
             (
                 "senses",
-                &["id", "display_lemma_id", "pos_type", "sense_number"][..],
+                &[
+                    "id",
+                    "display_lemma_id",
+                    "pos_type",
+                    "sense_number",
+                    "short_def",
+                ][..],
             ),
             ("pos_types", &["id", "label"][..]),
         ] {
@@ -57,10 +63,13 @@ impl DeviceDictionary {
                 }
             }
         }
+        // Amazon's has definitionless placeholder senses (negative ids, sense_number 0, pos 0)
+        // that sort first; a hint pointing at one shows as an empty gap on the Kindle.
         let mut st = conn.prepare(
             "SELECT lower(l.lemma), p.label, s.id FROM senses s
              JOIN lemmas l ON l.id = s.display_lemma_id
              LEFT JOIN pos_types p ON p.id = s.pos_type
+             WHERE s.short_def IS NOT NULL AND s.short_def != ''
              ORDER BY s.sense_number, s.id",
         )?;
         let mut d = DeviceDictionary::default();

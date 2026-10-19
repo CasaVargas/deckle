@@ -65,10 +65,11 @@ fn amazon_klld(path: &Path) {
             "CREATE TABLE pos_types (id integer, label varchar(100));
              CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT);
              CREATE TABLE lemmas (id INTEGER PRIMARY KEY, lemma TEXT);
-             CREATE TABLE senses (id INTEGER PRIMARY KEY, display_lemma_id INTEGER, pos_type INTEGER, sense_number REAL);
+             CREATE TABLE senses (id INTEGER PRIMARY KEY, display_lemma_id INTEGER, pos_type INTEGER, sense_number REAL, short_def TEXT);
              INSERT INTO pos_types VALUES (2,'adjective'),(3,'adverb');
              INSERT INTO lemmas VALUES (7,'universally'),(8,'acknowledged');
-             INSERT INTO senses VALUES (70001, 7, 3, 1.0), (80001, 8, 2, 1.0);",
+             INSERT INTO senses VALUES (70001, 7, 3, 1.0, 'ZGVm'), (80001, 8, 2, 1.0, 'ZGVm'),
+               (-70001, 7, 0, 0.0, NULL);",
         )
         .unwrap();
 }
