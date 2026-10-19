@@ -1,0 +1,19 @@
+[package]
+name = "deckle-wordwise-build"
+description = "Offline build of Deckle's Word Wise database from Wiktionary (kaikki.org) and wordfreq"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+deckle-wordwise.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+flate2 = "1"
+rmpv = "1"
+
+[dev-dependencies]
+tempfile.workspace = true
