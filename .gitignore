@@ -1,0 +1,8 @@
+/target
+node_modules
+dist
+.DS_Store
+*.log
+/fixtures/out
+/apps/desktop/src-tauri/target
+/apps/desktop/src-tauri/gen/schemas
