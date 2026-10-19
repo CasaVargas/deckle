@@ -273,6 +273,7 @@ dependencies = [
  "deckle-kfx",
  "deunicode",
  "image",
+ "regex",
  "roxmltree",
  "serde",
  "serde_json",

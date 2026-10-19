@@ -3,3 +3,4 @@
 
 pub mod epub;
 pub mod inspect;
+pub mod normalize;
