@@ -308,3 +308,7 @@ Each milestone ends with a verified book on a real device, not a passing test.
   Open Library + print-ASIN heuristic for Match; Wikipedia opt-in default off; Windows unsigned
   in v1; no auto-updater; Word Wise data downloaded not bundled; working name "Deckle".
   Claude's calls.
+- 2026-10-19 Word Wise points at the Kindle's own English dictionary when present (read at send
+  time, never stored), else installs Deckle's Wiktionary dictionary in the Chinese slot (reader
+  sets Word Wise language to 中文 once); Amazon's dictionaries are never overwritten. Database
+  12 MB gzipped, on GitHub Releases, sha256-pinned. Claude's call (M4 plan).
