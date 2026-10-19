@@ -329,6 +329,8 @@ fn deliver_mtp(
 ) -> Result<PathBuf, DeliverError> {
     let sidecars = &opts.sidecars;
     let m = |e: &dyn std::fmt::Display| DeliverError::Mtp(e.to_string());
+    // The step and file in the error: the Kindle answers a refused write with a bare code.
+    let step = |what: String| move |e: MtpError| DeliverError::Mtp(format!("{what}: {e}"));
     let storages = dev.storages().map_err(|e| m(&e))?;
     let storage = *storages
         .first()
@@ -337,7 +339,8 @@ fn deliver_mtp(
     if let Some(existing) = dev.find_child(storage, docs, name).map_err(|e| m(&e))? {
         dev.delete(existing).map_err(|e| m(&e))?;
     }
-    dev.send_file(storage, docs, name, kfx).map_err(|e| m(&e))?;
+    dev.send_file(storage, docs, name, kfx)
+        .map_err(step(format!("sending documents/{name}")))?;
     let sdr_name = Path::new(name)
         .with_extension("sdr")
         .to_string_lossy()
@@ -357,11 +360,11 @@ fn deliver_mtp(
             Some(h) => h,
             None => dev
                 .make_folder(storage, docs, &sdr_name)
-                .map_err(|e| m(&e))?,
+                .map_err(step(format!("creating documents/{sdr_name}")))?,
         };
         for (sc_name, bytes) in sidecars {
             dev.send_file(storage, sdr, sc_name, bytes)
-                .map_err(|e| m(&e))?;
+                .map_err(step(format!("sending documents/{sdr_name}/{sc_name}")))?;
         }
     }
     if !opts.system_files.is_empty() {
@@ -372,12 +375,15 @@ fn deliver_mtp(
             };
             let mut at = root;
             for f in folders {
-                at = dev.ensure_folder(storage, at, f).map_err(|e| m(&e))?;
+                at = dev
+                    .ensure_folder(storage, at, f)
+                    .map_err(step(format!("creating {}", parts.join("/"))))?;
             }
             if let Some(old) = dev.find_child(storage, at, file).map_err(|e| m(&e))? {
                 dev.delete(old).map_err(|e| m(&e))?;
             }
-            dev.send_file(storage, at, file, bytes).map_err(|e| m(&e))?;
+            dev.send_file(storage, at, file, bytes)
+                .map_err(step(format!("sending {}", parts.join("/"))))?;
         }
     }
     Ok(PathBuf::from(format!(

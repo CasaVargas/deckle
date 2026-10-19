@@ -149,10 +149,10 @@ fn map_err(e: rusb::Error) -> TransportError {
 
 impl Drop for UsbTransport {
     fn drop(&mut self) {
+        // No USB reset, despite libmtp's FORCE_RESET_ON_CLOSE for Kindles: on a Scribe 2024 the
+        // reset sends it to the home screen and off the bus until replugged, while a plain
+        // close leaves it ready for the next session.
         let _ = self.handle.release_interface(self.ep.interface);
-        // libmtp's Kindle entries carry FORCE_RESET_ON_CLOSE; without it the device may vanish
-        // until replugged.
-        let _ = self.handle.reset();
     }
 }
 

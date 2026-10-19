@@ -226,6 +226,19 @@ pub fn probe_on(conn: &mut Conn<'_>) -> Result<DeviceDicts, String> {
                 .first()
                 .ok_or("MTP: device reports no storage")?;
             let root = dev.content_root(storage).map_err(|e| m(&e))?;
+            // The Scribe 2024 hides `system/` over MTP: its dictionary can't be read and
+            // Deckle's can't be installed, so there is nothing for hints to point at.
+            if dev
+                .find_child(storage, root, "system")
+                .map_err(|e| m(&e))?
+                .is_none()
+            {
+                return Err(
+                    "this Kindle doesn't expose its system folder over MTP, where Word \
+                            Wise dictionaries live"
+                        .into(),
+                );
+            }
             let mut get = |parts: &[&str]| -> Result<Option<Vec<u8>>, String> {
                 match dev.find_path(storage, root, parts).map_err(|e| m(&e))? {
                     Some(h) => dev.get_object(h).map(Some).map_err(|e| m(&e)),
