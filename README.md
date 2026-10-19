@@ -6,7 +6,26 @@ One window: drop books, plug in Kindle, press go.
 
 Mac and Windows. Open source (GPL-3.0-or-later). No account, no subscription, no telemetry.
 
-Status: pre-alpha, design phase. See `docs/superpowers/specs/` for the design document.
+Status: pre-alpha. The command line converts EPUB → KFX end to end (M1); the desktop app is a
+shell (M0). See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
+build plan.
+
+## Command line
+
+```sh
+cargo build --release -p deckle-cli            # binary at target/release/deckle
+deckle devices                                 # connected mass-storage Kindles
+deckle run book.epub --to device --pages auto  # inspect → normalize → Previewer → KFX → Kindle
+deckle run book.epub --to ./out --cde pdoc     # export to a folder instead
+deckle inspect book.epub --json                # metadata, spine, TOC, warnings
+deckle convert book.kpf -o book.kfx --asin B0XXXXDECK   # repackage an existing Previewer KPF
+```
+
+`--cde pdoc` (default) shows covers on every Kindle; `--cde ebok` is what X-Ray and Word Wise
+will need (M2+). `--pages auto` adds approximate page numbers like the store does.
+
+The KFX writer is a Rust port of the GPL-3 kfxlib conversion path and is tested byte for byte
+against kfxlib's output (`fixtures/`).
 
 ## Why
 
