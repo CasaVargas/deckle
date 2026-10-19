@@ -15,7 +15,7 @@ Rebuild an existing tag: *Actions → release → Run workflow* with the tag nam
 ## macOS signing and notarization (owner, one time)
 
 Without these secrets the `.app` is ad-hoc signed: Gatekeeper blocks a double-click and users
-must right-click → Open once (README says so). With them, the workflow signs with Developer ID
+must right-click → Open once. With them, the workflow signs with Developer ID
 and notarizes.
 
 1. Apple Developer account → Certificates → **Developer ID Application** (Xcode → Settings →
