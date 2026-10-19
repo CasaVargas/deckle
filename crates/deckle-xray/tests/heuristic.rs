@@ -81,6 +81,27 @@ fn single_mentions_and_stopwords_are_dropped() {
     assert!(find(&c, "The Thames").is_none());
 }
 
+#[test]
+fn capitalized_common_words_drop_caps_and_calendar_words_are_not_entities() {
+    let text = runs(&[
+        "Allow me to say so. Allow me again. Allow it, please; I shall allow nothing else, nor allow that.",
+        "HEN the day came, Thursday it was, in June. HEN again. On Thursday in June they left.",
+        "Dawson brought the tea, and Dawson took it away; Dawson was tired.",
+    ]);
+    let c = heuristic(&text, "en");
+    assert!(
+        find(&c, "Allow").is_none(),
+        "a capitalized verb that also appears lowercase"
+    );
+    assert!(find(&c, "HEN").is_none(), "drop-cap remnant");
+    assert!(find(&c, "Thursday").is_none());
+    assert!(find(&c, "June").is_none());
+    assert!(
+        find(&c, "Dawson").is_some(),
+        "a real name never appears lowercase"
+    );
+}
+
 /// Quality smoke on a real novel: set DECKLE_SMOKE_KFX to a monolithic KFX path.
 #[test]
 fn smoke_on_a_real_book_prints_the_top_entities() {

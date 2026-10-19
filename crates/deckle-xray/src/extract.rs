@@ -39,19 +39,175 @@ const HONORIFICS: [&str; 14] = [
 
 fn stopwords(_lang: &str) -> &'static [&'static str] {
     &[
-        "the", "a", "an", "and", "but", "or", "nor", "so", "yet", "for", "of", "in", "on", "at",
-        "to", "by", "with", "from", "as", "it", "its", "he", "she", "they", "we", "you", "i",
-        "his", "her", "their", "our", "your", "my", "this", "that", "these", "those", "there",
-        "here", "then", "than", "when", "where", "while", "what", "which", "who", "whom", "why",
-        "how", "if", "not", "no", "yes", "all", "any", "some", "such", "very", "more", "most",
-        "much", "one", "two", "three", "first", "second", "last", "next", "new", "old", "good",
-        "bad", "well", "now", "soon", "after", "before", "again", "once", "never", "ever",
-        "always", "still", "just", "only", "even", "also", "chapter", "book", "part", "volume",
-        "prologue", "epilogue", "contents", "page", "oh", "ah", "yet", "though", "however",
-        "indeed", "perhaps", "upon", "into", "about", "over", "under", "between", "am", "is",
-        "are", "was", "were", "be", "been", "being", "do", "does", "did", "have", "has", "had",
-        "will", "would", "shall", "should", "can", "could", "may", "might", "must", "let", "us",
-        "me", "him", "them", "dear", "god", "lord",
+        "the",
+        "a",
+        "an",
+        "and",
+        "but",
+        "or",
+        "nor",
+        "so",
+        "yet",
+        "for",
+        "of",
+        "in",
+        "on",
+        "at",
+        "to",
+        "by",
+        "with",
+        "from",
+        "as",
+        "it",
+        "its",
+        "he",
+        "she",
+        "they",
+        "we",
+        "you",
+        "i",
+        "his",
+        "her",
+        "their",
+        "our",
+        "your",
+        "my",
+        "this",
+        "that",
+        "these",
+        "those",
+        "there",
+        "here",
+        "then",
+        "than",
+        "when",
+        "where",
+        "while",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "why",
+        "how",
+        "if",
+        "not",
+        "no",
+        "yes",
+        "all",
+        "any",
+        "some",
+        "such",
+        "very",
+        "more",
+        "most",
+        "much",
+        "one",
+        "two",
+        "three",
+        "first",
+        "second",
+        "last",
+        "next",
+        "new",
+        "old",
+        "good",
+        "bad",
+        "well",
+        "now",
+        "soon",
+        "after",
+        "before",
+        "again",
+        "once",
+        "never",
+        "ever",
+        "always",
+        "still",
+        "just",
+        "only",
+        "even",
+        "also",
+        "chapter",
+        "book",
+        "part",
+        "volume",
+        "prologue",
+        "epilogue",
+        "contents",
+        "page",
+        "oh",
+        "ah",
+        "yet",
+        "though",
+        "however",
+        "indeed",
+        "perhaps",
+        "upon",
+        "into",
+        "about",
+        "over",
+        "under",
+        "between",
+        "am",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "have",
+        "has",
+        "had",
+        "will",
+        "would",
+        "shall",
+        "should",
+        "can",
+        "could",
+        "may",
+        "might",
+        "must",
+        "let",
+        "us",
+        "me",
+        "him",
+        "them",
+        "dear",
+        "god",
+        "lord",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "ten",
+        "hundred",
+        "thousand",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+        "january",
+        "february",
+        "march",
+        "april",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+        "christmas",
+        "easter",
     ]
 }
 
@@ -97,7 +253,9 @@ fn mentions(runs: &[Run], stop: &[&str]) -> Vec<Mention> {
             let (s, _, w) = words[i];
             let is_honorific =
                 HONORIFICS.contains(&w) || HONORIFICS.contains(&format!("{w}.").as_str());
+            let shouting = w.chars().count() > 1 && w.chars().all(|c| !c.is_lowercase());
             if !(is_cap_word(w) || is_honorific)
+                || shouting
                 || (!is_honorific && stop.contains(&w.to_lowercase().as_str()))
             {
                 i += 1;
@@ -164,6 +322,17 @@ fn sentence_around(text: &str, byte: usize) -> String {
 pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
     let stop = stopwords(lang);
     let ms = mentions(runs, stop);
+    // How often each word appears in lowercase: "Allow" at sentence starts is the verb when
+    // "allow" shows up at least half as often; "Paris" never does.
+    let word_re = Regex::new(r"[\p{L}][\p{L}'’\-]*").unwrap();
+    let mut lower_counts: HashMap<String, usize> = HashMap::new();
+    for r in runs {
+        for m in word_re.find_iter(&r.text) {
+            if m.as_str().chars().next().is_some_and(char::is_lowercase) {
+                *lower_counts.entry(m.as_str().to_owned()).or_default() += 1;
+            }
+        }
+    }
     // Group identical surface forms.
     let mut groups: HashMap<String, Vec<&Mention>> = HashMap::new();
     for m in &ms {
@@ -281,6 +450,12 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
     let mut out: Vec<Candidate> = merged
         .into_iter()
         .filter(|(_, (occ, _, _))| occ.len() >= 2)
+        .filter(|(label, (occ, _, _))| {
+            label.contains(' ')
+                || lower_counts
+                    .get(&label.to_lowercase())
+                    .is_none_or(|&n| n * 2 < occ.len())
+        })
         .map(|(label, (mut occ, aliases, first))| {
             occ.sort();
             let honorific = HONORIFICS
