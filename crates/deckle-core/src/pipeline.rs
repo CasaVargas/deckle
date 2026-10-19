@@ -139,8 +139,10 @@ pub fn run(epub: &Path, opts: &RunOptions) -> RunReport {
         previewer::convert(&previewer, &normalized, &work_path.join("previewer"))
     );
     report.kpf = Some(kpf.kpf.clone());
-    for e in &kpf.log_errors {
-        report.warnings.push(format!("previewer: {e}"));
+    for issue in kpf.log_issues.iter().filter(|i| i.should_surface()) {
+        report
+            .warnings
+            .push(format!("previewer: {}", issue.message));
     }
 
     let asin = opts

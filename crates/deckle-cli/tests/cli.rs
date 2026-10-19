@@ -74,6 +74,7 @@ fn inspect_json_reports_the_title() {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn run_with_fake_previewer_from_the_cli() {
     let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../deckle-core/tests/fake_previewer/ok.sh");
@@ -99,5 +100,31 @@ fn run_with_fake_previewer_from_the_cli() {
             .as_str()
             .unwrap()
             .ends_with("Deckle Mini Fixture.kfx")
+    );
+}
+
+#[test]
+fn run_checks_previewer_before_creating_the_output_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let target = tmp.path().join("new-folder");
+    let res = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["run"])
+        .arg(deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .args(["--to"])
+        .arg(&target)
+        .args(["--previewer", "/nonexistent/KindlePreviewer4CLI"])
+        .output()
+        .unwrap();
+    assert!(!res.status.success());
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&res.stdout),
+        String::from_utf8_lossy(&res.stderr)
+    );
+    assert!(text.contains("Kindle Previewer is not installed"), "{text}");
+    assert!(
+        !target.exists(),
+        "output folder must not be created before the Previewer check"
     );
 }

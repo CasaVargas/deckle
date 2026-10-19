@@ -271,13 +271,15 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 return Ok(ExitCode::from(EXIT_USAGE));
             }
             let pages = cli::parse_pages(pages.as_deref())?;
+            // Fail before any work (and before touching the target) when Previewer is missing.
+            let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             let target = resolve_target(&to)?;
             let opts = RunOptions {
                 cde_type: cde.into(),
                 asin: None,
                 pages,
                 target,
-                previewer: pv,
+                previewer: Some(located.path),
                 keep_work_dir,
             };
             let reports: Vec<_> = epubs.iter().map(|e| run(e, &opts)).collect();

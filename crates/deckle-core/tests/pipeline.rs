@@ -12,6 +12,7 @@ fn fake(name: &str) -> PathBuf {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
@@ -80,6 +81,7 @@ fn missing_previewer_fails_before_any_work() {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
@@ -131,4 +133,25 @@ fn real_previewer_end_to_end() {
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
     assert!(report.delivered.unwrap().exists());
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn missing_media_notice_from_previewer_reaches_the_report() {
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("notice.sh")),
+        keep_work_dir: false,
+    };
+    let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
+    assert_eq!(report.error, None);
+    assert!(
+        report.warnings.iter().any(|w| w.contains("W14010")),
+        "{:?}",
+        report.warnings
+    );
 }

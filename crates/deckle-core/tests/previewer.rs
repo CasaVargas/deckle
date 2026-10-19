@@ -10,6 +10,7 @@ fn fake(name: &str) -> PathBuf {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn fake_previewer_converts_to_kpf_with_enhanced_typesetting() {
     let p = locate(Some(&fake("ok.sh"))).unwrap();
     assert_eq!(p.version, "4.0.3");
@@ -24,6 +25,7 @@ fn fake_previewer_converts_to_kpf_with_enhanced_typesetting() {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn enhanced_typesetting_refusal_reports_the_first_error_row() {
     let p = locate(Some(&fake("unsupported.sh"))).unwrap();
     let out = tempfile::tempdir().unwrap();
@@ -84,4 +86,54 @@ fn real_previewer_converts_the_mini_epub() {
     .unwrap();
     assert!(r.et_supported);
     assert!(r.kpf.exists());
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn outright_conversion_failure_is_distinct_and_carries_the_error_row() {
+    let p = locate(Some(&fake("failed.sh"))).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    match convert(
+        &p,
+        &deckle_kfx::fixtures::path("deckle-mini.epub"),
+        out.path(),
+    ) {
+        Err(ConvertError::ConversionFailed { message }) => {
+            assert!(message.contains("E23001"), "{message}");
+        }
+        other => panic!("expected ConversionFailed, got {other:?}"),
+    }
+}
+
+#[test]
+fn log_issues_keep_warnings_and_missing_media_notices() {
+    use deckle_core::previewer::{IssueKind, read_log_issues};
+    let dir = tempfile::tempdir().unwrap();
+    let log = dir.path().join("x_log.csv");
+    std::fs::write(&log, "\u{feff}\"Error: legend\"\n\"Notice: legend\"\n\"Type\",\"Description\",\"Source File\",\"Line Number\",\"Text Preceding Warning or Error\",\"Recommended Fix\"\n\"Error\",\"E1 bad\",\"a.xhtml\",\"3\",\"\",\"\"\n\"Warning\",\"W2 odd\",\"b.xhtml\",\"\",\"\",\"\"\n\"Notice\",\"W14010: media file not found Images/cover.png\",\"c.xhtml\",\"\",\"\",\"\"\n\"Notice\",\"I3 harmless\",\"\",\"\",\"\",\"\"\n").unwrap();
+    let issues = read_log_issues(&log);
+    let kinds: Vec<IssueKind> = issues.iter().map(|i| i.kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            IssueKind::Error,
+            IssueKind::Warning,
+            IssueKind::Notice,
+            IssueKind::Notice
+        ]
+    );
+    assert_eq!(issues[0].message, "E1 bad (a.xhtml:3)");
+    let surfaced: Vec<&str> = issues
+        .iter()
+        .filter(|i| i.should_surface())
+        .map(|i| i.message.as_str())
+        .collect();
+    assert_eq!(
+        surfaced,
+        [
+            "E1 bad (a.xhtml:3)",
+            "W2 odd (b.xhtml)",
+            "W14010: media file not found Images/cover.png (c.xhtml)"
+        ]
+    );
 }

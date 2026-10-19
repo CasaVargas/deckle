@@ -17,8 +17,12 @@ impl EpubReader {
     pub fn open(path: &Path) -> Result<Self, InspectError> {
         let file = std::fs::File::open(path).map_err(InspectError::Io)?;
         let mut zip = zip::ZipArchive::new(file).map_err(|_| InspectError::NotZip)?;
-        if zip.by_name("META-INF/encryption.xml").is_ok() {
-            return Err(InspectError::Drm);
+        if let Ok(mut f) = zip.by_name("META-INF/encryption.xml") {
+            let mut xml = String::new();
+            let _ = f.read_to_string(&mut xml);
+            if encryption_is_drm(&xml) {
+                return Err(InspectError::Drm);
+            }
         }
         let container = {
             let mut f = zip
@@ -123,4 +127,44 @@ pub fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8(out).unwrap_or_else(|_| s.to_owned())
+}
+
+const FONT_OBFUSCATION_ALGORITHMS: [&str; 2] = [
+    "http://www.idpf.org/2008/embedding",
+    "http://ns.adobe.com/pdf/enc#RC",
+];
+const FONT_EXTENSIONS: [&str; 6] = [".ttf", ".otf", ".woff", ".woff2", ".eot", ".dfont"];
+
+/// True when `META-INF/encryption.xml` encrypts anything beyond obfuscated fonts (IDPF/Adobe
+/// font mangling is routine in DRM-free books). Unparseable files count as DRM.
+pub fn encryption_is_drm(xml: &str) -> bool {
+    let Ok(doc) = roxmltree::Document::parse(xml) else {
+        return true;
+    };
+    let mut saw_any = false;
+    for data in doc
+        .descendants()
+        .filter(|n| n.has_tag_name("EncryptedData"))
+    {
+        saw_any = true;
+        let algorithm = data
+            .descendants()
+            .find(|n| n.has_tag_name("EncryptionMethod"))
+            .and_then(|n| n.attribute("Algorithm"))
+            .unwrap_or("");
+        let uri = data
+            .descendants()
+            .find(|n| n.has_tag_name("CipherReference"))
+            .and_then(|n| n.attribute("URI"))
+            .unwrap_or("")
+            .to_lowercase();
+        let font_algorithm = FONT_OBFUSCATION_ALGORITHMS.contains(&algorithm);
+        let font_file = FONT_EXTENSIONS.iter().any(|e| uri.ends_with(e));
+        if !(font_algorithm && font_file) {
+            return true;
+        }
+    }
+    // An encryption.xml with no EncryptedData entries encrypts nothing.
+    let _ = saw_any;
+    false
 }

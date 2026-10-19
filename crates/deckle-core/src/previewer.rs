@@ -17,12 +17,42 @@ pub struct Previewer {
     pub major: u8,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub enum IssueKind {
+    Error,
+    Warning,
+    Notice,
+}
+
+/// One row of Previewer's per-book log.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct LogIssue {
+    pub kind: IssueKind,
+    /// "Description (Source File:Line)".
+    pub message: String,
+}
+
+impl LogIssue {
+    /// Errors and warnings always matter; notices only when they mean content went missing.
+    pub fn should_surface(&self) -> bool {
+        match self.kind {
+            IssueKind::Error | IssueKind::Warning => true,
+            IssueKind::Notice => {
+                let m = self.message.to_lowercase();
+                m.contains("not found") || m.contains("missing") || m.contains("could not be")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct KpfResult {
     pub kpf: PathBuf,
     pub et_supported: bool,
     /// `Error` rows of the per-book log.
     pub log_errors: Vec<String>,
+    /// Every row of the per-book log.
+    pub log_issues: Vec<LogIssue>,
     pub duration_ms: u64,
 }
 
@@ -32,6 +62,8 @@ pub enum ConvertError {
     PreviewerMissing { download_url: &'static str },
     #[error("Kindle Previewer refused Enhanced Typesetting: {first_error}")]
     EnhancedTypesettingUnsupported { first_error: String },
+    #[error("Kindle Previewer could not convert the book: {message}")]
+    ConversionFailed { message: String },
     #[error("Kindle Previewer failed: {stderr}")]
     PreviewerFailed { stderr: String },
     #[error("Kindle Previewer produced no output")]
@@ -42,7 +74,8 @@ pub enum ConvertError {
 
 /// Candidate install locations, most preferred first.
 pub fn default_candidates() -> Vec<PathBuf> {
-    let mut v = Vec::new();
+    #[allow(unused_mut)]
+    let mut v: Vec<PathBuf> = Vec::new();
     let home = std::env::var_os("HOME").map(PathBuf::from);
     #[cfg(target_os = "macos")]
     {
@@ -163,41 +196,71 @@ pub fn convert(p: &Previewer, epub: &Path, out_dir: &Path) -> Result<KpfResult, 
             .arg(&out_dir);
     }
     let output = cmd.output()?;
+    let console = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let console_tail = || {
+        console
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .trim()
+            .to_owned()
+    };
     if !output.status.success() {
         return Err(ConvertError::PreviewerFailed {
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            stderr: console.trim().to_owned(),
         });
     }
     let summary_path = out_dir.join("Summary_Log.csv");
-    let summary = std::fs::read(&summary_path).map_err(|_| ConvertError::NoOutput)?;
+    let summary = std::fs::read(&summary_path).map_err(|_| ConvertError::ConversionFailed {
+        message: format!("no Summary_Log.csv was written ({})", console_tail()),
+    })?;
     let summary = strip_bom(&summary);
     let mut rdr = csv::ReaderBuilder::new()
         .flexible(true)
         .from_reader(summary.as_slice());
     let headers = rdr.headers().map_err(|_| ConvertError::NoOutput)?.clone();
     let col = |name: &str| headers.iter().position(|h| h == name);
-    let (et_col, out_col, log_col) = (
+    let (et_col, status_col, out_col, log_col) = (
         col("Enhanced Typesetting Status"),
+        col("Conversion Status"),
         col("Output File Path"),
         col("Log File Path"),
     );
-    let mut et_supported = false;
-    let mut kpf: Option<PathBuf> = None;
-    let mut log_path: Option<PathBuf> = None;
-    if let Some(rec) = rdr.records().flatten().next() {
-        et_supported = et_col
-            .and_then(|c| rec.get(c))
-            .is_some_and(|s| s.eq_ignore_ascii_case("Supported"));
-        kpf = out_col
-            .and_then(|c| rec.get(c))
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from);
-        log_path = log_col
-            .and_then(|c| rec.get(c))
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from);
+    let Some(rec) = rdr.records().flatten().next() else {
+        return Err(ConvertError::ConversionFailed {
+            message: format!("empty Summary_Log.csv ({})", console_tail()),
+        });
+    };
+    let et_supported = et_col
+        .and_then(|c| rec.get(c))
+        .is_some_and(|s| s.eq_ignore_ascii_case("Supported"));
+    let status = status_col.and_then(|c| rec.get(c)).unwrap_or("").to_owned();
+    let kpf = out_col
+        .and_then(|c| rec.get(c))
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    let log_path = log_col
+        .and_then(|c| rec.get(c))
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    let log_issues = log_path.as_deref().map(read_log_issues).unwrap_or_default();
+    let log_errors: Vec<String> = log_issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Error)
+        .map(|i| i.message.clone())
+        .collect();
+    if !status.eq_ignore_ascii_case("Success") {
+        let message = log_errors
+            .first()
+            .cloned()
+            .unwrap_or_else(|| format!("status {status:?} ({})", console_tail()));
+        return Err(ConvertError::ConversionFailed { message });
     }
-    let log_errors = log_path.as_deref().map(read_log_errors).unwrap_or_default();
     if !et_supported {
         let first_error = log_errors
             .first()
@@ -220,6 +283,7 @@ pub fn convert(p: &Previewer, epub: &Path, out_dir: &Path) -> Result<KpfResult, 
         kpf,
         et_supported,
         log_errors,
+        log_issues,
         duration_ms: started.elapsed().as_millis() as u64,
     })
 }
@@ -228,8 +292,8 @@ fn strip_bom(b: &[u8]) -> Vec<u8> {
     b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(b).to_vec()
 }
 
-/// `Error` rows of a Previewer per-book log, as "Description (Source File:Line)".
-pub fn read_log_errors(path: &Path) -> Vec<String> {
+/// Every row of a Previewer per-book log, as "Description (Source File:Line)".
+pub fn read_log_issues(path: &Path) -> Vec<LogIssue> {
     let Ok(bytes) = std::fs::read(path) else {
         return Vec::new();
     };
@@ -243,17 +307,35 @@ pub fn read_log_errors(path: &Path) -> Vec<String> {
         .from_reader(&text.as_bytes()[start..]);
     let mut out = Vec::new();
     for rec in rdr.records().flatten() {
-        if rec.get(0).is_some_and(|t| t.eq_ignore_ascii_case("Error")) {
-            let desc = rec.get(1).unwrap_or("").trim();
-            let file = rec.get(2).unwrap_or("").trim();
-            let line = rec.get(3).unwrap_or("").trim();
-            let loc = match (file.is_empty(), line.is_empty()) {
-                (true, _) => String::new(),
-                (false, true) => format!(" ({file})"),
-                (false, false) => format!(" ({file}:{line})"),
-            };
-            out.push(format!("{desc}{loc}"));
-        }
+        let kind = match rec.get(0).map(str::trim) {
+            Some(t) if t.eq_ignore_ascii_case("Error") => IssueKind::Error,
+            Some(t) if t.eq_ignore_ascii_case("Warning") => IssueKind::Warning,
+            Some(t) if t.eq_ignore_ascii_case("Notice") || t.eq_ignore_ascii_case("Info") => {
+                IssueKind::Notice
+            }
+            _ => continue,
+        };
+        let desc = rec.get(1).unwrap_or("").trim();
+        let file = rec.get(2).unwrap_or("").trim();
+        let line = rec.get(3).unwrap_or("").trim();
+        let loc = match (file.is_empty(), line.is_empty()) {
+            (true, _) => String::new(),
+            (false, true) => format!(" ({file})"),
+            (false, false) => format!(" ({file}:{line})"),
+        };
+        out.push(LogIssue {
+            kind,
+            message: format!("{desc}{loc}"),
+        });
     }
     out
+}
+
+/// `Error` rows only (kept for callers that just want blockers).
+pub fn read_log_errors(path: &Path) -> Vec<String> {
+    read_log_issues(path)
+        .into_iter()
+        .filter(|i| i.kind == IssueKind::Error)
+        .map(|i| i.message)
+        .collect()
 }

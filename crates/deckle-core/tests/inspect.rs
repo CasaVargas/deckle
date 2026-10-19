@@ -65,7 +65,7 @@ fn variant(edits: &[(&str, &[u8])]) -> tempfile::NamedTempFile {
 fn drm_is_refused_before_anything_else() {
     let f = variant(&[(
         "META-INF/encryption.xml",
-        b"<encryption xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"/>",
+        br#"<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#"><enc:EncryptedData><enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/><enc:CipherData><enc:CipherReference URI="OEBPS/c0.xhtml"/></enc:CipherData></enc:EncryptedData></encryption>"#,
     )]);
     match inspect(f.path()) {
         Err(InspectError::Drm) => {}
@@ -108,4 +108,19 @@ fn not_a_zip_and_missing_container_are_distinct_errors() {
         inspect(out.path()),
         Err(InspectError::NoContainerXml)
     ));
+}
+
+#[test]
+fn font_obfuscation_in_encryption_xml_is_not_drm() {
+    let enc = br#"<?xml version="1.0"?><encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#"><enc:EncryptedData><enc:EncryptionMethod Algorithm="http://www.idpf.org/2008/embedding"/><enc:CipherData><enc:CipherReference URI="OEBPS/fonts/Font.otf"/></enc:CipherData></enc:EncryptedData><enc:EncryptedData><enc:EncryptionMethod Algorithm="http://ns.adobe.com/pdf/enc#RC"/><enc:CipherData><enc:CipherReference URI="OEBPS/fonts/Other.ttf"/></enc:CipherData></enc:EncryptedData></encryption>"#;
+    let f = variant(&[("META-INF/encryption.xml", enc)]);
+    let info = inspect(f.path()).expect("font obfuscation is not DRM");
+    assert_eq!(info.title, "Deckle Mini Fixture");
+}
+
+#[test]
+fn adept_encryption_of_content_is_drm() {
+    let enc = br#"<?xml version="1.0"?><encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#"><enc:EncryptedData><enc:EncryptionMethod Algorithm="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/><enc:CipherData><enc:CipherReference URI="OEBPS/c0.xhtml"/></enc:CipherData></enc:EncryptedData></encryption>"#;
+    let f = variant(&[("META-INF/encryption.xml", enc)]);
+    assert!(matches!(inspect(f.path()), Err(InspectError::Drm)));
 }
