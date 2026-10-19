@@ -261,9 +261,15 @@ fn mentions(runs: &[Run], stop: &[&str]) -> Vec<Mention> {
                 i += 1;
                 continue;
             }
-            // extend while the following words are capitalized (max 3 words after an honorific)
+            // extend while the following words are capitalized (max 3 words after an honorific);
+            // a plain word before an honorific ("Consider Mr. Collins") is not part of the name
             let mut j = i + 1;
-            while j < words.len() && j - i < 3 {
+            let next_is_honorific =
+                j < words.len() && HONORIFICS.contains(&format!("{}.", words[j].2).as_str());
+            while j < words.len()
+                && j - i < 3
+                && !(j == i + 1 && !is_honorific && next_is_honorific)
+            {
                 let (ps, _, _) = words[j];
                 let (_, pe, _) = words[j - 1];
                 let gap = &run.text[pe..ps];
