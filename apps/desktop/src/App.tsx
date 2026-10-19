@@ -20,7 +20,7 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, cdeOverride: null, showReport: false };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, cdeOverride: null, showReport: false };
 }
 
 export default function App() {
@@ -115,6 +115,10 @@ export default function App() {
                 pages: e.pages ?? b.pages,
                 runWarnings: e.status === "running" ? b.runWarnings : e.warnings,
                 runError: e.error,
+                shipped:
+                  e.status === "done" && e.cde && e.asin
+                    ? { cde: e.cde, asin: e.asin, reason: e.reason ?? "", matched: e.matched ?? null }
+                    : b.shipped,
               },
         ),
       );
@@ -156,7 +160,7 @@ export default function App() {
     setNotice(null);
     setBusy(true);
     setBooks((prev) =>
-      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", stage: null, delivered: null, pages: null, runWarnings: [], runError: null })),
+      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null })),
     );
     try {
       await api.runBooks(

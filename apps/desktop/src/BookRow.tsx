@@ -49,6 +49,11 @@ export default function BookRowView({ book, busy, plan, onOverride, onToggleRepo
           </button>
         )}
         {book.runWarnings.length > 0 && <span className="warn"> · {book.runWarnings.length} warning{book.runWarnings.length > 1 ? "s" : ""}</span>}
+        {book.shipped && (
+          <div className="shipped" title={book.shipped.reason}>
+            {book.shipped.cde} · {book.shipped.reason}
+          </div>
+        )}
       </div>
     );
   } else if (book.status === "failed") {

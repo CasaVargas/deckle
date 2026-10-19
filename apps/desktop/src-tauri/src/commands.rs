@@ -93,6 +93,29 @@ pub struct ProgressEvent {
     pub pages: Option<u32>,
     pub warnings: Vec<String>,
     pub error: Option<String>,
+    /// What shipped and why (design §4 step 7), on the final event.
+    #[serde(default)]
+    pub cde: Option<String>,
+    #[serde(default)]
+    pub asin: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub matched: Option<String>,
+}
+
+/// One override chain for both the badge planner and the run: book, then device, then the
+/// global setting unless it is `auto`.
+pub fn effective_override<'a>(
+    book: Option<&'a str>,
+    device: Option<&'a str>,
+    settings: &'a Settings,
+) -> Option<&'a str> {
+    book.or(device).or(if settings.cde == "auto" {
+        None
+    } else {
+        Some(settings.cde.as_str())
+    })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -182,10 +205,12 @@ pub fn plan_rows(
     class: &DeviceClass,
     device_override: Option<&str>,
     verified: bool,
+    settings: &Settings,
 ) -> Vec<PlanRow> {
     ids.iter()
         .map(|(id, book_override)| {
-            let user = match book_override.as_deref().or(device_override) {
+            let user = match effective_override(book_override.as_deref(), device_override, settings)
+            {
                 Some("ebok") => Override::PreferFeatures,
                 Some("pdoc") => Override::PreferCover,
                 _ => Override::None,
@@ -420,6 +445,10 @@ pub fn run_books_with(
                         delivered: None,
                         pages: None,
                         warnings: Vec::new(),
+                        cde: None,
+                        asin: None,
+                        reason: None,
+                        matched: None,
                         error: Some("the MTP Kindle is no longer connected".into()),
                     });
                 }
@@ -440,6 +469,10 @@ pub fn run_books_with(
                         delivered: None,
                         pages: None,
                         warnings: Vec::new(),
+                        cde: None,
+                        asin: None,
+                        reason: None,
+                        matched: None,
                         error: Some(format!("Kindle at {root} is no longer connected")),
                     });
                 }
@@ -448,15 +481,7 @@ pub fn run_books_with(
         },
     };
     for b in books {
-        let override_str = b
-            .cde
-            .as_deref()
-            .or(device_override)
-            .or(if settings.cde == "auto" {
-                None
-            } else {
-                Some(settings.cde.as_str())
-            });
+        let override_str = effective_override(b.cde.as_deref(), device_override, settings);
         let opts = RunOptions {
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
             cde_override: override_str.map(cde_from),
@@ -482,6 +507,10 @@ pub fn run_books_with(
                 pages: None,
                 warnings: Vec::new(),
                 error: None,
+                cde: None,
+                asin: None,
+                reason: None,
+                matched: None,
             })
         });
         emit(ProgressEvent {
@@ -496,6 +525,10 @@ pub fn run_books_with(
             pages: report.pages,
             warnings: report.warnings,
             error: report.error,
+            cde: report.cde_type,
+            asin: report.asin,
+            reason: report.decision.map(|d| d.reason),
+            matched: report.matched,
         });
     }
 }
@@ -576,11 +609,13 @@ pub fn plan_books(
         .iter()
         .map(|b| (b.id.clone(), b.cde.clone()))
         .collect();
+    let settings = load_settings_from(&state.settings_file);
     plan_rows(
         &ids,
         &class,
         profile.as_ref().and_then(|p| p.cde_override.as_deref()),
         profile.as_ref().is_some_and(|p| p.verified_real_asin),
+        &settings,
     )
 }
 
@@ -692,11 +727,12 @@ mod tests {
 
     #[test]
     fn plan_rows_follow_the_cover_rule_and_overrides() {
+        let auto = Settings::default();
         let ids = vec![
             ("a".to_string(), None),
             ("b".to_string(), Some("ebok".to_string())),
         ];
-        let rows = plan_rows(&ids, &DeviceClass::Mtp, None, false);
+        let rows = plan_rows(&ids, &DeviceClass::Mtp, None, false, &auto);
         assert_eq!(rows[0].cde, "pdoc");
         assert_eq!(rows[1].cde, "ebok");
         let rows = plan_rows(
@@ -706,6 +742,7 @@ mod tests {
             },
             None,
             false,
+            &auto,
         );
         assert_eq!(rows[0].cde, "ebok");
         assert!(rows[0].write_thumbnail);
@@ -716,9 +753,31 @@ mod tests {
             },
             Some("pdoc"),
             false,
+            &auto,
         );
         assert_eq!(rows[0].cde, "pdoc", "device override applies");
         assert_eq!(rows[1].cde, "ebok", "book override beats device override");
+        // the global setting applies when nothing more specific does, exactly like the run
+        let global = Settings {
+            cde: "pdoc".into(),
+            ..Settings::default()
+        };
+        let rows = plan_rows(
+            &ids,
+            &DeviceClass::MassStorage {
+                thumbnails_writable: true,
+            },
+            None,
+            false,
+            &global,
+        );
+        assert_eq!(rows[0].cde, "pdoc");
+        assert_eq!(effective_override(None, None, &global), Some("pdoc"));
+        assert_eq!(
+            effective_override(None, Some("ebok"), &global),
+            Some("ebok")
+        );
+        assert_eq!(effective_override(None, None, &auto), None);
     }
 
     #[test]
@@ -845,5 +904,12 @@ mod tests {
                 .ends_with("Deckle Mini Fixture.kfx")
         );
         assert!(last.error.is_none());
+        assert_eq!(
+            last.cde.as_deref(),
+            Some("PDOC"),
+            "folder target ships PDOC"
+        );
+        assert!(last.reason.as_deref().unwrap().contains("PDOC"));
+        assert!(last.asin.as_deref().unwrap().ends_with("DECK"));
     }
 }

@@ -11,7 +11,8 @@ use serde::Serialize;
 use crate::session::{Mtp, Transport, TransportError};
 
 pub const AMAZON_VENDOR_ID: u16 = 0x1949;
-const TIMEOUT: Duration = Duration::from_secs(20);
+/// libmtp uses LONG_TIMEOUT (60 s) for Kindles: SendObject answers only after the file is on eMMC.
+const TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct MtpInfo {
@@ -65,6 +66,7 @@ struct Endpoints {
     interface: u8,
     bulk_in: u8,
     bulk_out: u8,
+    max_packet_out: usize,
 }
 
 fn find_mtp_interface<T: UsbContext>(d: &Device<T>) -> Option<Endpoints> {
@@ -76,12 +78,15 @@ fn find_mtp_interface<T: UsbContext>(d: &Device<T>) -> Option<Endpoints> {
             if !(is_ptp || is_vendor_mtp) {
                 continue;
             }
-            let (mut bulk_in, mut bulk_out) = (None, None);
+            let (mut bulk_in, mut bulk_out, mut max_out) = (None, None, 512usize);
             for ep in desc.endpoint_descriptors() {
                 if ep.transfer_type() == rusb::TransferType::Bulk {
                     match ep.direction() {
                         rusb::Direction::In => bulk_in = Some(ep.address()),
-                        rusb::Direction::Out => bulk_out = Some(ep.address()),
+                        rusb::Direction::Out => {
+                            bulk_out = Some(ep.address());
+                            max_out = usize::from(ep.max_packet_size()).max(1);
+                        }
                     }
                 }
             }
@@ -90,6 +95,7 @@ fn find_mtp_interface<T: UsbContext>(d: &Device<T>) -> Option<Endpoints> {
                     interface: desc.interface_number(),
                     bulk_in: i,
                     bulk_out: o,
+                    max_packet_out: max_out,
                 });
             }
         }
@@ -103,7 +109,17 @@ pub struct UsbTransport {
 }
 
 impl Transport for UsbTransport {
+    fn max_packet_out(&self) -> usize {
+        self.ep.max_packet_out
+    }
     fn write(&mut self, bytes: &[u8]) -> Result<(), TransportError> {
+        if bytes.is_empty() {
+            // zero-length packet terminating a data phase
+            self.handle
+                .write_bulk(self.ep.bulk_out, &[], TIMEOUT)
+                .map_err(map_err)?;
+            return Ok(());
+        }
         let mut off = 0;
         while off < bytes.len() {
             let n = self
@@ -124,6 +140,9 @@ impl Transport for UsbTransport {
 fn map_err(e: rusb::Error) -> TransportError {
     match e {
         rusb::Error::Timeout => TransportError::Timeout,
+        rusb::Error::Access | rusb::Error::Busy => TransportError::Usb(
+            "another app holds the Kindle (Android File Transfer, Send to Kindle, Image Capture, calibre); quit it and retry".into(),
+        ),
         other => TransportError::Usb(other.to_string()),
     }
 }
@@ -131,6 +150,9 @@ fn map_err(e: rusb::Error) -> TransportError {
 impl Drop for UsbTransport {
     fn drop(&mut self) {
         let _ = self.handle.release_interface(self.ep.interface);
+        // libmtp's Kindle entries carry FORCE_RESET_ON_CLOSE; without it the device may vanish
+        // until replugged.
+        let _ = self.handle.reset();
     }
 }
 

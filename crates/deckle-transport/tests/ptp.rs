@@ -121,6 +121,12 @@ impl Transport for Fake {
     }
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
         if self.pending.is_empty() {
+            eprintln!(
+                "FAKE: no reply pending; script pos {} of {}; sent {:?}",
+                self.pos,
+                self.script.len(),
+                self.sent.iter().map(|w| w.len()).collect::<Vec<_>>()
+            );
             return Err(TransportError::Timeout);
         }
         let r = self.pending.remove(0);
@@ -173,31 +179,31 @@ fn a_scripted_session_finds_documents_and_sends_a_file() {
     let fake = Fake {
         script: vec![
             (
-                cmd(op::OPEN_SESSION, 1, &[1]),
-                vec![ok(op::OPEN_SESSION, 1, &[])],
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
             ),
             (
-                cmd(op::GET_STORAGE_IDS, 2, &[]),
+                cmd(op::GET_STORAGE_IDS, 1, &[]),
                 vec![
-                    data(op::GET_STORAGE_IDS, 2, &[1, 0, 0, 0, 1, 0, 1, 0]),
-                    ok(op::GET_STORAGE_IDS, 2, &[]),
+                    data(op::GET_STORAGE_IDS, 1, &[1, 0, 0, 0, 1, 0, 1, 0]),
+                    ok(op::GET_STORAGE_IDS, 1, &[]),
                 ],
             ),
             (
-                cmd(op::GET_OBJECT_HANDLES, 3, &[storage, 0, 0xFFFF_FFFF]),
+                cmd(op::GET_OBJECT_HANDLES, 2, &[storage, 0, 0xFFFF_FFFF]),
                 vec![
-                    data(op::GET_OBJECT_HANDLES, 3, &[1, 0, 0, 0, 0x2A, 0, 0, 0]),
-                    ok(op::GET_OBJECT_HANDLES, 3, &[]),
+                    data(op::GET_OBJECT_HANDLES, 2, &[1, 0, 0, 0, 0x2A, 0, 0, 0]),
+                    ok(op::GET_OBJECT_HANDLES, 2, &[]),
                 ],
             ),
             (
-                cmd(op::GET_OBJECT_INFO, 4, &[0x2A]),
+                cmd(op::GET_OBJECT_INFO, 3, &[0x2A]),
                 vec![
-                    data(op::GET_OBJECT_INFO, 4, &docs_info),
-                    ok(op::GET_OBJECT_INFO, 4, &[]),
+                    data(op::GET_OBJECT_INFO, 3, &docs_info),
+                    ok(op::GET_OBJECT_INFO, 3, &[]),
                 ],
             ),
-            (cmd(op::SEND_OBJECT_INFO, 5, &[storage, 0x2A]), vec![]),
+            (cmd(op::SEND_OBJECT_INFO, 4, &[storage, 0x2A]), vec![]),
         ],
         ..Default::default()
     };
@@ -222,13 +228,13 @@ fn a_scripted_session_finds_documents_and_sends_a_file() {
     }
     .encode();
     fake.script.push((
-        data(op::SEND_OBJECT_INFO, 5, &expected_info),
-        vec![ok(op::SEND_OBJECT_INFO, 5, &[storage, 0x2A, 0x99])],
+        data(op::SEND_OBJECT_INFO, 4, &expected_info),
+        vec![ok(op::SEND_OBJECT_INFO, 4, &[storage, 0x2A, 0x99])],
     ));
-    fake.script.push((cmd(op::SEND_OBJECT, 6, &[]), vec![]));
+    fake.script.push((cmd(op::SEND_OBJECT, 5, &[]), vec![]));
     fake.script.push((
-        data(op::SEND_OBJECT, 6, b"hello"),
-        vec![ok(op::SEND_OBJECT, 6, &[])],
+        data(op::SEND_OBJECT, 5, b"hello"),
+        vec![ok(op::SEND_OBJECT, 5, &[])],
     ));
     let handle = mtp.send_file(storage, docs, "b.kfx", b"hello").unwrap();
     assert_eq!(handle, 0x99);
@@ -238,12 +244,12 @@ fn a_scripted_session_finds_documents_and_sends_a_file() {
 fn an_error_response_is_surfaced_with_its_code() {
     let fake = Fake {
         script: vec![(
-            cmd(op::OPEN_SESSION, 1, &[1]),
+            cmd(op::OPEN_SESSION, 0, &[1]),
             vec![
                 Container {
                     kind: ContainerKind::Response,
                     code: 0x2019,
-                    tx_id: 1,
+                    tx_id: 0,
                     params: vec![],
                 }
                 .encode(&[]),
@@ -254,4 +260,128 @@ fn an_error_response_is_surfaced_with_its_code() {
     let mut mtp = Mtp::new(Box::new(fake));
     let err = mtp.open_session().unwrap_err();
     assert!(err.to_string().contains("0x2019"), "{err}");
+}
+
+#[test]
+fn a_data_phase_that_fills_whole_packets_gets_a_zero_length_packet_both_ways() {
+    // 512 - 12 header bytes = 500 payload bytes -> exactly one wMaxPacketSize on the wire.
+    let payload = vec![7u8; 500];
+    let storage = 0x0001_0001u32;
+    let expected_info = ObjectInfo {
+        storage_id: storage,
+        format: 0x3000,
+        size: 500,
+        parent: 0x2A,
+        association: false,
+        filename: "z.kfx".into(),
+    }
+    .encode();
+    let fake = Fake {
+        script: vec![
+            (
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
+            ),
+            (cmd(op::SEND_OBJECT_INFO, 1, &[storage, 0x2A]), vec![]),
+            (
+                data(op::SEND_OBJECT_INFO, 1, &expected_info),
+                vec![ok(op::SEND_OBJECT_INFO, 1, &[storage, 0x2A, 0x77])],
+            ),
+            (cmd(op::SEND_OBJECT, 2, &[]), vec![]),
+            (data(op::SEND_OBJECT, 2, &payload), vec![]),
+            // the host's zero-length packet, then the device answers with its own ZLP first
+            (vec![], vec![vec![], ok(op::SEND_OBJECT, 2, &[])]),
+        ],
+        ..Default::default()
+    };
+    let mut mtp = Mtp::new(Box::new(fake));
+    mtp.open_session().unwrap();
+    let h = mtp.send_file(storage, 0x2A, "z.kfx", &payload).unwrap();
+    assert_eq!(h, 0x77);
+    let fake = mtp.transport_mut::<Fake>().unwrap();
+    assert!(
+        fake.sent.iter().any(|w| w.is_empty()),
+        "a zero-length packet must be written"
+    );
+}
+
+#[test]
+fn documents_folder_is_found_under_a_nameless_root_association_and_never_invented() {
+    let storage = 0x0001_0001u32;
+    let nameless = ObjectInfo {
+        storage_id: storage,
+        format: 0x3001,
+        size: 0,
+        parent: 0,
+        association: true,
+        filename: String::new(),
+    }
+    .encode();
+    let docs_info = ObjectInfo {
+        storage_id: storage,
+        format: 0x3001,
+        size: 0,
+        parent: 0x10,
+        association: true,
+        filename: "documents".into(),
+    }
+    .encode();
+    let fake = Fake {
+        script: vec![
+            (
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
+            ),
+            (
+                cmd(op::GET_OBJECT_HANDLES, 1, &[storage, 0, 0xFFFF_FFFF]),
+                vec![
+                    data(op::GET_OBJECT_HANDLES, 1, &[1, 0, 0, 0, 0x10, 0, 0, 0]),
+                    ok(op::GET_OBJECT_HANDLES, 1, &[]),
+                ],
+            ),
+            (
+                cmd(op::GET_OBJECT_INFO, 2, &[0x10]),
+                vec![
+                    data(op::GET_OBJECT_INFO, 2, &nameless),
+                    ok(op::GET_OBJECT_INFO, 2, &[]),
+                ],
+            ),
+            (
+                cmd(op::GET_OBJECT_HANDLES, 3, &[storage, 0, 0x10]),
+                vec![
+                    data(op::GET_OBJECT_HANDLES, 3, &[1, 0, 0, 0, 0x11, 0, 0, 0]),
+                    ok(op::GET_OBJECT_HANDLES, 3, &[]),
+                ],
+            ),
+            (
+                cmd(op::GET_OBJECT_INFO, 4, &[0x11]),
+                vec![
+                    data(op::GET_OBJECT_INFO, 4, &docs_info),
+                    ok(op::GET_OBJECT_INFO, 4, &[]),
+                ],
+            ),
+            // an empty storage: no documents anywhere -> error, nothing created
+            (
+                cmd(op::GET_OBJECT_HANDLES, 5, &[storage, 0, 0xFFFF_FFFF]),
+                vec![
+                    data(op::GET_OBJECT_HANDLES, 5, &[0, 0, 0, 0]),
+                    ok(op::GET_OBJECT_HANDLES, 5, &[]),
+                ],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut mtp = Mtp::new(Box::new(fake));
+    mtp.open_session().unwrap();
+    assert_eq!(mtp.find_documents(storage).unwrap(), 0x11);
+    let err = mtp.find_documents(storage).unwrap_err();
+    assert!(err.to_string().contains("no documents folder"), "{err}");
+    let fake = mtp.transport_mut::<Fake>().unwrap();
+    assert!(
+        !fake
+            .sent
+            .iter()
+            .any(|w| w.len() >= 8 && u16::from_le_bytes([w[6], w[7]]) == op::SEND_OBJECT_INFO),
+        "must not create folders"
+    );
 }

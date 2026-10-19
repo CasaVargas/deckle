@@ -216,9 +216,7 @@ fn deliver_mtp(
         let storage = *storages
             .first()
             .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
-        let docs = dev
-            .ensure_folder(storage, 0, "documents")
-            .map_err(|e| m(&e))?;
+        let docs = dev.find_documents(storage).map_err(|e| m(&e))?;
         if let Some(existing) = dev.find_child(storage, docs, name).map_err(|e| m(&e))? {
             dev.delete(existing).map_err(|e| m(&e))?;
         }

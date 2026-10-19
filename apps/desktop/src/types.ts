@@ -22,6 +22,8 @@ export interface BookState extends BookRow {
   pages: number | null;
   runWarnings: string[];
   runError: string | null;
+  /** What shipped (from the final progress event). */
+  shipped: { cde: string; asin: string; reason: string; matched: string | null } | null;
   /** Per-book override of the settings' cde. */
   cdeOverride: "pdoc" | "ebok" | null;
   showReport: boolean;
@@ -73,6 +75,10 @@ export interface ProgressEvent {
   pages: number | null;
   warnings: string[];
   error: string | null;
+  cde?: "PDOC" | "EBOK" | null;
+  asin?: string | null;
+  reason?: string | null;
+  matched?: string | null;
 }
 
 export type RunTarget =

@@ -64,12 +64,11 @@ pub fn decide(device: &DeviceClass, matched: &MatchResult, user: Override) -> De
             };
         }
         Override::PreferFeatures => {
+            // The owner accepted the grey-cover risk; a real ASIN is strictly better than a
+            // generated one here (and it is how spike 2 gets run).
             let asin = match matched {
-                MatchResult::Candidate {
-                    asin,
-                    verified: true,
-                } => AsinChoice::Real(asin.clone()),
-                _ => AsinChoice::Generated,
+                MatchResult::Candidate { asin, .. } => AsinChoice::Real(asin.clone()),
+                MatchResult::None => AsinChoice::Generated,
             };
             return Decision {
                 cde: CdeType::Ebok,

@@ -18,6 +18,10 @@ pub trait Transport: Any {
     fn write(&mut self, bytes: &[u8]) -> Result<(), TransportError>;
     /// Reads one container (or one chunk of a large data phase); returns bytes read.
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError>;
+    /// wMaxPacketSize of the bulk OUT endpoint (512 high speed, 1024 super speed).
+    fn max_packet_out(&self) -> usize {
+        512
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -32,7 +36,12 @@ pub enum MtpError {
     Unexpected(ContainerKind, u16),
     #[error("device returned no {0}")]
     Missing(&'static str),
+    #[error("the Kindle has no documents folder; nothing was written")]
+    NoDocumentsFolder,
 }
+
+/// PTP response: a session is already open (a previous run did not close it).
+pub const RSP_SESSION_ALREADY_OPEN: u16 = 0x201E;
 
 /// Bulk reads of a data phase are at most this large per USB transfer.
 const READ_CHUNK: usize = 1024 * 1024;
@@ -55,13 +64,18 @@ impl Mtp {
     }
 
     fn next_tx(&mut self) -> u32 {
-        self.tx += 1;
+        self.tx = self.tx.wrapping_add(1);
         self.tx
     }
 
     fn read_container(&mut self) -> Result<(Container, Vec<u8>), MtpError> {
         let mut buf = vec![0u8; READ_CHUNK];
-        let n = self.transport.read(&mut buf)?;
+        let mut n = self.transport.read(&mut buf)?;
+        // A zero-length packet ends a data phase whose size was a multiple of wMaxPacketSize;
+        // the next read holds the real container.
+        if n == 0 {
+            n = self.transport.read(&mut buf)?;
+        }
         buf.truncate(n);
         let (c, mut payload) = Container::decode(&buf)?;
         if c.kind == ContainerKind::Data {
@@ -106,10 +120,19 @@ impl Mtp {
             for chunk in bytes.chunks(WRITE_CHUNK) {
                 self.transport.write(chunk)?;
             }
+            // USB bulk: a data phase that is an exact multiple of wMaxPacketSize must be
+            // terminated with a zero-length packet, or the device waits forever.
+            let max = self.transport.max_packet_out();
+            if max > 0 && bytes.len().is_multiple_of(max) {
+                self.transport.write(&[])?;
+            }
         }
         let mut data_in = None;
         loop {
             let (c, payload) = self.read_container()?;
+            if c.kind != ContainerKind::Event && c.tx_id != tx {
+                continue; // stale container from an aborted transaction
+            }
             match c.kind {
                 ContainerKind::Data => data_in = Some(payload),
                 ContainerKind::Response => {
@@ -127,9 +150,23 @@ impl Mtp {
         }
     }
 
+    /// Opens session 1. PIMA 15740 §9.3.1: OpenSession uses TransactionID 0. A stale open
+    /// session (crashed previous run) is closed and reopened.
     pub fn open_session(&mut self) -> Result<(), MtpError> {
-        self.tx = 0;
-        self.transact(op::OPEN_SESSION, &[1], None).map(|_| ())
+        self.tx = u32::MAX; // next_tx wraps to 0 for OpenSession
+        match self.transact(op::OPEN_SESSION, &[1], None) {
+            Ok(_) => Ok(()),
+            Err(MtpError::Response {
+                code: RSP_SESSION_ALREADY_OPEN,
+                ..
+            }) => {
+                self.tx = 0;
+                let _ = self.transact(op::CLOSE_SESSION, &[], None);
+                self.tx = u32::MAX;
+                self.transact(op::OPEN_SESSION, &[1], None).map(|_| ())
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub fn close_session(&mut self) -> Result<(), MtpError> {
@@ -181,6 +218,27 @@ impl Mtp {
             }
         }
         Ok(None)
+    }
+
+    /// The Kindle's `documents` folder: at the storage root, or one level down inside one of
+    /// the nameless root associations some firmwares expose (libmtp #436). Never created.
+    pub fn find_documents(&mut self, storage: u32) -> Result<u32, MtpError> {
+        let root = self.list(storage, 0)?;
+        if let Some((h, _)) = root
+            .iter()
+            .find(|(_, i)| i.filename.eq_ignore_ascii_case("documents"))
+        {
+            return Ok(*h);
+        }
+        for (h, _) in root
+            .iter()
+            .filter(|(_, i)| i.association && i.filename.is_empty())
+        {
+            if let Some(d) = self.find_child(storage, *h, "documents")? {
+                return Ok(d);
+            }
+        }
+        Err(MtpError::NoDocumentsFolder)
     }
 
     /// Creates a folder and returns its handle.

@@ -111,3 +111,14 @@ fn overrides_win_and_say_so() {
     );
     assert!(f2.write_thumbnail);
 }
+
+#[test]
+fn prefer_features_uses_an_unverified_candidate_asin_so_spike_2_can_run() {
+    let m = MatchResult::Candidate {
+        asin: REAL.into(),
+        verified: false,
+    };
+    let d = decide(&DeviceClass::Mtp, &m, Override::PreferFeatures);
+    assert_eq!(d.cde, CdeType::Ebok);
+    assert_eq!(d.asin, AsinChoice::Real(REAL.into()));
+}

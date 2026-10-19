@@ -188,6 +188,7 @@ pub fn run_with_progress(
                 }
         );
     let matched = if needs_match {
+        on_stage("match");
         let t = Instant::now();
         let outcome = match_book(&info, &mut crate::matcher::http_fetch);
         report
