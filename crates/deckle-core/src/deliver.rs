@@ -2,7 +2,7 @@
 //! Stage 6: put the KFX on a folder or a mass-storage Kindle.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -21,6 +21,15 @@ pub struct Device {
 pub enum Target {
     Folder(PathBuf),
     MassStorage(Device),
+    /// MTP-only Kindle (Scribe 2024, Colorsoft, Paperwhite 2024).
+    Mtp(deckle_transport::usb::MtpInfo),
+}
+
+/// Extras to deliver alongside the book.
+#[derive(Clone, Debug, Default)]
+pub struct DeliverOptions {
+    /// `(file name, JPEG bytes)` for `system/thumbnails/` on mass-storage Kindles.
+    pub thumbnail: Option<(String, Vec<u8>)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -30,6 +39,10 @@ pub enum DeliverError {
         path: PathBuf,
         source: std::io::Error,
     },
+    #[error("MTP: {0}")]
+    Mtp(String),
+    #[error("thumbnail: {0}")]
+    Thumbnail(String),
 }
 
 const MAX_FILENAME_LEN: usize = 120;
@@ -148,20 +161,73 @@ pub fn detect_mass_storage() -> Vec<Device> {
 
 /// Writes the KFX and returns its path. Mass storage gets `documents/<name>`, fsynced.
 pub fn deliver(kfx: &[u8], info: &BookInfo, target: &Target) -> Result<PathBuf, DeliverError> {
+    deliver_with(kfx, info, target, &DeliverOptions::default())
+}
+
+/// [`deliver`] plus the extras: thumbnails on mass storage (restoring older ones too).
+pub fn deliver_with(
+    kfx: &[u8],
+    info: &BookInfo,
+    target: &Target,
+    opts: &DeliverOptions,
+) -> Result<PathBuf, DeliverError> {
     let name = device_filename(info);
-    let path = match target {
-        Target::Folder(dir) => dir.join(name),
-        Target::MassStorage(dev) => dev.root.join("documents").join(name),
-    };
+    match target {
+        Target::Folder(dir) => write_file(&dir.join(name), kfx),
+        Target::MassStorage(dev) => {
+            let path = write_file(&dev.root.join("documents").join(name), kfx)?;
+            if let Some((thumb_name, jpeg)) = &opts.thumbnail {
+                crate::thumbnail::install(&dev.root, thumb_name, jpeg)
+                    .map_err(|e| DeliverError::Thumbnail(e.to_string()))?;
+            }
+            let _ = crate::thumbnail::sync(&dev.root);
+            Ok(path)
+        }
+        Target::Mtp(mtp) => deliver_mtp(kfx, &name, mtp),
+    }
+}
+
+fn write_file(path: &Path, data: &[u8]) -> Result<PathBuf, DeliverError> {
     let io = |source: std::io::Error| DeliverError::Io {
-        path: path.clone(),
+        path: path.to_path_buf(),
         source,
     };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(io)?;
     }
-    let mut f = std::fs::File::create(&path).map_err(io)?;
-    f.write_all(kfx).map_err(io)?;
+    let mut f = std::fs::File::create(path).map_err(io)?;
+    f.write_all(data).map_err(io)?;
     f.sync_all().map_err(io)?;
-    Ok(path)
+    Ok(path.to_path_buf())
+}
+
+/// Sends the book into the Kindle's `documents` folder over MTP, replacing a same-named file.
+/// Returns a pseudo path `mtp://<serial>/documents/<name>`.
+fn deliver_mtp(
+    kfx: &[u8],
+    name: &str,
+    mtp: &deckle_transport::usb::MtpInfo,
+) -> Result<PathBuf, DeliverError> {
+    let m = |e: &dyn std::fmt::Display| DeliverError::Mtp(e.to_string());
+    let mut dev = deckle_transport::usb::open(mtp).map_err(|e| m(&e))?;
+    dev.open_session().map_err(|e| m(&e))?;
+    let result = (|| {
+        let storages = dev.storages().map_err(|e| m(&e))?;
+        let storage = *storages
+            .first()
+            .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
+        let docs = dev
+            .ensure_folder(storage, 0, "documents")
+            .map_err(|e| m(&e))?;
+        if let Some(existing) = dev.find_child(storage, docs, name).map_err(|e| m(&e))? {
+            dev.delete(existing).map_err(|e| m(&e))?;
+        }
+        dev.send_file(storage, docs, name, kfx).map_err(|e| m(&e))?;
+        Ok(PathBuf::from(format!(
+            "mtp://{}/documents/{name}",
+            mtp.serial.clone().unwrap_or_else(|| "kindle".into())
+        )))
+    })();
+    let _ = dev.close_session();
+    result
 }

@@ -265,6 +265,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             cde,
             pages,
             previewer: pv,
+            amazon_match,
+            verified_asin,
             keep_work_dir,
         } => {
             if epubs.is_empty() {
@@ -276,6 +278,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             let target = resolve_target(&to)?;
             let opts = RunOptions {
                 cde_type: cde.into(),
+                cde_override: cde.to_override(),
+                amazon_match,
+                verified_real_asin: verified_asin,
                 asin: None,
                 pages,
                 target,

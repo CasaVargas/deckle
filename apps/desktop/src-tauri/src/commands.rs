@@ -6,11 +6,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use base64::Engine;
-use deckle_core::deliver::{Device, Target, detect_mass_storage};
+use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, decide};
+use deckle_core::deliver::{Target, detect_mass_storage};
+use deckle_core::devices::{DeviceRegistry, Seen, TransportKind, seen_mass_storage};
 use deckle_core::inspect::inspect;
 use deckle_core::pipeline::{RunOptions, run_with_progress};
 use deckle_core::previewer;
 use deckle_kfx::convert::CdeType;
+use deckle_transport::usb::MtpInfo;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -35,7 +38,7 @@ pub struct BookRow {
 #[serde(default)]
 pub struct Settings {
     pub previewer_path: Option<String>,
-    /// `pdoc` | `ebok`
+    /// `auto` (cover rule) | `pdoc` | `ebok`
     pub cde: String,
     pub pages_auto: bool,
     /// `off` | `anthropic` | `openai` (M3)
@@ -51,7 +54,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             previewer_path: None,
-            cde: "pdoc".into(),
+            cde: "auto".into(),
             pages_auto: true,
             llm_provider: "off".into(),
             llm_model: String::new(),
@@ -67,6 +70,7 @@ impl Default for Settings {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum RunTarget {
     Device { root: String },
+    Mtp { bus: u8, address: u8 },
     Folder { path: String },
 }
 
@@ -101,24 +105,108 @@ pub struct PreviewerStatus {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DeviceRow {
-    pub root: String,
+    /// Profile key (`ms:…` / `mtp:…`), also the value the GUI selects by.
+    pub key: String,
+    pub kind: TransportKind,
+    pub root: Option<String>,
+    pub bus: u8,
+    pub address: u8,
     pub model_hint: String,
     pub thumbnails_writable: bool,
+    pub cde_override: Option<String>,
+    pub verified_real_asin: bool,
 }
 
-impl From<Device> for DeviceRow {
-    fn from(d: Device) -> Self {
-        DeviceRow {
-            root: d.root.to_string_lossy().into_owned(),
-            model_hint: d.model_hint,
-            thumbnails_writable: d.thumbnails_writable,
-        }
+fn seen_mtp(m: &MtpInfo) -> Seen {
+    let serial = m
+        .serial
+        .clone()
+        .unwrap_or_else(|| format!("{}:{}", m.bus, m.address));
+    Seen {
+        key: format!("mtp:{serial}"),
+        root: None,
+        model_hint: m.product.clone().unwrap_or_else(|| "Kindle (MTP)".into()),
+        transport: TransportKind::Mtp,
+        thumbnails_writable: false,
+        serial: Some(serial),
     }
+}
+
+/// All connected Kindles, recorded in the device registry.
+pub fn device_rows(registry_file: &Path) -> Vec<DeviceRow> {
+    let mut reg = DeviceRegistry::load(registry_file);
+    let mut rows = Vec::new();
+    for d in detect_mass_storage() {
+        let p = reg.remember(&seen_mass_storage(&d));
+        rows.push(DeviceRow {
+            key: p.key,
+            kind: TransportKind::MassStorage,
+            root: Some(d.root.to_string_lossy().into_owned()),
+            bus: 0,
+            address: 0,
+            model_hint: p.model_hint,
+            thumbnails_writable: p.thumbnails_writable,
+            cde_override: p.cde_override,
+            verified_real_asin: p.verified_real_asin,
+        });
+    }
+    for m in deckle_transport::usb::detect() {
+        let p = reg.remember(&seen_mtp(&m));
+        rows.push(DeviceRow {
+            key: p.key,
+            kind: TransportKind::Mtp,
+            root: None,
+            bus: m.bus,
+            address: m.address,
+            model_hint: p.model_hint,
+            thumbnails_writable: false,
+            cde_override: p.cde_override,
+            verified_real_asin: p.verified_real_asin,
+        });
+    }
+    let _ = reg.save(registry_file);
+    rows
+}
+
+/// What the cover rule will do for a book on a target (for the row badge).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PlanRow {
+    pub id: String,
+    pub cde: String,
+    pub write_thumbnail: bool,
+    pub reason: String,
+}
+
+pub fn plan_rows(
+    ids: &[(String, Option<String>)],
+    class: &DeviceClass,
+    device_override: Option<&str>,
+    verified: bool,
+) -> Vec<PlanRow> {
+    ids.iter()
+        .map(|(id, book_override)| {
+            let user = match book_override.as_deref().or(device_override) {
+                Some("ebok") => Override::PreferFeatures,
+                Some("pdoc") => Override::PreferCover,
+                _ => Override::None,
+            };
+            // Matching happens at run time; the badge assumes no match yet.
+            let _ = verified;
+            let d: Decision = decide(class, &MatchResult::None, user);
+            PlanRow {
+                id: id.clone(),
+                cde: d.cde.as_str().to_lowercase(),
+                write_thumbnail: d.write_thumbnail,
+                reason: d.reason,
+            }
+        })
+        .collect()
 }
 
 /// App state: the settings file location and what the command line asked for.
 pub struct AppState {
     pub settings_file: PathBuf,
+    pub devices_file: PathBuf,
     pub preload: Mutex<Vec<String>>,
     /// `--export-to <dir>`: run the preloaded books into this folder as soon as they load.
     pub preload_target: Mutex<Option<String>>,
@@ -291,14 +379,47 @@ fn cde_from(s: &str) -> CdeType {
 }
 
 /// Runs the books one after another, reporting through `emit`.
+#[cfg(test)]
 pub fn run_books_inner(
     books: &[RunRequest],
     target: &RunTarget,
     settings: &Settings,
     emit: &mut dyn FnMut(ProgressEvent),
 ) {
+    run_books_with(books, target, settings, None, false, emit)
+}
+
+/// `device_override` / `verified` come from the target's device profile.
+pub fn run_books_with(
+    books: &[RunRequest],
+    target: &RunTarget,
+    settings: &Settings,
+    device_override: Option<&str>,
+    verified: bool,
+    emit: &mut dyn FnMut(ProgressEvent),
+) {
     let target = match target {
         RunTarget::Folder { path } => Target::Folder(PathBuf::from(path)),
+        RunTarget::Mtp { bus, address } => match deckle_transport::usb::detect()
+            .into_iter()
+            .find(|m| m.bus == *bus && m.address == *address)
+        {
+            Some(m) => Target::Mtp(m),
+            None => {
+                for b in books {
+                    emit(ProgressEvent {
+                        id: b.id.clone(),
+                        status: "failed".into(),
+                        stage: None,
+                        delivered: None,
+                        pages: None,
+                        warnings: Vec::new(),
+                        error: Some("the MTP Kindle is no longer connected".into()),
+                    });
+                }
+                return;
+            }
+        },
         RunTarget::Device { root } => match detect_mass_storage()
             .into_iter()
             .find(|d| d.root.to_string_lossy() == *root)
@@ -321,8 +442,20 @@ pub fn run_books_inner(
         },
     };
     for b in books {
+        let override_str = b
+            .cde
+            .as_deref()
+            .or(device_override)
+            .or(if settings.cde == "auto" {
+                None
+            } else {
+                Some(settings.cde.as_str())
+            });
         let opts = RunOptions {
-            cde_type: cde_from(b.cde.as_deref().unwrap_or(&settings.cde)),
+            cde_type: cde_from(override_str.unwrap_or("pdoc")),
+            cde_override: override_str.map(cde_from),
+            amazon_match: settings.amazon_match,
+            verified_real_asin: verified,
             asin: None,
             pages: if settings.pages_auto {
                 Some(None)
@@ -387,11 +520,62 @@ pub fn inspect_books(paths: Vec<String>) -> Vec<BookRow> {
 }
 
 #[tauri::command]
-pub fn list_devices() -> Vec<DeviceRow> {
-    detect_mass_storage()
-        .into_iter()
-        .map(DeviceRow::from)
-        .collect()
+pub fn list_devices(state: State<'_, AppState>) -> Vec<DeviceRow> {
+    device_rows(&state.devices_file)
+}
+
+#[tauri::command]
+pub fn set_device_options(
+    state: State<'_, AppState>,
+    key: String,
+    cde_override: Option<String>,
+    verified_real_asin: bool,
+) -> Result<(), String> {
+    let mut reg = DeviceRegistry::load(&state.devices_file);
+    reg.set_override(&key, cde_override.as_deref());
+    reg.set_verified_real_asin(&key, verified_real_asin);
+    reg.save(&state.devices_file)
+}
+
+#[tauri::command]
+pub fn plan_books(
+    state: State<'_, AppState>,
+    books: Vec<RunRequest>,
+    target: RunTarget,
+) -> Vec<PlanRow> {
+    let reg = DeviceRegistry::load(&state.devices_file);
+    let (class, profile) = match &target {
+        RunTarget::Folder { .. } => (DeviceClass::Folder, None),
+        RunTarget::Mtp { bus, address } => {
+            let p = deckle_transport::usb::detect()
+                .into_iter()
+                .find(|m| m.bus == *bus && m.address == *address)
+                .and_then(|m| reg.get(&seen_mtp(&m).key).cloned());
+            (DeviceClass::Mtp, p)
+        }
+        RunTarget::Device { root } => {
+            let d = detect_mass_storage()
+                .into_iter()
+                .find(|d| d.root.to_string_lossy() == *root);
+            let class = DeviceClass::MassStorage {
+                thumbnails_writable: d.as_ref().is_some_and(|d| d.thumbnails_writable),
+            };
+            (
+                class,
+                d.and_then(|d| reg.get(&seen_mass_storage(&d).key).cloned()),
+            )
+        }
+    };
+    let ids: Vec<(String, Option<String>)> = books
+        .iter()
+        .map(|b| (b.id.clone(), b.cde.clone()))
+        .collect();
+    plan_rows(
+        &ids,
+        &class,
+        profile.as_ref().and_then(|p| p.cde_override.as_deref()),
+        profile.as_ref().is_some_and(|p| p.verified_real_asin),
+    )
 }
 
 #[tauri::command]
@@ -431,10 +615,33 @@ pub fn run_books(
     target: RunTarget,
 ) -> Result<(), String> {
     let settings = load_settings_from(&state.settings_file);
+    let reg = DeviceRegistry::load(&state.devices_file);
+    let profile = match &target {
+        RunTarget::Device { root } => detect_mass_storage()
+            .into_iter()
+            .find(|d| d.root.to_string_lossy() == *root)
+            .and_then(|d| reg.get(&seen_mass_storage(&d).key).cloned()),
+        RunTarget::Mtp { bus, address } => deckle_transport::usb::detect()
+            .into_iter()
+            .find(|m| m.bus == *bus && m.address == *address)
+            .and_then(|m| reg.get(&seen_mtp(&m).key).cloned()),
+        RunTarget::Folder { .. } => None,
+    };
+    let (device_override, verified) = (
+        profile.as_ref().and_then(|p| p.cde_override.clone()),
+        profile.as_ref().is_some_and(|p| p.verified_real_asin),
+    );
     std::thread::spawn(move || {
-        run_books_inner(&books, &target, &settings, &mut |e| {
-            let _ = app.emit("book-progress", e);
-        });
+        run_books_with(
+            &books,
+            &target,
+            &settings,
+            device_override.as_deref(),
+            verified,
+            &mut |e| {
+                let _ = app.emit("book-progress", e);
+            },
+        );
         let _ = app.emit("run-finished", ());
     });
     Ok(())
@@ -466,9 +673,47 @@ pub fn settings_file(app: &AppHandle) -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from("deckle-settings.json"))
 }
 
+pub fn devices_file(app: &AppHandle) -> PathBuf {
+    app.path()
+        .app_config_dir()
+        .map(|d| d.join("devices.json"))
+        .unwrap_or_else(|_| PathBuf::from("deckle-devices.json"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plan_rows_follow_the_cover_rule_and_overrides() {
+        let ids = vec![
+            ("a".to_string(), None),
+            ("b".to_string(), Some("ebok".to_string())),
+        ];
+        let rows = plan_rows(&ids, &DeviceClass::Mtp, None, false);
+        assert_eq!(rows[0].cde, "pdoc");
+        assert_eq!(rows[1].cde, "ebok");
+        let rows = plan_rows(
+            &ids,
+            &DeviceClass::MassStorage {
+                thumbnails_writable: true,
+            },
+            None,
+            false,
+        );
+        assert_eq!(rows[0].cde, "ebok");
+        assert!(rows[0].write_thumbnail);
+        let rows = plan_rows(
+            &ids,
+            &DeviceClass::MassStorage {
+                thumbnails_writable: true,
+            },
+            Some("pdoc"),
+            false,
+        );
+        assert_eq!(rows[0].cde, "pdoc", "device override applies");
+        assert_eq!(rows[1].cde, "ebok", "book override beats device override");
+    }
 
     #[test]
     fn cli_args_separate_books_from_the_export_target() {
@@ -538,7 +783,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("settings.json");
         let s = load_settings_from(&file);
-        assert_eq!(s.cde, "pdoc");
+        assert_eq!(s.cde, "auto");
         assert!(s.pages_auto);
         assert_eq!(s.llm_provider, "off");
         assert_eq!(s.word_wise_level, 3);

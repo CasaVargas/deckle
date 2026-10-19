@@ -19,6 +19,7 @@ serde.workspace = true
 serde_json.workspace = true
 deckle-core.workspace = true
 deckle-kfx.workspace = true
+deckle-transport.workspace = true
 base64 = "0.23"
 tauri-plugin-dialog = "2.8"
 

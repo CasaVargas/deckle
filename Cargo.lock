@@ -701,6 +701,7 @@ dependencies = [
  "clap",
  "deckle-core",
  "deckle-kfx",
+ "deckle-transport",
  "predicates",
  "serde",
  "serde_json",
@@ -713,6 +714,7 @@ version = "0.1.0"
 dependencies = [
  "csv",
  "deckle-kfx",
+ "deckle-transport",
  "deunicode",
  "image",
  "regex",
@@ -732,6 +734,7 @@ dependencies = [
  "base64 0.23.1",
  "deckle-core",
  "deckle-kfx",
+ "deckle-transport",
  "serde",
  "serde_json",
  "tauri",

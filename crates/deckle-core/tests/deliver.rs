@@ -71,3 +71,52 @@ fn mass_storage_kindle_is_detected_and_written_under_documents() {
     assert_eq!(path, root.path().join("documents/D, C - B.kfx"));
     assert!(path.exists());
 }
+
+#[test]
+fn mass_storage_delivery_installs_the_thumbnail_when_asked() {
+    use deckle_core::deliver::DeliverOptions;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("documents")).unwrap();
+    std::fs::create_dir_all(root.path().join("system/thumbnails")).unwrap();
+    let d = detect_in(&[root.path().to_path_buf()]).remove(0);
+    let opts = DeliverOptions {
+        thumbnail: Some((
+            "thumbnail_B0XXXXDECK_EBOK_portrait.jpg".into(),
+            b"\xFF\xD8\xFF\xE0jpeg".to_vec(),
+        )),
+    };
+    let path = deckle_core::deliver::deliver_with(
+        b"KFX",
+        &info("T", "A B"),
+        &Target::MassStorage(d),
+        &opts,
+    )
+    .unwrap();
+    assert!(path.exists());
+    let thumb = root
+        .path()
+        .join("system/thumbnails/thumbnail_B0XXXXDECK_EBOK_portrait.jpg");
+    assert_eq!(std::fs::read(&thumb).unwrap(), b"\xFF\xD8\xFF\xE0jpeg");
+    assert!(
+        root.path()
+            .join("deckle-covers/thumbnail_B0XXXXDECK_EBOK_portrait.jpg")
+            .exists()
+    );
+}
+
+#[test]
+fn folder_delivery_ignores_thumbnails() {
+    use deckle_core::deliver::DeliverOptions;
+    let dir = tempfile::tempdir().unwrap();
+    let opts = DeliverOptions {
+        thumbnail: Some(("t.jpg".into(), vec![1])),
+    };
+    deckle_core::deliver::deliver_with(
+        b"KFX",
+        &info("T", "A B"),
+        &Target::Folder(dir.path().to_path_buf()),
+        &opts,
+    )
+    .unwrap();
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}

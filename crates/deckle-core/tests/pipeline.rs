@@ -23,6 +23,9 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
         target: Target::Folder(out.path().to_path_buf()),
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -68,6 +71,9 @@ fn missing_previewer_fails_before_any_work() {
         target: Target::Folder(out.path().to_path_buf()),
         previewer: Some(PathBuf::from("/nonexistent/previewer")),
         keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -92,6 +98,9 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
         target: Target::Folder(out.path().to_path_buf()),
         previewer: Some(fake("unsupported.sh")),
         keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -130,6 +139,9 @@ fn real_previewer_end_to_end() {
         target: Target::Folder(out.path().to_path_buf()),
         previewer: None,
         keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -147,6 +159,9 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         target: Target::Folder(out.path().to_path_buf()),
         previewer: Some(fake("notice.sh")),
         keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None);
@@ -169,6 +184,9 @@ fn run_with_progress_reports_each_stage_in_order() {
         target: Target::Folder(out.path().to_path_buf()),
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -194,6 +212,9 @@ fn run_with_progress_stops_at_the_failing_stage() {
         target: Target::Folder(out.path().to_path_buf()),
         previewer: Some(PathBuf::from("/nonexistent/previewer")),
         keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -203,4 +224,63 @@ fn run_with_progress_stops_at_the_failing_stage() {
     );
     assert!(report.error.is_some());
     assert!(seen.is_empty());
+}
+
+#[test]
+#[cfg(unix)]
+fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
+    use deckle_core::cover_rule::AsinChoice;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("documents")).unwrap();
+    std::fs::create_dir_all(root.path().join("system/thumbnails")).unwrap();
+    let device = deckle_core::deliver::detect_in(&[root.path().to_path_buf()]).remove(0);
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc, // ignored: the rule decides unless cde_override is set
+        cde_override: None,
+        asin: None,
+        pages: None,
+        target: Target::MassStorage(device),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        amazon_match: false,
+        verified_real_asin: false,
+    };
+    let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    let decision = report.decision.as_ref().expect("decision");
+    assert_eq!(decision.cde, CdeType::Ebok);
+    assert!(decision.write_thumbnail);
+    assert_eq!(decision.asin, AsinChoice::Generated);
+    assert_eq!(report.cde_type.as_deref(), Some("EBOK"));
+    let asin = report.asin.clone().unwrap();
+    let thumb = root.path().join(format!(
+        "system/thumbnails/thumbnail_{asin}_EBOK_portrait.jpg"
+    ));
+    assert!(thumb.exists(), "{thumb:?}");
+    let img = image::load_from_memory(&std::fs::read(&thumb).unwrap()).unwrap();
+    assert_eq!(img.height(), 500);
+}
+
+#[test]
+#[cfg(unix)]
+fn folder_target_is_pdoc_and_an_override_wins() {
+    let out = tempfile::tempdir().unwrap();
+    let mut opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        cde_override: None,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        amazon_match: false,
+        verified_real_asin: false,
+    };
+    let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
+    assert_eq!(r.decision.unwrap().cde, CdeType::Pdoc);
+    opts.cde_override = Some(CdeType::Ebok);
+    let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
+    let d = r.decision.unwrap();
+    assert_eq!(d.cde, CdeType::Ebok);
+    assert!(d.reason.contains("override"));
 }
