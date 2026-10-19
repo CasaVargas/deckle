@@ -95,7 +95,7 @@ jobs:
           releaseName: ${{ env.TAG && format('Deckle {0}', env.TAG) || '' }}
           releaseBody: |
             See CHANGELOG.md for what changed and README.md for install notes.
-            macOS: if the app is not notarized, right-click → Open the first time.
+            macOS: signed with a Developer ID and notarized by Apple.
             Windows: unsigned in v1; SmartScreen → More info → Run anyway.
             Requires Kindle Previewer 4 (free, from Amazon).
           releaseDraft: true

@@ -17,5 +17,5 @@
 - Word Wise sidecars from Deckle's Wiktionary-derived dictionary (downloaded once, 12 MB),
   pointing at the Kindle's own dictionary when present.
 - Desktop app for macOS 14+ and Windows 11 (Tauri); `deckle` command line for everything.
-- Known gaps: not yet verified on real Kindles (see `docs/devices.md`); macOS builds are not
-  notarized and Windows builds are unsigned.
+- macOS builds are signed with a Developer ID and notarized; Windows builds are unsigned in v1.
+- Known gaps: not yet verified on real Kindles (see `docs/devices.md`).

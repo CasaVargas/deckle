@@ -20,8 +20,8 @@ recorded in `docs/devices.md`. Design: `docs/superpowers/specs/`; build plans:
    from Amazon). Deckle drives it to produce Enhanced Typesetting and never bundles it.
 2. Download Deckle from [Releases](https://github.com/prjoni99/deckle/releases):
    - **macOS 14+** (Apple Silicon: `aarch64`, Intel: `x64`): open the `.dmg`, drag Deckle to
-     Applications. Until releases are notarized, the first launch needs **right-click → Open →
-     Open** (or System Settings → Privacy & Security → *Open Anyway*).
+     Applications, and open it. Releases are signed with a Developer ID and notarized by Apple,
+     so macOS opens them like any other app.
    - **Windows 11**: run the `-setup.exe` (installs for your user, no admin) or the `.msi`. The
      installer is unsigned in v1, so SmartScreen says "Windows protected your PC": **More info
      → Run anyway**.
