@@ -1,30 +1,32 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from "react";
-import type { BookState } from "./types";
+import type { BookState, PlanRow } from "./types";
 import { STAGES, STAGE_LABEL } from "./types";
 
 interface Props {
   book: BookState;
   busy: boolean;
-  defaultCde: "pdoc" | "ebok";
+  /** What the cover rule will do on the current target (undefined until planned). */
+  plan?: PlanRow;
   onOverride: (id: string, cde: "pdoc" | "ebok" | null) => void;
   onToggleReport: (id: string) => void;
   onRemove: (id: string) => void;
   onReveal: (path: string) => void;
 }
 
-function badge(book: BookState, effectiveCde: "pdoc" | "ebok") {
+function badge(book: BookState, plan: PlanRow | undefined) {
   if (book.mode === "error") return { cls: "badge error", text: "Error", title: book.reason };
-  if (effectiveCde === "ebok") {
-    return { cls: "badge features", text: "Features", title: "EBOK: X-Ray and Word Wise capable once M3 lands. Cover may show grey on MTP-only Kindles." };
+  if (!plan) return { cls: "badge cover", text: "Cover", title: book.reason };
+  if (plan.cde === "ebok") {
+    return { cls: "badge features", text: plan.write_thumbnail ? "Everything" : "Features", title: plan.reason };
   }
-  return { cls: "badge cover", text: "Cover", title: book.reason };
+  return { cls: "badge cover", text: "Cover", title: plan.reason };
 }
 
-export default function BookRowView({ book, busy, defaultCde, onOverride, onToggleReport, onRemove, onReveal }: Props) {
+export default function BookRowView({ book, busy, plan, onOverride, onToggleReport, onRemove, onReveal }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const effectiveCde = book.cdeOverride ?? defaultCde;
-  const b = badge(book, effectiveCde);
+  const effectiveCde = book.cdeOverride ?? plan?.cde ?? "pdoc";
+  const b = badge(book, plan);
   const stageIndex = book.stage ? STAGES.indexOf(book.stage as (typeof STAGES)[number]) : -1;
 
   let statusLine: React.ReactNode = null;

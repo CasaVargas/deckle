@@ -5,11 +5,11 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import BookRowView from "./BookRow";
 import SettingsDrawer from "./SettingsDrawer";
-import type { BookRow, BookState, DeviceRow, PreviewerStatus, RunTarget, Settings } from "./types";
+import type { BookRow, BookState, DeviceRow, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
   previewer_path: null,
-  cde: "pdoc",
+  cde: "auto",
   pages_auto: true,
   llm_provider: "off",
   llm_model: "",
@@ -27,7 +27,8 @@ export default function App() {
   const [version, setVersion] = useState("");
   const [books, setBooks] = useState<BookState[]>([]);
   const [devices, setDevices] = useState<DeviceRow[]>([]);
-  const [targetRoot, setTargetRoot] = useState<string | null>(null);
+  const [targetKey, setTargetKey] = useState<string | null>(null);
+  const [plans, setPlans] = useState<Record<string, PlanRow>>({});
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [previewer, setPreviewer] = useState<PreviewerStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -51,8 +52,33 @@ export default function App() {
   const refreshDevices = useCallback(async () => {
     const d = await api.listDevices();
     setDevices(d);
-    setTargetRoot((cur) => (cur && d.some((x) => x.root === cur) ? cur : d[0]?.root ?? null));
+    setTargetKey((cur) => (cur && d.some((x) => x.key === cur) ? cur : d[0]?.key ?? null));
   }, []);
+
+  const device = devices.find((d) => d.key === targetKey) ?? null;
+  const deviceTarget: RunTarget | null = device
+    ? device.kind === "mtp"
+      ? { kind: "mtp", bus: device.bus, address: device.address }
+      : { kind: "device", root: device.root ?? "" }
+    : null;
+
+  // Ask the cover rule what each book gets on the current target (badges).
+  useEffect(() => {
+    const runnable = books.filter((b) => b.mode !== "error");
+    if (runnable.length === 0) {
+      setPlans({});
+      return;
+    }
+    const target: RunTarget = deviceTarget ?? { kind: "folder", path: "" };
+    api
+      .planBooks(
+        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride })),
+        target,
+      )
+      .then((rows) => setPlans(Object.fromEntries(rows.map((r) => [r.id, r]))))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [books.map((b) => `${b.id}:${b.cdeOverride ?? ""}`).join("|"), targetKey, devices.length, settings.cde]);
 
   useEffect(() => {
     api.appVersion().then(setVersion).catch(() => setVersion("dev"));
@@ -144,8 +170,8 @@ export default function App() {
   };
 
   const sendToKindle = () => {
-    if (!targetRoot) return;
-    start({ kind: "device", root: targetRoot });
+    if (!deviceTarget) return;
+    start(deviceTarget);
   };
 
   const exportToFolder = async () => {
@@ -156,20 +182,24 @@ export default function App() {
 
   // `--export-to DIR` on the command line: run as soon as the books and Previewer status are in.
   useEffect(() => {
-    if (autoExport && previewer && books.length > 0 && !busy) {
-      const dir = autoExport;
+    if (!autoExport || !previewer || books.length === 0 || busy) return;
+    if (autoExport === "device:") {
+      if (!deviceTarget) return; // wait for the device list
       setAutoExport(null);
-      start({ kind: "folder", path: dir });
+      start(deviceTarget);
+      return;
     }
+    const dir = autoExport;
+    setAutoExport(null);
+    start({ kind: "folder", path: dir });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoExport, previewer, books.length]);
+  }, [autoExport, previewer, books.length, deviceTarget?.kind, targetKey]);
 
   const override = (id: string, cde: "pdoc" | "ebok" | null) => setBooks((p) => p.map((b) => (b.id === id ? { ...b, cdeOverride: cde } : b)));
   const toggleReport = (id: string) => setBooks((p) => p.map((b) => (b.id === id ? { ...b, showReport: !b.showReport } : b)));
   const remove = (id: string) => setBooks((p) => p.filter((b) => b.id !== id));
   const clearDone = () => setBooks((p) => p.filter((b) => b.status !== "done"));
 
-  const device = devices.find((d) => d.root === targetRoot) ?? null;
   const doneCount = books.filter((b) => b.status === "done").length;
 
   return (
@@ -214,7 +244,7 @@ export default function App() {
                 key={b.id}
                 book={b}
                 busy={busy}
-                defaultCde={settings.cde}
+                plan={plans[b.id]}
                 onOverride={override}
                 onToggleReport={toggleReport}
                 onRemove={remove}
@@ -241,17 +271,23 @@ export default function App() {
           {devices.length === 0 ? (
             "No Kindle connected"
           ) : devices.length === 1 ? (
-            <span title={device?.root}>{device?.model_hint}</span>
+            <span title={device?.root ?? undefined}>{device?.model_hint}</span>
           ) : (
-            <select value={targetRoot ?? ""} onChange={(e) => setTargetRoot(e.target.value)} aria-label="Target Kindle">
+            <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
               {devices.map((d) => (
-                <option key={d.root} value={d.root}>
+                <option key={d.key} value={d.key}>
                   {d.model_hint}
                 </option>
               ))}
             </select>
           )}
-          {device && !device.thumbnails_writable && <span className="muted"> · covers via PDOC</span>}
+          {device && (
+            <span className="muted">
+              {" · "}
+              {device.kind === "mtp" ? "MTP" : "USB"}
+              {device.kind === "mtp" || !device.thumbnails_writable ? " · covers via PDOC" : " · thumbnails"}
+            </span>
+          )}
         </div>
         <div className="actions">
           <button className="primary" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
@@ -275,7 +311,12 @@ export default function App() {
         open={settingsOpen}
         settings={settings}
         previewer={previewer}
+        devices={devices}
         onChange={saveSettings}
+        onDeviceOptions={async (key, cde, verified) => {
+          await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
+          refreshDevices();
+        }}
         onClose={() => setSettingsOpen(false)}
         onPickPreviewer={pickPreviewer}
       />

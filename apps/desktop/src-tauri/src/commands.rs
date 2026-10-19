@@ -223,6 +223,12 @@ pub fn parse_cli_args(args: &[String]) -> (Vec<String>, Option<String>) {
             i += 2;
             continue;
         }
+        if args[i] == "--send" {
+            // "device:" = the first connected Kindle, resolved by the GUI once devices are listed
+            target = Some("device:".into());
+            i += 1;
+            continue;
+        }
         if !args[i].starts_with('-') {
             books.push(args[i].clone());
         }
@@ -728,6 +734,9 @@ mod tests {
         let (books, target) = parse_cli_args(&["c.epub".into(), "--verbose".into()]);
         assert_eq!(books, ["c.epub"]);
         assert_eq!(target, None);
+        let (books, target) = parse_cli_args(&["--send".into(), "d.epub".into()]);
+        assert_eq!(books, ["d.epub"]);
+        assert_eq!(target.as_deref(), Some("device:"));
     }
 
     #[test]

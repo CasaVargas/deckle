@@ -28,14 +28,27 @@ export interface BookState extends BookRow {
 }
 
 export interface DeviceRow {
-  root: string;
+  key: string;
+  kind: "mass_storage" | "mtp";
+  root: string | null;
+  bus: number;
+  address: number;
   model_hint: string;
   thumbnails_writable: boolean;
+  cde_override: "pdoc" | "ebok" | null;
+  verified_real_asin: boolean;
+}
+
+export interface PlanRow {
+  id: string;
+  cde: "pdoc" | "ebok";
+  write_thumbnail: boolean;
+  reason: string;
 }
 
 export interface Settings {
   previewer_path: string | null;
-  cde: "pdoc" | "ebok";
+  cde: "auto" | "pdoc" | "ebok";
   pages_auto: boolean;
   llm_provider: "off" | "anthropic" | "openai";
   llm_model: string;
@@ -62,7 +75,10 @@ export interface ProgressEvent {
   error: string | null;
 }
 
-export type RunTarget = { kind: "device"; root: string } | { kind: "folder"; path: string };
+export type RunTarget =
+  | { kind: "device"; root: string }
+  | { kind: "mtp"; bus: number; address: number }
+  | { kind: "folder"; path: string };
 
 export const STAGES = ["inspect", "normalize", "convert", "repackage", "deliver"] as const;
 export const STAGE_LABEL: Record<string, string> = {
@@ -71,4 +87,5 @@ export const STAGE_LABEL: Record<string, string> = {
   convert: "Kindle Previewer",
   repackage: "Building KFX",
   deliver: "Copying",
+  match: "Matching edition",
 };

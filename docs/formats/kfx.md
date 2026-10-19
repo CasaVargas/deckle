@@ -101,3 +101,23 @@ Cover must be JPEG/JFIF (`FF D8 FF E0`) for the lockscreen.
   boundary by at most 50 characters. 45 pages for the mini book, 435 for Pride and Prejudice.
 - Kindle Previewer 4's `--help` banner line `Kindle Previewer 4.0.3 Copyright (c) Amazon.com` is
   the version probe; the per-book log CSV has two legend lines before the `"Type"` header.
+
+## Cover thumbnails and the Amazon cover bug (M2, 2026-10-19)
+
+- Mass-storage Kindles read `system/thumbnails/thumbnail_<content_id>_<EBOK|PDOC>_portrait.jpg`
+  (calibre naming; `content_id` is the ASIN we stamp). Deckle renders them 500 px tall, JPEG/JFIF.
+- An EBOK whose ASIN the store does not know gets its thumbnail overwritten by a 60×40 "no image"
+  file when the Kindle goes online (MobileRead t=329945). Deckle keeps a copy in
+  `deckle-covers/` on the device and restores any missing or changed thumbnail on every Send
+  (`thumbnail::sync`), like calibre's `amazon-cover-bug/`.
+- PDOC KFX shows its embedded cover on firmware 5.15.1+ without a thumbnail file.
+
+## MTP (Scribe 2024, Colorsoft, Paperwhite 2024)
+
+- USB 1949:9981 (shared by Scribe and Paperwhite Signature 2024). Still-image class 6/1 interface,
+  bulk in/out endpoints; `deckle-transport::usb` claims it with libusb (vendored).
+- libmtp #436: the Kindle exposes two nameless root folders whose ObjectInfo trips libmtp's
+  64-bit ObjectCompressedSize heuristic; afterwards every SendObjectInfo gets `0xA806`. Deckle
+  always encodes the 32-bit ObjectInfo layout (`ptp::ObjectInfo::encode`).
+- Writes go to `documents/`; a same-named existing object is deleted first. Only one program may
+  hold the session; closing drops the device until it is replugged on some firmware.
