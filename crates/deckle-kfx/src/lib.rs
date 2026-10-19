@@ -2,5 +2,7 @@
 //! KFX/KPF container handling and the KPF → monolithic KFX conversion.
 
 pub mod fixtures;
+pub mod fragment;
 pub mod ion;
+pub mod kpf;
 pub mod symtab;
