@@ -5,6 +5,7 @@ use deckle_core::deliver::Target;
 use deckle_core::pipeline::{RunOptions, RunReport, run};
 use deckle_kfx::convert::CdeType;
 
+#[cfg(unix)]
 fn fake(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fake_previewer")

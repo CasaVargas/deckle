@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use deckle_core::previewer::{ConvertError, PREVIEWER_DOWNLOAD_URL, convert, locate, locate_in};
 
+#[cfg(unix)]
 fn fake(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fake_previewer")
