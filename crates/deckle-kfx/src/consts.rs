@@ -67,3 +67,73 @@ pub const GENERIC_CREATOR_VERSIONS: [(&str, &str); 3] = [
 pub const MAX_CONTENT_FRAGMENT_SIZE: usize = 8192;
 pub const KFX_COVER_RESOURCE: &str = "kfx_cover_image";
 pub const APPROXIMATE_PAGE_LIST: &str = "APPROXIMATE_PAGE_LIST";
+
+/// Per fragment type, the struct keys at top level that hold the fragment's own id.
+pub const FRAGMENT_ID_KEYS: [(&str, &[&str]); 18] = [
+    ("$266", &["$180"]),
+    ("$597", &["$174", "$598"]),
+    ("$418", &["$165"]),
+    ("$417", &["$165"]),
+    ("$394", &["$240"]),
+    ("$145", &["name"]),
+    ("$164", &["$175"]),
+    ("$391", &["$239"]),
+    ("$692", &["name"]),
+    ("$387", &["$174"]),
+    ("$756", &["$757"]),
+    ("$260", &["$174"]),
+    ("$267", &["$174"]),
+    ("$609", &["$174"]),
+    ("$259", &["$176"]),
+    ("$608", &["$598"]),
+    ("$157", &["$173"]),
+    ("$610", &["$602"]),
+];
+
+/// Struct key -> type of the fragment a symbol value references.
+pub const COMMON_FRAGMENT_REFERENCES: [(&str, &str); 24] = [
+    ("$749", "$259"),
+    ("$266", "$266"),
+    ("$597", "$597"),
+    ("$429", "$157"),
+    ("$479", "$164"),
+    ("$145", "$145"),
+    ("$146", "$608"),
+    ("$245", "$164"),
+    ("$179", "$266"),
+    ("$165", "$417"),
+    ("$392", "$391"),
+    ("name", "$145"),
+    ("$167", "$164"),
+    ("$175", "$164"),
+    ("$757", "$756"),
+    ("$174", "$260"),
+    ("$170", "$260"),
+    ("$176", "$259"),
+    ("$157", "$157"),
+    ("$173", "$157"),
+    ("$528", "$164"),
+    ("$214", "$164"),
+    ("$636", "$417"),
+    ("$635", "$164"),
+];
+
+/// (parent key, key) -> referenced type.
+pub const NESTED_FRAGMENT_REFERENCES: [((&str, &str), &str); 5] = [
+    (("$597", "$351"), "$597"),
+    (("$597", "$538"), "$597"),
+    (("$597", "$613"), "$597"),
+    (("$597", "$614"), "$597"),
+    (("$597", "$697"), "$597"),
+];
+
+/// (fragment type, key) -> referenced type.
+pub const SPECIAL_FRAGMENT_REFERENCES: [((&str, &str), &str); 4] = [
+    (("$391", "$247"), "$394"),
+    (("$387", "$213"), "$164"),
+    (("$387", "$214"), "$164"),
+    (("$387", "$212"), "$164"),
+];
+
+/// (fragment type, parent key) whose symbol values are not references.
+pub const SPECIAL_PARENT_NON_REFERENCES: [(&str, &str); 1] = [("$538", "yj.print.style")];

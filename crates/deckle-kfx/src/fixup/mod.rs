@@ -5,6 +5,7 @@
 mod content;
 mod navigation;
 mod positions;
+mod rebuild;
 mod structural;
 
 pub use content::{create_content_fragments, section_story_names};
@@ -14,6 +15,7 @@ pub use positions::{
     create_location_map, create_position_and_location_maps, create_position_map,
     generate_approximate_locations,
 };
+pub use rebuild::{natural_sort_key, new_container_id, rebuild};
 pub use structural::fix_structural;
 
 use crate::fragment::{Fragment, FragmentList};
