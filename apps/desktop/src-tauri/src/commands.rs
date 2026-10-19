@@ -385,7 +385,7 @@ fn cde_from(s: &str) -> CdeType {
 }
 
 /// Runs the books one after another, reporting through `emit`.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub fn run_books_inner(
     books: &[RunRequest],
     target: &RunTarget,
