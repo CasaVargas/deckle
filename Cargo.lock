@@ -261,8 +261,11 @@ dependencies = [
  "assert_cmd",
  "clap",
  "deckle-core",
+ "deckle-kfx",
  "predicates",
+ "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

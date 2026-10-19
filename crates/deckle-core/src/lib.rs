@@ -5,4 +5,5 @@ pub mod deliver;
 pub mod epub;
 pub mod inspect;
 pub mod normalize;
+pub mod pipeline;
 pub mod previewer;

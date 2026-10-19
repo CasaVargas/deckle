@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Command line definition. Bodies are filled in by later tasks.
+//! Command line definition.
 
 use std::path::PathBuf;
 
@@ -20,6 +20,15 @@ pub struct Cli {
 pub enum CdeArg {
     Pdoc,
     Ebok,
+}
+
+impl From<CdeArg> for deckle_kfx::convert::CdeType {
+    fn from(c: CdeArg) -> Self {
+        match c {
+            CdeArg::Pdoc => deckle_kfx::convert::CdeType::Pdoc,
+            CdeArg::Ebok => deckle_kfx::convert::CdeType::Ebok,
+        }
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -44,6 +53,9 @@ pub enum Command {
         /// Approximate page numbers: a count, or `auto`.
         #[arg(long)]
         pages: Option<String>,
+        /// Remove author metadata (reproduces kfxlib's default output).
+        #[arg(long)]
+        no_authors: bool,
         #[arg(long)]
         container_id: Option<String>,
         #[arg(long)]
@@ -63,10 +75,12 @@ pub enum Command {
     /// Run the whole pipeline on one or more EPUBs.
     Run {
         epubs: Vec<PathBuf>,
+        /// A folder path, or `device` for the first connected Kindle.
         #[arg(long, default_value = "device")]
         to: String,
         #[arg(long, value_enum, default_value_t = CdeArg::Pdoc)]
         cde: CdeArg,
+        /// Approximate page numbers: a count, or `auto`.
         #[arg(long)]
         pages: Option<String>,
         #[arg(long)]
@@ -74,4 +88,16 @@ pub enum Command {
         #[arg(long)]
         keep_work_dir: bool,
     },
+}
+
+/// `--pages` parsing: absent → none; `auto` → Some(None); a number → Some(Some(n)).
+pub fn parse_pages(arg: Option<&str>) -> Result<Option<Option<u32>>, String> {
+    match arg {
+        None => Ok(None),
+        Some("auto") => Ok(Some(None)),
+        Some(n) => n
+            .parse::<u32>()
+            .map(|n| Some(Some(n)))
+            .map_err(|_| format!("--pages expects a number or `auto`, got {n:?}")),
+    }
 }
