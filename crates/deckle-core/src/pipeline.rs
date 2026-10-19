@@ -13,6 +13,7 @@ use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{MatchOutcome, match_book};
 use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
 use crate::previewer;
+use crate::wordwise::{WordWiseOptions, WordWiseOutput, WordWiseSummary};
 use crate::xray::{LlmConfig, XRayOptions, XRaySummary};
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
 use deckle_kfx::metadata::generate_asin;
@@ -40,6 +41,8 @@ pub struct RunOptions {
     pub llm: Option<LlmConfig>,
     /// Wikipedia summaries for X-Ray terms (opt-in network).
     pub wikipedia: bool,
+    /// Word Wise sidecar on EBOK books; `None` = off.
+    pub word_wise: Option<WordWiseOptions>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,6 +68,8 @@ pub struct RunReport {
     pub matched: Option<String>,
     /// What went into the X-Ray sidecar, when one shipped.
     pub xray: Option<XRaySummary>,
+    /// What went into the Word Wise sidecar, when one shipped.
+    pub word_wise: Option<WordWiseSummary>,
     pub work_dir: Option<PathBuf>,
     pub warnings: Vec<String>,
     /// `"<stage>: <message>"` of the stage that failed.
@@ -284,26 +289,57 @@ pub fn run_with_progress(
                 .push("thumbnail not written: the book has no cover".into()),
         }
     }
-    if cde_type == CdeType::Ebok && opts.xray == XRayMode::Auto {
-        let xray_opts = XRayOptions {
-            llm: opts.llm.clone(),
-            wikipedia: opts.wikipedia,
-        };
+    let want_xray = cde_type == CdeType::Ebok && opts.xray == XRayMode::Auto;
+    let word_wise = opts
+        .word_wise
+        .as_ref()
+        .filter(|_| cde_type == CdeType::Ebok);
+    if want_xray || word_wise.is_some() {
         on_stage("enrich");
         let t = Instant::now();
-        let built = enrich(&out.bytes, &asin, &info, &xray_opts);
+        match deckle_kfx::text::content_runs(&out.bytes) {
+            Ok((runs, erl)) => {
+                if want_xray {
+                    let xray_opts = XRayOptions {
+                        llm: opts.llm.clone(),
+                        wikipedia: opts.wikipedia,
+                    };
+                    let built = crate::xray::build(
+                        &asin,
+                        &info.title,
+                        &info.language,
+                        &runs,
+                        erl,
+                        &xray_opts,
+                    )
+                    .map_err(|e| e.to_string());
+                    if work_keep && let Ok(Some(x)) = &built {
+                        keep_file(&mut report, &work_path, &x.file_name, &x.bytes);
+                    }
+                    attach_xray(&mut report, &mut deliver_opts, built);
+                }
+                if let Some(ww) = word_wise {
+                    let built = crate::wordwise::enrich(
+                        &runs,
+                        &asin,
+                        &out.asset_id,
+                        ww,
+                        &opts.target,
+                        &mut crate::wordwise::http_get_bytes,
+                    );
+                    if work_keep && let Ok(Some(w)) = &built {
+                        keep_file(&mut report, &work_path, &w.file_name, &w.bytes);
+                    }
+                    attach_word_wise(&mut report, &mut deliver_opts, built, ww.level);
+                }
+            }
+            Err(e) => report.warnings.push(format!(
+                "X-Ray and Word Wise skipped: cannot read the KFX text: {e}"
+            )),
+        }
         report
             .stage_ms
             .insert("enrich", t.elapsed().as_millis() as u64);
-        if work_keep
-            && let Ok(Some(x)) = &built
-            && let Err(e) = std::fs::write(work_path.join(&x.file_name), &x.bytes)
-        {
-            report
-                .warnings
-                .push(format!("could not keep {}: {e}", x.file_name));
-        }
-        attach_xray(&mut report, &mut deliver_opts, built);
     }
     let delivered = stage!(
         "deliver",
@@ -333,14 +369,39 @@ pub fn attach_xray(
     }
 }
 
-/// The X-Ray sidecar for an EBOK book, from the final KFX's text runs.
-fn enrich(
-    kfx: &[u8],
-    asin: &str,
-    info: &BookInfo,
-    opts: &XRayOptions,
-) -> Result<Option<crate::xray::XRayOutput>, String> {
-    let (runs, erl) = deckle_kfx::text::content_runs(kfx).map_err(|e| e.to_string())?;
-    crate::xray::build(asin, &info.title, &info.language, &runs, erl, opts)
-        .map_err(|e| e.to_string())
+fn keep_file(report: &mut RunReport, work: &Path, name: &str, bytes: &[u8]) {
+    if let Err(e) = std::fs::write(work.join(name), bytes) {
+        report.warnings.push(format!("could not keep {name}: {e}"));
+    }
+}
+
+/// Puts a built Word Wise sidecar (and Deckle's dictionary, when the device needs it) on the
+/// delivery, or turns a failure into a warning: the book still ships.
+pub fn attach_word_wise(
+    report: &mut RunReport,
+    deliver_opts: &mut DeliverOptions,
+    built: Result<Option<WordWiseOutput>, String>,
+    level: u8,
+) {
+    match built {
+        Ok(Some(w)) => {
+            report.warnings.extend(w.warnings);
+            if w.summary.dictionary == "deckle" {
+                report.warnings.push(
+                    "Word Wise uses Deckle's dictionary on this Kindle: set Word Wise → Language \
+                     to 中文 (Chinese) once; the hints are in English"
+                        .into(),
+                );
+            }
+            report.word_wise = Some(w.summary);
+            deliver_opts.sidecars.push((w.file_name, w.bytes));
+            if let Some(f) = w.dictionary_file {
+                deliver_opts.system_files.push(f);
+            }
+        }
+        Ok(None) => report.warnings.push(format!(
+            "Word Wise: no hint-worthy words at level {level}; no sidecar written"
+        )),
+        Err(e) => report.warnings.push(format!("Word Wise skipped: {e}")),
+    }
 }

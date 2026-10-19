@@ -30,8 +30,11 @@ pub enum Target {
 pub struct DeliverOptions {
     /// `(file name, JPEG bytes)` for `system/thumbnails/` on mass-storage Kindles.
     pub thumbnail: Option<(String, Vec<u8>)>,
-    /// `(file name, bytes)` for `<book>.sdr/` next to the KFX (X-Ray etc.).
+    /// `(file name, bytes)` for `<book>.sdr/` next to the KFX (X-Ray, Word Wise).
     pub sidecars: Vec<(String, Vec<u8>)>,
+    /// `(path under the device root, bytes)`, e.g. Deckle's Word Wise dictionary at
+    /// `system/kll/kll.en.zh.klld`; written after the book and its sidecars.
+    pub system_files: Vec<(Vec<String>, Vec<u8>)>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -178,11 +181,13 @@ pub fn deliver_with(
         Target::Folder(dir) => {
             let path = write_file(&dir.join(&name), kfx)?;
             write_sidecars(&path, &opts.sidecars)?;
+            write_system_files(dir, &opts.system_files)?;
             Ok(path)
         }
         Target::MassStorage(dev) => {
             let path = write_file(&dev.root.join("documents").join(&name), kfx)?;
             write_sidecars(&path, &opts.sidecars)?;
+            write_system_files(&dev.root, &opts.system_files)?;
             if let Some((thumb_name, jpeg)) = &opts.thumbnail {
                 crate::thumbnail::install(&dev.root, thumb_name, jpeg)
                     .map_err(|e| DeliverError::Thumbnail(e.to_string()))?;
@@ -190,17 +195,26 @@ pub fn deliver_with(
             let _ = crate::thumbnail::sync(&dev.root);
             Ok(path)
         }
-        Target::Mtp(mtp) => deliver_mtp(kfx, &name, mtp, &opts.sidecars),
+        Target::Mtp(mtp) => deliver_mtp(kfx, &name, mtp, opts),
     }
+}
+
+fn write_system_files(root: &Path, files: &[(Vec<String>, Vec<u8>)]) -> Result<(), DeliverError> {
+    for (parts, bytes) in files {
+        let path = parts.iter().fold(root.to_path_buf(), |p, s| p.join(s));
+        write_file(&path, bytes)?;
+    }
+    Ok(())
 }
 
 /// `<book>.sdr/<name>` files beside a delivered KFX (book first, sidecars after).
 fn write_sidecars(book: &Path, sidecars: &[(String, Vec<u8>)]) -> Result<(), DeliverError> {
     let sdr = book.with_extension("sdr");
-    // A re-run with another ASIN (or X-Ray off) must not leave yesterday's sidecar behind.
+    // A re-run with another ASIN (or X-Ray / Word Wise off) must not leave yesterday's
+    // sidecar behind.
     if let Ok(entries) = std::fs::read_dir(&sdr) {
         for e in entries.flatten() {
-            if is_xray_sidecar(&e.file_name().to_string_lossy()) {
+            if is_deckle_sidecar(&e.file_name().to_string_lossy()) {
                 let _ = std::fs::remove_file(e.path());
             }
         }
@@ -233,14 +247,20 @@ pub fn is_xray_sidecar(name: &str) -> bool {
     name.starts_with("XRAY.entities.") && name.ends_with(".asc")
 }
 
+/// A sidecar Deckle writes and replaces on every send: X-Ray or `LanguageLayer.<lang>.<ASIN>.kll`.
+pub fn is_deckle_sidecar(name: &str) -> bool {
+    is_xray_sidecar(name) || (name.starts_with("LanguageLayer.") && name.ends_with(".kll"))
+}
+
 /// Sends the book into the Kindle's `documents` folder over MTP, replacing a same-named file.
 /// Returns a pseudo path `mtp://<serial>/documents/<name>`.
 fn deliver_mtp(
     kfx: &[u8],
     name: &str,
     mtp: &deckle_transport::usb::MtpInfo,
-    sidecars: &[(String, Vec<u8>)],
+    opts: &DeliverOptions,
 ) -> Result<PathBuf, DeliverError> {
+    let sidecars = &opts.sidecars;
     let m = |e: &dyn std::fmt::Display| DeliverError::Mtp(e.to_string());
     let mut dev = deckle_transport::usb::open(mtp).map_err(|e| m(&e))?;
     dev.open_session().map_err(|e| m(&e))?;
@@ -263,7 +283,7 @@ fn deliver_mtp(
             .map_err(|e| m(&e))?;
         if let Some(sdr) = existing_sdr {
             for (h, info) in dev.list(storage, sdr).map_err(|e| m(&e))? {
-                if is_xray_sidecar(&info.filename) {
+                if is_deckle_sidecar(&info.filename) {
                     dev.delete(h).map_err(|e| m(&e))?;
                 }
             }
@@ -278,6 +298,22 @@ fn deliver_mtp(
             for (sc_name, bytes) in sidecars {
                 dev.send_file(storage, sdr, sc_name, bytes)
                     .map_err(|e| m(&e))?;
+            }
+        }
+        if !opts.system_files.is_empty() {
+            let root = dev.object_info(docs).map_err(|e| m(&e))?.parent;
+            for (parts, bytes) in &opts.system_files {
+                let Some((file, folders)) = parts.split_last() else {
+                    continue;
+                };
+                let mut at = root;
+                for f in folders {
+                    at = dev.ensure_folder(storage, at, f).map_err(|e| m(&e))?;
+                }
+                if let Some(old) = dev.find_child(storage, at, file).map_err(|e| m(&e))? {
+                    dev.delete(old).map_err(|e| m(&e))?;
+                }
+                dev.send_file(storage, at, file, bytes).map_err(|e| m(&e))?;
             }
         }
         Ok(PathBuf::from(format!(

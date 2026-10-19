@@ -85,6 +85,7 @@ fn mass_storage_delivery_installs_the_thumbnail_when_asked() {
             b"\xFF\xD8\xFF\xE0jpeg".to_vec(),
         )),
         sidecars: Vec::new(),
+        system_files: Vec::new(),
     };
     let path = deckle_core::deliver::deliver_with(
         b"KFX",
@@ -112,6 +113,7 @@ fn folder_delivery_ignores_thumbnails() {
     let opts = DeliverOptions {
         thumbnail: Some(("t.jpg".into(), vec![1])),
         sidecars: Vec::new(),
+        system_files: Vec::new(),
     };
     deckle_core::deliver::deliver_with(
         b"KFX",
@@ -128,7 +130,14 @@ fn sidecars_land_in_the_sdr_folder_next_to_the_book() {
     use deckle_core::deliver::DeliverOptions;
     let opts = DeliverOptions {
         thumbnail: None,
-        sidecars: vec![("XRAY.entities.B0ABCDDECK.asc".into(), b"sqlite".to_vec())],
+        sidecars: vec![
+            ("XRAY.entities.B0ABCDDECK.asc".into(), b"sqlite".to_vec()),
+            ("LanguageLayer.en.B0ABCDDECK.kll".into(), b"kll".to_vec()),
+        ],
+        system_files: vec![(
+            vec!["system".into(), "kll".into(), "kll.en.zh.klld".into()],
+            b"klld".to_vec(),
+        )],
     };
     // folder export
     let out = tempfile::tempdir().unwrap();
@@ -163,6 +172,17 @@ fn sidecars_land_in_the_sdr_folder_next_to_the_book() {
             .exists(),
         "{path:?}"
     );
+    assert!(
+        root.path()
+            .join("documents/B, A - Title.sdr/LanguageLayer.en.B0ABCDDECK.kll")
+            .exists()
+    );
+    // the dictionary goes to the device root (and mirrors that layout in a folder export)
+    assert_eq!(
+        std::fs::read(root.path().join("system/kll/kll.en.zh.klld")).unwrap(),
+        b"klld"
+    );
+    assert!(out.path().join("system/kll/kll.en.zh.klld").exists());
 }
 
 #[test]
@@ -172,10 +192,12 @@ fn stale_xray_sidecars_are_removed_on_redelivery() {
     let sdr = out.path().join("B, A - Title.sdr");
     std::fs::create_dir_all(&sdr).unwrap();
     std::fs::write(sdr.join("XRAY.entities.OLDASIN.asc"), b"old").unwrap();
+    std::fs::write(sdr.join("LanguageLayer.en.OLDASIN.kll"), b"old").unwrap();
     std::fs::write(sdr.join("keep.txt"), b"x").unwrap();
     let opts = DeliverOptions {
         thumbnail: None,
         sidecars: vec![("XRAY.entities.NEWASIN.asc".into(), b"new".to_vec())],
+        system_files: Vec::new(),
     };
     deckle_core::deliver::deliver_with(
         b"KFX",
@@ -185,6 +207,7 @@ fn stale_xray_sidecars_are_removed_on_redelivery() {
     )
     .unwrap();
     assert!(!sdr.join("XRAY.entities.OLDASIN.asc").exists());
+    assert!(!sdr.join("LanguageLayer.en.OLDASIN.kll").exists());
     assert!(sdr.join("XRAY.entities.NEWASIN.asc").exists());
     assert!(sdr.join("keep.txt").exists());
     // X-Ray off on a re-run also clears the old one

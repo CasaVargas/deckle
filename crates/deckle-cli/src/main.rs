@@ -296,6 +296,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             llm_model,
             llm_endpoint,
             wikipedia,
+            word_wise,
+            word_wise_level,
+            wordwise_db,
             keep_work_dir,
         } => {
             if epubs.is_empty() {
@@ -318,6 +321,13 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 xray: xray.into(),
                 llm: llm.config(llm_model, llm_endpoint),
                 wikipedia,
+                word_wise: (word_wise == cli::XRayArg::Auto).then(|| {
+                    deckle_core::wordwise::WordWiseOptions {
+                        level: word_wise_level,
+                        database: wordwise_db,
+                        ..Default::default()
+                    }
+                }),
             };
             let reports: Vec<_> = epubs.iter().map(|e| run(e, &opts)).collect();
             let failed = reports.iter().filter(|r| r.error.is_some()).count();
@@ -327,7 +337,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .map(|r| match (&r.error, &r.delivered) {
                         (Some(e), _) => format!("FAIL  {}\n      {e}", r.input.display()),
                         (None, Some(d)) => format!(
-                            "OK    {}\n      -> {}{}{}{}{}",
+                            "OK    {}\n      -> {}{}{}{}{}{}",
                             r.input.display(),
                             d.display(),
                             r.pages
@@ -342,6 +352,13 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                                 .map(|x| format!(
                                     "\n      X-Ray: {} people, {} terms ({})",
                                     x.people, x.terms, x.source
+                                ))
+                                .unwrap_or_default(),
+                            r.word_wise
+                                .as_ref()
+                                .map(|w| format!(
+                                    "\n      Word Wise: {} hints (level {}, {} dictionary)",
+                                    w.hints, w.level, w.dictionary
                                 ))
                                 .unwrap_or_default(),
                             if r.warnings.is_empty() {

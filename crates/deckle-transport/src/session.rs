@@ -304,6 +304,36 @@ impl Mtp {
         Ok(handle)
     }
 
+    /// Downloads a file (GetObject).
+    pub fn get_object(&mut self, handle: u32) -> Result<Vec<u8>, MtpError> {
+        let (data, _) = self.transact(op::GET_OBJECT, &[handle], None)?;
+        data.ok_or(MtpError::Missing("object data"))
+    }
+
+    /// The folder that holds `documents` (and `system`): the storage root (0) or a nameless
+    /// root association.
+    pub fn content_root(&mut self, storage: u32) -> Result<u32, MtpError> {
+        let docs = self.find_documents(storage)?;
+        Ok(self.object_info(docs)?.parent)
+    }
+
+    /// Handle of `path` (e.g. `["system", "kll", "x.klld"]`) under `parent`, if every part exists.
+    pub fn find_path(
+        &mut self,
+        storage: u32,
+        parent: u32,
+        path: &[&str],
+    ) -> Result<Option<u32>, MtpError> {
+        let mut at = parent;
+        for part in path {
+            match self.find_child(storage, at, part)? {
+                Some(h) => at = h,
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(at))
+    }
+
     pub fn delete(&mut self, handle: u32) -> Result<(), MtpError> {
         self.transact(op::DELETE_OBJECT, &[handle, 0], None)
             .map(|_| ())

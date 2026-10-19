@@ -8,7 +8,7 @@ says whether `system/thumbnails` is writable over that transport, which decides 
 |---|---|---|---|---|---|
 | Kindle Paperwhite (owner's, generation TBD) | TBD | TBD (mass storage if pre-2024, MTP if 2024) | TBD | not yet | pending M1 device check |
 | Kindle Scribe (2024) | TBD | MTP only | no | not yet | pending spikes 2–3 (MTP client built, untested on hardware) |
-| Simulated mass-storage Kindle (FAT32 disk image with `documents/`, `system/thumbnails`) | n/a | mass storage | yes | 2026-10-19 | EBOK + thumbnail + restore copy delivered by CLI and GUI |
+| Simulated mass-storage Kindle (FAT32 disk image with `documents/`, `system/thumbnails`) | n/a | mass storage | yes | 2026-10-19 | EBOK + thumbnail + restore copy delivered by CLI and GUI; M4: X-Ray + Word Wise sidecars and Deckle's `system/kll/kll.en.zh.klld` delivered by the GUI, dictionary not rewritten on a second send |
 
 ## Spikes 2 and 3 (M2, need the Scribe)
 
@@ -42,3 +42,22 @@ then ships matched books as EBOK on it.
 
 If the Paperwhite is MTP-only, use `--to <folder>` and copy the `.kfx` with any MTP client for
 now; the MTP transport is M2 work.
+
+## Word Wise check (M4, run by the owner)
+
+Each Kindle answers one question first: does it have Amazon's English Word Wise dictionary?
+Look for `system/kll/kll.en.en.klld` (mass storage: Finder; MTP: Android File Transfer, then
+close it). If it is missing, open any store book with Word Wise on and Wi-Fi on once, and check
+again; record either way in the table above.
+
+1. `deckle run <book>.epub --to device --cde ebok` (the result line names the dictionary).
+2. **Kindle dictionary** (`kll.en.en.klld` present): open the book, *Aa → More → Word Wise* on.
+   Hints should appear above harder words ("civility", "countenance" in Pride and Prejudice) and
+   tapping one should show a sensible definition. A hint that shows the wrong word's definition
+   means the sense-id join in `deckle-wordwise::device` guessed the wrong column
+   (`display_lemma_id` vs `term_lemma_id`): note two examples and the firmware.
+3. **Deckle dictionary** (no `kll.en.en.klld`): Settings → Language → Word Wise (or *Aa → More →
+   Word Wise → Language*) → 中文. Hints should be English Wiktionary glosses.
+4. Move the slider between "fewer" and "more hints": the count should change.
+5. Record firmware and result above. If no hints show at all, compare the sidecar against
+   `docs/formats/wordwise.md` and WordDumb's output for the same book.

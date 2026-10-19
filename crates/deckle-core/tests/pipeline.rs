@@ -29,6 +29,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -80,6 +81,7 @@ fn missing_previewer_fails_before_any_work() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -110,6 +112,7 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -154,6 +157,7 @@ fn real_previewer_end_to_end() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -177,6 +181,7 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None);
@@ -205,6 +210,7 @@ fn run_with_progress_reports_each_stage_in_order() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -238,6 +244,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -301,6 +308,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -333,6 +341,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -367,6 +376,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
         xray: XRayMode::Auto,
         llm: None,
         wikipedia: false,
+        word_wise: None,
     };
     let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(r.decision.unwrap().cde, CdeType::Pdoc);
@@ -395,4 +405,61 @@ fn a_failed_xray_is_a_warning_not_a_failed_run() {
     );
     assert!(opts.sidecars.is_empty());
     assert!(report.xray.is_none());
+}
+
+#[test]
+#[cfg(unix)]
+fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
+    use deckle_core::wordwise::WordWiseOptions;
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("ww.sqlite");
+    let conn = deckle_wordwise::lexicon::create(&db, "test").unwrap();
+    conn.execute_batch(
+        "INSERT INTO senses VALUES (1, 'universally', 'adverb', 'everywhere', 'everywhere', NULL, 4);
+         INSERT INTO forms VALUES ('universally', 1);",
+    )
+    .unwrap();
+    drop(conn);
+    let out = tmp.path().join("out");
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        cde_override: Some(CdeType::Ebok),
+        asin: Some("B0WWTESTDK".into()),
+        pages: None,
+        target: Target::Folder(out.clone()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: Some(WordWiseOptions {
+            level: 5,
+            database: Some(db),
+            cache_dir: tmp.path().join("cache"),
+        }),
+    };
+    let mut seen = Vec::new();
+    let r = deckle_core::pipeline::run_with_progress(
+        &deckle_kfx::fixtures::path("deckle-mini.epub"),
+        &opts,
+        &mut |s| seen.push(s),
+    );
+    assert_eq!(r.error, None, "{r:?}");
+    assert!(seen.contains(&"enrich"));
+    let ww = r.word_wise.expect("word wise summary");
+    assert_eq!(ww.dictionary, "deckle");
+    assert!(ww.hints >= 10, "{ww:?}"); // the fixture repeats the sentence
+    let sdr = r.delivered.unwrap().with_extension("sdr");
+    let kll = sdr.join("LanguageLayer.en.B0WWTESTDK.kll");
+    let c = rusqlite::Connection::open(&kll).unwrap();
+    let acr: String = c
+        .query_row("SELECT value FROM metadata WHERE key = 'acr'", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert!(!acr.is_empty());
+    assert!(out.join("system/kll/kll.en.zh.klld").exists());
+    assert!(r.xray.is_none());
 }

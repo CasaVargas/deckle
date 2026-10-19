@@ -1,0 +1,160 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! `sample.jsonl` is 22 real kaikki.org entries (Wiktionary, CC BY-SA 4.0), trimmed to the
+//! fields the builder reads.
+
+use std::collections::HashMap;
+use std::io::Write;
+
+use deckle_wordwise::lexicon::Lexicon;
+use deckle_wordwise_build::{build, difficulty, load_wordfreq, short_def, zipf};
+
+fn freq() -> HashMap<String, f64> {
+    [
+        ("take", 5.6),
+        ("took", 4.9),
+        ("off", 6.0),
+        ("bear", 4.0),
+        ("bore", 3.9),
+        ("bucket", 3.9),
+        ("kick", 4.7),
+        ("the", 7.7),
+        ("lugubrious", 1.8),
+        ("perspicacious", 1.3),
+        ("bath", 4.3),
+        ("house", 5.7),
+        ("o'er", 2.5),
+        ("ran", 5.0),
+    ]
+    .into_iter()
+    .map(|(w, z)| (w.to_owned(), z))
+    .collect()
+}
+
+#[test]
+fn difficulty_bands() {
+    assert_eq!(difficulty(None), None);
+    assert_eq!(difficulty(Some(4.25)), None);
+    assert_eq!(difficulty(Some(4.2)), Some(5));
+    assert_eq!(difficulty(Some(3.5)), Some(4));
+    assert_eq!(difficulty(Some(3.0)), Some(3));
+    assert_eq!(difficulty(Some(2.5)), Some(2));
+    assert_eq!(difficulty(Some(1.8)), Some(1));
+}
+
+#[test]
+fn phrase_zipf_is_dominated_by_its_rarest_word() {
+    let z = zipf(&freq(), "kick the bucket").unwrap();
+    assert!((3.7..3.9).contains(&z), "{z}");
+    assert_eq!(zipf(&freq(), "kick the pail"), None);
+}
+
+#[test]
+fn short_glosses() {
+    assert_eq!(
+        short_def("Gloomy, mournful or dismal, especially to an exaggerated degree."),
+        "Gloomy"
+    );
+    assert_eq!(
+        short_def("Of acute discernment; having keen insight; mentally perceptive."),
+        "Of acute discernment"
+    );
+    assert_eq!(
+        short_def("The act of conversing; also, an instance of it."),
+        "The act of conversing"
+    );
+    assert_eq!(
+        short_def("Any well-bred, well-mannered, kind-hearted man."),
+        "Any well-bred, well-mannered, kind-hearted man"
+    );
+    assert_eq!(
+        short_def("A large mammal (family Ursidae) with shaggy fur."),
+        "A large mammal with shaggy fur"
+    );
+    assert_eq!(
+        short_def("An open, horse-drawn carriage with two wheels."),
+        "An open, horse-drawn carriage with two wheels"
+    );
+}
+
+#[test]
+fn builds_a_lexicon_from_kaikki() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("ww.sqlite");
+    let jsonl = include_bytes!("sample.jsonl");
+    let stats = build(&jsonl[..], &freq(), &out, "test").unwrap();
+    assert_eq!(stats.entries, 22);
+    let lex = Lexicon::open(&out).unwrap();
+    assert!(lex.version.starts_with("test+"), "{}", lex.version);
+    // the build fingerprint is deterministic
+    let again = dir.path().join("again.sqlite");
+    build(&jsonl[..], &freq(), &again, "test").unwrap();
+    assert_eq!(Lexicon::open(&again).unwrap().version, lex.version);
+
+    let lug = lex.get("lugubrious").unwrap();
+    assert_eq!((lug.pos.as_str(), lug.difficulty), ("adjective", 1));
+    assert_eq!(lex.get("perspicacious").unwrap().difficulty, 1);
+    // phrase, and its inflections
+    let kick = lex.get("kicked the bucket").unwrap();
+    assert_eq!(
+        (kick.lemma.as_str(), kick.difficulty),
+        ("kick the bucket", 5)
+    );
+    assert_eq!(lex.max_words, 3);
+    // the main "bear" verb (carry, many senses) beats the stock-market etymology
+    let bore = lex.get("borne").unwrap();
+    assert_eq!((bore.lemma.as_str(), bore.pos.as_str()), ("bear", "verb"));
+    // a form maps to the richer entry: "bore" (past of bear) over the one-sense tidal bore
+    assert_eq!(lex.get("bore").unwrap().lemma, "bear");
+    // too common, proper nouns, form-of only, obsolete forms: absent
+    for w in [
+        "take",
+        "took",
+        "house",
+        "ran",
+        "bath's",
+        "beare",
+        "more lugubrious",
+    ] {
+        assert!(lex.get(w).is_none(), "{w}");
+    }
+    assert!(lex.senses().iter().all(|s| s.lemma != "Bath"));
+}
+
+#[test]
+fn reads_wordfreq_cbpack() {
+    use rmpv::Value;
+    let header = Value::Map(vec![
+        (Value::from("format"), Value::from("cB")),
+        (Value::from("version"), Value::from(1)),
+    ]);
+    let mut arr = vec![header];
+    for i in 0..=300 {
+        arr.push(Value::Array(match i {
+            200 => vec![Value::from("the")],
+            300 => vec![Value::from("bucket"), Value::from("pail")],
+            _ => vec![],
+        }));
+    }
+    let mut raw = Vec::new();
+    rmpv::encode::write_value(&mut raw, &Value::Array(arr)).unwrap();
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    gz.write_all(&raw).unwrap();
+    let f = load_wordfreq(&gz.finish().unwrap()[..]).unwrap();
+    assert_eq!(f["the"], 7.0);
+    assert_eq!(f["pail"], 6.0);
+    assert_eq!(f.len(), 3);
+}
+
+#[test]
+fn dated_spellings_are_hinted_with_the_modern_word() {
+    let mut f = freq();
+    f.insert("connexion".into(), 2.3);
+    let e: serde_json::Value = serde_json::from_str(
+        r#"{"word":"connexion","pos":"noun","lang_code":"en","senses":[
+            {"tags":["UK"],"glosses":["Dated spelling of connection."]}]}"#,
+    )
+    .unwrap();
+    let s = deckle_wordwise_build::sense_from_entry(&e, &f).unwrap();
+    assert_eq!(s.short_def, "connection");
+    assert_eq!(s.full_def, "Dated spelling of connection");
+}

@@ -52,11 +52,21 @@ export default function BookRowView({ book, busy, plan, onOverride, onToggleRepo
         {book.shipped && (
           <div className="shipped" title={book.shipped.reason}>
             {book.shipped.cde} · {book.shipped.reason}
+          </div>
+        )}
+        {(book.xray || book.wordWise) && (
+          <div className="shipped">
             {book.xray && (
               <>
-                {" "}
-                · X-Ray: {book.xray.people} people, {book.xray.terms} terms (
+                X-Ray: {book.xray.people} people, {book.xray.terms} terms (
                 {book.xray.source === "llm" ? "LLM" : book.xray.source === "wikipedia" ? "Wikipedia" : "basic"})
+              </>
+            )}
+            {book.xray && book.wordWise && " · "}
+            {book.wordWise && (
+              <>
+                Word Wise: {book.wordWise.hints.toLocaleString()} hints (level {book.wordWise.level},{" "}
+                {book.wordWise.dictionary === "device" ? "Kindle's dictionary" : "Deckle's dictionary"})
               </>
             )}
           </div>

@@ -162,6 +162,16 @@ pub enum Command {
         /// Wikipedia summaries for X-Ray terms (network).
         #[arg(long)]
         wikipedia: bool,
+        /// Word Wise sidecar for EBOK books: `auto` (default) or `off`. The first use downloads
+        /// Deckle's Word Wise database (about 12 MB) unless `--wordwise-db` is given.
+        #[arg(long = "word-wise", value_enum, default_value_t = XRayArg::Auto)]
+        word_wise: XRayArg,
+        /// Highest Word Wise difficulty to hint, 1 (rarest words only) to 5 (all).
+        #[arg(long = "word-wise-level", default_value_t = 5, value_parser = clap::value_parser!(u8).range(1..=5))]
+        word_wise_level: u8,
+        /// A local Word Wise database instead of the cached download.
+        #[arg(long = "wordwise-db")]
+        wordwise_db: Option<PathBuf>,
         #[arg(long)]
         keep_work_dir: bool,
     },
