@@ -7,7 +7,7 @@ says whether `system/thumbnails` is writable over that transport, which decides 
 | Model | Firmware | Transport | Thumbnails writable | Tested | Result |
 |---|---|---|---|---|---|
 | Kindle Paperwhite (owner's, generation TBD) | TBD | TBD (mass storage if pre-2024, MTP if 2024) | TBD | not yet | pending M1 device check |
-| Kindle Scribe (2024) | TBD | MTP only | no | 2026-10-19 | Spike 3 write: EBOK KFX + X-Ray `.sdr` delivered by the CLI (book opening on the device still to confirm). `system/` is not exposed over MTP, so Word Wise is skipped with a warning. A USB reset on close drops it off the bus until replugged, so Deckle doesn't reset |
+| Kindle Scribe (2024) | TBD | MTP only | no | 2026-10-19 | Spike 3 write: EBOK KFX + X-Ray `.sdr` delivered by the CLI (book opening on the device still to confirm). `system/` is not exposed over MTP: with `kll.en.en.klld` staged at `documents/deckle/` (copied on the device by a scriptlet), Word Wise shipped 3815 hints against the device dictionary; without it Word Wise is skipped with a warning. A USB reset on close drops it off the bus until replugged, so Deckle doesn't reset |
 | Simulated mass-storage Kindle (FAT32 disk image with `documents/`, `system/thumbnails`) | n/a | mass storage | yes | 2026-10-19 | EBOK + thumbnail + restore copy delivered by CLI and GUI; M4: X-Ray + Word Wise sidecars and Deckle's `system/kll/kll.en.zh.klld` delivered by the GUI, dictionary not rewritten on a second send |
 
 ## Spikes 2 and 3 (M2, need the Scribe)
