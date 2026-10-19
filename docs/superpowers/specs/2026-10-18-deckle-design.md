@@ -79,7 +79,8 @@ so the research that went into it stops being re-derived on MobileRead every yea
   at first connect) and Kindle Scribe 2024 (MTP-only, no writable `system/` folder). Firmware
   5.16+ assumed; the app records firmware per device and warns outside tested ranges.
 - **Reference tooling to study, not ship:** Calibre KFX Output (closed, Previewer-driven),
-  KFX Input/kfxlib (GPL-3, KFX container reader), kfxgen (GPL-3, pure-Python KFX writer),
+  KFX Input/kfxlib (GPL-3; contains the complete KPF→monolithic-KFX conversion the Output
+  plugin wraps, including approximate page numbers; our oracle), kfxgen (GPL-3, pure-Python KFX writer),
   WordDumb (GPL-3, X-Ray/Word Wise sidecar generator), kindle-cli (MIT, Go, PDOC/cover
   behaviour), KCC (cover thumbnail handling).
 
@@ -227,10 +228,13 @@ real implementation.
    `pride-and-prejudice.epub` → 47 MB KPF, ET Supported, 38 s), repackage, sideload, confirm
    Enhanced Typesetting is active (Aa menu shows it) and the book opens and paginates.
    **Time box: three working sessions.** Kill criterion: no device-accepted KFX by the end of
-   the third. Pivot: promote an **AZW3 (KF8) "Standard typography" fallback into v1** (port of
-   kindle-cli's approach), keep the KFX path as an experimental flag, and re-scope goal 1 to
-   "KFX when the repackager works, AZW3 otherwise, always disclosed". The product never has
-   zero output.
+   the third. Update 2026-10-18: the whole KPF→KFX path (KDF reader, fix-ups, container
+   writer) exists in GPL-3 Python as kfxlib inside the KFX Input plugin, and it produced a
+   KFX from Previewer 4 output in one second; those files are the goldens in `fixtures/`, so
+   the Rust port has a byte-exact oracle. Pivot if the port still misses the box: ship an
+   **embedded Python runtime (python-build-standalone) + kfxlib** behind the same Rust
+   interface. That keeps Enhanced Typesetting and the no-user-installed-interpreter rule;
+   an AZW3 fallback is no longer the pivot.
 2. **Real ASIN on the Scribe.** Sideload an EBOK KFX stamped with a real ASIN plus our X-Ray
    sidecar. Confirm: cover appears, X-Ray opens and shows *our* entities, nothing gets replaced
    or deleted by the device after a sync. Decides whether the "matched" branch of §5 exists.
