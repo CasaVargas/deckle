@@ -67,6 +67,11 @@ first time you use Word Wise on a store book), so they look exactly like a store
 without it gets Deckle's dictionary, installed once: set **Word Wise → Language → 中文
 (Chinese)** on the Kindle; the hints are English. Deckle never replaces Amazon's dictionaries.
 
+MTP Kindles such as the Scribe 2024 hide the folder that holds those dictionaries. On a
+jailbroken one, copy `system/kll/kll.en.en.klld` to `documents/deckle/` once with KOReader's file
+manager and Deckle uses it; otherwise Word Wise is skipped on that Kindle (the book and X-Ray
+still ship).
+
 ## Command line
 
 ```sh

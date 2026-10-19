@@ -226,6 +226,60 @@ fn a_kindle_with_its_own_dictionary_gets_amazon_sense_ids_and_no_install() {
 }
 
 #[test]
+fn a_hidden_system_folder_uses_the_staged_kindle_dictionary_and_installs_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = make_db(dir.path(), "v");
+    let staged = dir.path().join("staged.klld");
+    amazon_klld(&staged);
+    let dicts = DeviceDicts {
+        kindle_en: Some(std::fs::read(&staged).unwrap()),
+        zh_slot: Slot::Hidden,
+    };
+    let out = build(
+        "B0X",
+        "a",
+        &runs(),
+        &db,
+        false,
+        &opts(&db, dir.path(), 5),
+        &dicts,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(out.summary.dictionary, "device");
+    assert_eq!(gloss_rows(&out.bytes), vec![(1014, 70001), (1026, 80001)]);
+    assert!(out.dictionary_file.is_none());
+}
+
+#[test]
+fn a_hidden_system_folder_without_a_staged_copy_says_where_to_put_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = make_db(dir.path(), "v");
+    let build_with = |kindle_en: Option<Vec<u8>>| {
+        build(
+            "B0X",
+            "a",
+            &runs(),
+            &db,
+            false,
+            &opts(&db, dir.path(), 5),
+            &DeviceDicts {
+                kindle_en,
+                zh_slot: Slot::Hidden,
+            },
+        )
+        .unwrap_err()
+    };
+    let missing = build_with(None);
+    assert!(
+        missing.contains("documents/deckle/kll.en.en.klld"),
+        "{missing}"
+    );
+    let broken = build_with(Some(b"not sqlite".to_vec()));
+    assert!(broken.contains("copy it again"), "{broken}");
+}
+
+#[test]
 fn an_unreadable_kindle_dictionary_falls_back_to_deckles_with_a_warning() {
     let dir = tempfile::tempdir().unwrap();
     let db = make_db(dir.path(), "v");

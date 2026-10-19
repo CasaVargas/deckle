@@ -163,7 +163,12 @@ pub enum Slot {
     Deckle(String),
     /// Amazon's Chinese dictionary (or anyone else's): never replaced.
     Other,
+    /// Out of reach: the Kindle hides `system/` over MTP (Scribe 2024).
+    Hidden,
 }
+
+/// Where the reader stages a copy of the Kindle's `kll.en.en.klld` when MTP hides `system/`.
+pub const STAGED_KINDLE_EN_PATH: [&str; 3] = ["documents", "deckle", "kll.en.en.klld"];
 
 /// The dictionaries already on the target.
 #[derive(Clone, Debug)]
@@ -226,25 +231,23 @@ pub fn probe_on(conn: &mut Conn<'_>) -> Result<DeviceDicts, String> {
                 .first()
                 .ok_or("MTP: device reports no storage")?;
             let root = dev.content_root(storage).map_err(|e| m(&e))?;
-            // The Scribe 2024 hides `system/` over MTP: its dictionary can't be read and
-            // Deckle's can't be installed, so there is nothing for hints to point at.
-            if dev
+            // The Scribe 2024 hides `system/` over MTP: read the reader's staged copy instead.
+            let hidden = dev
                 .find_child(storage, root, "system")
                 .map_err(|e| m(&e))?
-                .is_none()
-            {
-                return Err(
-                    "this Kindle doesn't expose its system folder over MTP, where Word \
-                            Wise dictionaries live"
-                        .into(),
-                );
-            }
+                .is_none();
             let mut get = |parts: &[&str]| -> Result<Option<Vec<u8>>, String> {
                 match dev.find_path(storage, root, parts).map_err(|e| m(&e))? {
                     Some(h) => dev.get_object(h).map(Some).map_err(|e| m(&e)),
                     None => Ok(None),
                 }
             };
+            if hidden {
+                return Ok(DeviceDicts {
+                    kindle_en: get(&STAGED_KINDLE_EN_PATH)?,
+                    zh_slot: Slot::Hidden,
+                });
+            }
             let kindle_en = get(&klld::KINDLE_EN_PATH)?;
             let zh = get(&klld::DEVICE_PATH)?;
             Ok(DeviceDicts {
@@ -316,6 +319,20 @@ pub fn build(
                          book once (Wi-Fi on) so the Kindle downloads its English dictionary"
                             .into(),
                     );
+                }
+                Slot::Hidden => {
+                    let staged = STAGED_KINDLE_EN_PATH.join("/");
+                    return Err(if dicts.kindle_en.is_some() {
+                        format!(
+                            "the Kindle's dictionary copied to {staged} can't be read; copy it again"
+                        )
+                    } else {
+                        format!(
+                            "this Kindle hides its Word Wise dictionaries over USB. Copy \
+                             system/kll/kll.en.en.klld to {staged} once (KOReader's file manager \
+                             on a jailbroken Kindle)"
+                        )
+                    });
                 }
                 Slot::Deckle(v) if *v == lexicon.version => false,
                 _ => true,
