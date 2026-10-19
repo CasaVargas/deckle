@@ -4,6 +4,13 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { BookRow, DeviceRow, PlanRow, PreviewerStatus, ProgressEvent, RunTarget, Settings } from "./types";
 
+export interface RunRequest {
+  id: string;
+  path: string;
+  cde: string | null;
+  asin: string | null;
+}
+
 export const api = {
   appVersion: () => invoke<string>("app_version"),
   takePreloadedBooks: () => invoke<string[]>("take_preloaded_books"),
@@ -13,9 +20,9 @@ export const api = {
   previewerStatus: () => invoke<PreviewerStatus>("previewer_status"),
   getSettings: () => invoke<Settings>("get_settings"),
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
-  runBooks: (books: { id: string; path: string; cde: string | null }[], target: RunTarget) =>
+  runBooks: (books: RunRequest[], target: RunTarget) =>
     invoke<void>("run_books", { books, target }),
-  planBooks: (books: { id: string; path: string; cde: string | null }[], target: RunTarget) =>
+  planBooks: (books: RunRequest[], target: RunTarget) =>
     invoke<PlanRow[]>("plan_books", { books, target }),
   setDeviceOptions: (key: string, cdeOverride: "pdoc" | "ebok" | null, verifiedRealAsin: boolean) =>
     invoke<void>("set_device_options", { key, cdeOverride, verifiedRealAsin }),

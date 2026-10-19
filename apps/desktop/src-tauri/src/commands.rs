@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use base64::Engine;
-use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, decide};
+use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, decide, manual_asin};
 use deckle_core::deliver::{Target, detect_mass_storage};
 use deckle_core::devices::{DeviceRegistry, Seen, TransportKind, seen_mass_storage};
 use deckle_core::inspect::inspect;
@@ -91,6 +91,9 @@ pub struct RunRequest {
     pub path: String,
     /// Per-book override of the settings' cde (`pdoc` | `ebok`).
     pub cde: Option<String>,
+    /// The book's Amazon ASIN, typed by the owner (design §3).
+    #[serde(default)]
+    pub asin: Option<String>,
 }
 
 /// Emitted as `book-progress` once per stage and once at the end of each book.
@@ -215,24 +218,29 @@ pub struct PlanRow {
     pub reason: String,
 }
 
+/// `ids`: (book id, per-book cde override, typed ASIN).
 pub fn plan_rows(
-    ids: &[(String, Option<String>)],
+    ids: &[(String, Option<String>, Option<String>)],
     class: &DeviceClass,
     device_override: Option<&str>,
     verified: bool,
     settings: &Settings,
 ) -> Vec<PlanRow> {
     ids.iter()
-        .map(|(id, book_override)| {
+        .map(|(id, book_override, asin)| {
             let user = match effective_override(book_override.as_deref(), device_override, settings)
             {
                 Some("ebok") => Override::PreferFeatures,
                 Some("pdoc") => Override::PreferCover,
                 _ => Override::None,
             };
-            // Matching happens at run time; the badge assumes no match yet.
-            let _ = verified;
-            let d: Decision = decide(class, &MatchResult::None, user);
+            // Open Library matching happens at run time; the badge assumes no match yet, but a
+            // typed ASIN is known now.
+            let matched = match asin.as_deref().map(manual_asin) {
+                Some(Ok(asin)) => MatchResult::Candidate { asin, verified },
+                _ => MatchResult::None,
+            };
+            let d: Decision = decide(class, &matched, user);
             PlanRow {
                 id: id.clone(),
                 cde: d.cde.as_str().to_lowercase(),
@@ -521,7 +529,7 @@ pub fn run_books_with(
             cde_override: override_str.map(cde_from),
             amazon_match: settings.amazon_match,
             verified_real_asin: verified,
-            asin: None,
+            asin: b.asin.clone(),
             pages: if settings.pages_auto {
                 Some(None)
             } else {
@@ -654,9 +662,9 @@ pub fn plan_books(
             )
         }
     };
-    let ids: Vec<(String, Option<String>)> = books
+    let ids: Vec<(String, Option<String>, Option<String>)> = books
         .iter()
-        .map(|b| (b.id.clone(), b.cde.clone()))
+        .map(|b| (b.id.clone(), b.cde.clone(), b.asin.clone()))
         .collect();
     let settings = load_settings_from(&state.settings_file);
     plan_rows(
@@ -778,12 +786,21 @@ mod tests {
     fn plan_rows_follow_the_cover_rule_and_overrides() {
         let auto = Settings::default();
         let ids = vec![
-            ("a".to_string(), None),
-            ("b".to_string(), Some("ebok".to_string())),
+            ("a".to_string(), None, None),
+            ("b".to_string(), Some("ebok".to_string()), None),
         ];
         let rows = plan_rows(&ids, &DeviceClass::Mtp, None, false, &auto);
         assert_eq!(rows[0].cde, "pdoc");
         assert_eq!(rows[1].cde, "ebok");
+        // a typed ASIN with "Prefer features": the Kindle fetches the store cover
+        let typed = [(
+            "c".to_string(),
+            Some("ebok".to_string()),
+            Some("b0fxyz1234".to_string()),
+        )];
+        let rows = plan_rows(&typed, &DeviceClass::Mtp, None, false, &auto);
+        assert_eq!(rows[0].cde, "ebok");
+        assert!(rows[0].reason.contains("B0FXYZ1234") && !rows[0].reason.contains("grey"));
         let rows = plan_rows(
             &ids,
             &DeviceClass::MassStorage {
@@ -934,6 +951,7 @@ mod tests {
                     .to_string_lossy()
                     .into_owned(),
                 cde: None,
+                asin: None,
             }],
             &target,
             &settings,

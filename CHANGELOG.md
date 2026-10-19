@@ -11,6 +11,8 @@
   where its dictionaries live; the book and X-Ray still ship. Delivery errors name the file.
 - Word Wise on MTP Kindles reads a copy of the Kindle's dictionary staged at
   `documents/deckle/kll.en.en.klld`.
+- Manual Amazon ASIN per book (app: ⋯ → Set Amazon ASIN…; CLI: `run --asin`). With EBOK the
+  Kindle fetches the store cover, so MTP Kindles get covers with X-Ray and Word Wise.
 - Word Wise hints show on the Kindle: English books that get Word Wise are tagged `en` (not
   `en-US`), without which every hint was a blank gap; hints never point at Amazon's
   definitionless placeholder senses.

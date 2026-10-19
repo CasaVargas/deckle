@@ -28,7 +28,7 @@ pub struct RunOptions {
     pub amazon_match: bool,
     /// Spike 2 passed on this device: real ASINs keep our sidecars.
     pub verified_real_asin: bool,
-    /// Explicit ASIN; `None` generates a recognizable one from the book's identifiers.
+    /// An ASIN the owner typed (design §3); replaces Match. `None`: Match, else generated.
     pub asin: Option<String>,
     /// `None`: no page list; `Some(None)`: auto; `Some(Some(n))`: n pages.
     pub pages: Option<Option<u32>>,
@@ -209,7 +209,21 @@ pub fn run_with_progress(
                     thumbnails_writable: false
                 }
         );
-    let matched = if needs_match {
+    let manual = match opts.asin.as_deref().map(crate::cover_rule::manual_asin) {
+        Some(Err(e)) => {
+            report.error = Some(e);
+            return report;
+        }
+        Some(Ok(a)) => Some(a),
+        None => None,
+    };
+    // A typed ASIN replaces Match (design §3).
+    let matched = if let Some(asin) = manual {
+        MatchResult::Candidate {
+            asin,
+            verified: opts.verified_real_asin,
+        }
+    } else if needs_match {
         on_stage("match");
         let t = Instant::now();
         let outcome = match_book(&info, &mut crate::matcher::http_fetch);
@@ -234,10 +248,9 @@ pub fn run_with_progress(
         MatchResult::None
     };
     let decision = decide(&device_class, &matched, user);
-    let asin = match (&opts.asin, &decision.asin) {
-        (Some(a), _) => a.clone(),
-        (None, AsinChoice::Real(a)) => a.clone(),
-        (None, AsinChoice::Generated) => generate_asin(&asin_seed(&info)),
+    let asin = match &decision.asin {
+        AsinChoice::Real(a) => a.clone(),
+        AsinChoice::Generated => generate_asin(&asin_seed(&info)),
     };
     let cde_type = decision.cde;
     report.decision = Some(decision.clone());

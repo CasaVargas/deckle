@@ -147,6 +147,10 @@ pub enum Command {
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,
+        /// The book's Amazon ASIN, e.g. the Kindle edition's B0… from its Amazon page; replaces
+        /// `--match`. With `--cde ebok` the Kindle fetches the store cover. One EPUB only.
+        #[arg(long)]
+        asin: Option<String>,
         /// X-Ray sidecar for EBOK books: `auto` (default) or `off`.
         #[arg(long, value_enum, default_value_t = XRayArg::Auto)]
         xray: XRayArg,

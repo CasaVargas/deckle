@@ -292,6 +292,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             previewer: pv,
             amazon_match,
             verified_asin,
+            asin,
             xray,
             llm,
             llm_model,
@@ -305,6 +306,13 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             if epubs.is_empty() {
                 return Ok(ExitCode::from(EXIT_USAGE));
             }
+            if asin.is_some() && epubs.len() > 1 {
+                return Err("--asin names one book's edition: pass a single EPUB".into());
+            }
+            let asin = asin
+                .as_deref()
+                .map(deckle_core::cover_rule::manual_asin)
+                .transpose()?;
             let pages = cli::parse_pages(pages.as_deref())?;
             // Fail before any work (and before touching the target) when Previewer is missing.
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
@@ -314,7 +322,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 cde_override: cde.to_override(),
                 amazon_match,
                 verified_real_asin: verified_asin,
-                asin: None,
+                asin,
                 pages,
                 target,
                 previewer: Some(located.path),

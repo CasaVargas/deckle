@@ -30,6 +30,8 @@ export interface BookState extends BookRow {
   wordWise: WordWiseSummary | null;
   /** Per-book override of the settings' cde. */
   cdeOverride: "pdoc" | "ebok" | null;
+  /** The book's Amazon ASIN, typed by the owner: EBOK then gets the store cover. */
+  asin: string | null;
   showReport: boolean;
 }
 

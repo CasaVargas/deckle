@@ -9,6 +9,7 @@ interface Props {
   /** What the cover rule will do on the current target (undefined until planned). */
   plan?: PlanRow;
   onOverride: (id: string, cde: "pdoc" | "ebok" | null) => void;
+  onAsin: (id: string, asin: string | null) => void;
   onToggleReport: (id: string) => void;
   onRemove: (id: string) => void;
   onReveal: (path: string) => void;
@@ -23,8 +24,19 @@ function badge(book: BookState, plan: PlanRow | undefined) {
   return { cls: "badge cover", text: "Cover", title: plan.reason };
 }
 
-export default function BookRowView({ book, busy, plan, onOverride, onToggleReport, onRemove, onReveal }: Props) {
+const ASIN = /^[A-Z0-9]{10}$/;
+
+export default function BookRowView({ book, busy, plan, onOverride, onAsin, onToggleReport, onRemove, onReveal }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
+  /** The ASIN field's text while it is open; `null` when closed. */
+  const [asinDraft, setAsinDraft] = useState<string | null>(null);
+  const draft = (asinDraft ?? "").trim().toUpperCase();
+  const draftValid = ASIN.test(draft);
+  const saveAsin = () => {
+    if (!draftValid) return;
+    onAsin(book.id, draft);
+    setAsinDraft(null);
+  };
   const effectiveCde = book.cdeOverride ?? plan?.cde ?? "pdoc";
   const b = badge(book, plan);
   const stageIndex = book.stage ? STAGES.indexOf(book.stage as (typeof STAGES)[number]) : -1;
@@ -100,7 +112,40 @@ export default function BookRowView({ book, busy, plan, onOverride, onToggleRepo
         <div className="byline">
           {book.authors || <em>Unknown author</em>}
           {book.series && <span className="series"> · {book.series}</span>}
+          {book.asin && <span className="series"> · ASIN {book.asin}</span>}
         </div>
+        {asinDraft !== null && (
+          <form
+            className="asin-edit"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveAsin();
+            }}
+          >
+            <input
+              type="text"
+              autoFocus
+              value={asinDraft}
+              onChange={(e) => setAsinDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Escape" && setAsinDraft(null)}
+              placeholder="B0… from the book's Amazon page"
+              aria-label="Amazon ASIN"
+              spellCheck={false}
+              maxLength={12}
+            />
+            <button type="submit" className="ghost" disabled={!draftValid}>
+              Save
+            </button>
+            <button type="button" className="ghost" onClick={() => setAsinDraft(null)}>
+              Cancel
+            </button>
+            <div className="asin-hint">
+              {asinDraft.trim() && !draftValid
+                ? "An ASIN is 10 letters or digits."
+                : "With Prefer features (EBOK), the Kindle fetches Amazon's cover for this edition."}
+            </div>
+          </form>
+        )}
         {statusLine}
         {book.showReport && (
           <div className="report">
@@ -138,6 +183,12 @@ export default function BookRowView({ book, busy, plan, onOverride, onToggleRepo
             </button>
             {book.cdeOverride && (
               <button onClick={() => { onOverride(book.id, null); setMenuOpen(false); }}>Use default</button>
+            )}
+            <button onClick={() => { setAsinDraft(book.asin ?? ""); setMenuOpen(false); }} disabled={book.mode === "error"}>
+              {book.asin ? "Change Amazon ASIN…" : "Set Amazon ASIN…"}
+            </button>
+            {book.asin && (
+              <button onClick={() => { onAsin(book.id, null); setMenuOpen(false); }}>Clear ASIN</button>
             )}
             <button onClick={() => { onToggleReport(book.id); setMenuOpen(false); }}>
               {book.showReport ? "Hide report" : "Show report"}
