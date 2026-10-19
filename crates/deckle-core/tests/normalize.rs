@@ -132,3 +132,66 @@ fn missing_nav_gets_a_synthesized_toc_from_headings() {
     assert_eq!(info.toc.len(), info.spine.len());
     assert_eq!(info.toc[1].title, "Chapter Two");
 }
+
+/// Sigil-style layout: OEBPS/Text, OEBPS/Images, OEBPS/Styles, with a cover XHTML page.
+fn nested_epub() -> tempfile::NamedTempFile {
+    let out = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let mut z = zip::ZipWriter::new(std::fs::File::create(out.path()).unwrap());
+    let stored =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let deflated = zip::write::SimpleFileOptions::default();
+    z.start_file("mimetype", stored).unwrap();
+    z.write_all(b"application/epub+zip").unwrap();
+    z.start_file("META-INF/container.xml", deflated).unwrap();
+    z.write_all(br#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#).unwrap();
+    z.start_file("OEBPS/content.opf", deflated).unwrap();
+    z.write_all(br#"<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">urn:uuid:nested-0001</dc:identifier><dc:title>Nested</dc:title><dc:creator>A. Writer</dc:creator><dc:language>en</dc:language><meta name="cover" content="cover"/></metadata><manifest><item id="nav" href="Text/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="cover" href="Images/cover.png" media-type="image/png"/><item id="css" href="Styles/style.css" media-type="text/css"/><item id="coverpage" href="Text/cover.xhtml" media-type="application/xhtml+xml"/><item id="c0" href="Text/c0.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="coverpage"/><itemref idref="c0"/></spine></package>"#).unwrap();
+    z.start_file("OEBPS/Text/nav.xhtml", deflated).unwrap();
+    z.write_all(br#"<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>nav</title></head><body><nav epub:type="toc"><ol><li><a href="c0.xhtml">Chapter One</a></li></ol></nav></body></html>"#).unwrap();
+    z.start_file("OEBPS/Text/cover.xhtml", deflated).unwrap();
+    z.write_all(br#"<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink"><head><title>Cover</title><link rel="stylesheet" href="../Styles/style.css"/></head><body><div class="cover"><img src="../Images/cover.png" alt="cover"/><svg xmlns="http://www.w3.org/2000/svg"><image xlink:href="../Images/cover.png"/></svg></div></body></html>"#).unwrap();
+    z.start_file("OEBPS/Text/c0.xhtml", deflated).unwrap();
+    z.write_all(br#"<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>c0</title></head><body><h1>Chapter One</h1><p>Text.</p></body></html>"#).unwrap();
+    z.start_file("OEBPS/Styles/style.css", deflated).unwrap();
+    z.write_all(b".cover { background: url(../Images/cover.png) no-repeat; } .x { background-image: url('../Images/cover.png'); }").unwrap();
+    z.start_file("OEBPS/Images/cover.png", deflated).unwrap();
+    z.write_all(&png(600, 900)).unwrap();
+    z.finish().unwrap();
+    out
+}
+
+#[test]
+fn nested_layout_cover_rename_rewrites_every_reference() {
+    let f = nested_epub();
+    let out = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let report = normalize(f.path(), out.path(), &NormalizeOptions::default()).unwrap();
+    assert!(report.cover_converted_to_jpeg);
+    assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+    let mut z = zip::ZipArchive::new(std::fs::File::open(out.path()).unwrap()).unwrap();
+    assert!(
+        z.by_name("OEBPS/Images/cover.png").is_err(),
+        "old cover entry must be gone"
+    );
+    assert!(z.by_name("OEBPS/Images/cover.jpg").is_ok());
+    let cover_page = String::from_utf8(read_entry(out.path(), "OEBPS/Text/cover.xhtml")).unwrap();
+    assert!(!cover_page.contains("cover.png"), "{cover_page}");
+    assert_eq!(
+        cover_page.matches("../Images/cover.jpg").count(),
+        2,
+        "{cover_page}"
+    );
+    let css = String::from_utf8(read_entry(out.path(), "OEBPS/Styles/style.css")).unwrap();
+    assert!(!css.contains("cover.png"), "{css}");
+    assert_eq!(css.matches("../Images/cover.jpg").count(), 2, "{css}");
+    let info = inspect(out.path()).unwrap();
+    assert_eq!(info.cover_href.as_deref(), Some("Images/cover.jpg"));
+    // and no reference anywhere in the book still points at a missing file
+    for name in [
+        "OEBPS/Text/nav.xhtml",
+        "OEBPS/Text/c0.xhtml",
+        "OEBPS/content.opf",
+    ] {
+        let t = String::from_utf8(read_entry(out.path(), name)).unwrap();
+        assert!(!t.contains("cover.png"), "{name}: {t}");
+    }
+}

@@ -279,7 +279,7 @@ pub fn normalize(
         }
     }
 
-    // XHTML: scripts, remote resources, renamed cover references.
+    // XHTML: scripts and remote resources.
     let script_re = Regex::new(r"(?is)<script\b[^>]*/>|<script\b[^>]*>.*?</script>").unwrap();
     let remote_self_re = Regex::new(r#"(?is)<(img|link|source|iframe|object|embed|audio|video|track)\b[^>]*\b(?:src|href|data)\s*=\s*["']https?://[^"']*["'][^>]*/>"#).unwrap();
     let remote_pair_re = Regex::new(r#"(?is)<(img|link|source|iframe|object|embed|audio|video|track)\b[^>]*\b(?:src|href|data)\s*=\s*["']https?://[^"']*["'][^>]*>.*?</(?:img|link|source|iframe|object|embed|audio|video|track)>"#).unwrap();
@@ -306,13 +306,41 @@ pub fn normalize(
             text = remote_pair_re.replace_all(&text, "").into_owned();
             report.remote_refs_removed += n as u32;
         }
-        for (old, new) in &renames {
-            text = text
-                .replace(&format!("\"{old}\""), &format!("\"{new}\""))
-                .replace(&format!("'{old}'"), &format!("'{new}'"));
-        }
         if text != before {
             files.insert(name.clone(), text.into_bytes());
+        }
+    }
+
+    // Renamed resources: rewrite every reference in XHTML, SVG and CSS, resolved against the
+    // referencing document's own location (publisher layouts nest Text/, Images/, Styles/).
+    if !renames.is_empty() {
+        let full_renames: Vec<(String, String)> = renames
+            .iter()
+            .map(|(o, n)| (join(&opf_dir, o), join(&opf_dir, n)))
+            .collect();
+        let text_like: Vec<String> = order
+            .iter()
+            .filter(|n| {
+                let lower = n.to_lowercase();
+                lower.ends_with(".xhtml")
+                    || lower.ends_with(".html")
+                    || lower.ends_with(".htm")
+                    || lower.ends_with(".svg")
+                    || lower.ends_with(".css")
+            })
+            .cloned()
+            .collect();
+        for name in text_like {
+            let Some(bytes) = files.get(&name) else {
+                continue;
+            };
+            let Ok(text) = String::from_utf8(bytes.clone()) else {
+                continue;
+            };
+            let rewritten = rewrite_references(&text, &name, &full_renames);
+            if rewritten != text {
+                files.insert(name.clone(), rewritten.into_bytes());
+            }
         }
     }
 
@@ -427,4 +455,68 @@ fn xml_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// Directory part of a zip entry name (`OEBPS/Text/x.xhtml` → `OEBPS/Text`).
+fn dir_of(name: &str) -> &str {
+    match name.rfind('/') {
+        Some(i) => &name[..i],
+        None => "",
+    }
+}
+
+/// Relative path from `from_dir` to `to` (both zip-style, `/`-separated).
+pub fn relative_path(from_dir: &str, to: &str) -> String {
+    let from: Vec<&str> = from_dir.split('/').filter(|p| !p.is_empty()).collect();
+    let to_parts: Vec<&str> = to.split('/').filter(|p| !p.is_empty()).collect();
+    let mut common = 0;
+    while common < from.len()
+        && common < to_parts.len().saturating_sub(1)
+        && from[common] == to_parts[common]
+    {
+        common += 1;
+    }
+    let mut out: Vec<String> = vec!["..".to_owned(); from.len() - common];
+    out.extend(to_parts[common..].iter().map(|s| (*s).to_owned()));
+    out.join("/")
+}
+
+/// Rewrites `src`/`href`/`xlink:href` attributes and CSS `url()` values in `text` (the content
+/// of zip entry `doc_name`) that resolve to a renamed entry.
+pub fn rewrite_references(text: &str, doc_name: &str, renames: &[(String, String)]) -> String {
+    let doc_dir = dir_of(doc_name);
+    let attr_re =
+        Regex::new(r#"(?i)\b(src|href|xlink:href)(\s*=\s*)(["'])([^"']*)(["'])"#).unwrap();
+    let url_re = Regex::new(r#"(?i)url\(\s*(['"]?)([^'")]+)(['"]?)\s*\)"#).unwrap();
+    let map_value = |value: &str| -> Option<String> {
+        if value.starts_with("http://")
+            || value.starts_with("https://")
+            || value.starts_with("data:")
+            || value.starts_with('#')
+        {
+            return None;
+        }
+        let (path, frag) = match value.split_once('#') {
+            Some((p, f)) => (p, Some(f)),
+            None => (value, None),
+        };
+        let resolved = join(doc_dir, &crate::epub::percent_decode(path));
+        let (_, new) = renames.iter().find(|(old, _)| *old == resolved)?;
+        let mut rel = relative_path(doc_dir, new);
+        if let Some(f) = frag {
+            rel.push('#');
+            rel.push_str(f);
+        }
+        Some(rel)
+    };
+    let text = attr_re.replace_all(text, |c: &regex::Captures| match map_value(&c[4]) {
+        Some(new) => format!("{}{}{}{}{}", &c[1], &c[2], &c[3], new, &c[5]),
+        None => c[0].to_owned(),
+    });
+    url_re
+        .replace_all(&text, |c: &regex::Captures| match map_value(c[2].trim()) {
+            Some(new) => format!("url({}{}{})", &c[1], new, &c[3]),
+            None => c[0].to_owned(),
+        })
+        .into_owned()
 }
