@@ -8,3 +8,14 @@ repository.workspace = true
 
 [dependencies]
 deckle-kfx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
+image.workspace = true
+csv.workspace = true
+tempfile.workspace = true
+deunicode.workspace = true
+
+[dev-dependencies]
