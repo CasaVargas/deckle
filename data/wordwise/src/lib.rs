@@ -11,9 +11,10 @@ use anyhow::{Context, Result, bail};
 use deckle_wordwise::lexicon::{create, normalize_form};
 use rusqlite::params;
 use serde_json::Value;
+use sha2::Digest;
 
 /// Zipf at or above this is too common to hint (and disables a surface form outright).
-pub const TOO_COMMON: f64 = 5.0;
+pub const TOO_COMMON: f64 = 4.25;
 
 /// Word → Zipf frequency from wordfreq's cBpack msgpack (`[header, bucket0, bucket1, …]`,
 /// bucket *i* holds words at −*i* centibels, Zipf = 9 − *i*/100).
@@ -66,12 +67,59 @@ pub fn difficulty(zipf: Option<f64>) -> Option<i64> {
         return None;
     }
     Some(match z {
-        z if z >= 4.25 => 5,
-        z if z >= 3.5 => 4,
+        z if z >= 3.75 => 5,
+        z if z >= 3.25 => 4,
         z if z >= 2.75 => 3,
         z if z >= 2.0 => 2,
         _ => 1,
     })
+}
+
+/// Ordering key for picking a sense: 0 for an everyday sense, more for marked ones.
+fn sense_penalty(sense: &Value) -> u8 {
+    const MARKED: &[&str] = &[
+        "archaic",
+        "dated",
+        "rare",
+        "historical",
+        "dialectal",
+        "slang",
+        "vulgar",
+        "derogatory",
+        "obsolete",
+        "nonstandard",
+    ];
+    const SPECIALIST: &[&str] = &[
+        "grammar",
+        "linguistics",
+        "physics",
+        "chemistry",
+        "mathematics",
+        "biology",
+        "medicine",
+        "law",
+        "computing",
+        "nautical",
+        "military",
+        "heraldry",
+        "music",
+        "card-games",
+        "sports",
+        "finance",
+        "business",
+        "botany",
+        "zoology",
+        "anatomy",
+        "geology",
+        "astronomy",
+    ];
+    let topics: Vec<&str> = sense
+        .get("topics")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    u8::from(tags(sense).iter().any(|t| MARKED.contains(t)))
+        + u8::from(topics.iter().any(|t| SPECIALIST.contains(t)))
 }
 
 /// An archaic, dated, literary or contracted spelling ("connexion", "o'er") is hinted with the
@@ -190,27 +238,39 @@ fn trim_stop(s: &str) -> String {
 /// the shortest `/` alternative.
 pub fn short_def(gloss: &str) -> String {
     let g = trim_stop(&strip_parens(gloss));
-    let g = g
+    // the first `;` part when it is short enough, else the shortest one that says something
+    // ("also" alone does not)
+    let parts: Vec<&str> = g
         .split(';')
         .map(str::trim)
-        .min_by_key(|s| s.len())
-        .unwrap_or("");
-    // first comma part, unless it is a dangling "An open" of "An open, horse-drawn carriage"
+        .filter(|p| p.chars().filter(|c| c.is_alphabetic()).count() >= 4)
+        .collect();
+    let g = match parts.first() {
+        Some(first) if first.chars().count() <= 50 => *first,
+        _ => parts.iter().copied().min_by_key(|s| s.len()).unwrap_or(""),
+    };
+    // first comma part, unless it dangles: "An open" of "An open, horse-drawn carriage", or the
+    // adjective list of "Any well-bred, well-mannered, kind-hearted man"
     let mut parts = g.split(',').map(str::trim);
     let mut acc = parts.next().unwrap_or("").to_owned();
+    let starts_with_determiner = acc.split_whitespace().next().is_some_and(|w| {
+        matches!(
+            w.to_lowercase().as_str(),
+            "a" | "an" | "the" | "any" | "some" | "one" | "each" | "every"
+        )
+    });
+    let mut last_words = acc.split_whitespace().count();
     for next in parts {
-        let words: Vec<&str> = acc.split_whitespace().collect();
-        let dangling = (words.len() <= 2
-            && words
-                .first()
-                .is_some_and(|w| matches!(w.to_lowercase().as_str(), "a" | "an" | "the")))
-            || words
+        let dangling = (starts_with_determiner && last_words <= 2)
+            || acc
+                .split_whitespace()
                 .last()
-                .is_some_and(|w| matches!(*w, "and" | "or" | "of" | "to"));
+                .is_some_and(|w| matches!(w, "and" | "or" | "of" | "to"));
         if !dangling {
             break;
         }
         acc = format!("{acc}, {next}");
+        last_words = next.split_whitespace().count();
     }
     let g = acc.as_str();
     let g = g
@@ -260,22 +320,19 @@ pub fn sense_from_entry(entry: &Value, freq: &HashMap<String, f64>) -> Option<Bu
                         && !tags(s).iter().any(|t| SKIP_SENSE_TAGS.contains(t))))
         })
         .collect();
-    let sense = *good.first()?;
+    // the first everyday sense: archaic, rare and specialist senses only when nothing else fits
+    let sense = *good.iter().min_by_key(|s| sense_penalty(s))?;
     let gloss = sense["glosses"].as_array()?.last()?.as_str()?;
+    if dated_target(sense).is_none() && gloss.contains("spelling of") {
+        return None; // "British standard spelling of behavior": a variant, not a meaning
+    }
     let full = trim_stop(gloss);
     let short = dated_target(sense).unwrap_or_else(|| short_def(gloss));
     if short.is_empty() || full.is_empty() {
         return None;
     }
-    let example = sense
-        .get("examples")
-        .and_then(Value::as_array)
-        .and_then(|ex| {
-            ex.iter()
-                .filter_map(|e| e.get("text").and_then(Value::as_str))
-                .find(|t| t.chars().count() <= 200)
-        })
-        .map(trim_stop);
+    // examples are not shown in Word Wise hints; leaving them out halves the dictionary
+    let example = None;
     let mut forms = vec![word.clone()];
     for f in entry
         .get("forms")
@@ -362,16 +419,17 @@ pub fn build(
         .into_iter()
         .filter(|s| !function_word.get(&s.lemma).copied().unwrap_or(false))
         .collect();
-    // form → (rank, sense index): the form being the lemma itself beats an inflection, then the
-    // entry with more senses, then the earlier one.
-    type Rank = (u8, std::cmp::Reverse<usize>, usize);
+    // form → (rank, sense index): the entry with more senses ("lady" over the poker term
+    // "ladies", "pass" over the adjective "passed"), then the form being the lemma itself,
+    // then the earlier entry.
+    type Rank = (std::cmp::Reverse<usize>, u8, usize);
     let mut best: HashMap<String, (Rank, usize)> = HashMap::new();
     for (i, s) in senses.iter().enumerate() {
         for f in &s.forms {
             if zipf(freq, f).is_some_and(|z| z >= TOO_COMMON) {
                 continue;
             }
-            let rank = (u8::from(f != &s.lemma), std::cmp::Reverse(s.weight), i);
+            let rank = (std::cmp::Reverse(s.weight), u8::from(f != &s.lemma), i);
             best.entry(f.clone())
                 .and_modify(|e| {
                     if rank < e.0 {
@@ -411,6 +469,28 @@ pub fn build(
             stats.forms += 1;
         }
     }
+    // a fingerprint of the rows: the app keys its cached dictionary and the device's installed
+    // one on it, since sense ids are only meaningful for this exact build
+    let build_id = {
+        let mut h = sha2::Sha256::new();
+        let mut st =
+            tx.prepare("SELECT id, lemma, pos, short_def, difficulty FROM senses ORDER BY id")?;
+        let mut rows = st.query([])?;
+        while let Some(r) = rows.next()? {
+            let row: (i64, String, String, String, i64) =
+                (r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?);
+            h.update(format!("{row:?}\n").as_bytes());
+        }
+        let d = h.finalize();
+        d[..6]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    };
+    tx.execute(
+        "INSERT INTO metadata VALUES ('build', ?1)",
+        params![build_id],
+    )?;
     tx.commit()?;
     conn.execute_batch("VACUUM; PRAGMA optimize;")?;
     Ok(stats)

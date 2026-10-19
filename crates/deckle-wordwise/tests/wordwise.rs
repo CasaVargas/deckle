@@ -190,6 +190,23 @@ fn matches_words_phrases_and_positions() {
 }
 
 #[test]
+fn names_are_not_hinted_even_at_a_sentence_start_or_after_mr() {
+    let dir = tempfile::tempdir().unwrap();
+    let lex = Lexicon::open(&make_db(dir.path())).unwrap();
+    // "Bath" is a town here: capitalized mid-sentence more often than lowercase
+    let runs = [
+        run(0, "Mr. Bath arrived. Bath was lugubrious."),
+        run(100, "They went to Bath. She saw Bath again."),
+        run(200, "Mr. Lugubrious is a lugubrious man. A lugubrious day."),
+    ];
+    let ids: Vec<(i64, i64)> = glosses(&runs, &lex, 5)
+        .iter()
+        .map(|g| (g.start, g.sense_id))
+        .collect();
+    assert_eq!(ids, vec![(27, 1), (220, 1), (238, 1)]);
+}
+
+#[test]
 fn level_filters_by_difficulty_and_falls_back_to_shorter_phrase() {
     let dir = tempfile::tempdir().unwrap();
     let lex = Lexicon::open(&make_db(dir.path())).unwrap();

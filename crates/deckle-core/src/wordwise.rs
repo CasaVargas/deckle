@@ -23,7 +23,7 @@ use deckle_wordwise::lexicon::Lexicon;
 pub const DB_FILE: &str = "deckle-wordwise-en-v1.sqlite";
 pub const DB_URL: &str = "https://github.com/prjoni99/deckle/releases/download/wordwise-v1/deckle-wordwise-en-v1.sqlite.gz";
 /// SHA-256 of the `.gz` at [`DB_URL`].
-pub const DB_SHA256: &str = "0f22ea625d247000fe4f2e487df10ffa88092f468f4ed53902090903937f5d13";
+pub const DB_SHA256: &str = "2fdc729af1a2411dd4706eda183cc7475e908816013a1d4ec1cb10b2bedc7c34";
 /// Points at a local database instead of the cached download.
 pub const DB_ENV: &str = "DECKLE_WORDWISE_DB";
 
@@ -131,6 +131,8 @@ fn hex(bytes: &[u8]) -> String {
 pub fn deckle_klld(db: &Path, cache_dir: &Path) -> Result<PathBuf, String> {
     let version = Lexicon::open(db).map_err(|e| e.to_string())?.version;
     let path = cache_dir.join(format!("kll.en.zh-{}.klld", sanitize(&version)));
+    // the marker inside the .klld is the same `version+build` string the device slot is
+    // compared against
     if klld::deckle_version(&path).as_deref() == Some(version.as_str()) {
         return Ok(path);
     }

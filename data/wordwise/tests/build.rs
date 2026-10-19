@@ -13,7 +13,7 @@ fn freq() -> HashMap<String, f64> {
         ("take", 5.6),
         ("took", 4.9),
         ("off", 6.0),
-        ("bear", 4.6),
+        ("bear", 4.0),
         ("bore", 3.9),
         ("bucket", 3.9),
         ("kick", 4.7),
@@ -33,9 +33,9 @@ fn freq() -> HashMap<String, f64> {
 #[test]
 fn difficulty_bands() {
     assert_eq!(difficulty(None), None);
-    assert_eq!(difficulty(Some(5.0)), None);
-    assert_eq!(difficulty(Some(4.99)), Some(5));
-    assert_eq!(difficulty(Some(4.0)), Some(4));
+    assert_eq!(difficulty(Some(4.25)), None);
+    assert_eq!(difficulty(Some(4.2)), Some(5));
+    assert_eq!(difficulty(Some(3.5)), Some(4));
     assert_eq!(difficulty(Some(3.0)), Some(3));
     assert_eq!(difficulty(Some(2.5)), Some(2));
     assert_eq!(difficulty(Some(1.8)), Some(1));
@@ -49,14 +49,22 @@ fn phrase_zipf_is_dominated_by_its_rarest_word() {
 }
 
 #[test]
-fn short_gloss_like_proficiency() {
+fn short_glosses() {
     assert_eq!(
         short_def("Gloomy, mournful or dismal, especially to an exaggerated degree."),
         "Gloomy"
     );
     assert_eq!(
         short_def("Of acute discernment; having keen insight; mentally perceptive."),
-        "having keen insight"
+        "Of acute discernment"
+    );
+    assert_eq!(
+        short_def("The act of conversing; also, an instance of it."),
+        "The act of conversing"
+    );
+    assert_eq!(
+        short_def("Any well-bred, well-mannered, kind-hearted man."),
+        "Any well-bred, well-mannered, kind-hearted man"
     );
     assert_eq!(
         short_def("A large mammal (family Ursidae) with shaggy fur."),
@@ -76,7 +84,11 @@ fn builds_a_lexicon_from_kaikki() {
     let stats = build(&jsonl[..], &freq(), &out, "test").unwrap();
     assert_eq!(stats.entries, 22);
     let lex = Lexicon::open(&out).unwrap();
-    assert_eq!(lex.version, "test");
+    assert!(lex.version.starts_with("test+"), "{}", lex.version);
+    // the build fingerprint is deterministic
+    let again = dir.path().join("again.sqlite");
+    build(&jsonl[..], &freq(), &again, "test").unwrap();
+    assert_eq!(Lexicon::open(&again).unwrap().version, lex.version);
 
     let lug = lex.get("lugubrious").unwrap();
     assert_eq!((lug.pos.as_str(), lug.difficulty), ("adjective", 1));
@@ -85,14 +97,14 @@ fn builds_a_lexicon_from_kaikki() {
     let kick = lex.get("kicked the bucket").unwrap();
     assert_eq!(
         (kick.lemma.as_str(), kick.difficulty),
-        ("kick the bucket", 4)
+        ("kick the bucket", 5)
     );
     assert_eq!(lex.max_words, 3);
     // the main "bear" verb (carry, many senses) beats the stock-market etymology
     let bore = lex.get("borne").unwrap();
     assert_eq!((bore.lemma.as_str(), bore.pos.as_str()), ("bear", "verb"));
-    // a form that is a lemma itself maps to that lemma
-    assert_eq!(lex.get("bore").unwrap().lemma, "bore");
+    // a form maps to the richer entry: "bore" (past of bear) over the one-sense tidal bore
+    assert_eq!(lex.get("bore").unwrap().lemma, "bear");
     // too common, proper nouns, form-of only, obsolete forms: absent
     for w in [
         "take",

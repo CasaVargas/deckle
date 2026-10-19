@@ -43,7 +43,7 @@ pub struct Lexicon {
     forms: HashMap<String, u32>,
     /// Longest form in words (phrases like "take off" are 2).
     pub max_words: usize,
-    /// `metadata.version` (build date of the data).
+    /// `metadata.version`, plus `+<build>` when the database carries a build fingerprint.
     pub version: String,
 }
 
@@ -72,7 +72,12 @@ impl Lexicon {
         if format.as_deref() != Some(FORMAT) {
             return Err(LexiconError::Format(format));
         }
-        let version = meta("version").unwrap_or_default();
+        // `build` fingerprints the rows: sense ids are only valid for one build, so a rebuilt
+        // database with the same release version is still told apart.
+        let version = match (meta("version"), meta("build")) {
+            (Some(v), Some(b)) => format!("{v}+{b}"),
+            (v, _) => v.unwrap_or_default(),
+        };
         let mut senses = Vec::new();
         let mut index: HashMap<i64, u32> = HashMap::new();
         {

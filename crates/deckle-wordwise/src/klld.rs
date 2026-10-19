@@ -44,13 +44,17 @@ pub fn write_from_db(db: &Path, out: &Path) -> Result<(), KlldError> {
         std::fs::create_dir_all(p)?;
     }
     let src = Connection::open_with_flags(db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
-    let version: String = src
-        .query_row(
-            "SELECT value FROM metadata WHERE key = 'version'",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or_default();
+    let meta = |k: &str| -> Option<String> {
+        src.query_row("SELECT value FROM metadata WHERE key = ?1", [k], |r| {
+            r.get(0)
+        })
+        .ok()
+    };
+    // same string as `Lexicon::version`, so a device slot is matched to this exact build
+    let version = match (meta("version"), meta("build")) {
+        (Some(v), Some(b)) => format!("{v}+{b}"),
+        (v, _) => v.unwrap_or_default(),
+    };
     let mut conn = Connection::open(out)?;
     conn.execute_batch(SCHEMA)?;
     let tx = conn.transaction()?;
