@@ -3,9 +3,11 @@
 //! `ion_binary.py`).
 
 mod decode;
+mod encode;
 mod value;
 
 pub use decode::{decode_annotated, decode_single};
+pub use encode::{encode_single, encode_value};
 pub use value::{Decimal, Struct, Sym, Timestamp, Value};
 
 /// Ion binary version marker that prefixes every serialized value stream.
