@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Deckle app icon: a cream page with a deckle (torn, uncut) edge on terracotta.
+       Source for `pnpm tauri icon app-icon.png`; 824 px tile on Apple's 1024 grid. -->
+  <g transform="translate(100 100) scale(5.15)">
+    <rect width="160" height="160" rx="36" fill="#b5533c"/>
+    <path d="M50 34 H112 L116 42 L111 50 L117 58 L112 66 L118 74 L112 82 L117 90 L111 98 L116 106 L111 114 L116 122 L112 130 H50 Z" fill="#8e3f2c"/>
+    <path d="M42 28 H104 L108 36 L103 44 L109 52 L104 60 L110 68 L104 76 L109 84 L103 92 L108 100 L103 108 L108 116 L104 124 H42 Z" fill="#f6f3ee"/>
+    <g fill="#1f1b16">
+      <rect x="54" y="46" width="40" height="5" rx="2"/>
+      <rect x="54" y="60" width="36" height="5" rx="2"/>
+      <rect x="54" y="74" width="42" height="5" rx="2"/>
+      <rect x="54" y="88" width="30" height="5" rx="2"/>
+      <rect x="54" y="102" width="38" height="5" rx="2"/>
+    </g>
+  </g>
+</svg>
