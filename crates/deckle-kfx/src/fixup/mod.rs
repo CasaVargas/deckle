@@ -3,10 +3,12 @@
 //! `kpf_book.fix_kpf_prepub_book` and the structure/position helpers it calls.
 
 mod content;
+mod navigation;
 mod positions;
 mod structural;
 
 pub use content::{create_content_fragments, section_story_names};
+pub use navigation::{add_approximate_pages, fix_navigation};
 pub use positions::{
     ContentChunk, PositionReport, collect_position_map_info, cpython_int_set_order,
     create_location_map, create_position_and_location_maps, create_position_map,
