@@ -195,6 +195,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 approximate_pages: pages,
                 container_id,
                 creator,
+                exact_language: false,
             };
             let out = kpf_to_kfx(&kpf_path, &opts).map_err(|e| e.to_string())?;
             std::fs::write(&output, &out.bytes)

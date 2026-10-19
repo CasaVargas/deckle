@@ -19,6 +19,8 @@ pub struct ConvertOptions {
     pub title: Option<String>,
     pub authors: Option<Vec<String>>,
     pub language: Option<String>,
+    /// See [`Metadata::exact_language`].
+    pub exact_language: bool,
     /// `None`: no page list; `Some(None)`: kfxlib auto density; `Some(Some(n))`: aim for n pages.
     pub approximate_pages: Option<Option<u32>>,
     pub container_id: Option<String>,
@@ -33,6 +35,7 @@ impl Default for ConvertOptions {
             title: None,
             authors: None,
             language: None,
+            exact_language: false,
             approximate_pages: None,
             container_id: None,
             creator: None,
@@ -98,6 +101,7 @@ pub fn kpf_to_kfx(kpf: &Path, opts: &ConvertOptions) -> Result<ConvertOutput, Co
         cde_type: Some(opts.cde_type),
         asin: opts.asin.clone(),
         language: opts.language.clone(),
+        exact_language: opts.exact_language,
         cover_jpeg: None,
     };
     crate::metadata::apply(&mut book, &md)?;

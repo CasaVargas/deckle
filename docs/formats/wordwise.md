@@ -38,6 +38,17 @@ Deckle does too).
   never replaces Amazon's Chinese dictionary (Word Wise is then withheld with the reason). About
   40 MB, installed once per device; folder exports mirror it at `<out>/system/kll/`.
 
+### Language must be exactly `en` (verified on a Scribe 2024, 2026-10-19)
+
+The Kindle shows Word Wise (the widened line spacing) for an `en-US` book but draws no hints:
+every gap stays blank. With the KFX `language` metadata set to exactly `en` the same sidecar
+works. WordDumb forces `en` for the same reason. Deckle writes `en` for EBOK books that get Word
+Wise and whose language is any English variant (`ConvertOptions::exact_language`); kfxlib would
+otherwise keep `en-US`.
+
+Senses: Amazon's `kll.en.en.klld` has ~7,000 definitionless placeholder senses (negative ids,
+`sense_number` 0.0, `pos_type` 0); only senses with a `short_def` are used.
+
 ### MTP Kindles that hide `system/` (Scribe 2024, verified 2026-10-19)
 
 Over MTP the Scribe shows `documents/`, `fonts/` and others but no `system/`; creating it fails

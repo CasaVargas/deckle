@@ -9,6 +9,11 @@
 - MTP: no USB reset on close. On a Scribe 2024 the reset dropped it off the bus until replugged.
 - MTP: Word Wise is skipped with a warning when the Kindle hides `system/` over MTP (Scribe 2024),
   where its dictionaries live; the book and X-Ray still ship. Delivery errors name the file.
+- Word Wise on MTP Kindles reads a copy of the Kindle's dictionary staged at
+  `documents/deckle/kll.en.en.klld`.
+- Word Wise hints show on the Kindle: English books that get Word Wise are tagged `en` (not
+  `en-US`), without which every hint was a blank gap; hints never point at Amazon's
+  definitionless placeholder senses.
 
 ## 0.1.0 — first release (pre-alpha)
 

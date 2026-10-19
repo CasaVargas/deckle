@@ -16,7 +16,7 @@ use crate::previewer;
 use crate::wordwise::{WordWiseOptions, WordWiseOutput, WordWiseSummary};
 use crate::xray::{LlmConfig, XRayOptions, XRaySummary};
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
-use deckle_kfx::metadata::generate_asin;
+use deckle_kfx::metadata::{fix_language, generate_asin};
 
 #[derive(Clone, Debug)]
 pub struct RunOptions {
@@ -241,6 +241,10 @@ pub fn run_with_progress(
     };
     let cde_type = decision.cde;
     report.decision = Some(decision.clone());
+    // WordDumb does the same: the Kindle hides Word Wise hints unless the language is `en`.
+    let english_word_wise = cde_type == CdeType::Ebok
+        && opts.word_wise.is_some()
+        && fix_language(info.language.split(['-', '_']).next().unwrap_or("")) == "en";
     let convert_opts = ConvertOptions {
         cde_type,
         asin: Some(asin.clone()),
@@ -250,7 +254,12 @@ pub fn run_with_progress(
         } else {
             Some(kfx_authors(&info))
         },
-        language: Some(info.language.clone()),
+        language: Some(if english_word_wise {
+            "en".to_owned()
+        } else {
+            info.language.clone()
+        }),
+        exact_language: english_word_wise,
         approximate_pages: opts.pages,
         container_id: None,
         creator: None,
