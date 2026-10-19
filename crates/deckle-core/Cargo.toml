@@ -1,0 +1,22 @@
+[package]
+name = "deckle-core"
+description = "Deckle pipeline stages: inspect, normalize, convert, deliver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+deckle-kfx.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
+image.workspace = true
+csv.workspace = true
+tempfile.workspace = true
+deunicode.workspace = true
+regex.workspace = true
+
+[dev-dependencies]

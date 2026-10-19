@@ -80,3 +80,24 @@ numbers to a sideload.
 key. Keys we set: `ASIN`, `content_id` (= ASIN), `cde_content_type` (`PDOC` or `EBOK`),
 `title`, `author` (one per author, sort form), `language`, `cover_image` (resource symbol).
 Cover must be JPEG/JFIF (`FF D8 FF E0`) for the lockscreen.
+
+## Learned while porting (2026-10-18, Tasks 3–13)
+
+- The KFX container stores the shared-table import `max_id` **inflated by the 9 system
+  symbols** (859 on disk for a real 850); the KDF stores the raw 850. Local symbols start at 860
+  either way.
+- Unknown symbol ids decode to `$N` placeholders and `$N` always encodes to id N (kfxlib
+  `get_symbol`/`get_id`); byte-exact re-encoding depends on this.
+- `$264` section eid lists come from a Python `set`; their order is CPython's hash-table order
+  (`cpython_int_set_order`). The device does not care, the oracle does.
+- Floats are stored as decimals from `"%g" % x` (6 significant digits), `|x| < 0.001` → 0.
+- kfxlib with `authors=[]` (the default `YJ_Metadata`) **removes** the KPF's author entries; the
+  goldens therefore have no author. Deckle stamps authors in sort form (`Last, First`).
+- `$490` kindle_title_metadata entries are sorted by key after stamping (uppercase `ASIN` first).
+- The mini KDF has exactly one fingerprint record; records recur every 1 MiB of the *stripped*
+  stream.
+- The approximate page list (`$391::{$235:$237,$239:APPROXIMATE_PAGE_LIST}`) is derived from the
+  position-id map plus storyline text: 1850 positions per page, backing up to a whitespace
+  boundary by at most 50 characters. 45 pages for the mini book, 435 for Pride and Prejudice.
+- Kindle Previewer 4's `--help` banner line `Kindle Previewer 4.0.3 Copyright (c) Amazon.com` is
+  the version probe; the per-book log CSV has two legend lines before the `"Type"` header.

@@ -1,0 +1,20 @@
+[package]
+name = "deckle-kfx"
+description = "KFX/KPF container, Ion codec, and KPF→KFX conversion (Rust port of the kfxlib path)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+zip.workspace = true
+rusqlite.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+roxmltree.workspace = true
+uuid.workspace = true
+rand.workspace = true
+
+[dev-dependencies]
