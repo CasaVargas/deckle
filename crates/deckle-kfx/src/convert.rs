@@ -96,6 +96,7 @@ pub fn kpf_to_kfx(kpf: &Path, opts: &ConvertOptions) -> Result<ConvertOutput, Co
         cde_type: Some(opts.cde_type),
         asin: opts.asin.clone(),
         language: opts.language.clone(),
+        cover_jpeg: None,
     };
     crate::metadata::apply(&mut book, &md)?;
     let pages = match opts.approximate_pages {
