@@ -244,9 +244,14 @@ fn mentions(runs: &[Run], stop: &[&str]) -> Vec<Mention> {
             v[run.text.len()] = count;
             v
         };
+        // a closing quote glued to a word ("Darcy’") is not part of it
         let words: Vec<(usize, usize, &str)> = word_re
             .find_iter(&run.text)
-            .map(|m| (m.start(), m.end(), m.as_str()))
+            .map(|m| {
+                let w = m.as_str().trim_end_matches(['\'', '’']);
+                (m.start(), m.start() + w.len(), w)
+            })
+            .filter(|(_, _, w)| !w.is_empty())
             .collect();
         let mut i = 0;
         while i < words.len() {
@@ -317,7 +322,7 @@ fn abbreviation_dot(text: &str, dot: usize) -> bool {
     let before = &text[..dot];
     let word_start = before
         .rfind(|c: char| !c.is_alphabetic())
-        .map(|i| i + 1)
+        .map(|i| i + before[i..].chars().next().map_or(1, char::len_utf8))
         .unwrap_or(0);
     let word = &before[word_start..];
     word.chars().count() == 1 && word.chars().all(char::is_uppercase)

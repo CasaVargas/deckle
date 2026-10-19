@@ -58,6 +58,15 @@ fn finds_recurring_names_and_places_with_positions() {
         "Mr. Bennet was among the earliest.",
         "a quote starting with an honorific keeps its whole sentence"
     );
+    let curly = heuristic(
+        &runs(&["‘Mr. Darcy’ laughed aloud. ‘Mr. Darcy’ sighed again."]),
+        "en",
+    );
+    assert_eq!(
+        find(&curly, "Mr. Darcy").unwrap().quote,
+        "‘Mr. Darcy’ laughed aloud.",
+        "a multi-byte quote mark before the honorific"
+    );
     assert!(darcy.occurrences.len() >= 3);
     assert_eq!(find(&c, "Netherfield").unwrap().kind, EntityKind::Term);
     assert_eq!(find(&c, "Longbourn").unwrap().kind, EntityKind::Term);
