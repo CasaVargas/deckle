@@ -13,6 +13,7 @@ rust-version = "1.85"
 deckle-kfx = { path = "crates/deckle-kfx" }
 deckle-core = { path = "crates/deckle-core" }
 deckle-transport = { path = "crates/deckle-transport" }
+deckle-xray = { path = "crates/deckle-xray" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

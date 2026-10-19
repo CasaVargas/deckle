@@ -769,6 +769,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-xray"
+version = "0.1.0"
+dependencies = [
+ "deckle-kfx",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "ureq",
+]
+
+[[package]]
 name = "defmt"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
