@@ -24,7 +24,7 @@ SendObjectInfo fails with `0xA806`, the device wants a different ObjectInfo layo
 **Spike 2 — real ASIN on an MTP Kindle.** Turn on *Match books to an Amazon edition* (Settings),
 send a book with an ISBN as EBOK (`deckle run book.epub --to device --cde ebok --match`; the
 `ebok` override makes Deckle stamp the matched ISBN-10 even before the Kindle is marked
-verified), let the Scribe sync over Wi-Fi, then check: (a) the store cover appears, (b) after M3, that our X-Ray sidecar survives. If both
+verified), let the Scribe sync over Wi-Fi, then check: (a) the store cover appears, (b) that our X-Ray sidecar survives (open the book, long-press a name: the card should show Deckle's description). If both
 hold, tick *Keeps Deckle's X-Ray for real ASINs* for that Kindle in Settings; the cover rule
 then ships matched books as EBOK on it.
 
@@ -34,7 +34,11 @@ then ships matched books as EBOK on it.
 2. `deckle run <book>.epub --to device --pages auto`
 3. On the device: the book opens; the cover shows in the library; the `Aa` menu offers the
    Enhanced Typesetting options (hyphenation / justification); page numbers appear.
-4. Record the row above with firmware (Settings → Device Options → Device Info) and the result.
+4. `deckle run <book>.epub --to device --cde ebok` (or let the cover rule pick EBOK on a
+   mass-storage Kindle): the book opens, long-pressing a character's name shows Deckle's X-Ray
+   card, and the X-Ray entry in the reading menu lists our people and terms. If the sidecar is
+   ignored, note the firmware: `docs/formats/xray.md` has the schema to compare against.
+5. Record the row above with firmware (Settings → Device Options → Device Info) and the result.
 
 If the Paperwhite is MTP-only, use `--to <folder>` and copy the `.kfx` with any MTP client for
 now; the MTP transport is M2 work.

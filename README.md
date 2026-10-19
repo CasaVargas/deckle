@@ -6,18 +6,22 @@ One window: drop books, plug in Kindle, press go.
 
 Mac and Windows. Open source (GPL-3.0-or-later). No account, no subscription, no telemetry.
 
-Status: pre-alpha. The command line converts EPUB → KFX end to end (M1); the desktop app is a
-shell (M0). See `docs/superpowers/specs/` for the design and `docs/superpowers/plans/` for the
-build plan.
+Status: pre-alpha. EPUB → KFX with Enhanced Typesetting and page numbers (M1), the cover rule
+with thumbnails, Amazon edition matching and MTP delivery (M2), and X-Ray sidecars (M3) work
+from the command line and the desktop app. Word Wise (M4) is next. See `docs/superpowers/specs/`
+for the design and `docs/superpowers/plans/` for the build plan.
 
 ## Desktop app
 
 `apps/desktop` is the Tauri app: drop EPUBs (or **Add books…**), each row shows cover, title,
-author, series and a mode badge (**Cover** = PDOC, covers everywhere; **Features** = EBOK, for
-X-Ray/Word Wise once M3 lands; **Error** with the reason). **Send to Kindle** runs the pipeline
-book by book with per-stage progress; the split button exports to a folder instead. The row menu
-overrides the mode per book, shows the full report, or removes the row. Settings (gear) hold the
-Kindle Previewer path, default mode and page numbers; the M2–M4 options are visible but inert.
+author, series and a mode badge (**Cover** = PDOC, covers everywhere; **Features** = EBOK with
+X-Ray; **Everything** = EBOK plus a Deckle-written cover thumbnail; **Error** with the reason).
+**Send to Kindle** runs the pipeline book by book with per-stage progress; the split button
+exports to a folder instead. The result line says what shipped and why, and
+`X-Ray: 62 people, 88 terms (basic)` when a sidecar went along. The row menu overrides the mode
+per book, shows the full report, or removes the row. Settings (gear) hold the Kindle Previewer
+path, default mode, page numbers, Amazon matching, the X-Ray toggle, the LLM provider / model /
+endpoint / key, and the Wikipedia opt-in; Word Wise (M4) is visible but inert.
 
 ```sh
 cd apps/desktop && pnpm install && pnpm tauri dev                 # develop
@@ -26,6 +30,7 @@ cd apps/desktop && pnpm install && pnpm tauri dev                 # develop
 ```
 
 ![Deckle converting a batch](docs/screenshots/gui-running.png)
+![A book shipped as EBOK with its X-Ray](docs/screenshots/gui-xray-done.png)
 
 ## Command line
 
@@ -34,6 +39,10 @@ cargo build --release -p deckle-cli            # binary at target/release/deckle
 deckle devices                                 # connected mass-storage Kindles
 deckle run book.epub --to device --pages auto  # inspect → normalize → Previewer → KFX → Kindle
 deckle run book.epub --to ./out --cde pdoc     # export to a folder instead
+deckle run book.epub --to device --cde ebok --llm anthropic   # X-Ray with LLM descriptions (ANTHROPIC_API_KEY)
+deckle run book.epub --to ./out --cde ebok --llm openai --llm-endpoint http://localhost:11434/v1 --llm-model llama3
+deckle run book.epub --to ./out --cde ebok --wikipedia       # Wikipedia summaries for places and things
+deckle run book.epub --to ./out --xray off                   # no sidecar
 deckle inspect book.epub --json                # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx --asin B0XXXXDECK   # repackage an existing Previewer KPF
 ```
