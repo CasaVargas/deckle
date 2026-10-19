@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { BookRow, DeviceRow, PlanRow, PreviewerStatus, ProgressEvent, RunTarget, Settings } from "./types";
 
 export const api = {
@@ -19,6 +20,8 @@ export const api = {
   setDeviceOptions: (key: string, cdeOverride: "pdoc" | "ebok" | null, verifiedRealAsin: boolean) =>
     invoke<void>("set_device_options", { key, cdeOverride, verifiedRealAsin }),
   reveal: (path: string) => invoke<void>("reveal", { path }),
+  /** Opens an https link in the default browser (webview links do not). */
+  openLink: (url: string) => openUrl(url),
   onProgress: (cb: (e: ProgressEvent) => void): Promise<UnlistenFn> =>
     listen<ProgressEvent>("book-progress", (ev) => cb(ev.payload)),
   onRunFinished: (cb: () => void): Promise<UnlistenFn> => listen("run-finished", () => cb()),

@@ -241,7 +241,7 @@ export default function App() {
               ⬇
             </div>
             <h1>Drop EPUBs here</h1>
-            <p>Each book becomes a Kindle file with Enhanced Typesetting, a cover that shows, and real page numbers.</p>
+            <p>Each book becomes a Kindle book with Enhanced Typesetting, a cover that shows, page numbers, and X-Ray and Word Wise where your Kindle allows them.</p>
             <button className="ghost" onClick={pickBooks}>
               or choose files…
             </button>
@@ -318,6 +318,7 @@ export default function App() {
 
       <SettingsDrawer
         open={settingsOpen}
+        version={version}
         settings={settings}
         previewer={previewer}
         devices={devices}

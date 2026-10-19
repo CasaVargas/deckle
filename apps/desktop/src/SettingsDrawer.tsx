@@ -1,8 +1,28 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import type { ReactNode } from "react";
+import { api } from "./api";
 import type { DeviceRow, PreviewerStatus, Settings } from "./types";
+
+const REPO = "https://github.com/prjoni99/deckle";
+
+/** An external link: opens in the default browser (a plain anchor would do nothing in the app). */
+function Link({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      onClick={(e) => {
+        e.preventDefault();
+        api.openLink(href).catch(() => {});
+      }}
+    >
+      {children}
+    </a>
+  );
+}
 
 interface Props {
   open: boolean;
+  version: string;
   settings: Settings;
   previewer: PreviewerStatus | null;
   devices: DeviceRow[];
@@ -12,7 +32,7 @@ interface Props {
   onPickPreviewer: () => void;
 }
 
-export default function SettingsDrawer({ open, settings, previewer, devices, onChange, onDeviceOptions, onClose, onPickPreviewer }: Props) {
+export default function SettingsDrawer({ open, version, settings, previewer, devices, onChange, onDeviceOptions, onClose, onPickPreviewer }: Props) {
   if (!open) return null;
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...settings, [k]: v });
   return (
@@ -33,7 +53,7 @@ export default function SettingsDrawer({ open, settings, previewer, devices, onC
             </>
           ) : (
             <>
-              Not found. <a href={previewer?.download_url} target="_blank" rel="noreferrer">Download Kindle Previewer</a> (free, from Amazon) and
+              Not found. {previewer?.download_url ? <Link href={previewer.download_url}>Download Kindle Previewer</Link> : "Download Kindle Previewer"} (free, from Amazon) and
               restart Deckle, or choose the command line binary below.
             </>
           )}
@@ -157,6 +177,26 @@ export default function SettingsDrawer({ open, settings, previewer, devices, onC
           <input type="checkbox" checked={settings.amazon_match} onChange={(e) => set("amazon_match", e.target.checked)} />
           <span>Match books to an Amazon edition (Open Library lookup, network) so EBOK can keep the store cover</span>
         </label>
+      </section>
+      <section className="about">
+        <h3>About</h3>
+        <p className="hint">
+          Deckle {version} · GPL-3.0-or-later · <Link href={`${REPO}/releases`}>Check for a newer version</Link> ·{" "}
+          <Link href={REPO}>Source</Link>
+        </p>
+        <p className="hint">
+          Deckle never checks for updates or sends anything about you. It goes online only for: the Word Wise dictionary
+          (downloaded once from GitHub), and, when you turn them on, an LLM for X-Ray, Wikipedia summaries, and Amazon edition
+          matching (Open Library). A Kindle itself may ask Amazon about books sent with features (EBOK).
+        </p>
+        <p className="hint">
+          Word Wise definitions come from <Link href="https://en.wiktionary.org/">Wiktionary</Link> via{" "}
+          <Link href="https://kaikki.org/">kaikki.org</Link> (
+          <Link href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</Link>), word frequencies from{" "}
+          <Link href="https://github.com/rspeer/wordfreq">wordfreq</Link> (CC BY-SA 4.0). Built on the research and code of
+          jhowell (KFX Input, kfxlib), xxyzz (WordDumb, Proficiency), jloutsch (kfxgen) and seapy (kindle-cli). Kindle
+          Previewer is Amazon's and is never bundled. Kindle is a trademark of Amazon; Deckle is not affiliated with Amazon.
+        </p>
       </section>
     </aside>
   );
