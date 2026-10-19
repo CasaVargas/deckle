@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 deckle-kfx.workspace = true
 deckle-transport.workspace = true
+deckle-xray.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -22,3 +23,4 @@ regex.workspace = true
 ureq.workspace = true
 
 [dev-dependencies]
+rusqlite.workspace = true

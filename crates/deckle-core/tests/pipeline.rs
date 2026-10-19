@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 use deckle_core::deliver::Target;
-use deckle_core::pipeline::{RunOptions, RunReport, run};
+use deckle_core::pipeline::{RunOptions, RunReport, XRayMode, run};
 use deckle_kfx::convert::CdeType;
 
 #[cfg(unix)]
@@ -26,6 +26,9 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
         cde_override: None,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -74,6 +77,9 @@ fn missing_previewer_fails_before_any_work() {
         cde_override: None,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -101,6 +107,9 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
         cde_override: None,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -142,6 +151,9 @@ fn real_previewer_end_to_end() {
         cde_override: None,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -162,6 +174,9 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         cde_override: None,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None);
@@ -187,6 +202,9 @@ fn run_with_progress_reports_each_stage_in_order() {
         cde_override: None,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -197,8 +215,73 @@ fn run_with_progress_reports_each_stage_in_order() {
     assert_eq!(report.error, None);
     assert_eq!(
         seen,
-        ["inspect", "normalize", "convert", "repackage", "deliver"]
+        ["inspect", "normalize", "convert", "repackage", "deliver"],
+        "PDOC books get no enrich stage"
     );
+}
+
+#[test]
+#[cfg(unix)]
+fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
+    use deckle_core::pipeline::run_with_progress;
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Ebok,
+        cde_override: Some(CdeType::Ebok),
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
+    };
+    let mut seen: Vec<&'static str> = Vec::new();
+    let report = run_with_progress(
+        &deckle_kfx::fixtures::path("deckle-mini.epub"),
+        &opts,
+        &mut |stage| seen.push(stage),
+    );
+    assert_eq!(report.error, None, "{report:?}");
+    assert_eq!(
+        seen,
+        [
+            "inspect",
+            "normalize",
+            "convert",
+            "repackage",
+            "enrich",
+            "deliver"
+        ]
+    );
+    // the mini fixture is chapter one of Pride and Prejudice: three recurring names
+    let x = report.xray.as_ref().expect("xray summary");
+    assert_eq!((x.people, x.terms, x.source.as_str()), (3, 0, "basic"));
+    let asin = report.asin.clone().unwrap();
+    let sdr = report.delivered.clone().unwrap().with_extension("sdr");
+    let asc = sdr.join(format!("XRAY.entities.{asin}.asc"));
+    assert!(asc.exists(), "{asc:?}");
+    let db = rusqlite::Connection::open(&asc).unwrap();
+    let labels: Vec<String> = db
+        .prepare("SELECT label FROM entity WHERE id > 0 ORDER BY label")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(labels, ["Mr. Bennet", "Mr. Bingley", "Mrs. Bennet"]);
+    let mut off = opts.clone();
+    off.xray = XRayMode::Off;
+    let mut seen: Vec<&'static str> = Vec::new();
+    run_with_progress(
+        &deckle_kfx::fixtures::path("deckle-mini.epub"),
+        &off,
+        &mut |s| seen.push(s),
+    );
+    assert!(!seen.contains(&"enrich"));
 }
 
 #[test]
@@ -215,6 +298,9 @@ fn run_with_progress_stops_at_the_failing_stage() {
         cde_override: None,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -244,6 +330,9 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
         keep_work_dir: false,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -275,6 +364,9 @@ fn folder_target_is_pdoc_and_an_override_wins() {
         keep_work_dir: false,
         amazon_match: false,
         verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
     };
     let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(r.decision.unwrap().cde, CdeType::Pdoc);

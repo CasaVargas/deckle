@@ -24,6 +24,8 @@ export interface BookState extends BookRow {
   runError: string | null;
   /** What shipped (from the final progress event). */
   shipped: { cde: string; asin: string; reason: string; matched: string | null } | null;
+  /** X-Ray sidecar summary (from the final progress event). */
+  xray: { people: number; terms: number; source: "llm" | "wikipedia" | "basic" } | null;
   /** Per-book override of the settings' cde. */
   cdeOverride: "pdoc" | "ebok" | null;
   showReport: boolean;
@@ -55,6 +57,8 @@ export interface Settings {
   llm_provider: "off" | "anthropic" | "openai";
   llm_model: string;
   llm_endpoint: string;
+  llm_api_key: string;
+  xray: boolean;
   word_wise_level: number;
   wikipedia: boolean;
   amazon_match: boolean;
@@ -79,6 +83,7 @@ export interface ProgressEvent {
   asin?: string | null;
   reason?: string | null;
   matched?: string | null;
+  xray?: { people: number; terms: number; source: "llm" | "wikipedia" | "basic" } | null;
 }
 
 export type RunTarget =
@@ -86,12 +91,13 @@ export type RunTarget =
   | { kind: "mtp"; bus: number; address: number }
   | { kind: "folder"; path: string };
 
-export const STAGES = ["inspect", "normalize", "convert", "repackage", "deliver"] as const;
+export const STAGES = ["inspect", "normalize", "convert", "repackage", "enrich", "deliver"] as const;
 export const STAGE_LABEL: Record<string, string> = {
   inspect: "Reading",
   normalize: "Cleaning",
   convert: "Kindle Previewer",
   repackage: "Building KFX",
+  enrich: "X-Ray",
   deliver: "Copying",
   match: "Matching edition",
 };

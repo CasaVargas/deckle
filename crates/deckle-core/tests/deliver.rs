@@ -84,6 +84,7 @@ fn mass_storage_delivery_installs_the_thumbnail_when_asked() {
             "thumbnail_B0XXXXDECK_EBOK_portrait.jpg".into(),
             b"\xFF\xD8\xFF\xE0jpeg".to_vec(),
         )),
+        sidecars: Vec::new(),
     };
     let path = deckle_core::deliver::deliver_with(
         b"KFX",
@@ -110,6 +111,7 @@ fn folder_delivery_ignores_thumbnails() {
     let dir = tempfile::tempdir().unwrap();
     let opts = DeliverOptions {
         thumbnail: Some(("t.jpg".into(), vec![1])),
+        sidecars: Vec::new(),
     };
     deckle_core::deliver::deliver_with(
         b"KFX",
@@ -119,4 +121,46 @@ fn folder_delivery_ignores_thumbnails() {
     )
     .unwrap();
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+}
+
+#[test]
+fn sidecars_land_in_the_sdr_folder_next_to_the_book() {
+    use deckle_core::deliver::DeliverOptions;
+    let opts = DeliverOptions {
+        thumbnail: None,
+        sidecars: vec![("XRAY.entities.B0ABCDDECK.asc".into(), b"sqlite".to_vec())],
+    };
+    // folder export
+    let out = tempfile::tempdir().unwrap();
+    let path = deckle_core::deliver::deliver_with(
+        b"KFX",
+        &info("Title", "A B"),
+        &Target::Folder(out.path().to_path_buf()),
+        &opts,
+    )
+    .unwrap();
+    let sdr = path.with_extension("sdr");
+    assert_eq!(sdr.file_name().unwrap(), "B, A - Title.sdr");
+    assert_eq!(
+        std::fs::read(sdr.join("XRAY.entities.B0ABCDDECK.asc")).unwrap(),
+        b"sqlite"
+    );
+    // mass storage: under documents/
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("documents")).unwrap();
+    std::fs::create_dir_all(root.path().join("system/thumbnails")).unwrap();
+    let d = detect_in(&[root.path().to_path_buf()]).remove(0);
+    let path = deckle_core::deliver::deliver_with(
+        b"KFX",
+        &info("Title", "A B"),
+        &Target::MassStorage(d),
+        &opts,
+    )
+    .unwrap();
+    assert!(
+        root.path()
+            .join("documents/B, A - Title.sdr/XRAY.entities.B0ABCDDECK.asc")
+            .exists(),
+        "{path:?}"
+    );
 }

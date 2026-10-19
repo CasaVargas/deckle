@@ -92,10 +92,14 @@ export default function SettingsDrawer({ open, settings, previewer, devices, onC
         ))}
       </section>
 
-      <section className="coming">
+      <section>
         <h3>
-          X-Ray <span className="tag">M3</span>
+          X-Ray
         </h3>
+        <label className="field check">
+          <input type="checkbox" checked={settings.xray} onChange={(e) => set("xray", e.target.checked)} />
+          <span>Build an X-Ray for every book that ships with features (EBOK)</span>
+        </label>
         <label className="field">
           <span>LLM provider</span>
           <select value={settings.llm_provider} onChange={(e) => set("llm_provider", e.target.value as Settings["llm_provider"])}>
@@ -116,7 +120,11 @@ export default function SettingsDrawer({ open, settings, previewer, devices, onC
                 <input type="text" value={settings.llm_endpoint} onChange={(e) => set("llm_endpoint", e.target.value)} placeholder="http://localhost:11434/v1" />
               </label>
             )}
-            <p className="hint">API keys are read from the environment (ANTHROPIC_API_KEY / OPENAI_API_KEY) when M3 lands; nothing is stored here.</p>
+            <label className="field">
+              <span>API key</span>
+              <input type="password" value={settings.llm_api_key} onChange={(e) => set("llm_api_key", e.target.value)} placeholder="optional; else ANTHROPIC_API_KEY / OPENAI_API_KEY" autoComplete="off" />
+            </label>
+            <p className="hint">Stored in Deckle's settings file on this computer. Leave empty to use the environment variable, or for local servers that need no key.</p>
           </>
         )}
         <label className="field check">

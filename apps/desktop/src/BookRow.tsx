@@ -52,6 +52,13 @@ export default function BookRowView({ book, busy, plan, onOverride, onToggleRepo
         {book.shipped && (
           <div className="shipped" title={book.shipped.reason}>
             {book.shipped.cde} · {book.shipped.reason}
+            {book.xray && (
+              <>
+                {" "}
+                · X-Ray: {book.xray.people} people, {book.xray.terms} terms (
+                {book.xray.source === "llm" ? "LLM" : book.xray.source === "wikipedia" ? "Wikipedia" : "basic"})
+              </>
+            )}
           </div>
         )}
       </div>

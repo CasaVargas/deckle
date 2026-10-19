@@ -24,6 +24,49 @@ pub enum CdeArg {
     Ebok,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum XRayArg {
+    Off,
+    Auto,
+}
+
+impl From<XRayArg> for deckle_core::pipeline::XRayMode {
+    fn from(a: XRayArg) -> Self {
+        match a {
+            XRayArg::Off => Self::Off,
+            XRayArg::Auto => Self::Auto,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum LlmArg {
+    Off,
+    Anthropic,
+    Openai,
+}
+
+impl LlmArg {
+    pub fn config(
+        self,
+        model: Option<String>,
+        endpoint: Option<String>,
+    ) -> Option<deckle_core::xray::LlmConfig> {
+        use deckle_xray::llm::Provider;
+        let provider = match self {
+            LlmArg::Off => return None,
+            LlmArg::Anthropic => Provider::Anthropic,
+            LlmArg::Openai => Provider::OpenAi,
+        };
+        Some(deckle_core::xray::LlmConfig {
+            provider,
+            model: model.unwrap_or_default(),
+            endpoint: endpoint.unwrap_or_default(),
+            api_key: String::new(),
+        })
+    }
+}
+
 impl CdeArg {
     pub fn to_override(self) -> Option<deckle_kfx::convert::CdeType> {
         match self {
@@ -104,6 +147,21 @@ pub enum Command {
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,
+        /// X-Ray sidecar for EBOK books: `auto` (default) or `off`.
+        #[arg(long, value_enum, default_value_t = XRayArg::Auto)]
+        xray: XRayArg,
+        /// LLM for X-Ray descriptions (key from ANTHROPIC_API_KEY / OPENAI_API_KEY).
+        #[arg(long, value_enum, default_value_t = LlmArg::Off)]
+        llm: LlmArg,
+        /// Model name for `--llm` (provider default when omitted).
+        #[arg(long)]
+        llm_model: Option<String>,
+        /// Base URL for `--llm openai` (OpenAI-compatible servers, e.g. http://localhost:11434/v1).
+        #[arg(long)]
+        llm_endpoint: Option<String>,
+        /// Wikipedia summaries for X-Ray terms (network).
+        #[arg(long)]
+        wikipedia: bool,
         #[arg(long)]
         keep_work_dir: bool,
     },
