@@ -22,6 +22,7 @@ Kindle Previewer path, default mode and page numbers; the M2–M4 options are vi
 ```sh
 cd apps/desktop && pnpm install && pnpm tauri dev                 # develop
 ./target/debug/deckle-desktop --export-to ./out a.epub b.epub      # open books and convert at once
+./target/debug/deckle-desktop --send a.epub                         # open and send to the first Kindle
 ```
 
 ![Deckle converting a batch](docs/screenshots/gui-running.png)
@@ -37,8 +38,12 @@ deckle inspect book.epub --json                # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx --asin B0XXXXDECK   # repackage an existing Previewer KPF
 ```
 
-`--cde pdoc` (default) shows covers on every Kindle; `--cde ebok` is what X-Ray and Word Wise
-will need (M2+). `--pages auto` adds approximate page numbers like the store does.
+`--cde auto` (default) applies the cover rule: mass-storage Kindles get EBOK plus a Deckle-written
+cover thumbnail (restored on every send, defeating Amazon's "no image" overwrite); MTP-only
+Kindles and folder exports get PDOC so the cover always shows. `--cde pdoc|ebok` overrides it,
+`--match` looks up an Amazon edition on Open Library when an MTP Kindle needs a real ASIN, and
+`--pages auto` adds approximate page numbers like the store does. `deckle devices` lists both
+mass-storage and MTP Kindles.
 
 The KFX writer is a Rust port of the GPL-3 kfxlib conversion path and is tested byte for byte
 against kfxlib's output (`fixtures/`).

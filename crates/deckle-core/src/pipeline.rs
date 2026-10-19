@@ -7,8 +7,10 @@ use std::time::Instant;
 
 use serde::Serialize;
 
-use crate::deliver::{Target, deliver};
+use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
+use crate::deliver::{DeliverOptions, Target, deliver_with};
 use crate::inspect::{BookInfo, inspect};
+use crate::matcher::{MatchOutcome, match_book};
 use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
 use crate::previewer;
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
@@ -16,7 +18,14 @@ use deckle_kfx::metadata::generate_asin;
 
 #[derive(Clone, Debug)]
 pub struct RunOptions {
+    /// Legacy default; the cover rule decides unless `cde_override` is set.
     pub cde_type: CdeType,
+    /// Owner override for this run (per book or per device).
+    pub cde_override: Option<CdeType>,
+    /// Look up an Amazon edition (Open Library) when the device needs a real ASIN.
+    pub amazon_match: bool,
+    /// Spike 2 passed on this device: real ASINs keep our sidecars.
+    pub verified_real_asin: bool,
     /// Explicit ASIN; `None` generates a recognizable one from the book's identifiers.
     pub asin: Option<String>,
     /// `None`: no page list; `Some(None)`: auto; `Some(Some(n))`: n pages.
@@ -37,6 +46,8 @@ pub struct RunReport {
     pub pages: Option<u32>,
     pub asin: Option<String>,
     pub cde_type: Option<String>,
+    pub decision: Option<Decision>,
+    pub matched: Option<String>,
     pub work_dir: Option<PathBuf>,
     pub warnings: Vec<String>,
     /// `"<stage>: <message>"` of the stage that failed.
@@ -155,12 +166,61 @@ pub fn run_with_progress(
             .push(format!("previewer: {}", issue.message));
     }
 
-    let asin = opts
-        .asin
-        .clone()
-        .unwrap_or_else(|| generate_asin(&asin_seed(&info)));
+    // Cover rule (design §5): decide PDOC/EBOK, the ASIN, and whether we write the thumbnail.
+    let device_class = match &opts.target {
+        Target::Folder(_) => DeviceClass::Folder,
+        Target::MassStorage(d) => DeviceClass::MassStorage {
+            thumbnails_writable: d.thumbnails_writable,
+        },
+        Target::Mtp(_) => DeviceClass::Mtp,
+    };
+    let user = match opts.cde_override {
+        Some(CdeType::Ebok) => Override::PreferFeatures,
+        Some(CdeType::Pdoc) => Override::PreferCover,
+        None => Override::None,
+    };
+    let needs_match = opts.amazon_match
+        && matches!(
+            device_class,
+            DeviceClass::Mtp
+                | DeviceClass::MassStorage {
+                    thumbnails_writable: false
+                }
+        );
+    let matched = if needs_match {
+        on_stage("match");
+        let t = Instant::now();
+        let outcome = match_book(&info, &mut crate::matcher::http_fetch);
+        report
+            .stage_ms
+            .insert("match", t.elapsed().as_millis() as u64);
+        match outcome {
+            MatchOutcome::Candidate { asin, .. } => {
+                report.matched = Some(asin.clone());
+                MatchResult::Candidate {
+                    asin,
+                    verified: opts.verified_real_asin,
+                }
+            }
+            MatchOutcome::NotFound => MatchResult::None,
+            MatchOutcome::Error(e) => {
+                report.warnings.push(format!("edition lookup failed: {e}"));
+                MatchResult::None
+            }
+        }
+    } else {
+        MatchResult::None
+    };
+    let decision = decide(&device_class, &matched, user);
+    let asin = match (&opts.asin, &decision.asin) {
+        (Some(a), _) => a.clone(),
+        (None, AsinChoice::Real(a)) => a.clone(),
+        (None, AsinChoice::Generated) => generate_asin(&asin_seed(&info)),
+    };
+    let cde_type = decision.cde;
+    report.decision = Some(decision.clone());
     let convert_opts = ConvertOptions {
-        cde_type: opts.cde_type,
+        cde_type,
         asin: Some(asin.clone()),
         title: None,
         authors: if info.creators.is_empty() {
@@ -175,8 +235,8 @@ pub fn run_with_progress(
     };
     let out = stage!("repackage", kpf_to_kfx(&kpf.kpf, &convert_opts));
     report.pages = out.pages;
-    report.asin = Some(asin);
-    report.cde_type = Some(opts.cde_type.as_str().to_owned());
+    report.asin = Some(asin.clone());
+    report.cde_type = Some(cde_type.as_str().to_owned());
     report.warnings.extend(
         out.warnings
             .iter()
@@ -192,7 +252,25 @@ pub fn run_with_progress(
     }
     report.kfx = work_keep.then_some(kfx_path);
 
-    let delivered = stage!("deliver", deliver(&out.bytes, &info, &opts.target));
+    let mut deliver_opts = DeliverOptions::default();
+    if decision.write_thumbnail {
+        match crate::thumbnail::cover_jpeg_from_kfx(&out.bytes)
+            .map(|c| crate::thumbnail::render(&c, crate::thumbnail::THUMBNAIL_HEIGHT))
+        {
+            Some(Ok(jpeg)) => {
+                deliver_opts.thumbnail =
+                    Some((crate::thumbnail::thumbnail_name(&asin, cde_type), jpeg))
+            }
+            Some(Err(e)) => report.warnings.push(format!("thumbnail not written: {e}")),
+            None => report
+                .warnings
+                .push("thumbnail not written: the book has no cover".into()),
+        }
+    }
+    let delivered = stage!(
+        "deliver",
+        deliver_with(&out.bytes, &info, &opts.target, &deliver_opts)
+    );
     report.delivered = Some(delivered);
     report
 }

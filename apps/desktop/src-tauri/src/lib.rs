@@ -17,8 +17,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let settings_file = commands::settings_file(app.handle());
+            let devices_file = commands::devices_file(app.handle());
             app.manage(commands::AppState {
                 settings_file,
+                devices_file,
                 preload: Mutex::new(preload.clone()),
                 preload_target: Mutex::new(preload_target.clone()),
             });
@@ -30,6 +32,8 @@ pub fn run() {
             commands::take_preloaded_target,
             commands::inspect_books,
             commands::list_devices,
+            commands::set_device_options,
+            commands::plan_books,
             commands::previewer_status,
             commands::get_settings,
             commands::set_settings,

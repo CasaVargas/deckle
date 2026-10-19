@@ -1,0 +1,14 @@
+[package]
+name = "deckle-transport"
+description = "MTP/PTP client for MTP-only Kindles (Scribe, Colorsoft, Paperwhite 2024)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+rusb = { version = "0.9", features = ["vendored"] }
+
+[dev-dependencies]

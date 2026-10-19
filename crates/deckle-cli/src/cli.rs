@@ -18,15 +18,27 @@ pub struct Cli {
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CdeArg {
+    /// Let the cover rule decide (design §5).
+    Auto,
     Pdoc,
     Ebok,
+}
+
+impl CdeArg {
+    pub fn to_override(self) -> Option<deckle_kfx::convert::CdeType> {
+        match self {
+            CdeArg::Auto => None,
+            CdeArg::Pdoc => Some(deckle_kfx::convert::CdeType::Pdoc),
+            CdeArg::Ebok => Some(deckle_kfx::convert::CdeType::Ebok),
+        }
+    }
 }
 
 impl From<CdeArg> for deckle_kfx::convert::CdeType {
     fn from(c: CdeArg) -> Self {
         match c {
-            CdeArg::Pdoc => deckle_kfx::convert::CdeType::Pdoc,
             CdeArg::Ebok => deckle_kfx::convert::CdeType::Ebok,
+            _ => deckle_kfx::convert::CdeType::Pdoc,
         }
     }
 }
@@ -78,13 +90,20 @@ pub enum Command {
         /// A folder path, or `device` for the first connected Kindle.
         #[arg(long, default_value = "device")]
         to: String,
-        #[arg(long, value_enum, default_value_t = CdeArg::Pdoc)]
+        /// `auto` lets the cover rule decide; `pdoc`/`ebok` override it.
+        #[arg(long, value_enum, default_value_t = CdeArg::Auto)]
         cde: CdeArg,
         /// Approximate page numbers: a count, or `auto`.
         #[arg(long)]
         pages: Option<String>,
         #[arg(long)]
         previewer: Option<PathBuf>,
+        /// Look up an Amazon edition on Open Library when the Kindle needs a real ASIN (network).
+        #[arg(long = "match")]
+        amazon_match: bool,
+        /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
+        #[arg(long)]
+        verified_asin: bool,
         #[arg(long)]
         keep_work_dir: bool,
     },

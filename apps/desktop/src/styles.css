@@ -110,3 +110,6 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .field input[type="text"], .field select, .field-row input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 100%; }
 .field-row { display: flex; gap: 8px; }
 .field-row button { border: 1px solid var(--line); background: transparent; border-radius: 6px; padding: 0 12px; }
+.device-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.device-name { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.shipped { color: var(--muted); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

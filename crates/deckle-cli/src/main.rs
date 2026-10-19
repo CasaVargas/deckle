@@ -45,12 +45,17 @@ fn emit<T: serde::Serialize>(
 fn resolve_target(to: &str) -> Result<Target, String> {
     if to == "device" {
         let mut devices = detect_mass_storage();
-        if devices.is_empty() {
-            return Err(
-                "no mass-storage Kindle connected; pass --to <folder> to export instead".into(),
-            );
+        if !devices.is_empty() {
+            return Ok(Target::MassStorage(devices.remove(0)));
         }
-        return Ok(Target::MassStorage(devices.remove(0)));
+        let mut mtp = deckle_transport::usb::detect();
+        if !mtp.is_empty() {
+            return Ok(Target::Mtp(mtp.remove(0)));
+        }
+        return Err(
+            "no Kindle connected (mass storage or MTP); pass --to <folder> to export instead"
+                .into(),
+        );
     }
     let dir = PathBuf::from(to);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
@@ -235,26 +240,45 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         }
         cli::Command::Devices => {
             let devices = detect_mass_storage();
-            emit(json, &devices, || {
-                if devices.is_empty() {
-                    "no mass-storage Kindle connected".to_owned()
+            let mtp = deckle_transport::usb::detect();
+            #[derive(serde::Serialize)]
+            struct All<'a> {
+                mass_storage: &'a [deckle_core::deliver::Device],
+                mtp: &'a [deckle_transport::usb::MtpInfo],
+            }
+            let all = All {
+                mass_storage: &devices,
+                mtp: &mtp,
+            };
+            emit(json, &all, || {
+                let mut lines: Vec<String> = devices
+                    .iter()
+                    .map(|d| {
+                        format!(
+                            "{}  {}  mass storage, thumbnails:{}",
+                            d.root.display(),
+                            d.model_hint,
+                            if d.thumbnails_writable {
+                                "writable"
+                            } else {
+                                "no"
+                            }
+                        )
+                    })
+                    .collect();
+                lines.extend(mtp.iter().map(|m| {
+                    format!(
+                        "usb {}:{}  {}  MTP (serial {})",
+                        m.bus,
+                        m.address,
+                        m.product.clone().unwrap_or_else(|| "Kindle".into()),
+                        m.serial.clone().unwrap_or_default()
+                    )
+                }));
+                if lines.is_empty() {
+                    "no Kindle connected".to_owned()
                 } else {
-                    devices
-                        .iter()
-                        .map(|d| {
-                            format!(
-                                "{}  {}  thumbnails:{}",
-                                d.root.display(),
-                                d.model_hint,
-                                if d.thumbnails_writable {
-                                    "writable"
-                                } else {
-                                    "no"
-                                }
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
+                    lines.join("\n")
                 }
             })?;
             Ok(ExitCode::SUCCESS)
@@ -265,6 +289,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             cde,
             pages,
             previewer: pv,
+            amazon_match,
+            verified_asin,
             keep_work_dir,
         } => {
             if epubs.is_empty() {
@@ -276,6 +302,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             let target = resolve_target(&to)?;
             let opts = RunOptions {
                 cde_type: cde.into(),
+                cde_override: cde.to_override(),
+                amazon_match,
+                verified_real_asin: verified_asin,
                 asin: None,
                 pages,
                 target,
@@ -290,11 +319,15 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .map(|r| match (&r.error, &r.delivered) {
                         (Some(e), _) => format!("FAIL  {}\n      {e}", r.input.display()),
                         (None, Some(d)) => format!(
-                            "OK    {}\n      -> {}{}{}",
+                            "OK    {}\n      -> {}{}{}{}",
                             r.input.display(),
                             d.display(),
                             r.pages
                                 .map(|p| format!("  ({p} pages)"))
+                                .unwrap_or_default(),
+                            r.decision
+                                .as_ref()
+                                .map(|x| format!("\n      {}: {}", x.cde.as_str(), x.reason))
                                 .unwrap_or_default(),
                             if r.warnings.is_empty() {
                                 String::new()

@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 deckle-core.workspace = true
 deckle-kfx.workspace = true
+deckle-transport.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
