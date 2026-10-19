@@ -45,6 +45,8 @@ pub struct ConvertOutput {
     pub bytes: Vec<u8>,
     pub pages: Option<u32>,
     pub warnings: Vec<String>,
+    /// The book's `asset_id` metadata (Word Wise sidecars name it as `acr`).
+    pub asset_id: String,
 }
 
 impl ConvertOutput {
@@ -119,6 +121,11 @@ pub fn kpf_to_kfx(kpf: &Path, opts: &ConvertOptions) -> Result<ConvertOutput, Co
             package_version: String::new(),
         },
     )?;
+    let asset_id = book
+        .title_metadata("asset_id")
+        .and_then(crate::ion::Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| book.container_id.clone());
     let mut warnings = book.warnings;
     if let Some(w) = ConvertOutput::size_warning(bytes.len()) {
         warnings.push(w);
@@ -127,5 +134,6 @@ pub fn kpf_to_kfx(kpf: &Path, opts: &ConvertOptions) -> Result<ConvertOutput, Co
         bytes,
         pages,
         warnings,
+        asset_id,
     })
 }

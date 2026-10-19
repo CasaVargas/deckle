@@ -385,3 +385,27 @@ fn documents_folder_is_found_under_a_nameless_root_association_and_never_invente
         "must not create folders"
     );
 }
+
+#[test]
+fn get_object_downloads_a_multi_chunk_file() {
+    let payload: Vec<u8> = (0..3000u32).map(|i| (i % 251) as u8).collect();
+    let mut whole = data(op::GET_OBJECT, 1, &payload);
+    // the device splits the data phase across USB transfers
+    let tail = whole.split_off(1000);
+    let fake = Fake {
+        script: vec![
+            (
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
+            ),
+            (
+                cmd(op::GET_OBJECT, 1, &[0x42]),
+                vec![whole, tail, ok(op::GET_OBJECT, 1, &[])],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut mtp = Mtp::new(Box::new(fake));
+    mtp.open_session().unwrap();
+    assert_eq!(mtp.get_object(0x42).unwrap(), payload);
+}
