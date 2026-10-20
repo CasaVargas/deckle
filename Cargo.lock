@@ -848,7 +848,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -864,7 +864,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "csv",
  "deckle-kfx",
@@ -888,7 +888,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.23.1",
  "deckle-core",
@@ -906,7 +906,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-kfx"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rand",
  "roxmltree",
@@ -922,7 +922,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-transport"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rusb",
  "serde",
@@ -931,7 +931,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-wordwise"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64 0.22.1",
  "deckle-kfx",
@@ -943,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-wordwise-build"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "deckle-wordwise",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-xray"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "deckle-kfx",
  "regex",
