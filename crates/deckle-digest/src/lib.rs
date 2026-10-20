@@ -6,12 +6,16 @@
 //! today" note in its section and never fails the edition. `build` writes the EPUB.
 
 pub mod article;
+pub mod bookmarklet;
 pub mod config;
 pub mod cover;
 pub mod epub;
 pub mod fetch;
 pub mod horoscope;
+pub mod inbox;
+pub mod longread;
 pub mod moon;
+pub mod reading;
 pub mod render;
 pub mod sources;
 
@@ -115,12 +119,23 @@ pub struct BuildReport {
     pub epub: PathBuf,
     pub title: String,
     pub sections: Vec<SectionSummary>,
+    /// Long-read EPUBs written beside the paper.
+    pub long_reads: Vec<PathBuf>,
+    pub reading_outcomes: Vec<(String, reading::Outcome)>,
+    pub notes: Vec<String>,
 }
 
 /// A gathered edition plus which of its sections carry news stories (for the headlines).
 pub struct Gathered {
     pub edition: Edition,
     pub news: Vec<usize>,
+    /// The Your Reading section's index, when it has articles.
+    pub reading: Option<usize>,
+    pub long_reads: Vec<sources::reading::LongRead>,
+    /// What this edition did with each saved entry (committed by `digest run` only).
+    pub reading_outcomes: Vec<(String, reading::Outcome)>,
+    /// One-line notices for the person running the build.
+    pub notes: Vec<String>,
 }
 
 /// Fetches every configured source through `get`. Never fails: a source error becomes the
@@ -134,8 +149,41 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
         sections: Vec::new(),
     };
     let mut news = Vec::new();
-    for kind in &cfg.sections {
+    let mut g_reading = None;
+    let mut long_reads = Vec::new();
+    let mut reading_outcomes = Vec::new();
+    let mut notes = Vec::new();
+    let queue = reading::ReadingQueue::new(
+        cfg.reading
+            .queue_path
+            .clone()
+            .unwrap_or_else(reading::ReadingQueue::default_path),
+    );
+    let saved = queue.for_edition(date, cfg.reading.max_items);
+    let mut kinds = cfg.sections.clone();
+    if !saved.is_empty() && !kinds.contains(&SectionKind::Reading) {
+        // Saving is an explicit ask: print it even if the config predates the section.
+        kinds.insert(0, SectionKind::Reading);
+        notes.push(
+            "Your Reading added first: you have saved articles and \"reading\" isn't in \
+             sections (add it to digest.toml to choose its place)"
+                .into(),
+        );
+    }
+    for kind in &kinds {
         match kind {
+            SectionKind::Reading => {
+                if saved.is_empty() {
+                    continue;
+                }
+                let (section, lrs, outcomes) = sources::reading::section(&saved, cfg, net, date);
+                long_reads.extend(lrs);
+                reading_outcomes.extend(outcomes);
+                if !section.articles.is_empty() {
+                    g_reading = Some(edition.sections.len());
+                    edition.sections.push(section);
+                }
+            }
             SectionKind::Weather => {
                 let (section, line) = sources::weather::section(cfg, date, net);
                 edition.weather_line = line;
@@ -162,7 +210,14 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                 .push(sources::onthisday::section(date, net)),
         }
     }
-    Gathered { edition, news }
+    Gathered {
+        edition,
+        news,
+        reading: g_reading,
+        long_reads,
+        reading_outcomes,
+        notes,
+    }
 }
 
 /// Gathers and writes `<out_dir>/deckle-daily-<date>.epub`.
@@ -176,7 +231,17 @@ pub fn build(
     let gathered = gather(cfg, date, now, net);
     let path = out_dir.join(format!("deckle-daily-{date}.epub"));
     write_edition(&gathered, &path)?;
-    Ok(report(&gathered.edition, path))
+    let mut long_reads = Vec::new();
+    for lr in &gathered.long_reads {
+        let p = out_dir.join(format!("{}.epub", lr.file_stem));
+        longread::write_long_read(lr, date, &p)?;
+        long_reads.push(p);
+    }
+    let mut r = report(&gathered.edition, path);
+    r.long_reads = long_reads;
+    r.reading_outcomes = gathered.reading_outcomes;
+    r.notes = gathered.notes;
+    Ok(r)
 }
 
 /// Renders and writes one gathered edition as an EPUB.
@@ -202,6 +267,9 @@ fn report(edition: &Edition, epub: PathBuf) -> BuildReport {
                 unavailable: s.unavailable.clone(),
             })
             .collect(),
+        long_reads: Vec::new(),
+        reading_outcomes: Vec::new(),
+        notes: Vec::new(),
     }
 }
 

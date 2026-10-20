@@ -179,6 +179,22 @@ pub enum Command {
         #[arg(long)]
         keep_work_dir: bool,
     },
+    /// Save articles for tomorrow's paper (Your Reading): URLs or saved .html pages.
+    Save {
+        /// URLs, or saved web pages (.html).
+        targets: Vec<String>,
+        #[arg(long)]
+        title: Option<String>,
+        /// Show the queue: pending first, then the last 7 days.
+        #[arg(long)]
+        list: bool,
+        /// Remove an entry by id or URL.
+        #[arg(long)]
+        remove: Option<String>,
+        /// Print the bookmarklet to drag to your browser's bookmarks bar.
+        #[arg(long)]
+        bookmarklet: bool,
+    },
     /// The Deckle Daily: a newspaper built from your sources (weather, local news, feeds,
     /// lottery, horoscope, on this day).
     Digest {

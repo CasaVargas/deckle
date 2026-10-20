@@ -16,6 +16,8 @@ pub const HEIGHT: u32 = 1680;
 const MARGIN: f32 = 64.0;
 /// Headlines considered for the lead plus the grid.
 const HEADLINES: usize = 12;
+/// Saved articles shown in the cover's grid.
+const SAVED_ON_COVER: usize = 2;
 const BLACK: u8 = 0;
 const WHITE: u8 = 255;
 
@@ -25,6 +27,7 @@ const SERIF_BOLD: &[u8] = include_bytes!("../fonts/OldStandard-Bold.ttf");
 const SERIF_ITALIC: &[u8] = include_bytes!("../fonts/OldStandard-Italic.ttf");
 
 struct Fonts<'a> {
+    // `'static`: the fonts are bundled bytes.
     black: FontRef<'a>,
     serif: FontRef<'a>,
     bold: FontRef<'a>,
@@ -160,15 +163,82 @@ fn paragraph(
     y
 }
 
-/// The cover as a JPEG.
-pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
+fn fonts() -> Result<Fonts<'static>, String> {
     let font = |b| FontRef::try_from_slice(b).map_err(|e| e.to_string());
-    let f = Fonts {
+    Ok(Fonts {
         black: font(BLACKLETTER)?,
         serif: font(SERIF)?,
         bold: font(SERIF_BOLD)?,
         italic: font(SERIF_ITALIC)?,
+    })
+}
+
+fn jpeg(c: Canvas) -> Result<Vec<u8>, String> {
+    let mut out = Vec::new();
+    image::DynamicImage::ImageLuma8(c.img)
+        .to_rgb8()
+        .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut out, 90,
+        ))
+        .map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+/// A long read's cover (save-to-paper §5): "Deckle Reads" in the masthead face, the title
+/// large, then the byline, outlet and reading time.
+pub fn render_reads(
+    title: &str,
+    byline: Option<&str>,
+    outlet: &str,
+    minutes: usize,
+) -> Result<Vec<u8>, String> {
+    let f = fonts()?;
+    let inner = WIDTH as f32 - 2.0 * MARGIN;
+    let mut c = Canvas {
+        img: GrayImage::from_pixel(WIDTH, HEIGHT, Luma([WHITE])),
     };
+    let mut y = 220.0;
+    c.centered(&f.black, 120.0, y, "Deckle Reads", BLACK);
+    y += 50.0;
+    c.rule(y, 6.0);
+    c.rule(y + 12.0, 2.0);
+    let size = 96.0;
+    let lines = wrap(&f.bold, size, title, inner, 6);
+    // Title, byline and outlet centered in the space between the rules.
+    let block =
+        size * 1.15 * lines.len() as f32 + 40.0 + if byline.is_some() { 70.0 } else { 0.0 } + 40.0;
+    let foot = HEIGHT as f32 - 110.0;
+    y = (y + 12.0 + foot) / 2.0 - block / 2.0 + size;
+    for line in &lines {
+        c.centered(&f.bold, size, y, line, BLACK);
+        y += size * 1.15;
+    }
+    y += 40.0;
+    if let Some(b) = byline {
+        c.centered(&f.italic, 46.0, y, b, BLACK);
+        y += 70.0;
+    }
+    c.centered(&f.serif, 38.0, y, outlet, BLACK);
+    c.rule(foot, 2.0);
+    c.centered(
+        &f.serif,
+        34.0,
+        foot + 60.0,
+        &format!("About {minutes} min · saved to your Deckle Daily"),
+        BLACK,
+    );
+    jpeg(c)
+}
+
+/// The outlet in a story's meta line ("By Sentinel Staff · Sandhills Sentinel · Oct 20"):
+/// the first part that isn't a byline.
+fn outlet_of(meta: &str) -> Option<&str> {
+    meta.split(" · ").find(|p| !p.starts_with("By "))
+}
+
+/// The cover as a JPEG.
+pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
+    let f = fonts()?;
     let e = &g.edition;
     let inner = WIDTH as f32 - 2.0 * MARGIN;
     let mut c = Canvas {
@@ -220,10 +290,11 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
         match section.articles[a]
             .meta
             .as_deref()
-            .and_then(|m| m.split(" · ").next())
+            .and_then(|m| outlet_of(m))
         {
             // Briefs carry their outlet as the first meta part (Local: "WXII · Oct 20").
             Some(src) if section.title == "Local" => format!("LOCAL · {}", src.to_uppercase()),
+            _ if Some(s) == g.reading => "YOUR READING".to_owned(),
             _ => section.title.to_uppercase(),
         }
     };
@@ -256,10 +327,22 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     let top = y + 6.0;
     let mut col_y = [top, top];
     let mut drawn = [false, false];
-    for (k, &(s, a)) in heads.iter().enumerate() {
-        if Some(k) == lead {
-            continue;
-        }
+    // The news keeps the lead; up to two saved articles take the first grid spots.
+    let saved = g
+        .reading
+        .map(|r| (0..e.sections[r].articles.len().min(SAVED_ON_COVER)).map(move |a| (r, a)));
+    let grid: Vec<(usize, usize)> = saved
+        .into_iter()
+        .flatten()
+        .chain(
+            heads
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| Some(*k) != lead)
+                .map(|(_, h)| *h),
+        )
+        .collect();
+    for &(s, a) in &grid {
         let col = if col_y[0] <= col_y[1] { 0 } else { 1 };
         let x = MARGIN + col as f32 * (col_w + gutter);
         let lines = wrap(&f.bold, 40.0, &e.sections[s].articles[a].title, col_w, 3);
@@ -301,12 +384,19 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     let size = fit(&f.serif, 28.0, &line, inner);
     c.centered(&f.serif, size, footer_top + 64.0, &line, BLACK);
 
-    let mut jpeg = Vec::new();
-    image::DynamicImage::ImageLuma8(c.img)
-        .to_rgb8()
-        .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
-            &mut jpeg, 90,
-        ))
-        .map_err(|e| e.to_string())?;
-    Ok(jpeg)
+    jpeg(c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_outlet_label_skips_the_byline() {
+        assert_eq!(
+            outlet_of("By Sentinel Staff · Sandhills Sentinel · Oct 20, 6:52 PM"),
+            Some("Sandhills Sentinel")
+        );
+        assert_eq!(outlet_of("WXII · Oct 20, 4:04 PM"), Some("WXII"));
+    }
 }

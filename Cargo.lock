@@ -940,12 +940,15 @@ name = "deckle-digest"
 version = "0.2.1"
 dependencies = [
  "ab_glyph",
+ "base64 0.22.1",
  "chrono",
+ "deunicode",
  "dom_query",
  "dom_smoothie",
  "feed-rs",
  "html-escape",
  "image",
+ "rand",
  "regex",
  "roxmltree",
  "serde",

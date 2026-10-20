@@ -120,6 +120,20 @@ deckle digest push                  # deliver a queued edition to the Kindle now
 deckle digest watch                 # keep running; deliver whenever a Kindle connects
 ```
 
+**Save to tomorrow's paper.** Anything you save during the day prints in the next edition as
+*Your Reading*, whole and with its photos; pieces over 4,000 words become their own book that rides
+along with the paper.
+
+```sh
+deckle save https://example.com/story     # or a saved .html page (sites you're signed into)
+deckle save --list                        # what's waiting, and what printed
+deckle save --bookmarklet                 # a bookmarklet for your browser (needs `digest watch`)
+```
+
+Or drop links (`.webloc`, `.url`, `.txt`) and saved pages into `~/Deckle/Inbox`. Point
+`[reading] inbox` in `digest.toml` at an iCloud Drive folder and an iPhone Shortcut ("Save File")
+saves from your phone. The queue is a plain file, `reading.jsonl`, next to `digest.toml`.
+
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
 

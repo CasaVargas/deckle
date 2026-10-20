@@ -1,6 +1,6 @@
 # Save to tomorrow's paper — design
 
-**Status:** builder-checked, for owner review · **Date:** 2026-10-20 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** approved by owner ("merge it and build it", 2026-10-20); built in #61's PR · **Date:** 2026-10-20 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-20-daily-digest-design.md` (the Deckle Daily, §5a full text) ·
 **Companion:** #60 (highlights back)
 
