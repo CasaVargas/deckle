@@ -37,6 +37,12 @@ pub struct Config {
     pub keep: usize,
     /// Feed items older than this are left out.
     pub max_age_hours: u32,
+    /// Fetch each story's full text so nothing needs a browser (design §5a).
+    pub full_text: bool,
+    /// With full text: the story's photos, as grayscale JPEGs.
+    pub photos: bool,
+    /// Photos kept per story.
+    pub max_photos: usize,
     pub sections: Vec<SectionKind>,
     pub local: LocalConfig,
     pub feeds: Vec<FeedConfig>,
@@ -54,6 +60,9 @@ impl Default for Config {
             units: Units::Imperial,
             keep: 3,
             max_age_hours: 36,
+            full_text: true,
+            photos: true,
+            max_photos: 4,
             sections: vec![
                 SectionKind::Weather,
                 SectionKind::Local,
@@ -139,6 +148,9 @@ longitude = -74.01
 units = "imperial"                # or "metric"
 keep = 3                          # editions kept on the Kindle
 max_age_hours = 36                # older feed items are left out
+full_text = true                  # fetch whole stories, so nothing opens a browser
+photos = true                     # with their photos, in grayscale for e-ink
+max_photos = 4                    # per story
 
 # Order of the paper. Remove a name to drop that section.
 sections = ["weather", "local", "feeds", "lottery", "horoscope", "onthisday"]

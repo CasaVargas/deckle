@@ -58,7 +58,7 @@ fn read_zip(path: &PathBuf) -> zip::ZipArchive<std::fs::File> {
 
 #[test]
 fn every_section_fills_from_fixtures() {
-    let g = gather(&config(), date(), now(), &mut fake);
+    let g = gather(&config(), date(), now(), &fake);
     let titles: Vec<_> = g
         .edition
         .sections
@@ -89,8 +89,8 @@ fn every_section_fills_from_fixtures() {
 #[test]
 fn dead_network_still_builds() {
     let tmp = tempfile::tempdir().unwrap();
-    let mut offline = |url: &str| -> Result<Vec<u8>, String> { Err(format!("offline: {url}")) };
-    let r = build(&config(), date(), now(), tmp.path(), &mut offline).unwrap();
+    let offline = |url: &str| -> Result<Vec<u8>, String> { Err(format!("offline: {url}")) };
+    let r = build(&config(), date(), now(), tmp.path(), &offline).unwrap();
     assert!(r.epub.exists());
     let horoscope = r.sections.iter().find(|s| s.title == "Horoscope").unwrap();
     assert_eq!(horoscope.items, 2);
@@ -101,7 +101,7 @@ fn dead_network_still_builds() {
 #[test]
 fn epub_is_well_formed() {
     let tmp = tempfile::tempdir().unwrap();
-    let r = build(&config(), date(), now(), tmp.path(), &mut fake).unwrap();
+    let r = build(&config(), date(), now(), tmp.path(), &fake).unwrap();
     assert_eq!(r.title, "The Deckle Daily — Tuesday, October 20, 2026");
     let mut zip = read_zip(&r.epub);
     assert_eq!(zip.by_index(0).unwrap().name().unwrap(), "mimetype");

@@ -12,12 +12,15 @@ serde_json.workspace = true
 ureq.workspace = true
 regex.workspace = true
 zip.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["gif", "webp"] }
 toml = "1"
 feed-rs = "3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 ab_glyph = "0.2"
 html-escape = "0.2"
+dom_smoothie = "0.18"
+dom_query = "0.28"
+url = "2"
 
 [dev-dependencies]
 tempfile.workspace = true

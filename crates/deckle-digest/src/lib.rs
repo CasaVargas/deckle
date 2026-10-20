@@ -5,6 +5,7 @@
 //! `gather` turns a [`Config`] into an [`Edition`]; a failing source becomes an "unavailable
 //! today" note in its section and never fails the edition. `build` writes the EPUB.
 
+pub mod article;
 pub mod config;
 pub mod cover;
 pub mod epub;
@@ -21,7 +22,7 @@ use serde::Serialize;
 
 pub use chrono;
 pub use config::{Config, SectionKind};
-pub use fetch::{Get, http_get};
+pub use fetch::{Http, Net};
 
 /// The author stamped on every edition.
 pub const AUTHOR: &str = "Deckle";
@@ -43,6 +44,8 @@ pub struct Article {
     pub body: String,
     /// A plain-text opening paragraph for the cover's lead story.
     pub teaser: Option<String>,
+    /// E-ink JPEGs; the body refers to photo `n` as [`sources::feeds::photo_token`]`(n)`.
+    pub photos: Vec<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -122,7 +125,7 @@ pub struct Gathered {
 
 /// Fetches every configured source through `get`. Never fails: a source error becomes the
 /// section's `unavailable` note.
-pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, get: &mut Get<'_>) -> Gathered {
+pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) -> Gathered {
     let mut edition = Edition {
         paper: cfg.title.clone(),
         date,
@@ -134,7 +137,7 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, get: &mut Get<'
     for kind in &cfg.sections {
         match kind {
             SectionKind::Weather => {
-                let (section, line) = sources::weather::section(cfg, date, get);
+                let (section, line) = sources::weather::section(cfg, date, net);
                 edition.weather_line = line;
                 edition.sections.push(section);
             }
@@ -142,21 +145,21 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, get: &mut Get<'
                 news.push(edition.sections.len());
                 edition
                     .sections
-                    .push(sources::feeds::local_section(cfg, now, get));
+                    .push(sources::feeds::local_section(cfg, now, net));
             }
             SectionKind::Feeds => {
                 for feed in &cfg.feeds {
                     news.push(edition.sections.len());
                     edition
                         .sections
-                        .push(sources::feeds::feed_section(feed, cfg, now, get));
+                        .push(sources::feeds::feed_section(feed, cfg, now, net));
                 }
             }
-            SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, get)),
+            SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
             SectionKind::Horoscope => edition.sections.push(horoscope::section(cfg, date)),
             SectionKind::Onthisday => edition
                 .sections
-                .push(sources::onthisday::section(date, get)),
+                .push(sources::onthisday::section(date, net)),
         }
     }
     Gathered { edition, news }
@@ -168,9 +171,9 @@ pub fn build(
     date: NaiveDate,
     now: DateTime<Utc>,
     out_dir: &Path,
-    get: &mut Get<'_>,
+    net: &dyn Net,
 ) -> Result<BuildReport, String> {
-    let gathered = gather(cfg, date, now, get);
+    let gathered = gather(cfg, date, now, net);
     let path = out_dir.join(format!("deckle-daily-{date}.epub"));
     write_edition(&gathered, &path)?;
     Ok(report(&gathered.edition, path))

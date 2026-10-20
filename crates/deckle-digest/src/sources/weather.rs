@@ -5,7 +5,7 @@ use chrono::{NaiveDate, NaiveDateTime};
 use serde::Deserialize;
 
 use crate::config::{Config, Units};
-use crate::fetch::Get;
+use crate::fetch::Net;
 use crate::{Article, Section, esc};
 
 const TITLE: &str = "Weather";
@@ -107,14 +107,14 @@ fn deg(v: f64) -> String {
 }
 
 /// The Weather section and the one-line summary for the front page and cover.
-pub fn section(cfg: &Config, date: NaiveDate, get: &mut Get<'_>) -> (Section, Option<String>) {
+pub fn section(cfg: &Config, date: NaiveDate, net: &dyn Net) -> (Section, Option<String>) {
     let (Some(lat), Some(lon)) = (cfg.latitude, cfg.longitude) else {
         return (
             super::unavailable(TITLE, "set latitude and longitude in digest.toml"),
             None,
         );
     };
-    match get(&url(lat, lon, cfg.units)).and_then(|b| parse(&b)) {
+    match net.get(&url(lat, lon, cfg.units)).and_then(|b| parse(&b)) {
         Ok(f) => from_forecast(&f, cfg, date),
         Err(e) => (super::unavailable(TITLE, e), None),
     }
@@ -142,6 +142,7 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
         ));
         articles.push(Article {
             teaser: None,
+            photos: Vec::new(),
             title: format!("Today: {sky}"),
             meta: (!cfg.place.is_empty()).then(|| cfg.place.clone()),
             body: format!(
@@ -178,6 +179,7 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
         }
         articles.push(Article {
             teaser: None,
+            photos: Vec::new(),
             title: "The days ahead".into(),
             meta: None,
             body: format!("<table class=\"forecast\">{rows}</table>"),
@@ -186,6 +188,7 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
     let moon = crate::moon::phase(date);
     articles.push(Article {
         teaser: None,
+        photos: Vec::new(),
         title: format!("The moon: {}", moon.name),
         meta: None,
         body: format!(

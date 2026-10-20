@@ -5,7 +5,7 @@ use chrono::NaiveDateTime;
 use serde::Deserialize;
 
 use crate::config::Config;
-use crate::fetch::Get;
+use crate::fetch::Net;
 use crate::{Article, Section, esc};
 
 const TITLE: &str = "Lottery";
@@ -73,6 +73,7 @@ pub fn powerball(json: &[u8]) -> Result<Article, String> {
     }
     Ok(Article {
         teaser: None,
+        photos: Vec::new(),
         title: "Powerball".into(),
         meta: Some(drawn_on(&d.draw_date)),
         body,
@@ -90,19 +91,20 @@ pub fn mega_millions(json: &[u8]) -> Result<Article, String> {
     }
     Ok(Article {
         teaser: None,
+        photos: Vec::new(),
         title: "Mega Millions".into(),
         meta: Some(drawn_on(&d.draw_date)),
         body,
     })
 }
 
-pub fn section(cfg: &Config, get: &mut Get<'_>) -> Section {
+pub fn section(cfg: &Config, net: &dyn Net) -> Section {
     let mut articles = Vec::new();
     let mut errors = Vec::new();
     for game in &cfg.lottery.games {
         let result = match game.as_str() {
-            "powerball" => get(POWERBALL).and_then(|b| powerball(&b)),
-            "megamillions" => get(MEGA_MILLIONS).and_then(|b| mega_millions(&b)),
+            "powerball" => net.get(POWERBALL).and_then(|b| powerball(&b)),
+            "megamillions" => net.get(MEGA_MILLIONS).and_then(|b| mega_millions(&b)),
             other => Err(format!("unknown game {other:?}")),
         };
         match result {

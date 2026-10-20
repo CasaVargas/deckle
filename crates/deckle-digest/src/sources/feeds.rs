@@ -3,14 +3,15 @@
 //! section per `[[feeds]]` entry. Feed HTML is reduced to text paragraphs (v0).
 
 use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 use chrono::{DateTime, Local, Utc};
 use regex::Regex;
 
 use crate::config::{Config, FeedConfig};
-use crate::fetch::{Get, encode};
-use crate::{Article, Section, esc};
+use crate::fetch::{Net, encode};
+use crate::{Article, Section, article, esc};
 
 /// Paragraphs kept per article.
 const MAX_PARAGRAPHS: usize = 40;
@@ -141,7 +142,17 @@ fn when(t: DateTime<Utc>) -> String {
         .to_string()
 }
 
-pub fn article(item: &Item) -> Article {
+fn host(url: &str) -> &str {
+    url.split("://")
+        .nth(1)
+        .and_then(|r| r.split('/').next())
+        .map(|h| h.trim_start_matches("www."))
+        .unwrap_or(url)
+}
+
+/// The story as the feed gave it, with a plain source line and no outbound link. `note` says
+/// why the full story is missing, when it was looked for.
+pub fn article(item: &Item, note: Option<&str>) -> Article {
     let meta = [item.source.clone(), item.published.map(when)]
         .into_iter()
         .flatten()
@@ -150,18 +161,16 @@ pub fn article(item: &Item) -> Article {
     let mut body: String = item
         .paragraphs
         .iter()
+        .filter(|p| !p.contains("URL:"))
         .map(|p| format!("<p>{}</p>", esc(p)))
         .collect();
+    if let Some(n) = note {
+        body.push_str(&format!("<p class=\"note\">{}</p>", esc(n)));
+    }
     if let Some(link) = &item.link {
-        let host = link
-            .split("://")
-            .nth(1)
-            .and_then(|r| r.split('/').next())
-            .unwrap_or(link);
         body.push_str(&format!(
-            "<p class=\"link\">Read online: <a href=\"{}\">{}</a></p>",
-            esc(link),
-            esc(host)
+            "<p class=\"source\">Source: {}</p>",
+            esc(host(link))
         ));
     }
     Article {
@@ -169,7 +178,101 @@ pub fn article(item: &Item) -> Article {
         meta: (!meta.is_empty()).then_some(meta),
         body,
         teaser: teaser(&item.paragraphs),
+        photos: Vec::new(),
     }
+}
+
+/// The token a story's photo `n` carries in its body until the renderer names the file.
+pub fn photo_token(n: usize) -> String {
+    format!("__DECKLE_PHOTO_{n}__")
+}
+
+/// The full story behind `item` (design §5a), or the feed's version with a note.
+pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
+    let Some(link) = item.link.as_deref() else {
+        return article(item, None);
+    };
+    let url = if article::is_google_news(link) {
+        match article::resolve_google_news(link, net) {
+            Some(u) => u,
+            None => return article(item, Some(UNAVAILABLE)),
+        }
+    } else {
+        link.to_owned()
+    };
+    let extracted = net
+        .get_page(&url)
+        .ok()
+        .and_then(|b| article::extract(&String::from_utf8_lossy(&b), &url));
+    let Some(x) = extracted else {
+        return article(item, Some(UNAVAILABLE));
+    };
+    let fetched = if cfg.photos {
+        article::fetch_photos(&x.photos, cfg.max_photos, net)
+    } else {
+        vec![None; x.photos.len()]
+    };
+    let kept: Vec<bool> = fetched.iter().map(Option::is_some).collect();
+    // Placeholder k (all candidates) -> photo n (kept ones, in order).
+    let mut rank = Vec::with_capacity(kept.len());
+    let mut n = 0;
+    for &k in &kept {
+        rank.push(n);
+        n += usize::from(k);
+    }
+    let mut body = article::place_photos(&x.xhtml, &kept, |k| photo_token(rank[k]));
+    let outlet = item.source.clone().unwrap_or_else(|| host(&url).to_owned());
+    body.push_str(&format!("<p class=\"source\">Source: {}</p>", esc(&outlet)));
+    let meta = [
+        x.byline.map(|b| {
+            if b.to_lowercase().starts_with("by ") {
+                b
+            } else {
+                format!("By {b}")
+            }
+        }),
+        item.source.clone(),
+        item.published.map(when),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+    Article {
+        title: item.title.clone(),
+        meta: (!meta.is_empty()).then_some(meta),
+        body,
+        teaser: x.teaser.or_else(|| teaser(&item.paragraphs)),
+        photos: fetched.into_iter().flatten().collect(),
+    }
+}
+
+const UNAVAILABLE: &str = "Full story unavailable offline.";
+/// Article pages fetched at once.
+const WORKERS: usize = 8;
+
+/// `f` over `items` on up to [`WORKERS`] threads, results in input order.
+fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+    let next = AtomicUsize::new(0);
+    let results: Mutex<Vec<Option<R>>> = Mutex::new((0..items.len()).map(|_| None).collect());
+    std::thread::scope(|scope| {
+        for _ in 0..WORKERS.min(items.len()) {
+            scope.spawn(|| {
+                loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    let Some(item) = items.get(i) else { break };
+                    let r = f(item);
+                    results.lock().expect("no worker panics while holding it")[i] = Some(r);
+                }
+            });
+        }
+    });
+    results
+        .into_inner()
+        .expect("workers joined")
+        .into_iter()
+        .map(|r| r.expect("every index ran"))
+        .collect()
 }
 
 /// The first paragraph that reads like prose (not "Article URL: …" link lists).
@@ -180,14 +283,31 @@ fn teaser(paragraphs: &[String]) -> Option<String> {
         .cloned()
 }
 
-fn section_of(title: &str, kicker: Option<String>, items: &[Item], errors: &[String]) -> Section {
+fn section_of(
+    title: &str,
+    kicker: Option<String>,
+    items: &[Item],
+    errors: &[String],
+    cfg: &Config,
+    net: &dyn Net,
+) -> Section {
     if items.is_empty() && !errors.is_empty() {
         return super::unavailable(title, errors.join("; "));
     }
+    let articles = if cfg.full_text {
+        // Whole stories lead; ones only the feed could give run after them, like briefs.
+        let (mut full, briefs): (Vec<_>, Vec<_>) = par_map(items, |i| full_article(i, cfg, net))
+            .into_iter()
+            .partition(|a| !a.body.contains(UNAVAILABLE));
+        full.extend(briefs);
+        full
+    } else {
+        items.iter().map(|i| article(i, None)).collect()
+    };
     let mut section = Section {
         title: title.into(),
         kicker,
-        articles: items.iter().map(article).collect(),
+        articles,
         unavailable: None,
     };
     if items.is_empty() {
@@ -198,23 +318,27 @@ fn section_of(title: &str, kicker: Option<String>, items: &[Item], errors: &[Str
 
 /// The Local section: the Google News search and local feeds, merged, deduplicated, newest
 /// first.
-pub fn local_section(cfg: &Config, now: DateTime<Utc>, get: &mut Get<'_>) -> Section {
+pub fn local_section(cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section {
     let title = "Local";
     let mut items = Vec::new();
     let mut errors = Vec::new();
     if !cfg.local.google_news.trim().is_empty() {
-        match get(&google_news_url(
-            &cfg.local.google_news,
-            cfg.local.max_age_hours,
-        ))
-        .and_then(|b| parse(&b, now, cfg.local.max_age_hours))
+        match net
+            .get(&google_news_url(
+                &cfg.local.google_news,
+                cfg.local.max_age_hours,
+            ))
+            .and_then(|b| parse(&b, now, cfg.local.max_age_hours))
         {
             Ok((_, found)) => items.extend(as_briefs(found)),
             Err(e) => errors.push(format!("Google News: {e}")),
         }
     }
     for url in &cfg.local.feeds {
-        match get(url).and_then(|b| parse(&b, now, cfg.local.max_age_hours)) {
+        match net
+            .get(url)
+            .and_then(|b| parse(&b, now, cfg.local.max_age_hours))
+        {
             Ok((name, found)) => items.extend(found.into_iter().map(|mut i| {
                 i.source = i.source.or(name.clone());
                 i
@@ -230,20 +354,18 @@ pub fn local_section(cfg: &Config, now: DateTime<Utc>, get: &mut Get<'_>) -> Sec
     items.sort_by_key(|i| std::cmp::Reverse(i.published));
     items.truncate(cfg.local.max_items);
     let kicker = (!cfg.place.is_empty()).then(|| format!("News from around {}", cfg.place));
-    section_of(title, kicker, &items, &errors)
+    section_of(title, kicker, &items, &errors, cfg, net)
 }
 
 /// One `[[feeds]]` entry as its own section.
-pub fn feed_section(
-    feed: &FeedConfig,
-    cfg: &Config,
-    now: DateTime<Utc>,
-    get: &mut Get<'_>,
-) -> Section {
-    match get(&feed.url).and_then(|b| parse(&b, now, cfg.max_age_hours)) {
+pub fn feed_section(feed: &FeedConfig, cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section {
+    match net
+        .get(&feed.url)
+        .and_then(|b| parse(&b, now, cfg.max_age_hours))
+    {
         Ok((_, mut items)) => {
             items.truncate(feed.max_items);
-            section_of(&feed.name, None, &items, &[])
+            section_of(&feed.name, None, &items, &[], cfg, net)
         }
         Err(e) => super::unavailable(&feed.name, e),
     }

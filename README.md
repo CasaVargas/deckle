@@ -106,7 +106,9 @@ an Amazon edition on Open Library when an MTP Kindle needs a real ASIN.
 A morning paper built on your machine: weather (Open-Meteo), local news (a Google News search
 plus any local feeds), your RSS/Atom feeds, Powerball and Mega Millions, a horoscope Deckle
 writes itself, and "On this day" from Wikipedia. Its cover is a generated front page, so the
-Kindle library tile is today's paper. No keys or accounts; a source that fails prints
+Kindle library tile is today's paper. Every story comes with its full text and photos (grayscale
+for e-ink), pulled Reader-View style from the publisher, so nothing sends you to a browser; a
+story behind a paywall stays a headline. No keys or accounts; a source that fails prints
 "unavailable today" and the paper still ships.
 
 ```sh

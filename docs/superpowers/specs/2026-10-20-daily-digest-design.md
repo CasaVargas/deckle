@@ -49,8 +49,7 @@ What makes it unique, not just "RSS to EPUB":
 3. Delivery (b): opt-in Send-to-Kindle email over the user's own SMTP. This reverses the v1
    non-goal "USB/MTP only" for the digest only, as an explicit, labelled option, because it
    sends the edition through Amazon.
-4. Full-text articles (Readability-style extraction) when a feed only carries summaries;
-   images in articles.
+4. ~~Full-text articles and images~~ — in progress (#51), see §5a.
 5. Desktop app: a Daily tab to edit sections, preview the front page, and build now.
 6. Optional LLM editor (existing provider settings): dedupe stories across feeds, a three-line
    brief per section, an LLM-written horoscope.
@@ -147,6 +146,50 @@ sequentially in v0 (an edition is a handful of requests).
 - **Pruning:** after a push, over the *same* connection (a second MTP session would reset
   the Kindle again), `deckle-daily-*.kfx` files beyond the newest `keep` by name are
   removed with their `.sdr` folders. This applies to folders, mass storage and MTP.
+
+## 5a. Full text and photos (#51)
+
+The owner's bar: it should feel like a real newspaper, with nothing that sends you to a web
+browser. Every story carries its full text and photos inside the edition.
+
+- **Finding the article.**
+  - A feed item's link is the article.
+  - Google News links are not: they land on an interstitial page. The page carries
+    `data-n-a-id`, `data-n-a-ts` and `data-n-a-sg`, and a POST to
+    `news.google.com/_/DotsSplashUi/data/batchexecute` (rpc `Fbv4je`, `garturlreq`) returns
+    the publisher URL.
+  - This is undocumented and may break. When it fails, the item stays a brief (headline,
+    outlet, time) and the edition still ships.
+- **Extraction:** `dom_smoothie` (a port of Mozilla Readability, the code behind Firefox
+  Reader View) gives title, byline, lead image and cleaned content.
+  - The content is rewritten into a small XHTML whitelist: `p`, `h3`, `blockquote`,
+    `ul`/`ol`/`li`, `em`/`strong`, `br`, and `figure` with `img` and `figcaption`.
+  - Everything else is unwrapped to its text, and links become plain text.
+- **Thresholds:** a story under 120 words after extraction counts as a failure (paywall,
+  consent wall, video page). The item then falls back to the feed's own summary, with the
+  line "Full story unavailable offline." Text is capped at 6,000 words.
+- **Photos:**
+  - At most 4 per story: the lead image (`og:image`) first, then inline images in order,
+    deduplicated by URL without its query, then by a 64-bit difference hash of the picture
+    (CDNs serve one photo under several URLs; repeats measured 0–10 bits apart, distinct
+    photos 20+, cutoff 14).
+  - Images whose decoded shorter side is under 200 px are dropped (icons, trackers).
+  - Each is converted to 8-bit grayscale (e-ink), fit to 1000 px wide, and saved as JPEG
+    quality 70, as `images/<n>.jpg`.
+  - Formats: JPEG, PNG, GIF, WebP. Anything else is skipped.
+- **Requests:**
+  - Article pages are fetched with a desktop Safari user agent. Many publishers refuse
+    unknown agents, and the edition is read only by the person who built it.
+  - APIs keep the honest `Deckle/<version>` agent.
+  - Up to 8 fetches run in parallel: 15 s per API request, 25 s per publisher page.
+- **Order:** within a section, stories with full text come first; the ones that fell back
+  follow, like briefs.
+- **No outbound links:** the "Read online" link is gone. Each story ends with a small
+  "Source: <outlet>" line in plain text.
+- **Config:** `full_text = true` and `photos = true` at the top level, both default on.
+  `max_photos = 4`.
+- **Tests:** extraction and XHTML rewriting run against saved article pages, and the decoder
+  against a saved interstitial page plus a saved batchexecute reply. No network in tests.
 
 ## 6. Code layout
 

@@ -100,6 +100,7 @@ pub fn reading(sign: &str, date: NaiveDate) -> Option<Article> {
     let match_sign = SIGNS[(h.rotate_left(41) % 12) as usize].1;
     Some(Article {
         teaser: None,
+        photos: Vec::new(),
         title: (*name).into(),
         meta: Some((*range).into()),
         body: format!(
