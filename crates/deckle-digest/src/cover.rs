@@ -202,9 +202,13 @@ pub fn render_reads(
     y += 50.0;
     c.rule(y, 6.0);
     c.rule(y + 12.0, 2.0);
-    y += 120.0;
     let size = 96.0;
     let lines = wrap(&f.bold, size, title, inner, 6);
+    // Title, byline and outlet centered in the space between the rules.
+    let block =
+        size * 1.15 * lines.len() as f32 + 40.0 + if byline.is_some() { 70.0 } else { 0.0 } + 40.0;
+    let foot = HEIGHT as f32 - 110.0;
+    y = (y + 12.0 + foot) / 2.0 - block / 2.0 + size;
     for line in &lines {
         c.centered(&f.bold, size, y, line, BLACK);
         y += size * 1.15;
@@ -215,7 +219,6 @@ pub fn render_reads(
         y += 70.0;
     }
     c.centered(&f.serif, 38.0, y, outlet, BLACK);
-    let foot = HEIGHT as f32 - 110.0;
     c.rule(foot, 2.0);
     c.centered(
         &f.serif,
@@ -225,6 +228,12 @@ pub fn render_reads(
         BLACK,
     );
     jpeg(c)
+}
+
+/// The outlet in a story's meta line ("By Sentinel Staff · Sandhills Sentinel · Oct 20"):
+/// the first part that isn't a byline.
+fn outlet_of(meta: &str) -> Option<&str> {
+    meta.split(" · ").find(|p| !p.starts_with("By "))
 }
 
 /// The cover as a JPEG.
@@ -281,7 +290,7 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
         match section.articles[a]
             .meta
             .as_deref()
-            .and_then(|m| m.split(" · ").next())
+            .and_then(|m| outlet_of(m))
         {
             // Briefs carry their outlet as the first meta part (Local: "WXII · Oct 20").
             Some(src) if section.title == "Local" => format!("LOCAL · {}", src.to_uppercase()),
@@ -376,4 +385,18 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     c.centered(&f.serif, size, footer_top + 64.0, &line, BLACK);
 
     jpeg(c)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_outlet_label_skips_the_byline() {
+        assert_eq!(
+            outlet_of("By Sentinel Staff · Sandhills Sentinel · Oct 20, 6:52 PM"),
+            Some("Sandhills Sentinel")
+        );
+        assert_eq!(outlet_of("WXII · Oct 20, 4:04 PM"), Some("WXII"));
+    }
 }
