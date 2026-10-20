@@ -89,3 +89,61 @@ fn google_news_links_decode_to_the_publisher() {
     let offline = |u: &str| -> Result<Vec<u8>, String> { Err(format!("offline: {u}")) };
     assert_eq!(resolve_google_news(link, &offline), None);
 }
+
+fn long_page(words: usize) -> String {
+    let para = "The council met again tonight to argue about the new library and its long overdue roof repairs. ";
+    let per = para.split_whitespace().count();
+    let body: String = (0..words / per)
+        .map(|_| format!("<p>{}</p>", para.repeat(1)))
+        .collect();
+    format!(
+        "<html><head><title>Long</title></head><body><article><h1>Long</h1>{body}</article></body></html>"
+    )
+}
+
+#[test]
+fn long_read_is_not_capped() {
+    let html = long_page(9000);
+    let full = deckle_digest::article::extract_with(&html, "https://ex.com/long", None).unwrap();
+    assert!(full.words >= 8900, "{} words", full.words);
+    let capped = extract(&html, "https://ex.com/long").unwrap();
+    assert!(capped.words <= 6000, "{} words", capped.words);
+}
+
+fn png(w: u32, h: u32) -> Vec<u8> {
+    let mut out = Vec::new();
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(w, h, |x, y| {
+        image::Rgb([(x % 256) as u8, (y % 256) as u8, ((x * y) % 256) as u8])
+    }))
+    .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+    .unwrap();
+    out
+}
+
+#[test]
+fn saved_page_photos_from_files_folder_and_data_uri() {
+    use base64::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("a_files")).unwrap();
+    std::fs::write(dir.path().join("a_files/p.png"), png(400, 300)).unwrap();
+    let data = base64::engine::general_purpose::STANDARD.encode(png(500, 260));
+    let words = "word ".repeat(200);
+    let html = format!(
+        "<html><body><article><p>{words}</p><img src=\"a_files/p.png\"><p>{words}</p><img src=\"data:image/png;base64,{data}\"></article></body></html>"
+    );
+    let page = dir.path().join("a.html");
+    std::fs::write(&page, &html).unwrap();
+    let base = format!("file://{}", page.display());
+    let x = deckle_digest::article::extract_with(&html, &base, None).unwrap();
+    let offline = |u: &str| -> Result<Vec<u8>, String> { Err(format!("offline: {u}")) };
+    let got = deckle_digest::article::fetch_photos(&x.photos, 4, &offline);
+    assert_eq!(
+        got.iter().flatten().count(),
+        2,
+        "photos: {:?}",
+        x.photos
+            .iter()
+            .map(|p| &p[..40.min(p.len())])
+            .collect::<Vec<_>>()
+    );
+}

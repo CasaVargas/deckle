@@ -21,6 +21,7 @@ html-escape = "0.2"
 dom_smoothie = "0.18"
 dom_query = "0.28"
 url = "2"
+base64.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -74,13 +74,24 @@ pub fn resolve_google_news(url: &str, net: &dyn Net) -> Option<String> {
     GN_URL.captures(&reply).map(|c| c[1].to_owned())
 }
 
+/// An absolute photo or page URL. `file:` only for a saved page (a `file:` base), and only
+/// inside that page's own folder.
 fn resolve(base: &str, href: &str) -> Option<String> {
     let href = href.trim();
     if href.is_empty() || href.starts_with("data:") {
         return None;
     }
-    let url = url::Url::parse(base).ok()?.join(href).ok()?;
-    matches!(url.scheme(), "http" | "https").then(|| url.to_string())
+    let base = url::Url::parse(base).ok()?;
+    let url = base.join(href).ok()?;
+    match url.scheme() {
+        "http" | "https" => Some(url.to_string()),
+        "file" if base.scheme() == "file" => {
+            let dir = base.to_file_path().ok()?.parent()?.to_path_buf();
+            let path = url.to_file_path().ok()?;
+            (path.starts_with(&dir) && !href.contains("..")).then(|| url.to_string())
+        }
+        _ => None,
+    }
 }
 
 /// The photo's identity for deduplication: scheme, host and path, without the query (CDNs
@@ -95,6 +106,7 @@ struct Writer {
     photos: Vec<String>,
     seen: HashSet<String>,
     words: usize,
+    max_words: Option<usize>,
     teaser: Option<String>,
 }
 
@@ -114,6 +126,10 @@ impl Writer {
 
     fn img_src(&self, node: &dom_query::NodeRef) -> Option<String> {
         let attr = |n: &str| node.attr(n).map(|v| v.to_string());
+        // Single-file saved pages embed their photos.
+        if let Some(data) = attr("src").filter(|s| s.starts_with("data:image/")) {
+            return Some(data);
+        }
         let srcset_first = |n: &str| {
             attr(n).and_then(|s| {
                 s.split(',')
@@ -152,12 +168,23 @@ impl Writer {
     }
 
     fn node(&mut self, node: &dom_query::NodeRef) -> String {
-        if self.words >= MAX_WORDS {
+        if self.max_words.is_some_and(|m| self.words >= m) {
             return String::new();
         }
         if node.is_text() {
             let t = node.text().to_string();
-            let collapsed = t.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut words: Vec<&str> = t.split_whitespace().collect();
+            let mut cut = false;
+            if let Some(m) = self.max_words
+                && self.words + words.len() > m
+            {
+                words.truncate(m - self.words);
+                cut = true;
+            }
+            let mut collapsed = words.join(" ");
+            if cut {
+                collapsed.push('…');
+            }
             if collapsed.is_empty() {
                 if !t.is_empty() {
                     self.out.push(' ');
@@ -223,9 +250,15 @@ impl Writer {
     }
 }
 
-/// Extracts the article in `html` (fetched from `url`). `None` when it reads like a wall or
-/// a stub (fewer than [`MIN_WORDS`] words).
+/// Extracts a story for the paper: at most 6,000 words. `None` when it reads like a wall or a
+/// stub (fewer than [`MIN_WORDS`] words).
 pub fn extract(html: &str, url: &str) -> Option<Extracted> {
+    extract_with(html, url, Some(MAX_WORDS))
+}
+
+/// [`extract`] with a chosen cap; `None` keeps every word (long reads, save-to-paper §5).
+/// `url` may be `file://…` for a saved page: its photos then load from beside it.
+pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<Extracted> {
     let mut readability = dom_smoothie::Readability::new(html, Some(url), None).ok()?;
     let article = readability.parse().ok()?;
     let mut w = Writer {
@@ -234,6 +267,7 @@ pub fn extract(html: &str, url: &str) -> Option<Extracted> {
         photos: Vec::new(),
         seen: HashSet::new(),
         words: 0,
+        max_words,
         teaser: None,
     };
     // The lead image goes first, above the text.
@@ -309,6 +343,27 @@ pub fn photo_hash(jpeg: &[u8]) -> Option<u64> {
 /// of a photo came 0–10 bits apart, different photos 20 or more.
 pub const SAME_PHOTO_BITS: u32 = 14;
 
+/// A photo's bytes: a `data:` URI, a file beside a saved page (already checked by
+/// `resolve`), or a fetch.
+pub fn load_photo(url: &str, net: &dyn Net) -> Option<Vec<u8>> {
+    use base64::Engine;
+    if let Some(rest) = url.strip_prefix("data:") {
+        let (meta, data) = rest.split_once(',')?;
+        return if meta.ends_with(";base64") {
+            base64::engine::general_purpose::STANDARD
+                .decode(data.trim())
+                .ok()
+        } else {
+            None
+        };
+    }
+    if url.starts_with("file:") {
+        let path = url::Url::parse(url).ok()?.to_file_path().ok()?;
+        return std::fs::read(path).ok();
+    }
+    net.get_page(url).ok()
+}
+
 /// Fetches up to `max` of `photos`, in order, skipping repeats of a photo already kept; each
 /// slot is the JPEG or `None` (not kept).
 pub fn fetch_photos(photos: &[String], max: usize, net: &dyn Net) -> Vec<Option<Vec<u8>>> {
@@ -319,7 +374,7 @@ pub fn fetch_photos(photos: &[String], max: usize, net: &dyn Net) -> Vec<Option<
             if hashes.len() >= max {
                 return None;
             }
-            let jpeg = net.get_page(url).ok().and_then(|b| eink_photo(&b))?;
+            let jpeg = load_photo(url, net).and_then(|b| eink_photo(&b))?;
             let hash = photo_hash(&jpeg)?;
             if hashes
                 .iter()
