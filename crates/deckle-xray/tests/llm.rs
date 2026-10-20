@@ -36,6 +36,7 @@ fn anthropic_request_has_the_right_shape_and_response_is_parsed() {
         Provider::Anthropic,
         "claude-sonnet-5-5",
         "Pride and Prejudice",
+        "",
         &cands(),
         "en",
     );
@@ -57,6 +58,7 @@ fn anthropic_request_has_the_right_shape_and_response_is_parsed() {
         "key-123",
         "",
         "Pride and Prejudice",
+        "",
         &cands(),
         "en",
         &mut |url, headers, _body| {
@@ -87,7 +89,7 @@ fn anthropic_request_has_the_right_shape_and_response_is_parsed() {
 
 #[test]
 fn openai_compatible_request_and_response() {
-    let body = request_body(Provider::OpenAi, "llama3", "T", &cands(), "en");
+    let body = request_body(Provider::OpenAi, "llama3", "T", "", &cands(), "en");
     assert_eq!(body["messages"][0]["role"], "system");
     assert_eq!(body["messages"][1]["role"], "user");
     assert!(
@@ -101,6 +103,7 @@ fn openai_compatible_request_and_response() {
         "",
         "http://localhost:11434/v1",
         "T",
+        "",
         &cands(),
         "en",
         &mut |url, headers, _| {
@@ -129,6 +132,7 @@ fn truncated_answers_are_reported_as_such() {
         "",
         "http://x/v1",
         "T",
+        "",
         &cands(),
         "en",
         &mut |_, _, _| Ok(canned.to_owned()),
@@ -143,6 +147,7 @@ fn truncated_answers_are_reported_as_such() {
         "k",
         "",
         "T",
+        "",
         &cands(),
         "en",
         &mut |_, _, _| Ok(canned.to_owned()),
@@ -159,6 +164,7 @@ fn unusable_answers_are_errors_not_panics() {
         "",
         "http://x/v1",
         "T",
+        "",
         &cands(),
         "en",
         &mut |_, _, _| Ok("{\"choices\":[]}".into()),
@@ -171,10 +177,162 @@ fn unusable_answers_are_errors_not_panics() {
         "k",
         "",
         "T",
+        "",
         &cands(),
         "en",
         &mut |_, _, _| Err("HTTP 401".into()),
     )
     .unwrap_err();
     assert!(err.to_string().contains("401"));
+}
+
+fn many(n: usize) -> Vec<Candidate> {
+    (0..n)
+        .map(|i| Candidate {
+            label: format!("Name{i}"),
+            kind: EntityKind::Term,
+            quote: format!("Name{i} appears."),
+            occurrences: vec![(i as i64 * 10, 5), (i as i64 * 10 + 5, 5)],
+            aliases: vec![],
+        })
+        .collect()
+}
+
+/// An OpenAI-style answer describing every `NameN` that the request asked about.
+fn echo(body: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(body).unwrap();
+    let prompt = v["messages"][1]["content"].as_str().unwrap();
+    let items: Vec<serde_json::Value> = prompt
+        .lines()
+        .filter_map(|l| l.strip_prefix("- ")?.split(' ').next())
+        .filter(|n| n.starts_with("Name"))
+        .map(|n| serde_json::json!({"name": n, "kind": "person", "description": format!("{n} is described.")}))
+        .collect();
+    serde_json::json!({"choices": [{"message": {"content": serde_json::to_string(&items).unwrap()}}]})
+        .to_string()
+}
+
+#[test]
+fn candidates_go_out_in_batches_and_a_failed_batch_spares_the_rest() {
+    use deckle_xray::llm::{BATCH_SIZE, describe_all};
+    let mut sizes = Vec::new();
+    let out = describe_all(
+        Provider::OpenAi,
+        "qwen3:8b",
+        "",
+        "http://localhost:11434/v1",
+        "T",
+        "A. Author",
+        &many(60),
+        "en",
+        &mut |_, _, body| {
+            let n = echo(body).matches("is described").count();
+            sizes.push(n);
+            if sizes.len() == 2 {
+                Err("timeout".into())
+            } else {
+                Ok(echo(body))
+            }
+        },
+    );
+    assert_eq!(BATCH_SIZE, 25);
+    assert_eq!(sizes, vec![25, 25, 10]);
+    assert_eq!(out.batches, 3);
+    assert_eq!(out.failures.len(), 1);
+    assert_eq!(out.items.len(), 35, "batches 1 and 3 still count");
+    assert_eq!(out.items[25].name, "Name50");
+}
+
+#[test]
+fn self_hosted_endpoints_are_asked_not_to_think_and_a_rejection_is_retried_without_it() {
+    let mut bodies: Vec<serde_json::Value> = Vec::new();
+    let out = describe(
+        Provider::OpenAi,
+        "qwen3:8b",
+        "",
+        "http://localhost:11434/v1",
+        "T",
+        "",
+        &many(2),
+        "en",
+        &mut |_, _, body| {
+            bodies.push(serde_json::from_str(body).unwrap());
+            if bodies.len() == 1 {
+                Err("http status: 400".into())
+            } else {
+                Ok(echo(body))
+            }
+        },
+    )
+    .unwrap();
+    assert_eq!(bodies[0]["reasoning_effort"], "none");
+    assert!(
+        bodies[1].get("reasoning_effort").is_none(),
+        "retried without it"
+    );
+    assert_eq!(out.len(), 2);
+    // a timeout is not retried
+    let mut calls = 0;
+    let err = describe(
+        Provider::OpenAi,
+        "m",
+        "",
+        "http://localhost:11434/v1",
+        "T",
+        "",
+        &many(2),
+        "en",
+        &mut |_, _, _| {
+            calls += 1;
+            Err("timeout".into())
+        },
+    );
+    assert!(err.is_err());
+    assert_eq!(calls, 1);
+    // OpenAI's own endpoint and Anthropic never get the field
+    for (provider, endpoint) in [(Provider::OpenAi, ""), (Provider::Anthropic, "")] {
+        let mut sent = serde_json::Value::Null;
+        let _ = describe(
+            provider,
+            "m",
+            "k",
+            endpoint,
+            "T",
+            "",
+            &many(1),
+            "en",
+            &mut |_, _, body| {
+                sent = serde_json::from_str(body).unwrap();
+                Err("stop".into())
+            },
+        );
+        assert!(sent.get("reasoning_effort").is_none(), "{provider:?}");
+    }
+}
+
+#[test]
+fn the_prompt_names_the_author_and_leaves_the_kind_to_the_model() {
+    let body = request_body(
+        Provider::OpenAi,
+        "m",
+        "In the Shadow of Eight",
+        "Collin Gosselin",
+        &cands(),
+        "en",
+    );
+    let prompt = body["messages"][1]["content"].as_str().unwrap();
+    assert!(prompt.contains("Author: Collin Gosselin"), "{prompt}");
+    assert!(
+        !prompt.contains("guessed")
+            && prompt.contains("Any individual")
+            && prompt.contains("\"Yeah\""),
+        "{prompt}"
+    );
+    let anonymous = request_body(Provider::OpenAi, "m", "T", "", &cands(), "en");
+    assert!(
+        !anonymous["messages"][1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Author:")
+    );
 }

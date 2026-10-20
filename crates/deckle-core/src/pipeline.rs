@@ -331,6 +331,12 @@ pub fn run_with_progress(
                     let built = crate::xray::build(
                         &asin,
                         &info.title,
+                        &info
+                            .creators
+                            .iter()
+                            .map(|c| c.name.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" & "),
                         &info.language,
                         &runs,
                         erl,

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- X-Ray LLM descriptions work with local models (Ollama): candidates go out in batches of 25,
+  self-hosted endpoints are asked not to "think", the prompt names the author and no longer
+  sends Deckle's person/term guess, and a failed batch only affects its own names.
 - X-Ray: contractions ("I'd", "I’ve", "We’re") are no longer people or terms, and a sentence
   opener is no longer glued to the name after it ("Since Dad" is "Dad").
 - MTP: Word Wise no longer breaks delivery. Reading the Kindle's dictionary and sending the book
