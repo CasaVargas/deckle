@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — real Kindles: Scribe 2024 over MTP, Paperwhite (pre-alpha)
+
+Verified on a Kindle Scribe 2024 (MTP): cover, X-Ray and Word Wise. Also delivered to a
+mass-storage Kindle on firmware 5.19.2.
 
 - X-Ray LLM descriptions work with local models (Ollama): candidates go out in batches of 25,
   self-hosted endpoints are asked not to "think", the prompt names the author and no longer
