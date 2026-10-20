@@ -144,3 +144,53 @@ fn smoke_on_a_real_book_prints_the_top_entities() {
     }
     assert!(c.len() > 10);
 }
+
+#[test]
+fn contractions_are_not_names_but_apostrophe_names_are() {
+    let c = heuristic(
+        &runs(&[
+            "I'd never seen O'Brien so angry. I’ve known O'Brien for years, O'Brien said.",
+            "I'll go, I told him. I’m sure. We’re late. Don’t wait. I'd rather O'Brien drove.",
+            "I've got it, O'Brien said. I'd hoped so. They’re here.",
+        ]),
+        "en",
+    );
+    let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+    for contraction in [
+        "I'd",
+        "I’ve",
+        "I've",
+        "I'll",
+        "I’m",
+        "We’re",
+        "Don’t",
+        "They’re",
+    ] {
+        assert!(
+            !labels.contains(&contraction),
+            "{contraction} in {labels:?}"
+        );
+    }
+    assert!(labels.contains(&"O'Brien"), "{labels:?}");
+}
+
+#[test]
+fn a_sentence_opener_is_not_part_of_the_name_that_follows() {
+    let c = heuristic(
+        &runs(&[
+            "Since Dad left, the house was quiet. We had not talked since the spring.",
+            "“He was locked up for a year.” Since Dad was gone, nobody cooked. It had been years since then, since everything.",
+            "Grace Kelly smiled. Grace Kelly waved. He said grace before dinner.",
+            "She read the Daily Mail. The Daily Mail ran it daily, daily, daily.",
+        ]),
+        "en",
+    );
+    let labels: Vec<&str> = c.iter().map(|x| x.label.as_str()).collect();
+    assert!(!labels.contains(&"Since Dad"), "{labels:?}");
+    assert!(labels.contains(&"Dad"), "{labels:?}");
+    assert!(labels.contains(&"Grace Kelly"), "{labels:?}");
+    assert!(
+        labels.contains(&"Daily Mail"),
+        "mid-sentence capitals are a name: {labels:?}"
+    );
+}

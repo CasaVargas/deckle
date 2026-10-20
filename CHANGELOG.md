@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- X-Ray: contractions ("I'd", "I’ve", "We’re") are no longer people or terms, and a sentence
+  opener is no longer glued to the name after it ("Since Dad" is "Dad").
 - MTP: Word Wise no longer breaks delivery. Reading the Kindle's dictionary and sending the book
   now share one MTP connection; closing the first one reset the Kindle, which dropped it to the
   home screen and off the bus ("device is no longer connected"). Reopening also falls back to the

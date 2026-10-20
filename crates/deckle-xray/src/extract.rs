@@ -218,7 +218,27 @@ struct Mention {
     run_idx: usize,
 }
 
+/// Only a capitalized word at a sentence start can be an ordinary word ("Since Dad left");
+/// mid-sentence capitals ("the Daily Mail") are names.
+fn starts_sentence(text: &str, byte: usize) -> bool {
+    let before = text[..byte].trim_end_matches(|c: char| {
+        c.is_whitespace() || matches!(c, '"' | '\'' | '“' | '”' | '‘' | '’' | '(' | ')' | '[')
+    });
+    before.is_empty() || before.ends_with(['.', '!', '?', '…', ':', '—'])
+}
+
+/// "I'd", "We’re", "Don't": an apostrophe followed by a contraction ending, never a name
+/// ("O'Brien" is one).
+fn is_contraction(w: &str) -> bool {
+    w.rsplit_once(['\'', '’']).is_some_and(|(_, tail)| {
+        ["d", "ve", "ll", "m", "re", "t"].contains(&tail.to_lowercase().as_str())
+    })
+}
+
 fn is_cap_word(w: &str) -> bool {
+    if is_contraction(w) {
+        return false;
+    }
     let mut chars = w.chars();
     match chars.next() {
         Some(c) if c.is_uppercase() => {
@@ -231,6 +251,24 @@ fn is_cap_word(w: &str) -> bool {
 /// Collects capitalized n-grams (1–3 words, honorific-aware) with positions.
 fn mentions(runs: &[Run], stop: &[&str]) -> Vec<Mention> {
     let word_re = Regex::new(r"[\p{L}][\p{L}'’\-]*").unwrap();
+    // (lowercase, capitalized) counts per word, to spot sentence openers glued to a name
+    let mut forms: HashMap<String, (usize, usize)> = HashMap::new();
+    for r in runs {
+        for m in word_re.find_iter(&r.text) {
+            let e = forms.entry(m.as_str().to_lowercase()).or_default();
+            if m.as_str().chars().next().is_some_and(char::is_lowercase) {
+                e.0 += 1;
+            } else {
+                e.1 += 1;
+            }
+        }
+    }
+    // "Since Dad left": "since" is mostly lowercase in the book, so it opens the sentence
+    let opener = |w: &str| {
+        forms
+            .get(&w.to_lowercase())
+            .is_some_and(|&(lower, cap)| lower * 2 > cap)
+    };
     let mut out = Vec::new();
     for (ri, run) in runs.iter().enumerate() {
         // char offsets for position arithmetic
@@ -262,6 +300,16 @@ fn mentions(runs: &[Run], stop: &[&str]) -> Vec<Mention> {
             if !(is_cap_word(w) || is_honorific)
                 || shouting
                 || (!is_honorific && stop.contains(&w.to_lowercase().as_str()))
+            {
+                i += 1;
+                continue;
+            }
+            if !is_honorific
+                && starts_sentence(&run.text, s)
+                && opener(w)
+                && words
+                    .get(i + 1)
+                    .is_some_and(|&(ns, _, nw)| &run.text[words[i].1..ns] == " " && is_cap_word(nw))
             {
                 i += 1;
                 continue;
