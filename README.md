@@ -101,6 +101,24 @@ deckle convert book.kpf -o book.kfx --asin B0XXXXDECK   # repackage an existing 
 `--cde auto` (default) applies the cover rule; `--cde pdoc|ebok` overrides it; `--match` looks up
 an Amazon edition on Open Library when an MTP Kindle needs a real ASIN.
 
+### The Deckle Daily (preview)
+
+A morning paper built on your machine: weather (Open-Meteo), local news (a Google News search
+plus any local feeds), your RSS/Atom feeds, Powerball and Mega Millions, a horoscope Deckle
+writes itself, and "On this day" from Wikipedia. Its cover is a generated front page, so the
+Kindle library tile is today's paper. No keys or accounts; a source that fails prints
+"unavailable today" and the paper still ships.
+
+```sh
+deckle digest init                  # starter config: ~/Library/Application Support/deckle/digest.toml
+deckle digest build -o ./out        # today's edition as an EPUB
+deckle digest run --to device       # build, convert, send (cover first), keep the newest 3
+```
+
+Unlike books, the digest goes online by design: each edition fetches the sources in your config.
+Scheduling, an on-plug-in queue and opt-in Send-to-Kindle email come next
+(`docs/superpowers/specs/2026-10-20-daily-digest-design.md`).
+
 ## How it works: what a "store-quality" sideloaded book needs
 
 Sideloaded EPUBs are second-class on a Kindle. Every fix exists somewhere as a calibre plugin or a

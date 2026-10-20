@@ -78,18 +78,20 @@ order of `sections`.
 
 ```toml
 title = "The Deckle Daily"
-place = "Carthage, NC"          # shown on the masthead and weather page
-latitude = 35.35
-longitude = -79.42
+place = "New York, NY"          # shown on the masthead and weather page
+latitude = 40.71
+longitude = -74.01
 units = "imperial"              # or "metric"
 keep = 3                        # editions kept on the device
+max_age_hours = 36              # older feed items are left out
 sections = ["weather", "local", "feeds", "lottery", "horoscope", "onthisday"]
 
 [local]
 # A Google News search, plus any local paper feeds.
-google_news = "Moore County NC"
+google_news = "New York City"
 feeds = []
 max_items = 12
+max_age_hours = 72              # local news moves slower
 
 [[feeds]]
 name = "Hacker News"
@@ -100,7 +102,7 @@ max_items = 10
 games = ["powerball", "megamillions"]
 
 [horoscope]
-signs = ["leo"]
+signs = []                      # empty: all twelve
 ```
 
 ## 4. Sources (all free, no key)
@@ -108,7 +110,7 @@ signs = ["leo"]
 | Section | Source | Notes |
 |---|---|---|
 | weather | Open-Meteo forecast API | current, today, 4-day outlook, sunrise/sunset; moon phase computed locally |
-| local | Google News RSS search + optional feeds | RSS/Atom via `feed-rs` |
+| local | Google News RSS search + optional feeds | RSS/Atom via `feed-rs`. The search gets `when:<n>d` from `local.max_age_hours`; without it Google returns months-old results by relevance |
 | feeds | any RSS/Atom URL | summaries / `content:encoded`, HTML reduced to text paragraphs (v0) |
 | lottery | data.ny.gov open data (Powerball `d6yy-54nr`, Mega Millions `5xaw-6ayf`) | latest draw + date |
 | horoscope | built in, deterministic per (date, sign) | for fun; labelled as such. LLM version later |
@@ -128,10 +130,12 @@ sequentially in v0 (an edition is a handful of requests).
   local and feeds).
 - **Cover:** 1264×1680 PNG (largest current Kindle screen ratio), black on white: blackletter
   masthead, rule lines, date line, weather line, up to five headlines. Fonts bundled under
-  `crates/deckle-digest/fonts/` with their OFL licences.
+  `crates/deckle-digest/fonts/` with their OFL licences: UnifrakturMaguntia (masthead) and
+  Old Standard TT (a 19th-century newspaper face) for the rest.
 - **Pruning:** after delivery, editions whose device filename starts with the digest's
-  `Deckle - <title>` prefix are sorted by date and all but the newest `keep` are removed
-  (mass storage and MTP).
+  `Deckle - <title>` prefix are sorted by write time and all but the newest `keep` are
+  removed (folders and mass storage). MTP is not pruned in v0: a second connection would
+  reset the Kindle again, so it moves into the delivery increment, which owns the connection.
 
 ## 6. Code layout
 

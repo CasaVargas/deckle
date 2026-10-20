@@ -284,6 +284,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             })?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::Command::Digest { config, action } => digest(json, config, action),
         cli::Command::Run {
             epubs,
             to,
@@ -385,6 +386,153 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(EXIT_FAILURE)
+            })
+        }
+    }
+}
+
+fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
+    match arg {
+        None => Ok(deckle_digest::chrono::Local::now().date_naive()),
+        Some(d) => deckle_digest::chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d")
+            .map_err(|_| format!("--date expects YYYY-MM-DD, got {d:?}")),
+    }
+}
+
+fn load_digest_config(path: &Path) -> Result<deckle_digest::Config, String> {
+    if !path.exists() {
+        return Err(format!(
+            "no digest config at {}; run `deckle digest init` first",
+            path.display()
+        ));
+    }
+    deckle_digest::Config::load(path)
+}
+
+fn section_lines(r: &deckle_digest::BuildReport) -> String {
+    r.sections
+        .iter()
+        .map(|s| match (&s.unavailable, s.items) {
+            (Some(u), 0) => format!("      {}: {u}", s.title),
+            (Some(u), n) => format!("      {}: {n} ({u})", s.title),
+            (None, n) => format!("      {}: {n}", s.title),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn digest(
+    json: bool,
+    config: Option<PathBuf>,
+    action: cli::DigestCommand,
+) -> Result<ExitCode, String> {
+    let path = config.unwrap_or_else(deckle_digest::config::default_path);
+    match action {
+        cli::DigestCommand::Init { force } => {
+            if path.exists() && !force {
+                return Err(format!(
+                    "{} exists; pass --force to replace it",
+                    path.display()
+                ));
+            }
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&path, deckle_digest::config::STARTER).map_err(|e| e.to_string())?;
+            emit(json, &path, || format!("wrote {}", path.display()))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Build { output, date } => {
+            let cfg = load_digest_config(&path)?;
+            let date = parse_date(date.as_deref())?;
+            std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
+            let now = deckle_digest::chrono::Utc::now();
+            let report =
+                deckle_digest::build(&cfg, date, now, &output, &mut deckle_digest::http_get)?;
+            emit(json, &report, || {
+                format!(
+                    "OK    {}\n      -> {}\n{}",
+                    report.title,
+                    report.epub.display(),
+                    section_lines(&report)
+                )
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Run {
+            to,
+            date,
+            previewer: pv,
+            keep_work_dir,
+        } => {
+            let cfg = load_digest_config(&path)?;
+            let date = parse_date(date.as_deref())?;
+            let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
+            let target = resolve_target(&to)?;
+            let work = deckle_core::wordwise::default_cache_dir().join("digest");
+            std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+            let now = deckle_digest::chrono::Utc::now();
+            let built = deckle_digest::build(&cfg, date, now, &work, &mut deckle_digest::http_get)?;
+            let opts = RunOptions {
+                cde_type: deckle_kfx::convert::CdeType::Pdoc,
+                // The cover is the front page: it must always show (design §5).
+                cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
+                amazon_match: false,
+                verified_real_asin: false,
+                asin: None,
+                pages: None,
+                target: target.clone(),
+                previewer: Some(located.path),
+                keep_work_dir,
+                xray: deckle_core::pipeline::XRayMode::Off,
+                llm: None,
+                wikipedia: false,
+                word_wise: None,
+            };
+            let report = run(&built.epub, &opts);
+            let pruned = if report.delivered.is_some() {
+                let prefix = deckle_core::deliver::device_filename(&BookInfo {
+                    title: cfg.title.clone(),
+                    creators: vec![deckle_core::inspect::Creator {
+                        name: deckle_digest::AUTHOR.into(),
+                        file_as: Some(deckle_digest::AUTHOR.into()),
+                    }],
+                    ..Default::default()
+                });
+                let prefix = prefix.trim_end_matches(".kfx");
+                deckle_core::deliver::prune_editions(&target, prefix, cfg.keep.max(1))
+                    .map_err(|e| e.to_string())?
+            } else {
+                Some(Vec::new())
+            };
+            #[derive(serde::Serialize)]
+            struct DigestRun<'a> {
+                build: &'a deckle_digest::BuildReport,
+                run: &'a deckle_core::pipeline::RunReport,
+                pruned: &'a Option<Vec<PathBuf>>,
+            }
+            let all = DigestRun {
+                build: &built,
+                run: &report,
+                pruned: &pruned,
+            };
+            emit(json, &all, || {
+                let head = match (&report.error, &report.delivered) {
+                    (Some(e), _) => format!("FAIL  {}\n      {e}", built.title),
+                    (None, Some(d)) => format!("OK    {}\n      -> {}", built.title, d.display()),
+                    (None, None) => format!("OK    {}", built.title),
+                };
+                let prune = match &pruned {
+                    None => "\n      older editions: not pruned over MTP yet".to_owned(),
+                    Some(p) if p.is_empty() => String::new(),
+                    Some(p) => format!("\n      removed {} older edition(s)", p.len()),
+                };
+                format!("{head}\n{}{prune}", section_lines(&built))
+            })?;
+            Ok(if report.error.is_some() {
+                ExitCode::from(EXIT_FAILURE)
+            } else {
+                ExitCode::SUCCESS
             })
         }
     }

@@ -15,6 +15,7 @@ deckle-core = { path = "crates/deckle-core" }
 deckle-transport = { path = "crates/deckle-transport" }
 deckle-xray = { path = "crates/deckle-xray" }
 deckle-wordwise = { path = "crates/deckle-wordwise" }
+deckle-digest = { path = "crates/deckle-digest" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,27 @@
+[package]
+name = "deckle-digest"
+description = "Deckle Daily: a newspaper EPUB built every morning from free sources"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+ureq.workspace = true
+regex.workspace = true
+zip.workspace = true
+image.workspace = true
+toml = "1"
+feed-rs = "3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+ab_glyph = "0.2"
+html-escape = "0.2"
+
+[dev-dependencies]
+tempfile.workspace = true
+roxmltree.workspace = true
+zip.workspace = true
+image.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

@@ -392,6 +392,48 @@ fn deliver_mtp(
     )))
 }
 
+/// Keeps the newest `keep` books (by modification time) whose device filename starts with
+/// `prefix` and removes the rest, with their `.sdr` folders. Used for dated editions such as
+/// the daily digest. Returns the removed paths; `None` on an MTP target, which is not pruned
+/// yet (reconnecting would reset the Kindle a second time).
+pub fn prune_editions(
+    target: &Target,
+    prefix: &str,
+    keep: usize,
+) -> Result<Option<Vec<PathBuf>>, DeliverError> {
+    let dir = match target {
+        Target::Folder(dir) => dir.clone(),
+        Target::MassStorage(dev) => dev.root.join("documents"),
+        Target::Mtp(_) => return Ok(None),
+    };
+    let io = |path: &Path| {
+        let path = path.to_path_buf();
+        move |source| DeliverError::Io { path, source }
+    };
+    let mut editions: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(io(&dir))?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(prefix) && name.ends_with(".kfx") {
+            let modified = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .map_err(io(&entry.path()))?;
+            editions.push((modified, entry.path()));
+        }
+    }
+    editions.sort_by_key(|e| std::cmp::Reverse(e.0));
+    let mut removed = Vec::new();
+    for (_, path) in editions.into_iter().skip(keep) {
+        std::fs::remove_file(&path).map_err(io(&path))?;
+        let sdr = path.with_extension("sdr");
+        if sdr.is_dir() {
+            std::fs::remove_dir_all(&sdr).map_err(io(&sdr))?;
+        }
+        removed.push(path);
+    }
+    Ok(Some(removed))
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
