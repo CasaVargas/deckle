@@ -82,6 +82,7 @@ pub fn sidecar_name(asin: &str) -> String {
 pub fn build(
     asin: &str,
     title: &str,
+    author: &str,
     lang: &str,
     runs: &[Run],
     erl: i64,
@@ -90,6 +91,7 @@ pub fn build(
     build_with(
         asin,
         title,
+        author,
         lang,
         runs,
         erl,
@@ -104,6 +106,7 @@ pub fn build(
 pub fn build_with(
     asin: &str,
     title: &str,
+    author: &str,
     lang: &str,
     runs: &[Run],
     erl: i64,
@@ -145,24 +148,31 @@ pub fn build_with(
         } else {
             cfg.api_key.clone()
         };
-        let described = llm::describe(
+        let answer = llm::describe_all(
             cfg.provider,
             model,
             &key,
             &cfg.endpoint,
             title,
+            author,
             &cands,
             lang,
             post,
         );
-        match described {
-            Ok(items) => {
-                apply_llm(&mut entities, &cands, &items);
-                source = "llm";
-            }
-            Err(e) => warnings.push(format!(
-                "X-Ray: LLM descriptions skipped ({e}); using basic ones"
-            )),
+        if answer.failures.len() < answer.batches {
+            apply_llm(&mut entities, &cands, &answer.items);
+            source = "llm";
+        }
+        if let Some(e) = answer.failures.first() {
+            warnings.push(if answer.failures.len() == answer.batches {
+                format!("X-Ray: LLM descriptions skipped ({e}); using basic ones")
+            } else {
+                format!(
+                    "X-Ray: {} of {} LLM batches failed ({e}); their names keep basic descriptions",
+                    answer.failures.len(),
+                    answer.batches
+                )
+            });
         }
     }
     if opts.wikipedia {

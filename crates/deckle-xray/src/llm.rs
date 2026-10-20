@@ -68,33 +68,41 @@ pub type Post<'a> = dyn FnMut(&str, &[(String, String)], &str) -> Result<String,
 
 /// How many candidates we send: enough for a novel's cast, cheap enough for every run.
 pub const MAX_CANDIDATES: usize = 120;
+/// Candidates per request: fits a local model's default 4k context (Ollama) and answers well
+/// inside the per-request timeout at ~16 tok/s.
+pub const BATCH_SIZE: usize = 25;
 
 const SYSTEM: &str = "You annotate novels for an e-reader's X-Ray feature. Answer with a JSON array only, no prose, no markdown.";
 
-fn prompt(title: &str, cands: &[Candidate], lang: &str) -> String {
+fn prompt(title: &str, author: &str, cands: &[Candidate], lang: &str) -> String {
+    let by = if author.is_empty() {
+        String::new()
+    } else {
+        format!("Author: {author}\n")
+    };
     let mut p = format!(
-        "Book: {title}\nLanguage: {lang}\n\nBelow are recurring proper nouns found in the text, \
+        "Book: {title}\n{by}Language: {lang}\n\nBelow are recurring proper nouns found in the text, \
 each with its first-mention sentence. For each one, reply with an object \
 {{\"name\", \"kind\", \"description\", \"aliases\"}}:\n\
 - name: copy the input name exactly\n\
 - kind: \"person\" for characters (people, named animals), \"term\" for places, \
-organisations, objects, concepts\n\
+organisations, objects, concepts. Any individual (a first name, a family member, a \
+nickname) is a person. In a memoir or a first-person book the narrator is usually the \
+author\n\
 - description: one or two sentences, in the book's language, that help a reader who is \
 partway through the book. No spoilers: describe who or what it is as introduced, never \
 what happens later or how it ends. If the name is noise (a page header, a chapter word, \
-a publisher), set description to \"\" and it will be dropped.\n\
+a publisher, or an ordinary word capitalized at the start of a sentence such as \"Yeah\", \
+\"Hey\" or \"Thank\"), set description to \"\" and it will be dropped.\n\
 - aliases: other names in the list that refer to the same entity (e.g. a nickname), \
 else []\n\nEntities:\n"
     );
+    // No guessed kind: qwen3:8b copied the heuristic's "term" onto brothers and bodyguards.
     for c in cands.iter().take(MAX_CANDIDATES) {
         p.push_str(&format!(
-            "- {} ({} mentions, guessed {}): \"{}\"\n",
+            "- {} ({} mentions): \"{}\"\n",
             c.label,
             c.occurrences.len(),
-            match c.kind {
-                EntityKind::Person => "person",
-                EntityKind::Term => "term",
-            },
             c.quote.replace('"', "'")
         ));
     }
@@ -112,10 +120,11 @@ pub fn request_body(
     provider: Provider,
     model: &str,
     title: &str,
+    author: &str,
     cands: &[Candidate],
     lang: &str,
 ) -> serde_json::Value {
-    let user = prompt(title, cands, lang);
+    let user = prompt(title, author, cands, lang);
     let max_tokens = output_budget(cands.len().min(MAX_CANDIDATES));
     match provider {
         Provider::Anthropic => serde_json::json!({
@@ -181,12 +190,50 @@ fn parse_items(raw: &str) -> Result<Vec<Described>, LlmError> {
 /// Asks the model to describe the candidates. `endpoint` empty = provider default;
 /// `api_key` empty = no auth header (local servers).
 #[allow(clippy::too_many_arguments)]
+/// What [`describe_all`] got back: the answers of the batches that worked, and why the others
+/// failed (their entities keep the basic descriptions).
+#[derive(Debug, Default)]
+pub struct Batched {
+    pub items: Vec<Described>,
+    pub batches: usize,
+    pub failures: Vec<LlmError>,
+}
+
+/// [`describe`] for up to [`MAX_CANDIDATES`] candidates, [`BATCH_SIZE`] per request.
+#[allow(clippy::too_many_arguments)]
+pub fn describe_all(
+    provider: Provider,
+    model: &str,
+    api_key: &str,
+    endpoint: &str,
+    title: &str,
+    author: &str,
+    cands: &[Candidate],
+    lang: &str,
+    post: &mut Post<'_>,
+) -> Batched {
+    let mut out = Batched::default();
+    for batch in cands[..cands.len().min(MAX_CANDIDATES)].chunks(BATCH_SIZE) {
+        out.batches += 1;
+        match describe(
+            provider, model, api_key, endpoint, title, author, batch, lang, post,
+        ) {
+            Ok(items) => out.items.extend(items),
+            Err(e) => out.failures.push(e),
+        }
+    }
+    out
+}
+
+/// One request for `cands`.
+#[allow(clippy::too_many_arguments)]
 pub fn describe(
     provider: Provider,
     model: &str,
     api_key: &str,
     endpoint: &str,
     title: &str,
+    author: &str,
     cands: &[Candidate],
     lang: &str,
     post: &mut Post<'_>,
@@ -197,7 +244,13 @@ pub fn describe(
         endpoint
     }
     .trim_end_matches('/');
-    let body = request_body(provider, model, title, cands, lang).to_string();
+    let mut body = request_body(provider, model, title, author, cands, lang);
+    // A self-hosted OpenAI-compatible server (Ollama, LM Studio): ask reasoning models such as
+    // qwen3 not to "think" first, which roughly doubles a local model's output.
+    let local = provider == Provider::OpenAi && base != provider.default_endpoint();
+    if local {
+        body["reasoning_effort"] = serde_json::json!("none");
+    }
     let mut headers = vec![("content-type".to_owned(), "application/json".to_owned())];
     let url = match provider {
         Provider::Anthropic => {
@@ -212,7 +265,17 @@ pub fn describe(
             format!("{base}/chat/completions")
         }
     };
-    let raw = post(&url, &headers, &body).map_err(LlmError::Http)?;
+    let raw = match post(&url, &headers, &body.to_string()) {
+        // a server that rejects the field (4xx) gets the request again without it
+        Err(e) if local && e.contains("status: 4") => {
+            if let Some(o) = body.as_object_mut() {
+                o.remove("reasoning_effort");
+            }
+            post(&url, &headers, &body.to_string())
+        }
+        other => other,
+    }
+    .map_err(LlmError::Http)?;
     let v: serde_json::Value = serde_json::from_str(&raw)?;
     let truncated = match provider {
         Provider::Anthropic => v["stop_reason"].as_str() == Some("max_tokens"),

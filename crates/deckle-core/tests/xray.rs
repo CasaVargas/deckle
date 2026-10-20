@@ -27,6 +27,7 @@ fn basic_xray_from_the_text_alone_is_a_valid_sidecar() {
     let out = build(
         "B0ABCDDECK",
         "Pride and Prejudice",
+        "Jane Austen",
         "en",
         &runs,
         erl,
@@ -69,9 +70,17 @@ fn nothing_recurring_means_no_sidecar() {
         text: "It was a dark night.".into(),
     }];
     assert!(
-        build("B0ABCDDECK", "T", "en", &runs, 21, &XRayOptions::default())
-            .unwrap()
-            .is_none()
+        build(
+            "B0ABCDDECK",
+            "T",
+            "",
+            "en",
+            &runs,
+            21,
+            &XRayOptions::default()
+        )
+        .unwrap()
+        .is_none()
     );
 }
 
@@ -101,6 +110,7 @@ fn symmetric_llm_aliases_keep_the_main_character() {
     let out = build_with(
         "B0ABCDDECK",
         "T",
+        "",
         "en",
         &runs,
         erl,
@@ -156,6 +166,7 @@ fn llm_failure_falls_back_to_basic_with_a_warning_and_no_key_in_it() {
     let out = build_with(
         "B0ABCDDECK",
         "T",
+        "",
         "en",
         &runs,
         erl,
@@ -188,6 +199,7 @@ fn wikipedia_uses_the_primary_language_subtag() {
     let out = build_with(
         "B0ABCDDECK",
         "T",
+        "",
         "en-US",
         &runs,
         erl,

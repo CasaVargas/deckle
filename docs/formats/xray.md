@@ -75,25 +75,40 @@ London, Pemberley, Rosings, Hertfordshire …); noise remains in the long tail (
 
 ## LLM pass (design §7)
 
-`deckle_xray::llm::describe` sends the candidates (label, count, guessed kind, first-mention
-sentence; at most 120) in one request and asks for a JSON array
+`deckle_xray::llm::describe_all` sends the candidates (label, count, first-mention sentence; at
+most 120) in batches of 25, one request each, and asks for a JSON array
 `[{name, kind, description, aliases}]`: spoiler-free 1–2 sentence descriptions in the book's
 language, `person`/`term`, aliases among the listed names, and an empty description to drop
 noise. Anthropic Messages (`/v1/messages`, `x-api-key`, `anthropic-version 2023-06-01`) or any
 OpenAI-compatible chat endpoint (`<base>/chat/completions`, `Authorization: Bearer` when a key
 is set; none for local servers). The JSON array is extracted from a possibly fenced or chatty
-answer. Any failure falls back to the basic descriptions with a warning on the report.
+answer. A failed batch keeps the basic descriptions for its entities and adds a warning; the
+other batches still apply. The prompt names the book's author (a first-person narrator is
+usually the author), says any individual is a person, and lists sentence-start words and
+interjections ("Yeah", "Hey") as noise. It does **not** send the heuristic's person/term guess:
+qwen3:8b copied it even when told it was often wrong (brothers, a bodyguard and the author all
+came back as terms), and without it the same batch was classified correctly, and faster.
+
+**Local models (decision 2026-10-19, measured with Ollama + qwen3:8b on an M4).** One request
+for the whole book failed in practice: Ollama loads models with a 4,096-token context by default
+(its OpenAI endpoint cannot raise it), so the 120-entity prompt was truncated and only 46
+entities were answered; the full answer would also need ~15 min at 16 tok/s against the 180 s
+timeout. Batches of 25 fit a small context and take ~55 s each; the 180 s timeout applies per
+batch. OpenAI-compatible requests to a non-default endpoint also send
+`reasoning_effort: "none"` (qwen3 otherwise "thinks" first, roughly doubling the output); a
+server that rejects it with a 4xx gets the batch again without it. OpenAI's own endpoint and
+Anthropic never get the field.
 
 Keys: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or the API key field in the desktop settings
 (stored in Deckle's settings file; the keychain is a follow-up). Defaults: `claude-sonnet-5-5`,
 `gpt-5-mini`. `max_tokens` scales with the candidate count (1024 + 120 per entity, max 16384);
 a `max_tokens` / `length` stop is reported as "answer truncated" rather than "not JSON".
 
-**Deferred from design §7 (decision 2026-10-19):** no chunking, no per-book token budget and
-no cost estimate before the first run yet. One request per book carries at most 120
-candidates (the rest keep their basic quote), which is a few thousand input tokens and well
-under a cent on current models; the estimate and budget come back when Word Wise or longer
-books make the cost visible.
+**Deferred from design §7 (decision 2026-10-19):** no per-book token budget and no cost
+estimate before the first run yet. A book sends at most 120 candidates (the rest keep their
+basic quote), a few thousand input tokens in all and well under a cent on current models; the
+estimate and budget come back when longer books make the cost visible. (Chunking, deferred in
+the same decision, is now the batching above.)
 
 ## Wikipedia (opt-in)
 
