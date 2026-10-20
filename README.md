@@ -50,7 +50,8 @@ ASIN; that is the Kindle's behaviour, and *Settings → Default mode → Cover f
 
 Each row shows cover, title, author, series and a mode badge: **Cover** (PDOC: the cover always
 shows, no X-Ray/Word Wise), **Features** (EBOK: X-Ray and Word Wise), **Everything** (EBOK plus a
-cover thumbnail Deckle writes itself), or **Error** with the reason. Deckle picks the mode per
+cover thumbnail Deckle writes itself), **Ready** (a finished `.kfx`, sent as is without
+conversion), or **Error** with the reason. Deckle picks the mode per
 Kindle (see *How it works*); the row menu overrides it per book. **Send to Kindle** runs the
 pipeline book by book with per-stage progress; the split button exports to a folder instead. The
 result line says what shipped and why, e.g. `X-Ray: 62 people, 88 terms (basic) · Word Wise:

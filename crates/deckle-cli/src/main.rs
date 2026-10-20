@@ -64,46 +64,14 @@ fn resolve_target(to: &str) -> Result<Target, String> {
 
 /// Title and first author of a KFX, for naming the file when sending it.
 fn info_from_kfx(kfx: &[u8]) -> BookInfo {
-    use deckle_kfx::ion::{Sym, Value};
-    let mut info = BookInfo {
-        title: "book".into(),
-        ..Default::default()
-    };
-    let Ok(doc) = deckle_kfx::container::read_kfx(kfx) else {
-        return info;
-    };
-    let Some(md) = doc.fragments.get_single(&Sym::new("$490")) else {
-        return info;
-    };
-    let Some(cats) = md
-        .value
-        .as_struct()
-        .and_then(|s| s.get("$491"))
-        .and_then(Value::as_list)
-    else {
-        return info;
-    };
-    for cat in cats {
-        let Some(c) = cat.as_struct() else { continue };
-        if c.get("$495").and_then(Value::as_str) != Some("kindle_title_metadata") {
-            continue;
-        }
-        for kv in c.get("$258").and_then(Value::as_list).into_iter().flatten() {
-            let Some(s) = kv.as_struct() else { continue };
-            match (
-                s.get("$492").and_then(Value::as_str),
-                s.get("$307").and_then(Value::as_str),
-            ) {
-                (Some("title"), Some(t)) => info.title = t.to_owned(),
-                (Some("author"), Some(a)) => info.creators.push(deckle_core::inspect::Creator {
-                    name: a.to_owned(),
-                    file_as: Some(a.to_owned()),
-                }),
-                _ => {}
-            }
-        }
-    }
-    info
+    deckle_core::inspect::inspect_kfx(kfx)
+        .map(|k| k.info)
+        .ok()
+        .filter(|i| !i.title.is_empty())
+        .unwrap_or_else(|| BookInfo {
+            title: "book".into(),
+            ..Default::default()
+        })
 }
 
 fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {

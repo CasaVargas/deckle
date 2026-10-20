@@ -370,3 +370,69 @@ fn parse_ncx_toc(xml: &str, ncx_href: &str) -> Vec<TocEntry> {
     }
     out
 }
+
+/// What a finished KFX says about itself: enough to list it and send it unchanged.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct KfxInfo {
+    pub info: BookInfo,
+    /// `PDOC` or `EBOK`, from `cde_content_type`.
+    pub cde_type: Option<String>,
+    /// The cover image bytes (JPEG), when the KFX carries one.
+    #[serde(skip)]
+    pub cover: Option<Vec<u8>>,
+}
+
+/// Reads title, authors, content type and cover from a KFX's `kindle_title_metadata`. An
+/// unreadable KFX gives an `Err`; missing fields stay empty.
+pub fn inspect_kfx(kfx: &[u8]) -> Result<KfxInfo, String> {
+    use deckle_kfx::ion::{Sym, Value};
+    let doc = deckle_kfx::container::read_kfx(kfx).map_err(|e| e.to_string())?;
+    let mut out = KfxInfo::default();
+    let mut cover_name = None;
+    let cats = doc
+        .fragments
+        .get_single(&Sym::new("$490"))
+        .and_then(|md| md.value.as_struct())
+        .and_then(|s| s.get("$491"))
+        .and_then(Value::as_list)
+        .ok_or("no book metadata")?;
+    for cat in cats {
+        let Some(c) = cat.as_struct() else { continue };
+        if c.get("$495").and_then(Value::as_str) != Some("kindle_title_metadata") {
+            continue;
+        }
+        for kv in c.get("$258").and_then(Value::as_list).into_iter().flatten() {
+            let Some(s) = kv.as_struct() else { continue };
+            let (Some(key), Some(value)) = (s.get("$492").and_then(Value::as_str), s.get("$307"))
+            else {
+                continue;
+            };
+            let text = match value {
+                Value::Symbol(sym) => Some(sym.0.clone()),
+                v => v.as_str().map(str::to_owned),
+            };
+            match (key, text) {
+                ("title", Some(t)) => out.info.title = t,
+                ("author", Some(a)) => out.info.creators.push(Creator {
+                    file_as: Some(a.clone()),
+                    name: a,
+                }),
+                ("language", Some(l)) => out.info.language = l,
+                ("cde_content_type", Some(t)) => out.cde_type = Some(t),
+                ("cover_image", Some(n)) => cover_name = Some(n),
+                _ => {}
+            }
+        }
+    }
+    out.cover = cover_name.and_then(|name| {
+        let res = doc
+            .fragments
+            .get(&Sym::new("$164"), Some(&Sym::new(&name)))?;
+        let location = res.value.as_struct()?.get("$165")?.as_str()?.to_owned();
+        let raw = doc
+            .fragments
+            .get(&Sym::new("$417"), Some(&Sym::new(&location)))?;
+        raw.value.as_blob().map(<[u8]>::to_vec)
+    });
+    Ok(out)
+}

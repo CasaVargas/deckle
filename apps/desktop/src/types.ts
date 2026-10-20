@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-export type Mode = "full" | "cover" | "error";
+/** `ready`: a finished KFX, sent as is. */
+export type Mode = "full" | "cover" | "error" | "ready";
 export type RunStatus = "idle" | "queued" | "running" | "done" | "failed";
 
 export interface BookRow {

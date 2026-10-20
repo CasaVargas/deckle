@@ -195,6 +195,9 @@ One window, three regions.
 - **Top: drop zone / book list.** Drop EPUBs (or a folder) and each becomes a row: cover
   thumbnail, title, author, series, and a mode badge (**Full** / **Cover-only** / **Error**)
   with the reason on hover. Rows stay simple; a row menu holds the override and "Show report".
+  A finished `.kfx` (a Deckle Daily edition, a KFX exported earlier) lists from its own
+  metadata and cover with a **Ready** badge and is copied unchanged under its file name: no
+  Previewer, no override, no re-enrichment (#57).
 - **Bottom bar: device + action.** Connected Kindle(s) with model and transport, a target
   picker when there is more than one, and a single primary button: **Send to Kindle**.
   "Export to folder" lives in the button's secondary menu.
@@ -325,3 +328,6 @@ Each milestone ends with a verified book on a real device, not a passing test.
   time, never stored), else installs Deckle's Wiktionary dictionary in the Chinese slot (reader
   sets Word Wise language to 中文 once); Amazon's dictionaries are never overwritten. Database
   12 MB gzipped, on GitHub Releases, sha256-pinned. Claude's call (M4 plan).
+- 2026-10-20 The app accepts finished KFX files and sends them as is (owner asked why the
+  Deckle Daily KFX could not be added). Re-converting or re-enriching a KFX is out of scope;
+  its mode is whatever it was built with. Owner, #57.

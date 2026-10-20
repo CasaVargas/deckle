@@ -17,6 +17,7 @@ interface Props {
 
 function badge(book: BookState, plan: PlanRow | undefined) {
   if (book.mode === "error") return { cls: "badge error", text: "Error", title: book.reason };
+  if (book.mode === "ready") return { cls: "badge ready", text: "Ready", title: book.reason };
   if (!plan) return { cls: "badge cover", text: "Cover", title: book.reason };
   if (plan.cde === "ebok") {
     return { cls: "badge features", text: plan.write_thumbnail ? "Everything" : "Features", title: plan.reason };
@@ -54,7 +55,8 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
   } else if (book.status === "done") {
     statusLine = (
       <div className="result ok">
-        Done{book.pages ? ` · ${book.pages} pages` : ""}
+        Done{book.mode === "ready" ? " · sent as is" : ""}
+        {book.pages ? ` · ${book.pages} pages` : ""}
         {book.delivered && (
           <button className="link" onClick={() => onReveal(book.delivered!)}>
             Show file
@@ -91,6 +93,8 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
     statusLine = <div className="result muted">Waiting…</div>;
   } else if (book.error) {
     statusLine = <div className="result fail">{book.error}</div>;
+  } else if (book.mode === "ready") {
+    statusLine = <div className="result muted">Already a Kindle book: sent as is, no conversion.</div>;
   } else if (book.warnings.length > 0) {
     statusLine = <div className="result muted">{book.warnings.join("; ")}</div>;
   }
@@ -175,16 +179,16 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
         </button>
         {menuOpen && (
           <div className="menu" onMouseLeave={() => setMenuOpen(false)}>
-            <button onClick={() => { onOverride(book.id, "ebok"); setMenuOpen(false); }} disabled={effectiveCde === "ebok" || book.mode === "error"}>
+            <button onClick={() => { onOverride(book.id, "ebok"); setMenuOpen(false); }} disabled={effectiveCde === "ebok" || book.mode === "error" || book.mode === "ready"}>
               Prefer features (EBOK)
             </button>
-            <button onClick={() => { onOverride(book.id, "pdoc"); setMenuOpen(false); }} disabled={effectiveCde === "pdoc" || book.mode === "error"}>
+            <button onClick={() => { onOverride(book.id, "pdoc"); setMenuOpen(false); }} disabled={effectiveCde === "pdoc" || book.mode === "error" || book.mode === "ready"}>
               Prefer cover (PDOC)
             </button>
             {book.cdeOverride && (
               <button onClick={() => { onOverride(book.id, null); setMenuOpen(false); }}>Use default</button>
             )}
-            <button onClick={() => { setAsinDraft(book.asin ?? ""); setMenuOpen(false); }} disabled={book.mode === "error"}>
+            <button onClick={() => { setAsinDraft(book.asin ?? ""); setMenuOpen(false); }} disabled={book.mode === "error" || book.mode === "ready"}>
               {book.asin ? "Change Amazon ASIN…" : "Set Amazon ASIN…"}
             </button>
             {book.asin && (

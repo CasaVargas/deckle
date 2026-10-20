@@ -67,7 +67,7 @@ export default function App() {
 
   // Ask the cover rule what each book gets on the current target (badges).
   useEffect(() => {
-    const runnable = books.filter((b) => b.mode !== "error");
+    const runnable = books.filter((b) => b.mode !== "error" && b.mode !== "ready");
     if (runnable.length === 0) {
       setPlans({});
       return;
@@ -144,7 +144,7 @@ export default function App() {
   };
 
   const pickBooks = async () => {
-    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "EPUB", extensions: ["epub"] }] });
+    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books", extensions: ["epub", "kfx"] }] });
     if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
   };
 
@@ -157,7 +157,8 @@ export default function App() {
 
   const start = async (target: RunTarget) => {
     if (runnable.length === 0 || busy) return;
-    if (!previewer?.found) {
+    // A finished KFX is copied as is; only EPUBs need Kindle Previewer.
+    if (!previewer?.found && runnable.some((b) => b.mode !== "ready")) {
       setNotice("Kindle Previewer is not installed. Open Settings to download it or point Deckle at it.");
       setSettingsOpen(true);
       return;
@@ -243,6 +244,7 @@ export default function App() {
             </div>
             <h1>Drop EPUBs here</h1>
             <p>Each book becomes a Kindle book with Enhanced Typesetting, a cover that shows, page numbers, and X-Ray and Word Wise where your Kindle allows them.</p>
+            <p className="muted">Finished Kindle books (.kfx) are sent as they are.</p>
             <button className="ghost" onClick={pickBooks}>
               or choose files…
             </button>

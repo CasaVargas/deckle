@@ -124,3 +124,20 @@ fn adept_encryption_of_content_is_drm() {
     let f = variant(&[("META-INF/encryption.xml", enc)]);
     assert!(matches!(inspect(f.path()), Err(InspectError::Drm)));
 }
+
+#[test]
+fn a_finished_kfx_reports_title_type_and_cover() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mini");
+    for (file, cde) in [
+        ("deckle-mini-pdoc.golden.kfx", "PDOC"),
+        ("deckle-mini-ebok.golden.kfx", "EBOK"),
+    ] {
+        let k =
+            deckle_core::inspect::inspect_kfx(&std::fs::read(root.join(file)).unwrap()).unwrap();
+        assert!(!k.info.title.is_empty(), "{file}");
+        assert_eq!(k.cde_type.as_deref(), Some(cde), "{file}");
+        let cover = k.cover.unwrap_or_default();
+        assert!(cover.starts_with(&[0xFF, 0xD8]), "{file}: cover is a JPEG");
+    }
+    assert!(deckle_core::inspect::inspect_kfx(b"not a kfx").is_err());
+}

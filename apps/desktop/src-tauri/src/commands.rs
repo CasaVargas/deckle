@@ -29,7 +29,7 @@ pub struct BookRow {
     pub series: Option<String>,
     /// `data:image/...;base64,...` of the EPUB's cover, when it has one.
     pub cover: Option<String>,
-    /// `full` | `cover` | `error` (design §5).
+    /// `full` | `cover` | `error` (design §5), or `ready`: a finished KFX sent as is.
     pub mode: String,
     pub reason: String,
     pub warnings: Vec<String>,
@@ -285,13 +285,21 @@ pub fn parse_cli_args(args: &[String]) -> (Vec<String>, Option<String>) {
     (books, target)
 }
 
-fn is_epub(p: &Path) -> bool {
-    p.extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
+fn has_extension(p: &Path, ext: &str) -> bool {
+    p.extension().is_some_and(|e| e.eq_ignore_ascii_case(ext))
 }
 
-/// EPUB files from a mix of file and folder paths (folders are walked, sorted by name).
-pub fn expand_epub_paths(paths: &[String]) -> Vec<PathBuf> {
+/// A finished Kindle book: sent as is, never converted again.
+pub fn is_kfx(p: &Path) -> bool {
+    has_extension(p, "kfx")
+}
+
+fn is_book(p: &Path) -> bool {
+    has_extension(p, "epub") || is_kfx(p)
+}
+
+/// EPUB and KFX files from a mix of file and folder paths (folders are walked, sorted by name).
+pub fn expand_book_paths(paths: &[String]) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
             return;
@@ -301,7 +309,7 @@ pub fn expand_epub_paths(paths: &[String]) -> Vec<PathBuf> {
         for e in entries {
             if e.is_dir() {
                 walk(&e, out);
-            } else if is_epub(&e) {
+            } else if is_book(&e) {
                 out.push(e);
             }
         }
@@ -311,7 +319,7 @@ pub fn expand_epub_paths(paths: &[String]) -> Vec<PathBuf> {
         let p = PathBuf::from(p);
         if p.is_dir() {
             walk(&p, &mut out);
-        } else if is_epub(&p) {
+        } else if is_book(&p) {
             out.push(p);
         }
     }
@@ -345,6 +353,9 @@ fn cover_data_url(epub: &Path, href: &str) -> Option<String> {
 const COVER_MODE_REASON: &str = "Enhanced Typesetting, cover and page numbers. X-Ray and Word Wise need the book to ship as EBOK.";
 
 pub fn book_row(path: &Path) -> BookRow {
+    if is_kfx(path) {
+        return kfx_row(path);
+    }
     let id = format!("{:x}", md5ish(path.to_string_lossy().as_bytes()));
     let stem = path
         .file_stem()
@@ -392,6 +403,107 @@ pub fn book_row(path: &Path) -> BookRow {
             warnings: Vec::new(),
             error: Some(e.to_string()),
         },
+    }
+}
+
+/// A finished KFX: listed from its own metadata and cover, sent unchanged under its file name.
+pub fn kfx_row(path: &Path) -> BookRow {
+    let id = format!("{:x}", md5ish(path.to_string_lossy().as_bytes()));
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let read = std::fs::read(path)
+        .map_err(|e| e.to_string())
+        .and_then(|b| deckle_core::inspect::inspect_kfx(&b));
+    match read {
+        Ok(k) => {
+            let cde = k.cde_type.clone().unwrap_or_else(|| "KFX".into());
+            BookRow {
+                id,
+                path: path.to_string_lossy().into_owned(),
+                title: if k.info.title.is_empty() {
+                    stem
+                } else {
+                    k.info.title.clone()
+                },
+                authors: k
+                    .info
+                    .creators
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                series: None,
+                cover: k.cover.as_ref().map(|jpeg| {
+                    format!(
+                        "data:image/jpeg;base64,{}",
+                        base64::engine::general_purpose::STANDARD.encode(jpeg)
+                    )
+                }),
+                mode: "ready".into(),
+                reason: format!(
+                    "Already a Kindle book ({cde}): sent as is, without conversion. Its mode, X-Ray and Word Wise are what it was built with."
+                ),
+                warnings: Vec::new(),
+                error: None,
+            }
+        }
+        Err(e) => BookRow {
+            id,
+            path: path.to_string_lossy().into_owned(),
+            title: stem,
+            authors: String::new(),
+            series: None,
+            cover: None,
+            mode: "error".into(),
+            reason: format!("not a readable KFX: {e}"),
+            warnings: Vec::new(),
+            error: Some(format!("not a readable KFX: {e}")),
+        },
+    }
+}
+
+/// Sends a finished KFX unchanged under its own file name; the final progress event.
+fn send_kfx(b: &RunRequest, target: &Target) -> ProgressEvent {
+    let path = Path::new(&b.path);
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "book.kfx".into());
+    let result = std::fs::read(path)
+        .map_err(|e| format!("reading {}: {e}", path.display()))
+        .and_then(|bytes| {
+            let cde = deckle_core::inspect::inspect_kfx(&bytes)
+                .ok()
+                .and_then(|k| k.cde_type);
+            deckle_core::deliver::deliver_named_on(
+                &bytes,
+                &name,
+                &mut deckle_core::deliver::Conn::new(target),
+                &Default::default(),
+            )
+            .map(|d| (d, cde))
+            .map_err(|e| format!("deliver: {e}"))
+        });
+    let (status, delivered, cde, error) = match result {
+        Ok((d, cde)) => ("done", Some(d.to_string_lossy().into_owned()), cde, None),
+        Err(e) => ("failed", None, None, Some(e)),
+    };
+    ProgressEvent {
+        id: b.id.clone(),
+        status: status.into(),
+        stage: None,
+        delivered,
+        pages: None,
+        warnings: Vec::new(),
+        error,
+        cde,
+        asin: None,
+        reason: Some("Sent as is (already a Kindle book).".into()),
+        matched: None,
+        xray: None,
+        word_wise: None,
     }
 }
 
@@ -523,6 +635,25 @@ pub fn run_books_with(
         },
     };
     for b in books {
+        if is_kfx(Path::new(&b.path)) {
+            emit(ProgressEvent {
+                id: b.id.clone(),
+                status: "running".into(),
+                stage: Some("deliver".into()),
+                delivered: None,
+                pages: None,
+                warnings: Vec::new(),
+                error: None,
+                cde: None,
+                asin: None,
+                reason: None,
+                matched: None,
+                xray: None,
+                word_wise: None,
+            });
+            emit(send_kfx(b, &target));
+            continue;
+        }
         let override_str = effective_override(b.cde.as_deref(), device_override, settings);
         let opts = RunOptions {
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
@@ -609,7 +740,7 @@ pub fn take_preloaded_target(state: State<'_, AppState>) -> Option<String> {
 
 #[tauri::command]
 pub fn inspect_books(paths: Vec<String>) -> Vec<BookRow> {
-    expand_epub_paths(&paths)
+    expand_book_paths(&paths)
         .iter()
         .map(|p| book_row(p))
         .collect()
@@ -872,8 +1003,9 @@ mod tests {
         std::fs::write(dir.path().join("sub/B.EPUB"), b"x").unwrap();
         std::fs::write(dir.path().join("sub/deeper/c.epub"), b"x").unwrap();
         std::fs::write(dir.path().join("sub/notes.txt"), b"x").unwrap();
+        std::fs::write(dir.path().join("sub/deeper/d.kfx"), b"x").unwrap();
         let direct = dir.path().join("a.epub");
-        let found = expand_epub_paths(&[
+        let found = expand_book_paths(&[
             dir.path().join("sub").to_string_lossy().into_owned(),
             direct.to_string_lossy().into_owned(),
         ]);
@@ -881,7 +1013,7 @@ mod tests {
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, ["B.EPUB", "c.epub", "a.epub"]);
+        assert_eq!(names, ["B.EPUB", "c.epub", "d.kfx", "a.epub"]);
     }
 
     #[test]
@@ -927,6 +1059,62 @@ mod tests {
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
         assert_eq!(load_settings_from(&file), changed);
+    }
+
+    fn golden_kfx() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../fixtures/mini/deckle-mini-pdoc.golden.kfx")
+    }
+
+    #[test]
+    fn a_kfx_lists_as_ready_with_its_own_cover() {
+        let row = book_row(&golden_kfx());
+        assert_eq!(row.mode, "ready");
+        assert!(row.error.is_none());
+        assert!(!row.title.is_empty());
+        assert!(row.reason.contains("PDOC"));
+        assert!(row.cover.unwrap().starts_with("data:image/jpeg;base64,"));
+        let bad = tempfile::tempdir().unwrap();
+        let junk = bad.path().join("junk.kfx");
+        std::fs::write(&junk, b"nope").unwrap();
+        assert_eq!(book_row(&junk).mode, "error");
+    }
+
+    #[test]
+    fn a_kfx_is_sent_unchanged_under_its_own_name_without_previewer() {
+        let out = tempfile::tempdir().unwrap();
+        let src = tempfile::tempdir().unwrap();
+        let kfx = src.path().join("deckle-daily-2026-10-20.kfx");
+        std::fs::copy(golden_kfx(), &kfx).unwrap();
+        let settings = Settings {
+            previewer_path: Some("/nonexistent/previewer".into()),
+            ..Settings::default()
+        };
+        let mut events: Vec<ProgressEvent> = Vec::new();
+        run_books_with(
+            &[RunRequest {
+                id: "k".into(),
+                path: kfx.to_string_lossy().into_owned(),
+                cde: Some("ebok".into()),
+                asin: None,
+            }],
+            &RunTarget::Folder {
+                path: out.path().to_string_lossy().into_owned(),
+            },
+            &settings,
+            None,
+            false,
+            &mut |e| events.push(e),
+        );
+        let last = events.last().unwrap();
+        assert_eq!(last.status, "done", "{:?}", last.error);
+        assert_eq!(
+            last.cde.as_deref(),
+            Some("PDOC"),
+            "the KFX's own type, not the override"
+        );
+        let sent = out.path().join("deckle-daily-2026-10-20.kfx");
+        assert_eq!(std::fs::read(sent).unwrap(), std::fs::read(&kfx).unwrap());
     }
 
     #[test]
