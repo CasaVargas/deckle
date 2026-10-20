@@ -453,7 +453,7 @@ fn digest(
             previewer: pv,
             keep_work_dir,
         } => {
-            let cfg = load_digest_config(&path)?;
+            let mut cfg = load_digest_config(&path)?;
             let date = parse_date(date.as_deref())?;
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             // A folder target must exist (and is created) before any work; `device` may be
@@ -464,7 +464,7 @@ fn digest(
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+            let mut built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
             let opts = RunOptions {
                 cde_type: deckle_kfx::convert::CdeType::Pdoc,
                 // The cover is the front page: it must always show (design §5).
@@ -481,19 +481,18 @@ fn digest(
                 wikipedia: false,
                 word_wise: None,
             };
-            let report = run(&built.epub, &opts);
-            let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
-            let mut outcome = DigestOutcome::default();
-            let mut reading_outcomes = built.reading_outcomes.clone();
-            let mut long_reads: Vec<(String, PathBuf)> = Vec::new();
-            if let (None, Some(kfx)) = (&report.error, &report.delivered) {
-                // Long reads: books like any other, through the cover rule (design §5).
-                let book_ids: Vec<String> = reading_outcomes
+            // Long reads first: books like any other, through the cover rule (design §5).
+            // One that won't convert prints inside the paper instead, so the paper never
+            // points to a book that isn't coming.
+            let convert_long_reads = |built: &deckle_digest::BuildReport| {
+                let book_ids = built
+                    .reading_outcomes
                     .iter()
                     .filter(|(_, o)| *o == deckle_digest::reading::Outcome::Book)
-                    .map(|(id, _)| id.clone())
-                    .collect();
-                for (id, epub) in book_ids.iter().zip(&built.long_reads) {
+                    .map(|(id, _)| id.clone());
+                let mut ok: Vec<(String, PathBuf)> = Vec::new();
+                let mut failed: Vec<(String, String)> = Vec::new();
+                for (id, epub) in book_ids.zip(&built.long_reads) {
                     let lr_opts = RunOptions {
                         cde_type: deckle_kfx::convert::CdeType::Pdoc,
                         cde_override: None,
@@ -505,18 +504,32 @@ fn digest(
                     match (&lr.error, &lr.delivered) {
                         (None, Some(k)) => {
                             let stem = epub.file_stem().unwrap_or_default().to_string_lossy();
-                            long_reads.push((format!("{stem}.kfx"), k.clone()));
+                            ok.push((format!("{stem}.kfx"), k.clone()));
                         }
                         (e, _) => {
-                            let why = e.clone().unwrap_or_else(|| "not converted".into());
-                            for (rid, o) in &mut reading_outcomes {
-                                if rid == id {
-                                    *o = deckle_digest::reading::Outcome::Failed(why.clone());
-                                }
-                            }
+                            failed.push((id, e.clone().unwrap_or_else(|| "not converted".into())))
                         }
                     }
                 }
+                (ok, failed)
+            };
+            let (mut long_reads, failed) = convert_long_reads(&built);
+            let mut notes: Vec<String> = Vec::new();
+            if !failed.is_empty() {
+                for (id, why) in &failed {
+                    notes.push(format!(
+                        "long read {id} printed in the paper instead: {why}"
+                    ));
+                }
+                cfg.reading.inline = failed.into_iter().map(|(id, _)| id).collect();
+                built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+                long_reads = convert_long_reads(&built).0;
+            }
+            let report = run(&built.epub, &opts);
+            let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+            let mut outcome = DigestOutcome::default();
+            let reading_outcomes = built.reading_outcomes.clone();
+            if let (None, Some(kfx)) = (&report.error, &report.delivered) {
                 let name = deckle_digest::edition_filename(date);
                 match &folder {
                     Some(target) => {
@@ -570,7 +583,7 @@ fn digest(
                 for (n, _) in &long_reads {
                     text.push_str(&format!("\n      long read: {n}"));
                 }
-                for n in &built.notes {
+                for n in built.notes.iter().chain(&notes) {
                     text.push_str(&format!("\n      note: {n}"));
                 }
                 text
@@ -737,6 +750,9 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
     }
     for (file, why) in &r.unreadable {
         eprintln!("inbox: couldn't read {}: {why}", file.display());
+    }
+    for (file, why) in &r.retry {
+        eprintln!("inbox: {} waits for the next scan: {why}", file.display());
     }
 }
 

@@ -145,3 +145,22 @@ fn saved_page_photos_from_files_folder_and_data_uri() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn a_lazy_image_uses_its_real_source_over_a_data_placeholder() {
+    let words = "word ".repeat(200);
+    let html = format!(
+        "<html><body><article><p>{words}</p><img src=\"data:image/svg+xml;utf8,%3Csvg/%3E\" data-src=\"https://cdn.ex.com/real.jpg\"><p>{words}</p></article></body></html>"
+    );
+    let x = deckle_digest::article::extract_with(&html, "https://ex.com/a", None).unwrap();
+    assert!(
+        x.photos.iter().any(|p| p == "https://cdn.ex.com/real.jpg"),
+        "{:?}",
+        x.photos
+    );
+    assert!(
+        x.photos.iter().all(|p| !p.starts_with("data:")),
+        "{:?}",
+        x.photos
+    );
+}

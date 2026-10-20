@@ -242,3 +242,15 @@ fn cover_lead_stays_news() {
     assert!(!g.news.contains(&0), "Your Reading is not a news section");
     deckle_digest::cover::render(&g).unwrap();
 }
+
+#[test]
+fn a_long_read_that_must_print_inline_is_in_the_paper() {
+    let (_d, mut c, _q, ids) = reading_setup(&["https://ex.com/long"]);
+    c.reading.inline = ids.clone();
+    let g = gather(&c, date(), now(), &net_with_pages);
+    assert!(g.long_reads.is_empty());
+    let story = &g.edition.sections[0].articles[0];
+    assert!(!story.body.contains("In your library"));
+    assert!(story.body.contains("roof repairs"));
+    assert_eq!(g.reading_outcomes, [(ids[0].clone(), Outcome::Printed)]);
+}

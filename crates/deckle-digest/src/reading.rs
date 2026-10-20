@@ -59,7 +59,8 @@ pub enum Outcome {
 
 enum Line {
     Entry(Box<Entry>),
-    Raw(String),
+    /// A line that isn't an entry (hand edits, other encodings), kept byte for byte.
+    Raw(Vec<u8>),
 }
 
 #[derive(Clone, Debug)]
@@ -176,41 +177,50 @@ impl ReadingQueue {
         self.path.parent().unwrap_or(Path::new(".")).join("reading")
     }
 
-    fn lines(&self) -> Vec<Line> {
-        let Ok(text) = std::fs::read_to_string(&self.path) else {
-            return Vec::new();
+    /// The file's lines. A missing file is an empty queue; any other read error is an
+    /// error, so nothing writes over a file it couldn't read.
+    fn lines(&self) -> Result<Vec<Line>, String> {
+        let bytes = match std::fs::read(&self.path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(format!("{}: {e}", self.path.display())),
         };
-        text.lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| match serde_json::from_str::<Entry>(l) {
-                Ok(e) => Line::Entry(Box::new(e)),
-                Err(_) => Line::Raw(l.to_owned()),
+        Ok(bytes
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.trim_ascii().is_empty())
+            .map(|l| {
+                match std::str::from_utf8(l)
+                    .ok()
+                    .and_then(|t| serde_json::from_str::<Entry>(t).ok())
+                {
+                    Some(e) => Line::Entry(Box::new(e)),
+                    None => Line::Raw(l.to_vec()),
+                }
             })
-            .collect()
+            .collect())
     }
 
     fn write(&self, lines: &[Line]) -> Result<(), String> {
         if let Some(dir) = self.path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        let mut text = String::new();
+        let mut out = Vec::new();
         for l in lines {
             match l {
-                Line::Entry(e) => {
-                    text.push_str(&serde_json::to_string(e).map_err(|e| e.to_string())?)
-                }
-                Line::Raw(r) => text.push_str(r),
+                Line::Entry(e) => out.extend(serde_json::to_vec(e).map_err(|e| e.to_string())?),
+                Line::Raw(r) => out.extend_from_slice(r),
             }
-            text.push('\n');
+            out.push(b'\n');
         }
         let tmp = self.path.with_extension("jsonl.tmp");
-        std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
+        std::fs::write(&tmp, out).map_err(|e| format!("{}: {e}", tmp.display()))?;
         std::fs::rename(&tmp, &self.path).map_err(|e| format!("{}: {e}", self.path.display()))
     }
 
     /// Every entry that parses, in file order.
     pub fn load(&self) -> Vec<Entry> {
         self.lines()
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|l| match l {
                 Line::Entry(e) => Some(*e),
@@ -259,7 +269,7 @@ impl ReadingQueue {
         now: DateTime<Utc>,
     ) -> Result<Added, String> {
         let _lock = Lock::take(&self.path)?;
-        let lines = self.lines();
+        let lines = self.lines()?;
         let key = normalize_url(url);
         if let Some(id) = Self::pending_duplicate(&lines, &key) {
             return Ok(Added::Duplicate(id));
@@ -292,15 +302,18 @@ impl ReadingQueue {
             .find_map(|r| r.captures(&text).map(|c| c[1].to_owned()))
             .map(|u| normalize_url(&u));
         let _lock = Lock::take(&self.path)?;
-        let lines = self.lines();
-        if let Some(key) = &canonical
-            && let Some(id) = Self::pending_duplicate(&lines, key)
-        {
-            return Ok(Added::Duplicate(id));
-        }
-        let id = Self::new_id(&lines, &html.to_string_lossy(), now);
+        let mut lines = self.lines()?;
+        // A page for a URL already waiting is how a paywalled save gets read: the entry
+        // keeps its id and starts over with the page.
+        let existing = canonical
+            .as_ref()
+            .and_then(|key| Self::pending_duplicate(&lines, key));
+        let id = existing
+            .clone()
+            .unwrap_or_else(|| Self::new_id(&lines, &html.to_string_lossy(), now));
         let dir = self.pages_dir().join(&id);
         let name = html.file_name().ok_or("not a file")?;
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         std::fs::copy(html, dir.join(name)).map_err(|e| e.to_string())?;
         if let Some(stem) = html.file_stem() {
@@ -309,6 +322,20 @@ impl ReadingQueue {
                 copy_dir(&files, &dir.join(files.file_name().expect("has a name")))
                     .map_err(|e| e.to_string())?;
             }
+        }
+        if existing.is_some() {
+            for l in &mut lines {
+                if let Line::Entry(e) = l
+                    && e.id == id
+                {
+                    e.file = Some(dir.join(name));
+                    e.tries = 0;
+                    e.note = None;
+                    e.tried_on = None;
+                }
+            }
+            self.write(&lines)?;
+            return Ok(Added::New(id));
         }
         let entry = Entry {
             id: id.clone(),
@@ -331,7 +358,7 @@ impl ReadingQueue {
     pub fn remove(&self, id_or_url: &str) -> Result<bool, String> {
         let _lock = Lock::take(&self.path)?;
         let key = normalize_url(id_or_url);
-        let mut lines = self.lines();
+        let mut lines = self.lines()?;
         let before = lines.len();
         let mut removed_dirs = Vec::new();
         lines.retain(|l| match l {
@@ -369,7 +396,7 @@ impl ReadingQueue {
     /// Records what an edition for `date` did with each entry.
     pub fn commit(&self, date: NaiveDate, outcomes: &[(String, Outcome)]) -> Result<(), String> {
         let _lock = Lock::take(&self.path)?;
-        let mut lines = self.lines();
+        let mut lines = self.lines()?;
         for line in &mut lines {
             let Line::Entry(e) = line else { continue };
             let Some((_, outcome)) = outcomes.iter().find(|(id, _)| *id == e.id) else {

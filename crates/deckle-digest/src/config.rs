@@ -154,6 +154,10 @@ pub struct ReadingConfig {
     /// The queue file (tests); the default is `reading.jsonl` beside `digest.toml`.
     #[serde(skip)]
     pub queue_path: Option<PathBuf>,
+    /// Saved entries to print inside the paper whatever their length: their book failed to
+    /// convert, so the paper must not point to it (`digest run` sets this and rebuilds).
+    #[serde(skip)]
+    pub inline: Vec<String>,
 }
 
 impl Default for ReadingConfig {
@@ -163,6 +167,7 @@ impl Default for ReadingConfig {
             max_items: 10,
             long_read_words: 4000,
             queue_path: None,
+            inline: Vec::new(),
         }
     }
 }

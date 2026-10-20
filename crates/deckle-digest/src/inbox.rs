@@ -20,9 +20,18 @@ pub struct ScanReport {
     /// New queue entries (duplicates of pending saves don't count).
     pub queued: usize,
     pub unreadable: Vec<(PathBuf, String)>,
+    /// Left in place for the next scan (the queue was busy, a disk error).
+    pub retry: Vec<(PathBuf, String)>,
 }
 
-static URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://[^\s<>\x22]+").unwrap());
+/// Why a file wasn't queued: its content (moved aside) or the moment (left for later).
+enum Skip {
+    Unreadable(String),
+    Retry(String),
+}
+
+static URL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"https?://[^\s<>\x22\x00-\x1f\x7f\u{fffd}]+").unwrap());
 static WEBLOC: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<key>URL</key>\s*<string>([^<]+)</string>").unwrap());
 
@@ -63,10 +72,15 @@ fn urls_in(path: &Path, ext: &str) -> Result<Vec<String>, String> {
     let text = std::fs::read(path).map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&text);
     let urls: Vec<String> = match ext {
-        "webloc" => WEBLOC
-            .captures(&text)
-            .map(|c| vec![html_escape::decode_html_entities(c[1].trim()).into_owned()])
-            .unwrap_or_default(),
+        // XML property lists; binary ones (Finder drags) keep the URL as plain ASCII.
+        "webloc" => match WEBLOC.captures(&text) {
+            Some(c) => vec![html_escape::decode_html_entities(c[1].trim()).into_owned()],
+            None => URL
+                .find_iter(&text)
+                .take(1)
+                .map(|m| m.as_str().to_owned())
+                .collect(),
+        },
         "url" => text
             .lines()
             .filter_map(|l| l.trim().strip_prefix("URL="))
@@ -115,27 +129,35 @@ pub fn scan(dir: &Path, queue: &ReadingQueue, now: SystemTime) -> ScanReport {
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
-        let result = match ext.as_str() {
-            "html" | "htm" => queue
-                .add_page(&file, "inbox", Utc::now())
-                .map(|a| usize::from(matches!(a, Added::New(_)))),
-            "webloc" | "url" | "txt" => urls_in(&file, &ext).and_then(|urls| {
-                let mut n = 0;
-                for u in urls {
-                    if matches!(queue.add_url(&u, None, "inbox", Utc::now())?, Added::New(_)) {
-                        n += 1;
-                    }
-                }
-                Ok(n)
-            }),
-            _ => Err("Deckle reads .webloc, .url, .txt and .html files".into()),
-        };
+        let result =
+            match ext.as_str() {
+                "html" | "htm" => queue
+                    .add_page(&file, "inbox", Utc::now())
+                    .map(|a| usize::from(matches!(a, Added::New(_))))
+                    .map_err(Skip::Retry),
+                "webloc" | "url" | "txt" => urls_in(&file, &ext)
+                    .map_err(Skip::Unreadable)
+                    .and_then(|urls| {
+                        let mut n = 0;
+                        for u in urls {
+                            let added = queue
+                                .add_url(&u, None, "inbox", Utc::now())
+                                .map_err(Skip::Retry)?;
+                            n += usize::from(matches!(added, Added::New(_)));
+                        }
+                        Ok(n)
+                    }),
+                _ => Err(Skip::Unreadable(
+                    "Deckle reads .webloc, .url, .txt and .html files".into(),
+                )),
+            };
         match result {
             Ok(n) => {
                 report.queued += n;
                 move_to(&file, "Saved");
             }
-            Err(why) => {
+            Err(Skip::Retry(why)) => report.retry.push((file, why)),
+            Err(Skip::Unreadable(why)) => {
                 if let Some(dest) = move_to(&file, "Unreadable") {
                     let note = dest.with_file_name(format!(
                         "{}.txt",

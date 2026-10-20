@@ -122,3 +122,61 @@ fn add_page_copies_files_folder() {
     assert!(saved.join("a.html").exists());
     assert!(saved.join("a_files/p.jpg").exists());
 }
+
+#[test]
+fn a_non_utf8_line_never_wipes_the_queue() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = queue(&dir);
+    q.add_url("https://ex.com/a", None, "cli", now()).unwrap();
+    // A hand edit saved as Latin-1: "café" with a raw 0xE9 byte.
+    let mut bytes = b"{\"note\":\"caf\xe9\"}\n".to_vec();
+    bytes.extend(std::fs::read(&q.path).unwrap());
+    std::fs::write(&q.path, &bytes).unwrap();
+    q.add_url("https://ex.com/b", None, "cli", now()).unwrap();
+    let after = std::fs::read(&q.path).unwrap();
+    assert!(
+        after.starts_with(b"{\"note\":\"caf\xe9\"}\n"),
+        "the odd line is kept byte for byte"
+    );
+    assert_eq!(q.load().len(), 2, "both entries survive");
+}
+
+#[test]
+fn an_unreadable_queue_refuses_to_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
+    std::fs::create_dir_all(&q.path).unwrap(); // a directory where the file should be
+    assert!(q.add_url("https://ex.com/a", None, "cli", now()).is_err());
+    assert!(q.path.is_dir(), "nothing was written over it");
+}
+
+#[test]
+fn a_saved_page_attaches_to_its_pending_url() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = queue(&dir);
+    let d = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+    let Added::New(id) = q
+        .add_url("https://ex.com/story", None, "cli", now())
+        .unwrap()
+    else {
+        panic!()
+    };
+    q.commit(d, &[(id.clone(), Outcome::Failed("paywall".into()))])
+        .unwrap();
+    let src = tempfile::tempdir().unwrap();
+    std::fs::write(
+        src.path().join("s.html"),
+        r#"<link rel="canonical" href="https://ex.com/story"><p>x</p>"#,
+    )
+    .unwrap();
+    assert_eq!(
+        q.add_page(&src.path().join("s.html"), "inbox", now())
+            .unwrap(),
+        Added::New(id.clone()),
+        "the page is used, under the same entry"
+    );
+    let e = &q.load()[0];
+    assert_eq!(q.load().len(), 1);
+    assert!(e.file.as_ref().unwrap().ends_with("s.html"));
+    assert_eq!((e.tries, e.note.as_deref()), (0, None), "a fresh start");
+}

@@ -13,7 +13,8 @@ use crate::fetch::{Net, encode};
 
 /// Fewer words than this after extraction means a paywall, consent wall or video page.
 pub const MIN_WORDS: usize = 120;
-const MAX_WORDS: usize = 6000;
+/// The paper's cap on one story.
+pub const MAX_WORDS: usize = 6000;
 /// Photos narrower or shorter than this are icons or trackers.
 const MIN_PHOTO_SIDE: u32 = 200;
 const PHOTO_WIDTH: u32 = 1000;
@@ -128,10 +129,7 @@ impl Writer {
 
     fn img_src(&self, node: &dom_query::NodeRef) -> Option<String> {
         let attr = |n: &str| node.attr(n).map(|v| v.to_string());
-        // Single-file saved pages embed their photos.
-        if let Some(data) = attr("src").filter(|s| s.starts_with("data:image/")) {
-            return Some(data);
-        }
+        // The largest candidate in a srcset ("a.jpg 400w, b.jpg 800w" → b.jpg).
         let srcset_first = |n: &str| {
             attr(n).and_then(|s| {
                 s.split(',')
@@ -140,10 +138,19 @@ impl Writer {
                     .map(str::to_owned)
             })
         };
-        let src = attr("data-src")
+        // A lazy image's real source wins over a placeholder in `src`.
+        let lazy = attr("data-src")
             .or_else(|| srcset_first("srcset"))
             .or_else(|| srcset_first("data-srcset"))
-            .or_else(|| attr("src"))?;
+            .and_then(|u| resolve(&self.base, &u));
+        if lazy.is_some() {
+            return lazy;
+        }
+        let src = attr("src")?;
+        // Single-file saved pages embed their photos (raster only).
+        if src.starts_with("data:image/") {
+            return (!src.starts_with("data:image/svg")).then_some(src);
+        }
         resolve(&self.base, &src)
     }
 

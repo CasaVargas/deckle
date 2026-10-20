@@ -89,3 +89,29 @@ fn missing_inbox_is_created() {
     assert_eq!(r.queued, 0);
     assert!(inbox.is_dir());
 }
+
+#[test]
+fn a_busy_queue_leaves_the_file_for_the_next_scan() {
+    let (_d, q, inbox) = setup();
+    write(&inbox.join("later.txt"), "https://ex.com/later\n");
+    std::fs::create_dir_all(q.path.parent().unwrap()).unwrap();
+    std::fs::write(q.path.with_extension("lock"), b"").unwrap(); // another writer holds it
+    let r = scan(&inbox, &q, later());
+    assert_eq!(r.queued, 0);
+    assert!(r.unreadable.is_empty(), "{:?}", r.unreadable);
+    assert_eq!(r.retry.len(), 1);
+    assert!(inbox.join("later.txt").exists(), "still in the Inbox");
+}
+
+#[test]
+fn a_binary_webloc_is_read() {
+    let (_d, q, inbox) = setup();
+    // What Finder writes when a link is dragged out of a browser (binary property list).
+    let mut b = b"bplist00\xd1\x01\x02SURL_\x10\x15".to_vec();
+    b.extend_from_slice(b"https://ex.com/binary");
+    b.extend_from_slice(b"\x08\x0b\x0f\x00\x00\x00\x00\x00\x00\x01\x01");
+    std::fs::write(inbox.join("drag.webloc"), &b).unwrap();
+    let r = scan(&inbox, &q, later());
+    assert_eq!(r.queued, 1, "{:?}", r.unreadable);
+    assert_eq!(q.load()[0].url.as_deref(), Some("https://ex.com/binary"));
+}

@@ -96,8 +96,15 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         .with_timezone(&Local)
         .format("Saved %a %-I:%M %p")
         .to_string();
+    let inline = cfg.reading.inline.contains(&e.id);
+    // Inline: printed in the paper, so the paper's 6,000-word cap applies.
+    let cap = if inline {
+        Some(article::MAX_WORDS)
+    } else {
+        None
+    };
     let extracted = fetch_html(e, net).and_then(|(html, base)| {
-        article::extract_with(&html, &base, None)
+        article::extract_with(&html, &base, cap)
             .ok_or_else(|| "no readable article (a paywall, a sign-in page, or a video)".to_owned())
     });
     let x = match extracted {
@@ -130,7 +137,7 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         .or(x.title.clone())
         .unwrap_or_else(|| outlet.clone());
     let meta = format!("{saved} · {outlet} · about {} min", minutes(x.words));
-    if x.words > cfg.reading.long_read_words {
+    if x.words > cfg.reading.long_read_words && !inline {
         let (body, photos) = story_body(&x, &outlet, cfg, net);
         let lr = LongRead {
             id: e.id.clone(),
