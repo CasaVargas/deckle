@@ -12,6 +12,7 @@ pub mod epub;
 pub mod fetch;
 pub mod horoscope;
 pub mod moon;
+pub mod reading;
 pub mod render;
 pub mod sources;
 
