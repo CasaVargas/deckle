@@ -8,7 +8,7 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
-use crate::deliver::{DeliverOptions, Target, deliver_with};
+use crate::deliver::{Conn, DeliverOptions, Target, deliver_on};
 use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{MatchOutcome, match_book};
 use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
@@ -16,7 +16,7 @@ use crate::previewer;
 use crate::wordwise::{WordWiseOptions, WordWiseOutput, WordWiseSummary};
 use crate::xray::{LlmConfig, XRayOptions, XRaySummary};
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
-use deckle_kfx::metadata::generate_asin;
+use deckle_kfx::metadata::{fix_language, generate_asin};
 
 #[derive(Clone, Debug)]
 pub struct RunOptions {
@@ -28,7 +28,7 @@ pub struct RunOptions {
     pub amazon_match: bool,
     /// Spike 2 passed on this device: real ASINs keep our sidecars.
     pub verified_real_asin: bool,
-    /// Explicit ASIN; `None` generates a recognizable one from the book's identifiers.
+    /// An ASIN the owner typed (design §3); replaces Match. `None`: Match, else generated.
     pub asin: Option<String>,
     /// `None`: no page list; `Some(None)`: auto; `Some(Some(n))`: n pages.
     pub pages: Option<Option<u32>>,
@@ -209,7 +209,21 @@ pub fn run_with_progress(
                     thumbnails_writable: false
                 }
         );
-    let matched = if needs_match {
+    let manual = match opts.asin.as_deref().map(crate::cover_rule::manual_asin) {
+        Some(Err(e)) => {
+            report.error = Some(e);
+            return report;
+        }
+        Some(Ok(a)) => Some(a),
+        None => None,
+    };
+    // A typed ASIN replaces Match (design §3).
+    let matched = if let Some(asin) = manual {
+        MatchResult::Candidate {
+            asin,
+            verified: opts.verified_real_asin,
+        }
+    } else if needs_match {
         on_stage("match");
         let t = Instant::now();
         let outcome = match_book(&info, &mut crate::matcher::http_fetch);
@@ -234,13 +248,16 @@ pub fn run_with_progress(
         MatchResult::None
     };
     let decision = decide(&device_class, &matched, user);
-    let asin = match (&opts.asin, &decision.asin) {
-        (Some(a), _) => a.clone(),
-        (None, AsinChoice::Real(a)) => a.clone(),
-        (None, AsinChoice::Generated) => generate_asin(&asin_seed(&info)),
+    let asin = match &decision.asin {
+        AsinChoice::Real(a) => a.clone(),
+        AsinChoice::Generated => generate_asin(&asin_seed(&info)),
     };
     let cde_type = decision.cde;
     report.decision = Some(decision.clone());
+    // WordDumb does the same: the Kindle hides Word Wise hints unless the language is `en`.
+    let english_word_wise = cde_type == CdeType::Ebok
+        && opts.word_wise.is_some()
+        && fix_language(info.language.split(['-', '_']).next().unwrap_or("")) == "en";
     let convert_opts = ConvertOptions {
         cde_type,
         asin: Some(asin.clone()),
@@ -250,7 +267,12 @@ pub fn run_with_progress(
         } else {
             Some(kfx_authors(&info))
         },
-        language: Some(info.language.clone()),
+        language: Some(if english_word_wise {
+            "en".to_owned()
+        } else {
+            info.language.clone()
+        }),
+        exact_language: english_word_wise,
         approximate_pages: opts.pages,
         container_id: None,
         creator: None,
@@ -289,6 +311,8 @@ pub fn run_with_progress(
                 .push("thumbnail not written: the book has no cover".into()),
         }
     }
+    // One device connection for the probe and the delivery: an MTP Kindle resets on close.
+    let mut conn = Conn::new(&opts.target);
     let want_xray = cde_type == CdeType::Ebok && opts.xray == XRayMode::Auto;
     let word_wise = opts
         .word_wise
@@ -324,7 +348,7 @@ pub fn run_with_progress(
                         &asin,
                         &out.asset_id,
                         ww,
-                        &opts.target,
+                        &mut conn,
                         &mut crate::wordwise::http_get_bytes,
                     );
                     if work_keep && let Ok(Some(w)) = &built {
@@ -343,7 +367,7 @@ pub fn run_with_progress(
     }
     let delivered = stage!(
         "deliver",
-        deliver_with(&out.bytes, &info, &opts.target, &deliver_opts)
+        deliver_on(&out.bytes, &info, &mut conn, &deliver_opts)
     );
     report.delivered = Some(delivered);
     report

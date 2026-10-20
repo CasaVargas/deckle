@@ -7,7 +7,7 @@ says whether `system/thumbnails` is writable over that transport, which decides 
 | Model | Firmware | Transport | Thumbnails writable | Tested | Result |
 |---|---|---|---|---|---|
 | Kindle Paperwhite (owner's, generation TBD) | TBD | TBD (mass storage if pre-2024, MTP if 2024) | TBD | not yet | pending M1 device check |
-| Kindle Scribe (2024) | TBD | MTP only | no | not yet | pending spikes 2–3 (MTP client built, untested on hardware) |
+| Kindle Scribe (2024) | TBD | MTP only | no | 2026-10-19 | Spike 3 write: EBOK KFX + X-Ray `.sdr` delivered by the CLI (book opening on the device still to confirm). `system/` is not exposed over MTP: with `kll.en.en.klld` staged at `documents/deckle/` (copied on the device by a scriptlet), Word Wise shipped 3815 hints against the device dictionary; without it Word Wise is skipped with a warning. A USB reset on close drops it off the bus until replugged, so Deckle doesn't reset. Spike 2 passed: EBOK with the Kindle-edition ASIN typed by hand showed the store cover, and X-Ray and Word Wise kept working; marked *keeps Deckle's X-Ray for real ASINs* |
 | Simulated mass-storage Kindle (FAT32 disk image with `documents/`, `system/thumbnails`) | n/a | mass storage | yes | 2026-10-19 | EBOK + thumbnail + restore copy delivered by CLI and GUI; M4: X-Ray + Word Wise sidecars and Deckle's `system/kll/kll.en.zh.klld` delivered by the GUI, dictionary not rewritten on a second send |
 
 ## Spikes 2 and 3 (M2, need the Scribe)
@@ -20,6 +20,11 @@ MTP session.
 Deckle's own PTP client. Pass criteria: the book appears in the library and opens. If every
 SendObjectInfo fails with `0xA806`, the device wants a different ObjectInfo layout; capture
 `deckle run … --json` output and the libmtp #436 notes in `docs/formats/kfx.md`.
+
+**Spike 2 result (2026-10-19, Scribe 2024): passed with a Kindle-edition ASIN.** `deckle run
+book.epub --to device --cde ebok --asin B0…` (the ASIN from the book's Amazon page): the
+store cover appeared after the Kindle re-indexed with Wi-Fi on, and X-Ray and Word Wise kept
+working. Print ASINs from Open Library are still untested.
 
 **Spike 2 — real ASIN on an MTP Kindle.** Turn on *Match books to an Amazon edition* (Settings),
 send a book with an ISBN as EBOK (`deckle run book.epub --to device --cde ebok --match`; the

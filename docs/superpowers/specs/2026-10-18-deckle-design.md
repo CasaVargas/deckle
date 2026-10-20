@@ -111,6 +111,12 @@ EPUB ──► Inspect ──► Normalize ──► Match ──► Convert ─
    the Scribe fetches a cover for a print-edition ASIN is exactly what spike 2 tests. Store the
    candidate and its confidence. Used only by the cover rule (§5). Default off. If spike 2
    fails for print ASINs, Match is removed from v1 and MTP devices get PDOC always.
+   **Manual ASIN (added 2026-10-19).** The owner can type a book's ASIN (CLI `run --asin`,
+   GUI book menu "Set Amazon ASIN…"), normally the Kindle edition's `B0…` from its Amazon
+   page, since Open Library only knows print ISBNs. It must be 10 letters or digits. It
+   replaces Match for that book and enters the cover rule as a real-ASIN candidate, so EBOK
+   (per-book "Prefer features", or a verified device) ships it and the Kindle fetches the
+   store cover over Wi-Fi.
 4. **Convert.** Run the Kindle Previewer CLI (`KindlePreviewer4CLI <epub> --convert --locale en
    --output <dir>`, ~40 s for a novel on an M-series Mac), parse `Summary_Log.csv`, confirm
    "Enhanced Typesetting Status" is Supported and the output is KPF (MOBI means ET was refused
@@ -154,7 +160,9 @@ cover and we cannot write the thumbnail ourselves. So, per device profile:
 | Mass-storage Kindles (Paperwhite) | yes | **EBOK + generated ASIN + Deckle-written thumbnail.** Everything, always. |
 | MTP-only Kindles (Scribe 2024, Colorsoft) | no | If Match found a real ASIN **and** the real-ASIN spike (§10) passed: **EBOK + real ASIN**, device fetches the store cover, everything on. Otherwise **PDOC + embedded cover**, typography and page numbers only, X-Ray/Word Wise withheld with the reason shown. |
 
-Per-book override is one click: "Prefer features (risk grey cover)" or "Prefer cover". A
+Per-book override is one click: "Prefer features (risk grey cover)" or "Prefer cover". With
+"Prefer features" and a real ASIN (Match or manual, §3) the reason says the Kindle fetches the
+store cover rather than warning about a grey one. A
 global "Always PDOC (no Amazon traffic from the device)" switch exists for people who object
 to the EBOK side effect in goal 6. The default is never changed silently. Generated ASINs use the `B0` + 8 alphanumerics shape and a
 `DECK` marker so they are recognizable and never collide with a real one by accident.
@@ -238,6 +246,10 @@ real implementation.
 2. **Real ASIN on the Scribe.** Sideload an EBOK KFX stamped with a real ASIN plus our X-Ray
    sidecar. Confirm: cover appears, X-Ray opens and shows *our* entities, nothing gets replaced
    or deleted by the device after a sync. Decides whether the "matched" branch of §5 exists.
+   **Result 2026-10-19, Kindle Scribe 2024: passed for a Kindle-edition ASIN** (typed by hand,
+   §3). The store cover appeared, and Deckle's X-Ray and Word Wise sidecars kept working under
+   the real ASIN. A print ASIN (Open Library's ISBN-10) is still untested.
+   Spikes 3 (MTP write) and 4 (X-Ray acceptance) also passed on the same device that day.
 3. **Scribe MTP write from macOS.** Minimal rusb PTP client creating `.sdr` and writing files.
    Decides the transport design and whether a libmtp dependency is needed instead.
 4. **X-Ray sidecar acceptance.** Hand-craft an `.asc` from the documented schema for a fixture

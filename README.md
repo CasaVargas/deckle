@@ -67,6 +67,20 @@ first time you use Word Wise on a store book), so they look exactly like a store
 without it gets Deckle's dictionary, installed once: set **Word Wise → Language → 中文
 (Chinese)** on the Kindle; the hints are English. Deckle never replaces Amazon's dictionaries.
 
+### Covers on MTP Kindles
+
+The Scribe 2024 and other MTP-only Kindles can't take Deckle's cover thumbnail, so an EBOK book
+(needed for X-Ray and Word Wise) shows a grey cover unless the Kindle can fetch Amazon's. Give
+the book its real ASIN: copy the Kindle edition's ASIN (`B0…`, under *Product details* on its
+Amazon page), choose **⋯ → Set Amazon ASIN…** and **Prefer features (EBOK)**, and send. The
+Kindle downloads the store cover over Wi-Fi. Command line: `deckle run book.epub --cde ebok
+--asin B0XXXXXXXX`.
+
+MTP Kindles such as the Scribe 2024 hide the folder that holds those dictionaries. On a
+jailbroken one, copy `system/kll/kll.en.en.klld` to `documents/deckle/` once with KOReader's file
+manager and Deckle uses it; otherwise Word Wise is skipped on that Kindle (the book and X-Ray
+still ship).
+
 ## Command line
 
 ```sh

@@ -165,3 +165,29 @@ fn jpeg_cover_replaces_the_resource_bytes_and_dimensions() {
         .unwrap();
     assert_eq!(raw.value.as_blob().unwrap(), jpg.as_slice());
 }
+
+#[test]
+fn exact_language_replaces_a_regional_variant() {
+    let kpf = read_kpf(&deckle_kfx::fixtures::path("deckle-mini.kpf")).unwrap();
+    let mut book = Book::from_kpf(kpf, "CR!TEST");
+    fix_structural(&mut book).unwrap();
+    let lang = |book: &mut Book, language: &str, exact_language: bool| {
+        apply(
+            book,
+            &Metadata {
+                language: Some(language.into()),
+                exact_language,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        book.title_metadata("language")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned)
+    };
+    assert_eq!(lang(&mut book, "en-US", true).as_deref(), Some("en-US"));
+    // kfxlib keeps the regional variant...
+    assert_eq!(lang(&mut book, "en", false).as_deref(), Some("en-US"));
+    // ...but the Kindle shows Word Wise hints only for exactly `en`
+    assert_eq!(lang(&mut book, "en", true).as_deref(), Some("en"));
+}

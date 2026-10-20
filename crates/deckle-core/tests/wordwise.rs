@@ -65,10 +65,11 @@ fn amazon_klld(path: &Path) {
             "CREATE TABLE pos_types (id integer, label varchar(100));
              CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT);
              CREATE TABLE lemmas (id INTEGER PRIMARY KEY, lemma TEXT);
-             CREATE TABLE senses (id INTEGER PRIMARY KEY, display_lemma_id INTEGER, pos_type INTEGER, sense_number REAL);
+             CREATE TABLE senses (id INTEGER PRIMARY KEY, display_lemma_id INTEGER, pos_type INTEGER, sense_number REAL, short_def TEXT);
              INSERT INTO pos_types VALUES (2,'adjective'),(3,'adverb');
              INSERT INTO lemmas VALUES (7,'universally'),(8,'acknowledged');
-             INSERT INTO senses VALUES (70001, 7, 3, 1.0), (80001, 8, 2, 1.0);",
+             INSERT INTO senses VALUES (70001, 7, 3, 1.0, 'ZGVm'), (80001, 8, 2, 1.0, 'ZGVm'),
+               (-70001, 7, 0, 0.0, NULL);",
         )
         .unwrap();
 }
@@ -223,6 +224,60 @@ fn a_kindle_with_its_own_dictionary_gets_amazon_sense_ids_and_no_install() {
     assert_eq!(out.summary.dictionary, "device");
     assert_eq!(gloss_rows(&out.bytes), vec![(1014, 70001), (1026, 80001)]);
     assert!(out.dictionary_file.is_none());
+}
+
+#[test]
+fn a_hidden_system_folder_uses_the_staged_kindle_dictionary_and_installs_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = make_db(dir.path(), "v");
+    let staged = dir.path().join("staged.klld");
+    amazon_klld(&staged);
+    let dicts = DeviceDicts {
+        kindle_en: Some(std::fs::read(&staged).unwrap()),
+        zh_slot: Slot::Hidden,
+    };
+    let out = build(
+        "B0X",
+        "a",
+        &runs(),
+        &db,
+        false,
+        &opts(&db, dir.path(), 5),
+        &dicts,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(out.summary.dictionary, "device");
+    assert_eq!(gloss_rows(&out.bytes), vec![(1014, 70001), (1026, 80001)]);
+    assert!(out.dictionary_file.is_none());
+}
+
+#[test]
+fn a_hidden_system_folder_without_a_staged_copy_says_where_to_put_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = make_db(dir.path(), "v");
+    let build_with = |kindle_en: Option<Vec<u8>>| {
+        build(
+            "B0X",
+            "a",
+            &runs(),
+            &db,
+            false,
+            &opts(&db, dir.path(), 5),
+            &DeviceDicts {
+                kindle_en,
+                zh_slot: Slot::Hidden,
+            },
+        )
+        .unwrap_err()
+    };
+    let missing = build_with(None);
+    assert!(
+        missing.contains("documents/deckle/kll.en.en.klld"),
+        "{missing}"
+    );
+    let broken = build_with(Some(b"not sqlite".to_vec()));
+    assert!(broken.contains("copy it again"), "{broken}");
 }
 
 #[test]

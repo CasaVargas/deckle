@@ -47,6 +47,19 @@ pub struct Decision {
     pub reason: String,
 }
 
+/// An ASIN the owner typed (design §3): 10 letters or digits, uppercased.
+pub fn manual_asin(input: &str) -> Result<String, String> {
+    let asin = input.trim().to_ascii_uppercase();
+    if asin.len() == 10 && asin.chars().all(|c| c.is_ascii_alphanumeric()) {
+        Ok(asin)
+    } else {
+        Err(format!(
+            "\"{}\" is not an ASIN: it must be 10 letters or digits (e.g. B0…)",
+            input.trim()
+        ))
+    }
+}
+
 pub fn decide(device: &DeviceClass, matched: &MatchResult, user: Override) -> Decision {
     let thumbs = matches!(
         device,
@@ -73,13 +86,18 @@ pub fn decide(device: &DeviceClass, matched: &MatchResult, user: Override) -> De
             return Decision {
                 cde: CdeType::Ebok,
                 write_thumbnail: thumbs,
-                asin,
-                reason: if thumbs {
+                reason: if let AsinChoice::Real(a) = &asin {
+                    format!(
+                        "Your override: features first (EBOK) as Amazon edition {a}; the Kindle \
+                         fetches the store cover."
+                    )
+                } else if thumbs {
                     "Your override: features first (EBOK) with Deckle's thumbnail.".into()
                 } else {
                     "Your override: features first (EBOK). The cover may show grey on this Kindle."
                         .into()
                 },
+                asin,
             };
         }
         Override::None => {}

@@ -262,9 +262,13 @@ fn amazon_klld(dir: &Path) -> std::path::PathBuf {
          CREATE TABLE senses (id INTEGER PRIMARY KEY, display_lemma_id INTEGER, term_id INTEGER, term_lemma_id INTEGER, pos_type INTEGER, source_id INTEGER, sense_number REAL, synset_id INTEGER, corpus_count INTEGER, full_def TEXT, short_def TEXT, example_sentence TEXT);
          INSERT INTO pos_types VALUES (0,'noun'),(1,'verb'),(2,'adjective'),(3,'adverb');
          INSERT INTO metadata VALUES ('id','kll.en.en');
-         INSERT INTO lemmas VALUES (10,'lugubrious'),(11,'take off'),(12,'take'),(13,'bath');
+         INSERT INTO lemmas VALUES (10,'lugubrious'),(11,'take off'),(12,'take'),(13,'bath'),(14,'ghost');
+         INSERT INTO senses (id, display_lemma_id, pos_type, sense_number, short_def) VALUES
+           (900, 10, 2, 1.0, 'ZGVm'), (901, 11, 1, 2.0, 'ZGVm'), (902, 11, 1, 1.0, 'ZGVm'),
+           (903, 12, 1, 1.0, 'ZGVm'), (904, 13, 1, 1.0, 'ZGVm');
+         -- Amazon's definitionless rows: negative ids, sense_number 0, pos_type 0 (noun)
          INSERT INTO senses (id, display_lemma_id, pos_type, sense_number) VALUES
-           (900, 10, 2, 1.0), (901, 11, 1, 2.0), (902, 11, 1, 1.0), (903, 12, 1, 1.0), (904, 13, 1, 1.0);",
+           (-1, 10, 0, 0.0), (-2, 11, 1, 0.0), (-3, 14, 0, 0.0);",
     )
     .unwrap();
     p
@@ -275,8 +279,9 @@ fn device_dictionary_remaps_to_amazon_sense_ids() {
     let dir = tempfile::tempdir().unwrap();
     let lex = Lexicon::open(&make_db(dir.path())).unwrap();
     let d = DeviceDictionary::open(&amazon_klld(dir.path())).unwrap();
-    assert_eq!(d.len(), 4);
-    assert_eq!(d.sense("take off", "verb"), Some(902)); // lowest sense_number
+    assert_eq!(d.len(), 4); // "ghost" has no definition
+    assert_eq!(d.sense("take off", "verb"), Some(902)); // lowest sense_number with a definition
+    assert_eq!(d.sense("lugubrious", "noun"), Some(900)); // never a definitionless row
     assert_eq!(d.sense("bath", "noun"), Some(904)); // other POS when ours is missing
     let runs = [run(0, "A lugubrious man took off. Perspicacious!")];
     let g = d.remap(glosses(&runs, &lex, 5), &lex);

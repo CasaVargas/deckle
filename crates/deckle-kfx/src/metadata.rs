@@ -30,6 +30,9 @@ pub struct Metadata {
     pub cde_type: Option<CdeType>,
     pub asin: Option<String>,
     pub language: Option<String>,
+    /// Write `language` as given even over a regional variant of it (`en` over `en-US`): the
+    /// Kindle shows Word Wise hints only for books whose language is exactly `en`.
+    pub exact_language: bool,
     /// Replacement cover image; must be JPEG (ideally JFIF, `FF D8 FF E0`) for the lockscreen.
     pub cover_jpeg: Option<Vec<u8>>,
 }
@@ -192,6 +195,7 @@ pub fn apply(book: &mut Book, md: &Metadata) -> Result<(), MetadataError> {
         .map(|a| a.iter().map(|n| author_sort(n)).collect());
     let mut language = md.language.as_deref().map(fix_language);
     if let Some(lang) = &language
+        && !md.exact_language
         && let Some(orig) = book.title_metadata("language").and_then(Value::as_str)
         && orig.starts_with(&format!("{lang}-"))
     {

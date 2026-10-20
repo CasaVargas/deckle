@@ -121,4 +121,19 @@ fn prefer_features_uses_an_unverified_candidate_asin_so_spike_2_can_run() {
     let d = decide(&DeviceClass::Mtp, &m, Override::PreferFeatures);
     assert_eq!(d.cde, CdeType::Ebok);
     assert_eq!(d.asin, AsinChoice::Real(REAL.into()));
+    // a real ASIN means the Kindle fetches the store cover: no grey-cover warning
+    assert!(
+        d.reason.contains(REAL) && d.reason.contains("store cover") && !d.reason.contains("grey"),
+        "{}",
+        d.reason
+    );
+}
+
+#[test]
+fn manual_asins_are_ten_letters_or_digits_uppercased() {
+    use deckle_core::cover_rule::manual_asin;
+    assert_eq!(manual_asin(" b0fxyz1234 ").as_deref(), Ok("B0FXYZ1234"));
+    assert_eq!(manual_asin("1668659662").as_deref(), Ok("1668659662"));
+    assert!(manual_asin("B0FXYZ123").is_err());
+    assert!(manual_asin("B0FXYZ-1234").is_err());
 }

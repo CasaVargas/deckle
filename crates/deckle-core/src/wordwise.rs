@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
-use crate::deliver::Target;
+use crate::deliver::{Conn, Target};
 use deckle_kfx::text::Run;
 use deckle_wordwise::device::DeviceDictionary;
 use deckle_wordwise::kll::{DictionaryRef, LanguageLayer, sidecar_name, write_kll};
@@ -163,7 +163,12 @@ pub enum Slot {
     Deckle(String),
     /// Amazon's Chinese dictionary (or anyone else's): never replaced.
     Other,
+    /// Out of reach: the Kindle hides `system/` over MTP (Scribe 2024).
+    Hidden,
 }
+
+/// Where the reader stages a copy of the Kindle's `kll.en.en.klld` when MTP hides `system/`.
+pub const STAGED_KINDLE_EN_PATH: [&str; 3] = ["documents", "deckle", "kll.en.en.klld"];
 
 /// The dictionaries already on the target.
 #[derive(Clone, Debug)]
@@ -200,7 +205,12 @@ fn join(root: &Path, parts: &[&str]) -> PathBuf {
 
 /// Reads the dictionaries on a folder export, a mass-storage Kindle, or an MTP Kindle.
 pub fn probe(target: &Target) -> Result<DeviceDicts, String> {
-    match target {
+    probe_on(&mut Conn::new(target))
+}
+
+/// [`probe`] over a connection the delivery will reuse.
+pub fn probe_on(conn: &mut Conn<'_>) -> Result<DeviceDicts, String> {
+    match conn.target {
         Target::Folder(dir) => Ok(DeviceDicts {
             kindle_en: None,
             zh_slot: slot_of(read_opt(&join(dir, &klld::DEVICE_PATH)).as_deref()),
@@ -209,32 +219,41 @@ pub fn probe(target: &Target) -> Result<DeviceDicts, String> {
             kindle_en: read_opt(&join(&dev.root, &klld::KINDLE_EN_PATH)),
             zh_slot: slot_of(read_opt(&join(&dev.root, &klld::DEVICE_PATH)).as_deref()),
         }),
-        Target::Mtp(info) => {
+        Target::Mtp(_) => {
             let m = |e: &dyn std::fmt::Display| format!("MTP: {e}");
-            let mut dev = deckle_transport::usb::open(info).map_err(|e| m(&e))?;
-            dev.open_session().map_err(|e| m(&e))?;
-            let result = (|| {
-                let storage = *dev
-                    .storages()
-                    .map_err(|e| m(&e))?
-                    .first()
-                    .ok_or("MTP: device reports no storage")?;
-                let root = dev.content_root(storage).map_err(|e| m(&e))?;
-                let mut get = |parts: &[&str]| -> Result<Option<Vec<u8>>, String> {
-                    match dev.find_path(storage, root, parts).map_err(|e| m(&e))? {
-                        Some(h) => dev.get_object(h).map(Some).map_err(|e| m(&e)),
-                        None => Ok(None),
-                    }
-                };
-                let kindle_en = get(&klld::KINDLE_EN_PATH)?;
-                let zh = get(&klld::DEVICE_PATH)?;
-                Ok(DeviceDicts {
-                    kindle_en,
-                    zh_slot: slot_of(zh.as_deref()),
-                })
-            })();
-            let _ = dev.close_session();
-            result
+            let dev = match conn.mtp() {
+                Some(r) => r.map_err(|e| m(&e))?,
+                None => unreachable!("an MTP target always has a connection"),
+            };
+            let storage = *dev
+                .storages()
+                .map_err(|e| m(&e))?
+                .first()
+                .ok_or("MTP: device reports no storage")?;
+            let root = dev.content_root(storage).map_err(|e| m(&e))?;
+            // The Scribe 2024 hides `system/` over MTP: read the reader's staged copy instead.
+            let hidden = dev
+                .find_child(storage, root, "system")
+                .map_err(|e| m(&e))?
+                .is_none();
+            let mut get = |parts: &[&str]| -> Result<Option<Vec<u8>>, String> {
+                match dev.find_path(storage, root, parts).map_err(|e| m(&e))? {
+                    Some(h) => dev.get_object(h).map(Some).map_err(|e| m(&e)),
+                    None => Ok(None),
+                }
+            };
+            if hidden {
+                return Ok(DeviceDicts {
+                    kindle_en: get(&STAGED_KINDLE_EN_PATH)?,
+                    zh_slot: Slot::Hidden,
+                });
+            }
+            let kindle_en = get(&klld::KINDLE_EN_PATH)?;
+            let zh = get(&klld::DEVICE_PATH)?;
+            Ok(DeviceDicts {
+                kindle_en,
+                zh_slot: slot_of(zh.as_deref()),
+            })
         }
     }
 }
@@ -301,6 +320,20 @@ pub fn build(
                             .into(),
                     );
                 }
+                Slot::Hidden => {
+                    let staged = STAGED_KINDLE_EN_PATH.join("/");
+                    return Err(if dicts.kindle_en.is_some() {
+                        format!(
+                            "the Kindle's dictionary copied to {staged} can't be read; copy it again"
+                        )
+                    } else {
+                        format!(
+                            "this Kindle hides its Word Wise dictionaries over USB. Copy \
+                             system/kll/kll.en.en.klld to {staged} once (KOReader's file manager \
+                             on a jailbroken Kindle)"
+                        )
+                    });
+                }
                 Slot::Deckle(v) if *v == lexicon.version => false,
                 _ => true,
             };
@@ -351,10 +384,10 @@ pub fn enrich(
     asin: &str,
     acr: &str,
     opts: &WordWiseOptions,
-    target: &Target,
+    conn: &mut Conn<'_>,
     fetch: &mut FetchBytes<'_>,
 ) -> Result<Option<WordWiseOutput>, String> {
     let (db, downloaded) = ensure_database(opts, fetch)?;
-    let dicts = probe(target)?;
+    let dicts = probe_on(conn)?;
     build(asin, acr, runs, &db, downloaded, opts, &dicts)
 }

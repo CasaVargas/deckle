@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, showReport: false };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false };
 }
 
 export default function App() {
@@ -75,13 +75,13 @@ export default function App() {
     const target: RunTarget = deviceTarget ?? { kind: "folder", path: "" };
     api
       .planBooks(
-        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride })),
+        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin })),
         target,
       )
       .then((rows) => setPlans(Object.fromEntries(rows.map((r) => [r.id, r]))))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [books.map((b) => `${b.id}:${b.cdeOverride ?? ""}`).join("|"), targetKey, devices.length, settings.cde]);
+  }, [books.map((b) => `${b.id}:${b.cdeOverride ?? ""}:${b.asin ?? ""}`).join("|"), targetKey, devices.length, settings.cde]);
 
   useEffect(() => {
     api.appVersion().then(setVersion).catch(() => setVersion("dev"));
@@ -169,7 +169,7 @@ export default function App() {
     );
     try {
       await api.runBooks(
-        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride })),
+        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin })),
         target,
       );
     } catch (e) {
@@ -205,6 +205,7 @@ export default function App() {
   }, [autoExport, previewer, books.length, deviceTarget?.kind, targetKey]);
 
   const override = (id: string, cde: "pdoc" | "ebok" | null) => setBooks((p) => p.map((b) => (b.id === id ? { ...b, cdeOverride: cde } : b)));
+  const setAsin = (id: string, asin: string | null) => setBooks((p) => p.map((b) => (b.id === id ? { ...b, asin } : b)));
   const toggleReport = (id: string) => setBooks((p) => p.map((b) => (b.id === id ? { ...b, showReport: !b.showReport } : b)));
   const remove = (id: string) => setBooks((p) => p.filter((b) => b.id !== id));
   const clearDone = () => setBooks((p) => p.filter((b) => b.status !== "done"));
@@ -255,6 +256,7 @@ export default function App() {
                 busy={busy}
                 plan={plans[b.id]}
                 onOverride={override}
+                onAsin={setAsin}
                 onToggleReport={toggleReport}
                 onRemove={remove}
                 onReveal={(p) => api.reveal(p)}
