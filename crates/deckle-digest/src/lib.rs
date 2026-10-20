@@ -11,6 +11,7 @@ pub mod cover;
 pub mod epub;
 pub mod fetch;
 pub mod horoscope;
+pub mod inbox;
 pub mod moon;
 pub mod reading;
 pub mod render;
@@ -137,6 +138,8 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
     let mut news = Vec::new();
     for kind in &cfg.sections {
         match kind {
+            // Filled in by the Your Reading section (Task 4).
+            SectionKind::Reading => {}
             SectionKind::Weather => {
                 let (section, line) = sources::weather::section(cfg, date, net);
                 edition.weather_line = line;

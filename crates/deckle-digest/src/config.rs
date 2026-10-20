@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SectionKind {
+    /// Your saved articles (save-to-paper design §5).
+    Reading,
     Weather,
     Local,
     /// Every `[[feeds]]` entry, each as its own section, in file order.
@@ -48,6 +50,7 @@ pub struct Config {
     pub feeds: Vec<FeedConfig>,
     pub lottery: LotteryConfig,
     pub horoscope: HoroscopeConfig,
+    pub reading: ReadingConfig,
 }
 
 impl Default for Config {
@@ -64,6 +67,7 @@ impl Default for Config {
             photos: true,
             max_photos: 4,
             sections: vec![
+                SectionKind::Reading,
                 SectionKind::Weather,
                 SectionKind::Local,
                 SectionKind::Feeds,
@@ -75,6 +79,7 @@ impl Default for Config {
             feeds: Vec::new(),
             lottery: LotteryConfig::default(),
             horoscope: HoroscopeConfig::default(),
+            reading: ReadingConfig::default(),
         }
     }
 }
@@ -137,6 +142,31 @@ pub struct HoroscopeConfig {
     pub signs: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReadingConfig {
+    /// Links and saved pages dropped here are saved for the next edition.
+    pub inbox: String,
+    /// Saved articles per edition; the rest wait.
+    pub max_items: usize,
+    /// Longer articles become their own book.
+    pub long_read_words: usize,
+    /// The queue file (tests); the default is `reading.jsonl` beside `digest.toml`.
+    #[serde(skip)]
+    pub queue_path: Option<PathBuf>,
+}
+
+impl Default for ReadingConfig {
+    fn default() -> Self {
+        ReadingConfig {
+            inbox: "~/Deckle/Inbox".into(),
+            max_items: 10,
+            long_read_words: 4000,
+            queue_path: None,
+        }
+    }
+}
+
 /// The starter file `deckle digest init` writes.
 pub const STARTER: &str = r#"# Deckle Daily — your morning paper, built on this machine.
 # Edit freely; `deckle digest build` shows what a change does.
@@ -153,7 +183,12 @@ photos = true                     # with their photos, in grayscale for e-ink
 max_photos = 4                    # per story
 
 # Order of the paper. Remove a name to drop that section.
-sections = ["weather", "local", "feeds", "lottery", "horoscope", "onthisday"]
+sections = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "onthisday"]
+
+[reading]
+inbox = "~/Deckle/Inbox"          # point at iCloud Drive to save from an iPhone
+max_items = 10                    # saved articles per edition; the rest wait
+long_read_words = 4000            # longer pieces become their own book
 
 [local]
 google_news = "New York City"     # a Google News search; "" for none
@@ -212,7 +247,9 @@ mod tests {
         let c = Config::parse(STARTER).unwrap();
         assert_eq!(c.feeds.len(), 1);
         assert_eq!(c.local.google_news, "New York City");
-        assert_eq!(c.sections.len(), 6);
+        assert_eq!(c.sections.len(), 7);
+        assert_eq!(c.sections[0], SectionKind::Reading);
+        assert_eq!(c.reading.long_read_words, 4000);
     }
 
     #[test]

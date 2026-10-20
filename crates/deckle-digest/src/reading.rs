@@ -107,6 +107,10 @@ struct Lock(PathBuf);
 impl Lock {
     fn take(queue: &Path) -> Result<Lock, String> {
         let path = queue.with_extension("lock");
+        // First save on a new machine: the data folder doesn't exist yet.
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
         let start = Instant::now();
         loop {
             match std::fs::OpenOptions::new()
