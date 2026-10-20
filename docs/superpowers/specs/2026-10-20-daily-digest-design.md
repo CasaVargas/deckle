@@ -44,8 +44,7 @@ What makes it unique, not just "RSS to EPUB":
 **Next increments (refine backlog, in order)**
 
 1. ~~Delivery (a): outbox, `push`, plug-in delivery~~ — done (#48), see §5 *Delivery*.
-2. Scheduling: a generated launchd plist (macOS) / Task Scheduler entry (Windows) from
-   `deckle digest schedule --at 05:30`; later a toggle in the desktop app.
+2. ~~Scheduling~~ — #49, see §5b.
 3. Delivery (b): opt-in Send-to-Kindle email over the user's own SMTP. This reverses the v1
    non-goal "USB/MTP only" for the digest only, as an explicit, labelled option, because it
    sends the edition through Amazon.
@@ -190,6 +189,41 @@ browser. Every story carries its full text and photos inside the edition.
   `max_photos = 4`.
 - **Tests:** extraction and XHTML rewriting run against saved article pages, and the decoder
   against a saved interstitial page plus a saved batchexecute reply. No network in tests.
+
+## 5b. Scheduling (#49)
+
+`deckle digest schedule --at 05:30` makes the paper arrive by itself:
+
+- **Two jobs.**
+  - *The edition*, daily at the given time: `deckle digest run --to device`. It delivers
+    if a Kindle is connected and otherwise queues in the outbox.
+  - *The watcher*, from login on, kept alive: `deckle digest watch`. It delivers the queue
+    when a Kindle connects, scans the Inbox, and serves the bookmarklet.
+- **macOS:** two LaunchAgents in `~/Library/LaunchAgents`, loaded into the user's GUI
+  session so Kindle Previewer can run.
+  - `com.casavargas.deckle.digest` uses `StartCalendarInterval`; launchd runs a missed
+    time when the Mac wakes.
+  - `com.casavargas.deckle.watch` uses `RunAtLoad` and `KeepAlive`.
+  - Both log to `~/Library/Logs/Deckle/`.
+- **Windows:** two Task Scheduler tasks under `\Deckle\`. "Digest" runs daily at the time,
+  with "run as soon as possible after a missed start". "Watch" runs at logon. Both are
+  created with `schtasks`.
+- **Linux:** not scheduled by Deckle; `--at` prints the crontab line and the systemd user
+  unit to use.
+- **Other forms.**
+  - `--off` removes both jobs.
+  - `--status` (the default) says what's installed and at what time.
+  - Re-running `--at` with a new time replaces the jobs.
+  - `--config <path>` is carried into both jobs.
+- **Which binary.** The jobs run the `deckle` binary that created them (`current_exe`),
+  by absolute path.
+  - When that path is inside a Cargo `target/` folder, `schedule` warns. Such a binary
+    disappears on `cargo clean`; `cargo install --path crates/deckle-cli` gives a stable one.
+  - The desktop app ships only `deckle-desktop` today. Its Daily tab (#52) must bundle the
+    CLI as a sidecar before it can offer this toggle.
+- **Code:** `deckle_digest::schedule`, with pure generators (plist XML, `schtasks`
+  arguments) under unit tests, plus `install`, `remove` and `status`, which call
+  `launchctl` and `schtasks`.
 
 ## 6. Code layout
 
