@@ -22,9 +22,9 @@ recorded in `docs/devices.md`. Design: `docs/superpowers/specs/`; build plans:
    - **macOS 14+** (Apple Silicon: `aarch64`, Intel: `x64`): open the `.dmg`, drag Deckle to
      Applications, and open it. Releases are signed with a Developer ID and notarized by Apple,
      so macOS opens them like any other app.
-   - **Windows 11**: run the `-setup.exe` (installs for your user, no admin) or the `.msi`. The
-     installer is unsigned in v1, so SmartScreen says "Windows protected your PC": **More info
-     → Run anyway**.
+   - **Windows 11**: run the `-setup.exe` (installs for your user, no admin) or the `.msi`.
+     Releases are code-signed by Casa Vargas LLC (Azure Artifact Signing). A new certificate
+     can still get a SmartScreen prompt until it builds reputation: **More info → Run anyway**.
    - Linux (`.deb`, `.AppImage`) builds and runs every stage except conversion, which needs
      Kindle Previewer (Mac/Windows only).
 3. Plug in your Kindle, drop EPUBs on the window, press **Send to Kindle**.

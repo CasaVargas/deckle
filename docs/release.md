@@ -35,10 +35,27 @@ and notarizes.
 
 ## Windows
 
-Unsigned in v1 (design §12): SmartScreen shows "Windows protected your PC" → *More info → Run
-anyway*. A code-signing certificate is a purchase and waits for the owner's go-ahead; signing then means
-`bundle.windows.certificateThumbprint` (or a `signCommand`) plus importing the certificate in the
-workflow.
+Signed with **Azure Artifact Signing**: account `casavargas`, certificate profile
+`casavargas-public-trust`, endpoint `https://eus.codesigning.azure.net`, the same setup as Beltr
+and DebridDownloader. The pieces:
+
+- `apps/desktop/src-tauri/windows/tauri.signing.conf.json` sets `bundle.windows.signCommand` to
+  `windows/sign.ps1`. CI passes it with `--config` only when signing is configured, so local and
+  pull-request builds stay unsigned.
+- `sign.ps1` runs signtool with the Artifact Signing dlib on each file Tauri hands it: the app
+  `.exe`, the NSIS installer and uninstaller, and the `.msi`. Timestamped by
+  `http://timestamp.acs.microsoft.com` (the certificates live for days).
+- The release workflow's "Azure Artifact Signing" step downloads the pinned, hash-checked
+  `Microsoft.ArtifactSigning.Client` package, finds a Windows SDK signtool (10.0.22621+), checks
+  for a .NET 8+ runtime, and signs a throwaway exe first, so a bad secret or a missing role fails
+  there, readably. After the build, "Verify Windows signatures" checks both installers and the
+  app exe inside the NSIS installer.
+
+Repository secrets (Settings → Secrets and variables → Actions), from the Entra app registration
+that has the **Artifact Signing Certificate Profile Signer** role on the `casavargas` account:
+`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`. Without them the Windows build is
+unsigned and the log warns. A new certificate may still trigger SmartScreen until it has
+reputation.
 
 ## Word Wise database
 
