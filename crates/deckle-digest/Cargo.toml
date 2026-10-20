@@ -23,6 +23,7 @@ dom_query = "0.28"
 url = "2"
 base64.workspace = true
 deunicode.workspace = true
+rand.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

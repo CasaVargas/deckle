@@ -253,6 +253,13 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::Digest { config, action } => digest(json, config, action),
+        cli::Command::Save {
+            targets,
+            title,
+            list,
+            remove,
+            bookmarklet,
+        } => save(json, targets, title, list, remove, bookmarklet),
         cli::Command::Run {
             epubs,
             to,
@@ -415,14 +422,28 @@ fn digest(
             let date = parse_date(date.as_deref())?;
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
+            scan_inbox(&cfg);
             let report = deckle_digest::build(&cfg, date, now, &output, &deckle_digest::Http)?;
             emit(json, &report, || {
-                format!(
+                let mut text = format!(
                     "OK    {}\n      -> {}\n{}",
                     report.title,
                     report.epub.display(),
                     section_lines(&report)
-                )
+                );
+                for p in &report.long_reads {
+                    text.push_str(&format!("\n      long read -> {}", p.display()));
+                }
+                for n in &report.notes {
+                    text.push_str(&format!("\n      note: {n}"));
+                }
+                if !report.reading_outcomes.is_empty() {
+                    text.push_str(&format!(
+                        "\n      preview: {} saved stories not marked (digest run marks them)",
+                        report.reading_outcomes.len()
+                    ));
+                }
+                text
             })?;
             Ok(ExitCode::SUCCESS)
         }
@@ -442,6 +463,7 @@ fn digest(
             let converted = work.join("kfx");
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
+            scan_inbox(&cfg);
             let built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
             let opts = RunOptions {
                 cde_type: deckle_kfx::convert::CdeType::Pdoc,
@@ -451,8 +473,8 @@ fn digest(
                 verified_real_asin: false,
                 asin: None,
                 pages: None,
-                target: Target::Folder(converted),
-                previewer: Some(located.path),
+                target: Target::Folder(converted.clone()),
+                previewer: Some(located.path.clone()),
                 keep_work_dir,
                 xray: deckle_core::pipeline::XRayMode::Off,
                 llm: None,
@@ -462,13 +484,48 @@ fn digest(
             let report = run(&built.epub, &opts);
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             let mut outcome = DigestOutcome::default();
+            let mut reading_outcomes = built.reading_outcomes.clone();
+            let mut long_reads: Vec<(String, PathBuf)> = Vec::new();
             if let (None, Some(kfx)) = (&report.error, &report.delivered) {
+                // Long reads: books like any other, through the cover rule (design §5).
+                let book_ids: Vec<String> = reading_outcomes
+                    .iter()
+                    .filter(|(_, o)| *o == deckle_digest::reading::Outcome::Book)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                for (id, epub) in book_ids.iter().zip(&built.long_reads) {
+                    let lr_opts = RunOptions {
+                        cde_type: deckle_kfx::convert::CdeType::Pdoc,
+                        cde_override: None,
+                        xray: deckle_core::pipeline::XRayMode::Auto,
+                        word_wise: Some(Default::default()),
+                        ..opts.clone()
+                    };
+                    let lr = run(epub, &lr_opts);
+                    match (&lr.error, &lr.delivered) {
+                        (None, Some(k)) => {
+                            let stem = epub.file_stem().unwrap_or_default().to_string_lossy();
+                            long_reads.push((format!("{stem}.kfx"), k.clone()));
+                        }
+                        (e, _) => {
+                            let why = e.clone().unwrap_or_else(|| "not converted".into());
+                            for (rid, o) in &mut reading_outcomes {
+                                if rid == id {
+                                    *o = deckle_digest::reading::Outcome::Failed(why.clone());
+                                }
+                            }
+                        }
+                    }
+                }
                 let name = deckle_digest::edition_filename(date);
                 match &folder {
                     Some(target) => {
                         let one = deckle_core::queue::Queue::new(work.join("to-folder"));
                         let _ = std::fs::remove_dir_all(&one.dir);
                         one.add(kfx, &name, None).map_err(|e| e.to_string())?;
+                        for (n, k) in &long_reads {
+                            one.add(k, n, None).map_err(|e| e.to_string())?;
+                        }
                         outcome.flush = Some(
                             one.flush(target, Some(&digest_prune(&cfg)))
                                 .map_err(|e| e.to_string())?,
@@ -478,9 +535,16 @@ fn digest(
                         queue
                             .add(kfx, &name, Some(deckle_digest::EDITION_PREFIX))
                             .map_err(|e| e.to_string())?;
+                        for (n, k) in &long_reads {
+                            queue.add(k, n, None).map_err(|e| e.to_string())?;
+                        }
                         outcome = push_queued(&queue, &cfg)?;
                     }
                 }
+                // Only a run that shipped (or queued) the edition uses up the saved articles.
+                reading_queue(&cfg)
+                    .commit(date, &reading_outcomes)
+                    .map_err(|e| format!("reading queue: {e}"))?;
             }
             #[derive(serde::Serialize)]
             struct DigestRun<'a> {
@@ -498,11 +562,18 @@ fn digest(
                     Some(e) => format!("FAIL  {}\n      {e}", built.title),
                     None => format!("OK    {}", built.title),
                 };
-                format!(
+                let mut text = format!(
                     "{head}\n{}\n{}",
                     section_lines(&built),
                     outcome.describe(&queue)
-                )
+                );
+                for (n, _) in &long_reads {
+                    text.push_str(&format!("\n      long read: {n}"));
+                }
+                for n in &built.notes {
+                    text.push_str(&format!("\n      note: {n}"));
+                }
+                text
             })?;
             Ok(if report.error.is_some() {
                 ExitCode::from(EXIT_FAILURE)
@@ -528,6 +599,7 @@ fn digest(
             // reconnected (or for a new edition) instead of retrying every tick.
             let mut tried: Option<Vec<PathBuf>> = None;
             loop {
+                scan_inbox(&cfg);
                 let pending = queue.pending();
                 match detect_kindle() {
                     None => tried = None,
@@ -614,5 +686,118 @@ fn push_queued(
     Ok(DigestOutcome {
         flush: Some(flush),
         queued: false,
+    })
+}
+
+fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::ReadingQueue {
+    deckle_digest::reading::ReadingQueue::new(
+        cfg.reading
+            .queue_path
+            .clone()
+            .unwrap_or_else(deckle_digest::reading::ReadingQueue::default_path),
+    )
+}
+
+/// Queues what was dropped in the Inbox folder; says so when it found anything.
+fn scan_inbox(cfg: &deckle_digest::Config) {
+    let dir = deckle_digest::inbox::expand_home(&cfg.reading.inbox);
+    let r = deckle_digest::inbox::scan(&dir, &reading_queue(cfg), std::time::SystemTime::now());
+    if r.queued > 0 {
+        eprintln!(
+            "inbox: saved {} article(s) from {}",
+            r.queued,
+            dir.display()
+        );
+    }
+    for (file, why) in &r.unreadable {
+        eprintln!("inbox: couldn't read {}: {why}", file.display());
+    }
+}
+
+fn save(
+    json: bool,
+    targets: Vec<String>,
+    title: Option<String>,
+    list: bool,
+    remove: Option<String>,
+    bookmarklet: bool,
+) -> Result<ExitCode, String> {
+    use deckle_digest::reading::{Added, ReadingQueue, State};
+    let queue = ReadingQueue::new(ReadingQueue::default_path());
+    if bookmarklet {
+        let dir = queue.path.parent().unwrap_or(Path::new("."));
+        let token = deckle_digest::bookmarklet::token(dir).map_err(|e| e.to_string())?;
+        println!(
+            "Drag this to your bookmarks bar (or make a bookmark with it as the address).\n\
+             It works while `deckle digest watch` is running.\n\n{}",
+            deckle_digest::bookmarklet::javascript(&token)
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    if let Some(r) = remove {
+        return if queue.remove(&r)? {
+            println!("removed {r}");
+            Ok(ExitCode::SUCCESS)
+        } else {
+            Err(format!("nothing saved as {r}"))
+        };
+    }
+    if list || targets.is_empty() {
+        let week_ago = deckle_digest::chrono::Utc::now() - deckle_digest::chrono::Duration::days(7);
+        let mut entries: Vec<_> = queue
+            .load()
+            .into_iter()
+            .filter(|e| e.state == State::Pending || e.saved_at > week_ago)
+            .collect();
+        entries.sort_by_key(|e| (e.state != State::Pending, std::cmp::Reverse(e.saved_at)));
+        emit(json, &entries, || {
+            if entries.is_empty() {
+                return "nothing saved".into();
+            }
+            entries
+                .iter()
+                .map(|e| {
+                    let what = e
+                        .url
+                        .clone()
+                        .or(e.file.as_ref().map(|f| f.display().to_string()))
+                        .unwrap_or_default();
+                    let state = format!("{:?}", e.state).to_lowercase();
+                    let extra = match (&e.printed_in, &e.note) {
+                        (Some(d), _) if e.state != State::Pending => format!("  ({d})"),
+                        (_, Some(n)) => format!("  (tried {}x: {n})", e.tries),
+                        _ => String::new(),
+                    };
+                    format!("{}  {state:<8} {what}{extra}", e.id)
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    let now = deckle_digest::chrono::Utc::now();
+    let mut failed = false;
+    for t in &targets {
+        let p = Path::new(t);
+        let added = if p.is_file() {
+            queue.add_page(p, "cli", now)
+        } else if t.starts_with("http://") || t.starts_with("https://") {
+            queue.add_url(t, title.as_deref(), "cli", now)
+        } else {
+            Err("not a web address or a saved .html page".into())
+        };
+        match added {
+            Ok(Added::New(id)) => println!("saved {id}  {t}"),
+            Ok(Added::Duplicate(id)) => println!("already saved {id}  {t}"),
+            Err(e) => {
+                eprintln!("error: {t}: {e}");
+                failed = true;
+            }
+        }
+    }
+    Ok(if failed {
+        ExitCode::from(EXIT_FAILURE)
+    } else {
+        ExitCode::SUCCESS
     })
 }

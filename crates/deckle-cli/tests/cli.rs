@@ -128,3 +128,64 @@ fn run_checks_previewer_before_creating_the_output_folder() {
         "output folder must not be created before the Previewer check"
     );
 }
+
+fn save(queue: &std::path::Path, args: &[&str]) -> (bool, String) {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .env("DECKLE_READING_QUEUE", queue)
+        .arg("save")
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr),
+    )
+}
+
+#[test]
+fn save_list_remove_roundtrip() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = dir.path().join("reading.jsonl");
+    let (ok, text) = save(&q, &["https://ex.com/a"]);
+    assert!(ok && text.contains("saved r-"), "{text}");
+    let id = text
+        .split_whitespace()
+        .find(|w| w.starts_with("r-"))
+        .unwrap()
+        .to_owned();
+    let (_, list) = save(&q, &["--list"]);
+    assert!(
+        list.contains(&id) && list.contains("pending") && list.contains("https://ex.com/a"),
+        "{list}"
+    );
+    let (ok, _) = save(&q, &["--remove", &id]);
+    assert!(ok);
+    let (_, list) = save(&q, &["--list"]);
+    assert!(!list.contains(&id), "{list}");
+}
+
+#[test]
+fn save_duplicate_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = dir.path().join("reading.jsonl");
+    save(&q, &["https://ex.com/a"]);
+    let (ok, text) = save(&q, &["https://ex.com/a#again"]);
+    assert!(ok && text.contains("already saved"), "{text}");
+}
+
+#[test]
+fn bookmarklet_prints_javascript_with_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = dir.path().join("reading.jsonl");
+    let (ok, text) = save(&q, &["--bookmarklet"]);
+    assert!(ok, "{text}");
+    let js = text
+        .lines()
+        .find(|l| l.starts_with("javascript:"))
+        .unwrap_or_default();
+    assert!(js.contains("127.0.0.1:47219/save?token="), "{text}");
+    // The token is stable across calls.
+    let (_, again) = save(&q, &["--bookmarklet"]);
+    assert!(again.contains(js));
+}

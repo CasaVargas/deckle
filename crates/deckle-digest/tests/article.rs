@@ -93,9 +93,7 @@ fn google_news_links_decode_to_the_publisher() {
 fn long_page(words: usize) -> String {
     let para = "The council met again tonight to argue about the new library and its long overdue roof repairs. ";
     let per = para.split_whitespace().count();
-    let body: String = (0..words / per)
-        .map(|_| format!("<p>{para}</p>"))
-        .collect();
+    let body: String = (0..words / per).map(|_| format!("<p>{para}</p>")).collect();
     format!(
         "<html><head><title>Long</title></head><body><article><h1>Long</h1>{body}</article></body></html>"
     )

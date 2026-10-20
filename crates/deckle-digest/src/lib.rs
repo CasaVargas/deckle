@@ -6,6 +6,7 @@
 //! today" note in its section and never fails the edition. `build` writes the EPUB.
 
 pub mod article;
+pub mod bookmarklet;
 pub mod config;
 pub mod cover;
 pub mod epub;
