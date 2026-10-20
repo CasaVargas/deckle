@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use deckle_core::deliver::{Target, deliver, detect_in, device_filename, prune_editions};
+use deckle_core::deliver::{
+    Conn, Target, deliver, detect_in, device_filename, prunable, prune_named_on,
+};
 use deckle_core::inspect::{BookInfo, Creator};
 
 fn info(title: &str, author: &str) -> BookInfo {
@@ -222,27 +224,37 @@ fn stale_xray_sidecars_are_removed_on_redelivery() {
 }
 
 #[test]
-fn prune_keeps_the_newest_editions_and_their_sidecars_go_too() {
-    let dir = tempfile::tempdir().unwrap();
-    let target = Target::Folder(dir.path().to_path_buf());
-    let mut paths = Vec::new();
-    for day in ["Monday", "Tuesday", "Wednesday"] {
-        let p = deliver(
-            b"KFX",
-            &info(&format!("The Daily -- {day}"), "Deckle"),
-            &target,
-        )
-        .unwrap();
-        std::fs::create_dir_all(p.with_extension("sdr")).unwrap();
-        paths.push(p);
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    let other = deliver(b"KFX", &info("Dune", "Frank Herbert"), &target).unwrap();
-    let prefix = device_filename(&info("The Daily", "Deckle"));
-    let prefix = prefix.trim_end_matches(".kfx");
+fn prunable_keeps_the_newest_dated_names_only() {
+    let names = [
+        "deckle-daily-2026-10-18.kfx",
+        "deckle-daily-2026-10-20.kfx",
+        "deckle-daily-2026-10-19.kfx",
+        "deckle-daily-2026-10-19.sdr",
+        "deckle-daily-2026-10-17.kfx",
+        "Dune.kfx",
+    ]
+    .map(String::from);
+    assert_eq!(
+        prunable(names, "deckle-daily-", 2),
+        ["deckle-daily-2026-10-18.kfx", "deckle-daily-2026-10-17.kfx"]
+    );
+    assert!(prunable(Vec::new(), "deckle-daily-", 0).is_empty());
+}
 
-    let removed = prune_editions(&target, prefix, 2).unwrap().unwrap();
-    assert_eq!(removed, [paths[0].clone()]);
-    assert!(!paths[0].exists() && !paths[0].with_extension("sdr").exists());
-    assert!(paths[1].exists() && paths[2].exists() && other.exists());
+#[test]
+fn prune_removes_old_editions_and_their_sidecars_on_a_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    for day in ["17", "18", "19"] {
+        let p = dir.path().join(format!("deckle-daily-2026-10-{day}.kfx"));
+        std::fs::write(&p, b"KFX").unwrap();
+        std::fs::create_dir_all(p.with_extension("sdr")).unwrap();
+    }
+    std::fs::write(dir.path().join("Dune.kfx"), b"KFX").unwrap();
+    let target = Target::Folder(dir.path().to_path_buf());
+    let removed = prune_named_on(&mut Conn::new(&target), "deckle-daily-", 2).unwrap();
+    assert_eq!(removed, ["deckle-daily-2026-10-17.kfx"]);
+    assert!(!dir.path().join("deckle-daily-2026-10-17.kfx").exists());
+    assert!(!dir.path().join("deckle-daily-2026-10-17.sdr").exists());
+    assert!(dir.path().join("deckle-daily-2026-10-19.sdr").exists());
+    assert!(dir.path().join("Dune.kfx").exists());
 }

@@ -468,9 +468,12 @@ fn digest(
             let cfg = load_digest_config(&path)?;
             let date = parse_date(date.as_deref())?;
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
-            let target = resolve_target(&to)?;
+            // A folder target must exist (and is created) before any work; `device` may be
+            // absent: the edition then waits in the outbox.
+            let folder = (to != "device").then(|| resolve_target(&to)).transpose()?;
             let work = deckle_core::wordwise::default_cache_dir().join("digest");
-            std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+            let converted = work.join("kfx");
+            std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             let built = deckle_digest::build(&cfg, date, now, &work, &mut deckle_digest::http_get)?;
             let opts = RunOptions {
@@ -481,7 +484,7 @@ fn digest(
                 verified_real_asin: false,
                 asin: None,
                 pages: None,
-                target: target.clone(),
+                target: Target::Folder(converted),
                 previewer: Some(located.path),
                 keep_work_dir,
                 xray: deckle_core::pipeline::XRayMode::Off,
@@ -490,44 +493,49 @@ fn digest(
                 word_wise: None,
             };
             let report = run(&built.epub, &opts);
-            let pruned = if report.delivered.is_some() {
-                let prefix = deckle_core::deliver::device_filename(&BookInfo {
-                    title: cfg.title.clone(),
-                    creators: vec![deckle_core::inspect::Creator {
-                        name: deckle_digest::AUTHOR.into(),
-                        file_as: Some(deckle_digest::AUTHOR.into()),
-                    }],
-                    ..Default::default()
-                });
-                let prefix = prefix.trim_end_matches(".kfx");
-                deckle_core::deliver::prune_editions(&target, prefix, cfg.keep.max(1))
-                    .map_err(|e| e.to_string())?
-            } else {
-                Some(Vec::new())
-            };
+            let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+            let mut outcome = DigestOutcome::default();
+            if let (None, Some(kfx)) = (&report.error, &report.delivered) {
+                let name = deckle_digest::edition_filename(date);
+                match &folder {
+                    Some(target) => {
+                        let one = deckle_core::queue::Queue::new(work.join("to-folder"));
+                        let _ = std::fs::remove_dir_all(&one.dir);
+                        one.add(kfx, &name, None).map_err(|e| e.to_string())?;
+                        outcome.flush = Some(
+                            one.flush(target, Some(&digest_prune(&cfg)))
+                                .map_err(|e| e.to_string())?,
+                        );
+                    }
+                    None => {
+                        queue
+                            .add(kfx, &name, Some(deckle_digest::EDITION_PREFIX))
+                            .map_err(|e| e.to_string())?;
+                        outcome = push_queued(&queue, &cfg)?;
+                    }
+                }
+            }
             #[derive(serde::Serialize)]
             struct DigestRun<'a> {
                 build: &'a deckle_digest::BuildReport,
                 run: &'a deckle_core::pipeline::RunReport,
-                pruned: &'a Option<Vec<PathBuf>>,
+                outcome: &'a DigestOutcome,
             }
             let all = DigestRun {
                 build: &built,
                 run: &report,
-                pruned: &pruned,
+                outcome: &outcome,
             };
             emit(json, &all, || {
-                let head = match (&report.error, &report.delivered) {
-                    (Some(e), _) => format!("FAIL  {}\n      {e}", built.title),
-                    (None, Some(d)) => format!("OK    {}\n      -> {}", built.title, d.display()),
-                    (None, None) => format!("OK    {}", built.title),
+                let head = match &report.error {
+                    Some(e) => format!("FAIL  {}\n      {e}", built.title),
+                    None => format!("OK    {}", built.title),
                 };
-                let prune = match &pruned {
-                    None => "\n      older editions: not pruned over MTP yet".to_owned(),
-                    Some(p) if p.is_empty() => String::new(),
-                    Some(p) => format!("\n      removed {} older edition(s)", p.len()),
-                };
-                format!("{head}\n{}{prune}", section_lines(&built))
+                format!(
+                    "{head}\n{}\n{}",
+                    section_lines(&built),
+                    outcome.describe(&queue)
+                )
             })?;
             Ok(if report.error.is_some() {
                 ExitCode::from(EXIT_FAILURE)
@@ -535,5 +543,109 @@ fn digest(
                 ExitCode::SUCCESS
             })
         }
+        cli::DigestCommand::Push => {
+            let cfg = load_digest_config(&path)?;
+            let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+            let outcome = push_queued(&queue, &cfg)?;
+            emit(json, &outcome, || outcome.describe(&queue))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Watch { interval } => {
+            let cfg = load_digest_config(&path)?;
+            let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+            eprintln!(
+                "watching for a Kindle every {interval}s; outbox {}",
+                queue.dir.display()
+            );
+            // Try once per connection: a failed delivery waits for the Kindle to be
+            // reconnected (or for a new edition) instead of retrying every tick.
+            let mut tried: Option<Vec<PathBuf>> = None;
+            loop {
+                let pending = queue.pending();
+                match detect_kindle() {
+                    None => tried = None,
+                    Some(_) if pending.is_empty() || tried.as_ref() == Some(&pending) => {}
+                    Some(_) => {
+                        tried = Some(pending);
+                        match push_queued(&queue, &cfg) {
+                            Ok(o) => emit(json, &o, || o.describe(&queue))?,
+                            Err(e) => eprintln!("error: {e}"),
+                        }
+                    }
+                }
+                std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
+            }
+        }
     }
+}
+
+/// What happened to the converted edition: delivered (with pruning), or left queued.
+#[derive(Debug, Default, serde::Serialize)]
+struct DigestOutcome {
+    flush: Option<deckle_core::queue::FlushReport>,
+    /// No Kindle connected: the edition waits in the outbox.
+    queued: bool,
+}
+
+impl DigestOutcome {
+    fn describe(&self, queue: &deckle_core::queue::Queue) -> String {
+        match &self.flush {
+            Some(f) if f.delivered.is_empty() => "      nothing queued".to_owned(),
+            Some(f) => {
+                let mut lines: Vec<String> = f
+                    .delivered
+                    .iter()
+                    .map(|d| format!("      -> {}", d.display()))
+                    .collect();
+                if !f.pruned.is_empty() {
+                    lines.push(format!("      removed {} older edition(s)", f.pruned.len()));
+                }
+                lines.join("\n")
+            }
+            None if self.queued => format!(
+                "      queued in {}: plug in a Kindle and run `deckle digest push` (or keep \
+                 `deckle digest watch` running)",
+                queue.dir.display()
+            ),
+            None => String::new(),
+        }
+    }
+}
+
+fn digest_prune(cfg: &deckle_digest::Config) -> deckle_core::queue::Prune {
+    deckle_core::queue::Prune {
+        prefix: deckle_digest::EDITION_PREFIX.into(),
+        keep: cfg.keep.max(1),
+    }
+}
+
+/// The first connected Kindle, mass storage first; `None` when there is none.
+fn detect_kindle() -> Option<Target> {
+    resolve_target("device").ok()
+}
+
+/// Flushes the outbox to a connected Kindle, or reports it queued.
+fn push_queued(
+    queue: &deckle_core::queue::Queue,
+    cfg: &deckle_digest::Config,
+) -> Result<DigestOutcome, String> {
+    if queue.pending().is_empty() {
+        return Ok(DigestOutcome {
+            flush: Some(Default::default()),
+            queued: false,
+        });
+    }
+    let Some(target) = detect_kindle() else {
+        return Ok(DigestOutcome {
+            flush: None,
+            queued: true,
+        });
+    };
+    let flush = queue
+        .flush(&target, Some(&digest_prune(cfg)))
+        .map_err(|e| e.to_string())?;
+    Ok(DigestOutcome {
+        flush: Some(flush),
+        queued: false,
+    })
 }

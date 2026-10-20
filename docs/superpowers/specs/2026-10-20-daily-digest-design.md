@@ -43,8 +43,7 @@ What makes it unique, not just "RSS to EPUB":
 
 **Next increments (refine backlog, in order)**
 
-1. Delivery (a): an outbox and `deckle digest push`, plus an "on plug-in" hook so a Kindle that
-   was unplugged at build time gets the edition when it's next connected.
+1. ~~Delivery (a): outbox, `push`, plug-in delivery~~ — done (#48), see §5 *Delivery*.
 2. Scheduling: a generated launchd plist (macOS) / Task Scheduler entry (Windows) from
    `deckle digest schedule --at 05:30`; later a toggle in the desktop app.
 3. Delivery (b): opt-in Send-to-Kindle email over the user's own SMTP. This reverses the v1
@@ -135,10 +134,19 @@ sequentially in v0 (an edition is a handful of requests).
   a two-column grid of further headlines labelled by section (Local items by outlet), and an
   "Inside" index. Fonts bundled under `crates/deckle-digest/fonts/` with their OFL licences:
   UnifrakturMaguntia (masthead) and Old Standard TT regular/bold/italic.
-- **Pruning:** after delivery, editions whose device filename starts with the digest's
-  `Deckle - <title>` prefix are sorted by write time and all but the newest `keep` are
-  removed (folders and mass storage). MTP is not pruned in v0: a second connection would
-  reset the Kindle again, so it moves into the delivery increment, which owns the connection.
+- **File name:** editions land as `deckle-daily-YYYY-MM-DD.kfx`, so they sort by name.
+  The Kindle shows the title from the metadata, not the file name.
+- **Delivery:** `run` builds and converts into a work folder. With `--to <folder>` the
+  edition goes straight there. With `--to device` it goes into the outbox
+  (`<cache>/deckle/outbox`), replacing any undelivered older edition. It is then pushed at
+  once if a Kindle is connected, else left queued. `deckle digest push` delivers the queue
+  to a connected Kindle and succeeds quietly when none is connected, so it is safe on a
+  timer. `deckle digest watch [--interval 20]` polls and pushes when a Kindle appears. It
+  tries once per connection: a failed push waits for a reconnect or a new edition. A
+  launch-at-login agent for `watch` is part of scheduling (#49).
+- **Pruning:** after a push, over the *same* connection (a second MTP session would reset
+  the Kindle again), `deckle-daily-*.kfx` files beyond the newest `keep` by name are
+  removed with their `.sdr` folders. This applies to folders, mass storage and MTP.
 
 ## 6. Code layout
 

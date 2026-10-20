@@ -235,7 +235,17 @@ pub fn deliver_on(
     conn: &mut Conn<'_>,
     opts: &DeliverOptions,
 ) -> Result<PathBuf, DeliverError> {
-    let name = device_filename(info);
+    deliver_named_on(kfx, &device_filename(info), conn, opts)
+}
+
+/// [`deliver_on`] under a caller-chosen file name (dated editions use sortable names).
+pub fn deliver_named_on(
+    kfx: &[u8],
+    name: &str,
+    conn: &mut Conn<'_>,
+    opts: &DeliverOptions,
+) -> Result<PathBuf, DeliverError> {
+    let name = name.to_owned();
     match conn.target {
         Target::Folder(dir) => {
             let path = write_file(&dir.join(&name), kfx)?;
@@ -392,46 +402,88 @@ fn deliver_mtp(
     )))
 }
 
-/// Keeps the newest `keep` books (by modification time) whose device filename starts with
-/// `prefix` and removes the rest, with their `.sdr` folders. Used for dated editions such as
-/// the daily digest. Returns the removed paths; `None` on an MTP target, which is not pruned
-/// yet (reconnecting would reset the Kindle a second time).
-pub fn prune_editions(
-    target: &Target,
+/// The names to remove so that only the `keep` greatest (by name) `<prefix>….kfx` files are
+/// left. Dated editions named `<prefix>YYYY-MM-DD.kfx` sort oldest first.
+pub fn prunable<I: IntoIterator<Item = String>>(
+    names: I,
     prefix: &str,
     keep: usize,
-) -> Result<Option<Vec<PathBuf>>, DeliverError> {
-    let dir = match target {
+) -> Vec<String> {
+    let mut matching: Vec<String> = names
+        .into_iter()
+        .filter(|n| n.starts_with(prefix) && n.ends_with(".kfx"))
+        .collect();
+    matching.sort_unstable_by(|a, b| b.cmp(a));
+    matching.into_iter().skip(keep).collect()
+}
+
+/// Keeps the newest `keep` dated editions named `<prefix>….kfx` on the connection's target and
+/// removes the rest with their `.sdr` folders. Runs over the caller's connection, so an MTP
+/// Kindle is pruned in the same session as the delivery (a second session resets it again).
+pub fn prune_named_on(
+    conn: &mut Conn<'_>,
+    prefix: &str,
+    keep: usize,
+) -> Result<Vec<String>, DeliverError> {
+    let dir = match conn.target {
         Target::Folder(dir) => dir.clone(),
         Target::MassStorage(dev) => dev.root.join("documents"),
-        Target::Mtp(_) => return Ok(None),
+        Target::Mtp(_) => {
+            return match conn.mtp() {
+                Some(Ok(dev)) => prune_mtp(dev, prefix, keep),
+                Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+                None => unreachable!("an MTP target always has a connection"),
+            };
+        }
     };
     let io = |path: &Path| {
         let path = path.to_path_buf();
         move |source| DeliverError::Io { path, source }
     };
-    let mut editions: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
-    for entry in std::fs::read_dir(&dir).map_err(io(&dir))?.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if name.starts_with(prefix) && name.ends_with(".kfx") {
-            let modified = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .map_err(io(&entry.path()))?;
-            editions.push((modified, entry.path()));
-        }
-    }
-    editions.sort_by_key(|e| std::cmp::Reverse(e.0));
-    let mut removed = Vec::new();
-    for (_, path) in editions.into_iter().skip(keep) {
+    let names = std::fs::read_dir(&dir)
+        .map_err(io(&dir))?
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned());
+    let removed = prunable(names, prefix, keep);
+    for name in &removed {
+        let path = dir.join(name);
         std::fs::remove_file(&path).map_err(io(&path))?;
         let sdr = path.with_extension("sdr");
         if sdr.is_dir() {
             std::fs::remove_dir_all(&sdr).map_err(io(&sdr))?;
         }
-        removed.push(path);
     }
-    Ok(Some(removed))
+    Ok(removed)
+}
+
+fn prune_mtp(dev: &mut Mtp, prefix: &str, keep: usize) -> Result<Vec<String>, DeliverError> {
+    let m = |e: MtpError| DeliverError::Mtp(e.to_string());
+    let storage = *dev
+        .storages()
+        .map_err(m)?
+        .first()
+        .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
+    let docs = dev.find_documents(storage).map_err(m)?;
+    let children = dev.list(storage, docs).map_err(m)?;
+    let removed = prunable(
+        children.iter().map(|(_, info)| info.filename.clone()),
+        prefix,
+        keep,
+    );
+    for name in &removed {
+        let sdr_name = Path::new(name)
+            .with_extension("sdr")
+            .to_string_lossy()
+            .into_owned();
+        for (handle, info) in &children {
+            if info.filename == *name || info.filename == sdr_name {
+                dev.delete(*handle).map_err(|e| {
+                    DeliverError::Mtp(format!("deleting documents/{}: {e}", info.filename))
+                })?;
+            }
+        }
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]
