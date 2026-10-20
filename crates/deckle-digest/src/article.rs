@@ -27,6 +27,8 @@ pub fn placeholder(k: usize) -> String {
 
 #[derive(Clone, Debug, Default)]
 pub struct Extracted {
+    /// The page's own headline.
+    pub title: Option<String>,
     pub byline: Option<String>,
     /// Body XHTML; photos appear as `<img src="{placeholder(k)}"/>`.
     pub xhtml: String,
@@ -286,7 +288,9 @@ pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<E
     if w.words < MIN_WORDS {
         return None;
     }
+    let title = article.title.trim().to_owned();
     Some(Extracted {
+        title: (!title.is_empty()).then_some(title),
         byline: article
             .byline
             .map(|b| b.to_string())

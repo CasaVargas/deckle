@@ -142,7 +142,7 @@ fn when(t: DateTime<Utc>) -> String {
         .to_string()
 }
 
-fn host(url: &str) -> &str {
+pub(crate) fn host(url: &str) -> &str {
     url.split("://")
         .nth(1)
         .and_then(|r| r.split('/').next())
@@ -207,6 +207,42 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
     let Some(x) = extracted else {
         return article(item, Some(UNAVAILABLE));
     };
+    let outlet = item.source.clone().unwrap_or_else(|| host(&url).to_owned());
+    let (body, photos) = story_body(&x, &outlet, cfg, net);
+    let meta = [
+        x.byline.as_deref().map(by_line),
+        item.source.clone(),
+        item.published.map(when),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ");
+    Article {
+        title: item.title.clone(),
+        meta: (!meta.is_empty()).then_some(meta),
+        body,
+        teaser: x.teaser.or_else(|| teaser(&item.paragraphs)),
+        photos,
+    }
+}
+
+/// "By …" unless the byline already says so.
+pub(crate) fn by_line(b: &str) -> String {
+    if b.to_lowercase().starts_with("by ") {
+        b.to_owned()
+    } else {
+        format!("By {b}")
+    }
+}
+
+/// An extracted story's body with its photos fetched and placed, and a source line.
+pub(crate) fn story_body(
+    x: &article::Extracted,
+    outlet: &str,
+    cfg: &Config,
+    net: &dyn Net,
+) -> (String, Vec<Vec<u8>>) {
     let fetched = if cfg.photos {
         article::fetch_photos(&x.photos, cfg.max_photos, net)
     } else {
@@ -221,30 +257,8 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
         n += usize::from(k);
     }
     let mut body = article::place_photos(&x.xhtml, &kept, |k| photo_token(rank[k]));
-    let outlet = item.source.clone().unwrap_or_else(|| host(&url).to_owned());
-    body.push_str(&format!("<p class=\"source\">Source: {}</p>", esc(&outlet)));
-    let meta = [
-        x.byline.map(|b| {
-            if b.to_lowercase().starts_with("by ") {
-                b
-            } else {
-                format!("By {b}")
-            }
-        }),
-        item.source.clone(),
-        item.published.map(when),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<_>>()
-    .join(" · ");
-    Article {
-        title: item.title.clone(),
-        meta: (!meta.is_empty()).then_some(meta),
-        body,
-        teaser: x.teaser.or_else(|| teaser(&item.paragraphs)),
-        photos: fetched.into_iter().flatten().collect(),
-    }
+    body.push_str(&format!("<p class=\"source\">Source: {}</p>", esc(outlet)));
+    (body, fetched.into_iter().flatten().collect())
 }
 
 const UNAVAILABLE: &str = "Full story unavailable offline.";
@@ -252,7 +266,7 @@ const UNAVAILABLE: &str = "Full story unavailable offline.";
 const WORKERS: usize = 8;
 
 /// `f` over `items` on up to [`WORKERS`] threads, results in input order.
-fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
+pub(crate) fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync) -> Vec<R> {
     let next = AtomicUsize::new(0);
     let results: Mutex<Vec<Option<R>>> = Mutex::new((0..items.len()).map(|_| None).collect());
     std::thread::scope(|scope| {

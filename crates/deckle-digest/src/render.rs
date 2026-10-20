@@ -6,7 +6,7 @@ use crate::{Edition, Gathered, esc, long_date};
 /// `(path inside the EPUB, bytes)`. `mimetype` and `META-INF/container.xml` included.
 pub type Files = Vec<(String, Vec<u8>)>;
 
-const STYLE: &str = r#"body { font-family: serif; margin: 0 4%; }
+pub(crate) const STYLE: &str = r#"body { font-family: serif; margin: 0 4%; }
 h1, h2, h3 { font-family: serif; }
 .masthead { text-align: center; border-bottom: 3px double black; margin-bottom: 0.6em; }
 .ears { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.1em; margin: 0; }
@@ -45,7 +45,7 @@ ul.index { list-style-type: none; padding-left: 0; }
 ul.index li { border-bottom: 1px solid black; padding: 0.3em 0; }
 "#;
 
-fn page(title: &str, body: &str) -> Vec<u8> {
+pub(crate) fn page(title: &str, body: &str) -> Vec<u8> {
     format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
          <html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" xml:lang=\"en\" lang=\"en\">\n\

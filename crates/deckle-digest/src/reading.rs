@@ -49,7 +49,8 @@ pub enum Added {
     Duplicate(String),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", content = "reason", rename_all = "lowercase")]
 pub enum Outcome {
     Printed,
     Book,

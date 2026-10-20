@@ -4,6 +4,7 @@
 pub mod feeds;
 pub mod lottery;
 pub mod onthisday;
+pub mod reading;
 pub mod weather;
 
 /// The note shown in a section whose source failed.

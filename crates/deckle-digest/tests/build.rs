@@ -38,6 +38,10 @@ fn fake(url: &str) -> Result<Vec<u8>, String> {
 
 fn config() -> Config {
     let mut c = Config::parse(deckle_digest::config::STARTER).unwrap();
+    // Never the owner's real queue: a path that doesn't exist reads as empty.
+    c.reading.queue_path = Some(
+        std::env::temp_dir().join(format!("deckle-test-no-queue-{}.jsonl", std::process::id())),
+    );
     c.horoscope.signs = vec!["leo".into(), "virgo".into()];
     // The fixtures were saved on 2026-10-20; keep a week of stories.
     c.max_age_hours = 24 * 7;
@@ -120,4 +124,121 @@ fn epub_is_well_formed() {
         .unwrap();
     let img = image::load_from_memory(&cover).unwrap();
     assert_eq!((img.width(), img.height()), (1264, 1680));
+}
+
+// ---- Your Reading (save-to-paper design §5) ----
+
+use deckle_digest::reading::{Added, Outcome, ReadingQueue};
+
+const WXII: &str = "https://www.wxii12.com/article/candor-peach-street-standoff/74194295";
+
+fn long_page(words: usize) -> String {
+    let para = "The council met again tonight to argue about the new library and its long overdue roof repairs. ";
+    let per = para.split_whitespace().count();
+    let body: String = (0..words / per).map(|_| format!("<p>{para}</p>")).collect();
+    format!(
+        "<html><head><title>The Long One</title></head><body><article><h1>The Long One</h1>{body}</article></body></html>"
+    )
+}
+
+/// Fixtures plus the WXII story and a 5,000-word page at ex.com/long.
+fn net_with_pages(url: &str) -> Result<Vec<u8>, String> {
+    if url == WXII {
+        return Ok(fixture("article-wxii.html"));
+    }
+    if url == "https://ex.com/long" {
+        return Ok(long_page(5000).into_bytes());
+    }
+    fake(url)
+}
+
+fn reading_setup(urls: &[&str]) -> (tempfile::TempDir, Config, ReadingQueue, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
+    let ids = urls
+        .iter()
+        .map(|u| match q.add_url(u, None, "cli", now()).unwrap() {
+            Added::New(i) | Added::Duplicate(i) => i,
+        })
+        .collect();
+    let mut c = config();
+    c.reading.queue_path = Some(q.path.clone());
+    (dir, c, q, ids)
+}
+
+#[test]
+fn saved_article_prints_first_as_your_reading() {
+    let (_d, c, _q, ids) = reading_setup(&[WXII]);
+    let g = gather(&c, date(), now(), &net_with_pages);
+    let first = &g.edition.sections[0];
+    assert_eq!(first.title, "Your Reading");
+    assert_eq!(g.reading, Some(0));
+    let meta = first.articles[0].meta.as_deref().unwrap();
+    assert!(meta.starts_with("Saved Tue"), "{meta}");
+    assert!(meta.contains("about"), "{meta}");
+    assert_eq!(g.reading_outcomes, [(ids[0].clone(), Outcome::Printed)]);
+}
+
+#[test]
+fn long_read_becomes_its_own_book() {
+    let (_d, c, _q, ids) = reading_setup(&["https://ex.com/long"]);
+    let out = tempfile::tempdir().unwrap();
+    let g = gather(&c, date(), now(), &net_with_pages);
+    assert_eq!(g.long_reads.len(), 1);
+    assert!(
+        g.long_reads[0]
+            .file_stem
+            .starts_with("deckle-reads-2026-10-20-the-long-one")
+    );
+    assert!(
+        g.edition.sections[0].articles[0]
+            .body
+            .contains("In your library")
+    );
+    assert_eq!(g.reading_outcomes, [(ids[0].clone(), Outcome::Book)]);
+    let r = build(&c, date(), now(), out.path(), &net_with_pages).unwrap();
+    assert_eq!(r.long_reads.len(), 1);
+    let book = &r.long_reads[0];
+    assert!(
+        book.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("deckle-reads-2026-10-20-")
+    );
+    let mut zip = read_zip(book);
+    assert_eq!(zip.by_index(0).unwrap().name().unwrap(), "mimetype");
+    let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
+    for name in &names {
+        if name.ends_with(".xhtml") || name.ends_with(".opf") {
+            let mut s = String::new();
+            zip.by_name(name).unwrap().read_to_string(&mut s).unwrap();
+            roxmltree::Document::parse(&s).unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+    }
+}
+
+#[test]
+fn failing_save_stays_pending_with_a_try() {
+    let (_d, c, _q, ids) = reading_setup(&["https://ex.com/offline"]);
+    let g = gather(&c, date(), now(), &net_with_pages);
+    assert!(g.edition.sections.iter().all(|s| s.title != "Your Reading"));
+    assert!(matches!(&g.reading_outcomes[..], [(id, Outcome::Failed(_))] if *id == ids[0]));
+}
+
+#[test]
+fn reading_section_inserted_when_not_configured() {
+    let (_d, mut c, _q, _ids) = reading_setup(&[WXII]);
+    c.sections
+        .retain(|k| *k != deckle_digest::SectionKind::Reading);
+    let g = gather(&c, date(), now(), &net_with_pages);
+    assert_eq!(g.edition.sections[0].title, "Your Reading");
+    assert_eq!(g.notes.len(), 1, "{:?}", g.notes);
+}
+
+#[test]
+fn cover_lead_stays_news() {
+    let (_d, c, _q, _ids) = reading_setup(&[WXII]);
+    let g = gather(&c, date(), now(), &net_with_pages);
+    assert!(!g.news.contains(&0), "Your Reading is not a news section");
+    deckle_digest::cover::render(&g).unwrap();
 }
