@@ -128,10 +128,13 @@ sequentially in v0 (an edition is a handful of requests).
 - **Front page:** masthead, date and edition number (day of year), the weather line,
   "Inside today" (each section with its item count, linked), lead headlines (the first item of
   local and feeds).
-- **Cover:** 1264×1680 PNG (largest current Kindle screen ratio), black on white: blackletter
-  masthead, rule lines, date line, weather line, up to five headlines. Fonts bundled under
-  `crates/deckle-digest/fonts/` with their OFL licences: UnifrakturMaguntia (masthead) and
-  Old Standard TT (a 19th-century newspaper face) for the rest.
+- **Cover:** 1264×1680 JPEG, black on white, laid out like a front page: ears (edition
+  number, place), blackletter masthead, a black date band in large bold caps (sized to stay
+  legible on a Kindle library tile, so you can tell editions apart), the weather line, the
+  lead story (first headline with a prose opening paragraph) with that paragraph in italic,
+  a two-column grid of further headlines labelled by section (Local items by outlet), and an
+  "Inside" index. Fonts bundled under `crates/deckle-digest/fonts/` with their OFL licences:
+  UnifrakturMaguntia (masthead) and Old Standard TT regular/bold/italic.
 - **Pruning:** after delivery, editions whose device filename starts with the digest's
   `Deckle - <title>` prefix are sorted by write time and all but the newest `keep` are
   removed (folders and mass storage). MTP is not pruned in v0: a second connection would

@@ -49,6 +49,7 @@ pub fn article(json: &[u8], date: NaiveDate) -> Result<Article, String> {
         })
         .collect();
     Ok(Article {
+        teaser: None,
         title: date.format("%B %-d in history").to_string(),
         meta: Some("From Wikipedia".into()),
         body,

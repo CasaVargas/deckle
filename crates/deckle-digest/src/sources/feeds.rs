@@ -168,7 +168,16 @@ pub fn article(item: &Item) -> Article {
         title: item.title.clone(),
         meta: (!meta.is_empty()).then_some(meta),
         body,
+        teaser: teaser(&item.paragraphs),
     }
+}
+
+/// The first paragraph that reads like prose (not "Article URL: …" link lists).
+fn teaser(paragraphs: &[String]) -> Option<String> {
+    paragraphs
+        .iter()
+        .find(|p| p.len() >= 80 && !p.contains("URL:"))
+        .cloned()
 }
 
 fn section_of(title: &str, kicker: Option<String>, items: &[Item], errors: &[String]) -> Section {

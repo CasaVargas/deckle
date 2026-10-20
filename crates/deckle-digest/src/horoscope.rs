@@ -99,6 +99,7 @@ pub fn reading(sign: &str, date: NaiveDate) -> Option<Article> {
     let lucky = (h.rotate_left(29) % 99) + 1;
     let match_sign = SIGNS[(h.rotate_left(41) % 12) as usize].1;
     Some(Article {
+        teaser: None,
         title: (*name).into(),
         meta: Some((*range).into()),
         body: format!(

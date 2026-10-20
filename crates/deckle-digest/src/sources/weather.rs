@@ -141,6 +141,7 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
             deg(d.temperature_2m_min[0]),
         ));
         articles.push(Article {
+            teaser: None,
             title: format!("Today: {sky}"),
             meta: (!cfg.place.is_empty()).then(|| cfg.place.clone()),
             body: format!(
@@ -176,6 +177,7 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
             ));
         }
         articles.push(Article {
+            teaser: None,
             title: "The days ahead".into(),
             meta: None,
             body: format!("<table class=\"forecast\">{rows}</table>"),
@@ -183,6 +185,7 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
     }
     let moon = crate::moon::phase(date);
     articles.push(Article {
+        teaser: None,
         title: format!("The moon: {}", moon.name),
         meta: None,
         body: format!(

@@ -72,6 +72,7 @@ pub fn powerball(json: &[u8]) -> Result<Article, String> {
         }
     }
     Ok(Article {
+        teaser: None,
         title: "Powerball".into(),
         meta: Some(drawn_on(&d.draw_date)),
         body,
@@ -88,6 +89,7 @@ pub fn mega_millions(json: &[u8]) -> Result<Article, String> {
         body.push_str(&format!("<p>Megaplier {}x</p>", esc(m)));
     }
     Ok(Article {
+        teaser: None,
         title: "Mega Millions".into(),
         meta: Some(drawn_on(&d.draw_date)),
         body,

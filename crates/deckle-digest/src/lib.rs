@@ -33,6 +33,8 @@ pub struct Article {
     pub meta: Option<String>,
     /// XHTML fragment, already escaped.
     pub body: String,
+    /// A plain-text opening paragraph for the cover's lead story.
+    pub teaser: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
