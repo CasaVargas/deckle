@@ -246,6 +246,10 @@ real implementation.
 2. **Real ASIN on the Scribe.** Sideload an EBOK KFX stamped with a real ASIN plus our X-Ray
    sidecar. Confirm: cover appears, X-Ray opens and shows *our* entities, nothing gets replaced
    or deleted by the device after a sync. Decides whether the "matched" branch of §5 exists.
+   **Result 2026-10-19, Kindle Scribe 2024: passed for a Kindle-edition ASIN** (typed by hand,
+   §3). The store cover appeared, and Deckle's X-Ray and Word Wise sidecars kept working under
+   the real ASIN. A print ASIN (Open Library's ISBN-10) is still untested.
+   Spikes 3 (MTP write) and 4 (X-Ray acceptance) also passed on the same device that day.
 3. **Scribe MTP write from macOS.** Minimal rusb PTP client creating `.sdr` and writing files.
    Decides the transport design and whether a libmtp dependency is needed instead.
 4. **X-Ray sidecar acceptance.** Hand-craft an `.asc` from the documented schema for a fixture
