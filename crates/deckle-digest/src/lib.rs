@@ -23,8 +23,16 @@ pub use chrono;
 pub use config::{Config, SectionKind};
 pub use fetch::{Get, http_get};
 
-/// The author stamped on every edition; the device filename starts with it.
+/// The author stamped on every edition.
 pub const AUTHOR: &str = "Deckle";
+
+/// Editions land on the Kindle as `deckle-daily-YYYY-MM-DD.kfx`: sortable by name, so pruning
+/// works over MTP too (which reports no dates). The Kindle shows the title from the metadata.
+pub const EDITION_PREFIX: &str = "deckle-daily-";
+
+pub fn edition_filename(date: NaiveDate) -> String {
+    format!("{EDITION_PREFIX}{date}.kfx")
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Article {

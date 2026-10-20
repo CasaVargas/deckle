@@ -207,10 +207,11 @@ pub enum DigestCommand {
         #[arg(long)]
         date: Option<String>,
     },
-    /// Build today's edition and send it like any book (forced Cover/PDOC), then keep only the
-    /// newest editions on the target.
+    /// Build today's edition and convert it (forced Cover/PDOC). With `--to device` it goes to
+    /// the outbox and on to a connected Kindle now, or to the next one that connects (`push`,
+    /// `watch`). Only the newest `keep` editions stay on the target.
     Run {
-        /// A folder path, or `device` for the first connected Kindle.
+        /// A folder path, or `device` for a Kindle (now, or when one connects).
         #[arg(long, default_value = "device")]
         to: String,
         #[arg(long)]
@@ -219,6 +220,15 @@ pub enum DigestCommand {
         previewer: Option<PathBuf>,
         #[arg(long)]
         keep_work_dir: bool,
+    },
+    /// Deliver queued editions to a connected Kindle and prune old ones. Does nothing (and
+    /// succeeds) when no Kindle is connected, so it is safe to run on a timer.
+    Push,
+    /// Stay running and push queued editions whenever a Kindle connects.
+    Watch {
+        /// Seconds between checks.
+        #[arg(long, default_value_t = 20)]
+        interval: u64,
     },
 }
 

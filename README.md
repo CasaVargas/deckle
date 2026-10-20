@@ -113,10 +113,15 @@ Kindle library tile is today's paper. No keys or accounts; a source that fails p
 deckle digest init                  # starter config: ~/Library/Application Support/deckle/digest.toml
 deckle digest build -o ./out        # today's edition as an EPUB
 deckle digest run --to device       # build, convert, send (cover first), keep the newest 3
+deckle digest push                  # deliver a queued edition to the Kindle now connected
+deckle digest watch                 # keep running; deliver whenever a Kindle connects
 ```
 
+No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
+`push`, or as soon as you plug in while `watch` is running.
+
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
-Scheduling, an on-plug-in queue and opt-in Send-to-Kindle email come next
+Scheduling and opt-in Send-to-Kindle email come next
 (`docs/superpowers/specs/2026-10-20-daily-digest-design.md`).
 
 ## How it works: what a "store-quality" sideloaded book needs
