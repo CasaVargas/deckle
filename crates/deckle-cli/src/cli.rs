@@ -179,6 +179,47 @@ pub enum Command {
         #[arg(long)]
         keep_work_dir: bool,
     },
+    /// The Deckle Daily: a newspaper built from your sources (weather, local news, feeds,
+    /// lottery, horoscope, on this day).
+    Digest {
+        /// The digest config (default: `digest.toml` in Deckle's config folder).
+        #[arg(long, global = true)]
+        config: Option<PathBuf>,
+        #[command(subcommand)]
+        action: DigestCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DigestCommand {
+    /// Write a commented starter config.
+    Init {
+        /// Replace an existing config.
+        #[arg(long)]
+        force: bool,
+    },
+    /// Build today's edition as an EPUB.
+    Build {
+        /// Folder for the EPUB.
+        #[arg(short, long, default_value = ".")]
+        output: PathBuf,
+        /// Edition date, YYYY-MM-DD (default: today). Sources still return today's data.
+        #[arg(long)]
+        date: Option<String>,
+    },
+    /// Build today's edition and send it like any book (forced Cover/PDOC), then keep only the
+    /// newest editions on the target.
+    Run {
+        /// A folder path, or `device` for the first connected Kindle.
+        #[arg(long, default_value = "device")]
+        to: String,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        previewer: Option<PathBuf>,
+        #[arg(long)]
+        keep_work_dir: bool,
+    },
 }
 
 /// `--pages` parsing: absent → none; `auto` → Some(None); a number → Some(Some(n)).

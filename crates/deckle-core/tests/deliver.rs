@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use deckle_core::deliver::{Target, deliver, detect_in, device_filename};
+use deckle_core::deliver::{Target, deliver, detect_in, device_filename, prune_editions};
 use deckle_core::inspect::{BookInfo, Creator};
 
 fn info(title: &str, author: &str) -> BookInfo {
@@ -219,4 +219,30 @@ fn stale_xray_sidecars_are_removed_on_redelivery() {
     )
     .unwrap();
     assert!(!sdr.join("XRAY.entities.NEWASIN.asc").exists());
+}
+
+#[test]
+fn prune_keeps_the_newest_editions_and_their_sidecars_go_too() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = Target::Folder(dir.path().to_path_buf());
+    let mut paths = Vec::new();
+    for day in ["Monday", "Tuesday", "Wednesday"] {
+        let p = deliver(
+            b"KFX",
+            &info(&format!("The Daily -- {day}"), "Deckle"),
+            &target,
+        )
+        .unwrap();
+        std::fs::create_dir_all(p.with_extension("sdr")).unwrap();
+        paths.push(p);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let other = deliver(b"KFX", &info("Dune", "Frank Herbert"), &target).unwrap();
+    let prefix = device_filename(&info("The Daily", "Deckle"));
+    let prefix = prefix.trim_end_matches(".kfx");
+
+    let removed = prune_editions(&target, prefix, 2).unwrap().unwrap();
+    assert_eq!(removed, [paths[0].clone()]);
+    assert!(!paths[0].exists() && !paths[0].with_extension("sdr").exists());
+    assert!(paths[1].exists() && paths[2].exists() && other.exists());
 }

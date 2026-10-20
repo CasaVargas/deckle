@@ -15,6 +15,7 @@ deckle-core.workspace = true
 deckle-kfx.workspace = true
 deckle-transport.workspace = true
 deckle-xray.workspace = true
+deckle-digest.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
