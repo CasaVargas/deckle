@@ -170,7 +170,9 @@ browser. Every story carries its full text and photos inside the edition.
   line "Full story unavailable offline." Text is capped at 6,000 words.
 - **Photos:**
   - At most 4 per story: the lead image (`og:image`) first, then inline images in order,
-    deduplicated by URL without its query.
+    deduplicated by URL without its query, then by a 64-bit difference hash of the picture
+    (CDNs serve one photo under several URLs; repeats measured 0–10 bits apart, distinct
+    photos 20+, cutoff 14).
   - Images whose decoded shorter side is under 200 px are dropped (icons, trackers).
   - Each is converted to 8-bit grayscale (e-ink), fit to 1000 px wide, and saved as JPEG
     quality 70, as `images/<n>.jpg`.
@@ -179,7 +181,9 @@ browser. Every story carries its full text and photos inside the edition.
   - Article pages are fetched with a desktop Safari user agent. Many publishers refuse
     unknown agents, and the edition is read only by the person who built it.
   - APIs keep the honest `Deckle/<version>` agent.
-  - Up to 8 fetches run in parallel, with a 15 s timeout per request.
+  - Up to 8 fetches run in parallel: 15 s per API request, 25 s per publisher page.
+- **Order:** within a section, stories with full text come first; the ones that fell back
+  follow, like briefs.
 - **No outbound links:** the "Read online" link is gone. Each story ends with a small
   "Source: <outlet>" line in plain text.
 - **Config:** `full_text = true` and `photos = true` at the top level, both default on.

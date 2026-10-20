@@ -4,7 +4,7 @@
 use chrono::{Datelike, NaiveDate};
 use serde::Deserialize;
 
-use crate::fetch::Get;
+use crate::fetch::Net;
 use crate::{Article, Section, esc};
 
 const TITLE: &str = "On This Day";
@@ -50,14 +50,15 @@ pub fn article(json: &[u8], date: NaiveDate) -> Result<Article, String> {
         .collect();
     Ok(Article {
         teaser: None,
+        photos: Vec::new(),
         title: date.format("%B %-d in history").to_string(),
         meta: Some("From Wikipedia".into()),
         body,
     })
 }
 
-pub fn section(date: NaiveDate, get: &mut Get<'_>) -> Section {
-    match get(&url(date)).and_then(|b| article(&b, date)) {
+pub fn section(date: NaiveDate, net: &dyn Net) -> Section {
+    match net.get(&url(date)).and_then(|b| article(&b, date)) {
         Ok(a) => Section {
             title: TITLE.into(),
             kicker: None,

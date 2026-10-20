@@ -447,8 +447,7 @@ fn digest(
             let date = parse_date(date.as_deref())?;
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            let report =
-                deckle_digest::build(&cfg, date, now, &output, &mut deckle_digest::http_get)?;
+            let report = deckle_digest::build(&cfg, date, now, &output, &deckle_digest::Http)?;
             emit(json, &report, || {
                 format!(
                     "OK    {}\n      -> {}\n{}",
@@ -475,7 +474,7 @@ fn digest(
             let converted = work.join("kfx");
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            let built = deckle_digest::build(&cfg, date, now, &work, &mut deckle_digest::http_get)?;
+            let built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
             let opts = RunOptions {
                 cde_type: deckle_kfx::convert::CdeType::Pdoc,
                 // The cover is the front page: it must always show (design §5).

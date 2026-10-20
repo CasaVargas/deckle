@@ -34,6 +34,13 @@ td.day { font-weight: bold; }
 .label { font-size: 0.75em; font-weight: normal; text-transform: uppercase; }
 .event .year { font-weight: bold; }
 .small { font-size: 0.85em; }
+.figure { text-align: center; margin: 0.6em 0 0.8em 0; }
+.figure img, p img { width: 100%; }
+.caption { display: block; font-size: 0.8em; font-style: italic; text-align: left; margin-top: 0.2em; }
+h3.subhead { font-size: 1.05em; margin: 1em 0 0.3em 0; }
+blockquote { margin: 0.6em 1.2em; font-style: italic; }
+.source { font-size: 0.8em; font-style: italic; margin-top: 0.8em; }
+.note { font-style: italic; }
 ul.index { list-style-type: none; padding-left: 0; }
 ul.index li { border-bottom: 1px solid black; padding: 0.3em 0; }
 "#;
@@ -51,6 +58,11 @@ fn page(title: &str, body: &str) -> Vec<u8> {
 
 fn section_file(i: usize) -> String {
     format!("s{}.xhtml", i + 1)
+}
+
+/// Photo `n` of article `j` in section `i`, relative to the OPF.
+fn photo_file(i: usize, j: usize, n: usize) -> String {
+    format!("images/s{}a{}p{}.jpg", i + 1, j + 1, n + 1)
 }
 
 fn front_page(g: &Gathered) -> Vec<u8> {
@@ -123,7 +135,11 @@ fn section_page(e: &Edition, i: usize) -> Vec<u8> {
         if let Some(m) = &a.meta {
             body.push_str(&format!("<p class=\"meta\">{}</p>\n", esc(m)));
         }
-        body.push_str(&a.body);
+        let mut story = a.body.clone();
+        for n in 0..a.photos.len() {
+            story = story.replace(&crate::sources::feeds::photo_token(n), &photo_file(i, j, n));
+        }
+        body.push_str(&story);
         body.push('\n');
     }
     if let Some(u) = &s.unavailable {
@@ -214,6 +230,19 @@ fn opf(e: &Edition, uid: &str) -> Vec<u8> {
          <item id=\"front\" href=\"front.xhtml\" media-type=\"application/xhtml+xml\"/>\n",
     );
     let mut spine = String::from("<itemref idref=\"front\"/>\n");
+    for (i, s) in e.sections.iter().enumerate() {
+        for (j, a) in s.articles.iter().enumerate() {
+            for n in 0..a.photos.len() {
+                manifest.push_str(&format!(
+                    "<item id=\"p{}-{}-{}\" href=\"{}\" media-type=\"image/jpeg\"/>\n",
+                    i + 1,
+                    j + 1,
+                    n + 1,
+                    photo_file(i, j, n)
+                ));
+            }
+        }
+    }
     for i in 0..e.sections.len() {
         manifest.push_str(&format!(
             "<item id=\"s{n}\" href=\"{}\" media-type=\"application/xhtml+xml\"/>\n",
@@ -268,6 +297,11 @@ pub fn render(g: &Gathered, cover: Vec<u8>) -> Files {
     ];
     for i in 0..e.sections.len() {
         files.push((format!("OEBPS/{}", section_file(i)), section_page(e, i)));
+        for (j, a) in e.sections[i].articles.iter().enumerate() {
+            for (n, jpeg) in a.photos.iter().enumerate() {
+                files.push((format!("OEBPS/{}", photo_file(i, j, n)), jpeg.clone()));
+            }
+        }
     }
     files
 }
