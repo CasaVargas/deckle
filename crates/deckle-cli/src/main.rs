@@ -595,6 +595,32 @@ fn digest(
                 "watching for a Kindle every {interval}s; outbox {}",
                 queue.dir.display()
             );
+            // The bookmarklet's listener (save-to-paper §4). A busy port only costs the
+            // bookmarklet; watching goes on.
+            let reading = reading_queue(&cfg);
+            match reading
+                .path
+                .parent()
+                .map(deckle_digest::bookmarklet::token)
+                .transpose()
+            {
+                Ok(Some(token)) => {
+                    std::thread::spawn(move || {
+                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token) {
+                            eprintln!(
+                                "bookmarklet: can't listen on 127.0.0.1:{}: {e}",
+                                deckle_digest::bookmarklet::PORT
+                            );
+                        }
+                    });
+                    eprintln!(
+                        "bookmarklet: listening on 127.0.0.1:{}",
+                        deckle_digest::bookmarklet::PORT
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("bookmarklet: no token: {e}"),
+            }
             // Try once per connection: a failed delivery waits for the Kindle to be
             // reconnected (or for a new edition) instead of retrying every tick.
             let mut tried: Option<Vec<PathBuf>> = None;
