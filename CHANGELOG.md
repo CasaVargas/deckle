@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Windows installers are code-signed by Casa Vargas LLC with Azure Artifact Signing (the same
+  account and profile as Beltr and DebridDownloader), checked after every release build.
+
 ## 0.2.0 — real Kindles: Scribe 2024 over MTP, Paperwhite (pre-alpha)
 
 Verified on a Kindle Scribe 2024 (MTP): cover, X-Ray and Word Wise. Also delivered to a

@@ -1,8 +1,9 @@
 name: release
 # Builds installers for a `v*` tag and attaches them to a DRAFT GitHub release; the owner
 # reviews and publishes it. Pull requests that touch packaging run the same builds without
-# releasing anything. macOS builds are signed and notarized when the Apple secrets exist
-# (docs/release.md), ad-hoc signed otherwise. Windows ships unsigned in v1 (design §12).
+# releasing anything. macOS builds are signed and notarized when the Apple secrets exist, and
+# Windows builds are signed with Azure Artifact Signing when the Azure secrets exist
+# (docs/release.md); without them each platform builds unsigned with a warning.
 on:
   push:
     tags: ["v*"]
@@ -84,19 +85,161 @@ jobs:
             echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
             echo "::warning::No Apple secrets: the macOS build is ad-hoc signed and not notarized."
           fi
+      # Windows: Azure Artifact Signing (account casavargas, profile casavargas-public-trust, the
+      # same setup as Beltr and DebridDownloader). Tauri's signCommand
+      # (src-tauri/windows/tauri.signing.conf.json, passed below only when this step enables it)
+      # runs src-tauri/windows/sign.ps1 on the app exe, the NSIS installer and uninstaller, and
+      # the MSI. This step fetches the signing dlib, finds signtool, and signs a throwaway exe
+      # through the same script, so a bad secret, a missing signer role or a wrong endpoint fails
+      # here, readably, instead of deep inside the bundler.
+      - name: Azure Artifact Signing (when configured)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'  # Windows PowerShell's progress bar crawls downloads
+          $missing = 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET' |
+            Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
+          if ($missing) {
+            Write-Host "::warning::No Azure signing secrets ($($missing -join ', ')): the Windows build is unsigned."
+            exit 0
+          }
+          # The dlib is .NET 8 code hosted inside signtool (rollForward: Major). Without an x64
+          # .NET 8+ runtime, signtool exits 3 and prints nothing at all.
+          $netcore = Join-Path $env:ProgramFiles 'dotnet\shared\Microsoft.NETCore.App'
+          $runtimes = Get-ChildItem $netcore -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d+' -and [int]$Matches[0] -ge 8 }
+          if (-not $runtimes) {
+            Write-Host "::error::No x64 .NET 8+ runtime on this runner; Azure Artifact Signing needs one."
+            exit 1
+          }
+          # Pinned, hash-checked Artifact Signing client (the signtool dlib).
+          $version = '1.0.128'
+          $sha256 = '74BD7D27E6CE1051409C38D9B46BC8DF0400ECD643D51FFBF2AC00869061E40B'
+          $dir = Join-Path $env:RUNNER_TEMP 'artifact-signing'
+          $pkg = Join-Path $dir "Microsoft.ArtifactSigning.Client.$version.zip"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Invoke-WebRequest "https://www.nuget.org/api/v2/package/Microsoft.ArtifactSigning.Client/$version" -OutFile $pkg -UseBasicParsing
+          $actual = (Get-FileHash $pkg -Algorithm SHA256).Hash
+          if ($actual -ne $sha256) {
+            Write-Host "::error::Microsoft.ArtifactSigning.Client $version hash mismatch: got $actual"
+            exit 1
+          }
+          Expand-Archive $pkg (Join-Path $dir 'client') -Force
+          $dlib = Join-Path $dir 'client\bin\x64\Azure.CodeSigning.Dlib.dll'
+          if (-not (Test-Path $dlib)) {
+            Write-Host "::error::$dlib is missing from the Artifact Signing client package"
+            exit 1
+          }
+          # Newest Windows SDK signtool; Artifact Signing needs 10.0.22621.755 or later.
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+            Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+          if (-not $signtool -or [version]$signtool.Directory.Parent.Name -lt [version]'10.0.22621.0') {
+            Write-Host "::error::No Windows SDK signtool 10.0.22621 or later on this runner"
+            exit 1
+          }
+          Write-Host "signtool: $($signtool.FullName)"
+          Write-Host "dlib: $dlib"
+          # Add-Content, not Out-File -Encoding utf8: Windows PowerShell would write a BOM.
+          Add-Content $env:GITHUB_ENV "SIGNTOOL_PATH=$($signtool.FullName)"
+          Add-Content $env:GITHUB_ENV "ARTIFACT_SIGNING_DLIB=$dlib"
+          $env:SIGNTOOL_PATH = $signtool.FullName
+          $env:ARTIFACT_SIGNING_DLIB = $dlib
+          # A throwaway exe of our own, so the probe never signs anything that ships.
+          $probe = Join-Path $env:RUNNER_TEMP 'signing-probe.exe'
+          Add-Type -TypeDefinition 'public static class Probe { public static void Main() {} }' -OutputAssembly $probe -OutputType ConsoleApplication
+          # signtool writes errors to stderr; under 'Stop' Windows PowerShell would abort on the
+          # first line instead of reaching the explanation below.
+          $ErrorActionPreference = 'Continue'
+          & powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File apps\desktop\src-tauri\windows\sign.ps1 $probe
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Azure Artifact Signing failed (signtool exit $LASTEXITCODE, output above). A 403 means the Entra app lacks the Artifact Signing Certificate Profile Signer role on the casavargas account."
+            exit 1
+          }
+          $sig = Get-AuthenticodeSignature $probe
+          if ($sig.Status -ne 'Valid') {
+            Write-Host "::error::Signing probe came back '$($sig.Status)': $($sig.StatusMessage)"
+            exit 1
+          }
+          # Artifact Signing certificates live for days; without a timestamp every signature
+          # would stop validating soon after release.
+          if (-not $sig.TimeStamperCertificate) {
+            Write-Host "::error::Signing probe has no timestamp"
+            exit 1
+          }
+          Write-Host "Signing works. Signer: $($sig.SignerCertificate.Subject)"
+          Add-Content $env:GITHUB_ENV "WINDOWS_SIGN_ARGS= --config src-tauri/windows/tauri.signing.conf.json"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # read by src-tauri/windows/sign.ps1 when the step above enabled signing
+          AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}
           tagName: ${{ env.TAG }}
           releaseName: ${{ env.TAG && format('Deckle {0}', env.TAG) || '' }}
           releaseBody: |
             See CHANGELOG.md for what changed and README.md for install notes.
             macOS: signed with a Developer ID and notarized by Apple.
-            Windows: unsigned in v1; SmartScreen → More info → Run anyway.
+            Windows: code-signed by Casa Vargas LLC (Azure Artifact Signing).
             Requires Kindle Previewer 4 (free, from Amazon).
           releaseDraft: true
           prerelease: true
+      # Both installers, and the app exe packed inside the NSIS installer, must carry a valid,
+      # timestamped signature. The loose target\...\release exe doesn't count: after each package
+      # step the bundler puts the unsigned binary back, so only the packaged copies are signed.
+      # Other files in the NSIS payload (stock NSIS plugins, the 7-Zip-rebuilt uninstall.exe) are
+      # reported, not enforced; see DebridDownloader's workflow for why.
+      - name: Verify Windows signatures
+        if: runner.os == 'Windows' && env.WINDOWS_SIGN_ARGS
+        shell: powershell
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $bundle = "target\$env:TARGET\release\bundle"
+          $bad = 0
+          function Test-Signed([string]$Path) {
+            $sig = Get-AuthenticodeSignature $Path
+            if ($sig.Status -eq 'Valid' -and $sig.TimeStamperCertificate) {
+              Write-Host "OK  $Path : $($sig.SignerCertificate.Subject)"
+              return $true
+            }
+            Write-Host "::error::$Path is not validly signed and timestamped: $($sig.Status) $($sig.StatusMessage)"
+            return $false
+          }
+          foreach ($f in Get-ChildItem $bundle -Recurse -Include *.exe, *.msi) {
+            if (-not (Test-Signed $f.FullName)) { $bad++ }
+          }
+          $7z = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+          if (-not $7z) { $7z = Join-Path $env:ProgramFiles '7-Zip\7z.exe' }
+          foreach ($setup in Get-ChildItem "$bundle\nsis" -Filter *-setup.exe) {
+            $out = Join-Path $env:RUNNER_TEMP "unpacked-$($setup.BaseName)"
+            & $7z x $setup.FullName "-o$out" -y | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "::error::7-Zip could not unpack $($setup.Name)"
+              $bad++
+              continue
+            }
+            # the app exe is Deckle.exe (productName) or deckle-desktop.exe (crate name)
+            $app = Get-ChildItem $out -Filter *.exe | Where-Object { $_.Name -in 'Deckle.exe', 'deckle-desktop.exe' }
+            if (-not $app) {
+              Write-Host "::error::The app exe was not found inside $($setup.Name)"
+              $bad++
+            }
+            foreach ($f in Get-ChildItem $out -Recurse -Include *.exe, *.dll) {
+              if ($app -and $f.FullName -eq $app[0].FullName) {
+                if (-not (Test-Signed $f.FullName)) { $bad++ }
+              } else {
+                Write-Host "(info) $($f.Name) inside $($setup.Name): $((Get-AuthenticodeSignature $f.FullName).Status)"
+              }
+            }
+          }
+          if ($bad) { exit 1 }
