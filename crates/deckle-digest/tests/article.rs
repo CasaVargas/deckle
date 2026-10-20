@@ -131,7 +131,7 @@ fn saved_page_photos_from_files_folder_and_data_uri() {
     );
     let page = dir.path().join("a.html");
     std::fs::write(&page, &html).unwrap();
-    let base = format!("file://{}", page.display());
+    let base = url::Url::from_file_path(&page).unwrap().to_string();
     let x = deckle_digest::article::extract_with(&html, &base, None).unwrap();
     let offline = |u: &str| -> Result<Vec<u8>, String> { Err(format!("offline: {u}")) };
     let got = deckle_digest::article::fetch_photos(&x.photos, 4, &offline);
