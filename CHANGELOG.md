@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — signed Windows installers (pre-alpha)
+
+0.2.0 was built but never published; everything listed under it ships in this release.
 
 - Windows installers are code-signed by Casa Vargas LLC with Azure Artifact Signing (the same
   account and profile as Beltr and DebridDownloader), checked after every release build.
