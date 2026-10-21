@@ -483,55 +483,8 @@ fn digest(
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
             let mut built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
-            let opts = RunOptions {
-                cde_type: deckle_kfx::convert::CdeType::Pdoc,
-                // The cover is the front page: it must always show (design §5).
-                cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
-                amazon_match: false,
-                verified_real_asin: false,
-                asin: None,
-                pages: None,
-                target: Target::Folder(converted.clone()),
-                previewer: Some(located.path.clone()),
-                keep_work_dir,
-                xray: deckle_core::pipeline::XRayMode::Off,
-                llm: None,
-                wikipedia: false,
-                word_wise: None,
-            };
-            // Long reads first: books like any other, through the cover rule (design §5).
-            // One that won't convert prints inside the paper instead, so the paper never
-            // points to a book that isn't coming.
-            let convert_long_reads = |built: &deckle_digest::BuildReport| {
-                let book_ids = built
-                    .reading_outcomes
-                    .iter()
-                    .filter(|(_, o)| *o == deckle_digest::reading::Outcome::Book)
-                    .map(|(id, _)| id.clone());
-                let mut ok: Vec<(String, PathBuf)> = Vec::new();
-                let mut failed: Vec<(String, String)> = Vec::new();
-                for (id, epub) in book_ids.zip(&built.long_reads) {
-                    // Built into a folder for the outbox, so the device is unknown: the cover
-                    // rule ships PDOC and withholds X-Ray and Word Wise. Asking for them would
-                    // build nothing; they need a build for the device at push time.
-                    let lr_opts = RunOptions {
-                        cde_override: None,
-                        ..opts.clone()
-                    };
-                    let lr = run(epub, &lr_opts);
-                    match (&lr.error, &lr.delivered) {
-                        (None, Some(k)) => {
-                            let stem = epub.file_stem().unwrap_or_default().to_string_lossy();
-                            ok.push((format!("{stem}.kfx"), k.clone()));
-                        }
-                        (e, _) => {
-                            failed.push((id, e.clone().unwrap_or_else(|| "not converted".into())))
-                        }
-                    }
-                }
-                (ok, failed)
-            };
-            let (mut long_reads, failed) = convert_long_reads(&built);
+            let opts = paper_options(Some(located.path.clone()), keep_work_dir, &converted);
+            let (mut long_reads, failed) = prepare_long_reads(&built, &opts);
             let mut notes: Vec<String> = Vec::new();
             if !failed.is_empty() {
                 for (id, why) in &failed {
@@ -541,7 +494,7 @@ fn digest(
                 }
                 cfg.reading.inline = failed.into_iter().map(|(id, _)| id).collect();
                 built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
-                long_reads = convert_long_reads(&built).0;
+                long_reads = prepare_long_reads(&built, &opts).0;
             }
             let report = run(&built.epub, &opts);
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
@@ -554,8 +507,9 @@ fn digest(
                         let one = deckle_core::queue::Queue::new(work.join("to-folder"));
                         let _ = std::fs::remove_dir_all(&one.dir);
                         one.add(kfx, &name, None).map_err(|e| e.to_string())?;
-                        for (n, k) in &long_reads {
-                            one.add(k, n, None).map_err(|e| e.to_string())?;
+                        for (n, p, fallback) in &long_reads {
+                            one.add_prepared_with(p, fallback, n, None)
+                                .map_err(|e| e.to_string())?;
                         }
                         outcome.flush = Some(
                             one.flush(target, Some(&digest_prune(&cfg)))
@@ -566,8 +520,10 @@ fn digest(
                         queue
                             .add(kfx, &name, Some(deckle_digest::EDITION_PREFIX))
                             .map_err(|e| e.to_string())?;
-                        for (n, k) in &long_reads {
-                            queue.add(k, n, None).map_err(|e| e.to_string())?;
+                        for (n, p, fallback) in &long_reads {
+                            queue
+                                .add_prepared_with(p, fallback, n, None)
+                                .map_err(|e| e.to_string())?;
                         }
                         outcome = push_queued(&queue, &cfg)?;
                     }
@@ -598,7 +554,7 @@ fn digest(
                     section_lines(&built),
                     outcome.describe(&queue)
                 );
-                for (n, _) in &long_reads {
+                for (n, _, _) in &long_reads {
                     text.push_str(&format!("\n      long read: {n}"));
                 }
                 for n in built.notes.iter().chain(&notes) {
@@ -760,6 +716,7 @@ impl DigestOutcome {
                 if !f.pruned.is_empty() {
                     lines.push(format!("      removed {} older edition(s)", f.pruned.len()));
                 }
+                lines.extend(f.warnings.iter().map(|w| format!("      warning: {w}")));
                 lines.join("\n")
             }
             None if self.queued => format!(
@@ -770,6 +727,65 @@ impl DigestOutcome {
             None => String::new(),
         }
     }
+}
+
+/// The paper's build: into `converted`, always PDOC, because the cover is the front page and
+/// must always show (design §5).
+fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Path) -> RunOptions {
+    RunOptions {
+        cde_type: deckle_kfx::convert::CdeType::Pdoc,
+        cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
+        amazon_match: false,
+        verified_real_asin: false,
+        asin: None,
+        pages: None,
+        target: Target::Folder(converted.to_path_buf()),
+        previewer,
+        keep_work_dir,
+        xray: deckle_core::pipeline::XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+    }
+}
+
+/// A long read to queue: its name in the outbox, the book up to the KPF, its fallback build.
+type LongRead = (String, deckle_core::pipeline::Prepared, Vec<u8>);
+
+/// The paper's long reads, prepared for the Kindle that takes them: at push they get the cover
+/// rule's choice, X-Ray and Word Wise (device-aware build §4.5). One that won't convert, or
+/// can't even build its fallback, comes back as `(id, why)` to print inside the paper, so the
+/// paper never points to a book that isn't coming.
+fn prepare_long_reads(
+    built: &deckle_digest::BuildReport,
+    paper: &RunOptions,
+) -> (Vec<LongRead>, Vec<(String, String)>) {
+    let opts = RunOptions {
+        cde_override: None,
+        xray: deckle_core::pipeline::XRayMode::Auto,
+        word_wise: Some(Default::default()),
+        ..paper.clone()
+    };
+    let book_ids = built
+        .reading_outcomes
+        .iter()
+        .filter(|(_, o)| *o == deckle_digest::reading::Outcome::Book)
+        .map(|(id, _)| id.clone());
+    let mut ok = Vec::new();
+    let mut failed = Vec::new();
+    for (id, epub) in book_ids.zip(&built.long_reads) {
+        let prepared = deckle_core::pipeline::prepare(epub, &opts, &mut |_| {})
+            .map_err(|r| r.error.unwrap_or_else(|| "not converted".into()))
+            .and_then(|p| deckle_core::pipeline::fallback_kfx(&p).map(|f| (p, f)));
+        match prepared {
+            Ok((p, fallback)) => {
+                let stem = epub.file_stem().unwrap_or_default().to_string_lossy();
+                ok.push((format!("{stem}.kfx"), p, fallback));
+            }
+            Err(why) => failed.push((id, why)),
+        }
+    }
+    (ok, failed)
 }
 
 fn digest_prune(cfg: &deckle_digest::Config) -> deckle_core::queue::Prune {
@@ -825,9 +841,24 @@ fn sync_to(
     target: &Target,
     plan: deckle_core::sync::Plan,
 ) -> Result<DigestOutcome, String> {
+    // Prepared books are finished for this Kindle: its class from the connection, the owner's
+    // choices for it from the app's devices.json (device-aware build §4.3).
+    let registry =
+        deckle_core::devices::DeviceRegistry::load(&deckle_core::devices::default_registry_file());
+    let finishing = deckle_core::queue::Finishing {
+        profile: deckle_core::devices::profile_for(target, &registry),
+        ..Default::default()
+    };
     let mut conn = deckle_core::deliver::Conn::new(target);
-    let flush = deckle_core::sync::run(queue, &mut conn, plan, &digest_prune(cfg))
-        .map_err(|e| e.to_string())?;
+    let flush = deckle_core::sync::run_with(
+        queue,
+        &mut conn,
+        plan,
+        &digest_prune(cfg),
+        &finishing,
+        &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
+    )
+    .map_err(|e| e.to_string())?;
     Ok(DigestOutcome {
         flush: Some(flush),
         queued: false,
@@ -962,4 +993,60 @@ fn save(
     } else {
         ExitCode::SUCCESS
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deckle_core::pipeline::XRayMode;
+    use deckle_digest::reading::Outcome;
+
+    #[cfg(unix)]
+    pub(crate) fn fake_previewer() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh")
+    }
+
+    /// Long reads are queued prepared, asking for X-Ray and Word Wise (device-aware build
+    /// §4.5); one that won't convert comes back to be printed in the paper.
+    #[test]
+    #[cfg(unix)]
+    fn long_reads_are_prepared_with_xray_and_word_wise_and_a_failure_prints_inline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mini = tmp.path().join("deckle-reads-2026-10-21-mini.epub");
+        std::fs::copy(deckle_kfx::fixtures::path("deckle-mini.epub"), &mini).unwrap();
+        let broken = tmp.path().join("deckle-reads-2026-10-21-broken.epub");
+        std::fs::write(&broken, b"not an epub").unwrap();
+        let built = deckle_digest::BuildReport {
+            epub: tmp.path().join("paper.epub"),
+            title: "Paper".into(),
+            sections: Vec::new(),
+            long_reads: vec![mini, broken],
+            reading_outcomes: vec![
+                ("a1".into(), Outcome::Printed),
+                ("b2".into(), Outcome::Book),
+                ("c3".into(), Outcome::Book),
+            ],
+            notes: Vec::new(),
+        };
+        let opts = paper_options(Some(fake_previewer()), false, tmp.path());
+        let (ok, failed) = prepare_long_reads(&built, &opts);
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].0, "c3");
+        assert!(failed[0].1.starts_with("inspect:"), "{failed:?}");
+        let [(name, p, fallback)] = ok.as_slice() else {
+            panic!("one long read: {}", ok.len());
+        };
+        assert_eq!(name, "deckle-reads-2026-10-21-mini.kfx");
+        assert_eq!(p.wishes.cde_override, None, "the cover rule decides");
+        assert_eq!(p.wishes.xray, XRayMode::Auto);
+        assert_eq!(p.wishes.word_wise, Some(5));
+        assert!(fallback.starts_with(b"CONT"));
+
+        let q = deckle_core::queue::Queue::new(tmp.path().join("outbox"));
+        let entry = q.add_prepared_with(p, fallback, name, None).unwrap();
+        assert_eq!(
+            std::fs::read(entry.join("fallback.kfx")).unwrap(),
+            *fallback
+        );
+    }
 }

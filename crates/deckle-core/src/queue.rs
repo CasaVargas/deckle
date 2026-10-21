@@ -163,6 +163,17 @@ impl Queue {
     ) -> std::io::Result<PathBuf> {
         let fallback = fallback_kfx(prepared)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.add_prepared_with(prepared, &fallback, name, replaces)
+    }
+
+    /// [`Queue::add_prepared`] with its fallback already built ([`fallback_kfx`]).
+    pub fn add_prepared_with(
+        &self,
+        prepared: &Prepared,
+        fallback: &[u8],
+        name: &str,
+        replaces: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
         self.make_room(name, replaces)?;
         let stem = name.strip_suffix(".kfx").unwrap_or(name);
         // Written aside and renamed, so a `watch` never sees half an entry.

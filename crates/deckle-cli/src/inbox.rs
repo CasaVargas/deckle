@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Books in the Inbox (save-to-paper design §10): each one is converted (or, for a KFX,
-//! copied as it is) into the outbox, which `deckle digest push`/`watch` delivers.
-//! `deckle-digest` finds and moves the files; this is the conversion step it can't do.
+//! Books in the Inbox (save-to-paper design §10): each one is prepared (or, for a KFX,
+//! copied as it is) into the outbox, which `deckle digest push`/`watch` finishes for the Kindle
+//! that takes it and delivers. `deckle-digest` finds and moves the files; this is the
+//! conversion step it can't do.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use deckle_core::deliver::Target;
-use deckle_core::pipeline::{RunOptions, XRayMode, run};
+use deckle_core::deliver::{Target, device_filename};
+use deckle_core::pipeline::{RunOptions, XRayMode, prepare};
 use deckle_core::queue::Queue;
 use deckle_digest::inbox::{ScanReport, Skip, scan_with_books};
 use deckle_digest::reading::ReadingQueue;
 
-/// Turns a book into a `.kfx` inside the given folder; the real one is [`pipeline`].
-pub(crate) type Convert<'a> = dyn FnMut(&Path, &Path) -> Result<PathBuf, Skip> + 'a;
+/// Puts a book (not a KFX) into the outbox; the real one is [`pipeline`].
+pub(crate) type Convert<'a> = dyn FnMut(&Path, &Queue) -> Result<(), Skip> + 'a;
 
 /// Scans `dir`: articles into `reading`, books into `outbox` through `convert`.
 pub(crate) fn scan(
@@ -42,25 +43,26 @@ fn send_later(book: &Path, outbox: &Queue, convert: &mut Convert) -> Result<(), 
             .map_err(retry)?;
         return Ok(());
     }
-    let work = tempfile::tempdir().map_err(retry)?;
-    let kfx = convert(book, work.path())?;
-    let name = kfx
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "book.kfx".into());
-    outbox.add(&kfx, &name, None).map_err(retry)?;
-    Ok(())
+    convert(book, outbox)
 }
 
-/// The `deckle run` pipeline with its defaults (the cover rule decides PDOC or EBOK). X-Ray
-/// and Word Wise are off: the outbox carries only the `.kfx`, not sidecars. Kindle Previewer
-/// is looked for once, at the first book; without it books wait in the Inbox.
-pub(crate) fn pipeline() -> impl FnMut(&Path, &Path) -> Result<PathBuf, Skip> {
-    let mut previewer: Option<Result<PathBuf, String>> = None;
-    move |book, out| {
-        let pv = previewer
+/// The `deckle run` pipeline up to the KPF, queued as a prepared book named like `deckle run`
+/// names it. At push it gets the cover rule's choice for that Kindle, X-Ray and Word Wise at
+/// the default level (device-aware build §4.5). Kindle Previewer is looked for once, at the
+/// first book; without it books wait in the Inbox.
+pub(crate) fn pipeline() -> impl FnMut(&Path, &Queue) -> Result<(), Skip> {
+    pipeline_with(None)
+}
+
+/// [`pipeline`] with Kindle Previewer at `previewer` (else found as `deckle run` finds it).
+pub(crate) fn pipeline_with(
+    previewer: Option<PathBuf>,
+) -> impl FnMut(&Path, &Queue) -> Result<(), Skip> {
+    let mut located: Option<Result<PathBuf, String>> = None;
+    move |book, outbox| {
+        let pv = located
             .get_or_insert_with(|| {
-                deckle_core::previewer::locate(None)
+                deckle_core::previewer::locate(previewer.as_deref())
                     .map(|l| l.path)
                     .map_err(|e| e.to_string())
             })
@@ -73,21 +75,26 @@ pub(crate) fn pipeline() -> impl FnMut(&Path, &Path) -> Result<PathBuf, Skip> {
             verified_real_asin: false,
             asin: None,
             pages: None,
-            target: Target::Folder(out.to_path_buf()),
+            // `prepare` delivers nothing: the Kindle is known at push.
+            target: Target::Folder(std::env::temp_dir()),
             previewer: Some(pv),
             keep_work_dir: false,
-            xray: XRayMode::Off,
+            xray: XRayMode::Auto,
             llm: None,
             wikipedia: false,
-            word_wise: None,
+            word_wise: Some(Default::default()),
         };
-        let r = run(book, &opts);
-        match (r.error, r.delivered) {
-            (None, Some(kfx)) => Ok(kfx),
-            (e, _) => Err(Skip::Unreadable(
-                e.unwrap_or_else(|| "not converted".into()),
-            )),
-        }
+        let prepared = prepare(book, &opts, &mut |_| {})
+            .map_err(|r| Skip::Unreadable(r.error.unwrap_or_else(|| "not converted".into())))?;
+        let name = device_filename(&prepared.report.info);
+        outbox
+            .add_prepared(&prepared, &name, None)
+            .map_err(|e| match e.kind() {
+                // the book converted but can't build even for a folder
+                std::io::ErrorKind::InvalidData => Skip::Unreadable(e.to_string()),
+                _ => Skip::Retry(format!("outbox: {e}")),
+            })?;
+        Ok(())
     }
 }
 
@@ -119,16 +126,16 @@ mod tests {
         SystemTime::now() + Duration::from_secs(60)
     }
 
-    /// Stands in for Previewer: writes `<stem>.kfx` and counts its calls.
-    fn fake(calls: &mut Vec<PathBuf>) -> impl FnMut(&Path, &Path) -> Result<PathBuf, Skip> + '_ {
-        |book, out| {
+    /// Stands in for Previewer: queues `<stem>.kfx` and counts its calls.
+    fn fake(calls: &mut Vec<PathBuf>) -> impl FnMut(&Path, &Queue) -> Result<(), Skip> + '_ {
+        |book, outbox| {
             calls.push(book.to_path_buf());
-            let kfx = out.join(format!(
-                "{}.kfx",
-                book.file_stem().unwrap().to_string_lossy()
-            ));
+            let stem = book.file_stem().unwrap().to_string_lossy().into_owned();
+            let work = tempfile::tempdir().unwrap();
+            let kfx = work.path().join("book.kfx");
             std::fs::write(&kfx, b"converted").unwrap();
-            Ok(kfx)
+            outbox.add(&kfx, &format!("{stem}.kfx"), None).unwrap();
+            Ok(())
         }
     }
 
@@ -183,7 +190,7 @@ mod tests {
     fn a_failed_conversion_goes_to_unreadable_with_the_reason() {
         let s = setup();
         std::fs::write(s.inbox.join("Broken.epub"), b"junk").unwrap();
-        let mut failing = |_: &Path, _: &Path| -> Result<PathBuf, Skip> {
+        let mut failing = |_: &Path, _: &Queue| -> Result<(), Skip> {
             Err(Skip::Unreadable("inspect: not a zip".into()))
         };
         let r = scan(&s.inbox, &s.reading, &s.outbox, later(), &mut failing);
@@ -198,7 +205,7 @@ mod tests {
     fn without_previewer_a_book_waits_in_the_inbox() {
         let s = setup();
         std::fs::write(s.inbox.join("Later.epub"), b"epub").unwrap();
-        let mut missing = |_: &Path, _: &Path| -> Result<PathBuf, Skip> {
+        let mut missing = |_: &Path, _: &Queue| -> Result<(), Skip> {
             Err(Skip::Retry("Kindle Previewer not found".into()))
         };
         let r = scan(&s.inbox, &s.reading, &s.outbox, later(), &mut missing);
@@ -254,6 +261,47 @@ mod tests {
         assert!(s.inbox.join("Saved/link.url").exists());
         assert_eq!(s.reading.load()[0].url.as_deref(), Some("https://ex.com/a"));
         assert_eq!(names(&s.outbox), ["Book.kfx"]);
+    }
+
+    /// Device-aware build §4.5: an Inbox book is queued up to the KPF, asking for X-Ray and
+    /// Word Wise, and finished at push for the Kindle that takes it.
+    #[test]
+    #[cfg(unix)]
+    fn a_book_is_queued_prepared_asking_for_xray_and_word_wise() {
+        let s = setup();
+        std::fs::copy(
+            deckle_kfx::fixtures::path("deckle-mini.epub"),
+            s.inbox.join("Mini.epub"),
+        )
+        .unwrap();
+        let r = scan(
+            &s.inbox,
+            &s.reading,
+            &s.outbox,
+            later(),
+            &mut pipeline_with(Some(crate::tests::fake_previewer())),
+        );
+        assert_eq!(r.sent.len(), 1, "{:?} {:?}", r.unreadable, r.retry);
+        assert_eq!(
+            names(&s.outbox),
+            ["Testwright, Jane - Deckle Mini Fixture.book"]
+        );
+        let entry = &s.outbox.pending()[0];
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(entry.join("prepared.json")).unwrap()).unwrap();
+        assert_eq!(json["wishes"]["xray"], "auto");
+        assert_eq!(json["wishes"]["word_wise"], 5);
+        assert_eq!(json["wishes"]["cde_override"], serde_json::Value::Null);
+
+        let kindle = s._tmp.path().join("kindle");
+        let flushed = s
+            .outbox
+            .flush(&Target::Folder(kindle.clone()), None)
+            .unwrap();
+        assert_eq!(
+            flushed.delivered,
+            [kindle.join("Testwright, Jane - Deckle Mini Fixture.kfx")]
+        );
     }
 
     #[test]
