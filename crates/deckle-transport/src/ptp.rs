@@ -165,6 +165,67 @@ pub fn decode_u32_array(bytes: &[u8]) -> Result<Vec<u32>, PtpError> {
         .collect())
 }
 
+/// The strings of the DeviceInfo dataset (GetDeviceInfo, PIMA 15740 §5.5.1); the operation,
+/// event, property and format arrays before them are skipped.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceInfo {
+    pub manufacturer: String,
+    pub model: String,
+    /// The firmware version on a Kindle.
+    pub device_version: String,
+    pub serial_number: String,
+}
+
+impl DeviceInfo {
+    /// A minimal dataset (no supported operations); the device side, for tests.
+    pub fn encode(&self) -> Vec<u8> {
+        let mut o = Vec::new();
+        o.extend_from_slice(&100u16.to_le_bytes()); // standard version
+        o.extend_from_slice(&6u32.to_le_bytes()); // vendor extension id (MTP)
+        o.extend_from_slice(&100u16.to_le_bytes()); // vendor extension version
+        o.extend(encode_string(""));
+        o.extend_from_slice(&0u16.to_le_bytes()); // functional mode
+        for _ in 0..5 {
+            o.extend_from_slice(&0u32.to_le_bytes()); // empty u16 arrays
+        }
+        for s in [
+            &self.manufacturer,
+            &self.model,
+            &self.device_version,
+            &self.serial_number,
+        ] {
+            o.extend(encode_string(s));
+        }
+        o
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<DeviceInfo, PtpError> {
+        let mut at = 8; // standard version, vendor extension id, vendor extension version
+        if bytes.len() < at {
+            return Err(PtpError::Truncated);
+        }
+        let mut string = |at: &mut usize| -> Result<String, PtpError> {
+            let (s, n) = decode_string(bytes.get(*at..).ok_or(PtpError::Truncated)?)?;
+            *at += n;
+            Ok(s)
+        };
+        string(&mut at)?; // vendor extension description
+        at += 2; // functional mode
+        // operations, events, device properties, capture formats, playback formats
+        for _ in 0..5 {
+            let count = bytes.get(at..at + 4).ok_or(PtpError::Truncated)?;
+            let n = u32::from_le_bytes(count.try_into().unwrap()) as usize;
+            at += 4 + 2 * n;
+        }
+        Ok(DeviceInfo {
+            manufacturer: string(&mut at)?,
+            model: string(&mut at)?,
+            device_version: string(&mut at)?,
+            serial_number: string(&mut at)?,
+        })
+    }
+}
+
 /// The ObjectInfo dataset, always in the 32-bit ObjectCompressedSize layout. libmtp #436: the
 /// Kindle's nameless root folders fool libmtp into the 64-bit layout and the device then
 /// rejects every SendObjectInfo with 0xA806; we never switch layouts.
