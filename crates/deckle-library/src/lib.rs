@@ -10,6 +10,7 @@
 //! A book's identity is in its sidecar (the generated ASIN's seed), not its path.
 
 pub mod config;
+pub mod shelf;
 pub mod sidecar;
 
 use std::path::{Path, PathBuf};

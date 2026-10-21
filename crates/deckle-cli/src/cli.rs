@@ -197,6 +197,14 @@ pub enum Command {
         #[arg(long)]
         bookmarklet: bool,
     },
+    /// What's on a Kindle: list its books, or remove one.
+    Kindle {
+        /// `device` for the first connected Kindle, or a folder (an export).
+        #[arg(long, default_value = "device", global = true)]
+        to: String,
+        #[command(subcommand)]
+        action: KindleCommand,
+    },
     /// Your library: one folder per book, with a deckle.json beside it. Every book `run` sends
     /// is added once the library is set up.
     Library {
@@ -211,6 +219,19 @@ pub enum Command {
         config: Option<PathBuf>,
         #[command(subcommand)]
         action: DigestCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KindleCommand {
+    /// Every book in documents/: mode, X-Ray and Word Wise, size, and free space.
+    Books,
+    /// Remove a book (as `books` names it) with its .sdr folder.
+    Remove {
+        file: String,
+        /// Don't ask first.
+        #[arg(long)]
+        yes: bool,
     },
 }
 

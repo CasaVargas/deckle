@@ -271,6 +271,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         }
         cli::Command::Digest { config, action } => digest(json, config, action),
         cli::Command::Library { action } => library(json, action),
+        cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Save {
             targets,
             title,
@@ -440,6 +441,120 @@ fn add_to_library(source: &Path, mut report: RunReport, target: &Target) -> RunR
         report.warnings.push(deckle_library::auto_add_warning(&e));
     }
     report
+}
+
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
+fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, String> {
+    use deckle_core::deliver::Conn;
+    use deckle_core::inventory::{list_on, remove_on};
+    let target = resolve_target(to)?;
+    let device = deckle_library::device_ref(&target);
+    let library = deckle_library::Library::configured(&deckle_library::config::default_path())
+        .map(|(l, _)| l);
+    let mut conn = Conn::new(&target);
+    match action {
+        cli::KindleCommand::Books => {
+            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+            let inv = list_on(&mut conn, Some(&cache)).map_err(|e| e.to_string())?;
+            let shelf = deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key);
+            let rows: Vec<_> = shelf
+                .iter()
+                .map(|s| serde_json::json!({ "book": s.book, "library": s.library.as_ref().map(|b| &b.dir) }))
+                .collect();
+            emit(
+                json,
+                &serde_json::json!({ "device": device.name, "space": inv.space, "books": rows }),
+                || {
+                    let mut lines = vec![match inv.space {
+                        Some(s) => format!(
+                            "{}: {} free of {}",
+                            device.name,
+                            megabytes(s.free),
+                            megabytes(s.total)
+                        ),
+                        None => device.name.clone(),
+                    }];
+                    for s in &shelf {
+                        let b = &s.book;
+                        let title = match (&b.title, b.authors.first()) {
+                            (Some(t), Some(a)) => format!("{t} — {a}"),
+                            (Some(t), None) => t.clone(),
+                            _ => b.file.clone(),
+                        };
+                        let flags = [
+                            b.cde.clone().unwrap_or_else(|| b.format.to_uppercase()),
+                            if b.xray {
+                                "X-Ray".into()
+                            } else {
+                                String::new()
+                            },
+                            if b.word_wise {
+                                "Word Wise".into()
+                            } else {
+                                String::new()
+                            },
+                            if s.library.is_some() {
+                                "in library".into()
+                            } else {
+                                String::new()
+                            },
+                        ]
+                        .into_iter()
+                        .filter(|f| !f.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                        lines.push(format!(
+                            "{title}\n      {flags} · {} · {}",
+                            megabytes(b.size),
+                            b.file
+                        ));
+                    }
+                    if shelf.is_empty() {
+                        lines.push("no books".into());
+                    }
+                    lines.join("\n")
+                },
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::KindleCommand::Remove { file, yes } => {
+            if !yes {
+                use std::io::{BufRead, IsTerminal, Write};
+                if !std::io::stdin().is_terminal() {
+                    return Err("pass --yes to remove without a terminal to confirm in".into());
+                }
+                print!(
+                    "Remove {file} and its sidecars from {}? [y/N] ",
+                    device.name
+                );
+                std::io::stdout().flush().ok();
+                let mut answer = String::new();
+                std::io::stdin()
+                    .lock()
+                    .read_line(&mut answer)
+                    .map_err(|e| e.to_string())?;
+                if !answer.trim().eq_ignore_ascii_case("y") {
+                    println!("kept");
+                    return Ok(ExitCode::SUCCESS);
+                }
+            }
+            let removed = remove_on(&mut conn, &file).map_err(|e| e.to_string())?;
+            if let Some(lib) = &library {
+                lib.forget_send(&device.key, &file)?;
+            }
+            emit(json, &removed, || {
+                removed
+                    .iter()
+                    .map(|r| format!("removed {r}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
 }
 
 fn library(json: bool, action: cli::LibraryCommand) -> Result<ExitCode, String> {

@@ -335,3 +335,69 @@ fn auto_add_records_a_send_only_with_a_library_and_a_delivery() {
     assert!(lib.forget_send("ms:Kindle Paperwhite", &send.file).unwrap());
     assert!(lib.list()[0].sidecar.sends.is_empty());
 }
+
+#[test]
+fn a_kindles_books_match_the_library_by_asin_or_send_record() {
+    use deckle_core::inventory::DeviceBook;
+    use deckle_library::shelf::{shelve, source_cover};
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::new(tmp.path().join("Library"));
+    let mut book = lib
+        .add(&deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .unwrap()
+        .book;
+    let file = "Testwright, Jane - Deckle Mini Fixture.kfx";
+    let asin = book.sidecar.asin.clone();
+    lib.record_send(
+        &mut book,
+        deckle_library::SendRecord {
+            device: "mtp:G0X1".into(),
+            file: file.into(),
+            cde: Some("PDOC".into()),
+            asin: Some(asin.clone()),
+            xray: false,
+            word_wise: false,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let on_mtp = DeviceBook {
+        file: file.into(),
+        format: "kfx".into(),
+        ..Default::default()
+    };
+    let by_asin = DeviceBook {
+        file: "renamed.kfx".into(),
+        asin: Some(book.sidecar.asin.clone()),
+        cde: Some("EBOK".into()),
+        ..Default::default()
+    };
+    let other = DeviceBook {
+        file: "Store Book.kfx".into(),
+        asin: Some("B00STORE00".into()),
+        ..Default::default()
+    };
+    let got = shelve(vec![on_mtp, by_asin, other], Some(&lib), "mtp:G0X1");
+    assert_eq!(got[0].library.as_ref().unwrap().dir, book.dir);
+    assert_eq!(got[0].book.title.as_deref(), Some("Deckle Mini Fixture"));
+    assert_eq!(got[0].book.cde.as_deref(), Some("PDOC"));
+    assert!(got[0].book.from_deckle);
+    assert!(got[1].library.is_some());
+    assert_eq!(
+        got[1].book.cde.as_deref(),
+        Some("EBOK"),
+        "the device's own wins"
+    );
+    assert!(got[2].library.is_none() && !got[2].book.from_deckle);
+    // Another Kindle's record doesn't match by file name.
+    let elsewhere = DeviceBook {
+        file: file.into(),
+        ..Default::default()
+    };
+    assert!(
+        shelve(vec![elsewhere], Some(&lib), "ms:Kindle")[0]
+            .library
+            .is_none()
+    );
+    assert!(source_cover(&book).is_some());
+}
