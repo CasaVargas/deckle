@@ -30,6 +30,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -82,6 +83,7 @@ fn missing_previewer_fails_before_any_work() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -113,6 +115,7 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -147,6 +150,7 @@ fn a_word_document_runs_through_the_whole_pipeline() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&docx_fixture(), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -194,6 +198,7 @@ fn a_broken_word_document_fails_at_import() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&bad, &opts);
     let err = report.error.expect("error");
@@ -238,6 +243,7 @@ fn real_previewer_end_to_end() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -262,6 +268,7 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None);
@@ -291,6 +298,7 @@ fn run_with_progress_reports_each_stage_in_order() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -325,6 +333,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -389,6 +398,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -427,6 +437,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -468,6 +479,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(r.decision.unwrap().cde, CdeType::Pdoc);
@@ -498,6 +510,7 @@ fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
         llm: None,
         wikipedia: false,
         word_wise: Some(Default::default()),
+        replaces: Vec::new(),
     };
     let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(r.error, None, "{r:?}");
@@ -559,6 +572,7 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
             database: Some(db),
             cache_dir: tmp.path().join("cache"),
         }),
+        replaces: Vec::new(),
     };
     let mut seen = Vec::new();
     let r = deckle_core::pipeline::run_with_progress(
@@ -625,6 +639,7 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let epub = deckle_kfx::fixtures::path("deckle-mini.epub");
     let whole = run(&epub, &opts(&a));
@@ -660,4 +675,62 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
     assert_eq!(whole.pages, report.pages);
     assert_eq!(whole.warnings, report.warnings);
     assert_eq!(whole.info, report.info);
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_send_replaces_deckles_older_copy_under_another_name() {
+    use deckle_kfx::convert::{ConvertOptions, kpf_to_kfx};
+    let out = tempfile::tempdir().unwrap();
+    let epub = deckle_kfx::fixtures::path("deckle-mini.epub");
+    let info = deckle_core::inspect::inspect(&epub).unwrap();
+    let asin = deckle_kfx::metadata::generate_asin(&deckle_core::pipeline::asin_seed(&info));
+    // Deckle's copy from before a title fix, with its sidecars; and a store book.
+    let kpf = deckle_kfx::fixtures::path("deckle-mini.kpf");
+    let old = kpf_to_kfx(
+        &kpf,
+        &ConvertOptions {
+            asin: Some(asin.clone()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::write(out.path().join("Old Title.kfx"), &old.bytes).unwrap();
+    std::fs::create_dir_all(out.path().join("Old Title.sdr")).unwrap();
+    std::fs::write(out.path().join("Old Title.sdr/x.asc"), b"x").unwrap();
+    let store = std::fs::read(deckle_kfx::fixtures::path("deckle-mini-pdoc.golden.kfx")).unwrap();
+    std::fs::write(out.path().join("Store.kfx"), &store).unwrap();
+    // The library's record names one more (an MTP-style hint); one that's gone is ignored.
+    std::fs::write(out.path().join("Renamed by hand.kfx"), &store).unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+        replaces: vec!["Renamed by hand.kfx".into(), "Long gone.kfx".into()],
+    };
+    let report = run(&epub, &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    let mut replaced = report.replaced.clone();
+    replaced.sort();
+    assert_eq!(replaced, ["Old Title.kfx", "Renamed by hand.kfx"]);
+    let mut left: Vec<String> = std::fs::read_dir(out.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        ["Store.kfx", "Testwright, Jane - Deckle Mini Fixture.kfx"]
+    );
 }

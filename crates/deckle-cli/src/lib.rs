@@ -332,6 +332,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                         ..Default::default()
                     }
                 }),
+                replaces: Vec::new(),
             };
             let reports: Vec<_> = epubs
                 .iter()
@@ -344,7 +345,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .map(|r| match (&r.error, &r.delivered) {
                         (Some(e), _) => format!("FAIL  {}\n      {e}", r.input.display()),
                         (None, Some(d)) => format!(
-                            "OK    {}\n      -> {}{}{}{}{}{}",
+                            "OK    {}\n      -> {}{}{}{}{}{}{}",
                             r.input.display(),
                             d.display(),
                             r.pages
@@ -368,6 +369,10 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                                     w.hints, w.level, w.dictionary
                                 ))
                                 .unwrap_or_default(),
+                            r.replaced
+                                .iter()
+                                .map(|f| format!("\n      replaced {f}"))
+                                .collect::<String>(),
                             if r.warnings.is_empty() {
                                 String::new()
                             } else {
@@ -410,17 +415,11 @@ pub fn import_article(
 /// argument either way.
 fn run_input(input: &Path, opts: &RunOptions, net: &dyn deckle_digest::Net) -> RunReport {
     let arg = input.to_string_lossy();
-    let (source, report) = if !deckle_digest::web_book::is_article(&arg) {
-        (input.to_path_buf(), run(input, opts))
+    let source = if !deckle_digest::web_book::is_article(&arg) {
+        input.to_path_buf()
     } else {
         match import_article(&arg, net, &articles_dir()) {
-            Ok(book) => {
-                let report = RunReport {
-                    input: input.to_path_buf(),
-                    ..run(&book.path, opts)
-                };
-                (book.path, report)
-            }
+            Ok(book) => book.path,
             Err(e) => {
                 return RunReport {
                     input: input.to_path_buf(),
@@ -429,6 +428,17 @@ fn run_input(input: &Path, opts: &RunOptions, net: &dyn deckle_digest::Net) -> R
                 };
             }
         }
+    };
+    // The copy the library last put on this Kindle under another name goes (§4 of the
+    // Kindle-updates design).
+    let config = deckle_library::config::default_path();
+    let opts = RunOptions {
+        replaces: deckle_library::previous_copies(&config, &source, &opts.target),
+        ..opts.clone()
+    };
+    let report = RunReport {
+        input: input.to_path_buf(),
+        ..run(&source, &opts)
     };
     add_to_library(&source, report, &opts.target)
 }
@@ -1201,6 +1211,7 @@ fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Pa
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     }
 }
 

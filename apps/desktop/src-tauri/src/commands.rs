@@ -119,6 +119,9 @@ pub struct ProgressEvent {
     pub matched: Option<String>,
     #[serde(default)]
     pub xray: Option<XRaySummary>,
+    /// Older copies of the book removed from the Kindle (Kindle-updates design §4).
+    #[serde(default)]
+    pub replaced: Vec<String>,
     #[serde(default)]
     pub word_wise: Option<WordWiseSummary>,
 }
@@ -539,6 +542,7 @@ fn send_kfx(b: &RunRequest, target: &Target) -> ProgressEvent {
         matched: None,
         xray: None,
         word_wise: None,
+        replaced: Vec::new(),
     }
 }
 
@@ -649,6 +653,7 @@ pub fn run_books_with(
                     matched: None,
                     xray: None,
                     word_wise: None,
+                    replaced: Vec::new(),
                     error: Some(e.clone()),
                 });
             }
@@ -672,11 +677,13 @@ pub fn run_books_with(
                 matched: None,
                 xray: None,
                 word_wise: None,
+                replaced: Vec::new(),
             });
             emit(send_kfx(b, &target));
             continue;
         }
         let override_str = effective_override(b.cde.as_deref(), device_override, settings);
+        let library = deckle_library::config::default_path();
         let opts = RunOptions {
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
             cde_override: override_str.map(cde_from),
@@ -702,6 +709,8 @@ pub fn run_books_with(
                 level: settings.word_wise_level.clamp(1, 5),
                 ..Default::default()
             }),
+            // Kindle-updates design §4: the library's older copy under another name goes.
+            replaces: deckle_library::previous_copies(&library, Path::new(&b.path), &target),
         };
         let id = b.id.clone();
         let report = run_with_progress(Path::new(&b.path), &opts, &mut |stage| {
@@ -719,6 +728,7 @@ pub fn run_books_with(
                 matched: None,
                 xray: None,
                 word_wise: None,
+                replaced: Vec::new(),
             })
         });
         if report.firmware.is_some() {
@@ -726,12 +736,7 @@ pub fn run_books_with(
         }
         let mut report = report;
         // Every book sent goes into the library, when there is one (library design §3).
-        if let Err(e) = deckle_library::auto_add(
-            &deckle_library::config::default_path(),
-            Path::new(&b.path),
-            &report,
-            &target,
-        ) {
+        if let Err(e) = deckle_library::auto_add(&library, Path::new(&b.path), &report, &target) {
             report.warnings.push(deckle_library::auto_add_warning(&e));
         }
         emit(ProgressEvent {
@@ -752,6 +757,7 @@ pub fn run_books_with(
             matched: report.matched,
             xray: report.xray,
             word_wise: report.word_wise,
+            replaced: report.replaced,
         });
     }
     firmware

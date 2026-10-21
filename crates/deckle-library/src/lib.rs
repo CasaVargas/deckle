@@ -10,6 +10,7 @@
 //! A book's identity is in its sidecar (the generated ASIN's seed), not its path.
 
 pub mod config;
+pub mod freshness;
 pub mod shelf;
 pub mod sidecar;
 
@@ -542,6 +543,9 @@ pub fn send_record(report: &RunReport, device: &DeviceRef) -> Option<SendRecord>
         asin: report.asin.clone(),
         xray: report.xray.is_some(),
         word_wise: report.word_wise.is_some(),
+        stamped: true,
+        xray_engine: report.xray.as_ref().map(|x| x.engine),
+        wordwise_db: report.word_wise.as_ref().map(|w| w.database.clone()),
         extra: Default::default(),
     })
 }
@@ -566,6 +570,26 @@ pub fn auto_add(
     let mut book = library.add(source)?.book;
     library.record_send(&mut book, send)?;
     Ok(Some(book))
+}
+
+/// Where the library last put this book on `target`: the file a new send makes obsolete
+/// (Kindle-updates design §4). Empty without a library, or when it was never sent there.
+pub fn previous_copies(config: &Path, source: &Path, target: &Target) -> Vec<String> {
+    let Some((library, _)) = Library::configured(config) else {
+        return Vec::new();
+    };
+    let Ok(info) = book_info(source) else {
+        return Vec::new();
+    };
+    let id = String::from_utf8_lossy(&asin_seed(&info)).into_owned();
+    let device = device_ref(target);
+    library
+        .list()
+        .into_iter()
+        .find(|b| b.sidecar.id == id)
+        .and_then(|b| b.sidecar.send_to(&device.key).map(|s| s.file.clone()))
+        .into_iter()
+        .collect()
 }
 
 /// A note for the run's warnings when adding to the library failed (the send still worked).

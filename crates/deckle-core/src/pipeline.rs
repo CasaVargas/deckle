@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compat::{self, SendUse};
 use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
-use crate::deliver::{Conn, DeliverOptions, Target, deliver_named_on, deliver_on};
+use crate::deliver::{Conn, DeliverError, DeliverOptions, Target, deliver_named_on, deliver_on};
 use crate::devices::TransportKind;
 use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{MatchOutcome, match_book};
@@ -46,6 +46,9 @@ pub struct RunOptions {
     pub wikipedia: bool,
     /// Word Wise sidecar on EBOK books; `None` = off.
     pub word_wise: Option<WordWiseOptions>,
+    /// Older copies of this book under other names in `documents/` (the library's send
+    /// records); removed after delivery, on the same connection (Kindle-updates design §4).
+    pub replaces: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,6 +81,8 @@ pub struct RunReport {
     /// The target Kindle's firmware, when known (`system/version.txt`, or read over MTP).
     pub firmware: Option<String>,
     pub warnings: Vec<String>,
+    /// Older copies of the book removed after delivery (Kindle-updates design §4).
+    pub replaced: Vec<String>,
     /// `"<stage>: <message>"` of the stage that failed.
     pub error: Option<String>,
     pub stage_ms: BTreeMap<&'static str, u64>,
@@ -341,6 +346,43 @@ pub fn finish(
     )
 }
 
+/// Removes Deckle's older copies of this book under other names, now that the new one is
+/// written (Kindle-updates design §4): the files `named` (the library's records) and, on mass
+/// storage and folders, other KFX with the same generated ASIN. Store books are never touched.
+fn replace_older_copies(
+    conn: &mut Conn<'_>,
+    report: &mut RunReport,
+    asin: &str,
+    named: &[String],
+    delivered: &Path,
+) {
+    let new_name = delivered
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut old: Vec<String> = named.iter().filter(|n| **n != new_name).cloned().collect();
+    if crate::inventory::is_generated_asin(asin) && !matches!(conn.target, Target::Mtp(_)) {
+        let cache = crate::wordwise::default_cache_dir().join("inventory");
+        if let Ok(inv) = crate::inventory::list_on(conn, Some(&cache)) {
+            for b in inv.books {
+                if b.asin.as_deref() == Some(asin) && b.file != new_name && !old.contains(&b.file) {
+                    old.push(b.file);
+                }
+            }
+        }
+    }
+    for file in old {
+        match crate::inventory::remove_on(conn, &file) {
+            Ok(_) => report.replaced.push(file),
+            // Already gone (removed by hand since that send).
+            Err(DeliverError::Refused(_)) => {}
+            Err(e) => report
+                .warnings
+                .push(format!("the older copy {file} is still on the Kindle: {e}")),
+        }
+    }
+}
+
 /// [`finish`] with the fetcher for the Word Wise database (a push passes one that refuses).
 pub fn finish_with(
     prepared: &Prepared,
@@ -546,6 +588,7 @@ pub fn finish_with(
         },
         report
     );
+    replace_older_copies(conn, &mut report, &asin, &opts.replaces, &delivered);
     report.delivered = Some(delivered);
     // Known issues for this Kindle (design §6): warnings only, the book is already on it.
     let used = SendUse {
@@ -585,6 +628,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
         llm: None,
         wikipedia: false,
         word_wise: None,
+        replaces: Vec::new(),
     };
     let r = finish(prepared, &mut Conn::new(&target), &opts, &mut |_| {});
     match (r.error, r.delivered) {

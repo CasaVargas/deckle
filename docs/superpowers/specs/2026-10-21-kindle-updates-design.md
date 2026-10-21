@@ -73,10 +73,11 @@ own.
 
 ## 4. Replacing Deckle's older copy at send time
 
-- `DeliverOptions.replaces: Vec<String>` names files under `documents/` that this send makes
-  obsolete. Delivery removes them, with their `.sdr`, thumbnail and restore copy, after the new
-  file and its sidecars are written, over the same connection. They're reported as
-  `RunReport.replaced`.
+- `RunOptions.replaces: Vec<String>` names files under `documents/` that this send makes
+  obsolete. Right after delivery, over the same connection (a second MTP session would reset the
+  Kindle), the pipeline removes them with `inventory::remove_on`: the file, its `.sdr`, thumbnail
+  and restore copy. They're reported as `RunReport.replaced`. A file that's already gone is
+  skipped. A file that can't be removed is a warning; the new copy is already on the Kindle.
 - **Who decides:**
   - On mass storage and folders, the pipeline finds other `documents/` KFX files with the same
     `…DECK` ASIN, using the inventory's cached details.
@@ -109,8 +110,8 @@ own.
   - a record that says X-Ray shipped, with no X-Ray file on the device, is missing X-Ray.
 - Send records written after the change carry the stamps, and an old sidecar still loads and
   keeps its fields.
-- Delivery with `replaces` (folder and fake MTP) removes the old file, its `.sdr`, thumbnail
-  and restore copy only after the new one is written, and leaves a store book alone.
+- A send with `replaces` removes the named old file and its `.sdr` after the new one is
+  written, skips names already gone, and leaves a store book alone.
 - The pipeline on a temp mass-storage Kindle finds a `…DECK` copy under an old name and
   replaces it.
 - CLI `library reprocess --dry-run` changes nothing; `--yes` with the fake Previewer to a folder
