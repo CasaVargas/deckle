@@ -188,7 +188,9 @@ long_read_words = 4000           # longer pieces become their own book
 - **Long reads:**
   - over 4,000 words they become separate books;
   - no length cap;
-  - converted with the normal cover rule (EBOK with Word Wise where allowed);
+  - converted with the normal cover rule. They are built for the outbox, where the Kindle
+    is unknown, so the rule ships PDOC with no X-Ray or Word Wise (as built: EBOK with
+    Word Wise needs a build for the device at push time, an open follow-up);
   - named `deckle-reads-`, never pruned.
 - **When an item counts as printed:** only `digest run` uses up the queue, and a same-day
   rebuild reprints the same items. `build` is a preview.
@@ -230,8 +232,8 @@ one Inbox, and the file's extension decides what happens to it.
   `deckle-cli` supplies the step that converts a book and adds it to the outbox. Tests use
   a fake converter, so they don't need Previewer.
 - **Conversion options.** The cover rule decides PDOC or EBOK, as with `deckle run`. X-Ray
-  and Word Wise are off, because the outbox carries only the `.kfx` and would drop their
-  sidecar files. There's no Amazon match, so the Inbox stays offline.
+  and Word Wise are off: a book built for the outbox has no known Kindle, so the cover
+  rule ships it as PDOC, which gets neither. There's no Amazon match, so the Inbox stays offline.
 - **Outbox name.** A converted book keeps the name the pipeline gives it, and a KFX keeps
   its own file name (with the extension lower-cased, because the outbox only lists `*.kfx`).
   A second book with the same name replaces the first while it waits.

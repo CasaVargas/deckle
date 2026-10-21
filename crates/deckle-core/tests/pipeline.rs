@@ -478,6 +478,35 @@ fn folder_target_is_pdoc_and_an_override_wins() {
     assert!(d.reason.contains("override"));
 }
 
+/// A long read in `deckle digest run` is built into a folder and queued: the device is
+/// unknown, so it ships as PDOC and X-Ray and Word Wise are never built (no `.sdr` to lose).
+#[test]
+#[cfg(unix)]
+fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        cde_override: None,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
+        word_wise: Some(Default::default()),
+    };
+    let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
+    assert_eq!(r.error, None, "{r:?}");
+    assert_eq!(r.decision.as_ref().unwrap().cde, CdeType::Pdoc);
+    assert!(r.xray.is_none() && r.word_wise.is_none(), "{r:?}");
+    let kfx = r.delivered.unwrap();
+    assert!(!kfx.with_extension("sdr").exists());
+}
+
 #[test]
 fn a_failed_xray_is_a_warning_not_a_failed_run() {
     use deckle_core::deliver::DeliverOptions;

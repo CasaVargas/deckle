@@ -511,11 +511,11 @@ fn digest(
                 let mut ok: Vec<(String, PathBuf)> = Vec::new();
                 let mut failed: Vec<(String, String)> = Vec::new();
                 for (id, epub) in book_ids.zip(&built.long_reads) {
+                    // Built into a folder for the outbox, so the device is unknown: the cover
+                    // rule ships PDOC and withholds X-Ray and Word Wise. Asking for them would
+                    // build nothing; they need a build for the device at push time.
                     let lr_opts = RunOptions {
-                        cde_type: deckle_kfx::convert::CdeType::Pdoc,
                         cde_override: None,
-                        xray: deckle_core::pipeline::XRayMode::Auto,
-                        word_wise: Some(Default::default()),
                         ..opts.clone()
                     };
                     let lr = run(epub, &lr_opts);
