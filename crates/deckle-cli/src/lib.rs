@@ -2,6 +2,7 @@
 //! The `deckle` command line, as a library so the desktop app can run it too.
 
 mod cli;
+mod inbox;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -842,15 +843,29 @@ fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::Reading
     )
 }
 
-/// Queues what was dropped in the Inbox folder; says so when it found anything.
+/// Queues what was dropped in the Inbox folder: articles for the paper, books for the
+/// outbox (design §10). Says so when it found anything.
 fn scan_inbox(cfg: &deckle_digest::Config) {
     let dir = deckle_digest::inbox::expand_home(&cfg.reading.inbox);
-    let r = deckle_digest::inbox::scan(&dir, &reading_queue(cfg), std::time::SystemTime::now());
+    let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+    let r = inbox::scan(
+        &dir,
+        &reading_queue(cfg),
+        &outbox,
+        std::time::SystemTime::now(),
+        &mut inbox::pipeline(),
+    );
     if r.queued > 0 {
         eprintln!(
             "inbox: saved {} article(s) from {}",
             r.queued,
             dir.display()
+        );
+    }
+    if !r.sent.is_empty() {
+        eprintln!(
+            "inbox: {} book(s) in the outbox, sent when a Kindle connects",
+            r.sent.len()
         );
     }
     for (file, why) in &r.unreadable {
