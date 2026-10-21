@@ -155,12 +155,19 @@ saves from your phone. The queue is a plain file, `reading.jsonl`, next to `dige
 The same Inbox takes books: drop an `.epub`, `.docx` or `.kfx` there and it's sent later. The
 file's extension decides: `.epub`, `.docx` and `.kfx` are books, and `.webloc`, `.url`, `.txt`
 and `.html` are articles. Each book is converted like `deckle run` would (a KFX is copied as it
-is) and waits in the outbox with the paper. It moves to `Inbox/Sent`, or to `Inbox/Unreadable`
+is) and waits in the outbox with the paper; see below for how it's finished on push. It moves to `Inbox/Sent`, or to `Inbox/Unreadable`
 with a `.txt` saying why it couldn't be converted. Books need Kindle Previewer; without it they
 stay in the Inbox until it's installed.
 
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
+
+Long reads and Inbox books are finished for the Kindle that takes them: the slow Previewer step
+runs when they're queued, and the push picks PDOC or EBOK for that Kindle (and the per-Kindle
+mode you set in the app), adding X-Ray and Word Wise where it ships as EBOK. That step stays
+offline: basic X-Ray, no Amazon match, and Word Wise only once its database has been downloaded
+by a `deckle run`. If finishing fails, the book still goes over as a personal document with its
+cover. The paper itself is always PDOC.
 
 What `watch` does on plug-in is set per Kindle in `digest.toml`: `[sync]` holds the defaults
 (`push = true`, `prune = true`), and `[sync.devices."<sync id>"]` overrides them for one device,

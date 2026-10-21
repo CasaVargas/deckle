@@ -8,14 +8,15 @@ use std::sync::Mutex;
 use base64::Engine;
 use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, decide, manual_asin};
 use deckle_core::deliver::{Target, detect_mass_storage};
-use deckle_core::devices::{DeviceProfile, DeviceRegistry, Seen, TransportKind, seen_mass_storage};
+use deckle_core::devices::{
+    DeviceProfile, DeviceRegistry, TransportKind, seen_mass_storage, seen_mtp,
+};
 use deckle_core::inspect::inspect;
 use deckle_core::pipeline::{RunOptions, XRayMode, run_with_progress};
 use deckle_core::previewer;
 use deckle_core::wordwise::{WordWiseOptions, WordWiseSummary};
 use deckle_core::xray::{LlmConfig, XRaySummary};
 use deckle_kfx::convert::CdeType;
-use deckle_transport::usb::MtpInfo;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -167,23 +168,6 @@ fn compat_messages(p: &DeviceProfile) -> Vec<String> {
         .into_iter()
         .map(|w| w.message)
         .collect()
-}
-
-fn seen_mtp(m: &MtpInfo) -> Seen {
-    let serial = m
-        .serial
-        .clone()
-        .unwrap_or_else(|| format!("{}:{}", m.bus, m.address));
-    Seen {
-        key: format!("mtp:{serial}"),
-        root: None,
-        model_hint: m.product.clone().unwrap_or_else(|| "Kindle (MTP)".into()),
-        transport: TransportKind::Mtp,
-        thumbnails_writable: false,
-        serial: Some(serial),
-        // Read on the send's own session, never by the device poll (see the compat spec).
-        firmware: None,
-    }
 }
 
 /// All connected Kindles, recorded in the device registry.
@@ -952,6 +936,7 @@ pub fn devices_file(app: &AppHandle) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deckle_transport::usb::MtpInfo;
 
     #[test]
     fn an_mtp_kindle_profile_carries_its_known_issues_and_a_recorded_firmware() {

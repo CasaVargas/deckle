@@ -583,3 +583,81 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
     assert!(out.join("system/kll/kll.en.zh.klld").exists());
     assert!(r.xray.is_none());
 }
+
+/// `kfx` with its container id and `kfxgen_payload_sha1` value zeroed.
+#[cfg(unix)]
+fn without_container_id(mut kfx: Vec<u8>) -> Vec<u8> {
+    let id = deckle_kfx::container::read_kfx(&kfx).unwrap().container_id;
+    let sha_key = b"kfxgen_payload_sha1\",value:\"";
+    let mut blank = |needle: &[u8], skip: usize, len: usize| {
+        let mut i = 0;
+        while let Some(at) = kfx[i..].windows(needle.len()).position(|w| w == needle) {
+            let from = i + at + skip;
+            kfx[from..from + len].fill(b'0');
+            i = from + len;
+        }
+    };
+    blank(id.as_bytes(), 0, id.len());
+    blank(sha_key, sha_key.len(), 40);
+    kfx
+}
+
+/// Device-aware build §4.1: `run` is `finish(prepare(..))`, so splitting at the KPF changes
+/// nothing a folder (or a Kindle) receives.
+#[test]
+#[cfg(unix)]
+fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
+    use deckle_core::deliver::Conn;
+    use deckle_core::pipeline::{finish, prepare};
+    let tmp = tempfile::tempdir().unwrap();
+    let (a, b) = (tmp.path().join("run"), tmp.path().join("split"));
+    let opts = |dir: &std::path::Path| RunOptions {
+        cde_type: CdeType::Pdoc,
+        cde_override: None,
+        asin: None,
+        pages: Some(None),
+        target: Target::Folder(dir.to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+    };
+    let epub = deckle_kfx::fixtures::path("deckle-mini.epub");
+    let whole = run(&epub, &opts(&a));
+    assert_eq!(whole.error, None, "{whole:?}");
+
+    let split_opts = opts(&b);
+    let mut stages = Vec::new();
+    let prepared = prepare(&epub, &split_opts, &mut |s| stages.push(s)).expect("prepared");
+    assert_eq!(stages, ["inspect", "normalize", "convert"]);
+    assert!(prepared.kpf.exists());
+    let report = finish(
+        &prepared,
+        &mut Conn::new(&split_opts.target),
+        &split_opts,
+        &mut |s| stages.push(s),
+    );
+    assert_eq!(report.error, None, "{report:?}");
+    assert_eq!(
+        stages,
+        ["inspect", "normalize", "convert", "repackage", "deliver"]
+    );
+    let (x, y) = (whole.delivered.unwrap(), report.delivered.unwrap());
+    assert_eq!(x.file_name(), y.file_name());
+    // Every build draws a fresh random container id, and the payload digest covers it (two
+    // `run`s differ there too): blank both, then every other byte must match.
+    let (x, y) = (std::fs::read(&x).unwrap(), std::fs::read(&y).unwrap());
+    assert_eq!(x.len(), y.len());
+    assert!(
+        without_container_id(x) == without_container_id(y),
+        "the split build differs from run's"
+    );
+    assert_eq!(whole.asin, report.asin);
+    assert_eq!(whole.pages, report.pages);
+    assert_eq!(whole.warnings, report.warnings);
+    assert_eq!(whole.info, report.info);
+}
