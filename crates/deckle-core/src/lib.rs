@@ -12,6 +12,7 @@ pub mod normalize;
 pub mod pipeline;
 pub mod previewer;
 pub mod queue;
+pub mod sync;
 pub mod thumbnail;
 pub mod wordwise;
 pub mod xray;

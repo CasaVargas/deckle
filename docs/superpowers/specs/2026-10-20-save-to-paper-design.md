@@ -198,3 +198,40 @@ long_read_words = 4000           # longer pieces become their own book
 - **Missing `reading` section:** when saves are pending it's inserted first, without
   rewriting your config.
 - **Cover lead:** news keeps the lead; saved articles get grid spots.
+
+## 10. Books in the Inbox: send later (#45)
+
+The Inbox also takes books, so a book dropped there (or saved into the iCloud Drive folder
+from a phone) goes to the Kindle the next time one is plugged in. Owner's call, 2026-10-20:
+one Inbox, and the file's extension decides what happens to it.
+
+- **Books:** `.epub`, `.docx` and `.kfx`. **Articles:** `.webloc`, `.url`, `.txt`, `.html`
+  and `.htm`, handled as in §4, unchanged. Any other file goes to `Unreadable/` as before.
+- **Conversion:** EPUB and DOCX books go through the normal `deckle run` pipeline (import,
+  normalize, Previewer, cover rule). KFX files are copied as they are.
+- **The "Send later" queue is the outbox** (`deckle-core` `queue.rs`). It's the same queue
+  the edition waits in, delivered by `deckle digest push` and by `watch` when a Kindle
+  connects. Scanning the Inbox never delivers anything itself.
+- **After a scan:** a book that's in the outbox moves to `Inbox/Sent/`. A book that fails
+  conversion moves to `Inbox/Unreadable/`, with a `<name>.txt` beside it saying why, the
+  same way unreadable articles are reported.
+- **Waiting:** a book modified less than 5 s ago waits for the next scan, as articles do.
+  If Kindle Previewer isn't installed, an EPUB or DOCX book stays in the Inbox and is
+  retried on the next scan, because that's a problem with the machine, not the book.
+- **When:** books are handled in every Inbox scan, so at the start of `digest build`/`run`
+  and on every tick of `digest watch`.
+- **Not in v1:** the macOS share-sheet extension (a later follow-up), and MOBI/AZW3.
+
+**Calls made while building (owner to check)**
+
+- **Where the routing lives.** `deckle-digest` doesn't depend on `deckle-core`, and making
+  it do so would pull the whole conversion pipeline into the newspaper crate. So `inbox.rs`
+  only recognises book files and moves them (`Sent/`, `Unreadable/`, or left for later).
+  `deckle-cli` supplies the step that converts a book and adds it to the outbox. Tests use
+  a fake converter, so they don't need Previewer.
+- **Conversion options.** The cover rule decides PDOC or EBOK, as with `deckle run`. X-Ray
+  and Word Wise are off, because the outbox carries only the `.kfx` and would drop their
+  sidecar files. There's no Amazon match, so the Inbox stays offline.
+- **Outbox name.** A converted book keeps the name the pipeline gives it, and a KFX keeps
+  its own file name (with the extension lower-cased, because the outbox only lists `*.kfx`).
+  A second book with the same name replaces the first while it waits.
