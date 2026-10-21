@@ -170,13 +170,13 @@ pub fn scan_with_books(
             }
             continue;
         }
-        let result =
-            match ext.as_str() {
-                "html" | "htm" => queue
-                    .add_page(&file, "inbox", Utc::now())
-                    .map(|a| usize::from(matches!(a, Added::New(_))))
-                    .map_err(Skip::Retry),
-                "webloc" | "url" | "txt" => urls_in(&file, &ext)
+        let result = match ext.as_str() {
+            "html" | "htm" => queue
+                .add_page(&file, "inbox", Utc::now())
+                .map(|a| usize::from(matches!(a, Added::New(_))))
+                .map_err(Skip::Retry),
+            "webloc" | "url" | "txt" => {
+                urls_in(&file, &ext)
                     .map_err(Skip::Unreadable)
                     .and_then(|urls| {
                         let mut n = 0;
@@ -187,12 +187,13 @@ pub fn scan_with_books(
                             n += usize::from(matches!(added, Added::New(_)));
                         }
                         Ok(n)
-                    }),
-                _ => Err(Skip::Unreadable(
-                    "Deckle reads .webloc, .url, .txt and .html files, and .epub, .docx and .kfx books"
-                        .into(),
-                )),
-            };
+                    })
+            }
+            _ => Err(Skip::Unreadable(
+                "Deckle reads .webloc, .url, .txt and .html files, and .epub, .docx and .kfx books"
+                    .into(),
+            )),
+        };
         match result {
             Ok(n) => {
                 report.queued += n;
