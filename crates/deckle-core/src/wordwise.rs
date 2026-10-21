@@ -70,6 +70,12 @@ pub fn http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(300)))
         .user_agent("Deckle/0.1 (+https://github.com/prjoni99/deckle)")
+        // The OS certificate store, so TLS-inspecting proxies (Zscaler, …) the machine trusts work.
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
+        )
         .build()
         .new_agent();
     let mut resp = agent.get(url).call().map_err(|e| e.to_string())?;

@@ -56,6 +56,12 @@ pub fn http_get(url: &str) -> Result<String, String> {
         )
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(20)))
+        // The OS certificate store, so TLS-inspecting proxies (Zscaler, …) the machine trusts work.
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
+        )
         .build()
         .call()
         .map_err(|e| e.to_string())?;
