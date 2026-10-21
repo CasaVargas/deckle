@@ -1,8 +1,13 @@
 name: ci
+# Branch pushes are covered by their pull request; a push to main checks the merged result.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+# A new push to the same branch or PR cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   rust:
     strategy:
