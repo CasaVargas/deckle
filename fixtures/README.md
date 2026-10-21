@@ -30,6 +30,19 @@ Tests inject those values so container output can be compared byte-for-byte.
 |---|---|---|
 | `deckle-mini.docx` | Word document: Title, Heading 1–4, bold/italic, nested bullet list, numbered list, header-row table, two PNGs in `word/media`, three footnotes, core properties | `python3 -I tools/ref/make_mini_docx.py fixtures/docx/deckle-mini.docx` |
 
+## `notes/`
+
+Pop-up notes fixtures (#31), all made by
+`python3 -I tools/ref/make_notes_epubs.py fixtures/notes` (deterministic zips).
+
+| File | What |
+|---|---|
+| `semantic.epub` | EPUB 3 with `epub:type`/ARIA-marked noterefs and notes that aren't asides yet (a `div`, a `p`, an `li` in an `ol start="2"`), plus one pair already in the pop-up form |
+| `calibre.epub` | EPUB 2, no epub namespace: `<a class="footnote-link" href="#fn1"><sup>1</sup></a>` with `↩` backlinks; a note cited twice; a ref whose id is on its wrapping span |
+| `indesign.epub` | Refs in two chapters to an InDesign-style endnotes chapter whose anchors link back with the same digit; a heading other links point at; one one-way link to an appendix paragraph |
+| `pandoc.epub` | `footnote-ref` links to an `ol` under `section.footnotes` with `↩︎` backlinks |
+| `trap.epub` | Exponents, a numbered list and digit links that aren't notes: must come out byte-identical |
+
 ## Not in the repo
 
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB
