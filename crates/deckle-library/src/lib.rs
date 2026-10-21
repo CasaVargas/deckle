@@ -592,6 +592,22 @@ pub fn previous_copies(config: &Path, source: &Path, target: &Target) -> Vec<Str
         .collect()
 }
 
+/// Records a finished run's send on the library book for `source` (adding it when needed),
+/// whatever `auto_add` says: an update of a library book always updates its record.
+pub fn record_run(
+    library: &Library,
+    source: &Path,
+    report: &RunReport,
+    target: &Target,
+) -> Result<Option<Book>, String> {
+    let Some(send) = send_record(report, &device_ref(target)) else {
+        return Ok(None);
+    };
+    let mut book = library.add(source)?.book;
+    library.record_send(&mut book, send)?;
+    Ok(Some(book))
+}
+
 /// A note for the run's warnings when adding to the library failed (the send still worked).
 pub fn auto_add_warning(e: &str) -> String {
     format!("not added to the library: {e}")

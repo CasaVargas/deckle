@@ -4,6 +4,7 @@
 
 use deckle_core::inventory::DeviceBook;
 
+use crate::freshness::{Current, Reason, freshness};
 use crate::{Book, Library};
 
 /// A book on the Kindle and, when the library has it, the library's copy.
@@ -11,6 +12,31 @@ use crate::{Book, Library};
 pub struct Shelved {
     pub book: DeviceBook,
     pub library: Option<Book>,
+    /// Why Deckle could build it better now (Kindle-updates design §2); empty: current, or
+    /// not in the library.
+    pub updates: Vec<Reason>,
+    /// Another book on this Kindle has the same ASIN, or the same title and first author.
+    pub duplicate: bool,
+}
+
+/// What makes two books on a Kindle the same: the ASIN, else title and first author.
+fn identity(b: &DeviceBook) -> Option<String> {
+    if let Some(a) = &b.asin {
+        return Some(format!("asin:{a}"));
+    }
+    let norm = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let title = norm(b.title.as_deref()?);
+    (!title.is_empty()).then(|| {
+        format!(
+            "book:{title}|{}",
+            norm(b.authors.first().map(String::as_str).unwrap_or(""))
+        )
+    })
 }
 
 /// The cover image of a library book's source (EPUB only), as stored.
@@ -24,10 +50,15 @@ pub fn source_cover(book: &Book) -> Option<Vec<u8>> {
 
 /// Matches each of `books` (on the device `device`, a profile key) to the library: by the
 /// KFX's ASIN, else by a send record naming the file. A match by record fills in what the
-/// device listing couldn't read.
-pub fn shelve(books: Vec<DeviceBook>, library: Option<&Library>, device: &str) -> Vec<Shelved> {
+/// device listing couldn't read. Then judges updates against `current`, and duplicates.
+pub fn shelve(
+    books: Vec<DeviceBook>,
+    library: Option<&Library>,
+    device: &str,
+    current: &Current,
+) -> Vec<Shelved> {
     let all = library.map(Library::list).unwrap_or_default();
-    books
+    let mut shelf: Vec<Shelved> = books
         .into_iter()
         .map(|mut book| {
             let by_asin = book
@@ -51,18 +82,34 @@ pub fn shelve(books: Vec<DeviceBook>, library: Option<&Library>, device: &str) -
                 if !m.authors.is_empty() {
                     book.authors = m.authors.clone();
                 }
-                if let Some(s) = lib.sidecar.send_to(device).filter(|s| s.file == book.file) {
+            }
+            // The record of the send that put this very file here; the listing's `.sdr` flags
+            // say what is on the Kindle now.
+            let send = found
+                .as_ref()
+                .and_then(|lib| lib.sidecar.send_to(device))
+                .filter(|s| s.file == book.file);
+            let updates = match send {
+                Some(s) => {
                     book.cde = book.cde.take().or_else(|| s.cde.clone());
                     book.asin = book.asin.take().or_else(|| s.asin.clone());
-                    // The device's own `.sdr` is the truth when it was listed.
-                    book.xray |= s.xray;
-                    book.word_wise |= s.word_wise;
+                    freshness(s, book.xray, book.word_wise, current)
                 }
-            }
+                None => Vec::new(),
+            };
             Shelved {
                 book,
                 library: found,
+                updates,
+                duplicate: false,
             }
         })
-        .collect()
+        .collect();
+    let ids: Vec<Option<String>> = shelf.iter().map(|s| identity(&s.book)).collect();
+    for (i, s) in shelf.iter_mut().enumerate() {
+        s.duplicate = ids[i]
+            .as_ref()
+            .is_some_and(|id| ids.iter().filter(|x| x.as_ref() == Some(id)).count() > 1);
+    }
+    shelf
 }

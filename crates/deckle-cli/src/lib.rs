@@ -469,10 +469,19 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
         cli::KindleCommand::Books => {
             let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
             let inv = list_on(&mut conn, Some(&cache)).map_err(|e| e.to_string())?;
-            let shelf = deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key);
+            let current = deckle_library::freshness::Current::now(&Default::default());
+            let shelf =
+                deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key, &current);
             let rows: Vec<_> = shelf
                 .iter()
-                .map(|s| serde_json::json!({ "book": s.book, "library": s.library.as_ref().map(|b| &b.dir) }))
+                .map(|s| {
+                    serde_json::json!({
+                        "book": s.book,
+                        "library": s.library.as_ref().map(|b| &b.dir),
+                        "updates": s.updates,
+                        "duplicate": s.duplicate,
+                    })
+                })
                 .collect();
             emit(
                 json,
@@ -510,6 +519,18 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
                                 "in library".into()
                             } else {
                                 String::new()
+                            },
+                            if s.duplicate {
+                                "DUPLICATE".into()
+                            } else {
+                                String::new()
+                            },
+                            if s.updates.is_empty() {
+                                String::new()
+                            } else {
+                                let why: Vec<String> =
+                                    s.updates.iter().map(|r| r.describe()).collect();
+                                format!("can be updated: {}", why.join("; "))
                             },
                         ]
                         .into_iter()
@@ -565,6 +586,148 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+/// One book `library reprocess` would update: the device file, the library source, the mode
+/// it was sent in, and why.
+struct Update {
+    file: String,
+    title: String,
+    source: PathBuf,
+    cde: Option<String>,
+    reasons: Vec<String>,
+}
+
+fn reprocess(
+    json: bool,
+    lib: &deckle_library::Library,
+    to: &str,
+    dry_run: bool,
+    yes: bool,
+    pv: Option<PathBuf>,
+) -> Result<ExitCode, String> {
+    use deckle_core::deliver::Conn;
+    let target = resolve_target(to)?;
+    let device = deckle_library::device_ref(&target);
+    let word_wise = deckle_core::wordwise::WordWiseOptions::default();
+    let current = deckle_library::freshness::Current::now(&word_wise);
+    let shelf = {
+        // The listing's session ends before the first rebuild opens its own.
+        let mut conn = Conn::new(&target);
+        let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+        let inv =
+            deckle_core::inventory::list_on(&mut conn, Some(&cache)).map_err(|e| e.to_string())?;
+        deckle_library::shelf::shelve(inv.books, Some(lib), &device.key, &current)
+    };
+    let plan: Vec<Update> = shelf
+        .into_iter()
+        .filter(|s| !s.updates.is_empty())
+        .filter_map(|s| {
+            let book = s.library?;
+            Some(Update {
+                title: s.book.title.clone().unwrap_or_else(|| s.book.file.clone()),
+                file: s.book.file,
+                source: book.source_path(),
+                cde: s.book.cde,
+                reasons: s.updates.iter().map(|r| r.describe()).collect(),
+            })
+        })
+        .collect();
+    if plan.is_empty() {
+        println!("every book from your library on {} is current", device.name);
+        return Ok(ExitCode::SUCCESS);
+    }
+    for u in &plan {
+        println!(
+            "{}  ({}: {})",
+            u.title,
+            u.cde.as_deref().unwrap_or("as before"),
+            u.reasons.join("; ")
+        );
+    }
+    if dry_run {
+        println!(
+            "{} can be updated on {}; nothing changed",
+            plan.len(),
+            device.name
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !yes {
+        use std::io::{BufRead, IsTerminal, Write};
+        if !std::io::stdin().is_terminal() {
+            return Err("pass --yes to update without a terminal to confirm in".into());
+        }
+        print!(
+            "Rebuild and re-send {} on {}? [y/N] ",
+            plan.len(),
+            device.name
+        );
+        std::io::stdout().flush().ok();
+        let mut answer = String::new();
+        std::io::stdin()
+            .lock()
+            .read_line(&mut answer)
+            .map_err(|e| e.to_string())?;
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            println!("nothing changed");
+            return Ok(ExitCode::SUCCESS);
+        }
+    }
+    let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
+    let mut reports = Vec::new();
+    for u in &plan {
+        let cde = match u.cde.as_deref() {
+            Some("EBOK") => Some(deckle_kfx::convert::CdeType::Ebok),
+            Some("PDOC") => Some(deckle_kfx::convert::CdeType::Pdoc),
+            _ => None,
+        };
+        let opts = RunOptions {
+            cde_type: cde.unwrap_or(deckle_kfx::convert::CdeType::Pdoc),
+            cde_override: cde,
+            amazon_match: false,
+            verified_real_asin: false,
+            asin: None,
+            pages: Some(None),
+            target: target.clone(),
+            previewer: Some(located.path.clone()),
+            keep_work_dir: false,
+            xray: deckle_core::pipeline::XRayMode::Auto,
+            llm: None,
+            wikipedia: false,
+            word_wise: Some(word_wise.clone()),
+            // This copy goes once the new one is written, whatever it's called now.
+            replaces: vec![u.file.clone()],
+        };
+        let mut r = run(&u.source, &opts);
+        if r.error.is_none()
+            && let Err(e) = deckle_library::record_run(lib, &u.source, &r, &target)
+        {
+            r.warnings.push(deckle_library::auto_add_warning(&e));
+        }
+        reports.push(r);
+    }
+    let failed = reports.iter().filter(|r| r.error.is_some()).count();
+    emit(json, &reports, || {
+        plan.iter()
+            .zip(&reports)
+            .map(|(u, r)| match &r.error {
+                Some(e) => format!("FAIL  {}\n      {e} (the old copy is still there)", u.title),
+                None if r.warnings.is_empty() => format!("OK    {}", u.title),
+                None => format!(
+                    "OK    {}\n      warnings: {}",
+                    u.title,
+                    r.warnings.join("; ")
+                ),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    Ok(if failed == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_FAILURE)
+    })
 }
 
 fn library(json: bool, action: cli::LibraryCommand) -> Result<ExitCode, String> {
@@ -631,6 +794,12 @@ fn library(json: bool, action: cli::LibraryCommand) -> Result<ExitCode, String> 
             })?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::LibraryCommand::Reprocess {
+            to,
+            dry_run,
+            yes,
+            previewer: pv,
+        } => reprocess(json, &lib, &to, dry_run, yes, pv),
         cli::LibraryCommand::Scan => {
             let r = lib.scan();
             for p in &r.adopted {

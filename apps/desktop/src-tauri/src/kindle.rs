@@ -124,7 +124,8 @@ pub fn shelf_on(
     let device = deckle_library::device_ref(conn.target);
     let inv = list_on(conn, cache).map_err(|e| e.to_string())?;
     let library = Library::configured(config).map(|(l, _)| l);
-    let mut books: Vec<DeviceBookRow> = shelve(inv.books, library.as_ref(), &device.key)
+    let current = deckle_library::freshness::Current::now(&Default::default());
+    let mut books: Vec<DeviceBookRow> = shelve(inv.books, library.as_ref(), &device.key, &current)
         .into_iter()
         .map(row)
         .collect();

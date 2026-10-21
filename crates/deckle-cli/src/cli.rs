@@ -250,6 +250,22 @@ pub enum LibraryCommand {
     List,
     /// Adopt books put in the folder by hand, refresh changed ones, report problems.
     Scan,
+    /// Rebuild and re-send the books on a Kindle that Deckle could build better now (an
+    /// older X-Ray engine or Word Wise database, or a sidecar gone), each in the mode it was
+    /// sent in. Lists them, then asks.
+    Reprocess {
+        /// `device` for the first connected Kindle, or a folder.
+        #[arg(long, default_value = "device")]
+        to: String,
+        /// Show what would be updated and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Don't ask first.
+        #[arg(long)]
+        yes: bool,
+        #[arg(long)]
+        previewer: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
