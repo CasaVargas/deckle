@@ -155,6 +155,10 @@ pub enum Command {
         /// (off by default). Code and non-English quotes are left alone.
         #[arg(long)]
         typography: bool,
+        /// Turn footnotes and endnotes into Kindle pop-up notes (off by default). Notes the book
+        /// marks always convert; others only when the note links back to its reference.
+        #[arg(long)]
+        popup_notes: bool,
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,

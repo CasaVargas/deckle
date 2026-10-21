@@ -41,6 +41,21 @@ where
     }
 }
 
+/// `Notes: 84 pop-ups (12 already marked, 72 detected), 3 one-way links left` (#31 design §4).
+fn notes_line(n: &deckle_core::notes::NotesReport) -> String {
+    let left = match n.skipped_one_way {
+        0 => String::new(),
+        1 => ", 1 one-way link left".to_owned(),
+        k => format!(", {k} one-way links left"),
+    };
+    format!(
+        "\n      Notes: {} pop-ups ({} already marked, {} detected){left}",
+        n.semantic + n.heuristic,
+        n.semantic,
+        n.heuristic
+    )
+}
+
 fn emit<T: serde::Serialize>(
     json: bool,
     value: &T,
@@ -288,6 +303,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             amazon_match,
             fill_metadata,
             typography,
+            popup_notes,
             verified_asin,
             asin,
             xray,
@@ -320,6 +336,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 amazon_match,
                 metadata_fill: fill_metadata,
                 typography,
+                popup_notes,
                 verified_real_asin: verified_asin,
                 asin,
                 pages,
@@ -349,7 +366,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .map(|r| match (&r.error, &r.delivered) {
                         (Some(e), _) => format!("FAIL  {}\n      {e}", r.input.display()),
                         (None, Some(d)) => format!(
-                            "OK    {}\n      -> {}{}{}{}{}{}{}{}",
+                            "OK    {}\n      -> {}{}{}{}{}{}{}{}{}",
                             r.input.display(),
                             d.display(),
                             r.pages
@@ -380,6 +397,11 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                                     "\n      Typography: {} quotes, {} dashes, {} ellipses, {} empty paragraphs",
                                     t.quotes, t.dashes, t.ellipses, t.empty_paragraphs
                                 ))
+                                .unwrap_or_default(),
+                            r.normalize
+                                .notes
+                                .as_ref()
+                                .map(notes_line)
                                 .unwrap_or_default(),
                             r.replaced
                                 .iter()
@@ -700,6 +722,7 @@ fn reprocess(
             amazon_match: false,
             metadata_fill: false,
             typography: false,
+            popup_notes: false,
             verified_real_asin: false,
             asin: None,
             pages: Some(None),
@@ -1393,6 +1416,7 @@ fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Pa
         amazon_match: false,
         metadata_fill: false,
         typography: false,
+        popup_notes: false,
         verified_real_asin: false,
         asin: None,
         pages: None,

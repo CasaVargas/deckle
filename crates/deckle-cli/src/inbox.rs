@@ -74,6 +74,7 @@ pub(crate) fn pipeline_with(
             amazon_match: false,
             metadata_fill: false,
             typography: false,
+            popup_notes: false,
             verified_real_asin: false,
             asin: None,
             pages: None,
