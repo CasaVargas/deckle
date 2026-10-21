@@ -240,6 +240,16 @@ pub enum DigestCommand {
     /// Deliver queued editions to a connected Kindle and prune old ones. Does nothing (and
     /// succeeds) when no Kindle is connected, so it is safe to run on a timer.
     Push,
+    /// Make the paper arrive by itself: the edition daily at a time, and the watcher from
+    /// login on (macOS LaunchAgents, Windows Task Scheduler). No option: show what's set.
+    Schedule {
+        /// Daily time for the edition, 24-hour, e.g. 05:30.
+        #[arg(long, conflicts_with = "off")]
+        at: Option<String>,
+        /// Remove both jobs.
+        #[arg(long)]
+        off: bool,
+    },
     /// Stay running and push queued editions whenever a Kindle connects.
     Watch {
         /// Seconds between checks.

@@ -118,7 +118,13 @@ deckle digest build -o ./out        # today's edition as an EPUB
 deckle digest run --to device       # build, convert, send (cover first), keep the newest 3
 deckle digest push                  # deliver a queued edition to the Kindle now connected
 deckle digest watch                 # keep running; deliver whenever a Kindle connects
+deckle digest schedule --at 05:30   # both, automatically: the paper daily, the watcher from login
+deckle digest schedule --off        # and gone again
 ```
+
+`schedule` installs two LaunchAgents on macOS (or two Task Scheduler tasks on Windows) that run the
+`deckle` you scheduled from, so schedule from a stable one: `cargo install --path crates/deckle-cli`.
+A Mac asleep at 5:30 builds the paper when it wakes. Logs: `~/Library/Logs/Deckle/`.
 
 **Save to tomorrow's paper.** Anything you save during the day prints in the next edition as
 *Your Reading*, whole and with its photos; pieces over 4,000 words become their own book that rides
@@ -138,7 +144,7 @@ No Kindle plugged in at build time? The edition waits in the outbox and goes ove
 `push`, or as soon as you plug in while `watch` is running.
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
-Scheduling and opt-in Send-to-Kindle email come next
+Opt-in Send-to-Kindle email comes next
 (`docs/superpowers/specs/2026-10-20-daily-digest-design.md`).
 
 ## How it works: what a "store-quality" sideloaded book needs

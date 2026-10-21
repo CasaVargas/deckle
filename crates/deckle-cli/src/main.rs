@@ -401,6 +401,7 @@ fn digest(
     config: Option<PathBuf>,
     action: cli::DigestCommand,
 ) -> Result<ExitCode, String> {
+    let explicit_config = config.clone();
     let path = config.unwrap_or_else(deckle_digest::config::default_path);
     match action {
         cli::DigestCommand::Init { force } => {
@@ -593,6 +594,62 @@ fn digest(
             } else {
                 ExitCode::SUCCESS
             })
+        }
+        cli::DigestCommand::Schedule { at, off } => {
+            use deckle_digest::schedule;
+            if off {
+                let done = schedule::remove()?;
+                emit(json, &done, || {
+                    if done.is_empty() {
+                        "nothing was scheduled".into()
+                    } else {
+                        done.join("\n")
+                    }
+                })?;
+                return Ok(ExitCode::SUCCESS);
+            }
+            let Some(at) = at else {
+                let st = schedule::status();
+                emit(json, &st, || match (&st.at, st.watch) {
+                    (None, false) => {
+                        "not scheduled; `deckle digest schedule --at 05:30` sets it up".into()
+                    }
+                    (at, watch) => format!(
+                        "edition: {}\nwatcher: {}{}",
+                        at.as_deref()
+                            .map(|t| format!("daily at {t}"))
+                            .unwrap_or_else(|| "off".into()),
+                        if watch { "on" } else { "off" },
+                        st.exe
+                            .as_deref()
+                            .map(|e| format!("\nruns: {e}"))
+                            .unwrap_or_default()
+                    ),
+                })?;
+                return Ok(ExitCode::SUCCESS);
+            };
+            let (hour, minute) = schedule::parse_at(&at)?;
+            // The jobs need the config that exists now, not one created later.
+            load_digest_config(&path)?;
+            let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let exe = exe.canonicalize().unwrap_or(exe);
+            if let Some(w) = schedule::unstable_exe(&exe) {
+                eprintln!("warning: {w}");
+            }
+            let s = schedule::Schedule {
+                hour,
+                minute,
+                exe,
+                config: explicit_config.map(|c| c.canonicalize().unwrap_or(c)),
+            };
+            let done = schedule::install(&s)?;
+            emit(json, &done, || {
+                format!(
+                    "{}\nThe paper is built daily at {at} and goes to your Kindle when it's plugged in.",
+                    done.join("\n")
+                )
+            })?;
+            Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Push => {
             let cfg = load_digest_config(&path)?;

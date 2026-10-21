@@ -17,6 +17,7 @@ pub mod longread;
 pub mod moon;
 pub mod reading;
 pub mod render;
+pub mod schedule;
 pub mod sources;
 
 use std::path::{Path, PathBuf};
