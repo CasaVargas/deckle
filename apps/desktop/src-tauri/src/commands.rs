@@ -261,8 +261,8 @@ pub struct AppState {
     pub preload: Mutex<Vec<String>>,
     /// `--export-to <dir>`: run the preloaded books into this folder as soon as they load.
     pub preload_target: Mutex<Option<String>>,
-    /// `--daily`: open on the Daily tab.
-    pub start_daily: bool,
+    /// `--daily` / `--kindle`: open on that tab (else `books`).
+    pub start_tab: &'static str,
 }
 
 /// `deckle-desktop [--export-to DIR] [BOOK...]`: books to open and an optional auto-export dir.
@@ -607,6 +607,23 @@ pub fn run_books_inner(
 
 /// `device_override` / `verified` come from the target's device profile. Returns the firmware
 /// a send read off the Kindle, for its profile.
+/// The connected Kindle (or folder) a GUI target names.
+pub fn resolve_run_target(target: &RunTarget) -> Result<Target, String> {
+    match target {
+        RunTarget::Folder { path } => Ok(Target::Folder(PathBuf::from(path))),
+        RunTarget::Mtp { bus, address } => deckle_transport::usb::detect()
+            .into_iter()
+            .find(|m| m.bus == *bus && m.address == *address)
+            .map(Target::Mtp)
+            .ok_or_else(|| "the MTP Kindle is no longer connected".into()),
+        RunTarget::Device { root } => detect_mass_storage()
+            .into_iter()
+            .find(|d| d.root.to_string_lossy() == *root)
+            .map(Target::MassStorage)
+            .ok_or_else(|| format!("Kindle at {root} is no longer connected")),
+    }
+}
+
 pub fn run_books_with(
     books: &[RunRequest],
     target: &RunTarget,
@@ -615,60 +632,28 @@ pub fn run_books_with(
     verified: bool,
     emit: &mut dyn FnMut(ProgressEvent),
 ) -> Option<String> {
-    let target = match target {
-        RunTarget::Folder { path } => Target::Folder(PathBuf::from(path)),
-        RunTarget::Mtp { bus, address } => match deckle_transport::usb::detect()
-            .into_iter()
-            .find(|m| m.bus == *bus && m.address == *address)
-        {
-            Some(m) => Target::Mtp(m),
-            None => {
-                for b in books {
-                    emit(ProgressEvent {
-                        id: b.id.clone(),
-                        status: "failed".into(),
-                        stage: None,
-                        delivered: None,
-                        pages: None,
-                        warnings: Vec::new(),
-                        cde: None,
-                        asin: None,
-                        reason: None,
-                        matched: None,
-                        xray: None,
-                        word_wise: None,
-                        error: Some("the MTP Kindle is no longer connected".into()),
-                    });
-                }
-                return None;
+    let target = match resolve_run_target(target) {
+        Ok(t) => t,
+        Err(e) => {
+            for b in books {
+                emit(ProgressEvent {
+                    id: b.id.clone(),
+                    status: "failed".into(),
+                    stage: None,
+                    delivered: None,
+                    pages: None,
+                    warnings: Vec::new(),
+                    cde: None,
+                    asin: None,
+                    reason: None,
+                    matched: None,
+                    xray: None,
+                    word_wise: None,
+                    error: Some(e.clone()),
+                });
             }
-        },
-        RunTarget::Device { root } => match detect_mass_storage()
-            .into_iter()
-            .find(|d| d.root.to_string_lossy() == *root)
-        {
-            Some(d) => Target::MassStorage(d),
-            None => {
-                for b in books {
-                    emit(ProgressEvent {
-                        id: b.id.clone(),
-                        status: "failed".into(),
-                        stage: None,
-                        delivered: None,
-                        pages: None,
-                        warnings: Vec::new(),
-                        cde: None,
-                        asin: None,
-                        reason: None,
-                        matched: None,
-                        xray: None,
-                        word_wise: None,
-                        error: Some(format!("Kindle at {root} is no longer connected")),
-                    });
-                }
-                return None;
-            }
-        },
+            return None;
+        }
     };
     let mut firmware = None;
     for b in books {
@@ -739,6 +724,16 @@ pub fn run_books_with(
         if report.firmware.is_some() {
             firmware = report.firmware.clone();
         }
+        let mut report = report;
+        // Every book sent goes into the library, when there is one (library design §3).
+        if let Err(e) = deckle_library::auto_add(
+            &deckle_library::config::default_path(),
+            Path::new(&b.path),
+            &report,
+            &target,
+        ) {
+            report.warnings.push(deckle_library::auto_add_warning(&e));
+        }
         emit(ProgressEvent {
             id: b.id.clone(),
             status: if report.error.is_some() {
@@ -781,7 +776,7 @@ pub fn take_preloaded_target(state: State<'_, AppState>) -> Option<String> {
 
 #[tauri::command]
 pub fn start_tab(state: State<'_, AppState>) -> &'static str {
-    if state.start_daily { "daily" } else { "books" }
+    state.start_tab
 }
 
 #[tauri::command]

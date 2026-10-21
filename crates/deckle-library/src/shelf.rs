@@ -46,6 +46,9 @@ pub fn shelve(books: Vec<DeviceBook>, library: Option<&Library>, device: &str) -
                 let m = &lib.sidecar.metadata;
                 if book.title.is_none() {
                     book.title = Some(m.title.clone()).filter(|t| !t.is_empty());
+                }
+                // A KFX keeps authors in sort form ("Le Guin, Ursula K."); show the names.
+                if !m.authors.is_empty() {
                     book.authors = m.authors.clone();
                 }
                 if let Some(s) = lib.sidecar.send_to(device).filter(|s| s.file == book.file) {

@@ -238,3 +238,32 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
 export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "onthisday"];
 
 export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
+
+/** library.json, as Settings shows it (library design §3). */
+export interface LibraryStatus {
+  root: string | null;
+  auto_add: boolean;
+  books: number;
+}
+
+/** One book in a Kindle's documents/ (library design §4). */
+export interface DeviceBookRow {
+  file: string;
+  size: number;
+  format: string;
+  title: string | null;
+  authors: string[];
+  cde: "PDOC" | "EBOK" | null;
+  from_deckle: boolean;
+  xray: boolean;
+  word_wise: boolean;
+  cover: string | null;
+  /** The library's source file, for Re-send and Upgrade. */
+  library_source: string | null;
+}
+
+export interface DeviceShelf {
+  device: string;
+  space: { total: number; free: number } | null;
+  books: DeviceBookRow[];
+}

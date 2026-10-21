@@ -3,6 +3,7 @@
 
 mod commands;
 mod daily;
+mod kindle;
 
 use std::sync::Mutex;
 
@@ -14,7 +15,13 @@ pub fn run() {
     // `--export-to DIR` converts them straight away.
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (preload, preload_target) = commands::parse_cli_args(&args);
-    let start_daily = args.iter().any(|a| a == "--daily");
+    let start_tab = if args.iter().any(|a| a == "--daily") {
+        "daily"
+    } else if args.iter().any(|a| a == "--kindle") {
+        "kindle"
+    } else {
+        "books"
+    };
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -26,7 +33,7 @@ pub fn run() {
                 devices_file,
                 preload: Mutex::new(preload.clone()),
                 preload_target: Mutex::new(preload_target.clone()),
-                start_daily,
+                start_tab,
             });
             Ok(())
         })
@@ -60,6 +67,10 @@ pub fn run() {
             daily::email_status,
             daily::email_set_password,
             daily::email_test,
+            kindle::library_status,
+            kindle::library_set,
+            kindle::device_books,
+            kindle::device_remove,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deckle");

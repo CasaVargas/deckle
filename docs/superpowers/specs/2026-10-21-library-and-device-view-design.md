@@ -221,4 +221,11 @@ deckle kindle remove <file> [--yes]          # asks unless --yes
 - CLI: `library init/add/list` on a temp config and root; `run --to <folder>` with a library
   records the send.
 - App: the inventory command builds rows with covers and badges, and the Kindle tab is checked
-  by hand in the running app against a fake mass-storage root.
+  by hand in the running app against a fake mass-storage root. `--kindle` opens the app on the
+  Kindle tab, like `--daily`.
+
+**Known limit.** A mass-storage Kindle's key is its `devices.json` key, `ms:<model hint>`, and
+the hint is the first line of `system/version.txt`, which includes the firmware. After a
+firmware update, older send records no longer match that Kindle by file name. Books on mass
+storage are still matched by the ASIN read from the KFX, so the view is unaffected; only MTP
+relies on the records, and its key is the USB serial.

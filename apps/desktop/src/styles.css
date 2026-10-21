@@ -183,3 +183,13 @@ input[type=checkbox] { padding: 0; }
 .sections li.off { color: var(--muted); }
 .feeds { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .feed { display: grid; grid-template-columns: 160px 1fr 28px; gap: 6px; width: 100%; }
+
+/* Kindle tab (library design §5) */
+.shelf-head { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+.shelf-head > div:first-child { flex: 1; min-width: 0; }
+.shelf-head h2 { font-family: ui-serif, Georgia, serif; font-size: 20px; margin: 0; }
+.space { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 160px; }
+.space-track { width: 160px; height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.space-fill { height: 100%; background: var(--muted); }
+.confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; padding: 8px 10px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--fail) 50%, var(--line)); font-size: 13px; }
+.ghost.danger { color: var(--fail); border-color: var(--fail); }

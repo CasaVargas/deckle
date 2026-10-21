@@ -384,6 +384,11 @@ fn a_kindles_books_match_the_library_by_asin_or_send_record() {
     assert!(got[0].book.from_deckle);
     assert!(got[1].library.is_some());
     assert_eq!(
+        got[1].book.authors,
+        ["Jane Testwright"],
+        "display names, not sort form"
+    );
+    assert_eq!(
         got[1].book.cde.as_deref(),
         Some("EBOK"),
         "the device's own wins"
