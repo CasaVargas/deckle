@@ -1203,7 +1203,10 @@ mod tests {
             "the Open Library metadata fill is off by default"
         );
         assert!(!s.amazon_match);
-        assert!(s.generated_cover, "a coverless book gets a cover by default");
+        assert!(
+            s.generated_cover,
+            "a coverless book gets a cover by default"
+        );
         assert!(!s.typography, "the typography pass is off by default");
         let mut changed = s.clone();
         changed.cde = "ebok".into();
