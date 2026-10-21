@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DeviceRow, EditionPreview, EmailStatus, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
+import type { BookRow, DailyConfig, DailyState, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, LibraryStatus, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -15,7 +15,7 @@ export const api = {
   appVersion: () => invoke<string>("app_version"),
   takePreloadedBooks: () => invoke<string[]>("take_preloaded_books"),
   takePreloadedTarget: () => invoke<string | null>("take_preloaded_target"),
-  startTab: () => invoke<"books" | "daily">("start_tab"),
+  startTab: () => invoke<"books" | "daily" | "kindle">("start_tab"),
   inspectBooks: (paths: string[]) => invoke<BookRow[]>("inspect_books", { paths }),
   /** Web addresses, .webloc/.url link files or saved pages, each built into a book (slow: fetches). */
   importArticles: (targets: string[]) => invoke<BookRow[]>("import_articles", { targets }),
@@ -30,6 +30,13 @@ export const api = {
   setDeviceOptions: (key: string, cdeOverride: "pdoc" | "ebok" | null, verifiedRealAsin: boolean) =>
     invoke<void>("set_device_options", { key, cdeOverride, verifiedRealAsin }),
   reveal: (path: string) => invoke<void>("reveal", { path }),
+
+  // The library and the Kindle tab
+  libraryStatus: () => invoke<LibraryStatus>("library_status"),
+  librarySet: (root: string | null, autoAdd: boolean) => invoke<LibraryStatus>("library_set", { root, autoAdd }),
+  /** Slow over MTP (a few seconds). */
+  deviceBooks: (target: RunTarget) => invoke<DeviceShelf>("device_books", { target }),
+  deviceRemove: (target: RunTarget, file: string) => invoke<string[]>("device_remove", { target, file }),
   /** Opens an https link in the default browser (webview links do not). */
   openLink: (url: string) => openUrl(url),
   onProgress: (cb: (e: ProgressEvent) => void): Promise<UnlistenFn> =>

@@ -226,6 +226,47 @@ impl DeviceInfo {
     }
 }
 
+/// The StorageInfo dataset (GetStorageInfo, PIMA 15740 §5.5.3): size and free space.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StorageInfo {
+    pub max_capacity: u64,
+    pub free_bytes: u64,
+    pub description: String,
+    pub volume_label: String,
+}
+
+impl StorageInfo {
+    /// The device side, for tests (fixed storage, hierarchical filesystem, read-write).
+    pub fn encode(&self) -> Vec<u8> {
+        let mut o = Vec::new();
+        o.extend_from_slice(&0x0003u16.to_le_bytes()); // storage type: fixed RAM
+        o.extend_from_slice(&0x0002u16.to_le_bytes()); // filesystem type: generic hierarchical
+        o.extend_from_slice(&0x0000u16.to_le_bytes()); // access capability: read-write
+        o.extend_from_slice(&self.max_capacity.to_le_bytes());
+        o.extend_from_slice(&self.free_bytes.to_le_bytes());
+        o.extend_from_slice(&0xFFFF_FFFFu32.to_le_bytes()); // free space in objects: unused
+        o.extend(encode_string(&self.description));
+        o.extend(encode_string(&self.volume_label));
+        o
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<StorageInfo, PtpError> {
+        if bytes.len() < 26 {
+            return Err(PtpError::Truncated);
+        }
+        let u64_at = |i: usize| u64::from_le_bytes(bytes[i..i + 8].try_into().unwrap());
+        let (description, n) = decode_string(&bytes[26..])?;
+        let label = bytes.get(26 + n..).ok_or(PtpError::Truncated)?;
+        let (volume_label, _) = decode_string(label).unwrap_or_default();
+        Ok(StorageInfo {
+            max_capacity: u64_at(6),
+            free_bytes: u64_at(14),
+            description,
+            volume_label,
+        })
+    }
+}
+
 /// The ObjectInfo dataset, always in the 32-bit ObjectCompressedSize layout. libmtp #436: the
 /// Kindle's nameless root folders fool libmtp into the 64-bit layout and the device then
 /// rejects every SendObjectInfo with 0xA806; we never switch layouts.

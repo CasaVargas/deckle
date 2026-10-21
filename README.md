@@ -62,6 +62,20 @@ Settings hold the Kindle Previewer path, default mode, page numbers, Amazon matc
 provider, model, endpoint, key; Wikipedia), Word Wise (on/off, hint level) and per-Kindle
 options. *About* lists the version, a link to check for newer releases, and the credits.
 
+### Your library and the Kindle tab
+
+Choose a library folder in Settings and Deckle keeps a copy of every book you send: one folder
+per book (`Author/Title/`), holding the file you sent and a `deckle.json` that records where it
+went. There's no database: move, sync or back up the folder with anything. Books you put in by
+hand are picked up by `deckle library scan`.
+
+The **Kindle** tab shows what's on the connected Kindle: covers, PDOC/EBOK, X-Ray and Word Wise,
+size, and free space, with Deckle's books first. From a book's menu you can **Remove** it (with
+its X-Ray and Word Wise files), or, for a book in your library, **Re-send** it or **Upgrade to
+EBOK**. Both put the library copy on the Books tab, so you can check its badge before sending.
+On an MTP Kindle, Deckle doesn't read the books themselves, so it fills in details from the
+library. (`docs/superpowers/specs/2026-10-21-library-and-device-view-design.md`)
+
 ### Word Wise on your Kindle
 
 Hints point at the Kindle's own English Word Wise dictionary when it has one (it downloads it the
@@ -111,6 +125,15 @@ A web address, a `.webloc`/`.url` link file or a saved `.html` page becomes one 
 with its photos and a "Deckle Reads" cover, sent now rather than in tomorrow's paper. In the app,
 drop the file or paste the address on the Books tab
 (`docs/superpowers/specs/2026-10-21-web-article-design.md`).
+
+```sh
+deckle library init ~/Books/Deckle   # use this folder; every book `run` sends is added
+deckle library add book.epub         # add by hand (an edited copy updates the same book)
+deckle library list                  # author, title, series, and where each was sent
+deckle library scan                  # adopt books put in the folder by hand, report problems
+deckle kindle books                  # what's on the connected Kindle, and free space
+deckle kindle remove "Le Guin, Ursula K. - The Dispossessed.kfx"   # asks first; --yes to skip
+```
 
 `--cde auto` (default) applies the cover rule; `--cde pdoc|ebok` overrides it; `--match` looks up
 an Amazon edition on Open Library when an MTP Kindle needs a real ASIN.

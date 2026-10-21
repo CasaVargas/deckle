@@ -109,12 +109,15 @@ pub enum DeliverError {
     Mtp(String),
     #[error("thumbnail: {0}")]
     Thumbnail(String),
+    /// Not a book Deckle may touch, or not there (inventory remove).
+    #[error("{0}")]
+    Refused(String),
 }
 
 const MAX_FILENAME_LEN: usize = 120;
 
 /// Sort-form author name: `file-as` when present, else `Last, First`.
-fn author_sort(info: &BookInfo) -> Option<String> {
+pub fn author_sort(info: &BookInfo) -> Option<String> {
     let c = info.creators.first()?;
     if let Some(fa) = &c.file_as
         && !fa.trim().is_empty()
@@ -124,7 +127,8 @@ fn author_sort(info: &BookInfo) -> Option<String> {
     Some(deckle_kfx::metadata::author_sort(&c.name))
 }
 
-fn sanitize(s: &str) -> String {
+/// ASCII-folded and safe as a file or folder name on every OS.
+pub fn sanitize(s: &str) -> String {
     let ascii = deunicode::deunicode(s);
     ascii
         .chars()

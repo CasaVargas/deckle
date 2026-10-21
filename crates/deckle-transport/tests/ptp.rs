@@ -455,3 +455,24 @@ fn device_info_reads_the_firmware_inside_a_session() {
     assert_eq!(info.device_version, "5.18.1.0.1");
     assert_eq!(info.model, "Kindle Scribe");
 }
+
+#[test]
+fn storage_info_decodes_capacity_and_free_space() {
+    let info = deckle_transport::ptp::StorageInfo {
+        max_capacity: 31_000_000_000,
+        free_bytes: 12_345_678_901,
+        description: "Internal Storage".into(),
+        volume_label: "Kindle".into(),
+    };
+    let bytes = info.encode();
+    assert_eq!(
+        deckle_transport::ptp::StorageInfo::decode(&bytes).unwrap(),
+        info
+    );
+    // Some devices stop after the description.
+    let short = &bytes[..bytes.len() - (1 + 2 * 7)];
+    let got = deckle_transport::ptp::StorageInfo::decode(short).unwrap();
+    assert_eq!(got.free_bytes, 12_345_678_901);
+    assert_eq!(got.volume_label, "");
+    assert!(deckle_transport::ptp::StorageInfo::decode(&bytes[..20]).is_err());
+}

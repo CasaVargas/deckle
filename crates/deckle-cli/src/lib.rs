@@ -270,6 +270,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::Digest { config, action } => digest(json, config, action),
+        cli::Command::Library { action } => library(json, action),
+        cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Save {
             targets,
             title,
@@ -408,20 +410,269 @@ pub fn import_article(
 /// argument either way.
 fn run_input(input: &Path, opts: &RunOptions, net: &dyn deckle_digest::Net) -> RunReport {
     let arg = input.to_string_lossy();
-    if !deckle_digest::web_book::is_article(&arg) {
-        return run(input, opts);
+    let (source, report) = if !deckle_digest::web_book::is_article(&arg) {
+        (input.to_path_buf(), run(input, opts))
+    } else {
+        match import_article(&arg, net, &articles_dir()) {
+            Ok(book) => {
+                let report = RunReport {
+                    input: input.to_path_buf(),
+                    ..run(&book.path, opts)
+                };
+                (book.path, report)
+            }
+            Err(e) => {
+                return RunReport {
+                    input: input.to_path_buf(),
+                    error: Some(format!("import: {e}")),
+                    ..Default::default()
+                };
+            }
+        }
+    };
+    add_to_library(&source, report, &opts.target)
+}
+
+/// Every book a run sends goes into the library, when there is one (library design §3).
+/// Failing to add is a warning: the send itself worked.
+fn add_to_library(source: &Path, mut report: RunReport, target: &Target) -> RunReport {
+    let config = deckle_library::config::default_path();
+    if let Err(e) = deckle_library::auto_add(&config, source, &report, target) {
+        report.warnings.push(deckle_library::auto_add_warning(&e));
     }
-    match import_article(&arg, net, &articles_dir()) {
-        Ok(book) => RunReport {
-            input: input.to_path_buf(),
-            ..run(&book.path, opts)
-        },
-        Err(e) => RunReport {
-            input: input.to_path_buf(),
-            error: Some(format!("import: {e}")),
-            ..Default::default()
-        },
+    report
+}
+
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
+fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, String> {
+    use deckle_core::deliver::Conn;
+    use deckle_core::inventory::{list_on, remove_on};
+    let target = resolve_target(to)?;
+    let device = deckle_library::device_ref(&target);
+    let library = deckle_library::Library::configured(&deckle_library::config::default_path())
+        .map(|(l, _)| l);
+    let mut conn = Conn::new(&target);
+    match action {
+        cli::KindleCommand::Books => {
+            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+            let inv = list_on(&mut conn, Some(&cache)).map_err(|e| e.to_string())?;
+            let shelf = deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key);
+            let rows: Vec<_> = shelf
+                .iter()
+                .map(|s| serde_json::json!({ "book": s.book, "library": s.library.as_ref().map(|b| &b.dir) }))
+                .collect();
+            emit(
+                json,
+                &serde_json::json!({ "device": device.name, "space": inv.space, "books": rows }),
+                || {
+                    let mut lines = vec![match inv.space {
+                        Some(s) => format!(
+                            "{}: {} free of {}",
+                            device.name,
+                            megabytes(s.free),
+                            megabytes(s.total)
+                        ),
+                        None => device.name.clone(),
+                    }];
+                    for s in &shelf {
+                        let b = &s.book;
+                        let title = match (&b.title, b.authors.first()) {
+                            (Some(t), Some(a)) => format!("{t} — {a}"),
+                            (Some(t), None) => t.clone(),
+                            _ => b.file.clone(),
+                        };
+                        let flags = [
+                            b.cde.clone().unwrap_or_else(|| b.format.to_uppercase()),
+                            if b.xray {
+                                "X-Ray".into()
+                            } else {
+                                String::new()
+                            },
+                            if b.word_wise {
+                                "Word Wise".into()
+                            } else {
+                                String::new()
+                            },
+                            if s.library.is_some() {
+                                "in library".into()
+                            } else {
+                                String::new()
+                            },
+                        ]
+                        .into_iter()
+                        .filter(|f| !f.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                        lines.push(format!(
+                            "{title}\n      {flags} · {} · {}",
+                            megabytes(b.size),
+                            b.file
+                        ));
+                    }
+                    if shelf.is_empty() {
+                        lines.push("no books".into());
+                    }
+                    lines.join("\n")
+                },
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::KindleCommand::Remove { file, yes } => {
+            if !yes {
+                use std::io::{BufRead, IsTerminal, Write};
+                if !std::io::stdin().is_terminal() {
+                    return Err("pass --yes to remove without a terminal to confirm in".into());
+                }
+                print!(
+                    "Remove {file} and its sidecars from {}? [y/N] ",
+                    device.name
+                );
+                std::io::stdout().flush().ok();
+                let mut answer = String::new();
+                std::io::stdin()
+                    .lock()
+                    .read_line(&mut answer)
+                    .map_err(|e| e.to_string())?;
+                if !answer.trim().eq_ignore_ascii_case("y") {
+                    println!("kept");
+                    return Ok(ExitCode::SUCCESS);
+                }
+            }
+            let removed = remove_on(&mut conn, &file).map_err(|e| e.to_string())?;
+            if let Some(lib) = &library {
+                lib.forget_send(&device.key, &file)?;
+            }
+            emit(json, &removed, || {
+                removed
+                    .iter()
+                    .map(|r| format!("removed {r}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
     }
+}
+
+fn library(json: bool, action: cli::LibraryCommand) -> Result<ExitCode, String> {
+    use deckle_library::{Library, LibraryConfig, config::default_path};
+    let config = default_path();
+    if let cli::LibraryCommand::Init { dir, no_auto_add } = action {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        let root = dir.canonicalize().map_err(|e| e.to_string())?;
+        LibraryConfig {
+            root: Some(root.clone()),
+            auto_add: !no_auto_add,
+            ..LibraryConfig::load(&config)
+        }
+        .save(&config)?;
+        println!("library: {}", root.display());
+        if !no_auto_add {
+            println!("every book `deckle run` sends is added");
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    let (lib, _) = Library::configured(&config)
+        .ok_or("no library yet: run `deckle library init <folder>` first")?;
+    match action {
+        cli::LibraryCommand::Init { .. } => unreachable!("handled above"),
+        cli::LibraryCommand::Add { books } => {
+            let mut failed = false;
+            for b in &books {
+                match lib.add(b) {
+                    Ok(a) => {
+                        let what = match (a.new, a.copied) {
+                            (true, _) => "added  ",
+                            (false, true) => "updated",
+                            (false, false) => "same   ",
+                        };
+                        println!("{what}  {}", a.book.dir.display());
+                    }
+                    Err(e) => {
+                        eprintln!("error: {e}");
+                        failed = true;
+                    }
+                }
+            }
+            Ok(if failed {
+                ExitCode::from(EXIT_FAILURE)
+            } else {
+                ExitCode::SUCCESS
+            })
+        }
+        cli::LibraryCommand::List => {
+            let books = lib.list();
+            let rows: Vec<_> = books
+                .iter()
+                .map(|b| serde_json::json!({ "dir": b.dir, "book": b.sidecar }))
+                .collect();
+            emit(json, &rows, || {
+                if books.is_empty() {
+                    return format!("no books in {}", lib.root.display());
+                }
+                books
+                    .iter()
+                    .map(library_line)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::LibraryCommand::Scan => {
+            let r = lib.scan();
+            for p in &r.adopted {
+                println!("adopted    {}", p.display());
+            }
+            for p in &r.refreshed {
+                println!("refreshed  {}", p.display());
+            }
+            for p in &r.missing_source {
+                println!("no source  {}", p.display());
+            }
+            for (p, why) in &r.problems {
+                println!("problem    {}: {why}", p.display());
+            }
+            println!("{} books in {}", r.books, lib.root.display());
+            Ok(if r.problems.is_empty() && r.missing_source.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(EXIT_FAILURE)
+            })
+        }
+    }
+}
+
+/// `Author sort  Title  [Series #n]`, then one line per Kindle it was last sent to.
+fn library_line(b: &deckle_library::Book) -> String {
+    let m = &b.sidecar.metadata;
+    let series = match &m.series {
+        Some(s) => match s.index {
+            Some(i) => format!("  [{} #{i}]", s.name),
+            None => format!("  [{}]", s.name),
+        },
+        None => String::new(),
+    };
+    let sends: String = b
+        .sidecar
+        .sends
+        .iter()
+        .map(|s| {
+            format!(
+                "\n      {} on {}, {}",
+                s.cde.as_deref().unwrap_or("sent"),
+                s.device_name,
+                s.at.get(..10).unwrap_or(&s.at)
+            )
+        })
+        .collect();
+    format!(
+        "{}  {}{series}{sends}",
+        m.author_sort.as_deref().unwrap_or("Unknown Author"),
+        m.title
+    )
 }
 
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {

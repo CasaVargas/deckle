@@ -4,7 +4,8 @@
 use std::any::Any;
 
 use crate::ptp::{
-    Container, ContainerKind, DeviceInfo, ObjectInfo, PtpError, decode_u32_array, fmt, op, rsp,
+    Container, ContainerKind, DeviceInfo, ObjectInfo, PtpError, StorageInfo, decode_u32_array, fmt,
+    op, rsp,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -187,6 +188,14 @@ impl Mtp {
         let (data, _) = self.transact(op::GET_STORAGE_IDS, &[], None)?;
         Ok(decode_u32_array(
             &data.ok_or(MtpError::Missing("storage ids"))?,
+        )?)
+    }
+
+    /// GetStorageInfo: the storage's capacity and free space.
+    pub fn storage_info(&mut self, storage: u32) -> Result<StorageInfo, MtpError> {
+        let (data, _) = self.transact(op::GET_STORAGE_INFO, &[storage], None)?;
+        Ok(StorageInfo::decode(
+            &data.ok_or(MtpError::Missing("storage info"))?,
         )?)
     }
 

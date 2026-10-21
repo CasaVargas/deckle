@@ -952,6 +952,7 @@ dependencies = [
  "deckle-core",
  "deckle-digest",
  "deckle-kfx",
+ "deckle-library",
  "deckle-transport",
  "deckle-xray",
  "predicates",
@@ -973,6 +974,7 @@ dependencies = [
  "deckle-xray",
  "deunicode",
  "flate2",
+ "fs4",
  "image",
  "regex",
  "roxmltree",
@@ -995,6 +997,7 @@ dependencies = [
  "deckle-core",
  "deckle-digest",
  "deckle-kfx",
+ "deckle-library",
  "deckle-transport",
  "deckle-xray",
  "serde",
@@ -1059,6 +1062,20 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "uuid",
+ "zip",
+]
+
+[[package]]
+name = "deckle-library"
+version = "0.2.1"
+dependencies = [
+ "deckle-core",
+ "deckle-docx",
+ "deckle-kfx",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
  "zip",
 ]
 
@@ -1599,6 +1616,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs4"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
+dependencies = [
+ "rustix",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4053,7 +4080,7 @@ dependencies = [
  "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

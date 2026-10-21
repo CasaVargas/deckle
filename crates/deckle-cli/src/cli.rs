@@ -197,6 +197,20 @@ pub enum Command {
         #[arg(long)]
         bookmarklet: bool,
     },
+    /// What's on a Kindle: list its books, or remove one.
+    Kindle {
+        /// `device` for the first connected Kindle, or a folder (an export).
+        #[arg(long, default_value = "device", global = true)]
+        to: String,
+        #[command(subcommand)]
+        action: KindleCommand,
+    },
+    /// Your library: one folder per book, with a deckle.json beside it. Every book `run` sends
+    /// is added once the library is set up.
+    Library {
+        #[command(subcommand)]
+        action: LibraryCommand,
+    },
     /// The Deckle Daily: a newspaper built from your sources (weather, local news, feeds,
     /// lottery, horoscope, on this day).
     Digest {
@@ -206,6 +220,36 @@ pub enum Command {
         #[command(subcommand)]
         action: DigestCommand,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KindleCommand {
+    /// Every book in documents/: mode, X-Ray and Word Wise, size, and free space.
+    Books,
+    /// Remove a book (as `books` names it) with its .sdr folder.
+    Remove {
+        file: String,
+        /// Don't ask first.
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LibraryCommand {
+    /// Use DIR as the library (created when missing) and remember it.
+    Init {
+        dir: PathBuf,
+        /// Don't add the books `run` sends; only `library add` adds.
+        #[arg(long)]
+        no_auto_add: bool,
+    },
+    /// Add EPUBs or Word documents (an edited copy of a book updates it in place).
+    Add { books: Vec<PathBuf> },
+    /// Every book: author, title, series, and where it was last sent.
+    List,
+    /// Adopt books put in the folder by hand, refresh changed ones, report problems.
+    Scan,
 }
 
 #[derive(Subcommand, Debug)]

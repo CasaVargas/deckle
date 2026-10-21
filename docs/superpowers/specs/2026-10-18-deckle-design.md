@@ -39,6 +39,8 @@ so the research that went into it stops being re-derived on MobileRead every yea
 **Non-goals (v1)**
 
 - Library management, tagging, reading, metadata editing beyond what the pipeline needs.
+  (A plain-folder library and a view of each Kindle's books came later:
+  `2026-10-21-library-and-device-view-design.md`.)
 - DRM removal of any kind. Input is DRM-free EPUB only.
 - Send-to-Kindle email or Amazon cloud delivery. Deckle is USB/MTP only.
 - Comics, manga, fixed-layout, PDFs, dictionaries. (Word documents came later as an import

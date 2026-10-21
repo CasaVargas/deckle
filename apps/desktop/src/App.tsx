@@ -6,7 +6,8 @@ import { api } from "./api";
 import BookRowView from "./BookRow";
 import SettingsDrawer from "./SettingsDrawer";
 import DailyView from "./DailyView";
-import type { BookRow, BookState, DeviceRow, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
+import KindleView from "./KindleView";
+import type { BookRow, BookState, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
   previewer_path: null,
@@ -45,7 +46,8 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState<string | null>(null);
-  const [tab, setTab] = useState<"books" | "daily">("books");
+  const [tab, setTab] = useState<"books" | "daily" | "kindle">("books");
+  const [library, setLibrary] = useState<LibraryStatus | null>(null);
   const booksRef = useRef(books);
   booksRef.current = books;
   const tabRef = useRef(tab);
@@ -119,6 +121,7 @@ export default function App() {
     api.startTab().then(setTab).catch(() => {});
     api.getSettings().then(setSettings).catch(() => {});
     api.previewerStatus().then(setPreviewer).catch(() => {});
+    api.libraryStatus().then(setLibrary).catch(() => {});
     refreshDevices();
     api
       .takePreloadedBooks()
@@ -189,6 +192,34 @@ export default function App() {
   const pickBooks = async () => {
     const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books and web articles", extensions: ["epub", "kfx", "webloc", "url", "html", "htm"] }] });
     if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
+  };
+
+  const setLibraryOptions = async (root: string | null, autoAdd: boolean) => {
+    try {
+      setLibrary(await api.librarySet(root, autoAdd));
+    } catch (e) {
+      setNotice(String(e));
+    }
+  };
+
+  const pickLibrary = async () => {
+    const dir = await openDialog({ directory: true, multiple: false });
+    if (typeof dir === "string") setLibraryOptions(dir, library?.auto_add ?? true);
+  };
+
+  // Re-send / Upgrade from the Kindle tab: the library copy goes on the Books tab for review.
+  const resendFromLibrary = async (source: string, cde: "ebok" | null) => {
+    const rows = await api.inspectBooks([source]);
+    if (rows.length === 0) {
+      setNotice("The app sends EPUBs; send this Word document with `deckle run`.");
+      return;
+    }
+    setBooks((prev) => {
+      const ids = new Set(rows.map((r) => r.id));
+      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cde }))];
+    });
+    setTab("books");
+    setNotice(cde === "ebok" ? "Ready to send again as EBOK. Check the badge, then Send to Kindle." : "Ready to send again. Send to Kindle when you're ready.");
   };
 
   const pickPreviewer = async () => {
@@ -267,6 +298,9 @@ export default function App() {
           <button role="tab" aria-selected={tab === "daily"} className={tab === "daily" ? "on" : ""} onClick={() => setTab("daily")}>
             Daily
           </button>
+          <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
+            Kindle
+          </button>
         </div>
         {!previewer?.found && previewer && (
           <button className="pill warn" onClick={() => setSettingsOpen(true)}>
@@ -290,6 +324,7 @@ export default function App() {
       </header>
 
       {tab === "daily" && <DailyView onNotice={setNotice} />}
+      {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} />}
       {tab === "books" && (
       <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
         {books.length === 0 ? (
@@ -335,7 +370,7 @@ export default function App() {
         </div>
       )}
 
-      {tab === "books" && (
+      {(tab === "books" || tab === "kindle") && (
       <footer className="bar">
         <div className="device">
           <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
@@ -360,6 +395,7 @@ export default function App() {
             </span>
           )}
         </div>
+        {tab === "books" && (
         <div className="actions">
           <button className="primary" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
             {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
@@ -375,6 +411,7 @@ export default function App() {
             )}
           </div>
         </div>
+        )}
         <div className="version">Deckle {version}</div>
       </footer>
       )}
@@ -392,6 +429,9 @@ export default function App() {
         }}
         onClose={() => setSettingsOpen(false)}
         onPickPreviewer={pickPreviewer}
+        library={library}
+        onLibrary={setLibraryOptions}
+        onPickLibrary={pickLibrary}
       />
     </div>
   );

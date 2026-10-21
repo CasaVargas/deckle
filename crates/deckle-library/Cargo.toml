@@ -1,0 +1,19 @@
+[package]
+name = "deckle-library"
+description = "Deckle library: one plain folder per book, with a deckle.json sidecar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+deckle-core.workspace = true
+deckle-docx.workspace = true
+deckle-kfx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+
+[dev-dependencies]
+zip.workspace = true

@@ -322,3 +322,160 @@ fn digest_email_needs_the_email_table_first() {
         assert!(!err.contains("not-a-real-password"), "{err}");
     }
 }
+
+/// `deckle` with HOME (so the config and cache folders) under `home`.
+fn deckle_at(home: &std::path::Path) -> Command {
+    let mut c = Command::cargo_bin("deckle").unwrap();
+    c.env("HOME", home)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .env("APPDATA", home.join("AppData"));
+    c
+}
+
+#[test]
+fn library_init_add_and_list() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let root = tmp.path().join("Library");
+    let none = deckle_at(&home).args(["library", "list"]).output().unwrap();
+    assert!(!none.status.success());
+    assert!(String::from_utf8_lossy(&none.stderr).contains("library init"));
+    deckle_at(&home)
+        .args(["library", "init"])
+        .arg(&root)
+        .assert()
+        .success();
+    deckle_at(&home)
+        .args(["library", "add"])
+        .arg(deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .assert()
+        .success();
+    let out = deckle_at(&home).args(["library", "list"]).output().unwrap();
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        text.contains("Testwright, Jane  Deckle Mini Fixture  [Fixture Series #2]"),
+        "{text}"
+    );
+    let out = deckle_at(&home)
+        .args(["--json", "library", "list"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v[0]["book"]["asin"].as_str().unwrap().ends_with("DECK"));
+    let scan = deckle_at(&home).args(["library", "scan"]).output().unwrap();
+    assert!(scan.status.success());
+    assert!(String::from_utf8_lossy(&scan.stdout).contains("1 books in"));
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn run_adds_the_book_to_the_library_and_records_the_send() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let out = tmp.path().join("out");
+    deckle_at(&home)
+        .args(["library", "init"])
+        .arg(tmp.path().join("Library"))
+        .assert()
+        .success();
+    deckle_at(&home)
+        .args(["run"])
+        .arg(deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .args(["--xray", "off", "--word-wise", "off", "--to"])
+        .arg(&out)
+        .args(["--previewer"])
+        .arg(&fake)
+        .assert()
+        .success();
+    let list = deckle_at(&home)
+        .args(["--json", "library", "list"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
+    let send = &v[0]["book"]["sends"][0];
+    assert!(
+        send["device"].as_str().unwrap().starts_with("folder:"),
+        "{v}"
+    );
+    assert!(
+        send["file"]
+            .as_str()
+            .unwrap()
+            .ends_with("Deckle Mini Fixture.kfx")
+    );
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn kindle_books_lists_what_run_sent_and_remove_takes_it_off() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let out = tmp.path().join("out");
+    deckle_at(&home)
+        .args(["library", "init"])
+        .arg(tmp.path().join("Library"))
+        .assert()
+        .success();
+    deckle_at(&home)
+        .args(["run"])
+        .arg(deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .args(["--xray", "off", "--word-wise", "off", "--to"])
+        .arg(&out)
+        .args(["--previewer"])
+        .arg(&fake)
+        .assert()
+        .success();
+    std::fs::write(out.join("paper.pdf"), b"%PDF").unwrap();
+    let books = deckle_at(&home)
+        .args(["--json", "kindle", "books", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(
+        books.status.success(),
+        "{}",
+        String::from_utf8_lossy(&books.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&books.stdout).unwrap();
+    let rows = v["books"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{v}");
+    let kfx = rows.iter().find(|r| r["book"]["format"] == "kfx").unwrap();
+    assert_eq!(kfx["book"]["title"], "Deckle Mini Fixture");
+    assert!(kfx["library"].is_string(), "matched to the library: {kfx}");
+    let file = kfx["book"]["file"].as_str().unwrap().to_owned();
+    let text = deckle_at(&home)
+        .args(["kindle", "books", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&text.stdout).contains("in library"));
+    // No terminal to ask in: refused without --yes.
+    let refused = deckle_at(&home)
+        .args(["kindle", "remove", &file, "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(out.join(&file).exists());
+    deckle_at(&home)
+        .args(["kindle", "remove", &file, "--yes", "--to"])
+        .arg(&out)
+        .assert()
+        .success();
+    assert!(!out.join(&file).exists());
+    let list = deckle_at(&home)
+        .args(["--json", "library", "list"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(
+        v[0]["book"]["sends"],
+        serde_json::json!([]),
+        "send forgotten"
+    );
+}

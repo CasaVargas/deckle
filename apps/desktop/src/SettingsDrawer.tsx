@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { ReactNode } from "react";
 import { api } from "./api";
-import type { DeviceRow, PreviewerStatus, Settings } from "./types";
+import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings } from "./types";
 
 const REPO = "https://github.com/prjoni99/deckle";
 
@@ -30,9 +30,12 @@ interface Props {
   onDeviceOptions: (key: string, cde: "pdoc" | "ebok" | null, verified: boolean) => void;
   onClose: () => void;
   onPickPreviewer: () => void;
+  library: LibraryStatus | null;
+  onLibrary: (root: string | null, autoAdd: boolean) => void;
+  onPickLibrary: () => void;
 }
 
-export default function SettingsDrawer({ open, version, settings, previewer, devices, onChange, onDeviceOptions, onClose, onPickPreviewer }: Props) {
+export default function SettingsDrawer({ open, version, settings, previewer, devices, onChange, onDeviceOptions, onClose, onPickPreviewer, library, onLibrary, onPickLibrary }: Props) {
   if (!open) return null;
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...settings, [k]: v });
   return (
@@ -67,6 +70,31 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
           />
           <button onClick={onPickPreviewer}>Choose…</button>
         </div>
+      </section>
+
+      <section>
+        <h3>Library</h3>
+        <p className="hint">
+          {library?.root ? (
+            <>
+              {library.books} book{library.books === 1 ? "" : "s"} in <code>{library.root}</code>. One folder per book, with the file you sent and a{" "}
+              <code>deckle.json</code> beside it.
+            </>
+          ) : (
+            <>Keep a copy of every book you send in a folder you choose, so you can send it again or upgrade it from the Kindle tab.</>
+          )}
+        </p>
+        <div className="field-row">
+          <button onClick={onPickLibrary}>{library?.root ? "Change folder…" : "Choose folder…"}</button>
+          {library?.root && <button onClick={() => api.reveal(library.root!)}>Show</button>}
+          {library?.root && <button onClick={() => onLibrary(null, library.auto_add)}>Stop using</button>}
+        </div>
+        {library?.root && (
+          <label className="field check">
+            <input type="checkbox" checked={library.auto_add} onChange={(e) => onLibrary(library.root, e.target.checked)} />
+            <span>Add every book I send</span>
+          </label>
+        )}
       </section>
 
       <section>
