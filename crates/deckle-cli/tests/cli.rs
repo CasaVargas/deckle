@@ -479,3 +479,80 @@ fn kindle_books_lists_what_run_sent_and_remove_takes_it_off() {
         "send forgotten"
     );
 }
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn library_reprocess_updates_books_sent_before_engine_stamps() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let out = tmp.path().join("out");
+    let root = tmp.path().join("Library");
+    deckle_at(&home)
+        .args(["library", "init"])
+        .arg(&root)
+        .assert()
+        .success();
+    deckle_at(&home)
+        .args(["run"])
+        .arg(deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .args(["--xray", "off", "--word-wise", "off", "--to"])
+        .arg(&out)
+        .args(["--previewer"])
+        .arg(&fake)
+        .assert()
+        .success();
+    // As a Deckle from before engine stamps would have written it.
+    let sidecar = root.join("Testwright, Jane/Deckle Mini Fixture/deckle.json");
+    let mut v: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+    assert_eq!(v["sends"][0]["stamped"], true);
+    v["sends"][0].as_object_mut().unwrap().remove("stamped");
+    std::fs::write(&sidecar, serde_json::to_vec(&v).unwrap()).unwrap();
+
+    let dry = deckle_at(&home)
+        .args(["library", "reprocess", "--dry-run", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&dry.stdout).into_owned();
+    assert!(dry.status.success(), "{text}");
+    assert!(
+        text.contains("sent before Deckle tracked versions"),
+        "{text}"
+    );
+    assert!(text.contains("1 can be updated"), "{text}");
+    let unchanged: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+    assert!(unchanged["sends"][0].get("stamped").is_none());
+
+    let done = deckle_at(&home)
+        .args(["library", "reprocess", "--yes", "--previewer"])
+        .arg(&fake)
+        .args(["--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(
+        done.status.success(),
+        "{}{}",
+        String::from_utf8_lossy(&done.stdout),
+        String::from_utf8_lossy(&done.stderr)
+    );
+    let after: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&sidecar).unwrap()).unwrap();
+    assert_eq!(after["sends"][0]["stamped"], true);
+    let kfx: Vec<_> = std::fs::read_dir(&out)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "kfx"))
+        .collect();
+    assert_eq!(kfx.len(), 1, "one copy");
+    let again = deckle_at(&home)
+        .args(["library", "reprocess", "--dry-run", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&again.stdout).contains("is current"));
+}

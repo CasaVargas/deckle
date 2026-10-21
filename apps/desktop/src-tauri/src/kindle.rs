@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use deckle_core::deliver::{Conn, Target};
 use deckle_core::inventory::{Space, list_on, remove_on};
+use deckle_library::freshness::Reason;
 use deckle_library::shelf::{Shelved, shelve, source_cover};
 use deckle_library::{Library, LibraryConfig};
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,19 @@ pub struct DeviceBookRow {
     pub cover: Option<String>,
     /// The library's source file, for Re-send and Upgrade.
     pub library_source: Option<String>,
+    /// Why Deckle could build it better now (Kindle-updates design §5).
+    pub updates: Vec<UpdateReason>,
+    /// Another book on this Kindle is the same one.
+    pub duplicate: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct UpdateReason {
+    /// An older build (else a missing feature).
+    pub older: bool,
+    /// `X-Ray` | `Word Wise` for a missing feature.
+    pub feature: Option<&'static str>,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -112,6 +126,20 @@ fn row(s: Shelved) -> DeviceBookRow {
         xray: s.book.xray,
         word_wise: s.book.word_wise,
         cover,
+        updates: s
+            .updates
+            .iter()
+            .map(|r| UpdateReason {
+                older: r.is_older(),
+                feature: match r {
+                    Reason::MissingXRay => Some("X-Ray"),
+                    Reason::MissingWordWise => Some("Word Wise"),
+                    _ => None,
+                },
+                text: r.describe(),
+            })
+            .collect(),
+        duplicate: s.duplicate,
     }
 }
 
@@ -124,7 +152,8 @@ pub fn shelf_on(
     let device = deckle_library::device_ref(conn.target);
     let inv = list_on(conn, cache).map_err(|e| e.to_string())?;
     let library = Library::configured(config).map(|(l, _)| l);
-    let mut books: Vec<DeviceBookRow> = shelve(inv.books, library.as_ref(), &device.key)
+    let current = deckle_library::freshness::Current::now(&Default::default());
+    let mut books: Vec<DeviceBookRow> = shelve(inv.books, library.as_ref(), &device.key, &current)
         .into_iter()
         .map(row)
         .collect();

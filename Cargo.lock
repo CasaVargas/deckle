@@ -1072,6 +1072,7 @@ dependencies = [
  "deckle-core",
  "deckle-docx",
  "deckle-kfx",
+ "deckle-xray",
  "serde",
  "serde_json",
  "sha2 0.11.1",

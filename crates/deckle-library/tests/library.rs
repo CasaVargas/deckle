@@ -381,7 +381,7 @@ fn a_kindles_books_match_the_library_by_asin_or_send_record() {
         asin: Some("B00STORE00".into()),
         ..Default::default()
     };
-    let got = shelve(vec![on_mtp, by_asin, other], Some(&lib), "mtp:G0X1");
+    let got = shelve(vec![on_mtp, by_asin, other], Some(&lib), "mtp:G0X1", &now());
     assert_eq!(got[0].library.as_ref().unwrap().dir, book.dir);
     assert_eq!(got[0].book.title.as_deref(), Some("Deckle Mini Fixture"));
     assert_eq!(got[0].book.cde.as_deref(), Some("PDOC"));
@@ -404,9 +404,93 @@ fn a_kindles_books_match_the_library_by_asin_or_send_record() {
         ..Default::default()
     };
     assert!(
-        shelve(vec![elsewhere], Some(&lib), "ms:Kindle")[0]
+        shelve(vec![elsewhere], Some(&lib), "ms:Kindle", &now())[0]
             .library
             .is_none()
     );
     assert!(source_cover(&book).is_some());
+}
+
+fn now() -> deckle_library::freshness::Current {
+    deckle_library::freshness::Current {
+        xray_engine: 2,
+        wordwise_db: Some("2026.10+3".into()),
+    }
+}
+
+#[test]
+fn the_shelf_says_what_can_be_updated_and_what_is_duplicated() {
+    use deckle_core::inventory::DeviceBook;
+    use deckle_library::freshness::Reason;
+    use deckle_library::shelf::shelve;
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::new(tmp.path().join("Library"));
+    let mut book = lib
+        .add(&deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .unwrap()
+        .book;
+    let asin = book.sidecar.asin.clone();
+    let file = "Testwright, Jane - Deckle Mini Fixture.kfx";
+    lib.record_send(
+        &mut book,
+        deckle_library::SendRecord {
+            device: "ms:Kindle".into(),
+            file: file.into(),
+            cde: Some("EBOK".into()),
+            asin: Some(asin.clone()),
+            xray: true,
+            word_wise: true,
+            stamped: true,
+            xray_engine: Some(1),
+            wordwise_db: Some("2026.10+3".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let on_kindle = DeviceBook {
+        file: file.into(),
+        asin: Some(asin.clone()),
+        xray: true,
+        word_wise: false, // the Kindle lost it
+        ..Default::default()
+    };
+    let store_a = DeviceBook {
+        file: "Some Store Book.azw3".into(),
+        title: Some("The Same Book!".into()),
+        authors: vec!["Ada Writer".into()],
+        ..Default::default()
+    };
+    let store_b = DeviceBook {
+        file: "the same book.pdf".into(),
+        title: Some("the same book".into()),
+        authors: vec!["ada writer".into()],
+        ..Default::default()
+    };
+    let got = shelve(
+        vec![on_kindle, store_a, store_b],
+        Some(&lib),
+        "ms:Kindle",
+        &now(),
+    );
+    assert_eq!(
+        got[0].updates,
+        [
+            Reason::XRayEngine { sent: 1, now: 2 },
+            Reason::MissingWordWise
+        ]
+    );
+    assert!(!got[0].duplicate);
+    assert!(got[1].updates.is_empty(), "not in the library");
+    assert!(got[1].duplicate && got[2].duplicate);
+    // Sent to another Kindle: nothing to judge here.
+    let elsewhere = DeviceBook {
+        file: file.into(),
+        asin: Some(asin),
+        ..Default::default()
+    };
+    assert!(
+        shelve(vec![elsewhere], Some(&lib), "ms:Other", &now())[0]
+            .updates
+            .is_empty()
+    );
 }

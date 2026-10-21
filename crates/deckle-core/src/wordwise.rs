@@ -94,6 +94,23 @@ pub fn ensure_database(
     ensure_database_pinned(opts, fetch, DB_SHA256)
 }
 
+/// The version of the database a send would use now, without downloading one: `None` when
+/// there is none yet.
+pub fn current_database_version(opts: &WordWiseOptions) -> Option<String> {
+    let path = opts
+        .database
+        .clone()
+        .or_else(|| {
+            std::env::var_os(DB_ENV)
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
+        })
+        .unwrap_or_else(|| opts.cache_dir.join(DB_FILE));
+    path.is_file()
+        .then(|| Lexicon::open(&path).ok().map(|l| l.version))
+        .flatten()
+}
+
 /// [`ensure_database`] against another pinned digest (tests).
 pub fn ensure_database_pinned(
     opts: &WordWiseOptions,
@@ -272,6 +289,8 @@ pub struct WordWiseSummary {
     pub dictionary: String,
     /// The database was downloaded during this run.
     pub downloaded: bool,
+    /// The database's `version+build`, stamped on the send (Kindle-updates design §3).
+    pub database: String,
 }
 
 #[derive(Debug)]
@@ -378,6 +397,7 @@ pub fn build(
             level,
             dictionary: dictionary.into(),
             downloaded,
+            database: lexicon.version.clone(),
         },
         dictionary_file,
         warnings,

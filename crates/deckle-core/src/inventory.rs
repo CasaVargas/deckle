@@ -76,7 +76,8 @@ fn sdr_name(file: &str) -> String {
         .into_owned()
 }
 
-fn is_generated_asin(asin: &str) -> bool {
+/// A Deckle-made ASIN: `B0` + four + `DECK` (design §5).
+pub fn is_generated_asin(asin: &str) -> bool {
     asin.len() == 10 && asin.starts_with("B0") && asin.ends_with("DECK")
 }
 

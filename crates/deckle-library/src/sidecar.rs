@@ -62,6 +62,13 @@ pub struct SendRecord {
     pub asin: Option<String>,
     pub xray: bool,
     pub word_wise: bool,
+    /// Written by a Deckle that stamps engines (Kindle-updates design §3); `false` on older
+    /// records.
+    pub stamped: bool,
+    /// `deckle_xray::ENGINE` when X-Ray shipped.
+    pub xray_engine: Option<u32>,
+    /// The Word Wise database's `version+build` when Word Wise shipped.
+    pub wordwise_db: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

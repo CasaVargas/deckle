@@ -29,7 +29,7 @@ const ARTICLE_FILE = /\.(webloc|url|html?)$/i;
 const WEB_ADDRESS = /https?:\/\/[^\s<>"]+/g;
 
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [] };
 }
 
 export default function App() {
@@ -159,6 +159,7 @@ export default function App() {
                     : b.shipped,
                 xray: e.status === "done" ? (e.xray ?? null) : b.xray,
                 wordWise: e.status === "done" ? (e.word_wise ?? null) : b.wordWise,
+                replaced: e.status === "done" ? (e.replaced ?? []) : b.replaced,
               },
         ),
       );
@@ -207,19 +208,22 @@ export default function App() {
     if (typeof dir === "string") setLibraryOptions(dir, library?.auto_add ?? true);
   };
 
-  // Re-send / Upgrade from the Kindle tab: the library copy goes on the Books tab for review.
-  const resendFromLibrary = async (source: string, cde: "ebok" | null) => {
-    const rows = await api.inspectBooks([source]);
+  // Re-send, Upgrade and Update from the Kindle tab: the library copies go on the Books tab
+  // for review, each with its chosen mode.
+  const resendFromLibrary = async (items: { source: string; cde: "pdoc" | "ebok" | null }[], what: string) => {
+    const rows = await api.inspectBooks(items.map((i) => i.source));
+    const cdeFor = new Map(items.map((i) => [i.source, i.cde]));
     if (rows.length === 0) {
-      setNotice("The app sends EPUBs; send this Word document with `deckle run`.");
+      setNotice("The app sends EPUBs; send Word documents with `deckle run`.");
       return;
     }
     setBooks((prev) => {
       const ids = new Set(rows.map((r) => r.id));
-      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cde }))];
+      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cdeFor.get(r.path) ?? null }))];
     });
     setTab("books");
-    setNotice(cde === "ebok" ? "Ready to send again as EBOK. Check the badge, then Send to Kindle." : "Ready to send again. Send to Kindle when you're ready.");
+    const skipped = items.length - rows.length;
+    setNotice(`${what} Check the badges, then Send to Kindle.${skipped ? ` ${skipped} Word document${skipped > 1 ? "s" : ""} left out: send with \`deckle library reprocess\`.` : ""}`);
   };
 
   const pickPreviewer = async () => {

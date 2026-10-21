@@ -34,6 +34,8 @@ export interface BookState extends BookRow {
   /** The book's Amazon ASIN, typed by the owner: EBOK then gets the store cover. */
   asin: string | null;
   showReport: boolean;
+  /** Older copies this send removed from the Kindle. */
+  replaced: string[];
 }
 
 export interface WordWiseSummary {
@@ -103,6 +105,8 @@ export interface ProgressEvent {
   matched?: string | null;
   xray?: { people: number; terms: number; source: "llm" | "wikipedia" | "basic" } | null;
   word_wise?: WordWiseSummary | null;
+  /** Older copies removed from the Kindle (Kindle-updates design §4). */
+  replaced?: string[];
 }
 
 export type RunTarget =
@@ -260,6 +264,9 @@ export interface DeviceBookRow {
   cover: string | null;
   /** The library's source file, for Re-send and Upgrade. */
   library_source: string | null;
+  /** Why Deckle could build it better now (Kindle-updates design §5). */
+  updates: { older: boolean; feature: "X-Ray" | "Word Wise" | null; text: string }[];
+  duplicate: boolean;
 }
 
 export interface DeviceShelf {

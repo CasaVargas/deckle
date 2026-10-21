@@ -55,6 +55,8 @@ pub struct XRaySummary {
     pub terms: usize,
     /// `llm` | `wikipedia` | `basic`
     pub source: String,
+    /// [`deckle_xray::ENGINE`] at build time.
+    pub engine: u32,
 }
 
 #[derive(Debug)]
@@ -213,6 +215,7 @@ pub fn build_with(
             people,
             terms,
             source: source.to_owned(),
+            engine: deckle_xray::ENGINE,
         },
         warnings,
     }))

@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 deckle-core.workspace = true
+deckle-xray.workspace = true
 deckle-docx.workspace = true
 deckle-kfx.workspace = true
 serde.workspace = true
