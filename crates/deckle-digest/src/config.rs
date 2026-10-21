@@ -54,6 +54,9 @@ pub struct Config {
     pub reading: ReadingConfig,
     /// What `digest watch` does when a Kindle connects (auto-sync design §3).
     pub sync: SyncConfig,
+    /// Send-to-Kindle email (email design §5). Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "EmailConfig::is_default")]
+    pub email: EmailConfig,
 }
 
 impl Default for Config {
@@ -84,6 +87,7 @@ impl Default for Config {
             horoscope: HoroscopeConfig::default(),
             reading: ReadingConfig::default(),
             sync: SyncConfig::default(),
+            email: EmailConfig::default(),
         }
     }
 }
@@ -235,6 +239,80 @@ impl SyncConfig {
     }
 }
 
+/// `[email]`: the paper to a Send-to-Kindle address over the owner's own SMTP account (email
+/// design §5). The password is never here: it's in the system keychain (`secret`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct EmailConfig {
+    pub enabled: bool,
+    /// `…@kindle.com` or `…@free.kindle.com`, nothing else.
+    pub to: String,
+    pub from: String,
+    pub smtp_host: String,
+    /// 587 (STARTTLS) or 465 (implicit TLS): there is no plain-text SMTP.
+    pub smtp_port: u16,
+    pub username: String,
+    /// Also queue the paper for USB when the email went out.
+    pub usb_too: bool,
+}
+
+impl Default for EmailConfig {
+    fn default() -> Self {
+        EmailConfig {
+            enabled: false,
+            to: String::new(),
+            from: String::new(),
+            smtp_host: String::new(),
+            smtp_port: 587,
+            username: String::new(),
+            usb_too: false,
+        }
+    }
+}
+
+impl EmailConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// A typo can't send the paper anywhere but a Kindle, or over plain text.
+    pub fn validate(&self) -> Result<(), String> {
+        let to = self.to.trim().to_ascii_lowercase();
+        let kindle = ["@kindle.com", "@free.kindle.com"]
+            .iter()
+            .any(|d| to.len() > d.len() && to.ends_with(d));
+        if !to.is_empty() && !kindle {
+            return Err(format!(
+                "[email] to = {:?}: it must be a Send-to-Kindle address (…@kindle.com or \
+                 …@free.kindle.com)",
+                self.to
+            ));
+        }
+        if !matches!(self.smtp_port, 587 | 465) {
+            return Err(format!(
+                "[email] smtp_port = {}: use 587 (STARTTLS) or 465 (TLS); plain-text SMTP isn't \
+                 supported",
+                self.smtp_port
+            ));
+        }
+        Ok(())
+    }
+
+    /// What's missing before an email can go out, as the config's key names.
+    pub fn missing(&self) -> Vec<&'static str> {
+        [
+            ("to", &self.to),
+            ("from", &self.from),
+            ("smtp_host", &self.smtp_host),
+            ("username", &self.username),
+        ]
+        .into_iter()
+        .filter(|(_, v)| v.trim().is_empty())
+        .map(|(k, _)| k)
+        .collect()
+    }
+}
+
 /// The starter file `deckle digest init` writes.
 pub const STARTER: &str = r#"# Deckle Daily — your morning paper, built on this machine.
 # Edit freely; `deckle digest build` shows what a change does.
@@ -285,11 +363,25 @@ clippings = false                 # not built yet
 # Per Kindle, by the "sync id" `deckle devices` shows:
 # [sync.devices."G0000000000"]
 # prune = false
+
+# Email the paper to your Kindle each morning (opt-in). The password is not stored here:
+# run `deckle digest email password` (or use the Daily tab), which saves it in the system
+# keychain. Add the "from" address to Amazon's Approved Personal Document E-mail List.
+# [email]
+# enabled = false
+# to = "you_ABC123@kindle.com"
+# from = "you@example.com"
+# smtp_host = "smtp.gmail.com"
+# smtp_port = 587            # 587 = STARTTLS, 465 = implicit TLS; anything else is refused
+# username = "you@example.com"
+# usb_too = false            # also queue the paper for USB when the email succeeds
 "#;
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        toml::from_str(text).map_err(|e| e.to_string())
+        let cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+        cfg.email.validate()?;
+        Ok(cfg)
     }
 
     pub fn load(path: &Path) -> Result<Self, String> {
@@ -302,6 +394,7 @@ impl Config {
 /// order and every value that didn't change stay as they are. A missing file starts from
 /// [`STARTER`] (Daily design §5c).
 pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
+    cfg.email.validate()?;
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => STARTER.to_owned(),
@@ -482,6 +575,90 @@ mod tests {
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(saved.contains("prune = false   # mine"), "{saved}");
         assert_eq!(Config::load(&path).unwrap(), c);
+    }
+
+    #[test]
+    fn email_is_off_by_default() {
+        let e = Config::parse("").unwrap().email;
+        assert_eq!(e, EmailConfig::default());
+        assert!(!e.enabled);
+        assert_eq!(e.smtp_port, 587);
+        assert!(!e.usb_too, "one copy of the paper, not two (design §11)");
+        assert_eq!(
+            Config::parse(STARTER).unwrap().email,
+            EmailConfig::default(),
+            "the starter's [email] block is commented out"
+        );
+    }
+
+    #[test]
+    fn the_starters_email_block_parses_once_uncommented() {
+        let block: String = STARTER
+            .lines()
+            .skip_while(|l| !l.starts_with("# [email]"))
+            .take_while(|l| l.starts_with('#'))
+            .map(|l| format!("{}\n", l.strip_prefix("# ").unwrap_or(l)))
+            .collect();
+        assert!(block.starts_with("[email]"), "{block}");
+        let text = STARTER.replace(
+            &block
+                .lines()
+                .map(|l| format!("# {l}\n"))
+                .collect::<String>(),
+            &block,
+        );
+        let e = Config::parse(&text).unwrap().email;
+        assert!(!e.enabled);
+        assert_eq!(e.to, "you_ABC123@kindle.com");
+        assert_eq!(e.smtp_host, "smtp.gmail.com");
+        assert_eq!(e.smtp_port, 587);
+        assert!(!e.usb_too);
+    }
+
+    #[test]
+    fn email_only_goes_to_a_kindle_address() {
+        let with = |to: &str| Config::parse(&format!("[email]\nto = \"{to}\"\n"));
+        assert!(with("me_1@kindle.com").is_ok());
+        assert!(with("me_1@free.kindle.com").is_ok());
+        assert!(with("Me_1@Kindle.COM").is_ok());
+        assert!(with("").is_ok(), "unset is fine until it's enabled");
+        for bad in [
+            "me@gmail.com",
+            "me@kindle.com.evil.net",
+            "me@notkindle.com",
+            "kindle.com",
+        ] {
+            let e = with(bad).unwrap_err();
+            assert!(e.contains("@kindle.com"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn email_needs_tls_ports() {
+        let with = |port: u16| Config::parse(&format!("[email]\nsmtp_port = {port}\n"));
+        assert!(with(587).is_ok());
+        assert!(with(465).is_ok());
+        for bad in [25, 2525, 0] {
+            let e = with(bad).unwrap_err();
+            assert!(e.contains("587") && e.contains("465"), "{bad}: {e}");
+        }
+        assert!(Config::parse("[email]\npasword = \"x\"").is_err());
+    }
+
+    #[test]
+    fn saving_refuses_a_bad_email_table_and_keeps_a_good_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, STARTER).unwrap();
+        let mut c = Config::load(&path).unwrap();
+        c.email.to = "me@gmail.com".into();
+        assert!(save(&path, &c).is_err());
+        c.email.to = "me_1@kindle.com".into();
+        c.email.enabled = true;
+        save(&path, &c).unwrap();
+        assert_eq!(Config::load(&path).unwrap().email, c.email);
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("password ="), "{text}");
     }
 
     #[test]
