@@ -185,12 +185,13 @@ fn jpeg(c: Canvas) -> Result<Vec<u8>, String> {
 }
 
 /// A long read's cover (save-to-paper §5): "Deckle Reads" in the masthead face, the title
-/// large, then the byline, outlet and reading time.
+/// large, then the byline, outlet and reading time (then `via`, how it came).
 pub fn render_reads(
     title: &str,
     byline: Option<&str>,
     outlet: &str,
     minutes: usize,
+    via: Option<&str>,
 ) -> Result<Vec<u8>, String> {
     let f = fonts()?;
     let inner = WIDTH as f32 - 2.0 * MARGIN;
@@ -224,7 +225,10 @@ pub fn render_reads(
         &f.serif,
         34.0,
         foot + 60.0,
-        &format!("About {minutes} min · saved to your Deckle Daily"),
+        &match via {
+            Some(v) => format!("About {minutes} min · {v}"),
+            None => format!("About {minutes} min"),
+        },
         BLACK,
     );
     jpeg(c)

@@ -306,6 +306,12 @@ pub fn http_post(url: &str, headers: &[(String, String)], body: &str) -> Result<
     let mut resp = req
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(180)))
+        // The OS certificate store, so TLS-inspecting proxies (Zscaler, …) the machine trusts work.
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
+        )
         .build()
         .send(body)
         .map_err(|e| e.to_string())?;

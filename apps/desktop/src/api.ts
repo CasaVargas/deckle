@@ -17,6 +17,8 @@ export const api = {
   takePreloadedTarget: () => invoke<string | null>("take_preloaded_target"),
   startTab: () => invoke<"books" | "daily">("start_tab"),
   inspectBooks: (paths: string[]) => invoke<BookRow[]>("inspect_books", { paths }),
+  /** Web addresses, .webloc/.url link files or saved pages, each built into a book (slow: fetches). */
+  importArticles: (targets: string[]) => invoke<BookRow[]>("import_articles", { targets }),
   listDevices: () => invoke<DeviceRow[]>("list_devices"),
   previewerStatus: () => invoke<PreviewerStatus>("previewer_status"),
   getSettings: () => invoke<Settings>("get_settings"),

@@ -22,6 +22,7 @@ pub mod render;
 pub mod schedule;
 pub mod secret;
 pub mod sources;
+pub mod web_book;
 
 use std::path::{Path, PathBuf};
 

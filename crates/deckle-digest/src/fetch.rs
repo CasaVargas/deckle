@@ -43,6 +43,12 @@ fn agent(user_agent: &str, timeout_secs: u64) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(timeout_secs)))
         .user_agent(user_agent)
+        // The OS certificate store, so TLS-inspecting proxies (Zscaler, …) the machine trusts work.
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
+        )
         .build()
         .new_agent()
 }

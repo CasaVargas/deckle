@@ -23,6 +23,10 @@ const DEFAULT_SETTINGS: Settings = {
   amazon_match: false,
 };
 
+/** Link files and saved pages become articles (web-article design); everything else is a book. */
+const ARTICLE_FILE = /\.(webloc|url|html?)$/i;
+const WEB_ADDRESS = /https?:\/\/[^\s<>"]+/g;
+
 function toState(row: BookRow): BookState {
   return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false };
 }
@@ -44,15 +48,40 @@ export default function App() {
   const [tab, setTab] = useState<"books" | "daily">("books");
   const booksRef = useRef(books);
   booksRef.current = books;
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
 
-  const addPaths = useCallback(async (paths: string[]) => {
-    if (paths.length === 0) return;
-    const rows = await api.inspectBooks(paths);
+  const addRows = useCallback((rows: BookRow[]) => {
     setBooks((prev) => {
       const known = new Set(prev.map((b) => b.id));
       return [...prev, ...rows.filter((r) => !known.has(r.id)).map(toState)];
     });
   }, []);
+
+  // Fetching and extracting takes a few seconds per article; say so while it runs.
+  const addArticles = useCallback(
+    async (targets: string[]) => {
+      if (targets.length === 0) return;
+      setNotice(targets.length === 1 ? "Fetching the article…" : `Fetching ${targets.length} articles…`);
+      try {
+        addRows(await api.importArticles(targets));
+        setNotice(null);
+      } catch (e) {
+        setNotice(String(e));
+      }
+    },
+    [addRows],
+  );
+
+  const addPaths = useCallback(
+    async (paths: string[]) => {
+      const articles = paths.filter((p) => ARTICLE_FILE.test(p));
+      const books = paths.filter((p) => !ARTICLE_FILE.test(p));
+      if (books.length > 0) addRows(await api.inspectBooks(books));
+      await addArticles(articles);
+    },
+    [addRows, addArticles],
+  );
 
   const refreshDevices = useCallback(async () => {
     const d = await api.listDevices();
@@ -132,13 +161,24 @@ export default function App() {
       );
     });
     const unlistenFinished = api.onRunFinished(() => setBusy(false));
+    // A pasted web address on the Books tab (not into a text field) becomes an article.
+    const onPaste = (ev: ClipboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (tabRef.current !== "books" || el?.closest("input, textarea, select, [contenteditable]")) return;
+      const urls = ev.clipboardData?.getData("text").match(WEB_ADDRESS) ?? [];
+      if (urls.length === 0) return;
+      ev.preventDefault();
+      addArticles([...new Set(urls)]);
+    };
+    document.addEventListener("paste", onPaste);
     return () => {
+      document.removeEventListener("paste", onPaste);
       clearInterval(timer);
       unlistenDrop.then((f) => f());
       unlistenProgress.then((f) => f());
       unlistenFinished.then((f) => f());
     };
-  }, [addPaths, refreshDevices]);
+  }, [addPaths, addArticles, refreshDevices]);
 
   const saveSettings = async (s: Settings) => {
     setSettings(s);
@@ -147,7 +187,7 @@ export default function App() {
   };
 
   const pickBooks = async () => {
-    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books", extensions: ["epub", "kfx"] }] });
+    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books and web articles", extensions: ["epub", "kfx", "webloc", "url", "html", "htm"] }] });
     if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
   };
 
@@ -260,6 +300,7 @@ export default function App() {
             <h1>Drop EPUBs here</h1>
             <p>Each book becomes a Kindle book with Enhanced Typesetting, a cover that shows, page numbers, and X-Ray and Word Wise where your Kindle allows them.</p>
             <p className="muted">Finished Kindle books (.kfx) are sent as they are.</p>
+            <p className="muted">Web articles too: paste an address, or drop a link (.webloc, .url) or a saved page (.html).</p>
             <button className="ghost" onClick={pickBooks}>
               or choose files…
             </button>

@@ -91,6 +91,7 @@ deckle devices                                 # connected Kindles (mass storage
 deckle run book.epub --to device --pages auto  # inspect → normalize → Previewer → KFX → enrich → Kindle
 deckle run book.epub --to ./out --cde pdoc     # export to a folder instead
 deckle run notes.docx --to device              # a Word document: imported as an EPUB first
+deckle run https://example.com/essay          # a web article (or a .webloc/.url/.html): its own book
 deckle run book.epub --to device --cde ebok --llm anthropic   # X-Ray with LLM descriptions (ANTHROPIC_API_KEY)
 deckle run book.epub --to ./out --cde ebok --llm openai --llm-endpoint http://localhost:11434/v1 --llm-model llama3
 deckle run book.epub --to ./out --cde ebok --wikipedia       # Wikipedia summaries for places and things
@@ -105,6 +106,11 @@ A `.docx` goes through the same pipeline: Heading 1–3 become the contents, foo
 pop-up notes, and pictures, lists, tables and bold/italic come through
 (`docs/superpowers/specs/2026-10-21-docx-import-design.md`). The app's drop zone still takes
 EPUBs only.
+
+A web address, a `.webloc`/`.url` link file or a saved `.html` page becomes one clean article
+with its photos and a "Deckle Reads" cover, sent now rather than in tomorrow's paper. In the app,
+drop the file or paste the address on the Books tab
+(`docs/superpowers/specs/2026-10-21-web-article-design.md`).
 
 `--cde auto` (default) applies the cover rule; `--cde pdoc|ebok` overrides it; `--match` looks up
 an Amazon edition on Open Library when an MTP Kindle needs a real ASIN.

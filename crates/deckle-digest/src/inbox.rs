@@ -87,7 +87,7 @@ fn move_to(file: &Path, sub: &str) -> Option<PathBuf> {
 }
 
 /// The URLs in a link file, by kind.
-fn urls_in(path: &Path, ext: &str) -> Result<Vec<String>, String> {
+pub(crate) fn urls_in(path: &Path, ext: &str) -> Result<Vec<String>, String> {
     let text = std::fs::read(path).map_err(|e| e.to_string())?;
     let text = String::from_utf8_lossy(&text);
     let urls: Vec<String> = match ext {

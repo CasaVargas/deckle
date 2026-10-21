@@ -132,6 +132,61 @@ fn run_takes_a_word_document() {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn run_takes_a_saved_web_page_and_reports_a_stub() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let tmp = tempfile::tempdir().unwrap();
+    let para = "The council met again tonight to argue about the new library and its roof. ";
+    let page = tmp.path().join("essay.html");
+    std::fs::write(
+        &page,
+        format!(
+            "<html><head><title>The Roof Question</title></head><body><article>\
+             <h1>The Roof Question</h1>{}</article></body></html>",
+            format!("<p>{para}</p>").repeat(40)
+        ),
+    )
+    .unwrap();
+    let stub = tmp.path().join("paywall.htm");
+    std::fs::write(&stub, "<html><body><p>Subscribe.</p></body></html>").unwrap();
+    let out = tmp.path().join("out");
+    // Deckle's cache (the built EPUBs) and config live under this HOME, not the real one.
+    let home = tmp.path().join("home");
+    let res = Command::cargo_bin("deckle")
+        .unwrap()
+        .env("HOME", &home)
+        .env("XDG_CACHE_HOME", home.join(".cache"))
+        .env("XDG_CONFIG_HOME", home.join(".config"))
+        .args(["--json", "run"])
+        .arg(&page)
+        .arg(&stub)
+        .args(["--xray", "off", "--word-wise", "off", "--to"])
+        .arg(&out)
+        .args(["--previewer"])
+        .arg(&fake)
+        .output()
+        .unwrap();
+    assert!(!res.status.success(), "the stub fails the run");
+    let v: serde_json::Value = serde_json::from_slice(&res.stdout).unwrap();
+    assert_eq!(v[0]["input"], page.to_string_lossy().as_ref());
+    assert_eq!(v[0]["info"]["title"], "The Roof Question");
+    assert!(
+        v[0]["delivered"]
+            .as_str()
+            .unwrap()
+            .ends_with("The Roof Question.kfx"),
+        "{}",
+        v[0]
+    );
+    assert!(
+        v[1]["error"].as_str().unwrap().contains("under 120 words"),
+        "{}",
+        v[1]
+    );
+}
+
+#[test]
 fn run_checks_previewer_before_creating_the_output_folder() {
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("new-folder");

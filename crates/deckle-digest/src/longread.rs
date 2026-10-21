@@ -16,14 +16,40 @@ fn photo_file(n: usize) -> String {
 }
 
 pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<(), String> {
+    write_article(
+        lr,
+        &format!("urn:deckle:reads:{date}:{}", lr.id),
+        Some("saved to your Deckle Daily"),
+        date,
+        path,
+    )
+}
+
+/// One article as a book with identifier `uid` (an article sent on its own, #21, keeps
+/// the same one each time). `via` follows the reading time at the cover's foot.
+pub fn write_article(
+    lr: &LongRead,
+    uid: &str,
+    via: Option<&str>,
+    date: NaiveDate,
+    path: &Path,
+) -> Result<(), String> {
     let cover = crate::cover::render_reads(
         &lr.title,
         lr.byline.as_deref(),
         &lr.outlet,
         minutes(lr.words),
+        via,
     )?;
-    let uid = format!("urn:deckle:reads:{date}:{}", lr.id);
     let author = lr.byline.clone().unwrap_or_else(|| lr.outlet.clone());
+    // An outlet isn't a person: keep "a saved page" from filing as "page, a saved".
+    let file_as = match &lr.byline {
+        Some(_) => String::new(),
+        None => format!(
+            "<meta refines=\"#creator\" property=\"file-as\">{}</meta>\n",
+            esc(&author)
+        ),
+    };
     let a = &lr.article;
     let mut body = a.body.clone();
     for n in 0..a.photos.len() {
@@ -60,13 +86,13 @@ pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<()
          <package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"uid\" xml:lang=\"en\">\n\
          <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n\
          <dc:identifier id=\"uid\">{uid}</dc:identifier>\n<dc:title>{title}</dc:title>\n\
-         <dc:creator id=\"creator\">{author}</dc:creator>\n<dc:language>en</dc:language>\n\
+         <dc:creator id=\"creator\">{author}</dc:creator>\n{file_as}<dc:language>en</dc:language>\n\
          <dc:publisher>{outlet}</dc:publisher>\n<dc:date>{date}</dc:date>\n\
          <meta property=\"dcterms:modified\">{date}T00:00:00Z</meta>\n\
          <meta name=\"cover\" content=\"cover-image\"/>\n</metadata>\n\
          <manifest>\n{manifest}</manifest>\n\
          <spine toc=\"ncx\">\n<itemref idref=\"text\"/>\n<itemref idref=\"nav\" linear=\"no\"/>\n</spine>\n</package>\n",
-        uid = esc(&uid),
+        uid = esc(uid),
         title = esc(&lr.title),
         author = esc(&author),
         outlet = esc(&lr.outlet),
@@ -85,7 +111,7 @@ pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<()
          <docTitle><text>{title}</text></docTitle>\n<navMap>\n\
          <navPoint id=\"text\" playOrder=\"1\"><navLabel><text>{title}</text></navLabel><content src=\"text.xhtml\"/></navPoint>\n\
          </navMap>\n</ncx>\n",
-        uid = esc(&uid),
+        uid = esc(uid),
         title = esc(&lr.title),
     );
     let mut files: crate::render::Files = vec![
