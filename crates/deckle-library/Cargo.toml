@@ -10,6 +10,7 @@ repository.workspace = true
 deckle-core.workspace = true
 deckle-xray.workspace = true
 deckle-docx.workspace = true
+deckle-txt.workspace = true
 deckle-kfx.workspace = true
 serde.workspace = true
 serde_json.workspace = true

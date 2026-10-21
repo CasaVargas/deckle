@@ -13,6 +13,7 @@ deckle-transport.workspace = true
 deckle-xray.workspace = true
 deckle-wordwise.workspace = true
 deckle-docx.workspace = true
+deckle-txt.workspace = true
 sha2.workspace = true
 flate2 = "1"
 thiserror.workspace = true

@@ -104,3 +104,26 @@ joined), `<br/>` in verse, scene breaks, the Gutenberg licence being stripped, m
 encoding fallback warning, the file splitting, and each refusal. The pipeline and CLI tests run
 `gutenberg-mini.txt` end to end through the fake Previewer. A real Gutenberg novel through real
 Previewer is checked by hand.
+
+## 5. Implementation notes (2026-10-21, #86)
+
+Calls made where §2 left room, so the code and this document agree:
+
+- **Order of the paragraph rules.** The hard-wrapped test runs first, so a dialogue-heavy
+  Gutenberg novel (many one-line blocks) still joins its wrapped paragraphs. A multi-line block
+  in a hard-wrapped book stays verse when more than half its lines are under 50 characters (a
+  signature, an address).
+- **Long unwrapped lines.** In a book that is neither hard-wrapped nor one paragraph per line, a
+  multi-line block whose lines are mostly 50 characters or longer becomes one paragraph per line,
+  not verse.
+- **All-caps subtitle.** Rendered as `Chapter 4<br/><span class="subtitle">THE LAST PROOF</span>`;
+  the contents entry reads `Chapter 4 — THE LAST PROOF`. A line that is itself a heading
+  (`PART TWO`) is never merged.
+- **Roman numerals** must be canonical (`IIII`, `MCMXCIX` and mixed case are not headings).
+- **Splitting at ~200 KB** applies only to a book with no headings; a long headed chapter stays
+  one file.
+- **Unknown `Language:`** falls back to `en` with a warning.
+- **Checked by hand:** Gutenberg #1342 (*Pride and Prejudice*, 772 KB) imports with the Preface
+  and 61 chapters in the contents and no warnings. Its first heading reads `Chapter I.]`,
+  because an illustration caption wraps it in the source. Real Previewer wasn't available on
+  this machine, so that end of the check is still to do.
