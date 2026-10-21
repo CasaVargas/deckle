@@ -162,6 +162,10 @@ stay in the Inbox until it's installed.
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
 
+What `watch` does on plug-in is set per Kindle in `digest.toml`: `[sync]` holds the defaults
+(`push = true`, `prune = true`), and `[sync.devices."<sync id>"]` overrides them for one device,
+using the id `deckle devices` shows. Push and prune share one connection.
+
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 Opt-in Send-to-Kindle email comes next
 (`docs/superpowers/specs/2026-10-20-daily-digest-design.md`).

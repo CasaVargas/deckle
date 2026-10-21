@@ -48,6 +48,16 @@ impl<'a> Conn<'a> {
         }
     }
 
+    /// A connection whose MTP session comes from `open` (tests: a fake Kindle).
+    #[cfg(test)]
+    pub(crate) fn with_opener(target: &'a Target, open: MtpOpener) -> Self {
+        Conn {
+            target,
+            mtp: None,
+            open,
+        }
+    }
+
     /// The open MTP session, opening it on first use. `None` when the target is not MTP.
     pub fn mtp(&mut self) -> Option<Result<&mut Mtp, MtpError>> {
         let Target::Mtp(info) = self.target else {
