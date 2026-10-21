@@ -60,7 +60,8 @@ result line says what shipped and why, e.g. `X-Ray: 62 people, 88 terms (basic) 
 11,477 hints (level 5, Deckle's dictionary)`.
 
 Settings hold the Kindle Previewer path, default mode, page numbers, Amazon matching, filling in
-missing book details from Open Library (`deckle run --fill-metadata`), X-Ray (LLM
+missing book details from Open Library (`deckle run --fill-metadata`), tidying typography
+(`deckle run --typography`), X-Ray (LLM
 provider, model, endpoint, key; Wikipedia), Word Wise (on/off, hint level) and per-Kindle
 options. *About* lists the version, a link to check for newer releases, and the credits.
 

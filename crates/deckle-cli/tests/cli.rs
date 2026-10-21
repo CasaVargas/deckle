@@ -104,6 +104,50 @@ fn run_with_fake_previewer_from_the_cli() {
     // The Open Library metadata fill is off unless asked for: no lookup, no outcome.
     assert!(v[0]["metadata_fill"].is_null(), "{}", v[0]);
     assert!(v[0]["stage_ms"].get("fill").is_none(), "{}", v[0]);
+    // So is the typography pass.
+    assert!(v[0]["normalize"]["typography"].is_null(), "{}", v[0]);
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn run_with_typography_reports_what_it_changed() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let out = tempfile::tempdir().unwrap();
+    let res = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["run"])
+        .arg(deckle_kfx::fixtures::path("deckle-mini.epub"))
+        .args(["--to"])
+        .arg(out.path())
+        .args(["--previewer"])
+        .arg(&fake)
+        .arg("--typography")
+        .output()
+        .unwrap();
+    assert!(
+        res.status.success(),
+        "{}",
+        String::from_utf8_lossy(&res.stderr)
+    );
+    let s = String::from_utf8(res.stdout).unwrap();
+    assert!(s.contains("Typography: ") && s.contains(" quotes, "), "{s}");
+}
+
+#[test]
+fn run_help_offers_typography_off_by_default() {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["run", "--help"])
+        .output()
+        .unwrap();
+    let s = String::from_utf8(out.stdout).unwrap();
+    let line = s
+        .lines()
+        .find(|l| l.contains("--typography"))
+        .unwrap_or_else(|| panic!("no --typography in:\n{s}"));
+    assert!(!line.contains('<'), "{line}");
+    assert!(s.contains("curly quotes"), "{s}");
 }
 
 #[test]

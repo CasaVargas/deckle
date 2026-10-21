@@ -18,5 +18,6 @@ pub mod previewer;
 pub mod queue;
 pub mod sync;
 pub mod thumbnail;
+pub mod typography;
 pub mod wordwise;
 pub mod xray;
