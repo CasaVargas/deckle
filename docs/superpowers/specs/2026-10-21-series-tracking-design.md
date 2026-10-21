@@ -1,6 +1,6 @@
 # Series tracking and reading order — design
 
-**Status:** proposed for #40 ("Series tracking and reading order"), awaiting owner review ·
+**Status:** approved by owner (2026-10-21) for [#40](https://github.com/prjoni99/deckle/issues/40) ("Series tracking and reading order") ·
 **Date:** 2026-10-21 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-21-library-and-device-view-design.md` (the folder library, `deckle.json`)
 

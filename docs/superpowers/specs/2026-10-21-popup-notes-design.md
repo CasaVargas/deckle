@@ -1,6 +1,6 @@
 # Footnotes → Kindle pop-up notes — design
 
-**Status:** proposed for #31 ("Footnotes → Kindle pop-up notes"), awaiting owner review ·
+**Status:** approved by owner (2026-10-21) for [#31](https://github.com/prjoni99/deckle/issues/31) ("Footnotes → Kindle pop-up notes") ·
 **Date:** 2026-10-21 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-18-deckle-design.md` (stage 2, normalize) ·
 `2026-10-21-typography-cleanup-design.md` (the opt-in normalize pass pattern) ·
