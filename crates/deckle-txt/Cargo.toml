@@ -1,0 +1,18 @@
+[package]
+name = "deckle-txt"
+description = "Deckle import: a plain text file (.txt) to a clean EPUB 3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+zip.workspace = true
+sha2.workspace = true
+encoding_rs.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+roxmltree.workspace = true
+zip.workspace = true

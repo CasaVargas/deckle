@@ -303,6 +303,18 @@ pub fn prepare_with(
         );
         report.warnings.extend(ireport.warnings);
         imported
+    } else if deckle_txt::is_text(epub) {
+        // Plain text the same way (TXT spec §3).
+        let imported = work_path.join("imported.epub");
+        let ireport = stage!(
+            report,
+            on_stage,
+            "import",
+            deckle_txt::convert(epub, &imported),
+            Err(Box::new(report))
+        );
+        report.warnings.extend(ireport.warnings);
+        imported
     } else {
         epub.to_path_buf()
     };

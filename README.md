@@ -18,7 +18,7 @@ recorded in `docs/devices.md`. Design: `docs/superpowers/specs/`; build plans:
 
 1. Install **[Kindle Previewer 4](https://kdp.amazon.com/en_US/help/topic/G202131170)** (free,
    from Amazon). Deckle drives it to produce Enhanced Typesetting and never bundles it.
-2. Download Deckle from [Releases](https://github.com/prjoni99/deckle/releases):
+2. Download Deckle from [Releases](https://github.com/CasaVargas/deckle/releases):
    - **macOS 14+** (Apple Silicon: `aarch64`, Intel: `x64`): open the `.dmg`, drag Deckle to
      Applications, and open it. Releases are signed with a Developer ID and notarized by Apple,
      so macOS opens them like any other app.

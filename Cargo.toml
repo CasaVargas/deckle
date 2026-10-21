@@ -6,7 +6,7 @@ members = ["crates/*", "data/wordwise", "apps/desktop/src-tauri"]
 version = "0.2.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/prjoni99/deckle"
+repository = "https://github.com/CasaVargas/deckle"
 rust-version = "1.85"
 
 [workspace.dependencies]
@@ -18,6 +18,7 @@ deckle-wordwise = { path = "crates/deckle-wordwise" }
 deckle-digest = { path = "crates/deckle-digest" }
 deckle-cli = { path = "crates/deckle-cli" }
 deckle-docx = { path = "crates/deckle-docx" }
+deckle-txt = { path = "crates/deckle-txt" }
 deckle-library = { path = "crates/deckle-library" }
 anyhow = "1"
 thiserror = "2"
@@ -37,6 +38,7 @@ regex = "1"
 ureq = { version = "3", features = ["platform-verifier"] }
 base64 = "0.22"
 sha2 = "0.11"
+encoding_rs = "0.8"
 tauri = { version = "2.12", features = [] }
 tauri-build = { version = "2.7", features = [] }
 uuid = { version = "1", features = ["v4"] }

@@ -251,6 +251,34 @@ fn run_takes_a_word_document() {
 
 #[test]
 #[cfg(unix)] // the fake Previewer is a shell script
+fn run_takes_a_text_file() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let txt = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/txt/gutenberg-mini.txt");
+    let out = tempfile::tempdir().unwrap();
+    let res = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["--json", "run"])
+        .arg(&txt)
+        .args(["--to"])
+        .arg(out.path())
+        .args(["--previewer"])
+        .arg(&fake)
+        .output()
+        .unwrap();
+    assert!(
+        res.status.success(),
+        "{}",
+        String::from_utf8_lossy(&res.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&res.stdout).unwrap();
+    assert_eq!(v[0]["info"]["title"], "The Deckle Mini Novel");
+    assert!(v[0]["delivered"].as_str().unwrap().ends_with(".kfx"));
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn run_takes_a_saved_web_page_and_reports_a_stub() {
     let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../deckle-core/tests/fake_previewer/ok.sh");
