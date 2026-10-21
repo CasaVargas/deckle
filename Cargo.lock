@@ -906,6 +906,7 @@ dependencies = [
  "deunicode",
  "flate2",
  "image",
+ "rand",
  "regex",
  "roxmltree",
  "rusqlite",
