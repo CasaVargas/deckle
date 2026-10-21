@@ -155,6 +155,19 @@ saves from your phone. The queue is a plain file, `reading.jsonl`, next to `dige
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
 
+**Over Wi-Fi (experimental).** `deckle serve` puts the outbox on a read-only page for the Kindle's
+browser, on one address you choose, until you stop it:
+
+```sh
+deckle serve --bind $(ipconfig getifaddr en0)   # or your Tailscale 100.x address
+```
+
+It prints a URL with a token in it (`http://<ip>:47220/t/<token>/`); open it on the Kindle and
+bookmark it. Anything without the token gets 403, nothing listens on every interface, and serving
+never changes the outbox. Only the book goes over Wi-Fi: X-Ray and Word Wise need USB. Whether a
+Kindle's browser accepts a `.kfx` download is still being checked on real devices
+(`docs/superpowers/specs/2026-10-20-wifi-delivery-design.md` §7).
+
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 Opt-in Send-to-Kindle email comes next
 (`docs/superpowers/specs/2026-10-20-daily-digest-design.md`).

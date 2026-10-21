@@ -196,6 +196,21 @@ pub enum Command {
         #[arg(long)]
         bookmarklet: bool,
     },
+    /// Put the outbox on a read-only web page for a Kindle's browser to download from, on one
+    /// LAN or Tailscale address, until interrupted. Prints the URL (it carries a token).
+    Serve {
+        /// The address to listen on: this computer's LAN or Tailscale IP.
+        #[arg(long)]
+        bind: std::net::IpAddr,
+        #[arg(long, default_value_t = deckle_core::serve::PORT)]
+        port: u16,
+        /// Serve this folder of .kfx files instead of the outbox.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+        /// Replace the token, so the old URL stops working.
+        #[arg(long)]
+        new_token: bool,
+    },
     /// The Deckle Daily: a newspaper built from your sources (weather, local news, feeds,
     /// lottery, horoscope, on this day).
     Digest {

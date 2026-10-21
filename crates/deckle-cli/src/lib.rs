@@ -267,6 +267,12 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         cli::Command::Digest { config, action } => digest(json, config, action),
+        cli::Command::Serve {
+            bind,
+            port,
+            dir,
+            new_token,
+        } => serve(json, bind, port, dir, new_token),
         cli::Command::Save {
             targets,
             title,
@@ -825,6 +831,52 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
     for (file, why) in &r.retry {
         eprintln!("inbox: {} waits for the next scan: {why}", file.display());
     }
+}
+
+/// `deckle serve` (Wi-Fi delivery design §4): one explicit address, never every interface.
+fn serve(
+    json: bool,
+    bind: std::net::IpAddr,
+    port: u16,
+    dir: Option<PathBuf>,
+    new_token: bool,
+) -> Result<ExitCode, String> {
+    use deckle_core::queue::Queue;
+    if bind.is_unspecified() {
+        return Err(format!(
+            "--bind {bind} would listen on every interface; give this computer's LAN or \
+             Tailscale IP (macOS: `ipconfig getifaddr en0`)"
+        ));
+    }
+    let outbox = Queue::default_dir();
+    let token_dir = outbox.parent().unwrap_or(Path::new("."));
+    let token = deckle_core::serve::token(token_dir, new_token).map_err(|e| e.to_string())?;
+    let queue = Queue::new(dir.unwrap_or(outbox));
+    let listener = std::net::TcpListener::bind((bind, port))
+        .map_err(|e| format!("can't listen on {bind}:{port}: {e}"))?;
+    let addr = listener.local_addr().map_err(|e| e.to_string())?;
+    let url = deckle_core::serve::url(addr, &token);
+    #[derive(serde::Serialize)]
+    struct Serving<'a> {
+        url: &'a str,
+        dir: &'a Path,
+    }
+    emit(
+        json,
+        &Serving {
+            url: &url,
+            dir: &queue.dir,
+        },
+        || {
+            format!(
+                "Serving {} (read-only) at\n\n  {url}\n\nOpen it in the Kindle's browser on the \
+                 same network and bookmark it. Ctrl-C to stop.",
+                queue.dir.display()
+            )
+        },
+    )?;
+    deckle_core::serve::serve(listener, queue, token).map_err(|e| e.to_string())?;
+    Ok(ExitCode::SUCCESS)
 }
 
 fn save(

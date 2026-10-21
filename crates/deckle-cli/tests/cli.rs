@@ -217,3 +217,28 @@ fn bookmarklet_prints_javascript_with_token() {
     let (_, again) = save(&q, &["--bookmarklet"]);
     assert!(again.contains(js));
 }
+
+#[test]
+fn serve_needs_an_explicit_bind_address() {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .arg("serve")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--bind"));
+}
+
+#[test]
+fn serve_refuses_every_interface() {
+    for addr in ["0.0.0.0", "::"] {
+        let out = Command::cargo_bin("deckle")
+            .unwrap()
+            .args(["serve", "--bind", addr])
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{addr}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains("every interface"), "{addr}: {err}");
+    }
+}
