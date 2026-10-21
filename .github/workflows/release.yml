@@ -1,16 +1,12 @@
 name: release
 # Builds installers for a `v*` tag and attaches them to a DRAFT GitHub release; the owner
-# reviews and publishes it. Pull requests that touch packaging run the same builds without
-# releasing anything. macOS builds are signed and notarized when the Apple secrets exist, and
+# reviews and publishes it. It runs only for a version tag or by hand (workflow_dispatch):
+# pull requests are checked by ci.yml and don't build installers. macOS builds are signed and notarized when the Apple secrets exist, and
 # Windows builds are signed with Azure Artifact Signing when the Azure secrets exist
 # (docs/release.md); without them each platform builds unsigned with a warning.
 on:
   push:
     tags: ["v*"]
-  pull_request:
-    paths:
-      - ".github/workflows/release.yml"
-      - "apps/desktop/**"
   workflow_dispatch:
     inputs:
       tag:
@@ -19,11 +15,6 @@ on:
 
 permissions:
   contents: write
-
-# A new push to a PR cancels its superseded bundle run; tag and manual builds are never cancelled.
-concurrency:
-  group: release-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   bundle:
@@ -41,7 +32,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
     runs-on: ${{ matrix.os }}
     env:
-      # empty on pull requests: build only, no release
+      # the pushed tag, or the one given to a manual run
       TAG: ${{ github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
     steps:
       - uses: actions/checkout@v4
@@ -69,8 +60,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
       # Only export the Apple variables when the secrets are set: an empty APPLE_CERTIFICATE
-      # would make the bundler try (and fail) to import a certificate. Pull requests build
-      # ad-hoc signed: notarizing every PR is slow and flaky, and only tagged builds ship.
+      # would make the bundler try (and fail) to import a certificate.
       - name: Apple signing and notarization (when configured)
         if: runner.os == 'macOS'
         shell: bash
@@ -82,10 +72,7 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
-            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
-            echo "Pull request: ad-hoc signed, not notarized (tags and manual runs are)."
-          elif [ -n "$APPLE_CERTIFICATE" ]; then
+          if [ -n "$APPLE_CERTIFICATE" ]; then
             for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
               { echo "$v<<__EOF__"; printenv "$v"; echo "__EOF__"; } >> "$GITHUB_ENV"
             done
@@ -111,10 +98,6 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $ProgressPreference = 'SilentlyContinue'  # Windows PowerShell's progress bar crawls downloads
-          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-            Write-Host "Pull request: unsigned build (tags and manual runs are signed)."
-            exit 0
-          }
           $missing = 'AZURE_TENANT_ID', 'AZURE_CLIENT_ID', 'AZURE_CLIENT_SECRET' |
             Where-Object { -not [Environment]::GetEnvironmentVariable($_) }
           if ($missing) {
