@@ -565,6 +565,34 @@ pub fn finish_with(
     report
 }
 
+/// The build any Kindle can take: PDOC with its cover, no X-Ray or Word Wise, as a folder
+/// export makes it. A queued book ships this when finishing it for the device fails
+/// (device-aware build §4.2).
+pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
+    let dir = tempfile::tempdir().map_err(|e| format!("workdir: {e}"))?;
+    let target = Target::Folder(dir.path().to_path_buf());
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        cde_override: Some(CdeType::Pdoc),
+        amazon_match: false,
+        verified_real_asin: false,
+        asin: None,
+        pages: prepared.wishes.pages,
+        target: target.clone(),
+        previewer: None,
+        keep_work_dir: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+    };
+    let r = finish(prepared, &mut Conn::new(&target), &opts, &mut |_| {});
+    match (r.error, r.delivered) {
+        (None, Some(kfx)) => std::fs::read(&kfx).map_err(|e| e.to_string()),
+        (e, _) => Err(e.unwrap_or_else(|| "not built".into())),
+    }
+}
+
 /// The compatibility rows (`compat::RULES`) a finished send to `conn`'s Kindle triggers, and the
 /// Kindle's firmware: `system/version.txt` on mass storage, PTP DeviceInfo on the already-open
 /// MTP session. A folder has no device and gets nothing.
