@@ -55,7 +55,8 @@ impl Default for DeviceProfile {
     }
 }
 
-fn now_iso() -> String {
+/// Now, UTC, as `YYYY-MM-DDTHH:MM:SSZ`.
+pub fn now_iso() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())

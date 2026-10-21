@@ -125,10 +125,16 @@ and the user fields and send records are kept.
   A `schema` greater than Deckle knows is listed but never rewritten.
 - Written atomically: a temp file in the same folder, then a rename.
 
-**Scan.** `scan` walks the root. A folder with `deckle.json` is a book. A folder with a
-source file (`.epub`, `.docx`) but no sidecar is adopted: a sidecar is written, and its folder
-isn't moved. A sidecar whose source is missing is reported, not deleted. Hidden folders and
-the `.sdr` folders are skipped.
+**Scan.** `scan` walks the root. A folder with `deckle.json` is a book.
+
+- A folder with exactly one source file (`.epub`, `.docx`) and no sidecar is adopted where
+  it is.
+- Source files at the root, or several in one sidecar-less folder, are filed into their own
+  folders (moved). The root belongs to Deckle.
+- A sidecar whose source is missing is reported, not deleted. So is a second folder for the
+  same `id`.
+- Hidden folders and `.sdr` folders are skipped.
+- A sidecar is rewritten only when its source changed.
 
 **Auto-add.** After each successful send, `deckle run` and the app's Send add the source to
 the library and record the send. A failure to add is a warning on the book; the send still

@@ -1063,6 +1063,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-library"
+version = "0.2.1"
+dependencies = [
+ "deckle-core",
+ "deckle-docx",
+ "deckle-kfx",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+ "zip",
+]
+
+[[package]]
 name = "deckle-transport"
 version = "0.2.1"
 dependencies = [
