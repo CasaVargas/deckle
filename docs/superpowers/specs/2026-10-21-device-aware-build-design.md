@@ -1,6 +1,6 @@
 # Device-aware build: finish queued books for the Kindle that takes them
 
-Status: draft, 2026-10-21. Issue #72; follows PR #71.
+Status: accepted and built, 2026-10-21. Issue #72; follows PR #71.
 
 ## 1. Why
 
@@ -119,6 +119,19 @@ For a folder target (`--to <folder>`), `finish` with `DeviceClass::Folder` gives
 - A `finish` failure, such as a corrupt KPF or an unknown `prepared.json` version, delivers `fallback.kfx` under the same name, with a warning.
 - `replaces` removes prepared entries by prefix.
 - Push with no network and no cached lexicon: the book ships with X-Ray, Word Wise is skipped with a warning.
+
+## 7a. Calls made while building (owner to check)
+
+The owner accepted §5 and the draft answers to §6 ("build 72"): the paper stays PDOC, no per-push limit, progress on the CLI (`push: 2/3 <name>` on stderr).
+
+- **Byte-identical means apart from the container id.** Every build draws a random container id, and `kfxgen_payload_sha1` covers it, so two plain `run`s already differ there. The regression test blanks both and compares every other byte.
+- **The device's override counts.** A queued book's own CDE wish wins, then the Kindle's override from `devices.json`, then the cover rule: the same chain the GUI uses. `verified_real_asin` comes along too, though with no Amazon match at push it changes nothing yet.
+- **The CLI reads the app's `devices.json`** at Tauri's config path (`~/Library/Application Support/com.casavargas.deckle/devices.json` on macOS). It only reads it; no profile means no override. `seen_mtp` moved into `deckle-core` so both key an MTP Kindle the same way.
+- **On an MTP Kindle, queued books stay PDOC unless the owner chose "Features first" for it.** That's the cover rule as it is (no thumbnail folder, no match at push); the push doesn't change it.
+- **The fallback is always PDOC**, whatever the book wished, and it's built when the book is queued. A long read whose fallback won't build prints inside the paper, like one that won't convert; such an Inbox book goes to `Unreadable/`.
+- **`prepared.json` carries the input path, `BookInfo` and the wishes, not the prepare-time warnings**: those were shown when the book was queued.
+- **One name, one entry.** Queuing a `.kfx` or a `.book` under a name that's already queued replaces the other kind too, so a book is never delivered twice.
+- **The missing-lexicon warning** reads "Word Wise skipped: could not download the Word Wise database: a push doesn't download it; the next `deckle run` with Word Wise does".
 
 ## 8. Sizing
 

@@ -184,6 +184,58 @@ impl DeviceRegistry {
     }
 }
 
+/// The desktop app's `devices.json` (Tauri's app config dir for `com.casavargas.deckle`), which
+/// `deckle digest push`/`watch` read too: `~/Library/Application Support/…` on macOS,
+/// `%APPDATA%\…` on Windows, `$XDG_CONFIG_HOME/…` (`~/.config`) elsewhere.
+pub fn default_registry_file() -> std::path::PathBuf {
+    use std::path::PathBuf;
+    let home = || std::env::var_os("HOME").map(PathBuf::from);
+    let base = if cfg!(target_os = "macos") {
+        home().map(|h| h.join("Library/Application Support"))
+    } else if cfg!(target_os = "windows") {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| home().map(|h| h.join(".config")))
+    };
+    base.unwrap_or_else(std::env::temp_dir)
+        .join("com.casavargas.deckle")
+        .join("devices.json")
+}
+
+/// The profile recorded for the Kindle `target` is, if the app has seen it. A folder has none.
+pub fn profile_for(
+    target: &crate::deliver::Target,
+    registry: &DeviceRegistry,
+) -> Option<DeviceProfile> {
+    use crate::deliver::Target;
+    let key = match target {
+        Target::Folder(_) => return None,
+        Target::MassStorage(d) => seen_mass_storage(d).key,
+        Target::Mtp(m) => seen_mtp(m).key,
+    };
+    registry.get(&key).cloned()
+}
+
+/// The `Seen` record for an MTP Kindle: keyed by its serial (else its bus address). Its
+/// firmware is read on a send's own session, never by a device poll (compat spec).
+pub fn seen_mtp(m: &deckle_transport::usb::MtpInfo) -> Seen {
+    let serial = m
+        .serial
+        .clone()
+        .unwrap_or_else(|| format!("{}:{}", m.bus, m.address));
+    Seen {
+        key: format!("mtp:{serial}"),
+        root: None,
+        model_hint: m.product.clone().unwrap_or_else(|| "Kindle (MTP)".into()),
+        transport: TransportKind::Mtp,
+        thumbnails_writable: false,
+        serial: Some(serial),
+        firmware: None,
+    }
+}
+
 /// The `Seen` record for a mass-storage device.
 pub fn seen_mass_storage(d: &crate::deliver::Device) -> Seen {
     Seen {

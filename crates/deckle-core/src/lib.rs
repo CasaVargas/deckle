@@ -6,6 +6,8 @@ pub mod cover_rule;
 pub mod deliver;
 pub mod devices;
 pub mod epub;
+#[cfg(test)]
+mod fake_mtp;
 pub mod inspect;
 pub mod matcher;
 pub mod normalize;
