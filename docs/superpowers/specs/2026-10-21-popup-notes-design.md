@@ -109,3 +109,27 @@ existing markup, like typography, so everything else in each file stays byte-ide
   - running the pass twice gives the same result as once;
   - the DOCX fixture reports 0 conversions.
 - By hand: a converted Calibre EPUB on a Scribe opens notes in a pop-up.
+
+## 7. Implementation notes
+
+Settled while building it (`crates/deckle-core/src/notes.rs`):
+
+- **What counts.** A note is counted only when the pass changed its markup or one of its
+  noterefs, so a book already in §2's form (every DOCX import) reports 0. `skipped_one_way`
+  counts links, not notes, and only links whose target block passed the size limit.
+- **§3.2's styling is required** for a heuristic noteref: a `<sup>` around or inside the link,
+  or a `note|fn|ref` class. A bare digit link ("section 2") is never a noteref. A link with a
+  note label to a semantically marked note needs no styling.
+- **Anchors that link back with the number.** InDesign and Word note anchors repeat the digit
+  and link back to the reference, so they look like noterefs to the body paragraph. When two
+  heuristic targets each hold the other's link, the one that comes before its link (the body
+  paragraph) is dropped: notes follow their references.
+- **One note per block.** An inline target `id` moves to its block only when the block has no
+  `id` of its own (both may be linked to). A second note claiming an already-converted block
+  is left alone.
+- **List numbers.** A converted `li` gets `n. ` at the start of its text (inside its first `p`
+  when it opens with one) unless the text already starts with `n`; `start`, `value` and
+  `reversed` are honoured.
+- **Kind.** The note keeps its own `footnote`/`endnote`/`rearnote` type; otherwise it becomes
+  an `endnote` when it or a section around it is marked endnotes (`epub:type` or ARIA), and a
+  `footnote` otherwise.

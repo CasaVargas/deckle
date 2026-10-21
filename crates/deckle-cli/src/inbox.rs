@@ -75,6 +75,7 @@ pub(crate) fn pipeline_with(
             generated_cover: Some(None),
             metadata_fill: false,
             typography: false,
+            popup_notes: false,
             verified_real_asin: false,
             asin: None,
             pages: None,

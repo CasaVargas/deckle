@@ -63,6 +63,8 @@ pub struct Settings {
     pub metadata_fill: bool,
     /// Curly quotes, dashes, ellipses and empty-paragraph cleanup (issue #30).
     pub typography: bool,
+    /// Footnotes and endnotes to Kindle pop-up notes (issue #31).
+    pub popup_notes: bool,
 }
 
 impl Default for Settings {
@@ -83,6 +85,7 @@ impl Default for Settings {
             generated_cover: true,
             metadata_fill: false,
             typography: false,
+            popup_notes: false,
         }
     }
 }
@@ -700,6 +703,7 @@ pub fn run_books_with(
             generated_cover: settings.generated_cover.then_some(None),
             metadata_fill: settings.metadata_fill,
             typography: settings.typography,
+            popup_notes: settings.popup_notes,
             verified_real_asin: verified,
             asin: b.asin.clone(),
             pages: if settings.pages_auto {
@@ -1208,11 +1212,13 @@ mod tests {
             "a coverless book gets a cover by default"
         );
         assert!(!s.typography, "the typography pass is off by default");
+        assert!(!s.popup_notes, "the pop-up notes pass is off by default");
         let mut changed = s.clone();
         changed.cde = "ebok".into();
         changed.metadata_fill = true;
         changed.typography = true;
         changed.generated_cover = false;
+        changed.popup_notes = true;
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
         assert_eq!(load_settings_from(&file), changed);

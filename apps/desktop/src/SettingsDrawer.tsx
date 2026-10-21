@@ -236,6 +236,11 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
           <span>Tidy typography: curly quotes, proper dashes and ellipses, stray empty paragraphs removed</span>
         </label>
         <p className="hint">Code and quotes in languages other than English are left as they are.</p>
+        <label className="field check">
+          <input type="checkbox" checked={settings.popup_notes} onChange={(e) => set("popup_notes", e.target.checked)} />
+          <span>Pop-up footnotes: tap a note number to read the note in a pop-up</span>
+        </label>
+        <p className="hint">Notes the book marks always convert; others only when the note links back to its number.</p>
       </section>
       <section className="about">
         <h3>About</h3>

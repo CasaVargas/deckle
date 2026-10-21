@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS: Settings = {
   generated_cover: true,
   metadata_fill: false,
   typography: false,
+  popup_notes: false,
 };
 
 /** Link files and saved pages become articles (web-article design); everything else is a book. */

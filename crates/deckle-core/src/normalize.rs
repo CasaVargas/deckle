@@ -3,7 +3,7 @@
 //! with the `cover-image` property, image downscaling, script and remote-resource removal, and a
 //! synthesized nav TOC when the book has none, and a generated cover when it has none of those
 //! either (#27). Everything else passes through byte for byte, unless the opt-in typography
-//! pass (#30, [`crate::typography`]) is on.
+//! (#30, [`crate::typography`]) or pop-up notes (#31, [`crate::notes`]) pass is on.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
@@ -14,6 +14,7 @@ use serde::Serialize;
 
 use crate::epub::{EpubReader, join};
 use crate::inspect::InspectError;
+use crate::notes::{self, NotesReport};
 use crate::typography::{self, TypographyReport};
 
 #[derive(Clone, Debug)]
@@ -26,6 +27,8 @@ pub struct NormalizeOptions {
     pub fill: crate::metadata_fill::Metadata,
     /// Curly quotes, dashes, ellipses and empty-paragraph cleanup in the text (issue #30).
     pub typography: bool,
+    /// Footnotes and endnotes to Kindle pop-up notes (issue #31).
+    pub popup_notes: bool,
     /// A cover to add when the book has none (issue #27); ignored when it has one.
     pub generated_cover: Option<GeneratedCover>,
 }
@@ -46,6 +49,7 @@ impl Default for NormalizeOptions {
             fill: Default::default(),
             typography: false,
             generated_cover: None,
+            popup_notes: false,
         }
     }
 }
@@ -61,6 +65,8 @@ pub struct NormalizeReport {
     pub typography: Option<TypographyReport>,
     /// The template of the cover added to a coverless book, when one was.
     pub cover_generated: Option<String>,
+    /// What the pop-up notes pass converted, when it was on.
+    pub notes: Option<NotesReport>,
     pub warnings: Vec<String>,
 }
 
@@ -377,6 +383,29 @@ pub fn normalize(
             }
         }
         report.typography = Some(counts);
+    }
+
+    if opts.popup_notes {
+        // Every spine document at once: noterefs and their notes are often in different files.
+        let spine_re =
+            Regex::new(r#"<itemref\b[^>]*\bidref\s*=\s*["']([^"']*)["'][^>]*>"#).unwrap();
+        let mut docs: Vec<(String, String)> = spine_re
+            .captures_iter(&opf)
+            .filter_map(|c| items.iter().find(|it| it.id == c[1]))
+            .filter(|it| it.media_type == "application/xhtml+xml")
+            .map(|it| join(&opf_dir, &crate::epub::percent_decode(&it.href)))
+            .filter_map(|name| {
+                let text = String::from_utf8(files.get(&name)?.clone()).ok()?;
+                Some((name, text))
+            })
+            .collect();
+        let before: Vec<String> = docs.iter().map(|(_, t)| t.clone()).collect();
+        report.notes = Some(notes::convert(&mut docs));
+        for ((name, text), old) in docs.into_iter().zip(before) {
+            if text != old {
+                files.insert(name, text.into_bytes());
+            }
+        }
     }
 
     // Renamed resources: rewrite every reference in XHTML, SVG and CSS, resolved against the

@@ -163,6 +163,10 @@ pub enum Command {
         /// book by its identifier).
         #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["classic", "band", "rule"]))]
         cover_style: Option<String>,
+        /// Turn footnotes and endnotes into Kindle pop-up notes (off by default). Notes the book
+        /// marks always convert; others only when the note links back to its reference.
+        #[arg(long)]
+        popup_notes: bool,
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,
