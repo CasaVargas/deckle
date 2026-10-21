@@ -91,6 +91,7 @@ fn oversized_images_are_downscaled_to_the_limit() {
         &NormalizeOptions {
             max_image_px: 1920,
             jpeg_quality: 85,
+            ..Default::default()
         },
     )
     .unwrap();

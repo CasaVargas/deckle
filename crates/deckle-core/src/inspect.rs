@@ -58,6 +58,10 @@ pub struct BookInfo {
     pub identifiers: Vec<String>,
     pub isbn: Option<String>,
     pub series: Option<Series>,
+    /// `dc:description`, as written (it may hold escaped HTML).
+    pub description: Option<String>,
+    /// `dc:subject`s, in order.
+    pub subjects: Vec<String>,
     /// Cover image href relative to the OPF directory.
     pub cover_href: Option<String>,
     /// Spine item hrefs relative to the OPF directory, in reading order.
@@ -66,6 +70,10 @@ pub struct BookInfo {
     pub epub_version: String,
     pub warnings: Vec<String>,
 }
+
+/// The warning `inspect` gives when the title is the file name; the metadata fill treats such
+/// a title as empty.
+pub const NO_TITLE_WARNING: &str = "no dc:title; using the file name";
 
 fn text_of(n: roxmltree::Node) -> String {
     n.text().map(str::trim).unwrap_or("").to_owned()
@@ -131,6 +139,18 @@ pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
                     .or_else(|| attr(n, "id").and_then(|id| refines(id, "file-as")));
                 info.creators.push(Creator { name, file_as });
             }
+            "description" => {
+                let d = text_of(n);
+                if info.description.is_none() && !d.is_empty() {
+                    info.description = Some(d);
+                }
+            }
+            "subject" => {
+                let s = text_of(n);
+                if !s.is_empty() {
+                    info.subjects.push(s);
+                }
+            }
             "language" => {
                 if info.language.is_empty() {
                     info.language = text_of(n);
@@ -193,8 +213,7 @@ pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
         info.series = None;
     }
     if info.title.is_empty() {
-        info.warnings
-            .push("no dc:title; using the file name".into());
+        info.warnings.push(NO_TITLE_WARNING.into());
         info.title = path
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())

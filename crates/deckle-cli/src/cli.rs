@@ -146,6 +146,11 @@ pub enum Command {
         /// Look up an Amazon edition on Open Library when the Kindle needs a real ASIN (network).
         #[arg(long = "match")]
         amazon_match: bool,
+        /// Fill the title, author, series, description and subjects a book leaves empty from
+        /// Open Library, by ISBN or title search (network, off by default). The book's own metadata
+        /// always wins.
+        #[arg(long)]
+        fill_metadata: bool,
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,

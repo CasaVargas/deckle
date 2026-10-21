@@ -18,6 +18,9 @@ pub struct NormalizeOptions {
     /// Longest side above which raster images are downscaled.
     pub max_image_px: u32,
     pub jpeg_quality: u8,
+    /// Metadata the Open Library fill found for fields the book leaves empty (issue #28),
+    /// added to the OPF; empty adds nothing.
+    pub fill: crate::metadata_fill::Metadata,
 }
 
 impl Default for NormalizeOptions {
@@ -25,6 +28,7 @@ impl Default for NormalizeOptions {
         NormalizeOptions {
             max_image_px: 1920,
             jpeg_quality: 85,
+            fill: Default::default(),
         }
     }
 }
@@ -417,6 +421,15 @@ pub fn normalize(
                 opf.insert_str(pos, &item_tag);
             }
             report.toc_synthesized = true;
+        }
+    }
+
+    if !opts.fill.is_empty() {
+        match crate::metadata_fill::add_to_opf(&opf, &opts.fill) {
+            Some(filled) => opf = filled,
+            None => report
+                .warnings
+                .push("metadata fill not written: the OPF has no </metadata>".into()),
         }
     }
 

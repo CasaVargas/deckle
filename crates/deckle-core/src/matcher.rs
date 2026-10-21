@@ -57,7 +57,7 @@ pub fn isbn13_to_isbn10(isbn: &str) -> Option<String> {
     ))
 }
 
-fn urlencode(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

@@ -218,6 +218,15 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
           <span>Match books to an Amazon edition (Open Library lookup, network) so EBOK can keep the store cover</span>
         </label>
       </section>
+
+      <section>
+        <h3>Book details</h3>
+        <label className="field check">
+          <input type="checkbox" checked={settings.metadata_fill} onChange={(e) => set("metadata_fill", e.target.checked)} />
+          <span>Fill missing title, author, series, description and subjects from Open Library (by ISBN or title, network)</span>
+        </label>
+        <p className="hint">Only empty fields are filled; a book's own metadata always wins.</p>
+      </section>
       <section className="about">
         <h3>About</h3>
         <p className="hint">
@@ -226,8 +235,8 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
         </p>
         <p className="hint">
           Deckle never checks for updates or sends anything about you. It goes online only for: the Word Wise dictionary
-          (downloaded once from GitHub), and, when you turn them on, an LLM for X-Ray, Wikipedia summaries, and Amazon edition
-          matching (Open Library). A Kindle itself may ask Amazon about books sent with features (EBOK).
+          (downloaded once from GitHub), and, when you turn them on, an LLM for X-Ray, Wikipedia summaries, Amazon edition
+          matching and filling in missing book details (both Open Library). A Kindle itself may ask Amazon about books sent with features (EBOK).
         </p>
         <p className="hint">
           Word Wise definitions come from <Link href="https://en.wiktionary.org/">Wiktionary</Link> via{" "}

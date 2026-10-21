@@ -25,6 +25,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -78,6 +79,7 @@ fn missing_previewer_fails_before_any_work() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -110,6 +112,7 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -145,6 +148,7 @@ fn a_word_document_runs_through_the_whole_pipeline() {
         keep_work_dir: true,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Off,
         llm: None,
@@ -193,6 +197,7 @@ fn a_broken_word_document_fails_at_import() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Off,
         llm: None,
@@ -238,6 +243,7 @@ fn real_previewer_end_to_end() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -263,6 +269,7 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -293,6 +300,7 @@ fn run_with_progress_reports_each_stage_in_order() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -328,6 +336,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -393,6 +402,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -432,6 +442,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -474,6 +485,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -505,6 +517,7 @@ fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -563,6 +576,7 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Off,
         llm: None,
@@ -624,6 +638,7 @@ fn a_word_document_built_as_ebok_ships_xray_and_word_wise_sidecars() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -703,6 +718,7 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Auto,
         llm: None,
@@ -780,6 +796,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         xray: XRayMode::Off,
         llm: None,
@@ -802,4 +819,136 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
         left,
         ["Store.kfx", "Testwright, Jane - Deckle Mini Fixture.kfx"]
     );
+}
+
+/// Options for the mini fixture through the fake Previewer to a folder, with the metadata fill
+/// on or off.
+#[cfg(unix)]
+fn fill_opts(out: &std::path::Path, metadata_fill: bool) -> RunOptions {
+    RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: true,
+        cde_override: None,
+        amazon_match: false,
+        metadata_fill,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+        replaces: Vec::new(),
+    }
+}
+
+/// prepare (with `fetch` for the metadata fill) and finish to the folder.
+#[cfg(unix)]
+fn run_filling(
+    opts: &RunOptions,
+    fetch: &mut deckle_core::matcher::Fetcher,
+) -> deckle_core::pipeline::RunReport {
+    let prepared = deckle_core::pipeline::prepare_with(
+        &deckle_kfx::fixtures::path("deckle-mini.epub"),
+        opts,
+        &mut |_| {},
+        fetch,
+    )
+    .expect("prepared");
+    deckle_core::pipeline::finish(
+        &prepared,
+        &mut deckle_core::deliver::Conn::new(&opts.target),
+        opts,
+        &mut |_| {},
+    )
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn with_the_metadata_fill_off_the_pipeline_makes_no_request() {
+    let out = tempfile::tempdir().unwrap();
+    let opts = fill_opts(out.path(), false);
+    let report = run_filling(&opts, &mut |url: &str| -> Result<String, String> {
+        panic!("the metadata fill is off but the pipeline fetched {url}")
+    });
+    assert_eq!(report.error, None, "{report:?}");
+    assert!(report.delivered.is_some());
+    assert_eq!(report.metadata_fill, None);
+    assert!(!report.stage_ms.contains_key("fill"));
+    assert_eq!(report.info.description, None);
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn with_the_metadata_fill_on_empty_fields_reach_the_epub_previewer_converts() {
+    let out = tempfile::tempdir().unwrap();
+    let opts = fill_opts(out.path(), true);
+    let mut urls = Vec::new();
+    let report = run_filling(&opts, &mut |url: &str| {
+        urls.push(url.to_owned());
+        if url.starts_with("https://openlibrary.org/search.json?") {
+            Ok(r#"{"docs":[{"key":"/works/OL1W","title":"Deckle Mini Fixture","author_name":["Jane Testwright"]}]}"#.into())
+        } else if url == "https://openlibrary.org/works/OL1W.json" {
+            Ok(r#"{"description":{"type":"/type/text","value":"A tiny book."},"subjects":["Testing"]}"#.into())
+        } else {
+            Err(format!("unexpected {url}"))
+        }
+    });
+    assert_eq!(report.error, None, "{report:?}");
+    assert_eq!(urls.len(), 2, "{urls:?}");
+    assert_eq!(
+        report.metadata_fill,
+        Some(deckle_core::metadata_fill::FillOutcome::Filled {
+            fields: vec!["description", "subjects"],
+            source: "search",
+        })
+    );
+    assert_eq!(report.info.description.as_deref(), Some("A tiny book."));
+    // The book's own title, author and series are kept.
+    assert_eq!(report.info.title, "Deckle Mini Fixture");
+    assert_eq!(report.info.creators[0].name, "Jane Testwright");
+    assert_eq!(report.info.series.as_ref().unwrap().name, "Fixture Series");
+    let work = report.work_dir.clone().expect("kept work dir");
+    let normalized = deckle_core::inspect::inspect(&work.join("normalized.epub")).unwrap();
+    assert_eq!(normalized.description.as_deref(), Some("A tiny book."));
+    assert_eq!(normalized.subjects, vec!["Testing".to_owned()]);
+    assert!(report.stage_ms.contains_key("fill"));
+    let _ = std::fs::remove_dir_all(work);
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_failed_metadata_lookup_is_a_warning_and_the_book_still_converts() {
+    for body in [
+        Err::<String, String>("Connection refused".into()),
+        Ok("not json".into()),
+    ] {
+        let out = tempfile::tempdir().unwrap();
+        let opts = fill_opts(out.path(), true);
+        let report = run_filling(&opts, &mut |_: &str| body.clone());
+        assert_eq!(report.error, None, "{report:?}");
+        assert!(report.delivered.as_ref().is_some_and(|d| d.is_file()));
+        assert!(
+            matches!(
+                report.metadata_fill,
+                Some(deckle_core::metadata_fill::FillOutcome::Error { .. })
+            ),
+            "{:?}",
+            report.metadata_fill
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.starts_with("metadata lookup failed: ")),
+            "{:?}",
+            report.warnings
+        );
+        assert_eq!(report.info.description, None);
+        if let Some(w) = report.work_dir {
+            let _ = std::fs::remove_dir_all(w);
+        }
+    }
 }
