@@ -233,4 +233,5 @@ one Inbox, and the file's extension decides what happens to it.
   and Word Wise are off, because the outbox carries only the `.kfx` and would drop their
   sidecar files. There's no Amazon match, so the Inbox stays offline.
 - **Outbox name.** A converted book keeps the name the pipeline gives it, and a KFX keeps
-  its own file name. A second book with the same name replaces the first while it waits.
+  its own file name (with the extension lower-cased, because the outbox only lists `*.kfx`).
+  A second book with the same name replaces the first while it waits.
