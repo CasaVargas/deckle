@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The Open Library metadata fill (issue #28), offline: saved Open Library records stand in for
-//! the network.
+//! the network. The records in `data/openlibrary/` were downloaded unchanged from openlibrary.org
+//! on 2026-10-21 (`/isbn/9780547928210.json`, the work and author it points to, and the
+//! `search_url` query for the title and author).
 use deckle_core::inspect::{BookInfo, Creator, NO_TITLE_WARNING, Series, inspect};
 use deckle_core::metadata_fill::{
     FillOutcome, Metadata, Missing, edition_url, fill, lookup, parse_series, search_url,
@@ -9,7 +11,7 @@ use deckle_core::normalize::{NormalizeOptions, normalize};
 
 const ISBN: &str = "9780547928210";
 const EDITION: &str = include_str!("data/openlibrary/isbn-9780547928210.json");
-const WORK: &str = include_str!("data/openlibrary/works-OL27448W.json");
+const WORK: &str = include_str!("data/openlibrary/works-OL27513W.json");
 const AUTHOR: &str = include_str!("data/openlibrary/authors-OL26320A.json");
 const SEARCH: &str = include_str!("data/openlibrary/search-fellowship.json");
 
@@ -19,7 +21,7 @@ fn saved(log: &mut Vec<String>) -> impl FnMut(&str) -> Result<String, String> + 
         log.push(url.to_owned());
         match url {
             u if u == edition_url(ISBN) => Ok(EDITION.into()),
-            "https://openlibrary.org/works/OL27448W.json" => Ok(WORK.into()),
+            "https://openlibrary.org/works/OL27513W.json" => Ok(WORK.into()),
             "https://openlibrary.org/authors/OL26320A.json" => Ok(AUTHOR.into()),
             u if u.starts_with("https://openlibrary.org/search.json?") => Ok(SEARCH.into()),
             u => Err(format!("http status: 404 for {u}")),
@@ -51,6 +53,7 @@ fn the_saved_isbn_records_give_title_author_series_description_and_subjects() {
         .expect("found");
     assert_eq!(source, "isbn");
     assert_eq!(md.title.as_deref(), Some("The Fellowship of the Ring"));
+    // The edition has no `authors`: they come from the work, then the author record.
     assert_eq!(md.authors, vec!["J.R.R. Tolkien".to_owned()]);
     assert_eq!(
         md.series,
@@ -59,29 +62,39 @@ fn the_saved_isbn_records_give_title_author_series_description_and_subjects() {
             index: Some(1.0),
         })
     );
+    // The edition's own description wins over the work's.
     assert!(
         md.description
             .as_deref()
             .unwrap()
-            .starts_with("Originally published from 1954"),
+            .starts_with("The first volume in J.R.R. Tolkien's epic adventure"),
         "{md:?}"
     );
-    assert!(md.subjects.contains(&"Hobbits".to_owned()), "{md:?}");
-    assert_eq!(
-        md.subjects.iter().filter(|s| *s == "Fiction").count(),
-        1,
-        "deduplicated: {:?}",
-        md.subjects
-    );
-    assert!(md.subjects.len() <= 10, "{:?}", md.subjects);
+    // The edition has no subjects: the work's, capped at 10.
+    assert_eq!(md.subjects.len(), 10, "{:?}", md.subjects);
+    assert_eq!(md.subjects[0], "Elves");
+    assert!(md.subjects.contains(&"The Lord of the Rings".to_owned()));
     assert_eq!(
         log,
         vec![
             edition_url(ISBN),
-            "https://openlibrary.org/works/OL27448W.json".to_owned(),
+            "https://openlibrary.org/works/OL27513W.json".to_owned(),
             "https://openlibrary.org/authors/OL26320A.json".to_owned(),
         ]
     );
+}
+
+#[test]
+fn subjects_are_deduplicated_ignoring_case() {
+    let edition = r#"{"title": "T", "works": [{"key": "/works/OL1W"}]}"#;
+    let work = r#"{"subjects": ["Fiction", "fiction", " Fantasy ", "FICTION", "Fantasy"]}"#;
+    let info = bare(Some(ISBN));
+    let (md, _) = lookup(&info, Missing::of(&info), &mut |u: &str| {
+        Ok(if u.contains("/works/") { work } else { edition }.to_owned())
+    })
+    .unwrap()
+    .expect("found");
+    assert_eq!(md.subjects, vec!["Fiction".to_owned(), "Fantasy".into()]);
 }
 
 #[test]
@@ -224,8 +237,18 @@ fn without_an_isbn_a_title_search_finds_the_work() {
         "{}",
         log[0]
     );
-    assert_eq!(log[1], "https://openlibrary.org/works/OL27448W.json");
-    assert!(info.subjects.contains(&"Hobbits".to_owned()));
+    assert_eq!(log[1], "https://openlibrary.org/works/OL27513W.json");
+    assert_eq!(log.len(), 2, "{log:?}");
+    // The work's description and its curated subjects (they replace the search doc's).
+    assert_eq!(info.subjects.first().map(String::as_str), Some("Elves"));
+    assert!(
+        info.description
+            .as_deref()
+            .unwrap()
+            .starts_with("One Ring to rule them all"),
+        "{:?}",
+        info.description
+    );
 }
 
 #[test]
