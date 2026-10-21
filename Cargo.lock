@@ -967,6 +967,7 @@ name = "deckle-core"
 version = "0.2.1"
 dependencies = [
  "csv",
+ "deckle-cover",
  "deckle-docx",
  "deckle-kfx",
  "deckle-transport",

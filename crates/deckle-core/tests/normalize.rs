@@ -2,7 +2,7 @@
 use std::io::{Read, Write};
 
 use deckle_core::inspect::inspect;
-use deckle_core::normalize::{NormalizeOptions, normalize};
+use deckle_core::normalize::{GeneratedCover, NormalizeOptions, normalize};
 
 fn mini() -> std::path::PathBuf {
     deckle_kfx::fixtures::path("deckle-mini.epub")
@@ -269,4 +269,75 @@ fn typography_keeps_straight_quotes_in_other_languages() {
         "{text}"
     );
     assert_eq!(report.typography.unwrap().quotes, 0);
+}
+
+/// The mini fixture without its cover: no `cover-image` item, no `cover.png`.
+fn coverless() -> tempfile::NamedTempFile {
+    let opf = String::from_utf8(read_entry(&mini(), "OEBPS/content.opf")).unwrap();
+    let opf = opf.replace(
+        r#"<item id="cover" href="cover.png" media-type="image/png" properties="cover-image"/>"#,
+        "",
+    );
+    variant(&[
+        ("OEBPS/content.opf", Some(opf.as_bytes())),
+        ("OEBPS/cover.png", None),
+    ])
+}
+
+fn generated() -> GeneratedCover {
+    GeneratedCover {
+        style: "band".into(),
+        jpeg: deckle_cover::render(
+            &deckle_cover::CoverText {
+                title: "Deckle Mini Fixture".into(),
+                ..Default::default()
+            },
+            deckle_cover::Template::Band,
+        )
+        .unwrap()
+        .jpeg,
+    }
+}
+
+#[test]
+fn a_coverless_book_gets_the_generated_cover_first_in_the_spine() {
+    let f = coverless();
+    assert_eq!(inspect(f.path()).unwrap().cover_href, None);
+    let out = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let opts = NormalizeOptions {
+        generated_cover: Some(generated()),
+        ..Default::default()
+    };
+    let report = normalize(f.path(), out.path(), &opts).unwrap();
+    assert_eq!(report.cover_generated.as_deref(), Some("band"));
+    let info = inspect(out.path()).unwrap();
+    assert_eq!(info.cover_href.as_deref(), Some("deckle-cover.jpg"));
+    assert_eq!(info.spine[0], "deckle-cover.xhtml");
+    let jpeg = read_entry(out.path(), "OEBPS/deckle-cover.jpg");
+    assert_eq!(&jpeg[2..4], &[0xFF, 0xE0], "JFIF");
+    let opf = String::from_utf8(read_entry(out.path(), "OEBPS/content.opf")).unwrap();
+    assert!(
+        opf.contains(r#"<meta name="cover" content="deckle-cover-image"/>"#),
+        "{opf}"
+    );
+    let page = String::from_utf8(read_entry(out.path(), "OEBPS/deckle-cover.xhtml")).unwrap();
+    assert!(page.contains(r#"src="deckle-cover.jpg""#), "{page}");
+    roxmltree::Document::parse(&page).expect("well-formed cover page");
+}
+
+#[test]
+fn a_book_with_a_cover_ignores_the_generated_one_byte_for_byte() {
+    let with = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let without = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let opts = NormalizeOptions {
+        generated_cover: Some(generated()),
+        ..Default::default()
+    };
+    let report = normalize(&mini(), with.path(), &opts).unwrap();
+    normalize(&mini(), without.path(), &NormalizeOptions::default()).unwrap();
+    assert_eq!(report.cover_generated, None);
+    assert_eq!(
+        std::fs::read(with.path()).unwrap(),
+        std::fs::read(without.path()).unwrap()
+    );
 }
