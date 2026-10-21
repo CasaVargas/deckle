@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod freshness;
+pub mod series;
 pub mod shelf;
 pub mod sidecar;
 

@@ -140,6 +140,8 @@ drop the file or paste the address on the Books tab
 deckle library init ~/Books/Deckle   # use this folder; every book `run` sends is added
 deckle library add book.epub         # add by hand (an edited copy updates the same book)
 deckle library list                  # author, title, series, and where each was sent
+deckle library list --series         # the same, grouped under series headings
+deckle library series [NAME]         # each series and its gaps, or one in reading order (--missing)
 deckle library scan                  # adopt books put in the folder by hand, report problems
 deckle library reprocess --dry-run   # which books Deckle could build better now
 deckle library reprocess             # rebuild and re-send them (asks first; --yes to skip)

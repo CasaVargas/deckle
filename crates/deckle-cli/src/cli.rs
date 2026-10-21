@@ -261,7 +261,19 @@ pub enum LibraryCommand {
     /// Add EPUBs or Word documents (an edited copy of a book updates it in place).
     Add { books: Vec<PathBuf> },
     /// Every book: author, title, series, and where it was last sent.
-    List,
+    List {
+        /// Group the books under series headings, books outside a series last.
+        #[arg(long)]
+        series: bool,
+    },
+    /// Every series with its missing numbers, or one series (NAME, or a unique start of it) in
+    /// reading order.
+    Series {
+        name: Option<String>,
+        /// Only series with gaps, and their missing numbers.
+        #[arg(long)]
+        missing: bool,
+    },
     /// Adopt books put in the folder by hand, refresh changed ones, report problems.
     Scan,
     /// Rebuild and re-send the books on a Kindle that Deckle could build better now (an

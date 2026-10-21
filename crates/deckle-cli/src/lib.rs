@@ -3,6 +3,7 @@
 
 mod cli;
 mod inbox;
+mod series;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -820,7 +821,11 @@ fn library(json: bool, action: cli::LibraryCommand) -> Result<ExitCode, String> 
                 ExitCode::SUCCESS
             })
         }
-        cli::LibraryCommand::List => {
+        cli::LibraryCommand::List { series: true } => series::list(json, &lib),
+        cli::LibraryCommand::Series { name, missing } => {
+            series::series(json, &lib, name.as_deref(), missing)
+        }
+        cli::LibraryCommand::List { series: false } => {
             let books = lib.list();
             let rows: Vec<_> = books
                 .iter()
