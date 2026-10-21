@@ -84,6 +84,8 @@ export interface Settings {
   amazon_match: boolean;
   /** Fill empty title, author, series, description and subjects from Open Library (network). */
   metadata_fill: boolean;
+  /** Curly quotes, dashes, ellipses and empty-paragraph cleanup (issue #30). */
+  typography: boolean;
 }
 
 export interface PreviewerStatus {

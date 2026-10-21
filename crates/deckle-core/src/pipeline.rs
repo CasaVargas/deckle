@@ -33,6 +33,8 @@ pub struct RunOptions {
     /// Fill title, author, series, description and subjects the EPUB leaves empty from Open
     /// Library (opt-in network, issue #28).
     pub metadata_fill: bool,
+    /// Curly quotes, dashes, ellipses and empty-paragraph cleanup in normalize (issue #30).
+    pub typography: bool,
     /// Spike 2 passed on this device: real ASINs keep our sidecars.
     pub verified_real_asin: bool,
     /// An ASIN the owner typed (design §3); replaces Match. `None`: Match, else generated.
@@ -333,6 +335,7 @@ pub fn prepare_with(
     let normalized = work_path.join("normalized.epub");
     let normalize_opts = NormalizeOptions {
         fill,
+        typography: opts.typography,
         ..Default::default()
     };
     let nreport = stage!(
@@ -657,6 +660,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
         cde_override: Some(CdeType::Pdoc),
         amazon_match: false,
         metadata_fill: false,
+        typography: false,
         verified_real_asin: false,
         asin: None,
         pages: prepared.wishes.pages,

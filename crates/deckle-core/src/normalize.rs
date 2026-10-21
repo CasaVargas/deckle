@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Stage 2: write a cleaned EPUB that Kindle Previewer converts well. v1 scope: JPEG/JFIF cover
 //! with the `cover-image` property, image downscaling, script and remote-resource removal, and a
-//! synthesized nav TOC when the book has none. Everything else passes through byte for byte.
+//! synthesized nav TOC when the book has none. Everything else passes through byte for byte,
+//! unless the opt-in typography pass (#30, [`crate::typography`]) is on.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
@@ -12,6 +13,7 @@ use serde::Serialize;
 
 use crate::epub::{EpubReader, join};
 use crate::inspect::InspectError;
+use crate::typography::{self, TypographyReport};
 
 #[derive(Clone, Debug)]
 pub struct NormalizeOptions {
@@ -21,6 +23,8 @@ pub struct NormalizeOptions {
     /// Metadata the Open Library fill found for fields the book leaves empty (issue #28),
     /// added to the OPF; empty adds nothing.
     pub fill: crate::metadata_fill::Metadata,
+    /// Curly quotes, dashes, ellipses and empty-paragraph cleanup in the text (issue #30).
+    pub typography: bool,
 }
 
 impl Default for NormalizeOptions {
@@ -29,6 +33,7 @@ impl Default for NormalizeOptions {
             max_image_px: 1920,
             jpeg_quality: 85,
             fill: Default::default(),
+            typography: false,
         }
     }
 }
@@ -40,6 +45,8 @@ pub struct NormalizeReport {
     pub remote_refs_removed: u32,
     pub cover_converted_to_jpeg: bool,
     pub toc_synthesized: bool,
+    /// What the typography pass changed, when it was on.
+    pub typography: Option<TypographyReport>,
     pub warnings: Vec<String>,
 }
 
@@ -313,6 +320,49 @@ pub fn normalize(
         if text != before {
             files.insert(name.clone(), text.into_bytes());
         }
+    }
+
+    if opts.typography {
+        let mut counts = TypographyReport::default();
+        let book_lang = Regex::new(r"(?is)<dc:language\b[^>]*>([^<]*)</dc:language>")
+            .unwrap()
+            .captures(&opf)
+            .map(|c| c[1].trim().to_owned());
+        for name in &xhtml_names {
+            let Some(text) = files
+                .get(name)
+                .and_then(|b| String::from_utf8(b.clone()).ok())
+            else {
+                continue;
+            };
+            let lang = typography::document_lang(&text).or_else(|| book_lang.clone());
+            let tidied = typography::tidy_xhtml(
+                &text,
+                typography::curls_quotes(lang.as_deref()),
+                &mut counts,
+            );
+            if tidied != text {
+                files.insert(name.clone(), tidied.into_bytes());
+            }
+        }
+        let curl = typography::curls_quotes(book_lang.as_deref());
+        for item in items
+            .iter()
+            .filter(|it| it.media_type == "application/x-dtbncx+xml")
+        {
+            let name = join(&opf_dir, &crate::epub::percent_decode(&item.href));
+            let Some(text) = files
+                .get(&name)
+                .and_then(|b| String::from_utf8(b.clone()).ok())
+            else {
+                continue;
+            };
+            let tidied = typography::tidy_ncx(&text, curl, &mut counts);
+            if tidied != text {
+                files.insert(name, tidied.into_bytes());
+            }
+        }
+        report.typography = Some(counts);
     }
 
     // Renamed resources: rewrite every reference in XHTML, SVG and CSS, resolved against the

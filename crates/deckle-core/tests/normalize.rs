@@ -196,3 +196,77 @@ fn nested_layout_cover_rename_rewrites_every_reference() {
         assert!(!t.contains("cover.png"), "{name}: {t}");
     }
 }
+
+fn typography_on() -> NormalizeOptions {
+    NormalizeOptions {
+        typography: true,
+        ..Default::default()
+    }
+}
+
+const TYPO_CHAPTER: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>"Ch"</title></head><body>
+<h1>"Begin"</h1>
+<p class="x--y">"Don't," she said -- and waited...</p>
+<p></p>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<pre>"raw" -- x...</pre>
+<p>Run <code>a--b "c"</code> now.</p>
+</body></html>
+"#;
+
+#[test]
+fn typography_is_off_by_default_and_leaves_text_byte_identical() {
+    let f = variant(&[("OEBPS/c0.xhtml", Some(TYPO_CHAPTER.as_bytes()))]);
+    let out = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let report = normalize(f.path(), out.path(), &NormalizeOptions::default()).unwrap();
+    assert_eq!(report.typography, None);
+    assert_eq!(
+        read_entry(out.path(), "OEBPS/c0.xhtml"),
+        TYPO_CHAPTER.as_bytes()
+    );
+}
+
+#[test]
+fn typography_tidies_text_but_not_code_markup_or_head() {
+    let f = variant(&[("OEBPS/c0.xhtml", Some(TYPO_CHAPTER.as_bytes()))]);
+    let out = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let report = normalize(f.path(), out.path(), &typography_on()).unwrap();
+    let text = String::from_utf8(read_entry(out.path(), "OEBPS/c0.xhtml")).unwrap();
+    assert!(text.contains("<h1>“Begin”</h1>"), "{text}");
+    assert!(
+        text.contains("<p class=\"x--y\">“Don’t,” she said — and waited…</p>"),
+        "{text}"
+    );
+    assert!(text.contains("<pre>\"raw\" -- x...</pre>"), "{text}");
+    assert!(text.contains("<code>a--b \"c\"</code>"), "{text}");
+    assert!(text.contains("<title>\"Ch\"</title>"), "{text}");
+    assert!(!text.contains("<p></p>"), "{text}");
+    assert_eq!(text.matches("<p>&nbsp;</p>").count(), 1, "{text}");
+    let t = report.typography.unwrap();
+    assert_eq!(
+        (t.quotes, t.dashes, t.ellipses, t.empty_paragraphs),
+        (5, 1, 1, 2)
+    );
+    // The book still inspects; a second pass changes nothing.
+    inspect(out.path()).unwrap();
+    let again = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let r2 = normalize(out.path(), again.path(), &typography_on()).unwrap();
+    assert_eq!(read_entry(again.path(), "OEBPS/c0.xhtml"), text.as_bytes());
+    assert_eq!(r2.typography, Some(Default::default()));
+}
+
+#[test]
+fn typography_keeps_straight_quotes_in_other_languages() {
+    let de = TYPO_CHAPTER.replace("<html xmlns", "<html xml:lang=\"de\" xmlns");
+    let f = variant(&[("OEBPS/c0.xhtml", Some(de.as_bytes()))]);
+    let out = tempfile::Builder::new().suffix(".epub").tempfile().unwrap();
+    let report = normalize(f.path(), out.path(), &typography_on()).unwrap();
+    let text = String::from_utf8(read_entry(out.path(), "OEBPS/c0.xhtml")).unwrap();
+    assert!(
+        text.contains("<p class=\"x--y\">\"Don't,\" she said — and waited…</p>"),
+        "{text}"
+    );
+    assert_eq!(report.typography.unwrap().quotes, 0);
+}

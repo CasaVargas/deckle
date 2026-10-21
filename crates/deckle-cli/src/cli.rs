@@ -151,6 +151,10 @@ pub enum Command {
         /// always wins.
         #[arg(long)]
         fill_metadata: bool,
+        /// Tidy the text: curly quotes, dashes, ellipses, and stray empty paragraphs removed
+        /// (off by default). Code and non-English quotes are left alone.
+        #[arg(long)]
+        typography: bool,
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,

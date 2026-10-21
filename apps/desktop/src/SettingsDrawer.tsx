@@ -226,6 +226,11 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
           <span>Fill missing title, author, series, description and subjects from Open Library (by ISBN or title, network)</span>
         </label>
         <p className="hint">Only empty fields are filled; a book's own metadata always wins.</p>
+        <label className="field check">
+          <input type="checkbox" checked={settings.typography} onChange={(e) => set("typography", e.target.checked)} />
+          <span>Tidy typography: curly quotes, proper dashes and ellipses, stray empty paragraphs removed</span>
+        </label>
+        <p className="hint">Code and quotes in languages other than English are left as they are.</p>
       </section>
       <section className="about">
         <h3>About</h3>

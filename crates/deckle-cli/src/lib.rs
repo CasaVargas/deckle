@@ -287,6 +287,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             previewer: pv,
             amazon_match,
             fill_metadata,
+            typography,
             verified_asin,
             asin,
             xray,
@@ -318,6 +319,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 cde_override: cde.to_override(),
                 amazon_match,
                 metadata_fill: fill_metadata,
+                typography,
                 verified_real_asin: verified_asin,
                 asin,
                 pages,
@@ -347,7 +349,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .map(|r| match (&r.error, &r.delivered) {
                         (Some(e), _) => format!("FAIL  {}\n      {e}", r.input.display()),
                         (None, Some(d)) => format!(
-                            "OK    {}\n      -> {}{}{}{}{}{}{}",
+                            "OK    {}\n      -> {}{}{}{}{}{}{}{}",
                             r.input.display(),
                             d.display(),
                             r.pages
@@ -369,6 +371,14 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                                 .map(|w| format!(
                                     "\n      Word Wise: {} hints (level {}, {} dictionary)",
                                     w.hints, w.level, w.dictionary
+                                ))
+                                .unwrap_or_default(),
+                            r.normalize
+                                .typography
+                                .as_ref()
+                                .map(|t| format!(
+                                    "\n      Typography: {} quotes, {} dashes, {} ellipses, {} empty paragraphs",
+                                    t.quotes, t.dashes, t.ellipses, t.empty_paragraphs
                                 ))
                                 .unwrap_or_default(),
                             r.replaced
@@ -689,6 +699,7 @@ fn reprocess(
             cde_override: cde,
             amazon_match: false,
             metadata_fill: false,
+            typography: false,
             verified_real_asin: false,
             asin: None,
             pages: Some(None),
@@ -1381,6 +1392,7 @@ fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Pa
         cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
         amazon_match: false,
         metadata_fill: false,
+        typography: false,
         verified_real_asin: false,
         asin: None,
         pages: None,
