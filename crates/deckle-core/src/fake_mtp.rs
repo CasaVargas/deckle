@@ -57,6 +57,7 @@ pub fn documents() -> Vec<String> {
 }
 
 /// The names in `documents/<folder>` (a book's `.sdr`), sorted; empty when it doesn't exist.
+#[cfg(unix)]
 pub fn in_documents(folder: &str) -> Vec<String> {
     let handle = KINDLE.with(|k| {
         k.borrow()

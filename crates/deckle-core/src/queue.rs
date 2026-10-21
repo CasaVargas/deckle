@@ -388,350 +388,348 @@ mod tests {
     }
 
     // Device-aware build (§7): prepared books are finished for the Kindle that takes them.
-
-    use std::cell::Cell;
-
-    use deckle_transport::ptp::op;
-    use deckle_transport::usb::MtpInfo;
-
-    use crate::devices::DeviceProfile;
-    use crate::fake_mtp as fake;
-    use crate::pipeline::{Prepared, RunOptions, XRayMode, prepare};
-    use crate::wordwise::WordWiseOptions;
-    use deckle_kfx::convert::CdeType;
-
-    const LONG_READ: &str = "deckle-reads-2026-10-21-mini.kfx";
-
-    /// The mini fixture up to the KPF (the fake Previewer), asking for X-Ray and Word Wise as
-    /// `digest run` asks for long reads.
+    // Unix only: the fake Previewer is a shell script.
     #[cfg(unix)]
-    fn prepared_mini() -> Prepared {
-        let opts = RunOptions {
-            cde_type: CdeType::Pdoc,
-            cde_override: None,
-            amazon_match: false,
-            verified_real_asin: false,
-            asin: None,
-            pages: None,
-            target: Target::Folder(std::env::temp_dir()),
-            previewer: Some(
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_previewer/ok.sh"),
-            ),
-            keep_work_dir: false,
-            xray: XRayMode::Auto,
-            llm: None,
-            wikipedia: false,
-            word_wise: Some(WordWiseOptions::default()),
-        };
-        prepare(
-            &deckle_kfx::fixtures::path("deckle-mini.epub"),
-            &opts,
-            &mut |_| {},
-        )
-        .expect("prepared")
-    }
+    mod device_aware {
+        use super::*;
 
-    /// A Word Wise database with one hint in the mini fixture.
-    fn lexicon(dir: &Path) -> PathBuf {
-        let db = dir.join("ww.sqlite");
-        let c = deckle_wordwise::lexicon::create(&db, "test").unwrap();
-        c.execute_batch(
-            "INSERT INTO senses VALUES (1, 'universally', 'adverb', 'everywhere', 'everywhere', NULL, 4);
-             INSERT INTO forms VALUES ('universally', 1);",
-        )
-        .unwrap();
-        db
-    }
+        use std::cell::Cell;
 
-    /// Word Wise with nothing cached and (for a push) no download.
-    fn uncached(dir: &Path) -> Finishing {
-        Finishing {
-            profile: None,
-            word_wise: WordWiseOptions {
-                level: 5,
-                database: None,
-                cache_dir: dir.join("empty-cache"),
-            },
+        use deckle_transport::ptp::op;
+        use deckle_transport::usb::MtpInfo;
+
+        use crate::devices::DeviceProfile;
+        use crate::fake_mtp as fake;
+        use crate::pipeline::{Prepared, RunOptions, XRayMode, prepare};
+        use crate::wordwise::WordWiseOptions;
+        use deckle_kfx::convert::CdeType;
+
+        const LONG_READ: &str = "deckle-reads-2026-10-21-mini.kfx";
+
+        /// The mini fixture up to the KPF (the fake Previewer), asking for X-Ray and Word Wise as
+        /// `digest run` asks for long reads.
+        fn prepared_mini() -> Prepared {
+            let opts = RunOptions {
+                cde_type: CdeType::Pdoc,
+                cde_override: None,
+                amazon_match: false,
+                verified_real_asin: false,
+                asin: None,
+                pages: None,
+                target: Target::Folder(std::env::temp_dir()),
+                previewer: Some(
+                    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fake_previewer/ok.sh"),
+                ),
+                keep_work_dir: false,
+                xray: XRayMode::Auto,
+                llm: None,
+                wikipedia: false,
+                word_wise: Some(WordWiseOptions::default()),
+            };
+            prepare(
+                &deckle_kfx::fixtures::path("deckle-mini.epub"),
+                &opts,
+                &mut |_| {},
+            )
+            .expect("prepared")
         }
-    }
 
-    fn mass_storage_kindle(root: &Path) -> Target {
-        std::fs::create_dir_all(root.join("documents")).unwrap();
-        std::fs::create_dir_all(root.join("system/thumbnails")).unwrap();
-        std::fs::write(
-            root.join("system/version.txt"),
-            "Kindle 5.16.2.1.1 (4184940002)\n",
-        )
-        .unwrap();
-        Target::MassStorage(crate::deliver::detect_in(&[root.to_path_buf()]).remove(0))
-    }
-
-    fn cde_of(kfx: &[u8]) -> String {
-        let doc = deckle_kfx::container::read_kfx(kfx).unwrap();
-        let md = doc
-            .fragments
-            .get_single(&deckle_kfx::ion::Sym::new("$490"))
-            .unwrap();
-        let s = format!("{:?}", md.value);
-        if s.contains("EBOK") { "EBOK" } else { "PDOC" }.into()
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn a_prepared_book_ships_as_ebok_with_a_thumbnail_and_xray_to_a_writable_kindle() {
-        let tmp = tempfile::tempdir().unwrap();
-        let q = Queue::new(tmp.path().join("outbox"));
-        let entry = q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
-        assert!(entry.join("book.kpf").is_file());
-        assert!(entry.join("prepared.json").is_file());
-        assert_eq!(
-            cde_of(&std::fs::read(entry.join("fallback.kfx")).unwrap()),
-            "PDOC"
-        );
-        assert_eq!(q.pending(), std::slice::from_ref(&entry));
-
-        let root = tmp.path().join("Kindle");
-        let target = mass_storage_kindle(&root);
-        let mut seen = Vec::new();
-        let r = q
-            .flush_with(
-                &mut Conn::new(&target),
-                None,
-                &uncached(tmp.path()),
-                &mut |i, n, name| seen.push(format!("{i}/{n} {name}")),
+        /// A Word Wise database with one hint in the mini fixture.
+        fn lexicon(dir: &Path) -> PathBuf {
+            let db = dir.join("ww.sqlite");
+            let c = deckle_wordwise::lexicon::create(&db, "test").unwrap();
+            c.execute_batch(
+                "INSERT INTO senses VALUES (1, 'universally', 'adverb', 'everywhere', 'everywhere', NULL, 4);
+                 INSERT INTO forms VALUES ('universally', 1);",
             )
             .unwrap();
-        assert_eq!(seen, [format!("1/1 {LONG_READ}")]);
-        let book = root.join("documents").join(LONG_READ);
-        assert_eq!(r.delivered, std::slice::from_ref(&book));
-        assert_eq!(cde_of(&std::fs::read(&book).unwrap()), "EBOK");
-        let sdr: Vec<String> = std::fs::read_dir(book.with_extension("sdr"))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert!(
-            sdr.iter().any(|n| n.starts_with("XRAY.entities.")),
-            "{sdr:?}"
-        );
-        let thumbs: Vec<String> = std::fs::read_dir(root.join("system/thumbnails"))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert!(
-            thumbs.iter().any(|n| n.ends_with("_EBOK_portrait.jpg")),
-            "{thumbs:?}"
-        );
-        assert!(q.pending().is_empty(), "delivered entries leave the outbox");
-        assert!(!entry.exists());
-    }
+            db
+        }
 
-    #[test]
-    #[cfg(unix)]
-    fn with_no_network_and_no_cached_lexicon_the_book_ships_with_xray_and_no_word_wise() {
-        let tmp = tempfile::tempdir().unwrap();
-        let q = Queue::new(tmp.path().join("outbox"));
-        q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
-        let root = tmp.path().join("Kindle");
-        let target = mass_storage_kindle(&root);
-        let r = q
-            .flush_with(
-                &mut Conn::new(&target),
-                None,
-                &uncached(tmp.path()),
-                &mut |_, _, _| {},
+        /// Word Wise with nothing cached and (for a push) no download.
+        fn uncached(dir: &Path) -> Finishing {
+            Finishing {
+                profile: None,
+                word_wise: WordWiseOptions {
+                    level: 5,
+                    database: None,
+                    cache_dir: dir.join("empty-cache"),
+                },
+            }
+        }
+
+        fn mass_storage_kindle(root: &Path) -> Target {
+            std::fs::create_dir_all(root.join("documents")).unwrap();
+            std::fs::create_dir_all(root.join("system/thumbnails")).unwrap();
+            std::fs::write(
+                root.join("system/version.txt"),
+                "Kindle 5.16.2.1.1 (4184940002)\n",
             )
             .unwrap();
-        assert_eq!(r.delivered.len(), 1);
-        let sdr = root.join("documents").join(LONG_READ).with_extension("sdr");
-        let names: Vec<String> = std::fs::read_dir(&sdr)
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert!(names.iter().any(|n| n.starts_with("XRAY.")), "{names:?}");
-        assert!(
-            !names.iter().any(|n| n.starts_with("LanguageLayer.")),
-            "{names:?}"
-        );
-        assert!(
-            r.warnings.iter().any(|w| w.starts_with(LONG_READ)
-                && w.contains("Word Wise skipped")
-                && w.contains("push doesn't download")),
-            "{:?}",
-            r.warnings
-        );
-        assert!(
-            !tmp.path()
-                .join("empty-cache")
-                .join(crate::wordwise::DB_FILE)
-                .exists(),
-            "nothing was downloaded"
-        );
-    }
+            Target::MassStorage(crate::deliver::detect_in(&[root.to_path_buf()]).remove(0))
+        }
 
-    #[test]
-    #[cfg(unix)]
-    fn a_prepared_book_to_an_mtp_kindle_probes_sends_and_prunes_in_one_session() {
-        let tmp = tempfile::tempdir().unwrap();
-        let q = Queue::new(tmp.path().join("outbox"));
-        q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
-        fake::reset(&["deckle-daily-2026-10-17.kfx", "deckle-daily-2026-10-18.kfx"]);
-        let target = Target::Mtp(MtpInfo {
-            vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
-            product_id: 1,
-            serial: Some("G0001".into()),
-            product: Some("Kindle".into()),
-            bus: 1,
-            address: 2,
-        });
-        // An MTP Kindle has no thumbnail folder: the owner chose features first for it.
-        let mut profile = DeviceProfile::new("mtp:G0001", "Kindle");
-        profile.cde_override = Some("ebok".into());
-        let finishing = Finishing {
-            profile: Some(profile),
-            word_wise: WordWiseOptions {
-                level: 5,
-                database: Some(lexicon(tmp.path())),
-                cache_dir: tmp.path().join("cache"),
-            },
-        };
-        let prune = Prune {
-            prefix: "deckle-daily-".into(),
-            keep: 1,
-        };
-        let r = {
-            let mut conn = Conn::with_opener(&target, fake::open);
-            q.flush_with(&mut conn, Some(&prune), &finishing, &mut |_, _, _| {})
+        fn cde_of(kfx: &[u8]) -> String {
+            let doc = deckle_kfx::container::read_kfx(kfx).unwrap();
+            let md = doc
+                .fragments
+                .get_single(&deckle_kfx::ion::Sym::new("$490"))
+                .unwrap();
+            let s = format!("{:?}", md.value);
+            if s.contains("EBOK") { "EBOK" } else { "PDOC" }.into()
+        }
+
+        #[test]
+        fn a_prepared_book_ships_as_ebok_with_a_thumbnail_and_xray_to_a_writable_kindle() {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            let entry = q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
+            assert!(entry.join("book.kpf").is_file());
+            assert!(entry.join("prepared.json").is_file());
+            assert_eq!(
+                cde_of(&std::fs::read(entry.join("fallback.kfx")).unwrap()),
+                "PDOC"
+            );
+            assert_eq!(q.pending(), std::slice::from_ref(&entry));
+
+            let root = tmp.path().join("Kindle");
+            let target = mass_storage_kindle(&root);
+            let mut seen = Vec::new();
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&target),
+                    None,
+                    &uncached(tmp.path()),
+                    &mut |i, n, name| seen.push(format!("{i}/{n} {name}")),
+                )
+                .unwrap();
+            assert_eq!(seen, [format!("1/1 {LONG_READ}")]);
+            let book = root.join("documents").join(LONG_READ);
+            assert_eq!(r.delivered, std::slice::from_ref(&book));
+            assert_eq!(cde_of(&std::fs::read(&book).unwrap()), "EBOK");
+            let sdr: Vec<String> = std::fs::read_dir(book.with_extension("sdr"))
                 .unwrap()
-        };
-        assert_eq!(
-            r.delivered,
-            [PathBuf::from(format!("mtp://G0001/documents/{LONG_READ}"))]
-        );
-        assert_eq!(r.pruned, ["deckle-daily-2026-10-17.kfx"]);
-        let sdr = LONG_READ.replace(".kfx", ".sdr");
-        assert!(
-            fake::in_documents(&sdr)
-                .iter()
-                .any(|n| n.starts_with("XRAY.entities.")),
-            "{:?}",
-            fake::in_documents(&sdr)
-        );
-        // The Word Wise probe read this Kindle (it hides `system/`) on the same session.
-        assert!(
-            r.warnings
-                .iter()
-                .any(|w| w.contains("hides its Word Wise dictionaries")),
-            "{:?}",
-            r.warnings
-        );
-        let ops = fake::ops();
-        assert_eq!(fake::opens(), 1, "one connection");
-        assert_eq!(ops.iter().filter(|&&o| o == op::OPEN_SESSION).count(), 1);
-        assert_eq!(ops.first(), Some(&op::OPEN_SESSION));
-        assert_eq!(ops.last(), Some(&op::CLOSE_SESSION));
-        let first_send = ops.iter().position(|&o| o == op::SEND_OBJECT_INFO).unwrap();
-        let last_send = ops.iter().rposition(|&o| o == op::SEND_OBJECT).unwrap();
-        let probe = ops.iter().position(|&o| o == op::GET_STORAGE_IDS).unwrap();
-        let pruned = ops.iter().rposition(|&o| o == op::DELETE_OBJECT).unwrap();
-        assert!(probe < first_send, "the probe comes before the sends");
-        assert!(last_send < pruned, "prune last");
-        assert!(q.pending().is_empty());
-    }
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(
+                sdr.iter().any(|n| n.starts_with("XRAY.entities.")),
+                "{sdr:?}"
+            );
+            let thumbs: Vec<String> = std::fs::read_dir(root.join("system/thumbnails"))
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(
+                thumbs.iter().any(|n| n.ends_with("_EBOK_portrait.jpg")),
+                "{thumbs:?}"
+            );
+            assert!(q.pending().is_empty(), "delivered entries leave the outbox");
+            assert!(!entry.exists());
+        }
 
-    #[test]
-    #[cfg(unix)]
-    fn a_corrupt_kpf_ships_the_fallback_under_the_same_name_with_a_warning() {
-        let tmp = tempfile::tempdir().unwrap();
-        let q = Queue::new(tmp.path().join("outbox"));
-        let entry = q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
-        let fallback = std::fs::read(entry.join("fallback.kfx")).unwrap();
-        std::fs::write(entry.join("book.kpf"), b"not a KPF").unwrap();
-        let root = tmp.path().join("Kindle");
-        let target = mass_storage_kindle(&root);
-        let r = q
-            .flush_with(
-                &mut Conn::new(&target),
-                None,
-                &uncached(tmp.path()),
-                &mut |_, _, _| {},
+        #[test]
+        fn with_no_network_and_no_cached_lexicon_the_book_ships_with_xray_and_no_word_wise() {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
+            let root = tmp.path().join("Kindle");
+            let target = mass_storage_kindle(&root);
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&target),
+                    None,
+                    &uncached(tmp.path()),
+                    &mut |_, _, _| {},
+                )
+                .unwrap();
+            assert_eq!(r.delivered.len(), 1);
+            let sdr = root.join("documents").join(LONG_READ).with_extension("sdr");
+            let names: Vec<String> = std::fs::read_dir(&sdr)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(names.iter().any(|n| n.starts_with("XRAY.")), "{names:?}");
+            assert!(
+                !names.iter().any(|n| n.starts_with("LanguageLayer.")),
+                "{names:?}"
+            );
+            assert!(
+                r.warnings.iter().any(|w| w.starts_with(LONG_READ)
+                    && w.contains("Word Wise skipped")
+                    && w.contains("push doesn't download")),
+                "{:?}",
+                r.warnings
+            );
+            assert!(
+                !tmp.path()
+                    .join("empty-cache")
+                    .join(crate::wordwise::DB_FILE)
+                    .exists(),
+                "nothing was downloaded"
+            );
+        }
+
+        #[test]
+        fn a_prepared_book_to_an_mtp_kindle_probes_sends_and_prunes_in_one_session() {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
+            fake::reset(&["deckle-daily-2026-10-17.kfx", "deckle-daily-2026-10-18.kfx"]);
+            let target = Target::Mtp(MtpInfo {
+                vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
+                product_id: 1,
+                serial: Some("G0001".into()),
+                product: Some("Kindle".into()),
+                bus: 1,
+                address: 2,
+            });
+            // An MTP Kindle has no thumbnail folder: the owner chose features first for it.
+            let mut profile = DeviceProfile::new("mtp:G0001", "Kindle");
+            profile.cde_override = Some("ebok".into());
+            let finishing = Finishing {
+                profile: Some(profile),
+                word_wise: WordWiseOptions {
+                    level: 5,
+                    database: Some(lexicon(tmp.path())),
+                    cache_dir: tmp.path().join("cache"),
+                },
+            };
+            let prune = Prune {
+                prefix: "deckle-daily-".into(),
+                keep: 1,
+            };
+            let r = {
+                let mut conn = Conn::with_opener(&target, fake::open);
+                q.flush_with(&mut conn, Some(&prune), &finishing, &mut |_, _, _| {})
+                    .unwrap()
+            };
+            assert_eq!(
+                r.delivered,
+                [PathBuf::from(format!("mtp://G0001/documents/{LONG_READ}"))]
+            );
+            assert_eq!(r.pruned, ["deckle-daily-2026-10-17.kfx"]);
+            let sdr = LONG_READ.replace(".kfx", ".sdr");
+            assert!(
+                fake::in_documents(&sdr)
+                    .iter()
+                    .any(|n| n.starts_with("XRAY.entities.")),
+                "{:?}",
+                fake::in_documents(&sdr)
+            );
+            // The Word Wise probe read this Kindle (it hides `system/`) on the same session.
+            assert!(
+                r.warnings
+                    .iter()
+                    .any(|w| w.contains("hides its Word Wise dictionaries")),
+                "{:?}",
+                r.warnings
+            );
+            let ops = fake::ops();
+            assert_eq!(fake::opens(), 1, "one connection");
+            assert_eq!(ops.iter().filter(|&&o| o == op::OPEN_SESSION).count(), 1);
+            assert_eq!(ops.first(), Some(&op::OPEN_SESSION));
+            assert_eq!(ops.last(), Some(&op::CLOSE_SESSION));
+            let first_send = ops.iter().position(|&o| o == op::SEND_OBJECT_INFO).unwrap();
+            let last_send = ops.iter().rposition(|&o| o == op::SEND_OBJECT).unwrap();
+            let probe = ops.iter().position(|&o| o == op::GET_STORAGE_IDS).unwrap();
+            let pruned = ops.iter().rposition(|&o| o == op::DELETE_OBJECT).unwrap();
+            assert!(probe < first_send, "the probe comes before the sends");
+            assert!(last_send < pruned, "prune last");
+            assert!(q.pending().is_empty());
+        }
+
+        #[test]
+        fn a_corrupt_kpf_ships_the_fallback_under_the_same_name_with_a_warning() {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            let entry = q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
+            let fallback = std::fs::read(entry.join("fallback.kfx")).unwrap();
+            std::fs::write(entry.join("book.kpf"), b"not a KPF").unwrap();
+            let root = tmp.path().join("Kindle");
+            let target = mass_storage_kindle(&root);
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&target),
+                    None,
+                    &uncached(tmp.path()),
+                    &mut |_, _, _| {},
+                )
+                .unwrap();
+            let book = root.join("documents").join(LONG_READ);
+            assert_eq!(r.delivered, std::slice::from_ref(&book));
+            assert_eq!(std::fs::read(&book).unwrap(), fallback);
+            assert!(
+                r.warnings
+                    .iter()
+                    .any(|w| w.starts_with(LONG_READ) && w.contains("repackage")),
+                "{:?}",
+                r.warnings
+            );
+            assert!(q.pending().is_empty());
+        }
+
+        #[test]
+        fn an_unknown_prepared_version_ships_the_fallback() {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            let entry = q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
+            let fallback = std::fs::read(entry.join("fallback.kfx")).unwrap();
+            let json = std::fs::read_to_string(entry.join("prepared.json")).unwrap();
+            let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+            v["version"] = 99.into();
+            std::fs::write(entry.join("prepared.json"), v.to_string()).unwrap();
+            let kindle = tmp.path().join("kindle");
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&Target::Folder(kindle.clone())),
+                    None,
+                    &uncached(tmp.path()),
+                    &mut |_, _, _| {},
+                )
+                .unwrap();
+            assert_eq!(std::fs::read(kindle.join(LONG_READ)).unwrap(), fallback);
+            assert!(
+                r.warnings.iter().any(|w| w.contains("version 99")),
+                "{:?}",
+                r.warnings
+            );
+        }
+
+        #[test]
+        fn replaces_removes_prepared_entries_by_prefix_and_a_name_has_one_entry() {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            let p = prepared_mini();
+            q.add_prepared(&p, "deckle-reads-2026-10-20-a.kfx", None)
+                .unwrap();
+            q.add_prepared(&p, "keep-me.kfx", None).unwrap();
+            let src = tmp.path().join("plain.kfx");
+            std::fs::write(&src, b"KFX").unwrap();
+            // A finished file and a prepared book never share a name: the newer one wins.
+            q.add(&src, "keep-me.kfx", None).unwrap();
+            q.add_prepared(
+                &p,
+                "deckle-reads-2026-10-21-b.kfx",
+                Some("deckle-reads-2026-10-20"),
             )
             .unwrap();
-        let book = root.join("documents").join(LONG_READ);
-        assert_eq!(r.delivered, std::slice::from_ref(&book));
-        assert_eq!(std::fs::read(&book).unwrap(), fallback);
-        assert!(
-            r.warnings
+            let names: Vec<String> = q
+                .pending()
                 .iter()
-                .any(|w| w.starts_with(LONG_READ) && w.contains("repackage")),
-            "{:?}",
-            r.warnings
-        );
-        assert!(q.pending().is_empty());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn an_unknown_prepared_version_ships_the_fallback() {
-        let tmp = tempfile::tempdir().unwrap();
-        let q = Queue::new(tmp.path().join("outbox"));
-        let entry = q.add_prepared(&prepared_mini(), LONG_READ, None).unwrap();
-        let fallback = std::fs::read(entry.join("fallback.kfx")).unwrap();
-        let json = std::fs::read_to_string(entry.join("prepared.json")).unwrap();
-        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
-        v["version"] = 99.into();
-        std::fs::write(entry.join("prepared.json"), v.to_string()).unwrap();
-        let kindle = tmp.path().join("kindle");
-        let r = q
-            .flush_with(
-                &mut Conn::new(&Target::Folder(kindle.clone())),
-                None,
-                &uncached(tmp.path()),
-                &mut |_, _, _| {},
-            )
-            .unwrap();
-        assert_eq!(std::fs::read(kindle.join(LONG_READ)).unwrap(), fallback);
-        assert!(
-            r.warnings.iter().any(|w| w.contains("version 99")),
-            "{:?}",
-            r.warnings
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn replaces_removes_prepared_entries_by_prefix_and_a_name_has_one_entry() {
-        let tmp = tempfile::tempdir().unwrap();
-        let q = Queue::new(tmp.path().join("outbox"));
-        let p = prepared_mini();
-        q.add_prepared(&p, "deckle-reads-2026-10-20-a.kfx", None)
-            .unwrap();
-        q.add_prepared(&p, "keep-me.kfx", None).unwrap();
-        let src = tmp.path().join("plain.kfx");
-        std::fs::write(&src, b"KFX").unwrap();
-        // A finished file and a prepared book never share a name: the newer one wins.
-        q.add(&src, "keep-me.kfx", None).unwrap();
-        q.add_prepared(
-            &p,
-            "deckle-reads-2026-10-21-b.kfx",
-            Some("deckle-reads-2026-10-20"),
-        )
-        .unwrap();
-        let names: Vec<String> = q
-            .pending()
-            .iter()
-            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(names, ["deckle-reads-2026-10-21-b.book", "keep-me.kfx"]);
-        let opened = Cell::new(0);
-        let r = q
-            .flush_with(
-                &mut Conn::new(&Target::Folder(tmp.path().join("k"))),
-                None,
-                &uncached(tmp.path()),
-                &mut |_, _, _| opened.set(opened.get() + 1),
-            )
-            .unwrap();
-        assert_eq!(opened.get(), 2);
-        assert_eq!(r.delivered.len(), 2);
+                .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(names, ["deckle-reads-2026-10-21-b.book", "keep-me.kfx"]);
+            let opened = Cell::new(0);
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&Target::Folder(tmp.path().join("k"))),
+                    None,
+                    &uncached(tmp.path()),
+                    &mut |_, _, _| opened.set(opened.get() + 1),
+                )
+                .unwrap();
+            assert_eq!(opened.get(), 2);
+            assert_eq!(r.delivered.len(), 2);
+        }
     }
 }

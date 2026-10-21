@@ -995,13 +995,13 @@ fn save(
     })
 }
 
-#[cfg(test)]
+// Unix only: the fake Previewer is a shell script.
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use deckle_core::pipeline::XRayMode;
     use deckle_digest::reading::Outcome;
 
-    #[cfg(unix)]
     pub(crate) fn fake_previewer() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh")
     }
@@ -1009,7 +1009,6 @@ mod tests {
     /// Long reads are queued prepared, asking for X-Ray and Word Wise (device-aware build
     /// §4.5); one that won't convert comes back to be printed in the paper.
     #[test]
-    #[cfg(unix)]
     fn long_reads_are_prepared_with_xray_and_word_wise_and_a_failure_prints_inline() {
         let tmp = tempfile::tempdir().unwrap();
         let mini = tmp.path().join("deckle-reads-2026-10-21-mini.epub");
