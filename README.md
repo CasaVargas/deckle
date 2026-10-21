@@ -89,6 +89,7 @@ cargo build --release -p deckle-cli            # binary at target/release/deckle
 deckle devices                                 # connected Kindles (mass storage and MTP)
 deckle run book.epub --to device --pages auto  # inspect → normalize → Previewer → KFX → enrich → Kindle
 deckle run book.epub --to ./out --cde pdoc     # export to a folder instead
+deckle run notes.docx --to device              # a Word document: imported as an EPUB first
 deckle run book.epub --to device --cde ebok --llm anthropic   # X-Ray with LLM descriptions (ANTHROPIC_API_KEY)
 deckle run book.epub --to ./out --cde ebok --llm openai --llm-endpoint http://localhost:11434/v1 --llm-model llama3
 deckle run book.epub --to ./out --cde ebok --wikipedia       # Wikipedia summaries for places and things
@@ -98,6 +99,11 @@ deckle run book.epub --to device --word-wise off             # no Word Wise side
 deckle inspect book.epub --json                # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx --asin B0XXXXDECK   # repackage an existing Previewer KPF
 ```
+
+A `.docx` goes through the same pipeline: Heading 1–3 become the contents, footnotes become
+pop-up notes, and pictures, lists, tables and bold/italic come through
+(`docs/superpowers/specs/2026-10-21-docx-import-design.md`). The app's drop zone still takes
+EPUBs only.
 
 `--cde auto` (default) applies the cover rule; `--cde pdoc|ebok` overrides it; `--match` looks up
 an Amazon edition on Open Library when an MTP Kindle needs a real ASIN.

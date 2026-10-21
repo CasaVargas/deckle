@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The whole pipeline for one book: inspect → normalize → convert → repackage → deliver.
+//! The whole pipeline for one book: (import) → inspect → normalize → convert → repackage →
+//! deliver.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -150,10 +151,6 @@ pub fn run_with_progress(
             }
         }};
     }
-    let info = stage!("inspect", inspect(epub));
-    report.info = info.clone();
-    report.warnings.extend(info.warnings.iter().cloned());
-
     let work = match tempfile::Builder::new().prefix("deckle-").tempdir() {
         Ok(d) => d,
         Err(e) => {
@@ -169,10 +166,23 @@ pub fn run_with_progress(
     let work_keep = opts.keep_work_dir;
     report.work_dir = work_keep.then(|| work_path.clone());
 
+    // A Word document becomes an EPUB first; every later stage is the same (DOCX spec §3).
+    let source = if deckle_docx::is_word(epub) {
+        let imported = work_path.join("imported.epub");
+        let ireport = stage!("import", deckle_docx::convert(epub, &imported));
+        report.warnings.extend(ireport.warnings);
+        imported
+    } else {
+        epub.to_path_buf()
+    };
+    let info = stage!("inspect", inspect(&source));
+    report.info = info.clone();
+    report.warnings.extend(info.warnings.iter().cloned());
+
     let normalized = work_path.join("normalized.epub");
     let nreport = stage!(
         "normalize",
-        normalize(epub, &normalized, &NormalizeOptions::default())
+        normalize(&source, &normalized, &NormalizeOptions::default())
     );
     report.warnings.extend(nreport.warnings.iter().cloned());
     report.normalize = nreport;
