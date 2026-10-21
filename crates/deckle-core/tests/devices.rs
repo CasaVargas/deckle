@@ -125,3 +125,42 @@ fn a_devices_json_from_before_firmware_still_loads() {
     assert_eq!(p.firmware, None);
     assert!(p.verified_real_asin);
 }
+
+/// A push finds the connected Kindle's profile by the key the app records it under.
+#[test]
+fn a_target_finds_the_profile_the_app_recorded() {
+    use deckle_core::deliver::{Device, Target};
+    use deckle_core::devices::{profile_for, seen_mass_storage, seen_mtp};
+    use deckle_transport::usb::MtpInfo;
+    let device = Device {
+        root: "/Volumes/Kindle".into(),
+        model_hint: "Kindle 5.16.2.1.1 (4184940002)".into(),
+        thumbnails_writable: true,
+        firmware: Some("5.16.2.1.1".into()),
+    };
+    let mtp = MtpInfo {
+        vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
+        product_id: 1,
+        serial: Some("G0X1".into()),
+        product: Some("Kindle Scribe".into()),
+        bus: 1,
+        address: 2,
+    };
+    let mut reg = DeviceRegistry::default();
+    reg.remember(&seen_mass_storage(&device));
+    reg.remember(&seen_mtp(&mtp));
+    reg.set_override("mtp:G0X1", Some("ebok"));
+    let p = profile_for(&Target::Mtp(mtp.clone()), &reg).expect("MTP profile");
+    assert_eq!(p.cde_override.as_deref(), Some("ebok"));
+    assert_eq!(seen_mtp(&mtp).transport, TransportKind::Mtp);
+    assert_eq!(
+        profile_for(&Target::MassStorage(device), &reg).map(|p| p.key),
+        Some("ms:Kindle 5.16.2.1.1 (4184940002)".into())
+    );
+    assert!(profile_for(&Target::Folder("/tmp".into()), &reg).is_none());
+    let unknown = MtpInfo {
+        serial: None,
+        ..mtp
+    };
+    assert!(profile_for(&Target::Mtp(unknown), &reg).is_none());
+}
