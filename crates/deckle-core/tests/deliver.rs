@@ -69,6 +69,7 @@ fn mass_storage_kindle_is_detected_and_written_under_documents() {
     assert_eq!(d.root, root.path());
     assert!(d.thumbnails_writable);
     assert!(d.model_hint.starts_with("Kindle 5.16.2.1.1"));
+    assert_eq!(d.firmware.as_deref(), Some("5.16.2.1.1"));
     let path = deliver(b"KFX", &info("B", "C D"), &Target::MassStorage(d.clone())).unwrap();
     assert_eq!(path, root.path().join("documents/D, C - B.kfx"));
     assert!(path.exists());
@@ -257,4 +258,16 @@ fn prune_removes_old_editions_and_their_sidecars_on_a_folder() {
     assert!(!dir.path().join("deckle-daily-2026-10-17.sdr").exists());
     assert!(dir.path().join("deckle-daily-2026-10-19.sdr").exists());
     assert!(dir.path().join("Dune.kfx").exists());
+}
+
+#[test]
+fn a_kindle_without_a_readable_version_has_no_firmware() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("documents")).unwrap();
+    std::fs::create_dir_all(root.path().join("system")).unwrap();
+    let d = detect_in(&[root.path().to_path_buf()]).remove(0);
+    assert_eq!(d.firmware, None);
+    std::fs::write(root.path().join("system/version.txt"), "Kindle (unknown)\n").unwrap();
+    let d = detect_in(&[root.path().to_path_buf()]).remove(0);
+    assert_eq!(d.firmware, None);
 }

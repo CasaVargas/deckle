@@ -407,6 +407,11 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
     let root = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(root.path().join("documents")).unwrap();
     std::fs::create_dir_all(root.path().join("system/thumbnails")).unwrap();
+    std::fs::write(
+        root.path().join("system/version.txt"),
+        "Kindle 5.16.2.1.1 (4184940002)\n",
+    )
+    .unwrap();
     let device = deckle_core::deliver::detect_in(&[root.path().to_path_buf()]).remove(0);
     let opts = RunOptions {
         cde_type: CdeType::Pdoc, // ignored: the rule decides unless cde_override is set
@@ -430,6 +435,12 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
     assert!(decision.write_thumbnail);
     assert_eq!(decision.asin, AsinChoice::Generated);
     assert_eq!(report.cde_type.as_deref(), Some("EBOK"));
+    assert_eq!(report.firmware.as_deref(), Some("5.16.2.1.1"));
+    assert!(
+        !report.warnings.iter().any(|w| w.contains("over MTP")),
+        "no MTP rows on a mass-storage Kindle: {:?}",
+        report.warnings
+    );
     let asin = report.asin.clone().unwrap();
     let thumb = root.path().join(format!(
         "system/thumbnails/thumbnail_{asin}_EBOK_portrait.jpg"

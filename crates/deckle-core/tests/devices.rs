@@ -10,6 +10,7 @@ fn seen_mass(root: &str, hint: &str, thumbs: bool) -> Seen {
         transport: TransportKind::MassStorage,
         thumbnails_writable: thumbs,
         serial: None,
+        firmware: None,
     }
 }
 
@@ -66,4 +67,61 @@ fn profile_maps_to_the_cover_rule_inputs() {
         }
     );
     assert_eq!(m.user_override(), Override::None);
+}
+
+#[test]
+fn firmware_round_trips_and_an_mtp_sighting_keeps_the_recorded_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("devices.json");
+    let mut reg = DeviceRegistry::default();
+    let ms = Seen {
+        firmware: Some("5.16.2.1.1".into()),
+        ..seen_mass("/Volumes/Kindle", "Kindle 5.16.2.1.1", true)
+    };
+    assert_eq!(reg.remember(&ms).firmware.as_deref(), Some("5.16.2.1.1"));
+    let mtp = Seen {
+        key: "mtp:G0X1".into(),
+        root: None,
+        model_hint: "Kindle Scribe".into(),
+        transport: TransportKind::Mtp,
+        thumbnails_writable: false,
+        serial: Some("G0X1".into()),
+        firmware: None,
+    };
+    reg.remember(&mtp);
+    reg.set_firmware("mtp:G0X1", "5.18.1.0.1");
+    reg.save(&file).unwrap();
+    let mut again = DeviceRegistry::load(&file);
+    assert_eq!(
+        again
+            .get("ms:Kindle 5.16.2.1.1")
+            .unwrap()
+            .firmware
+            .as_deref(),
+        Some("5.16.2.1.1")
+    );
+    let p = again.remember(&mtp);
+    assert_eq!(
+        p.firmware.as_deref(),
+        Some("5.18.1.0.1"),
+        "a sighting without firmware keeps the one a send recorded"
+    );
+}
+
+#[test]
+fn a_devices_json_from_before_firmware_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("devices.json");
+    std::fs::write(
+        &file,
+        r#"{"profiles":[{"key":"mtp:G0X1","model_hint":"Kindle Scribe","transport":"mtp",
+        "thumbnails_writable":false,"serial":"G0X1","last_root":null,
+        "first_seen":"2026-10-19T00:00:00Z","last_seen":"2026-10-19T00:00:00Z",
+        "cde_override":"ebok","verified_real_asin":true}]}"#,
+    )
+    .unwrap();
+    let reg = DeviceRegistry::load(&file);
+    let p = reg.get("mtp:G0X1").expect("old profile loads");
+    assert_eq!(p.firmware, None);
+    assert!(p.verified_real_asin);
 }

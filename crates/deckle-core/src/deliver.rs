@@ -18,6 +18,8 @@ pub struct Device {
     pub model_hint: String,
     /// `system/thumbnails` exists and is writable: EBOK books can get a cover thumbnail from us.
     pub thumbnails_writable: bool,
+    /// Firmware version from `system/version.txt` (`Kindle 5.16.2.1.1 (…)` → `5.16.2.1.1`).
+    pub firmware: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -45,6 +47,16 @@ impl<'a> Conn<'a> {
             target,
             mtp: None,
             open: deckle_transport::usb::open,
+        }
+    }
+
+    /// A connection that opens MTP devices with `open` (tests script the device).
+    #[cfg(test)]
+    pub(crate) fn with_opener(target: &'a Target, open: MtpOpener) -> Self {
+        Conn {
+            target,
+            mtp: None,
+            open,
         }
     }
 
@@ -159,15 +171,18 @@ pub fn detect_in(roots: &[PathBuf]) -> Vec<Device> {
         if !(documents.is_dir() && system.is_dir()) {
             continue;
         }
-        let model_hint = std::fs::read_to_string(system.join("version.txt"))
+        let version_line = std::fs::read_to_string(system.join("version.txt"))
             .ok()
             .and_then(|s| s.lines().next().map(|l| l.trim().to_owned()))
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| {
-                root.file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "Kindle".into())
-            });
+            .filter(|s| !s.is_empty());
+        let firmware = version_line
+            .as_deref()
+            .and_then(crate::compat::parse_firmware);
+        let model_hint = version_line.unwrap_or_else(|| {
+            root.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Kindle".into())
+        });
         let thumbs = system.join("thumbnails");
         let thumbnails_writable = thumbs.is_dir() && {
             let probe = thumbs.join(".deckle-probe");
@@ -179,6 +194,7 @@ pub fn detect_in(roots: &[PathBuf]) -> Vec<Device> {
             root: root.clone(),
             model_hint,
             thumbnails_writable,
+            firmware,
         });
     }
     out
