@@ -2,6 +2,10 @@
 //! The Inbox folder (save-to-paper design §4): links and saved pages dropped here become
 //! queue entries. Processed files move to `Saved/`; ones Deckle can't read move to
 //! `Unreadable/` with a `.txt` saying why. Point it at iCloud Drive to save from a phone.
+//!
+//! Books (`.epub`, `.docx`, `.kfx`) dropped here are sent later (design §10): the caller
+//! converts each one and adds it to the outbox, then it moves to `Sent/`. Converting needs
+//! `deckle-core`, which this crate doesn't depend on, so that step is passed in.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -19,13 +23,16 @@ const SETTLE: Duration = Duration::from_secs(5);
 pub struct ScanReport {
     /// New queue entries (duplicates of pending saves don't count).
     pub queued: usize,
+    /// Books handed on to be sent later (where they were in the Inbox).
+    pub sent: Vec<PathBuf>,
     pub unreadable: Vec<(PathBuf, String)>,
     /// Left in place for the next scan (the queue was busy, a disk error).
     pub retry: Vec<(PathBuf, String)>,
 }
 
 /// Why a file wasn't queued: its content (moved aside) or the moment (left for later).
-enum Skip {
+#[derive(Debug)]
+pub enum Skip {
     Unreadable(String),
     Retry(String),
 }
@@ -34,6 +41,18 @@ static URL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"https?://[^\s<>\x22\x00-\x1f\x7f\u{fffd}]+").unwrap());
 static WEBLOC: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<key>URL</key>\s*<string>([^<]+)</string>").unwrap());
+
+/// Extensions the Inbox treats as books rather than articles.
+pub const BOOK_EXTENSIONS: [&str; 3] = ["epub", "docx", "kfx"];
+
+/// A book to send later (by extension, any case), not an article.
+pub fn is_book(path: &Path) -> bool {
+    path.extension().is_some_and(|e| {
+        BOOK_EXTENSIONS
+            .iter()
+            .any(|b| e.to_string_lossy().eq_ignore_ascii_case(b))
+    })
+}
 
 /// `~/…` → the home folder.
 pub fn expand_home(p: &str) -> PathBuf {
@@ -98,9 +117,21 @@ fn urls_in(path: &Path, ext: &str) -> Result<Vec<String>, String> {
     }
 }
 
-/// Queues everything readable in `dir` (created when missing). `now` decides which files
-/// have settled.
+/// Queues the articles in `dir` (created when missing). `now` decides which files have
+/// settled. Books are left where they are for [`scan_with_books`].
 pub fn scan(dir: &Path, queue: &ReadingQueue, now: SystemTime) -> ScanReport {
+    scan_with_books(dir, queue, now, &mut |_| {
+        Err(Skip::Retry("books are sent by `deckle digest`".into()))
+    })
+}
+
+/// Like [`scan`], handing each settled book to `send_later`; `Ok` moves it to `Sent/`.
+pub fn scan_with_books(
+    dir: &Path,
+    queue: &ReadingQueue,
+    now: SystemTime,
+    send_later: &mut dyn FnMut(&Path) -> Result<(), Skip>,
+) -> ScanReport {
     let mut report = ScanReport::default();
     if std::fs::create_dir_all(dir).is_err() {
         return report;
@@ -129,13 +160,23 @@ pub fn scan(dir: &Path, queue: &ReadingQueue, now: SystemTime) -> ScanReport {
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
-        let result =
-            match ext.as_str() {
-                "html" | "htm" => queue
-                    .add_page(&file, "inbox", Utc::now())
-                    .map(|a| usize::from(matches!(a, Added::New(_))))
-                    .map_err(Skip::Retry),
-                "webloc" | "url" | "txt" => urls_in(&file, &ext)
+        if is_book(&file) {
+            match send_later(&file) {
+                Ok(()) => {
+                    move_to(&file, "Sent");
+                    report.sent.push(file);
+                }
+                Err(skip) => report.skip(file, skip),
+            }
+            continue;
+        }
+        let result = match ext.as_str() {
+            "html" | "htm" => queue
+                .add_page(&file, "inbox", Utc::now())
+                .map(|a| usize::from(matches!(a, Added::New(_))))
+                .map_err(Skip::Retry),
+            "webloc" | "url" | "txt" => {
+                urls_in(&file, &ext)
                     .map_err(Skip::Unreadable)
                     .and_then(|urls| {
                         let mut n = 0;
@@ -146,18 +187,30 @@ pub fn scan(dir: &Path, queue: &ReadingQueue, now: SystemTime) -> ScanReport {
                             n += usize::from(matches!(added, Added::New(_)));
                         }
                         Ok(n)
-                    }),
-                _ => Err(Skip::Unreadable(
-                    "Deckle reads .webloc, .url, .txt and .html files".into(),
-                )),
-            };
+                    })
+            }
+            _ => Err(Skip::Unreadable(
+                "Deckle reads .webloc, .url, .txt and .html files, and .epub, .docx and .kfx books"
+                    .into(),
+            )),
+        };
         match result {
             Ok(n) => {
                 report.queued += n;
                 move_to(&file, "Saved");
             }
-            Err(Skip::Retry(why)) => report.retry.push((file, why)),
-            Err(Skip::Unreadable(why)) => {
+            Err(skip) => report.skip(file, skip),
+        }
+    }
+    report
+}
+
+impl ScanReport {
+    /// Leaves `file` for the next scan, or moves it to `Unreadable/` with a `.txt` saying why.
+    fn skip(&mut self, file: PathBuf, skip: Skip) {
+        match skip {
+            Skip::Retry(why) => self.retry.push((file, why)),
+            Skip::Unreadable(why) => {
                 if let Some(dest) = move_to(&file, "Unreadable") {
                     let note = dest.with_file_name(format!(
                         "{}.txt",
@@ -165,9 +218,8 @@ pub fn scan(dir: &Path, queue: &ReadingQueue, now: SystemTime) -> ScanReport {
                     ));
                     let _ = std::fs::write(note, format!("{why}\n"));
                 }
-                report.unreadable.push((file, why));
+                self.unreadable.push((file, why));
             }
         }
     }
-    report
 }
