@@ -19,6 +19,7 @@ deckle-digest = { path = "crates/deckle-digest" }
 deckle-cli = { path = "crates/deckle-cli" }
 deckle-docx = { path = "crates/deckle-docx" }
 deckle-library = { path = "crates/deckle-library" }
+deckle-cover = { path = "crates/deckle-cover" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

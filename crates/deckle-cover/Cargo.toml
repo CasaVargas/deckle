@@ -1,0 +1,11 @@
+[package]
+name = "deckle-cover"
+description = "Deckle covers: a typographic cover for a book that has none"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ab_glyph = "0.2"
+image.workspace = true

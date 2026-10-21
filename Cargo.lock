@@ -989,6 +989,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-cover"
+version = "0.2.1"
+dependencies = [
+ "ab_glyph",
+ "image",
+]
+
+[[package]]
 name = "deckle-desktop"
 version = "0.2.1"
 dependencies = [
