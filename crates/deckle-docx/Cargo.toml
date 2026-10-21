@@ -1,0 +1,18 @@
+[package]
+name = "deckle-docx"
+description = "Deckle import: a Word document (.docx) to a clean EPUB 3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+roxmltree.workspace = true
+zip.workspace = true

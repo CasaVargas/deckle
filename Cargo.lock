@@ -898,6 +898,7 @@ name = "deckle-core"
 version = "0.2.1"
 dependencies = [
  "csv",
+ "deckle-docx",
  "deckle-kfx",
  "deckle-transport",
  "deckle-wordwise",
@@ -957,6 +958,17 @@ dependencies = [
  "toml 1.1.8+spec-1.1.0",
  "ureq",
  "url",
+ "zip",
+]
+
+[[package]]
+name = "deckle-docx"
+version = "0.2.1"
+dependencies = [
+ "roxmltree",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
  "zip",
 ]
 

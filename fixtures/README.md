@@ -24,6 +24,12 @@ them from the golden instead of hard-coding:
 
 Tests inject those values so container output can be compared byte-for-byte.
 
+## `docx/`
+
+| File | What | How it was made |
+|---|---|---|
+| `deckle-mini.docx` | Word document: Title, Heading 1–4, bold/italic, nested bullet list, numbered list, header-row table, two PNGs in `word/media`, three footnotes, core properties | `python3 -I tools/ref/make_mini_docx.py fixtures/docx/deckle-mini.docx` |
+
 ## Not in the repo
 
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB
