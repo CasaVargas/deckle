@@ -29,8 +29,10 @@ so the research that went into it stops being re-derived on MobileRead every yea
 3. Correct metadata on device: title, author (sort-aware), series name and index, language.
 4. Real page numbers where the source has them, synthesized ones otherwise (to verify, §9).
 5. Zero-config happy path: install, (install Kindle Previewer when prompted), drop, go.
-6. The app runs fully offline except for three opt-in network features: LLM calls, edition
-   lookup (Open Library), and Wikipedia summaries. All default off for new installs; the
+6. The app runs fully offline except for four opt-in network features: LLM calls, edition
+   lookup (Open Library), Wikipedia summaries, and the metadata fill (Open Library by ISBN or
+   title search; fills only the title, author, series, description and subjects a book leaves
+   empty, issue #28). All default off for new installs; the
    owner's build turns them on. Note the *device* is not offline: an EBOK book with an ASIN
    makes the Kindle itself query Amazon for that ASIN and may sync position under it. That is
    Amazon's behaviour and is disclosed in the device line (§6); it is not a Deckle network call.

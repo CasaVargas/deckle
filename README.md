@@ -42,6 +42,7 @@ Nothing about you, ever. Deckle goes online only for:
 | LLM descriptions for X-Ray (Anthropic or any OpenAI-compatible endpoint, incl. local Ollama) | each EBOK book | off |
 | Wikipedia summaries for X-Ray terms | each EBOK book | off |
 | Amazon edition lookup (Open Library) | books for MTP Kindles | off |
+| Metadata fill (Open Library, by ISBN or title): title, author, series, description, subjects the book leaves empty | each book sent | off |
 | Send-to-Kindle email of the Daily, through your own SMTP account | each morning paper | off |
 
 Your Kindle itself may ask Amazon about a book sent with features (EBOK) because it carries an
@@ -58,7 +59,8 @@ pipeline book by book with per-stage progress; the split button exports to a fol
 result line says what shipped and why, e.g. `X-Ray: 62 people, 88 terms (basic) · Word Wise:
 11,477 hints (level 5, Deckle's dictionary)`.
 
-Settings hold the Kindle Previewer path, default mode, page numbers, Amazon matching, X-Ray (LLM
+Settings hold the Kindle Previewer path, default mode, page numbers, Amazon matching, filling in
+missing book details from Open Library (`deckle run --fill-metadata`), X-Ray (LLM
 provider, model, endpoint, key; Wikipedia), Word Wise (on/off, hint level) and per-Kindle
 options. *About* lists the version, a link to check for newer releases, and the credits.
 

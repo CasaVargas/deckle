@@ -57,6 +57,8 @@ pub struct Settings {
     pub word_wise_level: u8,
     pub wikipedia: bool,
     pub amazon_match: bool,
+    /// Fill empty title, author, series, description and subjects from Open Library (network).
+    pub metadata_fill: bool,
 }
 
 impl Default for Settings {
@@ -74,6 +76,7 @@ impl Default for Settings {
             word_wise_level: 5,
             wikipedia: false,
             amazon_match: false,
+            metadata_fill: false,
         }
     }
 }
@@ -688,6 +691,7 @@ pub fn run_books_with(
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
             cde_override: override_str.map(cde_from),
             amazon_match: settings.amazon_match,
+            metadata_fill: settings.metadata_fill,
             verified_real_asin: verified,
             asin: b.asin.clone(),
             pages: if settings.pages_auto {
@@ -1186,8 +1190,14 @@ mod tests {
         assert_eq!(s.llm_provider, "off");
         assert_eq!(s.word_wise_level, 5);
         assert!(s.word_wise);
+        assert!(
+            !s.metadata_fill,
+            "the Open Library metadata fill is off by default"
+        );
+        assert!(!s.amazon_match);
         let mut changed = s.clone();
         changed.cde = "ebok".into();
+        changed.metadata_fill = true;
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
         assert_eq!(load_settings_from(&file), changed);

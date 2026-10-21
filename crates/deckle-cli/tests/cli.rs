@@ -101,6 +101,31 @@ fn run_with_fake_previewer_from_the_cli() {
             .unwrap()
             .ends_with("Deckle Mini Fixture.kfx")
     );
+    // The Open Library metadata fill is off unless asked for: no lookup, no outcome.
+    assert!(v[0]["metadata_fill"].is_null(), "{}", v[0]);
+    assert!(v[0]["stage_ms"].get("fill").is_none(), "{}", v[0]);
+}
+
+#[test]
+fn run_help_offers_the_metadata_fill_off_by_default() {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["run", "--help"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let s = String::from_utf8(out.stdout).unwrap();
+    let line = s
+        .lines()
+        .find(|l| l.contains("--fill-metadata"))
+        .unwrap_or_else(|| panic!("no --fill-metadata in:\n{s}"));
+    // A plain switch: it takes no value and has no default that turns it on.
+    assert!(!line.contains('<'), "{line}");
+    assert!(!s.contains("[default: true]"), "{s}");
+    assert!(
+        s.contains("Open Library") && s.contains("off by default"),
+        "{s}"
+    );
 }
 
 #[test]

@@ -13,7 +13,8 @@ use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override
 use crate::deliver::{Conn, DeliverError, DeliverOptions, Target, deliver_named_on, deliver_on};
 use crate::devices::TransportKind;
 use crate::inspect::{BookInfo, inspect};
-use crate::matcher::{MatchOutcome, match_book};
+use crate::matcher::{Fetcher, MatchOutcome, match_book};
+use crate::metadata_fill::{FillOutcome, Metadata};
 use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
 use crate::previewer;
 use crate::wordwise::{WordWiseOptions, WordWiseOutput, WordWiseSummary};
@@ -29,6 +30,9 @@ pub struct RunOptions {
     pub cde_override: Option<CdeType>,
     /// Look up an Amazon edition (Open Library) when the device needs a real ASIN.
     pub amazon_match: bool,
+    /// Fill title, author, series, description and subjects the EPUB leaves empty from Open
+    /// Library (opt-in network, issue #28).
+    pub metadata_fill: bool,
     /// Spike 2 passed on this device: real ASINs keep our sidecars.
     pub verified_real_asin: bool,
     /// An ASIN the owner typed (design §3); replaces Match. `None`: Match, else generated.
@@ -73,6 +77,8 @@ pub struct RunReport {
     pub cde_type: Option<String>,
     pub decision: Option<Decision>,
     pub matched: Option<String>,
+    /// What the Open Library metadata fill did, when it was on.
+    pub metadata_fill: Option<FillOutcome>,
     /// What went into the X-Ray sidecar, when one shipped.
     pub xray: Option<XRaySummary>,
     /// What went into the Word Wise sidecar, when one shipped.
@@ -239,12 +245,22 @@ pub fn run_with_progress(
     }
 }
 
-/// The device-independent stages: (import) → inspect → normalize → convert (Previewer → KPF).
-/// `Err` carries the report with the failing stage in `error`.
+/// The device-independent stages: (import) → inspect → (fill) → normalize → convert (Previewer
+/// → KPF). `Err` carries the report with the failing stage in `error`.
 pub fn prepare(
     epub: &Path,
     opts: &RunOptions,
     on_stage: &mut dyn FnMut(&'static str),
+) -> Result<Prepared, Box<RunReport>> {
+    prepare_with(epub, opts, on_stage, &mut crate::matcher::http_fetch)
+}
+
+/// [`prepare`] with the fetcher for the metadata fill (tests pass one that stays offline).
+pub fn prepare_with(
+    epub: &Path,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+    fetch: &mut Fetcher,
 ) -> Result<Prepared, Box<RunReport>> {
     let mut report = RunReport {
         input: epub.to_path_buf(),
@@ -286,22 +302,44 @@ pub fn prepare(
     } else {
         epub.to_path_buf()
     };
-    let info = stage!(
+    let mut info = stage!(
         report,
         on_stage,
         "inspect",
         inspect(&source),
         Err(Box::new(report))
     );
+    // Fill-empty only: the book's own metadata always wins; a failed lookup is a warning.
+    let fill = if opts.metadata_fill {
+        on_stage("fill");
+        let t = Instant::now();
+        let (outcome, wrote) = crate::metadata_fill::fill(&mut info, fetch);
+        report
+            .stage_ms
+            .insert("fill", t.elapsed().as_millis() as u64);
+        if let FillOutcome::Error { message } = &outcome {
+            report
+                .warnings
+                .push(format!("metadata lookup failed: {message}"));
+        }
+        report.metadata_fill = Some(outcome);
+        wrote
+    } else {
+        Metadata::default()
+    };
     report.info = info.clone();
     report.warnings.extend(info.warnings.iter().cloned());
 
     let normalized = work_path.join("normalized.epub");
+    let normalize_opts = NormalizeOptions {
+        fill,
+        ..Default::default()
+    };
     let nreport = stage!(
         report,
         on_stage,
         "normalize",
-        normalize(&source, &normalized, &NormalizeOptions::default()),
+        normalize(&source, &normalized, &normalize_opts),
         Err(Box::new(report))
     );
     report.warnings.extend(nreport.warnings.iter().cloned());
@@ -618,6 +656,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
         cde_type: CdeType::Pdoc,
         cde_override: Some(CdeType::Pdoc),
         amazon_match: false,
+        metadata_fill: false,
         verified_real_asin: false,
         asin: None,
         pages: prepared.wishes.pages,

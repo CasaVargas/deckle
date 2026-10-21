@@ -11,6 +11,7 @@ mod fake_mtp;
 pub mod inspect;
 pub mod inventory;
 pub mod matcher;
+pub mod metadata_fill;
 pub mod normalize;
 pub mod pipeline;
 pub mod previewer;

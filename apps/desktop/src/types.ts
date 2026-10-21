@@ -82,6 +82,8 @@ export interface Settings {
   word_wise_level: number;
   wikipedia: boolean;
   amazon_match: boolean;
+  /** Fill empty title, author, series, description and subjects from Open Library (network). */
+  metadata_fill: boolean;
 }
 
 export interface PreviewerStatus {
@@ -123,6 +125,7 @@ export const STAGE_LABEL: Record<string, string> = {
   enrich: "X-Ray & Word Wise",
   deliver: "Copying",
   match: "Matching edition",
+  fill: "Looking up details",
 };
 
 // ---- The Daily tab (Daily design §5c) ----

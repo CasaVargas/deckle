@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: Settings = {
   word_wise_level: 5,
   wikipedia: false,
   amazon_match: false,
+  metadata_fill: false,
 };
 
 /** Link files and saved pages become articles (web-article design); everything else is a book. */
