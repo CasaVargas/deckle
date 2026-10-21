@@ -1,6 +1,6 @@
 # Send-to-Kindle email: the paper over Wi-Fi, every morning
 
-Status: draft, 2026-10-21. Issue #50. Implements "Delivery (b)" in the digest spec (§2, next increment 3).
+Status: accepted and built, 2026-10-21. Issue #50; the owner accepted the §11 draft answers (long reads stay on USB; `usb_too = false`). Implements "Delivery (b)" in the digest spec (§2, next increment 3).
 
 ## 1. Why
 
@@ -147,3 +147,15 @@ M:
 - one new `digest run` branch.
 
 The only thing that can't be tested in CI is a real SMTP and Kindle round trip. That's the owner's check, using `digest email test`.
+
+## 13. Build notes (rulings made while building)
+
+- **An emailed paper isn't converted.** With the email sent and `usb_too = false`, `digest run` skips the paper's Previewer step: nothing would use the KFX. The JSON report's `run` is then `null`; `emailed`, `email_error` and `password_from` sit at its top level. The paper is emailed after the long-read rebuild, so the EPUB that goes out is the final one.
+- **Saved articles are used up** when the paper was emailed or queued, as before for queued.
+- **An email failure isn't a failed run.** The paper is queued, so the exit code stays 0 and the report carries `email_error`. Only a failed conversion of a paper that goes by USB exits 1, as before.
+- **Validation:** `to` is checked only when set (an untouched table has `to = ""`), and `[email]` is checked on load and before every save, so the Daily tab can't write a bad one. A save leaves `[email]` out while it holds only defaults.
+- **Keychain features:** `keyring` 3 with `apple-native`, `windows-native`, and `sync-secret-service` + `crypto-rust` on Linux. That needs `libdbus-1-dev`, which Tauri's `tao` already needed; CI and release now name it.
+- **Keychain without the entry** is "not set", not a reason to read `DECKLE_SMTP_PASSWORD`: the variable stands in only when there is no keychain at all.
+- **New CLI dependency:** `rpassword` 7, for the no-echo prompt.
+- **lettre's copy:** lettre's `Credentials` takes a `String`, so the session holds a second copy of the password that isn't zeroed. Deckle's own copy is.
+- **Status code mapping:** SMTP 530/534/535 are reported as a refused login (with the app-password hint), other replies as a refused email, and no reply as a network error.
