@@ -87,6 +87,11 @@ fn an_address_becomes_a_whole_book_with_its_photo() {
     assert!(opf.contains("<dc:title>The Long One</dc:title>"), "{opf}");
     assert!(opf.contains("urn:deckle:article:"), "{opf}");
     assert!(opf.contains("<dc:publisher>ex.com</dc:publisher>"), "{opf}");
+    assert!(
+        opf.contains("<dc:creator id=\"creator\">Ada Writer</dc:creator>"),
+        "{opf}"
+    );
+    assert!(!opf.contains("file-as"), "a person sorts as usual: {opf}");
     let text = entry(&book.path, "OEBPS/text.xhtml").unwrap();
     assert!(text.contains("images/p1.jpg"), "photo placed");
     assert!(!text.contains("__DECKLE_"), "no placeholder left");
@@ -199,4 +204,31 @@ fn an_unreachable_address_says_why() {
     )
     .unwrap_err();
     assert!(err.contains("offline"), "{err}");
+}
+
+#[test]
+fn a_saved_page_without_a_byline_files_under_its_site() {
+    let dir = tempfile::tempdir().unwrap();
+    let html = page(600)
+        .replace(
+            "<meta name=\"author\" content=\"Ada Writer\">",
+            "<link rel=\"canonical\" href=\"https://www.ex.com/essays/roof\">",
+        )
+        .replace("<p class=\"byline\">By Ada Writer</p>", "");
+    let saved = dir.path().join("roof.html");
+    std::fs::write(&saved, html).unwrap();
+    let book = build(
+        &saved.to_string_lossy(),
+        &Config::default(),
+        &fake(),
+        &dir.path().join("out"),
+        date(),
+    )
+    .unwrap();
+    let opf = entry(&book.path, "OEBPS/content.opf").unwrap();
+    assert!(opf.contains("<dc:publisher>ex.com</dc:publisher>"), "{opf}");
+    assert!(
+        opf.contains("<meta refines=\"#creator\" property=\"file-as\">ex.com</meta>"),
+        "{opf}"
+    );
 }

@@ -34,6 +34,14 @@ pub fn write_article(lr: &LongRead, uid: &str, date: NaiveDate, path: &Path) -> 
         minutes(lr.words),
     )?;
     let author = lr.byline.clone().unwrap_or_else(|| lr.outlet.clone());
+    // An outlet isn't a person: keep "Deckle Reads" from filing as "Reads, Deckle".
+    let file_as = match &lr.byline {
+        Some(_) => String::new(),
+        None => format!(
+            "<meta refines=\"#creator\" property=\"file-as\">{}</meta>\n",
+            esc(&author)
+        ),
+    };
     let a = &lr.article;
     let mut body = a.body.clone();
     for n in 0..a.photos.len() {
@@ -70,7 +78,7 @@ pub fn write_article(lr: &LongRead, uid: &str, date: NaiveDate, path: &Path) -> 
          <package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" unique-identifier=\"uid\" xml:lang=\"en\">\n\
          <metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\n\
          <dc:identifier id=\"uid\">{uid}</dc:identifier>\n<dc:title>{title}</dc:title>\n\
-         <dc:creator id=\"creator\">{author}</dc:creator>\n<dc:language>en</dc:language>\n\
+         <dc:creator id=\"creator\">{author}</dc:creator>\n{file_as}<dc:language>en</dc:language>\n\
          <dc:publisher>{outlet}</dc:publisher>\n<dc:date>{date}</dc:date>\n\
          <meta property=\"dcterms:modified\">{date}T00:00:00Z</meta>\n\
          <meta name=\"cover\" content=\"cover-image\"/>\n</metadata>\n\

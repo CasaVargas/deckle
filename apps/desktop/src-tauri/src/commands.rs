@@ -411,6 +411,36 @@ pub fn book_row(path: &Path) -> BookRow {
     }
 }
 
+/// Web articles (addresses, `.webloc`/`.url` link files, saved pages) built into EPUBs in
+/// `dir`, one row each (web-article design §3). A failed import is an error row saying why.
+pub fn article_rows(targets: &[String], net: &dyn deckle_digest::Net, dir: &Path) -> Vec<BookRow> {
+    targets
+        .iter()
+        .map(|t| match deckle_cli::import_article(t, net, dir) {
+            Ok(book) => book_row(&book.path),
+            Err(e) => {
+                let title = Path::new(t)
+                    .file_stem()
+                    .filter(|_| !t.starts_with("http"))
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| t.clone());
+                BookRow {
+                    id: format!("{:x}", md5ish(t.as_bytes())),
+                    path: t.clone(),
+                    title,
+                    authors: String::new(),
+                    series: None,
+                    cover: None,
+                    mode: "error".into(),
+                    reason: e.clone(),
+                    warnings: Vec::new(),
+                    error: Some(e),
+                }
+            }
+        })
+        .collect()
+}
+
 /// A finished KFX: listed from its own metadata and cover, sent unchanged under its file name.
 pub fn kfx_row(path: &Path) -> BookRow {
     let id = format!("{:x}", md5ish(path.to_string_lossy().as_bytes()));
@@ -762,6 +792,16 @@ pub fn inspect_books(paths: Vec<String>) -> Vec<BookRow> {
         .collect()
 }
 
+/// Fetches and builds web articles off the main thread; see [`article_rows`].
+#[tauri::command]
+pub async fn import_articles(targets: Vec<String>) -> Result<Vec<BookRow>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        article_rows(&targets, &deckle_digest::Http, &deckle_cli::articles_dir())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn list_devices(state: State<'_, AppState>) -> Vec<DeviceRow> {
     device_rows(&state.devices_file)
@@ -1075,6 +1115,53 @@ mod tests {
         assert_eq!(row.mode, "cover");
         assert!(row.reason.contains("X-Ray"));
         assert!(row.error.is_none());
+    }
+
+    #[test]
+    fn a_saved_page_imports_as_a_book_row_and_a_stub_as_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let para = "The council met again tonight to argue about the new library and its roof. ";
+        let page = dir.path().join("essay.html");
+        std::fs::write(
+            &page,
+            format!(
+                "<html><head><title>The Roof Question</title></head><body><article>\
+                 <h1>The Roof Question</h1>{}</article></body></html>",
+                format!("<p>{para}</p>").repeat(40)
+            ),
+        )
+        .unwrap();
+        let stub = dir.path().join("paywall.html");
+        std::fs::write(&stub, "<html><body><p>Subscribe.</p></body></html>").unwrap();
+        let offline = |u: &str| -> Result<Vec<u8>, String> { Err(format!("offline: {u}")) };
+        let rows = article_rows(
+            &[
+                page.to_string_lossy().into_owned(),
+                stub.to_string_lossy().into_owned(),
+                "https://ex.com/gone".into(),
+            ],
+            &offline,
+            &dir.path().join("articles"),
+        );
+        assert_eq!(rows[0].title, "The Roof Question");
+        assert!(rows[0].error.is_none());
+        assert!(rows[0].path.ends_with(".epub"), "{}", rows[0].path);
+        assert!(
+            rows[0]
+                .cover
+                .as_deref()
+                .unwrap()
+                .starts_with("data:image/jpeg")
+        );
+        assert_eq!(rows[1].mode, "error");
+        assert_eq!(rows[1].title, "paywall");
+        assert!(
+            rows[1].reason.contains("under 120 words"),
+            "{}",
+            rows[1].reason
+        );
+        assert_eq!(rows[2].title, "https://ex.com/gone");
+        assert!(rows[2].reason.contains("offline"));
     }
 
     #[test]

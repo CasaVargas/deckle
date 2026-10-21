@@ -4,8 +4,10 @@
 //! caller sends through the usual pipeline.
 
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use chrono::NaiveDate;
+use regex::Regex;
 
 use crate::config::Config;
 use crate::fetch::Net;
@@ -46,6 +48,18 @@ fn extension(path: &Path) -> Option<String> {
 pub fn is_article(target: &str) -> bool {
     is_address(target)
         || extension(Path::new(target)).is_some_and(|e| ARTICLE_EXTENSIONS.contains(&e.as_str()))
+}
+
+static CANONICAL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?i)<(?:link[^>]+rel=["']canonical["'][^>]+href|meta[^>]+property=["']og:url["'][^>]+content)=["'](https?://[^"']+)"#,
+    )
+    .unwrap()
+});
+
+/// The address a saved page came from, when it says (`rel=canonical`, `og:url`).
+fn saved_from(html: &str) -> Option<String> {
+    CANONICAL.captures(html).map(|c| c[1].to_owned())
 }
 
 fn source(target: &str) -> Result<Source, String> {
@@ -94,11 +108,11 @@ pub fn build(
             let bytes = std::fs::read(&file).map_err(|e| e.to_string())?;
             let base = url::Url::from_file_path(&file)
                 .map_err(|_| format!("{}: not an absolute path", file.display()))?;
-            (
-                String::from_utf8_lossy(&bytes).into_owned(),
-                base.to_string(),
-                "a saved page".to_owned(),
-            )
+            let html = String::from_utf8_lossy(&bytes).into_owned();
+            let outlet = saved_from(&html)
+                .map(|u| host(&u).to_owned())
+                .unwrap_or_else(|| "a saved page".to_owned());
+            (html, base.to_string(), outlet)
         }
     };
     let x = article::extract_with(&html, &base, None).ok_or_else(|| {
@@ -149,6 +163,22 @@ mod tests {
         assert!(!is_article("book.epub"));
         assert!(!is_article("notes.docx"));
         assert!(!is_article("ex.com/a"));
+    }
+
+    #[test]
+    fn a_saved_page_names_where_it_came_from() {
+        assert_eq!(
+            saved_from(
+                r#"<link rel="canonical" href="https://en.wikipedia.org/wiki/Deckle_edge"/>"#
+            )
+            .as_deref(),
+            Some("https://en.wikipedia.org/wiki/Deckle_edge")
+        );
+        assert_eq!(
+            saved_from(r#"<meta property='og:url' content='https://ex.com/a'>"#).as_deref(),
+            Some("https://ex.com/a")
+        );
+        assert_eq!(saved_from("<p>no address</p>"), None);
     }
 
     #[test]
