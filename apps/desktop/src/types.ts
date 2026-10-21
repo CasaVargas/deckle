@@ -86,6 +86,8 @@ export interface Settings {
   metadata_fill: boolean;
   /** Curly quotes, dashes, ellipses and empty-paragraph cleanup (issue #30). */
   typography: boolean;
+  /** Footnotes and endnotes to Kindle pop-up notes (issue #31). */
+  popup_notes: boolean;
 }
 
 export interface PreviewerStatus {
