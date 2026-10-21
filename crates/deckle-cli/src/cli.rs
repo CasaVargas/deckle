@@ -257,6 +257,25 @@ pub enum DigestCommand {
         #[arg(long, default_value_t = 20)]
         interval: u64,
     },
+    /// Email the paper to your Kindle (`[email]` in digest.toml): the SMTP password and a test.
+    Email {
+        #[command(subcommand)]
+        action: EmailCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum EmailCommand {
+    /// Save the SMTP password in the system keychain (asked for without echo).
+    Password {
+        /// Read one line from stdin instead, for scripts.
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Send a one-page test EPUB to the Kindle address and show the SMTP result.
+    Test,
+    /// Delete the SMTP password from the system keychain.
+    Forget,
 }
 
 /// `--pages` parsing: absent → none; `auto` → Some(None); a number → Some(Some(n)).

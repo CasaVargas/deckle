@@ -217,3 +217,53 @@ fn bookmarklet_prints_javascript_with_token() {
     let (_, again) = save(&q, &["--bookmarklet"]);
     assert!(again.contains(js));
 }
+
+#[test]
+fn digest_email_has_password_test_and_forget() {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["digest", "email", "--help"])
+        .output()
+        .unwrap();
+    let s = String::from_utf8(out.stdout).unwrap();
+    for sub in ["password", "test", "forget"] {
+        assert!(s.contains(sub), "missing {sub} in:\n{s}");
+    }
+}
+
+/// The starter config's `[email]` is commented out, so these stop before the keychain or the
+/// network: no test touches either.
+fn email_with_starter(args: &[&str], stdin: &str) -> (bool, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("digest.toml");
+    std::fs::write(&cfg, deckle_digest::config::STARTER).unwrap();
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["digest", "--config"])
+        .arg(&cfg)
+        .arg("email")
+        .args(args)
+        .write_stdin(stdin)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn digest_email_needs_the_email_table_first() {
+    let (ok, err) = email_with_starter(&["test"], "");
+    assert!(!ok);
+    assert!(
+        err.contains("[email] needs to, from, smtp_host, username"),
+        "{err}"
+    );
+    for args in [&["password", "--stdin"][..], &["forget"]] {
+        let (ok, err) = email_with_starter(args, "not-a-real-password\n");
+        assert!(!ok, "{args:?}");
+        assert!(err.contains("username and smtp_host"), "{args:?}: {err}");
+        assert!(!err.contains("not-a-real-password"), "{err}");
+    }
+}

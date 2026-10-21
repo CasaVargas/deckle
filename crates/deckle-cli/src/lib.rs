@@ -496,35 +496,53 @@ fn digest(
                 built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
-            let report = run(&built.epub, &opts);
+            // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
+            // design §7). A paper that went out by email skips the outbox unless `usb_too`.
+            let (email, to_usb) = match &folder {
+                Some(_) => (None, true),
+                None => email_paper(
+                    &cfg.email,
+                    date,
+                    &built.epub,
+                    &deckle_digest::secret::SystemKeyring,
+                    &|k| std::env::var(k).ok(),
+                    |pw| deckle_digest::mail::SmtpMailer::new(&cfg.email, pw),
+                ),
+            };
+            let email = EmailRun {
+                email: email.unwrap_or_default(),
+            };
+            // Converted only when it goes by USB.
+            let report = to_usb.then(|| run(&built.epub, &opts));
+            let kfx = report.as_ref().and_then(|r| {
+                r.error
+                    .is_none()
+                    .then_some(r.delivered.as_deref())
+                    .flatten()
+            });
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             let mut outcome = DigestOutcome::default();
             let reading_outcomes = built.reading_outcomes.clone();
-            if let (None, Some(kfx)) = (&report.error, &report.delivered) {
+            if kfx.is_some() || !to_usb {
                 let name = deckle_digest::edition_filename(date);
                 match &folder {
                     Some(target) => {
                         let one = deckle_core::queue::Queue::new(work.join("to-folder"));
                         let _ = std::fs::remove_dir_all(&one.dir);
-                        one.add(kfx, &name, None).map_err(|e| e.to_string())?;
-                        for (n, p, fallback) in &long_reads {
-                            one.add_prepared_with(p, fallback, n, None)
-                                .map_err(|e| e.to_string())?;
-                        }
+                        queue_edition(&one, kfx, &name, None, &long_reads)?;
                         outcome.flush = Some(
                             one.flush(target, Some(&digest_prune(&cfg)))
                                 .map_err(|e| e.to_string())?,
                         );
                     }
                     None => {
-                        queue
-                            .add(kfx, &name, Some(deckle_digest::EDITION_PREFIX))
-                            .map_err(|e| e.to_string())?;
-                        for (n, p, fallback) in &long_reads {
-                            queue
-                                .add_prepared_with(p, fallback, n, None)
-                                .map_err(|e| e.to_string())?;
-                        }
+                        queue_edition(
+                            &queue,
+                            kfx,
+                            &name,
+                            Some(deckle_digest::EDITION_PREFIX),
+                            &long_reads,
+                        )?;
                         outcome = push_queued(&queue, &cfg)?;
                     }
                 }
@@ -536,24 +554,30 @@ fn digest(
             #[derive(serde::Serialize)]
             struct DigestRun<'a> {
                 build: &'a deckle_digest::BuildReport,
-                run: &'a deckle_core::pipeline::RunReport,
+                /// `null` when the paper went by email only.
+                run: Option<&'a deckle_core::pipeline::RunReport>,
                 outcome: &'a DigestOutcome,
+                #[serde(flatten)]
+                email: &'a EmailRun,
             }
             let all = DigestRun {
                 build: &built,
-                run: &report,
+                run: report.as_ref(),
                 outcome: &outcome,
+                email: &email,
             };
+            let failed = report.as_ref().and_then(|r| r.error.as_ref());
             emit(json, &all, || {
-                let head = match &report.error {
+                let head = match failed {
                     Some(e) => format!("FAIL  {}\n      {e}", built.title),
                     None => format!("OK    {}", built.title),
                 };
-                let mut text = format!(
-                    "{head}\n{}\n{}",
-                    section_lines(&built),
-                    outcome.describe(&queue)
-                );
+                let mut text = format!("{head}\n{}", section_lines(&built));
+                for part in [email.lines(), outcome.describe(&queue)] {
+                    if !part.is_empty() {
+                        text.push_str(&format!("\n{part}"));
+                    }
+                }
                 for (n, _, _) in &long_reads {
                     text.push_str(&format!("\n      long read: {n}"));
                 }
@@ -562,7 +586,7 @@ fn digest(
                 }
                 text
             })?;
-            Ok(if report.error.is_some() {
+            Ok(if failed.is_some() {
                 ExitCode::from(EXIT_FAILURE)
             } else {
                 ExitCode::SUCCESS
@@ -623,6 +647,10 @@ fn digest(
                 )
             })?;
             Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Email { action } => {
+            let cfg = load_digest_config(&path)?.email;
+            digest_email(json, &cfg, action)
         }
         cli::DigestCommand::Push => {
             let cfg = load_digest_config(&path)?;
@@ -727,6 +755,141 @@ impl DigestOutcome {
             None => String::new(),
         }
     }
+}
+
+/// `digest email password|test|forget` (email design §8), on the system keychain.
+fn digest_email(
+    json: bool,
+    cfg: &deckle_digest::config::EmailConfig,
+    action: cli::EmailCommand,
+) -> Result<ExitCode, String> {
+    use deckle_digest::secret::{self, SystemKeyring};
+    use deckle_digest::zeroize::Zeroizing;
+    let account = secret::account(cfg);
+    match action {
+        cli::EmailCommand::Password { stdin } => {
+            // Nothing to file it under: say so before asking for it.
+            if cfg.username.trim().is_empty() || cfg.smtp_host.trim().is_empty() {
+                return Err(secret::SecretError::NoAccount.to_string());
+            }
+            let password = Zeroizing::new(if stdin {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .map_err(|e| format!("stdin: {e}"))?;
+                let pw = line.trim_end_matches(['\r', '\n']).to_owned();
+                deckle_digest::zeroize::Zeroize::zeroize(&mut line);
+                pw
+            } else {
+                rpassword::prompt_password(format!("SMTP password for {account}: "))
+                    .map_err(|e| format!("couldn't read the password: {e}"))?
+            });
+            secret::set(cfg, &SystemKeyring, &password).map_err(|e| e.to_string())?;
+            emit(json, &account, || {
+                format!(
+                    "saved in the system keychain ({}, {account})",
+                    secret::SERVICE
+                )
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::EmailCommand::Forget => {
+            let had = secret::forget(cfg, &SystemKeyring).map_err(|e| e.to_string())?;
+            emit(json, &had, || {
+                if had {
+                    format!("removed the keychain entry for {account}")
+                } else {
+                    format!("no keychain entry for {account}")
+                }
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::EmailCommand::Test => {
+            let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+            let src = deckle_digest::mail::send_test(
+                cfg,
+                dir.path(),
+                deckle_digest::chrono::Local::now().date_naive(),
+                &SystemKeyring,
+                &|k| std::env::var(k).ok(),
+                |pw| deckle_digest::mail::SmtpMailer::new(cfg, pw),
+            )
+            .map_err(|e| e.to_string())?;
+            let to = cfg.to.trim();
+            emit(json, &to, || {
+                format!(
+                    "sent a test to {to}{}. If it doesn't reach the Kindle in a few minutes, \
+                     check that {} is on Amazon's Approved Personal Document E-mail List.",
+                    match src {
+                        secret::Source::Env => format!(" (password from {})", secret::ENV),
+                        secret::Source::Keychain => String::new(),
+                    },
+                    cfg.from.trim()
+                )
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+/// What the run says about the email: nothing when `[email]` is off.
+#[derive(Debug, Default, serde::Serialize)]
+struct EmailRun {
+    #[serde(flatten)]
+    email: deckle_digest::mail::EmailReport,
+}
+
+impl EmailRun {
+    fn lines(&self) -> String {
+        let e = &self.email;
+        match (&e.emailed, &e.email_error) {
+            (Some(to), _) => format!(
+                "      emailed to {to}{}",
+                match e.password_from {
+                    Some(deckle_digest::secret::Source::Env) => {
+                        format!(" (password from {})", deckle_digest::secret::ENV)
+                    }
+                    _ => String::new(),
+                }
+            ),
+            (None, Some(why)) => format!("      email failed: {why}; queued for USB instead"),
+            (None, None) => String::new(),
+        }
+    }
+}
+
+/// Emails the paper when `[email]` is on (email design §7), and says whether it still goes to
+/// USB: after a failure always, after a success only with `usb_too`.
+fn email_paper<M: deckle_digest::mail::Mailer>(
+    cfg: &deckle_digest::config::EmailConfig,
+    date: deckle_digest::chrono::NaiveDate,
+    epub: &Path,
+    keys: &dyn deckle_digest::secret::Keyring,
+    env: &dyn Fn(&str) -> Option<String>,
+    connect: impl FnOnce(deckle_digest::zeroize::Zeroizing<String>) -> M,
+) -> (Option<deckle_digest::mail::EmailReport>, bool) {
+    let report = deckle_digest::mail::email_edition(cfg, date, epub, keys, env, connect);
+    let to_usb = report.as_ref().is_none_or(|r| r.to_usb(cfg));
+    (report, to_usb)
+}
+
+/// Puts the paper's KFX (`None`: it went by email) and the long reads in `queue`.
+fn queue_edition(
+    queue: &deckle_core::queue::Queue,
+    paper: Option<&Path>,
+    name: &str,
+    replaces: Option<&str>,
+    long_reads: &[LongRead],
+) -> Result<(), String> {
+    if let Some(kfx) = paper {
+        queue.add(kfx, name, replaces).map_err(|e| e.to_string())?;
+    }
+    for (n, p, fallback) in long_reads {
+        queue
+            .add_prepared_with(p, fallback, n, None)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 /// The paper's build: into `converted`, always PDOC, because the cover is the front page and
@@ -1047,5 +1210,207 @@ mod tests {
             std::fs::read(entry.join("fallback.kfx")).unwrap(),
             *fallback
         );
+    }
+}
+
+/// `digest run` with Send-to-Kindle email (email design §7), on fakes: no keychain, no SMTP.
+#[cfg(test)]
+mod email_tests {
+    use super::*;
+    use deckle_digest::config::EmailConfig;
+    use deckle_digest::mail::{MAX_BYTES, MailError, Mailer, Outgoing};
+    use deckle_digest::secret::{Keyring, MemoryKeyring};
+    use std::cell::RefCell;
+
+    const PW: &str = "hunter2-Secret!";
+
+    #[derive(Default)]
+    struct Recording {
+        sent: RefCell<Vec<Outgoing>>,
+        fail: Option<MailError>,
+    }
+
+    impl Mailer for &Recording {
+        fn send(&self, msg: &Outgoing) -> Result<(), MailError> {
+            self.sent.borrow_mut().push(msg.clone());
+            self.fail.clone().map_or(Ok(()), Err)
+        }
+    }
+
+    fn cfg(usb_too: bool) -> EmailConfig {
+        EmailConfig {
+            enabled: true,
+            to: "me_1@kindle.com".into(),
+            from: "me@example.com".into(),
+            smtp_host: "smtp.example.com".into(),
+            smtp_port: 465,
+            username: "me@example.com".into(),
+            usb_too,
+        }
+    }
+
+    fn keys() -> MemoryKeyring {
+        let k = MemoryKeyring::default();
+        k.set(&deckle_digest::secret::account(&cfg(false)), PW)
+            .unwrap();
+        k
+    }
+
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    fn date() -> deckle_digest::chrono::NaiveDate {
+        deckle_digest::chrono::NaiveDate::from_ymd_opt(2026, 10, 21).unwrap()
+    }
+
+    /// A built paper, its KFX and an empty outbox.
+    struct Run {
+        _tmp: tempfile::TempDir,
+        epub: PathBuf,
+        kfx: PathBuf,
+        queue: deckle_core::queue::Queue,
+    }
+
+    fn built() -> Run {
+        let tmp = tempfile::tempdir().unwrap();
+        let epub = tmp.path().join("deckle-daily-2026-10-21.epub");
+        std::fs::write(&epub, b"PK paper").unwrap();
+        let kfx = tmp.path().join("paper.kfx");
+        std::fs::write(&kfx, b"CONT paper").unwrap();
+        let queue = deckle_core::queue::Queue::new(tmp.path().join("outbox"));
+        Run {
+            _tmp: tmp,
+            epub,
+            kfx,
+            queue,
+        }
+    }
+
+    /// The run's delivery step: email, then the outbox for what still goes by USB.
+    fn deliver(run: &Run, cfg: &EmailConfig, keys: &dyn Keyring, rec: &Recording) -> EmailRun {
+        let (email, to_usb) = email_paper(cfg, date(), &run.epub, keys, &no_env, |_| rec);
+        queue_edition(
+            &run.queue,
+            to_usb.then_some(run.kfx.as_path()),
+            &deckle_digest::edition_filename(date()),
+            Some(deckle_digest::EDITION_PREFIX),
+            &[],
+        )
+        .unwrap();
+        EmailRun {
+            email: email.unwrap_or_default(),
+        }
+    }
+
+    #[test]
+    fn an_emailed_paper_skips_the_outbox_unless_usb_too() {
+        for usb_too in [false, true] {
+            let run = built();
+            let rec = Recording::default();
+            let r = deliver(&run, &cfg(usb_too), &keys(), &rec);
+            assert_eq!(r.email.emailed.as_deref(), Some("me_1@kindle.com"));
+            assert_eq!(r.email.email_error, None);
+            let sent = rec.sent.borrow();
+            assert_eq!(sent.len(), 1);
+            assert_eq!(sent[0].attachment.0, "deckle-daily-2026-10-21.epub");
+            assert_eq!(sent[0].attachment.1, b"PK paper");
+            assert_eq!(
+                sent[0].subject,
+                "Deckle Daily — Wednesday, October 21, 2026"
+            );
+            assert_eq!(
+                run.queue.pending().len(),
+                usize::from(usb_too),
+                "usb_too = {usb_too}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_failed_email_queues_the_edition_and_says_why() {
+        let with_pw = keys();
+        let without = MemoryKeyring::default();
+        let cases: [(&str, Option<MailError>, bool, &dyn Keyring); 4] = [
+            (
+                "refused the login",
+                Some(MailError::Auth("535 5.7.8 not accepted".into())),
+                false,
+                &with_pw,
+            ),
+            (
+                "couldn't reach",
+                Some(MailError::Network("connection refused".into())),
+                false,
+                &with_pw,
+            ),
+            ("45 MB", None, true, &with_pw),
+            ("deckle digest email password", None, false, &without),
+        ];
+        for (why, fail, too_big, keys) in cases {
+            let run = built();
+            if too_big {
+                std::fs::File::options()
+                    .write(true)
+                    .open(&run.epub)
+                    .unwrap()
+                    .set_len(MAX_BYTES + 1)
+                    .unwrap();
+            }
+            let rec = Recording {
+                fail,
+                ..Default::default()
+            };
+            let r = deliver(&run, &cfg(false), keys, &rec);
+            assert_eq!(r.email.emailed, None, "{why}");
+            let e = r.email.email_error.as_deref().unwrap_or_default();
+            assert!(e.contains(why), "{why:?} not in {e:?}");
+            assert_eq!(run.queue.pending().len(), 1, "{why}: queued for USB");
+            let lines = r.lines();
+            assert!(lines.contains("queued for USB"), "{lines}");
+        }
+    }
+
+    #[test]
+    fn email_off_queues_as_before() {
+        let run = built();
+        let rec = Recording::default();
+        let off = EmailConfig {
+            enabled: false,
+            ..cfg(false)
+        };
+        let r = deliver(&run, &off, &keys(), &rec);
+        assert_eq!(r.email, Default::default());
+        assert!(rec.sent.borrow().is_empty());
+        assert_eq!(run.queue.pending().len(), 1);
+        assert_eq!(r.lines(), "");
+        assert_eq!(serde_json::to_string(&r).unwrap(), "{}");
+    }
+
+    #[test]
+    fn the_run_report_never_shows_the_password() {
+        let mut shown = Vec::new();
+        for fail in [None, Some(MailError::Auth("535 no".into()))] {
+            let run = built();
+            let rec = Recording {
+                fail,
+                ..Default::default()
+            };
+            let r = deliver(&run, &cfg(false), &keys(), &rec);
+            shown.push(format!(
+                "{}\n{}\n{:?}",
+                r.lines(),
+                serde_json::to_string(&r).unwrap(),
+                r.email
+            ));
+        }
+        assert!(
+            shown[0].contains("emailed to me_1@kindle.com"),
+            "{}",
+            shown[0]
+        );
+        for s in shown {
+            assert!(!s.contains(PW), "{s}");
+        }
     }
 }

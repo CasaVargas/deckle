@@ -31,6 +31,7 @@ use serde::Serialize;
 pub use chrono;
 pub use config::{Config, SectionKind};
 pub use fetch::{Http, Net};
+pub use zeroize;
 
 /// The author stamped on every edition.
 pub const AUTHOR: &str = "Deckle";
