@@ -52,7 +52,7 @@ pub fn http_get(url: &str) -> Result<String, String> {
     let mut resp = ureq::get(url)
         .header(
             "user-agent",
-            "Deckle/0.1 (https://github.com/prjoni99/deckle)",
+            "Deckle/0.1 (https://github.com/CasaVargas/deckle)",
         )
         .config()
         .timeout_global(Some(std::time::Duration::from_secs(20)))

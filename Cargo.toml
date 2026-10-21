@@ -6,7 +6,7 @@ members = ["crates/*", "data/wordwise", "apps/desktop/src-tauri"]
 version = "0.2.1"
 edition = "2024"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/prjoni99/deckle"
+repository = "https://github.com/CasaVargas/deckle"
 rust-version = "1.85"
 
 [workspace.dependencies]

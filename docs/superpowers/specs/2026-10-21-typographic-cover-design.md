@@ -1,6 +1,6 @@
 # Typographic cover generator — design
 
-**Status:** approved by owner (2026-10-21) for [#27](https://github.com/prjoni99/deckle/issues/27) ("Automatic typographic cover generator") ·
+**Status:** approved by owner (2026-10-21) for [#27](https://github.com/CasaVargas/deckle/issues/27) ("Automatic typographic cover generator") ·
 **Date:** 2026-10-21 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-18-deckle-design.md` (§1 goal 1, §5 the cover rule) ·
 `2026-10-21-docx-import-design.md` (DOCX has no cover)

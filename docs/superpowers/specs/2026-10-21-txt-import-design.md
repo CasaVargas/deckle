@@ -1,6 +1,6 @@
 # Plain text in — design
 
-**Status:** approved by owner (2026-10-21) for [#86](https://github.com/prjoni99/deckle/issues/86), the first slice of [#24](https://github.com/prjoni99/deckle/issues/24) ("More source formats").
+**Status:** approved by owner (2026-10-21) for [#86](https://github.com/CasaVargas/deckle/issues/86), the first slice of [#24](https://github.com/CasaVargas/deckle/issues/24) ("More source formats").
 FB2, ODT, RTF and MOBI/AZW3 get their own issues later ·
 **Date:** 2026-10-21 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-21-docx-import-design.md` (the `import` stage)
