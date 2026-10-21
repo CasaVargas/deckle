@@ -1,11 +1,30 @@
 # Changelog
 
-## 0.2.1 — signed Windows installers (pre-alpha)
+## 0.2.1 — library, more inputs, the Deckle Daily (pre-alpha)
 
 0.2.0 was built but never published; everything listed under it ships in this release.
 
 - Windows installers are code-signed by Casa Vargas LLC with Azure Artifact Signing (the same
   account and profile as Beltr and DebridDownloader), checked after every release build.
+- More inputs: Word documents (`.docx`: headings become the contents, footnotes pop-up notes),
+  plain text (`.txt`), and web articles (an address, a `.webloc`/`.url` link or a saved `.html`
+  page) become their own books. A finished `.kfx` is sent as is.
+- Library: a plain folder, one `Author/Title/` per book with a `deckle.json` sidecar.
+  `deckle library init|add|list|scan|series|reprocess`; `run` adds what it sends. Series are
+  grouped, in reading order, with gaps shown.
+- Kindle tab (and `deckle kindle books|remove`): what's on the Kindle, matched to the library,
+  with free space. It says which books Deckle could now build better; **Update all** re-sends
+  them. Sending a book again replaces Deckle's older copy.
+- Opt-in cleanups: fill missing metadata from Open Library, tidy typography, turn footnotes into
+  Kindle pop-up notes.
+- Compatibility warnings: Deckle reads the Kindle's firmware (also over MTP) and warns on known
+  issues.
+- The Deckle Daily (preview): a morning paper built locally from weather, local news and your
+  feeds, with full article text and photos, a front-page cover, Your Reading (`deckle save`, an
+  Inbox folder, a bookmarklet), a schedule, delivery whenever a Kindle connects, and optional
+  Send-to-Kindle email through your own SMTP account (password in the OS keychain). The Daily
+  tab in the app sets it all up.
+- TLS is verified against the OS certificate store.
 
 ## 0.2.0 — real Kindles: Scribe 2024 over MTP, Paperwhite (pre-alpha)
 
