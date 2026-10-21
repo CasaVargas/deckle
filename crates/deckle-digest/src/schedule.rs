@@ -421,7 +421,8 @@ mod tests {
         ] {
             assert!(digest.contains(&format!("<string>{arg}</string>")), "{arg}");
         }
-        assert!(digest.contains("<string>/L/digest.log</string>"));
+        let log = Path::new("/L").join("digest.log");
+        assert!(digest.contains(&format!("<string>{}</string>", log.display())));
         assert!(watch.contains("<key>KeepAlive</key><true/>"));
         assert!(
             watch.contains("<string>watch</string>") && !watch.contains("<string>run</string>")
