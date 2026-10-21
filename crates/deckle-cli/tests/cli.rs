@@ -104,6 +104,34 @@ fn run_with_fake_previewer_from_the_cli() {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn run_takes_a_word_document() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let docx = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/docx/deckle-mini.docx");
+    let out = tempfile::tempdir().unwrap();
+    let res = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["--json", "run"])
+        .arg(&docx)
+        .args(["--to"])
+        .arg(out.path())
+        .args(["--previewer"])
+        .arg(&fake)
+        .output()
+        .unwrap();
+    assert!(
+        res.status.success(),
+        "{}",
+        String::from_utf8_lossy(&res.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&res.stdout).unwrap();
+    assert_eq!(v[0]["info"]["title"], "Deckle Mini Document");
+    assert!(v[0]["delivered"].as_str().unwrap().ends_with(".kfx"));
+}
+
+#[test]
 fn run_checks_previewer_before_creating_the_output_folder() {
     let tmp = tempfile::tempdir().unwrap();
     let target = tmp.path().join("new-folder");

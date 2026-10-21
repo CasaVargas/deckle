@@ -124,6 +124,86 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
     assert!(report.delivered.is_none());
 }
 
+#[cfg(unix)]
+fn docx_fixture() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/docx/deckle-mini.docx")
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_word_document_runs_through_the_whole_pipeline() {
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: true,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+    };
+    let report = run(&docx_fixture(), &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    assert_eq!(report.input, docx_fixture());
+    // Metadata comes from the document, through the imported EPUB.
+    assert_eq!(report.info.title, "Deckle Mini Document");
+    assert_eq!(report.info.creators[0].name, "Jane Testwright");
+    assert_eq!(report.info.toc.len(), 4);
+    let delivered = report.delivered.clone().expect("delivered");
+    // (the fake Previewer always returns the mini fixture's KPF, so the name is not checked)
+    assert_eq!(delivered.parent(), Some(out.path()));
+    assert!(std::fs::read(&delivered).unwrap().starts_with(b"CONT"));
+    for stage in [
+        "import",
+        "inspect",
+        "normalize",
+        "convert",
+        "repackage",
+        "deliver",
+    ] {
+        assert!(report.stage_ms.contains_key(stage), "missing {stage}");
+    }
+    let work = report.work_dir.clone().expect("kept work dir");
+    assert!(work.join("imported.epub").is_file());
+    std::fs::remove_dir_all(work).ok();
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_broken_word_document_fails_at_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = dir.path().join("notes.docx");
+    std::fs::write(&bad, b"not really a document").unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(dir.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+    };
+    let report = run(&bad, &opts);
+    let err = report.error.expect("error");
+    assert_eq!(
+        err,
+        "import: not a Word document: the file is not a zip archive"
+    );
+    assert!(!report.stage_ms.contains_key("inspect"));
+}
+
 #[test]
 fn size_warning_text() {
     let mut r = RunReport::default();
