@@ -598,6 +598,75 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
     assert!(r.xray.is_none());
 }
 
+/// Enrichment is source-agnostic (spec 2026-10-21-source-agnostic-enrichment): a Word document
+/// built as EBOK gets X-Ray and Word Wise exactly like an EPUB, because `enrich` reads the KFX.
+#[test]
+#[cfg(unix)]
+fn a_word_document_built_as_ebok_ships_xray_and_word_wise_sidecars() {
+    use deckle_core::pipeline::run_with_progress;
+    use deckle_core::wordwise::WordWiseOptions;
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tmp.path().join("ww.sqlite");
+    let conn = deckle_wordwise::lexicon::create(&db, "test").unwrap();
+    conn.execute_batch(
+        "INSERT INTO senses VALUES (1, 'universally', 'adverb', 'everywhere', 'everywhere', NULL, 4);
+         INSERT INTO forms VALUES ('universally', 1);",
+    )
+    .unwrap();
+    drop(conn);
+    let out = tmp.path().join("out");
+    let opts = RunOptions {
+        cde_type: CdeType::Ebok,
+        cde_override: Some(CdeType::Ebok),
+        asin: Some("B0DOCXTEST".into()),
+        pages: None,
+        target: Target::Folder(out.clone()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        amazon_match: false,
+        verified_real_asin: false,
+        xray: XRayMode::Auto,
+        llm: None,
+        wikipedia: false,
+        word_wise: Some(WordWiseOptions {
+            level: 5,
+            database: Some(db),
+            cache_dir: tmp.path().join("cache"),
+        }),
+        replaces: Vec::new(),
+    };
+    let mut seen: Vec<&'static str> = Vec::new();
+    let r = run_with_progress(&docx_fixture(), &opts, &mut |s| seen.push(s));
+    assert_eq!(r.error, None, "{r:?}");
+    assert_eq!(
+        seen,
+        [
+            "import",
+            "inspect",
+            "normalize",
+            "convert",
+            "repackage",
+            "enrich",
+            "deliver"
+        ]
+    );
+    // metadata is the document's, through the imported EPUB
+    assert_eq!(r.info.title, "Deckle Mini Document");
+    assert_eq!(r.decision.as_ref().unwrap().cde, CdeType::Ebok);
+    // (the fake Previewer always returns the mini fixture's KPF: three recurring names)
+    let x = r.xray.as_ref().expect("xray summary");
+    assert_eq!((x.people, x.source.as_str()), (3, "basic"));
+    let ww = r.word_wise.as_ref().expect("word wise summary");
+    assert_eq!(ww.dictionary, "deckle");
+    assert!(ww.hints >= 1, "{ww:?}");
+    let sdr = r.delivered.clone().unwrap().with_extension("sdr");
+    let asc = sdr.join("XRAY.entities.B0DOCXTEST.asc");
+    assert!(asc.exists(), "{asc:?}");
+    let kll = sdr.join("LanguageLayer.en.B0DOCXTEST.kll");
+    assert!(kll.exists(), "{kll:?}");
+    assert!(out.join("system/kll/kll.en.zh.klld").exists());
+}
+
 /// `kfx` with its container id and `kfxgen_payload_sha1` value zeroed.
 #[cfg(unix)]
 fn without_container_id(mut kfx: Vec<u8>) -> Vec<u8> {

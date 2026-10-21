@@ -5,6 +5,10 @@ the `enrich` stage. Authority: WordDumb and Proficiency (both GPL-3, by xxyzz), 
 device-accepted Word Wise files for years. Confidence tags: **device** / **reference** /
 **inferred**. Nothing here is **device** yet: see the runbook in `docs/devices.md`.
 
+Any source gets Word Wise, not just EPUB: Word documents, web articles and long reads are turned
+into an EPUB before the shared stages, and `enrich` reads the text from the KFX (see
+`docs/superpowers/specs/2026-10-21-source-agnostic-enrichment-design.md`; PDF is #18, Markdown #23).
+
 ## The sidecar (reference)
 
 `documents/<book>.sdr/LanguageLayer.en.<ASIN>.kll`, SQLite, next to the X-Ray sidecar. The book
