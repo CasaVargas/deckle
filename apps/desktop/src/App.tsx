@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: Settings = {
   word_wise_level: 5,
   wikipedia: false,
   amazon_match: false,
+  generated_cover: true,
   metadata_fill: false,
   typography: false,
 };

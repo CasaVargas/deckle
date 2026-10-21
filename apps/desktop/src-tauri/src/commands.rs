@@ -57,6 +57,8 @@ pub struct Settings {
     pub word_wise_level: u8,
     pub wikipedia: bool,
     pub amazon_match: bool,
+    /// A typographic cover for a book that has none (issue #27).
+    pub generated_cover: bool,
     /// Fill empty title, author, series, description and subjects from Open Library (network).
     pub metadata_fill: bool,
     /// Curly quotes, dashes, ellipses and empty-paragraph cleanup (issue #30).
@@ -78,6 +80,7 @@ impl Default for Settings {
             word_wise_level: 5,
             wikipedia: false,
             amazon_match: false,
+            generated_cover: true,
             metadata_fill: false,
             typography: false,
         }
@@ -694,6 +697,7 @@ pub fn run_books_with(
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
             cde_override: override_str.map(cde_from),
             amazon_match: settings.amazon_match,
+            generated_cover: settings.generated_cover.then_some(None),
             metadata_fill: settings.metadata_fill,
             typography: settings.typography,
             verified_real_asin: verified,
@@ -1199,11 +1203,13 @@ mod tests {
             "the Open Library metadata fill is off by default"
         );
         assert!(!s.amazon_match);
+        assert!(s.generated_cover, "a coverless book gets a cover by default");
         assert!(!s.typography, "the typography pass is off by default");
         let mut changed = s.clone();
         changed.cde = "ebok".into();
         changed.metadata_fill = true;
         changed.typography = true;
+        changed.generated_cover = false;
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
         assert_eq!(load_settings_from(&file), changed);

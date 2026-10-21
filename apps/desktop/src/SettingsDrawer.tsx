@@ -212,7 +212,12 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
       </section>
 
       <section>
-        <h3>Covers on MTP Kindles</h3>
+        <h3>Covers</h3>
+        <label className="field check">
+          <input type="checkbox" checked={settings.generated_cover} onChange={(e) => set("generated_cover", e.target.checked)} />
+          <span>Make a cover when a book has none</span>
+        </label>
+        <p className="hint">The title and author, set in one of three plain styles. A book's own cover is never replaced.</p>
         <label className="field check">
           <input type="checkbox" checked={settings.amazon_match} onChange={(e) => set("amazon_match", e.target.checked)} />
           <span>Match books to an Amazon edition (Open Library lookup, network) so EBOK can keep the store cover</span>
