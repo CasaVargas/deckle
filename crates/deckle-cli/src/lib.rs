@@ -238,24 +238,26 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .iter()
                     .map(|d| {
                         format!(
-                            "{}  {}  mass storage, thumbnails:{}",
+                            "{}  {}  mass storage, thumbnails:{}  sync id \"{}\"",
                             d.root.display(),
                             d.model_hint,
                             if d.thumbnails_writable {
                                 "writable"
                             } else {
                                 "no"
-                            }
+                            },
+                            deckle_core::sync::device_id(&Target::MassStorage(d.clone()))
                         )
                     })
                     .collect();
                 lines.extend(mtp.iter().map(|m| {
                     format!(
-                        "usb {}:{}  {}  MTP (serial {})",
+                        "usb {}:{}  {}  MTP (serial {})  sync id \"{}\"",
                         m.bus,
                         m.address,
                         m.product.clone().unwrap_or_else(|| "Kindle".into()),
-                        m.serial.clone().unwrap_or_default()
+                        m.serial.clone().unwrap_or_default(),
+                        deckle_core::sync::device_id(&Target::Mtp(m.clone()))
                     )
                 }));
                 if lines.is_empty() {
@@ -705,21 +707,27 @@ fn digest(
                 Ok(None) => {}
                 Err(e) => eprintln!("bookmarklet: no token: {e}"),
             }
-            // Try once per connection: a failed delivery waits for the Kindle to be
-            // reconnected (or for a new edition) instead of retrying every tick.
-            let mut tried: Option<Vec<PathBuf>> = None;
+            if cfg.sync.any_clippings() {
+                eprintln!("sync: clippings isn't built yet (#60); ignoring `clippings = true`");
+            }
+            // Each device's [sync] actions run once per connection: a failed delivery waits
+            // for the Kindle to be reconnected (or for a new edition) instead of retrying
+            // every tick.
+            let mut watcher = deckle_core::sync::Watcher::default();
             loop {
                 scan_inbox(&cfg);
                 let pending = queue.pending();
-                match detect_kindle() {
-                    None => tried = None,
-                    Some(_) if pending.is_empty() || tried.as_ref() == Some(&pending) => {}
-                    Some(_) => {
-                        tried = Some(pending);
-                        match push_queued(&queue, &cfg) {
-                            Ok(o) => emit(json, &o, || o.describe(&queue))?,
-                            Err(e) => eprintln!("error: {e}"),
-                        }
+                let kindle = detect_kindle();
+                let id = kindle.as_ref().map(deckle_core::sync::device_id);
+                let actions = id
+                    .as_deref()
+                    .map(|id| sync_actions(&cfg, id))
+                    .unwrap_or_default();
+                let plan = watcher.tick(id.as_deref(), &pending, actions);
+                if let (Some(target), false) = (&kindle, plan.is_empty()) {
+                    match sync_to(&queue, &cfg, target, plan) {
+                        Ok(o) => emit(json, &o, || o.describe(&queue))?,
+                        Err(e) => eprintln!("error: {e}"),
                     }
                 }
                 std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
@@ -739,7 +747,9 @@ struct DigestOutcome {
 impl DigestOutcome {
     fn describe(&self, queue: &deckle_core::queue::Queue) -> String {
         match &self.flush {
-            Some(f) if f.delivered.is_empty() => "      nothing queued".to_owned(),
+            Some(f) if f.delivered.is_empty() && f.pruned.is_empty() => {
+                "      nothing queued".to_owned()
+            }
             Some(f) => {
                 let mut lines: Vec<String> = f
                     .delivered
@@ -790,8 +800,32 @@ fn push_queued(
             queued: true,
         });
     };
-    let flush = queue
-        .flush(&target, Some(&digest_prune(cfg)))
+    // An explicit push always pushes; the device's `prune` still counts.
+    let plan = deckle_core::sync::Plan {
+        push: true,
+        prune: sync_actions(cfg, &deckle_core::sync::device_id(&target)).prune,
+    };
+    sync_to(queue, cfg, &target, plan)
+}
+
+/// The device's `[sync]` actions (auto-sync design §3).
+fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Actions {
+    let a = cfg.sync.for_device(id);
+    deckle_core::sync::Actions {
+        push: a.push,
+        prune: a.prune,
+    }
+}
+
+/// Runs `plan` on `target` over one connection.
+fn sync_to(
+    queue: &deckle_core::queue::Queue,
+    cfg: &deckle_digest::Config,
+    target: &Target,
+    plan: deckle_core::sync::Plan,
+) -> Result<DigestOutcome, String> {
+    let mut conn = deckle_core::deliver::Conn::new(target);
+    let flush = deckle_core::sync::run(queue, &mut conn, plan, &digest_prune(cfg))
         .map_err(|e| e.to_string())?;
     Ok(DigestOutcome {
         flush: Some(flush),

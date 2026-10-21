@@ -437,7 +437,10 @@ mod tests {
             clippings: false,
         };
         assert_eq!(c.sync.for_device("G000"), want);
-        assert_eq!(Config::parse(STARTER).unwrap().sync.for_device("G000"), want);
+        assert_eq!(
+            Config::parse(STARTER).unwrap().sync.for_device("G000"),
+            want
+        );
     }
 
     #[test]
@@ -453,7 +456,10 @@ mod tests {
             clippings,
         };
         assert_eq!(c.sync.for_device("G000"), actions(false, true, false));
-        assert_eq!(c.sync.for_device("Kindle/Kindle"), actions(true, false, true));
+        assert_eq!(
+            c.sync.for_device("Kindle/Kindle"),
+            actions(true, false, true)
+        );
         assert_eq!(c.sync.for_device("other"), actions(true, false, false));
         assert!(c.sync.any_clippings());
     }
