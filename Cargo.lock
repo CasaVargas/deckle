@@ -952,6 +952,7 @@ dependencies = [
  "deckle-core",
  "deckle-digest",
  "deckle-kfx",
+ "deckle-library",
  "deckle-transport",
  "deckle-xray",
  "predicates",
