@@ -6,6 +6,13 @@ Kindle over USB: Enhanced Typesetting, a cover that shows, real page numbers, X-
 Desktop app for macOS and Windows, plus a CLI. Written in Rust (Tauri for the UI). GPL-3.0. No
 account, no subscription, no telemetry.
 
+It also prints you a morning paper. The Deckle Daily (preview) builds an edition on your machine
+from your town's weather and news, your RSS feeds and the articles you saved, with a generated
+front page as its cover, and delivers it when the Kindle connects. Details in
+[docs/daily.md](docs/daily.md).
+
+<img src="docs/screenshots/daily-front.jpg" width="320" alt="The front page of a Deckle Daily demo edition: a blackletter masthead, the date, the weather and the lead headlines (fictional town and stories)">
+
 ![A book sent with X-Ray and Word Wise](docs/screenshots/gui-wordwise-done.png)
 
 ## Why
