@@ -49,7 +49,7 @@ What makes it unique, not just "RSS to EPUB":
    non-goal "USB/MTP only" for the digest only, as an explicit, labelled option, because it
    sends the edition through Amazon.
 4. ~~Full-text articles and images~~ — in progress (#51), see §5a.
-5. Desktop app: a Daily tab to edit sections, preview the front page, and build now.
+5. ~~Desktop app: a Daily tab~~ — #52, see §5c.
 6. Optional LLM editor (existing provider settings): dedupe stories across feeds, a three-line
    brief per section, an LLM-written horoscope.
 7. Extras: Sudoku/word puzzles with answers in the next edition, word of the day from the
@@ -224,6 +224,47 @@ browser. Every story carries its full text and photos inside the edition.
 - **Code:** `deckle_digest::schedule`, with pure generators (plist XML, `schtasks`
   arguments) under unit tests, plus `install`, `remove` and `status`, which call
   `launchctl` and `schtasks`.
+
+## 5c. The Daily tab in the app (#52)
+
+Everything the CLI does, without the CLI. The window gets a **Books | Daily** switch in the
+top bar; Books is today's view, unchanged.
+
+- **One binary.** `deckle-cli` becomes a library plus a thin `deckle` binary. `deckle-desktop`
+  starts with the same code when its first argument is `digest` or `save`, and exits
+  without opening a window. The schedule (§5b) therefore runs the app itself
+  (`/Applications/Deckle.app/Contents/MacOS/deckle-desktop digest run --to device`), and
+  nothing new needs signing.
+- **The Daily screen**, four cards top to bottom:
+  1. **Today's paper.** The newest edition's cover (from the build cache), its date, the
+     number of editions waiting in the outbox, and two buttons:
+     - **Preview** runs `digest build` without using up saved articles;
+     - **Send now** runs `digest run --to device`, which queues when no Kindle is in.
+
+     Both run as a child process of the app with `--json`, so the window never blocks. The
+     card then shows the result's section counts and notes.
+  2. **Your Reading.**
+     - A "Save a link" field.
+     - The queue: pending first, then the last 7 days, with state and a remove button.
+     - The Inbox folder, with a Change… picker and Reveal.
+     - **Copy bookmarklet**, with one line on how to add it. A webview can't drag a link
+       into a browser's bookmarks bar.
+  3. **Every morning.** A switch and a time. On: `schedule::install` with the app's own
+     binary. Off: `schedule::remove`. Shows what is installed.
+  4. **The paper.** The settings in `digest.toml`:
+     - **Name**, **place** and units. Place is typed and found with Open-Meteo geocoding;
+       you choose from the matches, which fills latitude and longitude.
+     - **Sections**: checkboxes in order, with up and down arrows.
+     - **Local news**: the search query.
+     - **Feeds**: name and URL rows, add and remove.
+     - **Lottery**: games. **Horoscope**: signs.
+     - **Full text** and **photos**, and how many editions to keep.
+     - A **Save** button.
+- **Saving keeps your file yours.** The settings are written into the existing
+  `digest.toml` with `toml_edit`. Comments and key order survive, keys you didn't change
+  stay byte for byte, and a missing file is created from the starter.
+- **First run.** With no `digest.toml`, the Daily screen shows one "Set up your paper"
+  button. It writes the starter and asks for the place.
 
 ## 6. Code layout
 
