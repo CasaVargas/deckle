@@ -132,8 +132,9 @@ never written by two processes at once (an exclusive lock file beside it).
     converted and queued in the outbox; with `run --to <folder>` they're delivered there;
     with `build` they're written as EPUBs next to the paper.
   - **How they're converted.** They go through the normal book pipeline with the cover rule,
-    like any book Deckle sends. On a Kindle that allows it they ship as EBOK with Word
-    Wise; unlike the paper, they are not forced to PDOC.
+    like any book Deckle sends, decided at push for the Kindle that takes them (#72). On a
+    Kindle that allows it they ship as EBOK with X-Ray and Word Wise; unlike the paper, they
+    are not forced to PDOC.
   - **File name.** `deckle-reads-YYYY-MM-DD-<slug>.kfx`. The `deckle-reads-` prefix keeps
     them out of the paper's replace-and-prune. Long reads are never pruned automatically:
     they are books you chose to keep.
@@ -188,9 +189,9 @@ long_read_words = 4000           # longer pieces become their own book
 - **Long reads:**
   - over 4,000 words they become separate books;
   - no length cap;
-  - converted with the normal cover rule. They are built for the outbox, where the Kindle
-    is unknown, so the rule ships PDOC with no X-Ray or Word Wise (as built: EBOK with
-    Word Wise needs a build for the device at push time, an open follow-up);
+  - converted with the normal cover rule. They are queued prepared (up to the KPF) and
+    finished at push for the Kindle that takes them, asking for X-Ray and Word Wise: EBOK
+    with both where that Kindle allows it, PDOC otherwise (device-aware build, #72);
   - named `deckle-reads-`, never pruned.
 - **When an item counts as printed:** only `digest run` uses up the queue, and a same-day
   rebuild reprints the same items. `build` is a preview.
@@ -231,9 +232,11 @@ one Inbox, and the file's extension decides what happens to it.
   only recognises book files and moves them (`Sent/`, `Unreadable/`, or left for later).
   `deckle-cli` supplies the step that converts a book and adds it to the outbox. Tests use
   a fake converter, so they don't need Previewer.
-- **Conversion options.** The cover rule decides PDOC or EBOK, as with `deckle run`. X-Ray
-  and Word Wise are off: a book built for the outbox has no known Kindle, so the cover
-  rule ships it as PDOC, which gets neither. There's no Amazon match, so the Inbox stays offline.
-- **Outbox name.** A converted book keeps the name the pipeline gives it, and a KFX keeps
-  its own file name (with the extension lower-cased, because the outbox only lists `*.kfx`).
-  A second book with the same name replaces the first while it waits.
+- **Conversion options.** The cover rule decides PDOC or EBOK, as with `deckle run`, but
+  for the Kindle that takes the book: it's queued prepared (up to the KPF) and finished at
+  push, asking for X-Ray and Word Wise at the default level (device-aware build, #72). There's
+  no Amazon match, so the Inbox and the push stay offline.
+- **Outbox name.** A converted book keeps the name the pipeline gives it
+  (`<Author> - <Title>`, queued as a `.book` folder), and a KFX keeps its own file name (with
+  the extension lower-cased). A second book with the same name replaces the first while it
+  waits.
