@@ -151,6 +151,7 @@ mod tests {
             root: PathBuf::from("/Volumes/Kindle"),
             model_hint: "Kindle Paperwhite".into(),
             thumbnails_writable: true,
+            firmware: None,
         });
         assert_eq!(device_id(&ms), "Kindle Paperwhite/Kindle");
     }

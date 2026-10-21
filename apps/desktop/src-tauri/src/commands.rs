@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use base64::Engine;
 use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, decide, manual_asin};
 use deckle_core::deliver::{Target, detect_mass_storage};
-use deckle_core::devices::{DeviceRegistry, Seen, TransportKind, seen_mass_storage};
+use deckle_core::devices::{DeviceProfile, DeviceRegistry, Seen, TransportKind, seen_mass_storage};
 use deckle_core::inspect::inspect;
 use deckle_core::pipeline::{RunOptions, XRayMode, run_with_progress};
 use deckle_core::previewer;
@@ -156,6 +156,17 @@ pub struct DeviceRow {
     pub thumbnails_writable: bool,
     pub cde_override: Option<String>,
     pub verified_real_asin: bool,
+    /// Last known firmware (MTP: recorded by the first send).
+    pub firmware: Option<String>,
+    /// Known issues for this model, transport and firmware (`compat::RULES`).
+    pub compat: Vec<String>,
+}
+
+fn compat_messages(p: &DeviceProfile) -> Vec<String> {
+    deckle_core::compat::check_profile(p)
+        .into_iter()
+        .map(|w| w.message)
+        .collect()
 }
 
 fn seen_mtp(m: &MtpInfo) -> Seen {
@@ -170,6 +181,8 @@ fn seen_mtp(m: &MtpInfo) -> Seen {
         transport: TransportKind::Mtp,
         thumbnails_writable: false,
         serial: Some(serial),
+        // Read on the send's own session, never by the device poll (see the compat spec).
+        firmware: None,
     }
 }
 
@@ -179,7 +192,10 @@ pub fn device_rows(registry_file: &Path) -> Vec<DeviceRow> {
     let mut rows = Vec::new();
     for d in detect_mass_storage() {
         let p = reg.remember(&seen_mass_storage(&d));
+        let compat = compat_messages(&p);
         rows.push(DeviceRow {
+            compat,
+            firmware: p.firmware,
             key: p.key,
             kind: TransportKind::MassStorage,
             root: Some(d.root.to_string_lossy().into_owned()),
@@ -193,7 +209,10 @@ pub fn device_rows(registry_file: &Path) -> Vec<DeviceRow> {
     }
     for m in deckle_transport::usb::detect() {
         let p = reg.remember(&seen_mtp(&m));
+        let compat = compat_messages(&p);
         rows.push(DeviceRow {
+            compat,
+            firmware: p.firmware,
             key: p.key,
             kind: TransportKind::Mtp,
             root: None,
@@ -569,10 +588,11 @@ pub fn run_books_inner(
     settings: &Settings,
     emit: &mut dyn FnMut(ProgressEvent),
 ) {
-    run_books_with(books, target, settings, None, false, emit)
+    run_books_with(books, target, settings, None, false, emit);
 }
 
-/// `device_override` / `verified` come from the target's device profile.
+/// `device_override` / `verified` come from the target's device profile. Returns the firmware
+/// a send read off the Kindle, for its profile.
 pub fn run_books_with(
     books: &[RunRequest],
     target: &RunTarget,
@@ -580,7 +600,7 @@ pub fn run_books_with(
     device_override: Option<&str>,
     verified: bool,
     emit: &mut dyn FnMut(ProgressEvent),
-) {
+) -> Option<String> {
     let target = match target {
         RunTarget::Folder { path } => Target::Folder(PathBuf::from(path)),
         RunTarget::Mtp { bus, address } => match deckle_transport::usb::detect()
@@ -606,7 +626,7 @@ pub fn run_books_with(
                         error: Some("the MTP Kindle is no longer connected".into()),
                     });
                 }
-                return;
+                return None;
             }
         },
         RunTarget::Device { root } => match detect_mass_storage()
@@ -632,10 +652,11 @@ pub fn run_books_with(
                         error: Some(format!("Kindle at {root} is no longer connected")),
                     });
                 }
-                return;
+                return None;
             }
         },
     };
+    let mut firmware = None;
     for b in books {
         if is_kfx(Path::new(&b.path)) {
             emit(ProgressEvent {
@@ -701,6 +722,9 @@ pub fn run_books_with(
                 word_wise: None,
             })
         });
+        if report.firmware.is_some() {
+            firmware = report.firmware.clone();
+        }
         emit(ProgressEvent {
             id: b.id.clone(),
             status: if report.error.is_some() {
@@ -721,6 +745,7 @@ pub fn run_books_with(
             word_wise: report.word_wise,
         });
     }
+    firmware
 }
 
 // ---- Tauri command wrappers -----------------------------------------------------------------
@@ -867,8 +892,10 @@ pub fn run_books(
         profile.as_ref().and_then(|p| p.cde_override.clone()),
         profile.as_ref().is_some_and(|p| p.verified_real_asin),
     );
+    let key = profile.map(|p| p.key);
+    let devices_file = state.devices_file.clone();
     std::thread::spawn(move || {
-        run_books_with(
+        let firmware = run_books_with(
             &books,
             &target,
             &settings,
@@ -878,6 +905,12 @@ pub fn run_books(
                 let _ = app.emit("book-progress", e);
             },
         );
+        // An MTP Kindle's firmware is only read by a send; keep it for the device card.
+        if let (Some(key), Some(fw)) = (key, firmware) {
+            let mut reg = DeviceRegistry::load(&devices_file);
+            reg.set_firmware(&key, &fw);
+            let _ = reg.save(&devices_file);
+        }
         let _ = app.emit("run-finished", ());
     });
     Ok(())
@@ -919,6 +952,25 @@ pub fn devices_file(app: &AppHandle) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_mtp_kindle_profile_carries_its_known_issues_and_a_recorded_firmware() {
+        let m = MtpInfo {
+            vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
+            product_id: 1,
+            serial: Some("G0X1".into()),
+            product: Some("Kindle Scribe".into()),
+            bus: 1,
+            address: 2,
+        };
+        let mut reg = DeviceRegistry::default();
+        let p = reg.remember(&seen_mtp(&m));
+        assert_eq!(p.firmware, None, "the device poll never reads MTP firmware");
+        assert_eq!(compat_messages(&p).len(), 3);
+        reg.set_firmware(&p.key, "5.18.1.0.1");
+        let p = reg.remember(&seen_mtp(&m));
+        assert_eq!(p.firmware.as_deref(), Some("5.18.1.0.1"));
+    }
 
     #[test]
     fn plan_rows_follow_the_cover_rule_and_overrides() {

@@ -3,7 +3,9 @@
 
 use std::any::Any;
 
-use crate::ptp::{Container, ContainerKind, ObjectInfo, PtpError, decode_u32_array, fmt, op, rsp};
+use crate::ptp::{
+    Container, ContainerKind, DeviceInfo, ObjectInfo, PtpError, decode_u32_array, fmt, op, rsp,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TransportError {
@@ -171,6 +173,14 @@ impl Mtp {
 
     pub fn close_session(&mut self) -> Result<(), MtpError> {
         self.transact(op::CLOSE_SESSION, &[], None).map(|_| ())
+    }
+
+    /// GetDeviceInfo: the model and, in `device_version`, the firmware.
+    pub fn device_info(&mut self) -> Result<DeviceInfo, MtpError> {
+        let (data, _) = self.transact(op::GET_DEVICE_INFO, &[], None)?;
+        Ok(DeviceInfo::decode(
+            &data.ok_or(MtpError::Missing("device info"))?,
+        )?)
     }
 
     pub fn storages(&mut self) -> Result<Vec<u32>, MtpError> {

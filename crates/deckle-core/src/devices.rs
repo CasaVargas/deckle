@@ -25,6 +25,8 @@ pub struct Seen {
     pub transport: TransportKind,
     pub thumbnails_writable: bool,
     pub serial: Option<String>,
+    /// Firmware version (`5.16.2.1.1`), when this sighting could read it.
+    pub firmware: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -42,6 +44,9 @@ pub struct DeviceProfile {
     pub cde_override: Option<String>,
     /// Spike 2 passed on this device: a real ASIN keeps our sidecars and shows the store cover.
     pub verified_real_asin: bool,
+    /// Last known firmware: `system/version.txt` on mass storage, PTP `DeviceVersion` on MTP
+    /// (recorded by a send, see [`DeviceRegistry::set_firmware`]).
+    pub firmware: Option<String>,
 }
 
 impl Default for DeviceProfile {
@@ -85,6 +90,7 @@ impl DeviceProfile {
             last_seen: now,
             cde_override: None,
             verified_real_asin: false,
+            firmware: None,
         }
     }
 
@@ -147,6 +153,9 @@ impl DeviceRegistry {
         p.thumbnails_writable = seen.thumbnails_writable;
         p.serial = seen.serial.clone();
         p.last_root = seen.root.clone();
+        if seen.firmware.is_some() {
+            p.firmware = seen.firmware.clone();
+        }
         p.last_seen = now;
         p.clone()
     }
@@ -158,6 +167,13 @@ impl DeviceRegistry {
     pub fn set_override(&mut self, key: &str, cde: Option<&str>) {
         if let Some(p) = self.profiles.iter_mut().find(|p| p.key == key) {
             p.cde_override = cde.map(str::to_owned);
+        }
+    }
+
+    /// Records the firmware a send read off the device (MTP sightings carry none).
+    pub fn set_firmware(&mut self, key: &str, firmware: &str) {
+        if let Some(p) = self.profiles.iter_mut().find(|p| p.key == key) {
+            p.firmware = Some(firmware.to_owned());
         }
     }
 
@@ -177,5 +193,6 @@ pub fn seen_mass_storage(d: &crate::deliver::Device) -> Seen {
         transport: TransportKind::MassStorage,
         thumbnails_writable: d.thumbnails_writable,
         serial: None,
+        firmware: d.firmware.clone(),
     }
 }

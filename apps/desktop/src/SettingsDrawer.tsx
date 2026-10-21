@@ -93,6 +93,18 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
             <div className="device-name">
               {d.model_hint} <span className="tag">{d.kind === "mtp" ? "MTP" : "USB"}</span>
             </div>
+            <p className="hint device-firmware">
+              Firmware {d.firmware ?? (d.kind === "mtp" ? "unknown until the first send" : "unknown")}
+            </p>
+            {d.compat.length > 0 && (
+              <ul className="device-compat" aria-label="Known issues on this Kindle">
+                {d.compat.map((m, i) => (
+                  <li key={i} className="warn">
+                    {m}
+                  </li>
+                ))}
+              </ul>
+            )}
             <label className="field">
               <span>Mode on this Kindle</span>
               <select
