@@ -30,6 +30,18 @@ Tests inject those values so container output can be compared byte-for-byte.
 |---|---|---|
 | `deckle-mini.docx` | Word document: Title, Heading 1–4, bold/italic, nested bullet list, numbered list, header-row table, two PNGs in `word/media`, three footnotes, core properties | `python3 -I tools/ref/make_mini_docx.py fixtures/docx/deckle-mini.docx` |
 
+## `txt/`
+
+Made by `python3 -I tools/ref/make_txt_fixtures.py fixtures/txt` (standard library only).
+
+| File | What |
+|---|---|
+| `gutenberg-mini.txt` | Project Gutenberg markers and licence, `Title:`/`Author:`/`Language:` header, two parts, four chapters (one with an all-caps subtitle line before it), a scene break, hard-wrapped lines, a `well-`/`known` line-end hyphen, a short-line block; CRLF line endings |
+| `unwrapped.txt` | One paragraph per line, no blank lines, Windows-1252 with curly quotes |
+| `verse.txt` | Two stanzas of short lines |
+| `utf16.txt` | UTF-16 LE with a BOM, accented letters |
+| `noheadings.txt` | About 500 KB of hard-wrapped paragraphs with no headings |
+
 ## Not in the repo
 
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB
