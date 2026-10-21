@@ -18,6 +18,7 @@ python3 -m venv /tmp/kfxvenv && /tmp/kfxvenv/bin/pip install lxml pillow pypdf b
 | Script | Purpose |
 |---|---|
 | `make_mini_epub.py OUT.epub` | Builds the deterministic mini EPUB fixture |
+| `make_txt_fixtures.py OUT_DIR` | Builds the plain text fixtures in `fixtures/txt` |
 | `kpf2kfx.py <KFX-Input> IN.kpf OUT.kfx CDE ASIN` | KPF to monolithic KFX with approximate pages; prints fragment type counts |
 | `kpf2kfx_opts.py <KFX-Input> IN.kpf OUT.kfx CDE ASIN PAGES\|none` | Same, with page-list control |
 | `dump_kpf_raw.py <KFX-Input> IN.kpf` | Pre-fix-up fragment inventory of a KPF (what the Rust KDF reader must produce) |

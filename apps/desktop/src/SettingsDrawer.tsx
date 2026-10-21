@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { api } from "./api";
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings } from "./types";
 
-const REPO = "https://github.com/prjoni99/deckle";
+const REPO = "https://github.com/CasaVargas/deckle";
 
 /** An external link: opens in the default browser (a plain anchor would do nothing in the app). */
 function Link({ href, children }: { href: string; children: ReactNode }) {

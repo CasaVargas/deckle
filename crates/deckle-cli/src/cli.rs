@@ -127,10 +127,11 @@ pub enum Command {
     },
     /// List connected Kindles.
     Devices,
-    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx) or web articles.
+    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), text files (.txt) or
+    /// web articles.
     Run {
-        /// EPUBs; Word documents (.docx); or web articles: an address, a .webloc/.url link
-        /// file or a saved .html page, each built into its own book first.
+        /// EPUBs; Word documents (.docx); text files (.txt); or web articles: an address, a
+        /// .webloc/.url link file or a saved .html page, each built into its own book first.
         epubs: Vec<PathBuf>,
         /// A folder path, or `device` for the first connected Kindle.
         #[arg(long, default_value = "device")]

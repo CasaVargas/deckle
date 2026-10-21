@@ -225,6 +225,78 @@ fn a_broken_word_document_fails_at_import() {
 }
 
 #[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_plain_text_file_runs_through_the_whole_pipeline() {
+    let txt =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/txt/gutenberg-mini.txt");
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: true,
+        cde_override: None,
+        amazon_match: false,
+        generated_cover: Some(None),
+        metadata_fill: false,
+        typography: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+        replaces: Vec::new(),
+    };
+    let report = run(&txt, &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    // Metadata comes from the Gutenberg header, through the imported EPUB.
+    assert_eq!(report.info.title, "The Deckle Mini Novel");
+    assert_eq!(report.info.creators[0].name, "Ada Testwright");
+    assert_eq!(report.info.toc.len(), 6);
+    let delivered = report.delivered.clone().expect("delivered");
+    assert!(std::fs::read(&delivered).unwrap().starts_with(b"CONT"));
+    assert!(report.stage_ms.contains_key("import"));
+    let work = report.work_dir.clone().expect("kept work dir");
+    assert!(work.join("imported.epub").is_file());
+    std::fs::remove_dir_all(work).ok();
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn an_empty_text_file_fails_at_import() {
+    let dir = tempfile::tempdir().unwrap();
+    let empty = dir.path().join("empty.txt");
+    std::fs::write(&empty, b"\n\n").unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(dir.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        generated_cover: Some(None),
+        metadata_fill: false,
+        typography: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+        replaces: Vec::new(),
+    };
+    let report = run(&empty, &opts);
+    assert_eq!(
+        report.error.as_deref(),
+        Some("import: the text file is empty")
+    );
+    assert!(!report.stage_ms.contains_key("inspect"));
+}
+
+#[test]
 fn size_warning_text() {
     let mut r = RunReport::default();
     r.push_size_warning(25_467_398);
