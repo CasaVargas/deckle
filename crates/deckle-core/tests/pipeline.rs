@@ -124,6 +124,7 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
     assert!(report.delivered.is_none());
 }
 
+#[cfg(unix)]
 fn docx_fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/docx/deckle-mini.docx")
 }
