@@ -155,6 +155,13 @@ pub enum Command {
         /// (off by default). Code and non-English quotes are left alone.
         #[arg(long)]
         typography: bool,
+        /// Don't make a typographic cover for a book that has none (one is made by default).
+        #[arg(long)]
+        no_generated_cover: bool,
+        /// The generated cover's template: `classic`, `band` or `rule` (default: chosen per
+        /// book by its identifier).
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["classic", "band", "rule"]))]
+        cover_style: Option<String>,
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,

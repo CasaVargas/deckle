@@ -72,6 +72,7 @@ pub(crate) fn pipeline_with(
             cde_type: deckle_kfx::convert::CdeType::Pdoc,
             cde_override: None,
             amazon_match: false,
+            generated_cover: Some(None),
             metadata_fill: false,
             typography: false,
             verified_real_asin: false,

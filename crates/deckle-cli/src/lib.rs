@@ -288,6 +288,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             amazon_match,
             fill_metadata,
             typography,
+            no_generated_cover,
+            cover_style,
             verified_asin,
             asin,
             xray,
@@ -318,6 +320,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 cde_type: cde.into(),
                 cde_override: cde.to_override(),
                 amazon_match,
+                generated_cover: (!no_generated_cover)
+                    .then(|| cover_style.as_deref().map(str::parse).transpose())
+                    .transpose()?,
                 metadata_fill: fill_metadata,
                 typography,
                 verified_real_asin: verified_asin,
@@ -349,7 +354,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .map(|r| match (&r.error, &r.delivered) {
                         (Some(e), _) => format!("FAIL  {}\n      {e}", r.input.display()),
                         (None, Some(d)) => format!(
-                            "OK    {}\n      -> {}{}{}{}{}{}{}{}",
+                            "OK    {}\n      -> {}{}{}{}{}{}{}{}{}",
                             r.input.display(),
                             d.display(),
                             r.pages
@@ -372,6 +377,11 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                                     "\n      Word Wise: {} hints (level {}, {} dictionary)",
                                     w.hints, w.level, w.dictionary
                                 ))
+                                .unwrap_or_default(),
+                            r.normalize
+                                .cover_generated
+                                .as_ref()
+                                .map(|c| format!("\n      Cover: generated ({c})"))
                                 .unwrap_or_default(),
                             r.normalize
                                 .typography
@@ -698,6 +708,7 @@ fn reprocess(
             cde_type: cde.unwrap_or(deckle_kfx::convert::CdeType::Pdoc),
             cde_override: cde,
             amazon_match: false,
+            generated_cover: Some(None),
             metadata_fill: false,
             typography: false,
             verified_real_asin: false,
@@ -1391,6 +1402,7 @@ fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Pa
         cde_type: deckle_kfx::convert::CdeType::Pdoc,
         cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,

@@ -625,3 +625,54 @@ fn library_reprocess_updates_books_sent_before_engine_stamps() {
         .unwrap();
     assert!(String::from_utf8_lossy(&again.stdout).contains("is current"));
 }
+
+/// `deckle run` on the DOCX fixture (no cover) through the fake Previewer, with `extra` flags.
+#[cfg(unix)] // the fake Previewer is a shell script
+fn run_docx(extra: &[&str]) -> std::process::Output {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    let docx = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures/docx/deckle-mini.docx");
+    let out = tempfile::tempdir().unwrap();
+    Command::cargo_bin("deckle")
+        .unwrap()
+        .arg("run")
+        .arg(docx)
+        .arg("--to")
+        .arg(out.path())
+        .arg("--previewer")
+        .arg(&fake)
+        .args(extra)
+        .output()
+        .unwrap()
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn run_generates_a_cover_for_a_coverless_book_unless_told_not_to() {
+    let res = run_docx(&["--cover-style", "rule"]);
+    let s = String::from_utf8_lossy(&res.stdout);
+    assert!(res.status.success(), "{s}");
+    assert!(s.contains("Cover: generated (rule)"), "{s}");
+
+    let res = run_docx(&["--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&res.stdout).unwrap();
+    assert!(v[0]["normalize"]["cover_generated"].is_string(), "{}", v[0]);
+
+    let res = run_docx(&["--no-generated-cover"]);
+    let s = String::from_utf8_lossy(&res.stdout);
+    assert!(res.status.success(), "{s}");
+    assert!(!s.contains("Cover:"), "{s}");
+}
+
+#[test]
+fn run_rejects_an_unknown_cover_style() {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["run", "x.epub", "--cover-style", "fancy"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("classic") && err.contains("band"), "{err}");
+}
