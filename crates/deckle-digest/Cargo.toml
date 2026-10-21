@@ -26,6 +26,8 @@ base64.workspace = true
 deunicode.workspace = true
 rand.workspace = true
 zeroize = "1"
+# Send-to-Kindle email: SMTP over rustls only (no native-tls), no async runtime.
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "rustls-tls", "builder"] }
 
 # The SMTP password's keychain (email design §6): each OS's own store.
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -15,6 +15,7 @@ pub mod geocode;
 pub mod horoscope;
 pub mod inbox;
 pub mod longread;
+pub mod mail;
 pub mod moon;
 pub mod reading;
 pub mod render;
