@@ -4,6 +4,10 @@ Working notes for `crates/deckle-xray` and the `enrich` stage in `deckle-core`. 
 WordDumb (GPL-3), which has generated device-accepted X-Ray files for years, and kfxlib for the
 position model. Confidence tags: **device** / **reference** / **inferred**.
 
+Any source gets X-Ray, not just EPUB: Word documents, web articles and long reads are turned into
+an EPUB before the shared stages, and `enrich` reads the text from the KFX (see
+`docs/superpowers/specs/2026-10-21-source-agnostic-enrichment-design.md`; PDF is #18, Markdown #23).
+
 ## Where it lives (reference)
 
 - `documents/<book>.sdr/XRAY.entities.<ASIN>.asc`, next to `documents/<book>.kfx`. The `.sdr`
