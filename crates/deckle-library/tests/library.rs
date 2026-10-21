@@ -197,6 +197,18 @@ fn a_word_document_is_kept_as_it_is() {
 }
 
 #[test]
+fn a_text_file_is_kept_as_it_is() {
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::new(tmp.path().join("Library"));
+    let txt =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/txt/gutenberg-mini.txt");
+    assert!(deckle_library::is_source(&txt));
+    let book = lib.add(&txt).unwrap().book;
+    assert_eq!(book.sidecar.source, "gutenberg-mini.txt");
+    assert_eq!(book.sidecar.metadata.title, "The Deckle Mini Novel");
+}
+
+#[test]
 fn scan_adopts_bare_and_loose_books_and_reports_problems() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("Library");

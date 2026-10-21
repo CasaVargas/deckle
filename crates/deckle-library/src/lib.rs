@@ -76,20 +76,27 @@ pub struct Library {
     pub root: PathBuf,
 }
 
-/// EPUB or Word document: what the library keeps.
+/// EPUB, Word document or plain text: what the library keeps.
 pub fn is_source(path: &Path) -> bool {
     deckle_docx::is_word(path)
+        || deckle_txt::is_text(path)
         || path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
 }
 
-/// The book's metadata: the EPUB's, or the EPUB a Word document imports as.
+/// The book's metadata: the EPUB's, or the EPUB a Word document or text file imports as.
 pub fn book_info(path: &Path) -> Result<BookInfo, String> {
     if deckle_docx::is_word(path) {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let epub = dir.path().join("imported.epub");
         deckle_docx::convert(path, &epub).map_err(|e| e.to_string())?;
+        return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
+    }
+    if deckle_txt::is_text(path) {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let epub = dir.path().join("imported.epub");
+        deckle_txt::convert(path, &epub).map_err(|e| e.to_string())?;
         return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
     }
     deckle_core::inspect::inspect(path).map_err(|e| e.to_string())
