@@ -63,6 +63,7 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
           </button>
         )}
         {book.runWarnings.length > 0 && <span className="warn"> · {book.runWarnings.length} warning{book.runWarnings.length > 1 ? "s" : ""}</span>}
+        {book.replaced.length > 0 && <div className="shipped">Replaced the older copy {book.replaced.join(", ")}</div>}
         {book.shipped && (
           <div className="shipped" title={book.shipped.reason}>
             {book.shipped.cde} · {book.shipped.reason}

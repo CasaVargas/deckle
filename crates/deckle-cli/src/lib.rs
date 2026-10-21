@@ -713,11 +713,18 @@ fn reprocess(
             .zip(&reports)
             .map(|(u, r)| match &r.error {
                 Some(e) => format!("FAIL  {}\n      {e} (the old copy is still there)", u.title),
-                None if r.warnings.is_empty() => format!("OK    {}", u.title),
                 None => format!(
-                    "OK    {}\n      warnings: {}",
+                    "OK    {}{}{}",
                     u.title,
-                    r.warnings.join("; ")
+                    r.replaced
+                        .iter()
+                        .map(|f| format!("\n      replaced {f}"))
+                        .collect::<String>(),
+                    if r.warnings.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n      warnings: {}", r.warnings.join("; "))
+                    }
                 ),
             })
             .collect::<Vec<_>>()

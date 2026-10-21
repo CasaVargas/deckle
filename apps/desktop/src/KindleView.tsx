@@ -8,8 +8,9 @@ interface Props {
   target: RunTarget | null;
   targetKey: string | null;
   busy: boolean;
-  /** Put the library copy on the Books tab for this Kindle (`ebok` for an upgrade). */
-  onResend: (source: string, cde: "ebok" | null) => void;
+  /** Put library copies on the Books tab for this Kindle, each with its mode; `what` opens
+   * the notice. */
+  onResend: (items: { source: string; cde: "pdoc" | "ebok" | null }[], what: string) => void;
   onNotice: (msg: string | null) => void;
 }
 
@@ -17,6 +18,35 @@ function size(bytes: number): string {
   if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
   if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+}
+
+/** The mode an update keeps: the one it was sent in. */
+function sentMode(book: DeviceBookRow): "pdoc" | "ebok" | null {
+  return book.cde === "EBOK" ? "ebok" : book.cde === "PDOC" ? "pdoc" : null;
+}
+
+function updateBadges(book: DeviceBookRow) {
+  const older = book.updates.filter((u) => u.older);
+  const missing = book.updates.filter((u) => !u.older);
+  return (
+    <>
+      {older.length > 0 && (
+        <span className="badge stale" title={older.map((u) => u.text).join("\n")}>
+          Older build
+        </span>
+      )}
+      {missing.map((u) => (
+        <span key={u.feature} className="badge stale" title={u.text}>
+          Missing {u.feature}
+        </span>
+      ))}
+      {book.duplicate && (
+        <span className="badge dup" title="Another book on this Kindle is the same one (same ASIN, or same title and author)">
+          Duplicate
+        </span>
+      )}
+    </>
+  );
 }
 
 function BookLine({ book, busy, onResend, onRemove }: { book: DeviceBookRow; busy: boolean; onResend: Props["onResend"]; onRemove: (file: string) => Promise<void> }) {
@@ -42,6 +72,7 @@ function BookLine({ book, busy, onResend, onRemove }: { book: DeviceBookRow; bus
           ) : (
             <span className="badge">{book.format.toUpperCase()}</span>
           )}
+          {updateBadges(book)}
         </div>
         <div className="byline">
           {book.authors.length > 0 ? book.authors.join(", ") : book.title ? <em>Unknown author</em> : <span className="mono">{book.format} file</span>}
@@ -78,12 +109,23 @@ function BookLine({ book, busy, onResend, onRemove }: { book: DeviceBookRow; bus
         </button>
         {menuOpen && (
           <div className="menu" onMouseLeave={() => setMenuOpen(false)}>
+            {book.updates.length > 0 && book.library_source && (
+              <button
+                title={book.updates.map((u) => u.text).join("\n")}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onResend([{ source: book.library_source!, cde: sentMode(book) }], `${title} is ready to update.`);
+                }}
+              >
+                Update
+              </button>
+            )}
             <button
               disabled={!book.library_source}
               title={book.library_source ? undefined : "Not in your library, so Deckle has no copy to send"}
               onClick={() => {
                 setMenuOpen(false);
-                onResend(book.library_source!, null);
+                onResend([{ source: book.library_source!, cde: null }], `${title} is ready to send again.`);
               }}
             >
               Re-send
@@ -92,7 +134,7 @@ function BookLine({ book, busy, onResend, onRemove }: { book: DeviceBookRow; bus
               <button
                 onClick={() => {
                   setMenuOpen(false);
-                  onResend(book.library_source!, "ebok");
+                  onResend([{ source: book.library_source!, cde: "ebok" }], `${title} is ready to send again as EBOK.`);
                 }}
               >
                 Upgrade to EBOK (X-Ray, Word Wise)
@@ -163,6 +205,12 @@ export default function KindleView({ target, targetKey, busy, onResend, onNotice
   }
 
   const used = shelf?.space ? shelf.space.total - shelf.space.free : 0;
+  const updatable = shelf?.books.filter((b) => b.updates.length > 0 && b.library_source) ?? [];
+  const updateAll = () =>
+    onResend(
+      updatable.map((b) => ({ source: b.library_source!, cde: sentMode(b) })),
+      `${updatable.length} book${updatable.length === 1 ? " is" : "s are"} ready to update, each in the mode it was sent in.`,
+    );
   const deckle = shelf?.books.filter((b) => b.from_deckle).length ?? 0;
   return (
     <main className="list-area">
@@ -190,6 +238,19 @@ export default function KindleView({ target, targetKey, busy, onResend, onNotice
         </button>
       </div>
       {error && <div className="result fail">{error}</div>}
+      {updatable.length > 0 && (
+        <div className="update-banner" role="status">
+          <span>
+            <strong>
+              {updatable.length} book{updatable.length === 1 ? "" : "s"} can be updated
+            </strong>{" "}
+            — Deckle can build {updatable.length === 1 ? "it" : "them"} better now.
+          </span>
+          <button className="primary solo" onClick={updateAll} disabled={busy}>
+            Update all
+          </button>
+        </div>
+      )}
       {shelf && shelf.books.length === 0 && <p className="muted">No books in documents/ yet.</p>}
       {shelf && (
         <ul className="books" aria-label="Books on this Kindle">

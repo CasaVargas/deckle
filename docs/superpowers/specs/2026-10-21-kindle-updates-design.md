@@ -1,7 +1,7 @@
 # Keeping Kindles current — design
 
-**Status:** stale rule, duplicate handling and update flow settled by owner (2026-10-21); for
-#38 and #39 · **Date:** 2026-10-21 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** stale rule, duplicate handling and update flow settled by owner (2026-10-21); built in
+the PR for #38 and #39 · **Date:** 2026-10-21 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-21-library-and-device-view-design.md` (the library, send records, the
 Kindle tab)
 

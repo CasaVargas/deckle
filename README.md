@@ -76,6 +76,13 @@ EBOK**. Both put the library copy on the Books tab, so you can check its badge b
 On an MTP Kindle, Deckle doesn't read the books themselves, so it fills in details from the
 library. (`docs/superpowers/specs/2026-10-21-library-and-device-view-design.md`)
 
+When Deckle's X-Ray or Word Wise has improved since a book was sent, or a book's X-Ray or
+Word Wise file has gone missing from the Kindle, the tab says it **can be updated**. **Update
+all** puts those books on the Books tab in the mode they were sent in. Sending a book again
+under a new name (say, after fixing its title) replaces Deckle's older copy instead of adding a
+second one. Copies from elsewhere are only marked **Duplicate**, never removed.
+(`docs/superpowers/specs/2026-10-21-kindle-updates-design.md`)
+
 ### Word Wise on your Kindle
 
 Hints point at the Kindle's own English Word Wise dictionary when it has one (it downloads it the
@@ -131,6 +138,8 @@ deckle library init ~/Books/Deckle   # use this folder; every book `run` sends i
 deckle library add book.epub         # add by hand (an edited copy updates the same book)
 deckle library list                  # author, title, series, and where each was sent
 deckle library scan                  # adopt books put in the folder by hand, report problems
+deckle library reprocess --dry-run   # which books Deckle could build better now
+deckle library reprocess             # rebuild and re-send them (asks first; --yes to skip)
 deckle kindle books                  # what's on the connected Kindle, and free space
 deckle kindle remove "Le Guin, Ursula K. - The Dispossessed.kfx"   # asks first; --yes to skip
 ```
