@@ -149,6 +149,35 @@ export interface DailyConfig {
   lottery: { games: string[] };
   horoscope: { signs: string[] };
   reading: { inbox: string; max_items: number; long_read_words: number };
+  /** Absent while it's untouched (the backend leaves the defaults out). */
+  email?: EmailConfig;
+}
+
+/** `[email]`: Send-to-Kindle over the owner's SMTP (email design §5). No password here. */
+export interface EmailConfig {
+  enabled: boolean;
+  to: string;
+  from: string;
+  smtp_host: string;
+  smtp_port: number;
+  username: string;
+  usb_too: boolean;
+}
+
+export const DEFAULT_EMAIL: EmailConfig = {
+  enabled: false,
+  to: "",
+  from: "",
+  smtp_host: "",
+  smtp_port: 587,
+  username: "",
+  usb_too: false,
+};
+
+/** Whether a password is saved: the password itself never reaches the window. */
+export interface EmailStatus {
+  configured: boolean;
+  has_password: boolean;
 }
 
 export interface DailyState {
