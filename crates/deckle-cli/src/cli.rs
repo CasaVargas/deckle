@@ -156,6 +156,13 @@ pub enum Command {
         /// (off by default). Code and non-English quotes are left alone.
         #[arg(long)]
         typography: bool,
+        /// Don't make a typographic cover for a book that has none (one is made by default).
+        #[arg(long)]
+        no_generated_cover: bool,
+        /// The generated cover's template: `classic`, `band` or `rule` (default: chosen per
+        /// book by its identifier).
+        #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["classic", "band", "rule"]))]
+        cover_style: Option<String>,
         /// Turn footnotes and endnotes into Kindle pop-up notes (off by default). Notes the book
         /// marks always convert; others only when the note links back to its reference.
         #[arg(long)]

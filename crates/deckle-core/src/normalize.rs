@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Stage 2: write a cleaned EPUB that Kindle Previewer converts well. v1 scope: JPEG/JFIF cover
 //! with the `cover-image` property, image downscaling, script and remote-resource removal, and a
-//! synthesized nav TOC when the book has none. Everything else passes through byte for byte,
-//! unless the opt-in typography (#30, [`crate::typography`]) or pop-up notes (#31,
-//! [`crate::notes`]) pass is on.
+//! synthesized nav TOC when the book has none, and a generated cover when it has none of those
+//! either (#27). Everything else passes through byte for byte, unless the opt-in typography
+//! (#30, [`crate::typography`]) or pop-up notes (#31, [`crate::notes`]) pass is on.
 
 use std::collections::BTreeMap;
 use std::io::{Cursor, Read, Write};
@@ -29,6 +29,16 @@ pub struct NormalizeOptions {
     pub typography: bool,
     /// Footnotes and endnotes to Kindle pop-up notes (issue #31).
     pub popup_notes: bool,
+    /// A cover to add when the book has none (issue #27); ignored when it has one.
+    pub generated_cover: Option<GeneratedCover>,
+}
+
+/// A cover made for a coverless book (`deckle_cover`).
+#[derive(Clone, Debug, Default)]
+pub struct GeneratedCover {
+    /// The template it was made with, for the report.
+    pub style: String,
+    pub jpeg: Vec<u8>,
 }
 
 impl Default for NormalizeOptions {
@@ -38,6 +48,7 @@ impl Default for NormalizeOptions {
             jpeg_quality: 85,
             fill: Default::default(),
             typography: false,
+            generated_cover: None,
             popup_notes: false,
         }
     }
@@ -52,6 +63,8 @@ pub struct NormalizeReport {
     pub toc_synthesized: bool,
     /// What the typography pass changed, when it was on.
     pub typography: Option<TypographyReport>,
+    /// The template of the cover added to a coverless book, when one was.
+    pub cover_generated: Option<String>,
     /// What the pop-up notes pass converted, when it was on.
     pub notes: Option<NotesReport>,
     pub warnings: Vec<String>,
@@ -513,6 +526,18 @@ pub fn normalize(
         }
     }
 
+    if let (None, Some(cover)) = (cover_idx, &opts.generated_cover) {
+        match add_generated_cover(&opf, &opf_dir, cover, &mut files, &mut order) {
+            Some(with_cover) => {
+                opf = with_cover;
+                report.cover_generated = Some(cover.style.clone());
+            }
+            None => report
+                .warnings
+                .push("generated cover not added: the OPF has no manifest or spine".into()),
+        }
+    }
+
     files.insert(opf_path.clone(), opf.into_bytes());
 
     // Write: mimetype first and stored, everything else deflated.
@@ -541,6 +566,55 @@ pub fn normalize(
     }
     zw.finish()?;
     Ok(report)
+}
+
+const COVER_IMAGE: &str = "deckle-cover.jpg";
+const COVER_PAGE: &str = "deckle-cover.xhtml";
+
+/// Adds `cover` as the book's cover: a `cover-image` JPEG, `<meta name="cover">` for EPUB 2
+/// readers, and a cover page first in the spine. `None` when the OPF lacks a place for them.
+fn add_generated_cover(
+    opf: &str,
+    opf_dir: &str,
+    cover: &GeneratedCover,
+    files: &mut BTreeMap<String, Vec<u8>>,
+    order: &mut Vec<String>,
+) -> Option<String> {
+    let manifest = opf.find("</manifest>")?;
+    let metadata = opf.find("</metadata>")?;
+    let spine = Regex::new(r"<spine\b[^>]*>").unwrap().find(opf)?.end();
+    let mut out = opf.to_owned();
+    // Back to front, so the earlier offsets stay valid.
+    let mut edits = [
+        (
+            manifest,
+            format!(
+                "<item id=\"deckle-cover-image\" href=\"{COVER_IMAGE}\" media-type=\"image/jpeg\" properties=\"cover-image\"/>\
+                 <item id=\"deckle-cover\" href=\"{COVER_PAGE}\" media-type=\"application/xhtml+xml\"/>"
+            ),
+        ),
+        (
+            metadata,
+            "<meta name=\"cover\" content=\"deckle-cover-image\"/>".to_owned(),
+        ),
+        (spine, "<itemref idref=\"deckle-cover\"/>".to_owned()),
+    ];
+    edits.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+    for (at, text) in edits {
+        out.insert_str(at, &text);
+    }
+    let page = format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>Cover</title><style>body{{margin:0;padding:0;text-align:center}}img{{max-width:100%;max-height:100%}}</style></head><body epub:type=\"cover\"><img src=\"{COVER_IMAGE}\" alt=\"Cover\"/></body></html>\n"
+    );
+    for (href, data) in [
+        (COVER_IMAGE, ensure_jfif(cover.jpeg.clone())),
+        (COVER_PAGE, page.into_bytes()),
+    ] {
+        let name = join(opf_dir, href);
+        order.push(name.clone());
+        files.insert(name, data);
+    }
+    Some(out)
 }
 
 fn xml_escape(s: &str) -> String {

@@ -82,6 +82,8 @@ export interface Settings {
   word_wise_level: number;
   wikipedia: boolean;
   amazon_match: boolean;
+  /** A typographic cover for a book that has none (issue #27). */
+  generated_cover: boolean;
   /** Fill empty title, author, series, description and subjects from Open Library (network). */
   metadata_fill: boolean;
   /** Curly quotes, dashes, ellipses and empty-paragraph cleanup (issue #30). */

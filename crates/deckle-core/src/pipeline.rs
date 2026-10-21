@@ -15,10 +15,11 @@ use crate::devices::TransportKind;
 use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{Fetcher, MatchOutcome, match_book};
 use crate::metadata_fill::{FillOutcome, Metadata};
-use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
+use crate::normalize::{GeneratedCover, NormalizeOptions, NormalizeReport, normalize};
 use crate::previewer;
 use crate::wordwise::{WordWiseOptions, WordWiseOutput, WordWiseSummary};
 use crate::xray::{LlmConfig, XRayOptions, XRaySummary};
+pub use deckle_cover::Template as CoverTemplate;
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
 use deckle_kfx::metadata::{fix_language, generate_asin};
 
@@ -30,6 +31,9 @@ pub struct RunOptions {
     pub cde_override: Option<CdeType>,
     /// Look up an Amazon edition (Open Library) when the device needs a real ASIN.
     pub amazon_match: bool,
+    /// A typographic cover for a book that has none (issue #27): `None` off, `Some(None)` the
+    /// template by the book's hash, `Some(Some(t))` template `t`.
+    pub generated_cover: Option<Option<CoverTemplate>>,
     /// Fill title, author, series, description and subjects the EPUB leaves empty from Open
     /// Library (opt-in network, issue #28).
     pub metadata_fill: bool,
@@ -346,10 +350,24 @@ pub fn prepare_with(
     report.info = info.clone();
     report.warnings.extend(info.warnings.iter().cloned());
 
+    let generated_cover = match (&info.cover_href, opts.generated_cover) {
+        (None, Some(style)) => match generated_cover(&info, style) {
+            Ok((cover, warnings)) => {
+                report.warnings.extend(warnings);
+                Some(cover)
+            }
+            Err(e) => {
+                report.warnings.push(format!("cover not generated: {e}"));
+                None
+            }
+        },
+        _ => None,
+    };
     let normalized = work_path.join("normalized.epub");
     let normalize_opts = NormalizeOptions {
         fill,
         typography: opts.typography,
+        generated_cover,
         popup_notes: opts.popup_notes,
         ..Default::default()
     };
@@ -383,6 +401,32 @@ pub fn prepare_with(
         name: None,
         _work: work,
     })
+}
+
+/// The cover for a book that has none, from its (filled) metadata: `style`, or the template
+/// its identifier hashes to.
+fn generated_cover(
+    info: &crate::inspect::BookInfo,
+    style: Option<CoverTemplate>,
+) -> Result<(GeneratedCover, Vec<String>), String> {
+    let text = deckle_cover::CoverText {
+        title: info.title.clone(),
+        authors: info.creators.iter().map(|c| c.name.clone()).collect(),
+        series: info
+            .series
+            .as_ref()
+            .map(|s| deckle_cover::series_line(&s.name, s.index)),
+    };
+    let key = info.identifiers.first().unwrap_or(&info.title);
+    let style = style.unwrap_or_else(|| CoverTemplate::choose(key, &text));
+    let cover = deckle_cover::render(&text, style)?;
+    Ok((
+        GeneratedCover {
+            style: style.name().to_owned(),
+            jpeg: cover.jpeg,
+        },
+        cover.warnings,
+    ))
 }
 
 /// The device-dependent stages for the Kindle on `conn`: cover rule → repackage → enrich →
@@ -674,6 +718,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
         cde_type: CdeType::Pdoc,
         cde_override: Some(CdeType::Pdoc),
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         popup_notes: false,

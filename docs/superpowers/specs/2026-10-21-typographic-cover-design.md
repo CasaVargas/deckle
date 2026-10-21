@@ -48,7 +48,12 @@ shrinking the font size until it fits; it is never cut off.
 - **Text:** the title from the OPF `dc:title`, with any subtitle after `:` set smaller on its
   own line. Authors from `dc:creator`: up to two names, joined by "and", otherwise "First
   Author et al.". The series from `inspect`'s `series`.
-- **Scripts:** Old Standard and Inter cover Latin, Greek and Cyrillic. Any other script (CJK,
+- **Long titles:** below a template's size range (60 % of its largest size) a title takes
+  more lines, within the template's height, rather than shrink out of legibility on a tile.
+- **Scripts:** Old Standard covers Latin and Cyrillic; Inter covers Latin, Greek and Cyrillic.
+  (As built: the bundled Old Standard has no Greek, so when the hashed template can't set a
+  title, `Template::choose` moves on to the next template that can. An explicit
+  `--cover-style` is kept and the title left off.) Any other script (CJK,
   Arabic, Hebrew, Devanagari…) isn't drawn as missing-glyph boxes. If any of the title's
   letters fall outside the bundled fonts, the title is left off and the cover shows the
   remaining lines (author, series) that do render, plus a warning ("cover title not renderable
@@ -64,10 +69,13 @@ inspect (no cover) ──▶ deckle_cover::render(&CoverText, style) ──▶ N
 
 - `pipeline::run` renders the cover only when `inspect` reports no `cover_href` and the option
   is on.
-- `NormalizeOptions` gets `generated_cover: Option<Vec<u8>>`. Normalize adds `cover.jpg` to the
-  manifest with `properties="cover-image"`, adds `<meta name="cover">` for EPUB 2 readers, and
-  adds a `cover.xhtml` first in the spine. That's the shape it already writes when it converts
-  a non-JPEG cover.
+- `NormalizeOptions` gets `generated_cover: Option<GeneratedCover>` (the JPEG and the
+  template's name). Normalize adds `deckle-cover.jpg` to the manifest with
+  `properties="cover-image"`, adds `<meta name="cover">` for EPUB 2 readers, and adds a
+  `deckle-cover.xhtml` first in the spine. The `deckle-` prefix follows the synthesized
+  `deckle-nav.xhtml` and can't collide with a book's own files.
+- `RunOptions.generated_cover: Option<Option<Template>>`: `None` off, `Some(None)` by hash,
+  `Some(Some(t))` template `t` (the `pages` idiom).
 - `NormalizeReport.cover_generated: Option<String>` records the template that was used. The CLI
   shows `Cover: generated (classic)`.
 - Everything downstream (the cover rule, the thumbnail, the library's `source_cover`) sees an
