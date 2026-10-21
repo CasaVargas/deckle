@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use deckle_digest::Config;
 use deckle_digest::chrono::{DateTime, Utc};
+use deckle_digest::config::EmailConfig;
 use deckle_digest::reading::{Added, Entry, ReadingQueue, State};
+use deckle_digest::secret::{self, Keyring, SystemKeyring};
+use deckle_digest::zeroize::Zeroizing;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
@@ -150,6 +153,44 @@ pub fn parse_run(status_ok: bool, stdout: &[u8], stderr: &[u8]) -> RunResult {
         report,
         log: lines[lines.len().saturating_sub(6)..].join("\n"),
     }
+}
+
+/// The "Email to Kindle" card's state (email design §8): whether a password is there, never
+/// the password.
+#[derive(Clone, Debug, Serialize)]
+pub struct EmailStatus {
+    /// `[email]` has every address and the host it needs.
+    pub configured: bool,
+    pub has_password: bool,
+}
+
+pub fn email_status_with(
+    cfg: &EmailConfig,
+    keys: &dyn Keyring,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> EmailStatus {
+    EmailStatus {
+        configured: cfg.missing().is_empty() && cfg.validate().is_ok(),
+        has_password: secret::has_password(cfg, keys, env),
+    }
+}
+
+/// Saves the password for `cfg`'s account; the plain copy is zeroed when it's dropped here.
+pub fn set_password_with(
+    cfg: &EmailConfig,
+    keys: &dyn Keyring,
+    password: String,
+) -> Result<(), String> {
+    let password = Zeroizing::new(password);
+    secret::set(cfg, keys, &password).map_err(|e| e.to_string())
+}
+
+fn email_config() -> Result<EmailConfig, String> {
+    Ok(Config::load(&config_path())?.email)
+}
+
+fn env_var(k: &str) -> Option<String> {
+    std::env::var(k).ok()
 }
 
 // ---- Tauri commands -----------------------------------------------------------------
@@ -299,6 +340,44 @@ pub fn schedule_set(at: Option<String>) -> Result<deckle_digest::schedule::Statu
     Ok(schedule::status())
 }
 
+#[tauri::command]
+pub fn email_status() -> EmailStatus {
+    let cfg = email_config().unwrap_or_default();
+    email_status_with(&cfg, &SystemKeyring, &env_var)
+}
+
+/// Writes the keychain for the saved `[email]` account. Nothing reads it back to the window.
+#[tauri::command]
+pub fn email_set_password(password: String) -> Result<EmailStatus, String> {
+    let cfg = email_config()?;
+    set_password_with(&cfg, &SystemKeyring, password)?;
+    Ok(email_status_with(&cfg, &SystemKeyring, &env_var))
+}
+
+/// `deckle digest email test` from the card: a one-page EPUB to the Kindle address.
+#[tauri::command]
+pub async fn email_test() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let cfg = email_config()?;
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        deckle_digest::mail::send_test(
+            &cfg,
+            dir.path(),
+            deckle_digest::chrono::Local::now().date_naive(),
+            &SystemKeyring,
+            &env_var,
+            |pw| deckle_digest::mail::SmtpMailer::new(&cfg, pw),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(format!(
+            "Test sent to {}. It should reach your Kindle within a few minutes.",
+            cfg.to.trim()
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,6 +418,37 @@ mod tests {
         assert_eq!(r.report.unwrap()["title"], "T");
         assert_eq!(r.log, "inbox: saved 1\nlast");
         assert!(parse_run(false, b"oops", b"").report.is_none());
+    }
+
+    #[test]
+    fn email_status_never_returns_the_password() {
+        use deckle_digest::secret::MemoryKeyring;
+        const PW: &str = "hunter2-Secret!";
+        let cfg = deckle_digest::config::EmailConfig {
+            enabled: true,
+            to: "me_1@kindle.com".into(),
+            from: "me@example.com".into(),
+            smtp_host: "smtp.example.com".into(),
+            username: "me@example.com".into(),
+            ..Default::default()
+        };
+        let keys = MemoryKeyring::default();
+        let no_env = |_: &str| None;
+        let before = email_status_with(&cfg, &keys, &no_env);
+        assert!(before.configured && !before.has_password);
+        set_password_with(&cfg, &keys, PW.to_owned()).unwrap();
+        let after = email_status_with(&cfg, &keys, &no_env);
+        assert!(after.configured && after.has_password);
+        let shown = format!("{after:?} {}", serde_json::to_string(&after).unwrap());
+        assert!(!shown.contains(PW), "{shown}");
+        assert_eq!(
+            serde_json::to_value(&after).unwrap(),
+            serde_json::json!({"configured": true, "has_password": true})
+        );
+        let unfinished = email_status_with(&Default::default(), &keys, &no_env);
+        assert!(!unfinished.configured && !unfinished.has_password);
+        let e = set_password_with(&Default::default(), &keys, PW.to_owned()).unwrap_err();
+        assert!(!e.contains(PW), "{e}");
     }
 
     #[test]
