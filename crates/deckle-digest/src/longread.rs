@@ -16,13 +16,18 @@ fn photo_file(n: usize) -> String {
 }
 
 pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<(), String> {
+    write_article(lr, &format!("urn:deckle:reads:{date}:{}", lr.id), date, path)
+}
+
+/// One article as a book with identifier `uid` (an article sent on its own, #21, keeps
+/// the same one each time).
+pub fn write_article(lr: &LongRead, uid: &str, date: NaiveDate, path: &Path) -> Result<(), String> {
     let cover = crate::cover::render_reads(
         &lr.title,
         lr.byline.as_deref(),
         &lr.outlet,
         minutes(lr.words),
     )?;
-    let uid = format!("urn:deckle:reads:{date}:{}", lr.id);
     let author = lr.byline.clone().unwrap_or_else(|| lr.outlet.clone());
     let a = &lr.article;
     let mut body = a.body.clone();
@@ -66,7 +71,7 @@ pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<()
          <meta name=\"cover\" content=\"cover-image\"/>\n</metadata>\n\
          <manifest>\n{manifest}</manifest>\n\
          <spine toc=\"ncx\">\n<itemref idref=\"text\"/>\n<itemref idref=\"nav\" linear=\"no\"/>\n</spine>\n</package>\n",
-        uid = esc(&uid),
+        uid = esc(uid),
         title = esc(&lr.title),
         author = esc(&author),
         outlet = esc(&lr.outlet),
@@ -85,7 +90,7 @@ pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<()
          <docTitle><text>{title}</text></docTitle>\n<navMap>\n\
          <navPoint id=\"text\" playOrder=\"1\"><navLabel><text>{title}</text></navLabel><content src=\"text.xhtml\"/></navPoint>\n\
          </navMap>\n</ncx>\n",
-        uid = esc(&uid),
+        uid = esc(uid),
         title = esc(&lr.title),
     );
     let mut files: crate::render::Files = vec![
