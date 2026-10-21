@@ -150,7 +150,7 @@ fn read_sidecar(path: &Path) -> Result<Sidecar, String> {
 
 /// One folder under the root, as the walk found it.
 enum Found {
-    Book(Book),
+    Book(Box<Book>),
     Unreadable(PathBuf, String),
     /// A folder (not the root) holding exactly one source and no sidecar.
     Bare(PathBuf),
@@ -180,10 +180,10 @@ impl Library {
         let sidecar = dir.join(FILE_NAME);
         if sidecar.is_file() {
             out.push(match read_sidecar(&sidecar) {
-                Ok(s) => Found::Book(Book {
+                Ok(s) => Found::Book(Box::new(Book {
                     dir: dir.to_path_buf(),
                     sidecar: s,
-                }),
+                })),
                 Err(e) => Found::Unreadable(sidecar, e),
             });
             return;
@@ -220,7 +220,7 @@ impl Library {
             .walk()
             .into_iter()
             .filter_map(|f| match f {
-                Found::Book(b) => Some(b),
+                Found::Book(b) => Some(*b),
                 _ => None,
             })
             .collect();
