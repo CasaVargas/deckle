@@ -105,6 +105,12 @@ impl Doc {
                 ids.entry(id.to_owned()).or_insert(i);
             }
         }
+        // Word's "save as HTML" names its note anchors instead.
+        for (i, el) in els.iter().enumerate().filter(|(_, e)| e.name == "a") {
+            if let Some(id) = attr(&text[el.open.clone()], "name") {
+                ids.entry(id.to_owned()).or_insert(i);
+            }
+        }
         Doc {
             name: name.to_owned(),
             els,
@@ -128,6 +134,12 @@ impl Doc {
             None => "",
         }
     }
+}
+
+/// The `id` a link can reach an element by: its `id`, or a link's `name`.
+fn anchor<'t>(el: &El, text: &'t str) -> Option<&'t str> {
+    let tag = &text[el.open.clone()];
+    attr(tag, "id").or_else(|| (el.name == "a").then(|| attr(tag, "name")).flatten())
 }
 
 /// The value of attribute `name` in a start tag (names compare case-insensitively).
@@ -354,12 +366,13 @@ pub fn convert(docs: &mut [(String, String)]) -> NotesReport {
                 continue;
             }
             let semantic = is_noteref(tag);
-            let styled = REF_CLASS.is_match(attr(tag, "class").unwrap_or(""))
-                || doc.els[a + 1..]
-                    .iter()
-                    .take_while(|e| e.open.start < el.close.as_ref().map_or(0, |c| c.start))
-                    .any(|e| e.name == "sup")
-                || el.parent.is_some_and(|p| doc.els[p].name == "sup");
+            let inside = doc.els[a + 1..]
+                .iter()
+                .take_while(|e| e.open.start < el.close.as_ref().map_or(0, |c| c.start));
+            let styled = std::iter::once(el).chain(inside).any(|e| {
+                e.name == "sup"
+                    || REF_CLASS.is_match(attr(&text[e.open.clone()], "class").unwrap_or(""))
+            }) || el.parent.is_some_and(|p| doc.els[p].name == "sup");
             let marked = note_marker(&texts[td][target_doc.els[block].open.clone()]).is_some()
                 || note_marker(&texts[td][t_el.open.clone()]).is_some();
             let labelled = is_label(&visible_text(doc.inner(text, a)));
@@ -474,7 +487,7 @@ pub fn convert(docs: &mut [(String, String)]) -> NotesReport {
             }
             _ => "footnote",
         };
-        let id = attr(&text[doc.els[target.id_el].open.clone()], "id")
+        let id = anchor(&doc.els[target.id_el], text)
             .unwrap_or_default()
             .to_owned();
         if inline {
@@ -573,7 +586,7 @@ fn two_way(docs: &[Doc], texts: &[String], target: &Target) -> bool {
             let rd = &docs[r.doc];
             std::iter::once(r.a)
                 .chain(rd.ancestors(r.a))
-                .find(|&i| attr(&texts[r.doc][rd.els[i].open.clone()], "id").is_some())
+                .find(|&i| anchor(&rd.els[i], &texts[r.doc]).is_some())
                 .map(|i| (r.doc, i))
         })
         .collect();
@@ -675,6 +688,25 @@ mod tests {
             r##"<p>Claim<sup><a href="#n3" id="r3" epub:type="noteref">3</a></sup>.</p><aside class="x" epub:type="footnote" id="n3"><a href="#r3">3</a> The note.</aside>"##
         );
         assert_eq!(r.heuristic, 1);
+    }
+
+    #[test]
+    fn word_html_notes_link_by_name() {
+        let (out, r) = one(
+            r##"<p class="MsoNormal">Claim<a href="#_ftn1" name="_ftnref1" title=""><span class="MsoFootnoteReference">[1]</span></a>.</p><div id="ftn1"><p class="MsoFootnoteText"><a href="#_ftnref1" name="_ftn1" title="">[1]</a> The note.</p></div>"##,
+        );
+        assert_eq!(
+            out,
+            r##"<p class="MsoNormal">Claim<a href="#_ftn1" name="_ftnref1" title="" epub:type="noteref"><span class="MsoFootnoteReference">[1]</span></a>.</p><div id="ftn1"><aside class="MsoFootnoteText" epub:type="footnote" id="_ftn1"><a href="#_ftnref1" name="_ftn1" title="">[1]</a> The note.</aside></div>"##
+        );
+        assert_eq!(
+            r,
+            NotesReport {
+                semantic: 0,
+                heuristic: 1,
+                skipped_one_way: 0
+            }
+        );
     }
 
     #[test]
