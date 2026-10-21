@@ -10,6 +10,25 @@ says whether `system/thumbnails` is writable over that transport, which decides 
 | Kindle Scribe (2024) | TBD | MTP only | no | 2026-10-19 | Spike 3 write: EBOK KFX + X-Ray `.sdr` delivered by the CLI (book opening on the device still to confirm). `system/` is not exposed over MTP: with `kll.en.en.klld` staged at `documents/deckle/` (copied on the device by a scriptlet), Word Wise shipped 3815 hints against the device dictionary; without it Word Wise is skipped with a warning. A USB reset on close drops it off the bus until replugged, so Deckle doesn't reset. Spike 2 passed: EBOK with the Kindle-edition ASIN typed by hand showed the store cover, and X-Ray and Word Wise kept working; marked *keeps Deckle's X-Ray for real ASINs* |
 | Simulated mass-storage Kindle (FAT32 disk image with `documents/`, `system/thumbnails`) | n/a | mass storage | yes | 2026-10-19 | EBOK + thumbnail + restore copy delivered by CLI and GUI; M4: X-Ray + Word Wise sidecars and Deckle's `system/kll/kll.en.zh.klld` delivered by the GUI, dictionary not rewritten on a second send |
 
+## Compatibility warnings (how to add a row)
+
+Deckle warns, never refuses, when a connected Kindle matches a row of `RULES` in
+`crates/deckle-core/src/compat.rs` (spec: `docs/superpowers/specs/2026-10-20-compat-warnings-design.md`).
+Matches show in the Kindles card in Settings and, for `on_send` rows, in a send's warnings.
+Firmware comes from `system/version.txt` on mass storage and from PTP DeviceInfo on MTP (read by
+the first send, then shown in the card).
+
+1. Record the fact in the table above first: model, firmware (Settings → Device Options → Device
+   Info), transport and what went wrong. A row without a device check behind it doesn't go in.
+2. Add a `Rule`: `model` is a case-insensitive substring of the model hint (`None`: any model),
+   `transport` narrows to `MassStorage` or `Mtp` (`None`: any), `firmware` is an inclusive
+   `FirmwareRange { min, max }` (`None`: every firmware; unknown firmware never matches a range),
+   `feature` is `Cover`, `Kfx`, `Xray` or `WordWise`, and `on_send: false` keeps it to the
+   device card (use it when the pipeline already says the same thing). Say what to do in the
+   message, not just what breaks.
+3. Add a case to `crates/deckle-core/tests/compat.rs` with a firmware inside the range and one
+   just outside it.
+
 ## Spikes 2 and 3 (M2, need the Scribe)
 
 Close Android File Transfer, Send to Kindle and calibre first: only one program may hold the
