@@ -11,7 +11,7 @@ use clap::Parser;
 use deckle_core::deliver::{Target, deliver, detect_mass_storage};
 use deckle_core::inspect::{BookInfo, inspect};
 use deckle_core::normalize::{NormalizeOptions, normalize};
-use deckle_core::pipeline::{RunOptions, run};
+use deckle_core::pipeline::{RunOptions, RunReport, run};
 use deckle_core::previewer;
 use deckle_kfx::convert::{ConvertOptions, kpf_to_kfx};
 
@@ -331,7 +331,10 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     }
                 }),
             };
-            let reports: Vec<_> = epubs.iter().map(|e| run(e, &opts)).collect();
+            let reports: Vec<_> = epubs
+                .iter()
+                .map(|e| run_input(e, &opts, &deckle_digest::Http))
+                .collect();
             let failed = reports.iter().filter(|r| r.error.is_some()).count();
             emit(json, &reports, || {
                 reports
@@ -380,6 +383,44 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 ExitCode::from(EXIT_FAILURE)
             })
         }
+    }
+}
+
+/// Where `run` and the desktop app write web articles' EPUBs (web-article design §3).
+pub fn articles_dir() -> PathBuf {
+    deckle_core::wordwise::default_cache_dir().join("articles")
+}
+
+/// A web address, link file or saved page built into an EPUB in `dir`, with the Daily's
+/// photo settings when it has a config.
+pub fn import_article(
+    target: &str,
+    net: &dyn deckle_digest::Net,
+    dir: &Path,
+) -> Result<deckle_digest::web_book::WebBook, String> {
+    let cfg =
+        deckle_digest::Config::load(&deckle_digest::config::default_path()).unwrap_or_default();
+    let today = deckle_digest::chrono::Local::now().date_naive();
+    deckle_digest::web_book::build(target, &cfg, net, dir, today)
+}
+
+/// One `run` argument: a web article is built into an EPUB first; the report names the
+/// argument either way.
+fn run_input(input: &Path, opts: &RunOptions, net: &dyn deckle_digest::Net) -> RunReport {
+    let arg = input.to_string_lossy();
+    if !deckle_digest::web_book::is_article(&arg) {
+        return run(input, opts);
+    }
+    match import_article(&arg, net, &articles_dir()) {
+        Ok(book) => RunReport {
+            input: input.to_path_buf(),
+            ..run(&book.path, opts)
+        },
+        Err(e) => RunReport {
+            input: input.to_path_buf(),
+            error: Some(format!("import: {e}")),
+            ..Default::default()
+        },
     }
 }
 

@@ -159,7 +159,10 @@ fn a_saved_page_is_read_from_disk_with_photos_beside_it() {
     assert_eq!(book.title, "The Long One");
     assert!(names(&book.path).contains(&"OEBPS/images/p1.jpg".to_owned()));
     let opf = entry(&book.path, "OEBPS/content.opf").unwrap();
-    assert!(opf.contains("<dc:publisher>a saved page</dc:publisher>"), "{opf}");
+    assert!(
+        opf.contains("<dc:publisher>a saved page</dc:publisher>"),
+        "{opf}"
+    );
 }
 
 #[test]

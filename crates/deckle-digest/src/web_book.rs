@@ -38,7 +38,8 @@ fn is_address(target: &str) -> bool {
 }
 
 fn extension(path: &Path) -> Option<String> {
-    path.extension().map(|e| e.to_string_lossy().to_ascii_lowercase())
+    path.extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
 }
 
 /// A web address, or a file with one of [`ARTICLE_EXTENSIONS`] (any case).

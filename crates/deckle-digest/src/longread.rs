@@ -16,7 +16,12 @@ fn photo_file(n: usize) -> String {
 }
 
 pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<(), String> {
-    write_article(lr, &format!("urn:deckle:reads:{date}:{}", lr.id), date, path)
+    write_article(
+        lr,
+        &format!("urn:deckle:reads:{date}:{}", lr.id),
+        date,
+        path,
+    )
 }
 
 /// One article as a book with identifier `uid` (an article sent on its own, #21, keeps
