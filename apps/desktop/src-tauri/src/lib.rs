@@ -56,6 +56,9 @@ pub fn run() {
             daily::daily_run,
             daily::schedule_get,
             daily::schedule_set,
+            daily::email_status,
+            daily::email_set_password,
+            daily::email_test,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deckle");

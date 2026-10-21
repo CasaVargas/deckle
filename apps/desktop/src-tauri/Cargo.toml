@@ -26,6 +26,7 @@ deckle-cli.workspace = true
 base64 = "0.23"
 tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2"
+tempfile.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -4,8 +4,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
-import type { DailyConfig, DailyState, EditionPreview, FeedConfig, PlaceRow, ReadingEntry, RunResult, ScheduleStatus, SectionKind } from "./types";
-import { ALL_SECTIONS, SECTION_LABEL, SIGNS } from "./types";
+import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, PlaceRow, ReadingEntry, RunResult, ScheduleStatus, SectionKind } from "./types";
+import { ALL_SECTIONS, DEFAULT_EMAIL, SECTION_LABEL, SIGNS } from "./types";
+
+/** Amazon's Manage Your Content and Devices: the approved-sender list and the emailed Docs. */
+const MYCD = "https://www.amazon.com/mycd";
 
 function summary(r: RunResult, send: boolean): string {
   if (!r.ok && !r.report) return r.log || "Something went wrong.";
@@ -15,6 +18,8 @@ function summary(r: RunResult, send: boolean): string {
   if (send) {
     const run = r.report?.run;
     const outcome = r.report?.outcome;
+    if (r.report?.emailed) parts.push(`Emailed to ${r.report.emailed}.`);
+    if (r.report?.email_error) parts.push(`Email failed: ${r.report.email_error}. Sent over USB instead.`);
     if (run?.error) parts.push(`Not converted: ${run.error}`);
     else if (outcome?.flush?.delivered?.length) parts.push("Sent to your Kindle.");
     else if (outcome?.queued) parts.push("Waiting for your Kindle: it goes over when you plug it in.");
@@ -54,12 +59,17 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [placeQuery, setPlaceQuery] = useState("");
   const [places, setPlaces] = useState<PlaceRow[] | null>(null);
   const [copied, setCopied] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null);
+  const [password, setPassword] = useState("");
+  const [emailMsg, setEmailMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [testing, setTesting] = useState(false);
 
   const load = useCallback(async (s?: DailyState) => {
     const st = s ?? (await api.dailyState());
     setState(st);
     setDraft(st.config ? structuredClone(st.config) : null);
     setDirty(false);
+    api.emailStatus().then(setEmailStatus).catch(() => {});
   }, []);
 
   const refreshSide = useCallback(() => {
@@ -98,13 +108,47 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     setDirty(true);
   };
 
-  const save = async (c = draft) => {
-    if (!c) return;
+  const save = async (c = draft): Promise<boolean> => {
+    if (!c) return false;
     try {
       await load(await api.dailySave(c));
+      return true;
     } catch (e) {
       onNotice(String(e));
+      return false;
     }
+  };
+
+  const editEmail = (f: (e: EmailConfig) => void) =>
+    edit((c) => {
+      c.email = c.email ?? { ...DEFAULT_EMAIL };
+      f(c.email);
+    });
+
+  // The keychain entry is named after the saved username and host, so unsaved edits go first.
+  const savePassword = async () => {
+    if (!password) return;
+    if (dirty && !(await save())) return;
+    try {
+      setEmailStatus(await api.emailSetPassword(password));
+      setEmailMsg({ text: "Password saved in the system keychain.", ok: true });
+    } catch (e) {
+      setEmailMsg({ text: String(e), ok: false });
+    }
+    setPassword("");
+  };
+
+  const sendTest = async () => {
+    if (testing) return;
+    if (dirty && !(await save())) return;
+    setTesting(true);
+    setEmailMsg(null);
+    try {
+      setEmailMsg({ text: await api.emailTest(), ok: true });
+    } catch (e) {
+      setEmailMsg({ text: String(e), ok: false });
+    }
+    setTesting(false);
   };
 
   const run = async (send: boolean) => {
@@ -334,6 +378,94 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           {schedule?.at
             ? `On. Deckle also keeps watching for your Kindle and sends the paper the moment you plug it in. A Mac asleep at ${schedule.at} builds it when it wakes.`
             : "Off. Turn it on and the paper waits for you every morning."}
+        </p>
+      </section>
+
+      <section className="card email-card">
+        <div className="card-head">
+          <h3>Email to Kindle</h3>
+          {dirty && (
+            <button className="primary" onClick={() => save()}>
+              Save
+            </button>
+          )}
+        </div>
+        <p className="muted small">
+          The morning paper arrives over Wi-Fi with no cable: Deckle emails it to your Kindle's Send-to-Kindle address from your
+          own mail account. If an email fails, the paper waits for USB as before.
+        </p>
+        <label className="check">
+          <input type="checkbox" checked={!!draft.email?.enabled} onChange={(e) => editEmail((m) => (m.enabled = e.target.checked))} />
+          Email the paper to my Kindle
+        </label>
+        <div className="grid2">
+          <label>
+            <span className="label">Kindle address</span>
+            <input value={draft.email?.to ?? ""} placeholder="you_ABC123@kindle.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.to = e.target.value))} />
+          </label>
+          <label>
+            <span className="label">From</span>
+            <input value={draft.email?.from ?? ""} placeholder="you@example.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.from = e.target.value))} />
+          </label>
+          <label>
+            <span className="label">SMTP server</span>
+            <input value={draft.email?.smtp_host ?? ""} placeholder="smtp.gmail.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.smtp_host = e.target.value))} />
+          </label>
+          <label>
+            <span className="label">Port</span>
+            <select value={draft.email?.smtp_port ?? 587} onChange={(e) => editEmail((m) => (m.smtp_port = Number(e.target.value)))}>
+              <option value={587}>587 (STARTTLS)</option>
+              <option value={465}>465 (TLS)</option>
+            </select>
+          </label>
+          <label>
+            <span className="label">Username</span>
+            <input value={draft.email?.username ?? ""} placeholder="you@example.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.username = e.target.value))} />
+          </label>
+          <div>
+            <span className="label">Password</span>
+            <form
+              className="save-row"
+              onSubmit={(e) => {
+                e.preventDefault();
+                savePassword();
+              }}
+            >
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                placeholder={emailStatus?.has_password ? "Saved in the keychain" : "App password"}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+              <button className="ghost" type="submit" disabled={!password}>
+                {emailStatus?.has_password ? "Replace" : "Save"}
+              </button>
+            </form>
+          </div>
+        </div>
+        <label className="check">
+          <input type="checkbox" checked={!!draft.email?.usb_too} onChange={(e) => editEmail((m) => (m.usb_too = e.target.checked))} />
+          Also send it over USB when the email goes out (two copies on the Kindle)
+        </label>
+        <div className="paper-actions">
+          <button className="ghost" disabled={testing || !emailStatus?.configured || !emailStatus?.has_password} onClick={sendTest}>
+            {testing ? "Sending…" : "Send a test"}
+          </button>
+          {emailStatus && !emailStatus.configured && <span className="muted small">Fill in the addresses and server first.</span>}
+        </div>
+        {emailMsg && <p className={`small ${emailMsg.ok ? "" : "fail"}`}>{emailMsg.text}</p>}
+        <p className="muted small">
+          Add the From address to Amazon's Approved Personal Document E-mail List (Manage Your Content and Devices → Preferences →
+          Personal Document Settings), or Amazon drops the email. Gmail and iCloud need an app password. The password is kept in the
+          system keychain, never in digest.toml.
+        </p>
+        <p className="muted small">
+          Emailed papers collect in your Kindle's Docs: Deckle can't remove them, so the "keep" setting only applies over USB. Clear
+          old ones in{" "}
+          <button className="link" onClick={() => api.openLink(MYCD).catch(() => {})}>
+            Manage Your Content and Devices
+          </button>
         </p>
       </section>
 

@@ -42,6 +42,7 @@ Nothing about you, ever. Deckle goes online only for:
 | LLM descriptions for X-Ray (Anthropic or any OpenAI-compatible endpoint, incl. local Ollama) | each EBOK book | off |
 | Wikipedia summaries for X-Ray terms | each EBOK book | off |
 | Amazon edition lookup (Open Library) | books for MTP Kindles | off |
+| Send-to-Kindle email of the Daily, through your own SMTP account | each morning paper | off |
 
 Your Kindle itself may ask Amazon about a book sent with features (EBOK) because it carries an
 ASIN; that is the Kindle's behaviour, and *Settings → Default mode → Cover first (PDOC)* avoids it.
@@ -174,8 +175,48 @@ What `watch` does on plug-in is set per Kindle in `digest.toml`: `[sync]` holds 
 using the id `deckle devices` shows. Push and prune share one connection.
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
-Opt-in Send-to-Kindle email comes next
-(`docs/superpowers/specs/2026-10-20-daily-digest-design.md`).
+
+#### Email to Kindle (opt-in)
+
+With no cable, the paper can arrive over Wi-Fi: `digest run` emails its EPUB to your Kindle's
+Send-to-Kindle address (`…@kindle.com`) through your own mail account. This one is labelled
+because the paper then goes through Amazon, which converts it with its own typesetting. Long reads
+and Inbox books stay on USB, where they get X-Ray and Word Wise.
+(`docs/superpowers/specs/2026-10-21-send-to-kindle-email-design.md`)
+
+1. Uncomment `[email]` in `digest.toml` (or fill in the **Email to Kindle** card on the Daily tab):
+   `to`, `from`, `smtp_host`, `smtp_port` (587 STARTTLS or 465 TLS; plain-text SMTP is refused),
+   `username`. `to` must end in `@kindle.com` or `@free.kindle.com`.
+2. Save the password in the system keychain: `deckle digest email password` (asks without echo;
+   `--stdin` for scripts), or the card's password field. It's never written to `digest.toml`.
+   Gmail and iCloud need an app password, made with 2-step verification on:
+   [Google](https://myaccount.google.com/apppasswords),
+   [Apple](https://support.apple.com/en-us/102654).
+3. Add the `from` address to Amazon's Approved Personal Document E-mail List (*Manage Your Content
+   and Devices → Preferences → Personal Document Settings*), or Amazon drops the email.
+4. `deckle digest email test` (or **Send a test**) sends a one-page EPUB. Then set
+   `enabled = true`.
+
+```sh
+deckle digest email password [--stdin]   # save the SMTP password in the keychain
+deckle digest email test                 # a one-page test EPUB to your Kindle
+deckle digest email forget               # delete the keychain entry
+```
+
+When the email goes out, the paper skips the USB outbox (`usb_too = true` sends both, so two
+copies). When it fails (no password, login refused, no network, over 45 MB), the paper is queued
+for USB as before and the run's report says why. `--to <folder>` and `digest push` never email.
+
+- **Emailed papers pile up in the Kindle's Docs.** Amazon gives Deckle no way to delete them, so
+  `keep` only prunes USB editions; clear old ones in
+  [Manage Your Content and Devices](https://www.amazon.com/mycd).
+- **The keychain entry** is `com.casavargas.deckle.smtp`, account `<username>@<smtp_host>`. With no
+  keychain at all (Linux without Secret Service, CI), `DECKLE_SMTP_PASSWORD` is read instead and
+  the report says so.
+- **macOS dev builds:** the scheduled run uses the app's own signed binary, which reads the entry
+  the app wrote with no prompt. A separately built and signed `deckle` (e.g. `cargo install`)
+  makes macOS ask once whether "deckle wants to use your confidential information": choose
+  **Always Allow**, or the 5:30 run waits on that dialog.
 
 ## How it works: what a "store-quality" sideloaded book needs
 

@@ -15,10 +15,12 @@ pub mod geocode;
 pub mod horoscope;
 pub mod inbox;
 pub mod longread;
+pub mod mail;
 pub mod moon;
 pub mod reading;
 pub mod render;
 pub mod schedule;
+pub mod secret;
 pub mod sources;
 
 use std::path::{Path, PathBuf};
@@ -29,6 +31,7 @@ use serde::Serialize;
 pub use chrono;
 pub use config::{Config, SectionKind};
 pub use fetch::{Http, Net};
+pub use zeroize;
 
 /// The author stamped on every edition.
 pub const AUTHOR: &str = "Deckle";
