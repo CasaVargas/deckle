@@ -175,7 +175,7 @@ pub struct DeviceBook {
 - **Remove** takes a file name from the inventory. It deletes `documents/<file>` and
   `documents/<stem>.sdr` (over MTP: the folder's children, then the folder). On mass storage
   it also deletes Deckle's `system/thumbnails/thumbnail_<ASIN>_EBOK_portrait.jpg` for a
-  `…DECK` ASIN. The library's send record for that device is dropped. A name that isn't in
+  `…DECK` ASIN, and its restore copy in `deckle-covers/` (which every send copies back). The library's send record for that device is dropped. A name that isn't in
   `documents/` (or contains `..`) is refused.
 
 ## 5. Surfaces
