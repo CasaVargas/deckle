@@ -56,6 +56,16 @@ fn epub(path: &Path, id: &str, title: &str, author: &str) -> PathBuf {
     path.to_path_buf()
 }
 
+/// `path` under `root`, `/`-separated on every OS.
+fn rel(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap()
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn files_under(root: &Path) -> Vec<String> {
     fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
         for e in std::fs::read_dir(dir).unwrap().flatten() {
@@ -63,7 +73,7 @@ fn files_under(root: &Path) -> Vec<String> {
             if p.is_dir() {
                 walk(&p, root, out);
             } else {
-                out.push(p.strip_prefix(root).unwrap().to_string_lossy().into_owned());
+                out.push(rel(&p, root));
             }
         }
     }
@@ -171,13 +181,7 @@ fn no_author_and_unsafe_titles_still_make_good_folders() {
         "",
     );
     let book = lib.add(&src).unwrap().book;
-    let rel = book
-        .dir
-        .strip_prefix(&lib.root)
-        .unwrap()
-        .to_string_lossy()
-        .into_owned();
-    assert_eq!(rel, "Unknown Author/What_ A_B_ Test");
+    assert_eq!(rel(&book.dir, &lib.root), "Unknown Author/What_ A_B_ Test");
 }
 
 #[test]
