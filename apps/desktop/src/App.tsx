@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import BookRowView from "./BookRow";
 import SettingsDrawer from "./SettingsDrawer";
+import DailyView from "./DailyView";
 import type { BookRow, BookState, DeviceRow, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
@@ -40,6 +41,7 @@ export default function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState<string | null>(null);
+  const [tab, setTab] = useState<"books" | "daily">("books");
   const booksRef = useRef(books);
   booksRef.current = books;
 
@@ -85,6 +87,7 @@ export default function App() {
 
   useEffect(() => {
     api.appVersion().then(setVersion).catch(() => setVersion("dev"));
+    api.startTab().then(setTab).catch(() => {});
     api.getSettings().then(setSettings).catch(() => {});
     api.previewerStatus().then(setPreviewer).catch(() => {});
     refreshDevices();
@@ -217,16 +220,26 @@ export default function App() {
     <div className={`app ${dragging ? "dragging" : ""}`}>
       <header className="topbar">
         <div className="brand">Deckle</div>
+        <div className="tabs" role="tablist">
+          <button role="tab" aria-selected={tab === "books"} className={tab === "books" ? "on" : ""} onClick={() => setTab("books")}>
+            Books
+          </button>
+          <button role="tab" aria-selected={tab === "daily"} className={tab === "daily" ? "on" : ""} onClick={() => setTab("daily")}>
+            Daily
+          </button>
+        </div>
         {!previewer?.found && previewer && (
           <button className="pill warn" onClick={() => setSettingsOpen(true)}>
             Kindle Previewer not found
           </button>
         )}
         <div className="spacer" />
-        <button className="ghost" onClick={pickBooks} disabled={busy}>
-          Add books…
-        </button>
-        {doneCount > 0 && !busy && (
+        {tab === "books" && (
+          <button className="ghost" onClick={pickBooks} disabled={busy}>
+            Add books…
+          </button>
+        )}
+        {tab === "books" && doneCount > 0 && !busy && (
           <button className="ghost" onClick={clearDone}>
             Clear done
           </button>
@@ -236,6 +249,8 @@ export default function App() {
         </button>
       </header>
 
+      {tab === "daily" && <DailyView onNotice={setNotice} />}
+      {tab === "books" && (
       <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
         {books.length === 0 ? (
           <div className="dropzone-inner">
@@ -268,6 +283,7 @@ export default function App() {
         )}
         {dragging && <div className="drop-overlay">Drop to add</div>}
       </main>
+      )}
 
       {notice && (
         <div className="notice" role="status">
@@ -278,6 +294,7 @@ export default function App() {
         </div>
       )}
 
+      {tab === "books" && (
       <footer className="bar">
         <div className="device">
           <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
@@ -319,6 +336,7 @@ export default function App() {
         </div>
         <div className="version">Deckle {version}</div>
       </footer>
+      )}
 
       <SettingsDrawer
         open={settingsOpen}

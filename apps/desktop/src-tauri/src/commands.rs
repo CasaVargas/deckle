@@ -258,6 +258,8 @@ pub struct AppState {
     pub preload: Mutex<Vec<String>>,
     /// `--export-to <dir>`: run the preloaded books into this folder as soon as they load.
     pub preload_target: Mutex<Option<String>>,
+    /// `--daily`: open on the Daily tab.
+    pub start_daily: bool,
 }
 
 /// `deckle-desktop [--export-to DIR] [BOOK...]`: books to open and an optional auto-export dir.
@@ -736,6 +738,11 @@ pub fn take_preloaded_books(state: State<'_, AppState>) -> Vec<String> {
 #[tauri::command]
 pub fn take_preloaded_target(state: State<'_, AppState>) -> Option<String> {
     state.preload_target.lock().unwrap().take()
+}
+
+#[tauri::command]
+pub fn start_tab(state: State<'_, AppState>) -> &'static str {
+    if state.start_daily { "daily" } else { "books" }
 }
 
 #[tauri::command]
