@@ -9,6 +9,7 @@ pub mod epub;
 #[cfg(test)]
 mod fake_mtp;
 pub mod inspect;
+pub mod inventory;
 pub mod matcher;
 pub mod normalize;
 pub mod pipeline;

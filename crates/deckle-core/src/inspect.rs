@@ -381,6 +381,8 @@ pub struct KfxInfo {
     pub info: BookInfo,
     /// `PDOC` or `EBOK`, from `cde_content_type`.
     pub cde_type: Option<String>,
+    /// The `ASIN` (else `content_id`) the Kindle files it under.
+    pub asin: Option<String>,
     /// The cover image bytes (JPEG), when the KFX carries one.
     #[serde(skip)]
     pub cover: Option<Vec<u8>>,
@@ -423,6 +425,8 @@ pub fn inspect_kfx(kfx: &[u8]) -> Result<KfxInfo, String> {
                 }),
                 ("language", Some(l)) => out.info.language = l,
                 ("cde_content_type", Some(t)) => out.cde_type = Some(t),
+                ("ASIN", Some(a)) => out.asin = Some(a),
+                ("content_id", Some(a)) if out.asin.is_none() => out.asin = Some(a),
                 ("cover_image", Some(n)) => cover_name = Some(n),
                 _ => {}
             }

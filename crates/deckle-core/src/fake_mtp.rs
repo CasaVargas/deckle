@@ -6,12 +6,15 @@
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use deckle_transport::ptp::{Container, ContainerKind, ObjectInfo, fmt, op, rsp};
+use deckle_transport::ptp::{Container, ContainerKind, ObjectInfo, StorageInfo, fmt, op, rsp};
 use deckle_transport::session::{Mtp, Transport, TransportError};
 use deckle_transport::usb::MtpInfo;
 
 const STORAGE: u32 = 0x0001_0001;
 const DOCUMENTS: u32 = 1;
+/// What GetStorageInfo reports.
+pub const CAPACITY: u64 = 31_000_000_000;
+pub const FREE: u64 = 12_000_000_000;
 
 #[derive(Default)]
 struct Kindle {
@@ -50,6 +53,55 @@ pub fn reset(docs: &[&str]) {
         }
         k.next = 100;
     });
+}
+
+/// Puts `path` under `documents/` (`a.kfx`, `a.sdr/XRAY.entities.B0X.asc`, `Sub/b.pdf`),
+/// making its folders; a file gets `size` bytes.
+pub fn put(path: &str, size: u32) {
+    KINDLE.with(|k| {
+        let mut k = k.borrow_mut();
+        let mut parent = DOCUMENTS;
+        let parts: Vec<&str> = path.split('/').collect();
+        for (i, part) in parts.iter().enumerate() {
+            let folder = i + 1 < parts.len();
+            let found = k
+                .objects
+                .iter()
+                .find(|(_, o)| o.parent == parent && o.filename == *part)
+                .map(|(h, _)| *h);
+            parent = match found {
+                Some(h) => h,
+                None => {
+                    let h = k.next;
+                    k.next += 1;
+                    let mut o = info(parent, part, folder);
+                    if !folder {
+                        o.size = size;
+                    }
+                    k.objects.push((h, o));
+                    h
+                }
+            };
+        }
+    });
+}
+
+/// Every path under `documents/`, folders with a trailing `/`, sorted.
+pub fn paths() -> Vec<String> {
+    fn walk(k: &Kindle, parent: u32, prefix: &str, out: &mut Vec<String>) {
+        for (h, o) in k.objects.iter().filter(|(_, o)| o.parent == parent) {
+            if o.association {
+                out.push(format!("{prefix}{}/", o.filename));
+                walk(k, *h, &format!("{prefix}{}/", o.filename), out);
+            } else {
+                out.push(format!("{prefix}{}", o.filename));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    KINDLE.with(|k| walk(&k.borrow(), DOCUMENTS, "", &mut out));
+    out.sort();
+    out
 }
 
 pub fn documents() -> Vec<String> {
@@ -139,6 +191,15 @@ impl Wire {
             match c.code {
                 op::GET_STORAGE_IDS => {
                     self.replies.push_back(data(c.code, tx, &u32s(&[STORAGE])));
+                }
+                op::GET_STORAGE_INFO => {
+                    let s = StorageInfo {
+                        max_capacity: CAPACITY,
+                        free_bytes: FREE,
+                        description: "Internal Storage".into(),
+                        volume_label: "Kindle".into(),
+                    };
+                    self.replies.push_back(data(c.code, tx, &s.encode()));
                 }
                 op::GET_OBJECT_HANDLES => {
                     let parent = match c.params[2] {

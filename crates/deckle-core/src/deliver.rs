@@ -109,6 +109,9 @@ pub enum DeliverError {
     Mtp(String),
     #[error("thumbnail: {0}")]
     Thumbnail(String),
+    /// Not a book Deckle may touch, or not there (inventory remove).
+    #[error("{0}")]
+    Refused(String),
 }
 
 const MAX_FILENAME_LEN: usize = 120;

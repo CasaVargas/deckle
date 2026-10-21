@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+fs4 = "0.13"
 deckle-kfx.workspace = true
 deckle-transport.workspace = true
 deckle-xray.workspace = true
