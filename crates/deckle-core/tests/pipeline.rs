@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 use deckle_core::deliver::Target;
-use deckle_core::pipeline::{CoverTemplate, RunOptions, RunReport, XRayMode, run};
+use deckle_core::pipeline::{RunOptions, RunReport, XRayMode, run};
 use deckle_kfx::convert::CdeType;
 
 #[cfg(unix)]
@@ -1084,7 +1084,9 @@ fn a_failed_metadata_lookup_is_a_warning_and_the_book_still_converts() {
 /// The DOCX fixture through the pipeline with the work dir kept; returns the report and the
 /// normalized EPUB's bytes.
 #[cfg(unix)] // the fake Previewer is a shell script
-fn docx_normalized(generated_cover: Option<Option<CoverTemplate>>) -> (RunReport, Vec<u8>) {
+fn docx_normalized(
+    generated_cover: Option<Option<deckle_core::pipeline::CoverTemplate>>,
+) -> (RunReport, Vec<u8>) {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
         generated_cover,
@@ -1104,7 +1106,12 @@ fn docx_normalized(generated_cover: Option<Option<CoverTemplate>>) -> (RunReport
 fn a_word_document_gets_a_generated_cover() {
     let (report, epub) = docx_normalized(Some(None));
     let style = report.normalize.cover_generated.clone().expect("generated");
-    assert!(style.parse::<CoverTemplate>().is_ok(), "{style}");
+    assert!(
+        style
+            .parse::<deckle_core::pipeline::CoverTemplate>()
+            .is_ok(),
+        "{style}"
+    );
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("n.epub");
     std::fs::write(&path, &epub).unwrap();
@@ -1113,7 +1120,7 @@ fn a_word_document_gets_a_generated_cover() {
     // The same book always gets the same cover.
     assert_eq!(docx_normalized(Some(None)).1, epub);
     // An explicit style wins over the hash.
-    let (r, _) = docx_normalized(Some(Some(CoverTemplate::Rule)));
+    let (r, _) = docx_normalized(Some(Some(deckle_core::pipeline::CoverTemplate::Rule)));
     assert_eq!(r.normalize.cover_generated.as_deref(), Some("rule"));
 }
 
