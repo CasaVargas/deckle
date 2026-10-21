@@ -376,9 +376,12 @@ pub fn remove_on(conn: &mut Conn<'_>, file: &str) -> Result<Vec<String>, Deliver
             deckle_kfx::convert::CdeType::Pdoc,
         ] {
             let name = crate::thumbnail::thumbnail_name(&asin, cde);
-            let thumb = root.join("system/thumbnails").join(&name);
-            if thumb.is_file() && std::fs::remove_file(&thumb).is_ok() {
-                removed.push(format!("system/thumbnails/{name}"));
+            // The thumbnail and Deckle's restore copy, which every send would put back.
+            for dir in [crate::thumbnail::THUMBNAIL_DIR, crate::thumbnail::CACHE_DIR] {
+                let thumb = root.join(dir).join(&name);
+                if thumb.is_file() && std::fs::remove_file(&thumb).is_ok() {
+                    removed.push(format!("{dir}/{name}"));
+                }
             }
         }
     }
@@ -548,6 +551,9 @@ mod device_tests {
         std::fs::write(docs.join("Mine - Book.sdr/x.asc"), b"x").unwrap();
         let thumb = format!("thumbnail_{asin}_EBOK_portrait.jpg");
         std::fs::write(thumbs.join(&thumb), b"jpg").unwrap();
+        let copies = tmp.path().join(crate::thumbnail::CACHE_DIR);
+        std::fs::create_dir_all(&copies).unwrap();
+        std::fs::write(copies.join(&thumb), b"jpg").unwrap();
         std::fs::write(
             thumbs.join("thumbnail_B00STORE00_EBOK_portrait.jpg"),
             b"jpg",
@@ -562,8 +568,12 @@ mod device_tests {
                 "documents/Mine - Book.kfx".to_owned(),
                 "documents/Mine - Book.sdr".to_owned(),
                 format!("system/thumbnails/{thumb}"),
+                format!("deckle-covers/{thumb}"),
             ]
         );
+        // The next send's restore pass has nothing to bring back.
+        assert_eq!(crate::thumbnail::sync(tmp.path()).unwrap(), 0);
+        assert!(!thumbs.join(&thumb).exists());
         assert_eq!(std::fs::read_dir(&docs).unwrap().count(), 0);
         assert!(
             thumbs
