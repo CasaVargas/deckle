@@ -204,7 +204,7 @@ impl DeviceInfo {
         if bytes.len() < at {
             return Err(PtpError::Truncated);
         }
-        let mut string = |at: &mut usize| -> Result<String, PtpError> {
+        let string = |at: &mut usize| -> Result<String, PtpError> {
             let (s, n) = decode_string(bytes.get(*at..).ok_or(PtpError::Truncated)?)?;
             *at += n;
             Ok(s)
