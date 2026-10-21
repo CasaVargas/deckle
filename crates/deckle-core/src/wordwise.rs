@@ -21,7 +21,7 @@ use deckle_wordwise::lexicon::Lexicon;
 
 /// Deckle's database release asset (built by `data/wordwise`).
 pub const DB_FILE: &str = "deckle-wordwise-en-v1.sqlite";
-pub const DB_URL: &str = "https://github.com/prjoni99/deckle/releases/download/wordwise-v1/deckle-wordwise-en-v1.sqlite.gz";
+pub const DB_URL: &str = "https://github.com/CasaVargas/deckle/releases/download/wordwise-v1/deckle-wordwise-en-v1.sqlite.gz";
 /// SHA-256 of the `.gz` at [`DB_URL`].
 pub const DB_SHA256: &str = "2fdc729af1a2411dd4706eda183cc7475e908816013a1d4ec1cb10b2bedc7c34";
 /// Points at a local database instead of the cached download.
@@ -69,7 +69,7 @@ pub type FetchBytes<'a> = dyn FnMut(&str) -> Result<Vec<u8>, String> + 'a;
 pub fn http_get_bytes(url: &str) -> Result<Vec<u8>, String> {
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(300)))
-        .user_agent("Deckle/0.1 (+https://github.com/prjoni99/deckle)")
+        .user_agent("Deckle/0.1 (+https://github.com/CasaVargas/deckle)")
         // The OS certificate store, so TLS-inspecting proxies (Zscaler, …) the machine trusts work.
         .tls_config(
             ureq::tls::TlsConfig::builder()

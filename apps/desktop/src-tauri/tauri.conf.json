@@ -45,7 +45,7 @@
     "copyright": "© 2026 CasaVargas LLC · GPL-3.0-or-later",
     "category": "Productivity",
     "license": "GPL-3.0-or-later",
-    "homepage": "https://github.com/prjoni99/deckle",
+    "homepage": "https://github.com/CasaVargas/deckle",
     "shortDescription": "Turn EPUBs into store-quality Kindle books",
     "longDescription": "Deckle turns EPUBs you own into Kindle books with Enhanced Typesetting, covers that show, page numbers, X-Ray and Word Wise, and puts them on your Kindle over USB or MTP.",
     "macOS": {
