@@ -18,6 +18,7 @@ python3 -m venv /tmp/kfxvenv && /tmp/kfxvenv/bin/pip install lxml pillow pypdf b
 | Script | Purpose |
 |---|---|
 | `make_mini_epub.py OUT.epub` | Builds the deterministic mini EPUB fixture |
+| `make_notes_epubs.py OUT_DIR` | Builds the pop-up notes fixtures (#31) in `fixtures/notes/` |
 | `make_txt_fixtures.py OUT_DIR` | Builds the plain text fixtures in `fixtures/txt` |
 | `kpf2kfx.py <KFX-Input> IN.kpf OUT.kfx CDE ASIN` | KPF to monolithic KFX with approximate pages; prints fragment type counts |
 | `kpf2kfx_opts.py <KFX-Input> IN.kpf OUT.kfx CDE ASIN PAGES\|none` | Same, with page-list control |

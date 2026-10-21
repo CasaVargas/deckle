@@ -13,6 +13,7 @@ pub mod inventory;
 pub mod matcher;
 pub mod metadata_fill;
 pub mod normalize;
+pub mod notes;
 pub mod pipeline;
 pub mod previewer;
 pub mod queue;

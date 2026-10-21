@@ -35,6 +35,8 @@ pub struct RunOptions {
     pub metadata_fill: bool,
     /// Curly quotes, dashes, ellipses and empty-paragraph cleanup in normalize (issue #30).
     pub typography: bool,
+    /// Footnotes and endnotes to Kindle pop-up notes in normalize (issue #31).
+    pub popup_notes: bool,
     /// Spike 2 passed on this device: real ASINs keep our sidecars.
     pub verified_real_asin: bool,
     /// An ASIN the owner typed (design §3); replaces Match. `None`: Match, else generated.
@@ -348,6 +350,7 @@ pub fn prepare_with(
     let normalize_opts = NormalizeOptions {
         fill,
         typography: opts.typography,
+        popup_notes: opts.popup_notes,
         ..Default::default()
     };
     let nreport = stage!(
@@ -673,6 +676,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
         amazon_match: false,
         metadata_fill: false,
         typography: false,
+        popup_notes: false,
         verified_real_asin: false,
         asin: None,
         pages: prepared.wishes.pages,

@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS: Settings = {
   amazon_match: false,
   metadata_fill: false,
   typography: false,
+  popup_notes: false,
 };
 
 /** Link files and saved pages become articles (web-article design); everything else is a book. */

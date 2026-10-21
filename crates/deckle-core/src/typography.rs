@@ -166,7 +166,7 @@ fn rewrite_text(body: &str, curl_quotes: bool, report: &mut TypographyReport) ->
 
 /// Length of the markup after a `<`: a comment, CDATA, processing instruction or tag
 /// (quoted attribute values may hold `>`).
-fn markup_len(s: &str) -> usize {
+pub(crate) fn markup_len(s: &str) -> usize {
     let until = |end: &str| s.find(end).map_or(s.len(), |i| i + end.len());
     if s.starts_with("!--") {
         return until("-->");
@@ -191,7 +191,7 @@ fn markup_len(s: &str) -> usize {
 
 /// (local name lowercased, is closing, is self-closing) of an element tag; `None` for
 /// comments, CDATA, doctype and processing instructions.
-fn tag_name(tag: &str) -> Option<(String, bool, bool)> {
+pub(crate) fn tag_name(tag: &str) -> Option<(String, bool, bool)> {
     let inner = tag.strip_prefix('<')?;
     let (closing, inner) = match inner.strip_prefix('/') {
         Some(r) => (true, r),
