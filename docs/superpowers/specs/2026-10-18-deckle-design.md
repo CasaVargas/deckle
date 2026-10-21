@@ -40,7 +40,9 @@ so the research that went into it stops being re-derived on MobileRead every yea
 
 - Library management, tagging, reading, metadata editing beyond what the pipeline needs.
 - DRM removal of any kind. Input is DRM-free EPUB only.
-- Send-to-Kindle email or Amazon cloud delivery. Deckle is USB/MTP only.
+- Send-to-Kindle email or Amazon cloud delivery. Deckle is USB/MTP only. (Labelled
+  exception: `deckle serve`, an opt-in, read-only server over the outbox that the Kindle's
+  browser fetches from on the LAN or tailnet: `2026-10-20-wifi-delivery-design.md`.)
 - Comics, manga, fixed-layout, PDFs, dictionaries. (Word documents came later as an import
   stage in front of the pipeline: `2026-10-21-docx-import-design.md`.)
 - Producing AZW3/MOBI. If KFX conversion fails the book is reported, not downgraded (AZW3
@@ -332,3 +334,5 @@ Each milestone ends with a verified book on a real device, not a passing test.
 - 2026-10-20 The app accepts finished KFX files and sends them as is (owner asked why the
   Deckle Daily KFX could not be added). Re-converting or re-enriching a KFX is out of scope;
   its mode is whatever it was built with. Owner, #57.
+- 2026-10-20 Wi-Fi delivery: `deckle serve`, opt-in, explicit bind address, token in the path,
+  read-only over the outbox, std `TcpListener`; merge gated on a Kindle browser spike. Owner, #44.
