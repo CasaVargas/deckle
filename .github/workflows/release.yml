@@ -1,9 +1,10 @@
 name: release
 # Builds installers for a `v*` tag and attaches them to a DRAFT GitHub release; the owner
 # reviews and publishes it. It runs only for a version tag or by hand (workflow_dispatch):
-# pull requests are checked by ci.yml and don't build installers. macOS builds are signed and notarized when the Apple secrets exist, and
-# Windows builds are signed with Azure Artifact Signing when the Azure secrets exist
-# (docs/release.md); without them each platform builds unsigned with a warning.
+# pull requests are checked by ci.yml and don't build installers. macOS builds are signed and
+# notarized when the Apple secrets exist, and Windows builds are signed with Azure Artifact
+# Signing when the Azure secrets exist (docs/release.md); without them each platform builds
+# unsigned with a warning.
 on:
   push:
     tags: ["v*"]
