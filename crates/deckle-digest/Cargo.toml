@@ -25,6 +25,17 @@ url = "2"
 base64.workspace = true
 deunicode.workspace = true
 rand.workspace = true
+zeroize = "1"
+
+# The SMTP password's keychain (email design §6): each OS's own store.
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile.workspace = true
