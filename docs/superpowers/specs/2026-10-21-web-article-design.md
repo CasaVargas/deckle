@@ -80,3 +80,7 @@ saved .html ───────────read───┘
 - Desktop: `import_articles` on a saved page returns a row with the article's title and a
   cover, and a stub page returns an error row. The drop, picker and paste paths are checked
   by hand in the running app.
+
+All HTTP (here, the Daily, Open Library, Word Wise, Wikipedia, the LLM) checks certificates
+against the OS store (`ureq` platform verifier), so a TLS-inspecting proxy the machine trusts
+(e.g. Zscaler) works instead of failing with `UnknownIssuer`.

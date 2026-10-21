@@ -141,7 +141,7 @@ pub fn build(
         file_stem: stem.clone(),
     };
     let path = dir.join(format!("{stem}.epub"));
-    longread::write_article(&lr, &format!("urn:deckle:article:{id}"), date, &path)?;
+    longread::write_article(&lr, &format!("urn:deckle:article:{id}"), None, date, &path)?;
     Ok(WebBook {
         path,
         title,

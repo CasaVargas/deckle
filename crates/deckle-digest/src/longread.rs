@@ -19,22 +19,30 @@ pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<()
     write_article(
         lr,
         &format!("urn:deckle:reads:{date}:{}", lr.id),
+        Some("saved to your Deckle Daily"),
         date,
         path,
     )
 }
 
 /// One article as a book with identifier `uid` (an article sent on its own, #21, keeps
-/// the same one each time).
-pub fn write_article(lr: &LongRead, uid: &str, date: NaiveDate, path: &Path) -> Result<(), String> {
+/// the same one each time). `via` follows the reading time at the cover's foot.
+pub fn write_article(
+    lr: &LongRead,
+    uid: &str,
+    via: Option<&str>,
+    date: NaiveDate,
+    path: &Path,
+) -> Result<(), String> {
     let cover = crate::cover::render_reads(
         &lr.title,
         lr.byline.as_deref(),
         &lr.outlet,
         minutes(lr.words),
+        via,
     )?;
     let author = lr.byline.clone().unwrap_or_else(|| lr.outlet.clone());
-    // An outlet isn't a person: keep "Deckle Reads" from filing as "Reads, Deckle".
+    // An outlet isn't a person: keep "a saved page" from filing as "page, a saved".
     let file_as = match &lr.byline {
         Some(_) => String::new(),
         None => format!(
