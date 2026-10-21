@@ -1090,6 +1090,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-txt"
+version = "0.2.1"
+dependencies = [
+ "encoding_rs",
+ "roxmltree",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zip",
+]
+
+[[package]]
 name = "deckle-wordwise"
 version = "0.2.1"
 dependencies = [
