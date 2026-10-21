@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 
 use deckle_core::deliver::Target;
-use deckle_core::pipeline::{RunOptions, RunReport, XRayMode, run};
+use deckle_core::pipeline::{CoverTemplate, RunOptions, RunReport, XRayMode, run};
 use deckle_kfx::convert::CdeType;
 
 #[cfg(unix)]
@@ -25,6 +25,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -80,6 +81,7 @@ fn missing_previewer_fails_before_any_work() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -114,6 +116,7 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -151,6 +154,7 @@ fn a_word_document_runs_through_the_whole_pipeline() {
         keep_work_dir: true,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -201,6 +205,7 @@ fn a_broken_word_document_fails_at_import() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -248,6 +253,7 @@ fn real_previewer_end_to_end() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -275,6 +281,7 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -307,6 +314,7 @@ fn run_with_progress_reports_each_stage_in_order() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -344,6 +352,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -411,6 +420,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -452,6 +462,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -496,6 +507,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -529,6 +541,7 @@ fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -589,6 +602,7 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -652,6 +666,7 @@ fn a_word_document_built_as_ebok_ships_xray_and_word_wise_sidecars() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -733,6 +748,7 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
         previewer: Some(fake("ok.sh")),
         keep_work_dir: false,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -812,6 +828,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
         keep_work_dir: false,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill: false,
         typography: false,
         verified_real_asin: false,
@@ -851,6 +868,7 @@ fn fill_opts(out: &std::path::Path, metadata_fill: bool) -> RunOptions {
         keep_work_dir: true,
         cde_override: None,
         amazon_match: false,
+        generated_cover: Some(None),
         metadata_fill,
         typography: false,
         verified_real_asin: false,
@@ -969,4 +987,73 @@ fn a_failed_metadata_lookup_is_a_warning_and_the_book_still_converts() {
             let _ = std::fs::remove_dir_all(w);
         }
     }
+}
+
+/// The DOCX fixture through the pipeline with the work dir kept; returns the report and the
+/// normalized EPUB's bytes.
+#[cfg(unix)] // the fake Previewer is a shell script
+fn docx_normalized(generated_cover: Option<Option<CoverTemplate>>) -> (RunReport, Vec<u8>) {
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        generated_cover,
+        keep_work_dir: true,
+        ..fill_opts(out.path(), false)
+    };
+    let report = run(&docx_fixture(), &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    let work = report.work_dir.clone().expect("kept work dir");
+    let bytes = std::fs::read(work.join("normalized.epub")).unwrap();
+    std::fs::remove_dir_all(work).ok();
+    (report, bytes)
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_word_document_gets_a_generated_cover() {
+    let (report, epub) = docx_normalized(Some(None));
+    let style = report.normalize.cover_generated.clone().expect("generated");
+    assert!(style.parse::<CoverTemplate>().is_ok(), "{style}");
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("n.epub");
+    std::fs::write(&path, &epub).unwrap();
+    let info = deckle_core::inspect::inspect(&path).unwrap();
+    assert_eq!(info.cover_href.as_deref(), Some("deckle-cover.jpg"));
+    // The same book always gets the same cover.
+    assert_eq!(docx_normalized(Some(None)).1, epub);
+    // An explicit style wins over the hash.
+    let (r, _) = docx_normalized(Some(Some(CoverTemplate::Rule)));
+    assert_eq!(r.normalize.cover_generated.as_deref(), Some("rule"));
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn with_generated_covers_off_a_word_document_normalizes_as_before() {
+    let (report, epub) = docx_normalized(None);
+    assert_eq!(report.normalize.cover_generated, None);
+    // Today's output: the imported EPUB normalized with the default options.
+    let dir = tempfile::tempdir().unwrap();
+    let (imported, before) = (dir.path().join("i.epub"), dir.path().join("b.epub"));
+    deckle_docx::convert(&docx_fixture(), &imported).unwrap();
+    deckle_core::normalize::normalize(&imported, &before, &Default::default()).unwrap();
+    assert_eq!(epub, std::fs::read(before).unwrap());
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn an_epub_with_a_cover_normalizes_the_same_with_generated_covers_on_or_off() {
+    let normalized = |generated_cover| {
+        let out = tempfile::tempdir().unwrap();
+        let opts = RunOptions {
+            generated_cover,
+            keep_work_dir: true,
+            ..fill_opts(out.path(), false)
+        };
+        let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
+        assert_eq!(report.normalize.cover_generated, None);
+        let work = report.work_dir.clone().expect("kept work dir");
+        let bytes = std::fs::read(work.join("normalized.epub")).unwrap();
+        std::fs::remove_dir_all(work).ok();
+        bytes
+    };
+    assert_eq!(normalized(Some(None)), normalized(None));
 }
