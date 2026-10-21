@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `digest.toml`: what goes in the paper, in what order.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -51,6 +52,8 @@ pub struct Config {
     pub lottery: LotteryConfig,
     pub horoscope: HoroscopeConfig,
     pub reading: ReadingConfig,
+    /// What `digest watch` does when a Kindle connects (auto-sync design §3).
+    pub sync: SyncConfig,
 }
 
 impl Default for Config {
@@ -80,6 +83,7 @@ impl Default for Config {
             lottery: LotteryConfig::default(),
             horoscope: HoroscopeConfig::default(),
             reading: ReadingConfig::default(),
+            sync: SyncConfig::default(),
         }
     }
 }
@@ -172,6 +176,65 @@ impl Default for ReadingConfig {
     }
 }
 
+/// `[sync]`: the actions run on plug-in, with per-device overrides keyed by sync id.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SyncConfig {
+    pub push: bool,
+    pub prune: bool,
+    /// Reserved for clippings pull (#60); accepted, does nothing yet.
+    pub clippings: bool,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub devices: BTreeMap<String, DeviceSync>,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        SyncConfig {
+            push: true,
+            prune: true,
+            clippings: false,
+            devices: BTreeMap::new(),
+        }
+    }
+}
+
+/// `[sync.devices."<id>"]`: what's set here wins over `[sync]`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DeviceSync {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prune: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clippings: Option<bool>,
+}
+
+/// The actions settled for one device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct SyncActions {
+    pub push: bool,
+    pub prune: bool,
+    pub clippings: bool,
+}
+
+impl SyncConfig {
+    pub fn for_device(&self, id: &str) -> SyncActions {
+        let d = self.devices.get(id).cloned().unwrap_or_default();
+        SyncActions {
+            push: d.push.unwrap_or(self.push),
+            prune: d.prune.unwrap_or(self.prune),
+            clippings: d.clippings.unwrap_or(self.clippings),
+        }
+    }
+
+    /// Clippings asked for anywhere (the watcher says it isn't built yet).
+    pub fn any_clippings(&self) -> bool {
+        self.clippings || self.devices.values().any(|d| d.clippings == Some(true))
+    }
+}
+
 /// The starter file `deckle digest init` writes.
 pub const STARTER: &str = r#"# Deckle Daily — your morning paper, built on this machine.
 # Edit freely; `deckle digest build` shows what a change does.
@@ -212,6 +275,16 @@ games = ["powerball", "megamillions"]
 
 [horoscope]
 signs = []                        # e.g. ["leo", "virgo"]; empty prints all twelve
+
+# What `deckle digest watch` does when a Kindle is plugged in.
+[sync]
+push = true                       # deliver waiting editions
+prune = true                      # then keep only the newest `keep` on the Kindle
+clippings = false                 # not built yet
+
+# Per Kindle, by the "sync id" `deckle devices` shows:
+# [sync.devices."G0000000000"]
+# prune = false
 "#;
 
 impl Config {
@@ -353,6 +426,56 @@ mod tests {
                 .unwrap()
                 .starts_with("# Deckle Daily")
         );
+    }
+
+    #[test]
+    fn sync_defaults_push_and_prune_for_any_device() {
+        let c = Config::parse("").unwrap();
+        let want = SyncActions {
+            push: true,
+            prune: true,
+            clippings: false,
+        };
+        assert_eq!(c.sync.for_device("G000"), want);
+        assert_eq!(Config::parse(STARTER).unwrap().sync.for_device("G000"), want);
+    }
+
+    #[test]
+    fn a_device_overrides_only_what_it_sets() {
+        let c = Config::parse(
+            "[sync]\nprune = false\n\n[sync.devices.\"G000\"]\npush = false\nprune = true\n\n\
+             [sync.devices.\"Kindle/Kindle\"]\nclippings = true\n",
+        )
+        .unwrap();
+        let actions = |push, prune, clippings| SyncActions {
+            push,
+            prune,
+            clippings,
+        };
+        assert_eq!(c.sync.for_device("G000"), actions(false, true, false));
+        assert_eq!(c.sync.for_device("Kindle/Kindle"), actions(true, false, true));
+        assert_eq!(c.sync.for_device("other"), actions(true, false, false));
+        assert!(c.sync.any_clippings());
+    }
+
+    #[test]
+    fn a_sync_typo_is_an_error() {
+        assert!(Config::parse("[sync]\npsuh = true").is_err());
+        assert!(Config::parse("[sync.devices.\"G\"]\nprnue = false").is_err());
+    }
+
+    #[test]
+    fn saving_keeps_a_device_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        let text = format!("{STARTER}\n[sync.devices.\"G000\"]\nprune = false   # mine\n");
+        std::fs::write(&path, &text).unwrap();
+        let mut c = Config::load(&path).unwrap();
+        c.title = "The Carthage Courier".into();
+        save(&path, &c).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("prune = false   # mine"), "{saved}");
+        assert_eq!(Config::load(&path).unwrap(), c);
     }
 
     #[test]
