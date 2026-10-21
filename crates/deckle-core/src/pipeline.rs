@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compat::{self, SendUse};
 use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
-use crate::deliver::{Conn, DeliverOptions, Target, deliver_on};
+use crate::deliver::{Conn, DeliverOptions, Target, deliver_named_on, deliver_on};
 use crate::devices::TransportKind;
 use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{MatchOutcome, match_book};
@@ -48,9 +48,10 @@ pub struct RunOptions {
     pub word_wise: Option<WordWiseOptions>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum XRayMode {
+    #[default]
     Off,
     /// Build one whenever the book ships as EBOK.
     Auto,
@@ -116,6 +117,105 @@ pub fn asin_seed(info: &BookInfo) -> Vec<u8> {
     }
 }
 
+/// What a prepared book asks for when it's finished: it travels with the KPF into the outbox
+/// (`prepared.json`, device-aware build §4.1).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Wishes {
+    /// The book's own CDE override; `None` lets the cover rule (and the device's override) decide.
+    pub cde_override: Option<CdeType>,
+    /// `None`: no page list; `Some(None)`: auto; `Some(Some(n))`: n pages. In JSON: absent,
+    /// `null`, `n`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub pages: Option<Option<u32>>,
+    pub xray: XRayMode,
+    /// The Word Wise level wanted; `None` = off.
+    pub word_wise: Option<u8>,
+}
+
+/// A field that is present (even as `null`) is `Some`.
+fn present<'de, D, T>(d: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(d).map(Some)
+}
+
+impl Wishes {
+    /// The travelling part of `opts`.
+    pub fn of(opts: &RunOptions) -> Self {
+        Wishes {
+            cde_override: opts.cde_override,
+            pages: opts.pages,
+            xray: opts.xray,
+            word_wise: opts.word_wise.as_ref().map(|w| w.level),
+        }
+    }
+}
+
+/// A book converted up to the KPF: everything before the device matters (inspect, normalize,
+/// Previewer). [`finish`] does the rest for a given Kindle.
+#[derive(Debug)]
+pub struct Prepared {
+    /// The report so far: input, book info, normalize, KPF, work dir, warnings, timings.
+    pub report: RunReport,
+    /// Previewer's KPF: in the work dir, or `book.kpf` in a queued entry.
+    pub kpf: PathBuf,
+    pub wishes: Wishes,
+    /// The device file name; `None` uses `<Author sort> - <Title>.kfx`.
+    pub name: Option<String>,
+    /// Removes the work dir with the book unless it was kept.
+    _work: Option<tempfile::TempDir>,
+}
+
+impl Prepared {
+    /// A book prepared earlier (a queued entry): its KPF, info and wishes.
+    pub fn from_parts(
+        input: PathBuf,
+        info: BookInfo,
+        kpf: PathBuf,
+        wishes: Wishes,
+        name: Option<String>,
+    ) -> Self {
+        Prepared {
+            report: RunReport {
+                input,
+                kpf: Some(kpf.clone()),
+                info,
+                ..Default::default()
+            },
+            kpf,
+            wishes,
+            name,
+            _work: None,
+        }
+    }
+}
+
+/// Runs `$expr` as stage `$name`, timing it; on error records `"<stage>: <message>"` and
+/// returns `$bail`.
+macro_rules! stage {
+    ($report:ident, $on_stage:ident, $name:literal, $expr:expr, $bail:expr) => {{
+        $on_stage($name);
+        let t = Instant::now();
+        let r = $expr;
+        $report
+            .stage_ms
+            .insert($name, t.elapsed().as_millis() as u64);
+        match r {
+            Ok(v) => v,
+            Err(e) => {
+                $report.error = Some(format!("{}: {}", $name, e));
+                return $bail;
+            }
+        }
+    }};
+}
+
 /// Runs every stage; never panics, failures land in `report.error`.
 pub fn run(epub: &Path, opts: &RunOptions) -> RunReport {
     run_with_progress(epub, opts, &mut |_| {})
@@ -127,6 +227,20 @@ pub fn run_with_progress(
     opts: &RunOptions,
     on_stage: &mut dyn FnMut(&'static str),
 ) -> RunReport {
+    match prepare(epub, opts, on_stage) {
+        // One device connection for the probe and the delivery: an MTP Kindle resets on close.
+        Ok(prepared) => finish(&prepared, &mut Conn::new(&opts.target), opts, on_stage),
+        Err(report) => *report,
+    }
+}
+
+/// The device-independent stages: (import) → inspect → normalize → convert (Previewer → KPF).
+/// `Err` carries the report with the failing stage in `error`.
+pub fn prepare(
+    epub: &Path,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+) -> Result<Prepared, Box<RunReport>> {
     let mut report = RunReport {
         input: epub.to_path_buf(),
         ..Default::default()
@@ -135,65 +249,65 @@ pub fn run_with_progress(
         Ok(p) => p,
         Err(e) => {
             report.error = Some(format!("previewer: {e}"));
-            return report;
+            return Err(Box::new(report));
         }
     };
-    macro_rules! stage {
-        ($name:literal, $expr:expr) => {{
-            on_stage($name);
-            let t = Instant::now();
-            let r = $expr;
-            report
-                .stage_ms
-                .insert($name, t.elapsed().as_millis() as u64);
-            match r {
-                Ok(v) => v,
-                Err(e) => {
-                    report.error = Some(format!("{}: {}", $name, e));
-                    return report;
-                }
-            }
-        }};
-    }
     let work = match tempfile::Builder::new().prefix("deckle-").tempdir() {
         Ok(d) => d,
         Err(e) => {
             report.error = Some(format!("workdir: {e}"));
-            return report;
+            return Err(Box::new(report));
         }
     };
-    let work_path = if opts.keep_work_dir {
-        work.keep()
+    let (work_path, work) = if opts.keep_work_dir {
+        (work.keep(), None)
     } else {
-        work.path().to_path_buf()
+        (work.path().to_path_buf(), Some(work))
     };
-    let work_keep = opts.keep_work_dir;
-    report.work_dir = work_keep.then(|| work_path.clone());
+    report.work_dir = opts.keep_work_dir.then(|| work_path.clone());
 
     // A Word document becomes an EPUB first; every later stage is the same (DOCX spec §3).
     let source = if deckle_docx::is_word(epub) {
         let imported = work_path.join("imported.epub");
-        let ireport = stage!("import", deckle_docx::convert(epub, &imported));
+        let ireport = stage!(
+            report,
+            on_stage,
+            "import",
+            deckle_docx::convert(epub, &imported),
+            Err(Box::new(report))
+        );
         report.warnings.extend(ireport.warnings);
         imported
     } else {
         epub.to_path_buf()
     };
-    let info = stage!("inspect", inspect(&source));
+    let info = stage!(
+        report,
+        on_stage,
+        "inspect",
+        inspect(&source),
+        Err(Box::new(report))
+    );
     report.info = info.clone();
     report.warnings.extend(info.warnings.iter().cloned());
 
     let normalized = work_path.join("normalized.epub");
     let nreport = stage!(
+        report,
+        on_stage,
         "normalize",
-        normalize(&source, &normalized, &NormalizeOptions::default())
+        normalize(&source, &normalized, &NormalizeOptions::default()),
+        Err(Box::new(report))
     );
     report.warnings.extend(nreport.warnings.iter().cloned());
     report.normalize = nreport;
 
     let kpf = stage!(
+        report,
+        on_stage,
         "convert",
-        previewer::convert(&previewer, &normalized, &work_path.join("previewer"))
+        previewer::convert(&previewer, &normalized, &work_path.join("previewer")),
+        Err(Box::new(report))
     );
     report.kpf = Some(kpf.kpf.clone());
     for issue in kpf.log_issues.iter().filter(|i| i.should_surface()) {
@@ -201,9 +315,48 @@ pub fn run_with_progress(
             .warnings
             .push(format!("previewer: {}", issue.message));
     }
+    Ok(Prepared {
+        report,
+        kpf: kpf.kpf,
+        wishes: Wishes::of(opts),
+        name: None,
+        _work: work,
+    })
+}
+
+/// The device-dependent stages for the Kindle on `conn`: cover rule → repackage → enrich →
+/// deliver. `opts.target` is not used: the connection's target is. Never panics.
+pub fn finish(
+    prepared: &Prepared,
+    conn: &mut Conn<'_>,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+) -> RunReport {
+    finish_with(
+        prepared,
+        conn,
+        opts,
+        on_stage,
+        &mut crate::wordwise::http_get_bytes,
+    )
+}
+
+/// [`finish`] with the fetcher for the Word Wise database (a push passes one that refuses).
+pub fn finish_with(
+    prepared: &Prepared,
+    conn: &mut Conn<'_>,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+    fetch: &mut crate::wordwise::FetchBytes<'_>,
+) -> RunReport {
+    let mut report = prepared.report.clone();
+    let info = prepared.report.info.clone();
+    let kpf = &prepared.kpf;
+    let work_keep = report.work_dir.is_some();
+    let work_path = report.work_dir.clone().unwrap_or_default();
 
     // Cover rule (design §5): decide PDOC/EBOK, the ASIN, and whether we write the thumbnail.
-    let device_class = match &opts.target {
+    let device_class = match conn.target {
         Target::Folder(_) => DeviceClass::Folder,
         Target::MassStorage(d) => DeviceClass::MassStorage {
             thumbnails_writable: d.thumbnails_writable,
@@ -291,7 +444,13 @@ pub fn run_with_progress(
         container_id: None,
         creator: None,
     };
-    let out = stage!("repackage", kpf_to_kfx(&kpf.kpf, &convert_opts));
+    let out = stage!(
+        report,
+        on_stage,
+        "repackage",
+        kpf_to_kfx(kpf, &convert_opts),
+        report
+    );
     report.pages = out.pages;
     report.asin = Some(asin.clone());
     report.cde_type = Some(cde_type.as_str().to_owned());
@@ -325,8 +484,6 @@ pub fn run_with_progress(
                 .push("thumbnail not written: the book has no cover".into()),
         }
     }
-    // One device connection for the probe and the delivery: an MTP Kindle resets on close.
-    let mut conn = Conn::new(&opts.target);
     let want_xray = cde_type == CdeType::Ebok && opts.xray == XRayMode::Auto;
     let word_wise = opts
         .word_wise
@@ -363,14 +520,8 @@ pub fn run_with_progress(
                     attach_xray(&mut report, &mut deliver_opts, built);
                 }
                 if let Some(ww) = word_wise {
-                    let built = crate::wordwise::enrich(
-                        &runs,
-                        &asin,
-                        &out.asset_id,
-                        ww,
-                        &mut conn,
-                        &mut crate::wordwise::http_get_bytes,
-                    );
+                    let built =
+                        crate::wordwise::enrich(&runs, &asin, &out.asset_id, ww, conn, fetch);
                     if work_keep && let Ok(Some(w)) = &built {
                         keep_file(&mut report, &work_path, &w.file_name, &w.bytes);
                     }
@@ -386,8 +537,14 @@ pub fn run_with_progress(
             .insert("enrich", t.elapsed().as_millis() as u64);
     }
     let delivered = stage!(
+        report,
+        on_stage,
         "deliver",
-        deliver_on(&out.bytes, &info, &mut conn, &deliver_opts)
+        match &prepared.name {
+            Some(name) => deliver_named_on(&out.bytes, name, conn, &deliver_opts),
+            None => deliver_on(&out.bytes, &info, conn, &deliver_opts),
+        },
+        report
     );
     report.delivered = Some(delivered);
     // Known issues for this Kindle (design §6): warnings only, the book is already on it.
@@ -398,7 +555,7 @@ pub fn run_with_progress(
         xray: report.xray.is_some(),
         word_wise: report.word_wise.is_some(),
     };
-    let (compat_warnings, firmware) = device_compat(&mut conn, &used);
+    let (compat_warnings, firmware) = device_compat(conn, &used);
     for w in compat_warnings {
         if !report.warnings.contains(&w) {
             report.warnings.push(w);
