@@ -47,7 +47,7 @@ What makes it unique, not just "RSS to EPUB":
 2. ~~Scheduling~~ — #49, see §5b.
 3. Delivery (b): opt-in Send-to-Kindle email over the user's own SMTP. This reverses the v1
    non-goal "USB/MTP only" for the digest only, as an explicit, labelled option, because it
-   sends the edition through Amazon.
+   sends the edition through Amazon. Spec: `2026-10-21-send-to-kindle-email-design.md` (#50).
 4. ~~Full-text articles and images~~ — in progress (#51), see §5a.
 5. ~~Desktop app: a Daily tab~~ — #52, see §5c.
 6. Optional LLM editor (existing provider settings): dedupe stories across feeds, a three-line

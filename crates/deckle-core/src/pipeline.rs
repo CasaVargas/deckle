@@ -8,8 +8,10 @@ use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
+use crate::compat::{self, SendUse};
 use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
 use crate::deliver::{Conn, DeliverOptions, Target, deliver_on};
+use crate::devices::TransportKind;
 use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{MatchOutcome, match_book};
 use crate::normalize::{NormalizeOptions, NormalizeReport, normalize};
@@ -72,6 +74,8 @@ pub struct RunReport {
     /// What went into the Word Wise sidecar, when one shipped.
     pub word_wise: Option<WordWiseSummary>,
     pub work_dir: Option<PathBuf>,
+    /// The target Kindle's firmware, when known (`system/version.txt`, or read over MTP).
+    pub firmware: Option<String>,
     pub warnings: Vec<String>,
     /// `"<stage>: <message>"` of the stage that failed.
     pub error: Option<String>,
@@ -386,7 +390,51 @@ pub fn run_with_progress(
         deliver_on(&out.bytes, &info, &mut conn, &deliver_opts)
     );
     report.delivered = Some(delivered);
+    // Known issues for this Kindle (design §6): warnings only, the book is already on it.
+    let used = SendUse {
+        ebok_without_cover_source: cde_type == CdeType::Ebok
+            && decision.asin == AsinChoice::Generated
+            && deliver_opts.thumbnail.is_none(),
+        xray: report.xray.is_some(),
+        word_wise: report.word_wise.is_some(),
+    };
+    let (compat_warnings, firmware) = device_compat(&mut conn, &used);
+    for w in compat_warnings {
+        if !report.warnings.contains(&w) {
+            report.warnings.push(w);
+        }
+    }
+    report.firmware = firmware;
     report
+}
+
+/// The compatibility rows (`compat::RULES`) a finished send to `conn`'s Kindle triggers, and the
+/// Kindle's firmware: `system/version.txt` on mass storage, PTP DeviceInfo on the already-open
+/// MTP session. A folder has no device and gets nothing.
+pub fn device_compat(conn: &mut Conn<'_>, used: &SendUse) -> (Vec<String>, Option<String>) {
+    let (model, transport, firmware) = match conn.target {
+        Target::Folder(_) => return (Vec::new(), None),
+        Target::MassStorage(d) => (
+            d.model_hint.clone(),
+            TransportKind::MassStorage,
+            d.firmware.clone(),
+        ),
+        Target::Mtp(m) => {
+            let model = m.product.clone().unwrap_or_else(|| "Kindle (MTP)".into());
+            let firmware = match conn.mtp() {
+                Some(Ok(dev)) => dev
+                    .device_info()
+                    .ok()
+                    .map(|i| i.device_version.trim().to_owned())
+                    .filter(|v| !v.is_empty()),
+                _ => None,
+            };
+            (model, TransportKind::Mtp, firmware)
+        }
+    };
+    let warnings =
+        compat::send_warnings(compat::RULES, &model, transport, firmware.as_deref(), used);
+    (warnings, firmware)
 }
 
 /// Puts a built sidecar on the delivery, or turns an X-Ray failure into a warning: the book
@@ -443,5 +491,111 @@ pub fn attach_word_wise(
             "Word Wise: no hint-worthy words at level {level}; no sidecar written"
         )),
         Err(e) => report.warnings.push(format!("Word Wise skipped: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use deckle_transport::ptp::{Container, ContainerKind, DeviceInfo, op, rsp};
+    use deckle_transport::session::{Mtp, Transport, TransportError};
+    use deckle_transport::usb::MtpInfo;
+
+    use super::*;
+
+    /// Answers GetDeviceInfo with a Scribe on firmware 5.18.1.0.1 and everything else with OK.
+    struct Scribe(Vec<Vec<u8>>);
+
+    impl Transport for Scribe {
+        fn write(&mut self, bytes: &[u8]) -> Result<(), TransportError> {
+            let (c, _) = Container::decode(bytes).unwrap();
+            let reply = |kind, code| Container {
+                kind,
+                code,
+                tx_id: c.tx_id,
+                params: Vec::new(),
+            };
+            if c.code == op::GET_DEVICE_INFO {
+                let info = DeviceInfo {
+                    manufacturer: "Amazon".into(),
+                    model: "Kindle Scribe".into(),
+                    device_version: "5.18.1.0.1".into(),
+                    serial_number: "G0X1".into(),
+                };
+                self.0
+                    .push(reply(ContainerKind::Data, c.code).encode(&info.encode()));
+            }
+            self.0
+                .push(reply(ContainerKind::Response, rsp::OK).encode(&[]));
+            Ok(())
+        }
+        fn read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
+            if self.0.is_empty() {
+                return Err(TransportError::Timeout);
+            }
+            let r = self.0.remove(0);
+            buf[..r.len()].copy_from_slice(&r);
+            Ok(r.len())
+        }
+    }
+
+    fn open_scribe(_: &MtpInfo) -> Result<Mtp, TransportError> {
+        Ok(Mtp::new(Box::new(Scribe(Vec::new()))))
+    }
+
+    fn scribe() -> Target {
+        Target::Mtp(MtpInfo {
+            vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
+            product_id: 1,
+            serial: Some("G0X1".into()),
+            product: Some("Kindle Scribe".into()),
+            bus: 1,
+            address: 2,
+        })
+    }
+
+    #[test]
+    fn an_ebok_send_without_a_cover_source_to_an_mtp_kindle_is_warned_and_firmware_read() {
+        let target = scribe();
+        let mut conn = Conn::with_opener(&target, open_scribe);
+        let used = SendUse {
+            ebok_without_cover_source: true,
+            xray: true,
+            word_wise: true,
+        };
+        let (warnings, firmware) = device_compat(&mut conn, &used);
+        assert_eq!(firmware.as_deref(), Some("5.18.1.0.1"));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("no cover"), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_pdoc_send_to_an_mtp_kindle_gets_no_compat_warning() {
+        let target = scribe();
+        let mut conn = Conn::with_opener(&target, open_scribe);
+        let (warnings, firmware) = device_compat(&mut conn, &SendUse::default());
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(firmware.as_deref(), Some("5.18.1.0.1"));
+    }
+
+    #[test]
+    fn mass_storage_uses_the_version_txt_firmware_and_a_folder_has_none() {
+        let target = Target::MassStorage(crate::deliver::Device {
+            root: "/Volumes/Kindle".into(),
+            model_hint: "Kindle 5.16.2.1.1 (4184940002)".into(),
+            thumbnails_writable: false,
+            firmware: Some("5.16.2.1.1".into()),
+        });
+        let used = SendUse {
+            ebok_without_cover_source: true,
+            ..Default::default()
+        };
+        let (warnings, firmware) = device_compat(&mut Conn::new(&target), &used);
+        assert!(warnings.is_empty(), "no rows for mass storage yet");
+        assert_eq!(firmware.as_deref(), Some("5.16.2.1.1"));
+        let folder = Target::Folder("/tmp".into());
+        assert_eq!(
+            device_compat(&mut Conn::new(&folder), &used),
+            (Vec::new(), None)
+        );
     }
 }

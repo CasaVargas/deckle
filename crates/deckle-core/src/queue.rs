@@ -83,7 +83,15 @@ impl Queue {
         target: &Target,
         prune: Option<&Prune>,
     ) -> Result<FlushReport, DeliverError> {
-        let mut conn = Conn::new(target);
+        self.flush_on(&mut Conn::new(target), prune)
+    }
+
+    /// [`Queue::flush`] over the caller's connection.
+    pub fn flush_on(
+        &self,
+        conn: &mut Conn<'_>,
+        prune: Option<&Prune>,
+    ) -> Result<FlushReport, DeliverError> {
         let mut report = FlushReport::default();
         for file in self.pending() {
             let io = |source| DeliverError::Io {
@@ -95,12 +103,12 @@ impl Queue {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let path = deliver_named_on(&bytes, &name, &mut conn, &DeliverOptions::default())?;
+            let path = deliver_named_on(&bytes, &name, conn, &DeliverOptions::default())?;
             report.delivered.push(path);
             std::fs::remove_file(&file).map_err(io)?;
         }
         if let Some(p) = prune {
-            report.pruned = prune_named_on(&mut conn, &p.prefix, p.keep)?;
+            report.pruned = prune_named_on(conn, &p.prefix, p.keep)?;
         }
         Ok(report)
     }

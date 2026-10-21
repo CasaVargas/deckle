@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use deckle_digest::inbox::scan;
+use deckle_digest::inbox::{Skip, scan, scan_with_books};
 use deckle_digest::reading::ReadingQueue;
 
 fn later() -> SystemTime {
@@ -114,4 +114,74 @@ fn a_binary_webloc_is_read() {
     let r = scan(&inbox, &q, later());
     assert_eq!(r.queued, 1, "{:?}", r.unreadable);
     assert_eq!(q.load()[0].url.as_deref(), Some("https://ex.com/binary"));
+}
+
+#[test]
+fn books_go_to_the_handler_then_to_sent() {
+    let (_d, q, inbox) = setup();
+    for f in ["a.epub", "b.DOCX", "c.kfx"] {
+        std::fs::write(inbox.join(f), b"book").unwrap();
+    }
+    write(&inbox.join("d.txt"), "https://ex.com/article\n");
+    let mut seen = Vec::new();
+    let r = scan_with_books(&inbox, &q, later(), &mut |p: &Path| {
+        seen.push(p.file_name().unwrap().to_string_lossy().into_owned());
+        Ok(())
+    });
+    assert_eq!(seen, ["a.epub", "b.DOCX", "c.kfx"]);
+    assert_eq!(r.sent.len(), 3);
+    assert_eq!(r.queued, 1, "the article is still an article");
+    for f in ["a.epub", "b.DOCX", "c.kfx"] {
+        assert!(inbox.join("Sent").join(f).exists(), "{f} moved to Sent");
+    }
+    assert!(inbox.join("Saved/d.txt").exists());
+}
+
+#[test]
+fn a_book_that_fails_goes_to_unreadable_with_the_reason() {
+    let (_d, q, inbox) = setup();
+    std::fs::write(inbox.join("bad.epub"), b"not a zip").unwrap();
+    let r = scan_with_books(&inbox, &q, later(), &mut |_: &Path| {
+        Err(Skip::Unreadable("inspect: not an EPUB".into()))
+    });
+    assert!(r.sent.is_empty());
+    assert_eq!(r.unreadable.len(), 1);
+    assert!(inbox.join("Unreadable/bad.epub").exists());
+    let why = std::fs::read_to_string(inbox.join("Unreadable/bad.epub.txt")).unwrap();
+    assert!(why.contains("not an EPUB"), "{why}");
+}
+
+#[test]
+fn a_book_that_cant_be_handled_yet_stays() {
+    let (_d, q, inbox) = setup();
+    std::fs::write(inbox.join("wait.epub"), b"book").unwrap();
+    let r = scan_with_books(&inbox, &q, later(), &mut |_: &Path| {
+        Err(Skip::Retry("Kindle Previewer not found".into()))
+    });
+    assert_eq!(r.retry.len(), 1);
+    assert!(inbox.join("wait.epub").exists());
+}
+
+#[test]
+fn a_fresh_book_waits() {
+    let (_d, q, inbox) = setup();
+    std::fs::write(inbox.join("new.epub"), b"book").unwrap();
+    let mut called = false;
+    let r = scan_with_books(&inbox, &q, SystemTime::now(), &mut |_: &Path| {
+        called = true;
+        Ok(())
+    });
+    assert!(!called);
+    assert!(r.sent.is_empty());
+    assert!(inbox.join("new.epub").exists());
+}
+
+#[test]
+fn plain_scan_leaves_books_for_a_scan_that_can_send_them() {
+    let (_d, q, inbox) = setup();
+    std::fs::write(inbox.join("book.epub"), b"book").unwrap();
+    let r = scan(&inbox, &q, later());
+    assert!(r.unreadable.is_empty());
+    assert_eq!(r.retry.len(), 1);
+    assert!(inbox.join("book.epub").exists());
 }

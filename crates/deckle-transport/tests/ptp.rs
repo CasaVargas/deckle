@@ -2,7 +2,8 @@
 //! Packet-level tests for the PTP/MTP codec and a scripted end-to-end session over a fake
 //! bulk transport (no hardware).
 use deckle_transport::ptp::{
-    Container, ContainerKind, ObjectInfo, decode_string, decode_u32_array, encode_string, op, rsp,
+    Container, ContainerKind, DeviceInfo, ObjectInfo, PtpError, decode_string, decode_u32_array,
+    encode_string, op, rsp,
 };
 use deckle_transport::session::{Mtp, Transport, TransportError};
 
@@ -408,4 +409,49 @@ fn get_object_downloads_a_multi_chunk_file() {
     let mut mtp = Mtp::new(Box::new(fake));
     mtp.open_session().unwrap();
     assert_eq!(mtp.get_object(0x42).unwrap(), payload);
+}
+
+fn sample_device_info() -> DeviceInfo {
+    DeviceInfo {
+        manufacturer: "Amazon".into(),
+        model: "Kindle Scribe".into(),
+        device_version: "5.18.1.0.1".into(),
+        serial_number: "G0X1".into(),
+    }
+}
+
+#[test]
+fn device_info_round_trips_past_the_operation_arrays() {
+    let bytes = sample_device_info().encode();
+    assert_eq!(DeviceInfo::decode(&bytes).unwrap(), sample_device_info());
+    assert_eq!(
+        DeviceInfo::decode(&bytes[..bytes.len() - 3]),
+        Err(PtpError::BadString)
+    );
+    assert_eq!(DeviceInfo::decode(&bytes[..10]), Err(PtpError::Truncated));
+}
+
+#[test]
+fn device_info_reads_the_firmware_inside_a_session() {
+    let fake = Fake {
+        script: vec![
+            (
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
+            ),
+            (
+                cmd(op::GET_DEVICE_INFO, 1, &[]),
+                vec![
+                    data(op::GET_DEVICE_INFO, 1, &sample_device_info().encode()),
+                    ok(op::GET_DEVICE_INFO, 1, &[]),
+                ],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut mtp = Mtp::new(Box::new(fake));
+    mtp.open_session().unwrap();
+    let info = mtp.device_info().unwrap();
+    assert_eq!(info.device_version, "5.18.1.0.1");
+    assert_eq!(info.model, "Kindle Scribe");
 }

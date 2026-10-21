@@ -152,8 +152,19 @@ Or drop links (`.webloc`, `.url`, `.txt`) and saved pages into `~/Deckle/Inbox`.
 `[reading] inbox` in `digest.toml` at an iCloud Drive folder and an iPhone Shortcut ("Save File")
 saves from your phone. The queue is a plain file, `reading.jsonl`, next to `digest.toml`.
 
+The same Inbox takes books: drop an `.epub`, `.docx` or `.kfx` there and it's sent later. The
+file's extension decides: `.epub`, `.docx` and `.kfx` are books, and `.webloc`, `.url`, `.txt`
+and `.html` are articles. Each book is converted like `deckle run` would (a KFX is copied as it
+is) and waits in the outbox with the paper. It moves to `Inbox/Sent`, or to `Inbox/Unreadable`
+with a `.txt` saying why it couldn't be converted. Books need Kindle Previewer; without it they
+stay in the Inbox until it's installed.
+
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
+
+What `watch` does on plug-in is set per Kindle in `digest.toml`: `[sync]` holds the defaults
+(`push = true`, `prune = true`), and `[sync.devices."<sync id>"]` overrides them for one device,
+using the id `deckle devices` shows. Push and prune share one connection.
 
 **Over Wi-Fi (experimental).** `deckle serve` puts the outbox on a read-only page for the Kindle's
 browser, on one address you choose, until you stop it:

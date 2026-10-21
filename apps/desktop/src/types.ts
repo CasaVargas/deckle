@@ -54,6 +54,10 @@ export interface DeviceRow {
   thumbnails_writable: boolean;
   cde_override: "pdoc" | "ebok" | null;
   verified_real_asin: boolean;
+  /** Last known firmware; an MTP Kindle's is recorded by its first send. */
+  firmware: string | null;
+  /** Known issues for this model, transport and firmware (warnings, never refusals). */
+  compat: string[];
 }
 
 export interface PlanRow {
