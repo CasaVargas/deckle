@@ -2,6 +2,7 @@
 //! Tauri shell: the one-window GUI over the pipeline.
 
 mod commands;
+mod daily;
 
 use std::sync::Mutex;
 
@@ -13,6 +14,7 @@ pub fn run() {
     // `--export-to DIR` converts them straight away.
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (preload, preload_target) = commands::parse_cli_args(&args);
+    let start_daily = args.iter().any(|a| a == "--daily");
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -24,6 +26,7 @@ pub fn run() {
                 devices_file,
                 preload: Mutex::new(preload.clone()),
                 preload_target: Mutex::new(preload_target.clone()),
+                start_daily,
             });
             Ok(())
         })
@@ -40,6 +43,19 @@ pub fn run() {
             commands::set_settings,
             commands::run_books,
             commands::reveal,
+            commands::start_tab,
+            daily::daily_state,
+            daily::daily_setup,
+            daily::daily_save,
+            daily::geocode,
+            daily::reading_list,
+            daily::reading_save,
+            daily::reading_remove,
+            daily::bookmarklet,
+            daily::edition_preview,
+            daily::daily_run,
+            daily::schedule_get,
+            daily::schedule_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deckle");

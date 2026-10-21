@@ -225,6 +225,61 @@ impl Config {
     }
 }
 
+/// Writes `cfg` into the `digest.toml` at `path`, keeping what a person wrote: comments, key
+/// order and every value that didn't change stay as they are. A missing file starts from
+/// [`STARTER`] (Daily design §5c).
+pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => STARTER.to_owned(),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    let mut doc: toml_edit::DocumentMut = text
+        .parse()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    let new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
+    merge_table(doc.as_table_mut(), new.as_table());
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, doc.to_string()).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// `old` takes `new`'s keys and values; a value that changed keeps its comments, one that
+/// didn't is left alone, and keys `new` lacks (cleared options) are removed.
+fn merge_table(old: &mut toml_edit::Table, new: &toml_edit::Table) {
+    use toml_edit::Item;
+    let gone: Vec<String> = old
+        .iter()
+        .map(|(k, _)| k.to_owned())
+        .filter(|k| !new.contains_key(k))
+        .collect();
+    for k in gone {
+        old.remove(&k);
+    }
+    for (k, item) in new.iter() {
+        match (old.get_mut(k), item) {
+            (Some(Item::Table(o)), Item::Table(n)) => merge_table(o, n),
+            (Some(Item::Table(o)), Item::Value(toml_edit::Value::InlineTable(n))) => {
+                merge_table(o, &n.clone().into_table())
+            }
+            (Some(Item::Value(o)), Item::Value(n)) => {
+                if o.to_string().trim() != n.to_string().trim() {
+                    let decor = o.decor().clone();
+                    *o = n.clone();
+                    *o.decor_mut() = decor;
+                }
+            }
+            // Arrays of tables ([[feeds]]) and new keys: take the new one whole.
+            (_, n) => {
+                old.insert(k, n.clone());
+            }
+        }
+    }
+}
+
 /// `~/Library/Application Support/deckle/digest.toml`, `%APPDATA%\deckle\digest.toml`, or
 /// `$XDG_CONFIG_HOME/deckle/digest.toml` (`~/.config`).
 pub fn default_path() -> PathBuf {
@@ -260,6 +315,44 @@ mod tests {
     #[test]
     fn empty_file_is_defaults() {
         assert_eq!(Config::parse("").unwrap(), Config::default());
+    }
+
+    #[test]
+    fn saving_keeps_comments_and_untouched_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, STARTER).unwrap();
+        let mut c = Config::load(&path).unwrap();
+        c.title = "The Carthage Courier".into();
+        c.feeds.push(FeedConfig {
+            name: "NPR".into(),
+            url: "https://feeds.npr.org/1001/rss.xml".into(),
+            max_items: 8,
+        });
+        c.latitude = None;
+        save(&path, &c).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# Deckle Daily — your morning paper, built on this machine."));
+        assert!(text.contains(r#"title = "The Carthage Courier""#), "{text}");
+        assert!(
+            text.contains(r#"units = "imperial"                # or "metric""#),
+            "an untouched line keeps its comment:\n{text}"
+        );
+        assert!(!text.contains("latitude"), "a cleared value is removed");
+        assert_eq!(Config::load(&path).unwrap(), c, "round-trips");
+    }
+
+    #[test]
+    fn saving_without_a_file_starts_from_the_starter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("new/digest.toml");
+        let c = Config::parse(STARTER).unwrap();
+        save(&path, &c).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .starts_with("# Deckle Daily")
+        );
     }
 
     #[test]

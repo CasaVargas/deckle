@@ -11,6 +11,7 @@ pub mod config;
 pub mod cover;
 pub mod epub;
 pub mod fetch;
+pub mod geocode;
 pub mod horoscope;
 pub mod inbox;
 pub mod longread;

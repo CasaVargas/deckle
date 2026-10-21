@@ -110,6 +110,12 @@ an Amazon edition on Open Library when an MTP Kindle needs a real ASIN.
 
 ### The Deckle Daily (preview)
 
+In the app: the **Daily** tab sets up the paper (name, place, sections, feeds), saves links to
+Your Reading, copies the bookmarklet, turns on the morning schedule, and builds or sends an edition
+on demand. Everything below is the same thing from the command line; both edit the same
+`digest.toml`, and your own comments in it are kept.
+
+
 A morning paper built on your machine: weather (Open-Meteo), local news (a Google News search
 plus any local feeds), your RSS/Atom feeds, Powerball and Mega Millions, a horoscope Deckle
 writes itself, and "On this day" from Wikipedia. Its cover is a generated front page, so the

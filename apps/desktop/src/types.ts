@@ -116,3 +116,92 @@ export const STAGE_LABEL: Record<string, string> = {
   deliver: "Copying",
   match: "Matching edition",
 };
+
+// ---- The Daily tab (Daily design §5c) ----
+
+export type SectionKind = "reading" | "weather" | "local" | "feeds" | "lottery" | "horoscope" | "onthisday";
+
+export interface FeedConfig {
+  name: string;
+  url: string;
+  max_items: number;
+}
+
+/** `digest.toml`, as the backend's `deckle_digest::Config` serializes it. */
+export interface DailyConfig {
+  title: string;
+  place: string;
+  latitude: number | null;
+  longitude: number | null;
+  units: "imperial" | "metric";
+  keep: number;
+  max_age_hours: number;
+  full_text: boolean;
+  photos: boolean;
+  max_photos: number;
+  sections: SectionKind[];
+  local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number };
+  feeds: FeedConfig[];
+  lottery: { games: string[] };
+  horoscope: { signs: string[] };
+  reading: { inbox: string; max_items: number; long_read_words: number };
+}
+
+export interface DailyState {
+  config_path: string;
+  exists: boolean;
+  config: DailyConfig | null;
+  error: string | null;
+}
+
+export interface ReadingEntry {
+  id: string;
+  url: string | null;
+  file: string | null;
+  title: string | null;
+  saved_at: string;
+  source: string;
+  state: "pending" | "printed" | "book" | "failed";
+  tries: number;
+  printed_in: string | null;
+  note: string | null;
+}
+
+export interface EditionPreview {
+  title: string;
+  file: string;
+  cover: string | null;
+  outbox: number;
+}
+
+export interface RunResult {
+  ok: boolean;
+  report: any;
+  log: string;
+}
+
+export interface ScheduleStatus {
+  at: string | null;
+  watch: boolean;
+  exe: string | null;
+}
+
+export interface PlaceRow {
+  label: string;
+  latitude: number;
+  longitude: number;
+}
+
+export const SECTION_LABEL: Record<SectionKind, string> = {
+  reading: "Your Reading",
+  weather: "Weather",
+  local: "Local news",
+  feeds: "Your feeds",
+  lottery: "Lottery",
+  horoscope: "Horoscope",
+  onthisday: "On This Day",
+};
+
+export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "onthisday"];
+
+export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
