@@ -17,19 +17,26 @@ pub enum SectionKind {
     Feeds,
     Lottery,
     Horoscope,
+    /// The mini crossword and word ladder (puzzle design).
+    Puzzle,
     Onthisday,
 }
 
 /// The key a section goes by across editions (readership design §4): the kind's name, or
-/// `feeds:<name>` for each `[[feeds]]` entry.
+/// `feeds:<name>` for each `[[feeds]]` entry and `local:<name>` for each `[[local.places]]` one.
 pub fn section_key(kind: SectionKind, feed: Option<&str>) -> String {
     let name = match kind {
         SectionKind::Reading => "reading",
         SectionKind::Weather => "weather",
-        SectionKind::Local => "local",
+        SectionKind::Local => match feed {
+            // another place's local news (#102)
+            Some(place) => return format!("local:{place}"),
+            None => "local",
+        },
         SectionKind::Feeds => return format!("feeds:{}", feed.unwrap_or_default()),
         SectionKind::Lottery => "lottery",
         SectionKind::Horoscope => "horoscope",
+        SectionKind::Puzzle => "puzzle",
         SectionKind::Onthisday => "onthisday",
     };
     name.to_owned()
@@ -76,9 +83,18 @@ pub struct Config {
     /// while it's untouched.
     #[serde(skip_serializing_if = "DayConfig::is_default")]
     pub day: DayConfig,
+    /// The puzzle page (puzzle design §6). Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "PuzzleConfig::is_default")]
+    pub puzzle: PuzzleConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
+    /// Stop the presses (tests); the default is `press.json` beside `digest.toml`.
+    #[serde(skip)]
+    pub press_path: Option<PathBuf>,
+    /// Each day's puzzle (tests); the default is `puzzles.json` beside `digest.toml`.
+    #[serde(skip)]
+    pub puzzle_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -111,7 +127,10 @@ impl Default for Config {
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
             day: DayConfig::default(),
+            puzzle: PuzzleConfig::default(),
             almanac_path: None,
+            press_path: None,
+            puzzle_path: None,
         }
     }
 }
@@ -126,6 +145,26 @@ pub struct LocalConfig {
     pub max_items: usize,
     /// Local news moves slower than the wires: a longer window than `max_age_hours`.
     pub max_age_hours: u32,
+    /// `[[local.places]]`: other towns' local news, each its own section after Local (#102).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub places: Vec<PlaceNews>,
+}
+
+/// Another place's local news: a relative's town, a vacation spot (local places design §1).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlaceNews {
+    /// The section's title in the paper.
+    pub name: String,
+    /// A Google News search. Empty: none.
+    #[serde(default)]
+    pub google_news: String,
+    /// Local paper RSS/Atom feeds, merged with the search.
+    #[serde(default)]
+    pub feeds: Vec<String>,
+    /// Stories kept; `[local] max_items` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<usize>,
 }
 
 impl Default for LocalConfig {
@@ -135,6 +174,7 @@ impl Default for LocalConfig {
             feeds: Vec::new(),
             max_items: 12,
             max_age_hours: 72,
+            places: Vec::new(),
         }
     }
 }
@@ -190,6 +230,30 @@ impl Default for DayConfig {
 impl DayConfig {
     pub fn is_default(&self) -> bool {
         *self == DayConfig::default()
+    }
+}
+
+/// `[puzzle]`: what the puzzle page prints.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PuzzleConfig {
+    pub ladder: bool,
+    /// Theme answers from yesterday's headlines, clued as the headline with the word blanked.
+    pub theme: bool,
+}
+
+impl Default for PuzzleConfig {
+    fn default() -> Self {
+        PuzzleConfig {
+            ladder: true,
+            theme: true,
+        }
+    }
+}
+
+impl PuzzleConfig {
+    pub fn is_default(&self) -> bool {
+        *self == PuzzleConfig::default()
     }
 }
 
@@ -386,7 +450,7 @@ photos = true                     # with their photos, in grayscale for e-ink
 max_photos = 4                    # per story
 
 # Order of the paper. Remove a name to drop that section.
-sections = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "onthisday"]
+sections = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "puzzle", "onthisday"]
 
 [reading]
 inbox = "~/Deckle/Inbox"          # point at iCloud Drive to save from an iPhone
@@ -399,6 +463,12 @@ feeds = []                        # local paper RSS feeds, merged in
 max_items = 12
 max_age_hours = 72                # local news moves slower
 
+# Other places' local news, each its own section after Local: a relative's town, a trip.
+# [[local.places]]
+# name = "Asheville, NC"          # the section's title
+# google_news = "Asheville NC"
+# feeds = []
+
 # Each [[feeds]] entry becomes its own section, in this order.
 [[feeds]]
 name = "Hacker News"
@@ -410,6 +480,11 @@ games = ["powerball", "megamillions"]
 
 [horoscope]
 signs = []                        # e.g. ["leo", "virgo"]; empty prints all twelve
+
+# The puzzle page: a mini crossword, a word ladder, and yesterday's answers.
+# [puzzle]
+# ladder = true
+# theme = true                    # clues from yesterday's headlines, the word blanked
 
 # Your Day on the weather page: today's events from your calendars. Use .ics files or a
 # calendar's private address (it's a secret: anyone with it can read the calendar).
@@ -558,6 +633,20 @@ impl Config {
             .clone()
             .unwrap_or_else(|| default_path().with_file_name("almanac.json"))
     }
+
+    /// Where a stopped morning is kept (tomorrow's paper design §4.2).
+    pub fn press_state(&self) -> PathBuf {
+        self.press_path
+            .clone()
+            .unwrap_or_else(|| default_path().with_file_name("press.json"))
+    }
+
+    /// Where each day's puzzle is kept.
+    pub fn puzzle_store(&self) -> PathBuf {
+        self.puzzle_path
+            .clone()
+            .unwrap_or_else(|| default_path().with_file_name("puzzles.json"))
+    }
 }
 
 pub fn default_path() -> PathBuf {
@@ -635,7 +724,7 @@ mod tests {
         let c = Config::parse(STARTER).unwrap();
         assert_eq!(c.feeds.len(), 1);
         assert_eq!(c.local.google_news, "New York City");
-        assert_eq!(c.sections.len(), 7);
+        assert_eq!(c.sections.len(), 8);
         assert_eq!(c.sections[0], SectionKind::Reading);
         assert_eq!(c.reading.long_read_words, 4000);
     }

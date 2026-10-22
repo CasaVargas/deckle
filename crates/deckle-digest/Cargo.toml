@@ -16,7 +16,7 @@ image = { workspace = true, features = ["gif", "webp"] }
 toml = "1"
 toml_edit = { version = "0.25", features = ["serde"] }
 feed-rs = "3"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 ab_glyph = "0.2"
 html-escape = "0.2"
 dom_smoothie = "0.18"
@@ -31,6 +31,8 @@ lettre = { version = "0.11", default-features = false, features = ["smtp-transpo
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
 rrule = "0.14.0"
+flate2 = "1"
+deckle-highlights.workspace = true
 
 # The SMTP password's keychain (email design §6): each OS's own store.
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -47,4 +49,4 @@ tempfile.workspace = true
 roxmltree.workspace = true
 zip.workspace = true
 image.workspace = true
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }

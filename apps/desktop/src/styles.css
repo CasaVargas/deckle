@@ -117,7 +117,7 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .tabs button.on { background: var(--fg); color: var(--bg); }
 
 /* The Daily tab */
-.daily { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; max-width: 860px; width: 100%; margin: 0 auto; }
+.daily { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; max-width: 1120px; width: 100%; margin: 0 auto; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
 .card h2, .card h3 { font-family: ui-serif, Georgia, serif; margin: 0 0 6px; }
 .card h2 { font-size: 22px; }
@@ -295,3 +295,53 @@ input[type=checkbox] { padding: 0; }
 .yourday-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .yourday-actions { display: flex; gap: 8px; margin: 8px 0; }
 .yourday-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 4px; }
+
+/* Tomorrow's paper, so far (tomorrow's paper design §4–§8) */
+.press-bar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; }
+.press-bar .grow { flex: 1; }
+.press-line { font-weight: 600; }
+.press-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line); flex: none; }
+.press-dot.on { background: var(--ok); }
+.press-dot.stopped { background: var(--warn); }
+.press-bar input[type="time"] { font: inherit; font-size: 13px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.daily-columns { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.daily-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+@media (max-width: 900px) { .daily-columns { grid-template-columns: minmax(0, 1fr); } }
+.live { display: inline-flex; align-items: center; gap: 8px; }
+.live-badge { color: var(--ok); border-color: var(--ok); }
+.front { border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin: 4px 0 12px; background: var(--bg); font-family: ui-serif, Georgia, serif; }
+.front .ears { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: .06em; border-bottom: 2px solid var(--fg); padding-bottom: 4px; }
+.front .motto { font-style: italic; font-weight: 400; letter-spacing: 0; }
+.masthead-name { font-size: 30px; font-weight: 900; text-align: center; margin: 6px 0 4px; line-height: 1.1; }
+.dateband { background: var(--fg); color: var(--bg); text-align: center; font-weight: 700; letter-spacing: .06em; font-size: 12px; padding: 4px; }
+.weather-slot { text-align: center; font-size: 12px; color: var(--muted); border-bottom: 3px double var(--line); padding: 8px 0; }
+.tile { padding: 10px 0; }
+.tile .kicker { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 10.5px; font-weight: 700; letter-spacing: .06em; color: var(--muted); }
+.tile-title { font-weight: 700; font-size: 15px; line-height: 1.25; margin-top: 2px; }
+.tile .reason { font-style: italic; font-size: 13px; color: var(--muted); margin-top: 4px; }
+.tile.lead { border-bottom: 1px solid var(--line); }
+.tile.lead .tile-title { font-size: 22px; }
+.tile.dashed { border: 1.5px dashed var(--line); border-radius: 6px; padding: 10px; display: grid; place-items: center; text-align: center; }
+.tile.dashed .kicker { letter-spacing: 0; font-weight: 600; font-size: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 8px 0; }
+.tiles .tile:not(.dashed) { border-top: 1px solid var(--line); }
+.plan-rows { list-style: none; margin: 0; padding: 0; }
+.plan-row { display: grid; grid-template-columns: 14px 22px minmax(0, 1fr) auto auto; gap: 8px; align-items: center; padding: 7px 4px; border-bottom: 1px solid var(--line); cursor: grab; }
+.plan-row:last-child { border-bottom: 0; }
+.plan-row.off { cursor: default; opacity: .6; }
+.plan-row.dragging { opacity: .4; }
+.plan-row.over { box-shadow: inset 0 2px 0 var(--accent); }
+.plan-row .handle { color: var(--muted); font-size: 12px; letter-spacing: -2px; }
+.plan-name { display: flex; flex-direction: column; min-width: 0; }
+.plan-name .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-row select { font: inherit; font-size: 12px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+.plan-row .budget { white-space: nowrap; }
+.plan-row .arrows { display: inline-flex; }
+.week { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.week-day { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 6px; text-align: center; }
+.week-name { font-weight: 700; font-size: 13px; }
+.week-day.noPaper .week-label, .week-day.notOpened .week-label { color: var(--muted); }
+.press-switch { white-space: nowrap; margin: 0; font-size: 13px; }
+.plan-rows.locked .plan-row { cursor: default; opacity: .7; }
+.plan-row.place { cursor: default; padding-left: 18px; }
+.place-mark { color: var(--muted); text-align: center; }

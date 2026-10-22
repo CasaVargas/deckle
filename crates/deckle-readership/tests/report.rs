@@ -35,6 +35,7 @@ fn edition(s: &mut State, i: u64, secs: &[(&str, &str, i64)], reads: &[(&str, Op
                 key: (*k).into(),
                 name: (*n).into(),
                 start: *start,
+                items: None,
             })
             .collect(),
     });
@@ -408,4 +409,53 @@ fn the_further_of_furthest_and_last_counts() {
         .unwrap()
         .last = Some(8500);
     assert_eq!(report(&s, &usual()).median_percent, Some(85));
+}
+
+#[test]
+fn other_places_are_their_own_rows_and_drop_alone() {
+    let mut c = cfg(&["weather", "local", "lottery"], &[]);
+    c.local.places = vec![
+        deckle_digest::config::PlaceNews {
+            name: "Asheville, NC".into(),
+            google_news: "Asheville NC".into(),
+            feeds: Vec::new(),
+            max_items: None,
+        },
+        deckle_digest::config::PlaceNews {
+            name: "Boone".into(),
+            google_news: "Boone NC".into(),
+            feeds: Vec::new(),
+            max_items: None,
+        },
+    ];
+    let r = deckle_readership::report(&State::default(), &c);
+    let rows: Vec<(&str, &str)> = r
+        .sections
+        .iter()
+        .map(|s| (s.key.as_str(), s.name.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("weather", "Weather"),
+            ("local", "Local"),
+            ("local:Asheville, NC", "Asheville, NC"),
+            ("local:Boone", "Boone"),
+            ("lottery", "Lottery"),
+        ]
+    );
+    let drop = deckle_readership::report::Suggestion {
+        id: "drop:local:Boone".into(),
+        kind: SuggestionKind::Drop,
+        key: "local:Boone".into(),
+        title: String::new(),
+        why: String::new(),
+    };
+    apply(&drop, &mut c).unwrap();
+    assert_eq!(c.local.places.len(), 1);
+    assert!(
+        c.sections.contains(&SectionKind::Local),
+        "Local itself stays"
+    );
+    assert!(apply(&drop, &mut c).is_err(), "already gone");
 }

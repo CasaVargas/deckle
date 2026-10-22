@@ -67,6 +67,7 @@ fn layout_fixture() -> Layout {
         key: key.into(),
         name: key.into(),
         start,
+        items: None,
     };
     Layout {
         date: d("2026-10-21"),

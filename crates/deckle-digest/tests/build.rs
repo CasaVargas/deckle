@@ -45,6 +45,13 @@ fn config() -> Config {
     // Nor the owner's frost cache; the archive is offline here, so nothing is written.
     c.almanac_path =
         Some(std::env::temp_dir().join(format!("deckle-test-almanac-{}.json", std::process::id())));
+    // Nor the owner's puzzles: a fresh store per call, so parallel tests don't share one.
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    c.puzzle_path = Some(std::env::temp_dir().join(format!(
+        "deckle-test-puzzles-{}-{n}.json",
+        std::process::id()
+    )));
     c.horoscope.signs = vec!["leo".into(), "virgo".into()];
     // The fixtures were saved on 2026-10-20; keep a week of stories.
     c.max_age_hours = 24 * 7;
@@ -80,6 +87,7 @@ fn every_section_fills_from_fixtures() {
             "Hacker News",
             "Lottery",
             "Horoscope",
+            "Puzzle",
             "On This Day"
         ]
     );
@@ -272,6 +280,7 @@ fn gathered_sections_carry_their_keys() {
             "feeds:Hacker News",
             "lottery",
             "horoscope",
+            "puzzle",
             "onthisday"
         ]
     );
@@ -334,4 +343,218 @@ fn icons_ship_in_the_epub() {
             "{src} missing from the manifest"
         );
     }
+}
+
+#[test]
+fn gather_records_headlines_for_tomorrows_puzzle() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    c.puzzle_path = Some(dir.path().join("puzzles.json"));
+    let g = gather(&c, date(), now(), &fake);
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(puzzle.unavailable.is_none());
+    let store = deckle_digest::puzzle::store::Store::load(c.puzzle_path.as_ref().unwrap());
+    let day = &store.days[&date()];
+    assert!(!day.headlines.is_empty());
+    assert!(
+        day.headlines
+            .iter()
+            .all(|t| t.section == "Local" || t.section == "Hacker News")
+    );
+    // a rebuild prints the same puzzle
+    let again = gather(&c, date(), now(), &fake);
+    let p2 = again
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert_eq!(puzzle.articles[0].body, p2.articles[0].body);
+}
+
+#[test]
+fn puzzle_store_write_error_is_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    // a directory where the file should be: the save fails, the paper doesn't
+    let path = dir.path().join("puzzles.json");
+    std::fs::create_dir(&path).unwrap();
+    c.puzzle_path = Some(path);
+    let g = gather(&c, date(), now(), &fake);
+    assert!(
+        g.notes.iter().any(|n| n.contains("puzzle")),
+        "{:?}",
+        g.notes
+    );
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(!puzzle.articles.is_empty());
+}
+
+#[test]
+fn building_another_date_leaves_the_puzzle_store_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    c.puzzle_path = Some(dir.path().join("puzzles.json"));
+    gather(&c, date(), now(), &fake);
+    let before = std::fs::read(c.puzzle_path.as_ref().unwrap()).unwrap();
+    // a preview of next year's paper: printed, but neither kept nor pruning today's
+    let later = date() + chrono::Days::new(400);
+    let g = gather(&c, later, now(), &fake);
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(!puzzle.articles.is_empty());
+    assert_eq!(
+        std::fs::read(c.puzzle_path.as_ref().unwrap()).unwrap(),
+        before
+    );
+}
+
+// --- local news for more places (#102) ---
+
+use deckle_digest::config::PlaceNews;
+
+fn place(name: &str, search: &str) -> PlaceNews {
+    PlaceNews {
+        name: name.into(),
+        google_news: search.into(),
+        feeds: Vec::new(),
+        max_items: None,
+    }
+}
+
+#[test]
+fn places_print_after_local_each_from_its_own_search() {
+    let mut c = config();
+    c.local.places = vec![
+        place("Asheville, NC", "Asheville NC"),
+        place("Boone, NC", ""),
+    ];
+    c.local.places[1].feeds = vec!["https://boone.example/rss".into()]; // offline in the fake
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        fake(url)
+    };
+    let g = gather(&c, date(), now(), &net);
+    let keys: Vec<&str> = g.edition.sections.iter().map(|s| s.key.as_str()).collect();
+    let at = keys.iter().position(|k| *k == "local").unwrap();
+    assert_eq!(
+        &keys[at..at + 3],
+        ["local", "local:Asheville, NC", "local:Boone, NC"]
+    );
+    let asheville = &g.edition.sections[at + 1];
+    assert_eq!(asheville.title, "Asheville, NC");
+    assert_eq!(
+        asheville.kicker.as_deref(),
+        Some("News from around Asheville, NC")
+    );
+    assert!(!asheville.articles.is_empty());
+    // its own search, and only Local and Asheville search Google News
+    let asked = asked.lock().unwrap();
+    assert!(
+        asked.iter().any(|u| u.contains("q=Asheville+NC")),
+        "{asked:?}"
+    );
+    let searches = asked
+        .iter()
+        .filter(|u| u.starts_with("https://news.google.com/rss/search"))
+        .count();
+    assert_eq!(searches, 2, "{asked:?}");
+    // Boone's feed is down: its section says so, and nothing else is touched
+    let boone = &g.edition.sections[at + 2];
+    assert!(
+        boone
+            .unavailable
+            .as_deref()
+            .unwrap()
+            .contains("boone.example"),
+        "{boone:?}"
+    );
+    assert!(g.edition.sections[at].unavailable.is_none());
+    // all three are news, but only Local is the local tier
+    assert!(g.news.contains(&(at + 1)) && g.news.contains(&(at + 2)));
+}
+
+#[test]
+fn a_place_with_nothing_to_read_says_so() {
+    let mut c = config();
+    c.local.places = vec![place("Nowhere", "")];
+    let g = gather(&c, date(), now(), &fake);
+    let s = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "local:Nowhere")
+        .unwrap();
+    assert!(s.unavailable.as_deref().unwrap().contains("for Nowhere"));
+}
+
+#[test]
+fn places_follow_local_off() {
+    let mut c = config();
+    c.sections
+        .retain(|k| *k != deckle_digest::SectionKind::Local);
+    c.local.places = vec![place("Asheville, NC", "Asheville NC")];
+    let g = gather(&c, date(), now(), &fake);
+    assert!(
+        g.edition
+            .sections
+            .iter()
+            .all(|s| !s.key.starts_with("local"))
+    );
+}
+
+#[test]
+fn place_budget_defaults_to_locals() {
+    let mut c = config();
+    c.local.max_items = 2;
+    c.local.places = vec![place("A", "Asheville NC"), place("B", "Boone NC")];
+    c.local.places[1].max_items = Some(1);
+    c.full_text = false;
+    let g = gather(&c, date(), now(), &fake);
+    let n = |k: &str| {
+        g.edition
+            .sections
+            .iter()
+            .find(|s| s.key == k)
+            .unwrap()
+            .articles
+            .len()
+    };
+    assert_eq!((n("local:A"), n("local:B")), (2, 1));
+}
+
+#[test]
+fn places_round_trip_and_stay_out_of_an_untouched_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut c = Config::parse(deckle_digest::config::STARTER).unwrap();
+    deckle_digest::config::save(&path, &c).unwrap();
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("places ="));
+    c.local.places = vec![place("Asheville, NC", "Asheville NC")];
+    deckle_digest::config::save(&path, &c).unwrap();
+    let back = Config::load(&path).unwrap();
+    assert_eq!(back.local.places, c.local.places);
+    // an old file without places still reads
+    assert!(
+        Config::parse("[local]\ngoogle_news = \"x\"\n")
+            .unwrap()
+            .local
+            .places
+            .is_empty()
+    );
 }

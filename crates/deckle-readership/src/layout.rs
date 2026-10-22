@@ -25,6 +25,10 @@ pub struct SectionStart {
     /// What the paper prints.
     pub name: String,
     pub start: i64,
+    /// Stories or articles the section held, from the build report; `None` for the front page
+    /// and layouts recorded before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<u32>,
 }
 
 /// The layout of an edition from its KFX. `sections` is `(key, printed title)` in paper order,
@@ -44,6 +48,7 @@ pub fn layout_from_kfx(
         key: "front".into(),
         name: "Front page".into(),
         start: front.pid,
+        items: None,
     }];
     let mut rest = firsts[1..].iter();
     for (key, name) in sections {
@@ -54,6 +59,7 @@ pub fn layout_from_kfx(
             key: key.clone(),
             name: name.clone(),
             start: run.pid,
+            items: None,
         });
     }
     Ok(Layout {
