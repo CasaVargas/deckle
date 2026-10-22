@@ -2,8 +2,8 @@
 # Signs one file with Azure Artifact Signing.
 #
 # Tauri runs this through bundle.windows.signCommand (tauri.signing.conf.json, passed with
-# --config by the release workflow only) for the app exe, the NSIS installer and uninstaller,
-# and the MSI. The workflow's "Azure Artifact Signing" step provides SIGNTOOL_PATH and
+# --config by the release workflow only) for the app exe and the NSIS installer and
+# uninstaller. The workflow's "Azure Artifact Signing" step provides SIGNTOOL_PATH and
 # ARTIFACT_SIGNING_DLIB; the Azure dlib signs in with AZURE_TENANT_ID, AZURE_CLIENT_ID and
 # AZURE_CLIENT_SECRET from the environment. Same account and profile as Beltr and
 # DebridDownloader (docs/release.md).
