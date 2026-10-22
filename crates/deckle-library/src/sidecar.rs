@@ -69,6 +69,9 @@ pub struct SendRecord {
     pub xray_engine: Option<u32>,
     /// The Word Wise database's `version+build` when Word Wise shipped.
     pub wordwise_db: Option<String>,
+    /// The KFX's end position (`erl`) when sent, so a reading position becomes a percent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<i64>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

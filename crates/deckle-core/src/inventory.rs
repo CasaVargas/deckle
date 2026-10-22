@@ -39,6 +39,9 @@ pub struct DeviceBook {
     pub from_deckle: bool,
     pub xray: bool,
     pub word_wise: bool,
+    /// The KFX's end position (`erl`), the denominator of a reading position.
+    #[serde(skip)]
+    pub end: Option<i64>,
     /// The KFX's cover, JPEG.
     #[serde(skip)]
     pub cover: Option<Vec<u8>>,
@@ -92,6 +95,7 @@ fn read_details(book: &mut DeviceBook, kfx: &[u8]) {
     book.from_deckle = k.asin.as_deref().is_some_and(is_generated_asin);
     book.asin = k.asin;
     book.cover = k.cover;
+    book.end = deckle_kfx::text::content_runs(kfx).ok().map(|(_, e)| e);
 }
 
 /// A KFX's details, cached under `cache` by path, size and modified time, so a listing
@@ -103,6 +107,8 @@ fn details_cached(book: &mut DeviceBook, path: &Path, cache: Option<&Path>) {
         authors: Vec<String>,
         cde: Option<String>,
         asin: Option<String>,
+        /// `-1` when unknown. Required, so a cache file from before `end` is re-read once.
+        end: i64,
     }
     let stamp = std::fs::metadata(path)
         .and_then(|m| m.modified())
@@ -125,6 +131,7 @@ fn details_cached(book: &mut DeviceBook, path: &Path, cache: Option<&Path>) {
         book.cde = c.cde;
         book.from_deckle = c.asin.as_deref().is_some_and(is_generated_asin);
         book.asin = c.asin;
+        book.end = Some(c.end).filter(|e| *e >= 0);
         book.cover = std::fs::read(jpg).ok();
         return;
     }
@@ -138,6 +145,7 @@ fn details_cached(book: &mut DeviceBook, path: &Path, cache: Option<&Path>) {
             authors: book.authors.clone(),
             cde: book.cde.clone(),
             asin: book.asin.clone(),
+            end: book.end.unwrap_or(-1),
         };
         if let Some(dir) = json.parent()
             && std::fs::create_dir_all(dir).is_ok()
@@ -538,6 +546,29 @@ mod device_tests {
         let again = list_on(&mut conn, Some(&cache)).unwrap();
         assert_eq!(again.books[0].title, mine.title);
         assert_eq!(again.books[0].cover, mine.cover);
+    }
+
+    #[test]
+    fn listing_reads_end_from_kfx() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (kfx, _) = deckle_kfx();
+        let want = deckle_kfx::text::content_runs(&kfx).unwrap().1;
+        let books = tmp.path().join("books");
+        std::fs::create_dir_all(&books).unwrap();
+        std::fs::write(books.join("Mini.kfx"), &kfx).unwrap();
+        let cache = tmp.path().join("cache");
+        let target = Target::Folder(books);
+        let mut conn = Conn::new(&target);
+        let inv = list_on(&mut conn, Some(&cache)).unwrap();
+        assert_eq!(inv.books[0].end, Some(want));
+        // The second listing comes from the cache, which now holds the end.
+        let json: String = std::fs::read_dir(&cache)
+            .unwrap()
+            .filter_map(|e| std::fs::read_to_string(e.unwrap().path()).ok())
+            .collect();
+        assert!(json.contains("\"end\""), "{json}");
+        let again = list_on(&mut conn, Some(&cache)).unwrap();
+        assert_eq!(again.books[0].end, Some(want));
     }
 
     #[test]
