@@ -47,6 +47,10 @@ td.day { font-weight: bold; }
 .caption { display: block; font-size: 0.8em; font-style: italic; text-align: left; margin-top: 0.2em; }
 h3.subhead { font-size: 1.05em; margin: 1em 0 0.3em 0; }
 blockquote { margin: 0.6em 1.2em; font-style: italic; }
+.bar { border: 1px solid black; height: 0.5em; width: 60%; }
+.bar > div { background-color: black; height: 100%; }
+.nudge { font-style: italic; }
+.shelf-book { font-weight: bold; margin-bottom: 0.2em; }
 .source { font-size: 0.8em; font-style: italic; margin-top: 0.8em; }
 .note { font-style: italic; }
 ul.index { list-style-type: none; padding-left: 0; }

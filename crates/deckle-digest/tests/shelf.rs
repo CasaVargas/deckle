@@ -409,3 +409,260 @@ mod select {
         assert_eq!(select::words(&Shelf::default(), date(), TZ).len(), 0);
     }
 }
+
+// ---- the section on the page (shelf design §5) ---------------------------------------
+
+mod page {
+    use super::*;
+    use chrono_tz::{America::New_York, Tz};
+    use deckle_digest::shelf::section;
+    use deckle_digest::shelf::store::{HighlightSnap, WordSnap};
+    use deckle_digest::{Edition, GatherOptions, Gathered, Section, gather_with, render};
+
+    const TZ: Tz = New_York;
+
+    fn date() -> NaiveDate {
+        super::today()
+    }
+
+    fn at_percent(title: &str, days_ago: u64, pct: i64) -> BookSnap {
+        let day = date() - Days::new(days_ago);
+        BookSnap {
+            file: format!("{title}.kfx"),
+            title: title.into(),
+            last: Some(pct),
+            end: Some(100),
+            last_read: Some(format!("{}T16:00:00Z", day.format("%Y-%m-%d"))),
+            ..Default::default()
+        }
+    }
+
+    /// The Scribe (books only, plugged in yesterday) and the Paperwhite (a highlight with a
+    /// note, two words; plugged in two days ago).
+    fn fixed_shelf() -> Shelf {
+        let mut shelf = Shelf::default();
+        let mut scribe = snap("Kindle Scribe", date() - Days::new(1));
+        scribe.seen = "2026-10-21T20:00:00Z".into();
+        scribe.books = vec![
+            at_percent("The Count of Monte Cristo", 2, 62),
+            at_percent("Walden", 9, 35),
+        ];
+        shelf.put("S", scribe);
+        let mut pw = snap("Kindle Paperwhite", date() - Days::new(2));
+        pw.seen = "2026-10-20T20:00:00Z".into();
+        pw.books.clear();
+        pw.highlights_shared = true;
+        pw.highlights = vec![HighlightSnap {
+            id: "h1".into(),
+            title: "Walden".into(),
+            author: "Henry David Thoreau".into(),
+            text: "I went to the woods because I wished to live deliberately, to front only the essential facts of life.".into(),
+            notes: vec!["read this again before the cabin trip".into()],
+            page: Some("88".into()),
+            added: NaiveDate::from_ymd_opt(2025, 3, 22),
+        }];
+        pw.words_shared = true;
+        pw.words = vec![
+            WordSnap {
+                word: "ephemeral".into(),
+                stem: "ephemeral".into(),
+                usage: "Fame is ephemeral & fickle.".into(),
+                book: "Walden".into(),
+                at: "2026-10-20T15:00:00Z".into(),
+                definition: Some("lasting a very short time".into()),
+            },
+            WordSnap {
+                word: "quixotic".into(),
+                stem: "quixotic".into(),
+                usage: "A quixotic plan.".into(),
+                book: "Don Quixote".into(),
+                at: "2026-10-18T15:00:00Z".into(),
+                definition: None,
+            },
+        ];
+        shelf.put("P", pw);
+        shelf
+    }
+
+    fn xhtml(s: Section) -> String {
+        let g = Gathered {
+            edition: Edition {
+                paper: "The Deckle Daily".into(),
+                date: date(),
+                place: "New York, NY".into(),
+                weather_line: None,
+                sections: vec![s],
+                assets: Vec::new(),
+            },
+            news: Vec::new(),
+            reading: None,
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+        };
+        let (_, bytes) = render::render(&g, Vec::new())
+            .into_iter()
+            .find(|(p, _)| p == "OEBPS/s1.xhtml")
+            .unwrap();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    fn titles(s: &Section) -> Vec<String> {
+        s.articles.iter().map(|a| a.title.clone()).collect()
+    }
+
+    #[test]
+    fn golden_page() {
+        let mut shelf = fixed_shelf();
+        let s = section(&mut shelf, &Config::default(), date(), TZ, false).unwrap();
+        assert_eq!(s.key, "shelf");
+        let got = xhtml(s);
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/shelf/golden-page.xhtml"
+        );
+        if std::env::var_os("UPDATE_GOLDEN").is_some() {
+            std::fs::write(path, &got).unwrap();
+        }
+        assert_eq!(got, std::fs::read_to_string(path).unwrap());
+        roxmltree::Document::parse(&got).expect("well-formed XHTML");
+        for want in [
+            "On your nightstand",
+            "You highlighted this 19 months ago",
+            " (from your Kindle Paperwhite)",
+            "Your note: read this again before the cabin trip",
+            "Words you looked up this week",
+            "Taken from your Kindle (Kindle Scribe) when it was last plugged in, Wednesday",
+            "<i>The Count of Monte Cristo</i>",
+            "width:62%",
+            "62% · last read Tuesday",
+            "Pick up <i>The Count of Monte Cristo</i> tonight? You left off 62% in.",
+            "Walden, Henry David Thoreau · page 88 · March 22, 2025",
+            "Fame is ephemeral &amp; fickle.",
+        ] {
+            assert!(got.contains(want), "missing {want:?} in\n{got}");
+        }
+        assert_eq!(
+            shelf.shown.get("h1"),
+            Some(&date()),
+            "the pick is remembered"
+        );
+    }
+
+    #[test]
+    fn scribe_only_prints_nightstand() {
+        let mut shelf = fixed_shelf();
+        shelf.kindles.remove("P");
+        let s = section(&mut shelf, &Config::default(), date(), TZ, false).unwrap();
+        assert_eq!(titles(&s), ["On your nightstand"]);
+        assert!(shelf.shown.is_empty());
+    }
+
+    #[test]
+    fn parts_switch_off() {
+        let mut cfg = Config::default();
+        cfg.shelf.words = false;
+        let s = section(&mut fixed_shelf(), &cfg, date(), TZ, false).unwrap();
+        assert!(
+            titles(&s).iter().all(|t| !t.starts_with("Words")),
+            "{:?}",
+            titles(&s)
+        );
+        assert_eq!(s.articles.len(), 2);
+        cfg.shelf.highlights = false;
+        cfg.shelf.nightstand = false;
+        assert!(section(&mut fixed_shelf(), &cfg, date(), TZ, false).is_none());
+    }
+
+    /// A config with only the shelf, and stores in a temp dir.
+    fn cfg_in(dir: &std::path::Path) -> Config {
+        let mut cfg = Config {
+            sections: vec![SectionKind::Shelf],
+            shelf_path: Some(dir.join("shelf.json")),
+            puzzle_path: Some(dir.join("puzzles.json")),
+            ..Default::default()
+        };
+        cfg.reading.queue_path = Some(dir.join("reading.jsonl"));
+        cfg
+    }
+
+    fn now() -> chrono::DateTime<chrono::Utc> {
+        "2026-10-22T14:00:00Z".parse().unwrap()
+    }
+
+    fn offline(_: &str) -> Result<Vec<u8>, String> {
+        Err("offline".into())
+    }
+
+    #[test]
+    fn nothing_leaves_section_out() {
+        let mut empty = Shelf::default();
+        assert!(section(&mut empty, &Config::default(), date(), TZ, false).is_none());
+
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_in(dir.path());
+        let g = gather_with(&cfg, date(), now(), &offline, &GatherOptions::default());
+        assert!(g.edition.sections.iter().all(|s| s.key != "shelf"));
+        assert!(
+            g.notes
+                .iter()
+                .any(|n| n == "From Your Shelf left out: plug your Kindle in once to fill it"),
+            "{:?}",
+            g.notes
+        );
+
+        // A 40-day-old snapshot of finished books: out, and no plug-in note (it isn't fresh,
+        // but the Kindle has been seen).
+        let mut shelf = Shelf::default();
+        let mut old = snap("Scribe", date() - Days::new(40));
+        old.books = vec![at_percent("Done", 40, 99)];
+        shelf.put("S", old);
+        shelf.save(&cfg.shelf_store()).unwrap();
+        let g = gather_with(&cfg, date(), now(), &offline, &GatherOptions::default());
+        assert!(g.edition.sections.iter().all(|s| s.key != "shelf"));
+        assert!(
+            g.notes.iter().all(|n| !n.contains("plug your Kindle in")),
+            "a Kindle has been seen: {:?}",
+            g.notes
+        );
+    }
+
+    #[test]
+    fn rebuild_same_day_same_highlight() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg_in(dir.path());
+        let mut shelf = fixed_shelf();
+        // Three equally good old highlights: the pick must not move between builds.
+        let k = shelf.kindles.get_mut("P").unwrap();
+        for id in ["h2", "h3"] {
+            let mut h = k.highlights[0].clone();
+            h.id = id.into();
+            h.notes.clear();
+            k.highlights.push(h);
+        }
+        k.highlights[0].notes.clear();
+        shelf.save(&cfg.shelf_store()).unwrap();
+        let body = |g: &Gathered| {
+            let s = g
+                .edition
+                .sections
+                .iter()
+                .find(|s| s.key == "shelf")
+                .unwrap();
+            s.articles
+                .iter()
+                .map(|a| a.body.clone())
+                .collect::<Vec<_>>()
+        };
+        let opts = GatherOptions::default();
+        let first = gather_with(&cfg, date(), now(), &offline, &opts);
+        let second = gather_with(&cfg, date(), now(), &offline, &opts);
+        assert_eq!(body(&first), body(&second));
+        assert!(Shelf::load(&cfg.shelf_store()).shown.len() == 1);
+    }
+
+    #[test]
+    fn gather_without_options_keeps_the_fraction_off() {
+        assert!(!GatherOptions::default().shelf_fraction_ok);
+    }
+}

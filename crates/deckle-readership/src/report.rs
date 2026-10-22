@@ -68,7 +68,7 @@ pub struct Suggestion {
     pub why: String,
 }
 
-const KINDS: [SectionKind; 8] = [
+const KINDS: [SectionKind; 9] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
@@ -76,6 +76,7 @@ const KINDS: [SectionKind; 8] = [
     SectionKind::Lottery,
     SectionKind::Horoscope,
     SectionKind::Puzzle,
+    SectionKind::Shelf,
     SectionKind::Onthisday,
 ];
 
