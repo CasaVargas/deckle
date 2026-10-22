@@ -25,14 +25,24 @@ coordinate `deckle_kfx::text` uses. A never-opened book has no `.sdr` or no `.yj
   End to end the same day: `deckle digest run --to device` recorded the 2026-10-22 edition's
   sections; after reading and replugging, `deckle digest push` (empty outbox) read `fpr` 14565,
   the first character of the Hacker News section, and `deckle digest readership` counted it.
-- **From Your Shelf (`.yjf` of ordinary books and `vocab.db`), not yet checked on hardware.**
-  `book.info.store` in a book's `.yjf` holds the Kindle's own fraction through the book and a word
-  count (`fixtures/yjf/book.yjf`: 15.05%, 9519 words); `timer.average.calculator`, nested in
-  `timer.model`, holds pace samples. Still to confirm with the owner: on the Scribe, that the
-  fraction matches the progress the Kindle shows (until then `KINDLE_FRACTION_OK` is `false` and
-  a book with no known end shows no percent); where store books sit under `documents/`; on the
-  Paperwhite, that `.yjf` files sit beside KFX books and `system/vocabulary/vocab.db` (and a
-  `-wal`) is readable over USB mass storage.
+- **From Your Shelf, checked on hardware 2026-10-22.**
+  - `book.info.store` in a book's `.yjf` holds the Kindle's own fraction through the book and a
+    word count; `timer.average.calculator`, nested in `timer.model`, holds pace samples.
+  - **Paperwhite (5.19.2, mass storage):** `.yjf` files sit beside KFX, MOBI and AZW3 books
+    (the shelf reads KFX only), under `documents/` and `documents/<Author>/`; books two folders
+    down (`Downloads/Items01/`) aren't walked. `system/vocabulary/vocab.db` and
+    `My Clippings.txt` are readable (no `-wal` at the time). Percent against what the Kindle's
+    library shows: The Devil Wears Prada shows 14%, position ÷ end 14.2%, stored fraction 9.1%;
+    In the Shadow of Eight shows 16%, 12.4% and 14.1%; Harry Potter 1 shows 2%, 0.4% and 0.4%.
+    Position ÷ end is within 4 points on all three; the stored fraction within 5, but only just
+    (4.9), so `KINDLE_FRACTION_OK` stays `false` until the Scribe agrees.
+  - **Scribe 2024 (MTP):** only `documents/` is visible, and store-bought books (in Amazon's
+    cloud storage) aren't exposed, so the walk found the sideloaded book and the editions. Their
+    `.yjf` read fine, but no KFX is read over MTP, so a book Deckle didn't send has no end and
+    shows no percent unless the fraction is trusted. No clippings or vocabulary are shared. The
+    MTP product string ends in the serial ("Kindle Scribe G6G3X…"), which the page drops. An
+    edition Deckle sent by hand before date-named files ("Deckle - The Deckle Daily -- …")
+    counts as the paper and stays off the nightstand.
 - **Paperwhite (mass storage), checked 2026-10-22:** the same `documents/<stem>.sdr/<stem><suffix>.yjf`
   (same suffix as the Scribe), decoded fine. Two differences: its `lpr` (89882) was ahead of its
   `fpr` (89410), so the report takes the further of the two; and a pruned edition's `.sdr` stayed

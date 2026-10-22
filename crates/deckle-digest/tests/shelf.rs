@@ -224,6 +224,17 @@ mod select {
         );
         let edition = at_percent("deckle-daily-2026-10-21", 1, 50);
         assert!(titles(vec![edition]).is_empty(), "never the paper itself");
+        // Sent by hand before the date-named files: "<Author> - <Title>", the author being Deckle.
+        let mut old = at_percent(
+            "Deckle - The Deckle Daily -- Tuesday, October 20, 2026",
+            1,
+            50,
+        );
+        old.title = "Deckle - The Deckle Daily -- Tuesday, October 20, 2026".into();
+        assert!(
+            titles(vec![old]).is_empty(),
+            "an older edition is the paper too"
+        );
         let shelf = shelf_of("Scribe", vec![at_percent("Mush Pie", 1, 50)]);
         let cfg = ShelfConfig {
             hide: vec!["mush".into()],

@@ -42,6 +42,25 @@ pub struct Read {
     pub previous: Option<KindleSnapshot>,
 }
 
+/// A Kindle's name for the page: an MTP product string can end in the serial number
+/// ("Kindle Scribe G6G3X308536500ME"), which doesn't belong in print.
+pub fn friendly_name(raw: &str) -> String {
+    let raw = raw.trim();
+    match raw.rsplit_once(' ') {
+        Some((head, last))
+            if last.len() >= 10
+                && last
+                    .bytes()
+                    .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit())
+                && last.bytes().any(|b| b.is_ascii_digit())
+                && last.bytes().any(|b| b.is_ascii_uppercase()) =>
+        {
+            head.trim().to_owned()
+        }
+        _ => raw.to_owned(),
+    }
+}
+
 /// The snapshot of one Kindle (`device_key` is its profile key, as library send records name
 /// it) and the per-book problems found on the way. A problem with one book never costs the
 /// others.
@@ -73,7 +92,7 @@ pub fn snapshot(
         None => (false, Vec::new()),
     };
     let snap = KindleSnapshot {
-        name: name.to_owned(),
+        name: friendly_name(name),
         seen: now.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         books,
         skipped: read.skipped,

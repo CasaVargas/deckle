@@ -127,6 +127,19 @@ fn titles_from_file_names() {
 }
 
 #[test]
+fn a_kindle_is_named_without_its_serial() {
+    for (raw, want) in [
+        ("Kindle Scribe G6G3X308536500ME", "Kindle Scribe"),
+        ("Kindle Scribe", "Kindle Scribe"),
+        ("Kindle Paperwhite", "Kindle Paperwhite"),
+        ("Kindle 5.19.2 (467076 040)", "Kindle 5.19.2 (467076 040)"),
+        ("Kindle", "Kindle"),
+    ] {
+        assert_eq!(deckle_shelf::friendly_name(raw), want, "{raw}");
+    }
+}
+
+#[test]
 fn highlights_snapshot() {
     let mut clippings = fixture("clippings/variants.txt");
     clippings.extend_from_slice(

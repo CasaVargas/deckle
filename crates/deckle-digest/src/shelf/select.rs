@@ -78,11 +78,11 @@ fn local_date(utc: &str, tz: Tz) -> Option<NaiveDate> {
     )
 }
 
+/// The paper itself: a date-named edition, or one sent by hand as "<Author> - <Title>" with
+/// Deckle as the author.
 fn is_edition(file: &str) -> bool {
-    file.rsplit('/')
-        .next()
-        .unwrap_or(file)
-        .starts_with(EDITION_PREFIX)
+    let name = file.rsplit('/').next().unwrap_or(file);
+    name.starts_with(EDITION_PREFIX) || name.starts_with("Deckle - ")
 }
 
 fn state(days: i64, pct: Option<u8>, read: NaiveDate) -> String {
