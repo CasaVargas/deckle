@@ -1,0 +1,110 @@
+[
+ {
+  "place": "New York",
+  "date": "2026-03-20",
+  "lat": 40.71,
+  "lon": -74.01,
+  "tz": "America/New_York",
+  "rise": "06:59",
+  "set": "19:08"
+ },
+ {
+  "place": "New York",
+  "date": "2026-06-21",
+  "lat": 40.71,
+  "lon": -74.01,
+  "tz": "America/New_York",
+  "rise": "05:25",
+  "set": "20:31"
+ },
+ {
+  "place": "New York",
+  "date": "2026-11-01",
+  "lat": 40.71,
+  "lon": -74.01,
+  "tz": "America/New_York",
+  "rise": "06:26",
+  "set": "16:52"
+ },
+ {
+  "place": "New York",
+  "date": "2026-12-21",
+  "lat": 40.71,
+  "lon": -74.01,
+  "tz": "America/New_York",
+  "rise": "07:17",
+  "set": "16:32"
+ },
+ {
+  "place": "Anchorage",
+  "date": "2026-03-20",
+  "lat": 61.22,
+  "lon": -149.9,
+  "tz": "America/Anchorage",
+  "rise": "08:00",
+  "set": "20:15"
+ },
+ {
+  "place": "Anchorage",
+  "date": "2026-06-21",
+  "lat": 61.22,
+  "lon": -149.9,
+  "tz": "America/Anchorage",
+  "rise": "04:20",
+  "set": "23:43"
+ },
+ {
+  "place": "Anchorage",
+  "date": "2026-11-01",
+  "lat": 61.22,
+  "lon": -149.9,
+  "tz": "America/Anchorage",
+  "rise": "08:28",
+  "set": "16:57"
+ },
+ {
+  "place": "Anchorage",
+  "date": "2026-12-21",
+  "lat": 61.22,
+  "lon": -149.9,
+  "tz": "America/Anchorage",
+  "rise": "10:14",
+  "set": "15:41"
+ },
+ {
+  "place": "Sydney",
+  "date": "2026-03-20",
+  "lat": -33.87,
+  "lon": 151.21,
+  "tz": "Australia/Sydney",
+  "rise": "06:58",
+  "set": "19:07"
+ },
+ {
+  "place": "Sydney",
+  "date": "2026-06-21",
+  "lat": -33.87,
+  "lon": 151.21,
+  "tz": "Australia/Sydney",
+  "rise": "07:00",
+  "set": "16:54"
+ },
+ {
+  "place": "Sydney",
+  "date": "2026-11-01",
+  "lat": -33.87,
+  "lon": 151.21,
+  "tz": "Australia/Sydney",
+  "rise": "05:55",
+  "set": "19:23"
+ },
+ {
+  "place": "Sydney",
+  "date": "2026-12-21",
+  "lat": -33.87,
+  "lon": 151.21,
+  "tz": "Australia/Sydney",
+  "rise": "05:41",
+  "set": "20:05"
+ }
+]
