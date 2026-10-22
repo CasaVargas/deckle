@@ -45,6 +45,9 @@ fn config() -> Config {
     // Nor the owner's frost cache; the archive is offline here, so nothing is written.
     c.almanac_path =
         Some(std::env::temp_dir().join(format!("deckle-test-almanac-{}.json", std::process::id())));
+    // Nor the owner's puzzles: a fresh store per test run.
+    c.puzzle_path =
+        Some(std::env::temp_dir().join(format!("deckle-test-puzzles-{}.json", std::process::id())));
     c.horoscope.signs = vec!["leo".into(), "virgo".into()];
     // The fixtures were saved on 2026-10-20; keep a week of stories.
     c.max_age_hours = 24 * 7;
@@ -80,6 +83,7 @@ fn every_section_fills_from_fixtures() {
             "Hacker News",
             "Lottery",
             "Horoscope",
+            "Puzzle",
             "On This Day"
         ]
     );
@@ -272,6 +276,7 @@ fn gathered_sections_carry_their_keys() {
             "feeds:Hacker News",
             "lottery",
             "horoscope",
+            "puzzle",
             "onthisday"
         ]
     );

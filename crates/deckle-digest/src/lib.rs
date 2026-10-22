@@ -232,6 +232,9 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
             }
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
             SectionKind::Horoscope => edition.sections.push(horoscope::section(cfg, date)),
+            SectionKind::Puzzle => edition
+                .sections
+                .push(sources::unavailable("Puzzle", "not built yet")),
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),

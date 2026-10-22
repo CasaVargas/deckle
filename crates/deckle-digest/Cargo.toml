@@ -16,7 +16,7 @@ image = { workspace = true, features = ["gif", "webp"] }
 toml = "1"
 toml_edit = { version = "0.25", features = ["serde"] }
 feed-rs = "3"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 ab_glyph = "0.2"
 html-escape = "0.2"
 dom_smoothie = "0.18"
@@ -48,4 +48,4 @@ tempfile.workspace = true
 roxmltree.workspace = true
 zip.workspace = true
 image.workspace = true
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
