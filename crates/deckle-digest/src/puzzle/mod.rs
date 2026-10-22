@@ -3,4 +3,5 @@
 //! themed on yesterday's headlines, a word ladder, and yesterday's answers.
 
 pub mod grid;
+pub mod theme;
 pub mod words;
