@@ -63,3 +63,34 @@ pub fn yjf(pos: i64) -> Vec<u8> {
         obj("lpr", &[int(2), utf(&p), long(1_792_620_390_980)]),
     ])
 }
+
+pub fn d(s: &str) -> chrono::NaiveDate {
+    s.parse().unwrap()
+}
+
+/// A layout for `date` shipped as `deckle-daily-<date>`, sections "front", "s1", "s2"… at
+/// `starts`, ending at 10 000.
+pub fn layout(date: &str, starts: &[i64]) -> deckle_readership::layout::Layout {
+    use deckle_readership::layout::{Layout, SectionStart};
+    Layout {
+        date: d(date),
+        title: "The Deckle Daily".into(),
+        file: format!("deckle-daily-{date}"),
+        end: 10_000,
+        sections: starts
+            .iter()
+            .enumerate()
+            .map(|(i, &start)| SectionStart {
+                key: if i == 0 {
+                    "front".into()
+                } else {
+                    format!("s{i}")
+                },
+                name: format!("Section {i}"),
+                start,
+            })
+            .collect(),
+    }
+}
+
+pub const NOW: &str = "2026-10-22T07:02:11Z";
