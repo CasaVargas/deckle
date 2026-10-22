@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from "react";
 import Icon from "./Icon";
+import { step } from "./pagePlan";
 import type { NextPaper, PagePlanRow } from "./types";
 
 /** The sections in order with their budgets (tomorrow's paper design §6). Edits save at once. */
@@ -35,8 +36,8 @@ export default function PagePlanCard({
         {rows.map((r, i) => (
           <li
             key={`${r.key}-${i}`}
-            className={`plan-row ${over === i && dragging !== i ? "over" : ""} ${dragging === i ? "dragging" : ""}`}
-            draggable={!locked}
+            className={`plan-row ${r.place !== null ? "place" : ""} ${over === i && dragging !== i ? "over" : ""} ${dragging === i ? "dragging" : ""}`}
+            draggable={!locked && r.place === null}
             onDragStart={(e) => {
               setDragging(i);
               e.dataTransfer.effectAllowed = "move";
@@ -59,10 +60,16 @@ export default function PagePlanCard({
               setOver(null);
             }}
           >
-            <span className="handle" aria-hidden="true">⋮⋮</span>
-            <label className="check" title={r.kind === "feeds" ? "Switches all your feeds" : undefined}>
-              <input type="checkbox" checked disabled={locked} onChange={() => onToggle(r, false)} />
-            </label>
+            <span className="handle" aria-hidden="true">{r.place === null ? "⋮⋮" : ""}</span>
+            {r.place === null ? (
+              <label className="check" title={r.kind === "feeds" ? "Switches all your feeds" : undefined}>
+                <input type="checkbox" checked disabled={locked} onChange={() => onToggle(r, false)} />
+              </label>
+            ) : (
+              <span className="place-mark" aria-hidden="true" title="Follows Local">
+                ↳
+              </span>
+            )}
             <span className="plan-name">
               <strong>{r.name}</strong>
               <span className="muted small">{r.detail}</span>
@@ -78,14 +85,18 @@ export default function PagePlanCard({
             ) : (
               <span className="budget muted small">{r.budget}</span>
             )}
-            <span className="arrows">
-              <button className="icon small" aria-label="Move up" disabled={locked || i === 0} onClick={() => onMove(i, i - 1)}>
-                <Icon name="arrow-up" size={14} />
-              </button>
-              <button className="icon small" aria-label="Move down" disabled={locked || i === rows.length - 1} onClick={() => onMove(i, i + 1)}>
-                <Icon name="arrow-down" size={14} />
-              </button>
-            </span>
+            {r.place === null ? (
+              <span className="arrows">
+                <button className="icon small" aria-label="Move up" disabled={locked || step(rows, i, -1) === null} onClick={() => onMove(i, step(rows, i, -1)!)}>
+                  <Icon name="arrow-up" size={14} />
+                </button>
+                <button className="icon small" aria-label="Move down" disabled={locked || step(rows, i, 1) === null} onClick={() => onMove(i, step(rows, i, 1)!)}>
+                  <Icon name="arrow-down" size={14} />
+                </button>
+              </span>
+            ) : (
+              <span className="arrows" />
+            )}
           </li>
         ))}
         {next.off.map((r, i) => (
