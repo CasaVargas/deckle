@@ -210,6 +210,7 @@ pub fn write_test_epub(path: &Path, date: NaiveDate) -> Result<(), String> {
                 }],
                 unavailable: None,
             }],
+            assets: Vec::new(),
         },
         news: Vec::new(),
         reading: None,

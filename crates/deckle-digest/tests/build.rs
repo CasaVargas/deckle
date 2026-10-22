@@ -42,6 +42,9 @@ fn config() -> Config {
     c.reading.queue_path = Some(
         std::env::temp_dir().join(format!("deckle-test-no-queue-{}.jsonl", std::process::id())),
     );
+    // Nor the owner's frost cache; the archive is offline here, so nothing is written.
+    c.almanac_path =
+        Some(std::env::temp_dir().join(format!("deckle-test-almanac-{}.json", std::process::id())));
     c.horoscope.signs = vec!["leo".into(), "virgo".into()];
     // The fixtures were saved on 2026-10-20; keep a week of stories.
     c.max_age_hours = 24 * 7;
@@ -72,7 +75,7 @@ fn every_section_fills_from_fixtures() {
     assert_eq!(
         titles,
         [
-            "Weather",
+            "Weather & Almanac",
             "Local",
             "Hacker News",
             "Lottery",
@@ -98,8 +101,10 @@ fn dead_network_still_builds() {
     assert!(r.epub.exists());
     let horoscope = r.sections.iter().find(|s| s.title == "Horoscope").unwrap();
     assert_eq!(horoscope.items, 2);
-    let weather = r.sections.iter().find(|s| s.title == "Weather").unwrap();
-    assert!(weather.unavailable.as_deref().unwrap().contains("offline"));
+    // Offline, the forecast is missing but the almanac still prints (almanac design §2.7).
+    let weather = r.sections.iter().find(|s| s.key == "weather").unwrap();
+    assert!(weather.unavailable.is_none());
+    assert!(weather.items >= 2, "{weather:?}");
 }
 
 #[test]
@@ -280,4 +285,53 @@ fn your_reading_has_the_reading_key() {
     let (_tmp, c, _q, _urls) = reading_setup(&[WXII]);
     let g = gather(&c, date(), now(), &net_with_pages);
     assert_eq!(g.edition.sections[0].key, "reading");
+}
+
+#[test]
+fn weather_page_keeps_its_key() {
+    let mut c = config();
+    c.sections = vec![deckle_digest::config::SectionKind::Weather];
+    let g = gather(&c, date(), now(), &fake);
+    assert_eq!(g.edition.sections.len(), 1);
+    assert_eq!(g.edition.sections[0].key, "weather");
+    assert_eq!(g.edition.sections[0].title, "Weather & Almanac");
+}
+
+#[test]
+fn icons_ship_in_the_epub() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    c.sections = vec![deckle_digest::config::SectionKind::Weather];
+    let report = build(&c, date(), now(), dir.path(), &fake).unwrap();
+    // The CLI hands these (key, title) pairs to the readership layout.
+    assert_eq!(report.sections[0].key, "weather");
+    assert_eq!(report.sections[0].title, "Weather & Almanac");
+    let mut zip = read_zip(&report.epub);
+    let names: Vec<String> = zip.file_names().map(|n| n.unwrap().into_owned()).collect();
+    let mut opf = String::new();
+    zip.by_name("OEBPS/content.opf")
+        .unwrap()
+        .read_to_string(&mut opf)
+        .unwrap();
+    let mut page = String::new();
+    zip.by_name("OEBPS/s1.xhtml")
+        .unwrap()
+        .read_to_string(&mut page)
+        .unwrap();
+    let srcs: Vec<&str> = page
+        .split("src=\"")
+        .skip(1)
+        .filter_map(|s| s.split('"').next())
+        .collect();
+    assert!(!srcs.is_empty(), "no pictures on the weather page");
+    for src in srcs {
+        assert!(
+            names.contains(&format!("OEBPS/{src}")),
+            "{src} missing from the EPUB"
+        );
+        assert!(
+            opf.contains(&format!("href=\"{src}\"")),
+            "{src} missing from the manifest"
+        );
+    }
 }

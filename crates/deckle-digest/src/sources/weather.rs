@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Weather from Open-Meteo (free, no key), plus the moon from [`crate::moon`].
+//! The Weather & Almanac page (almanac design §4): the forecast from Open-Meteo (free, no
+//! key), and the sun, moon, sky and Your Day worked out on this machine.
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Duration, NaiveDate};
+use chrono_tz::Tz;
 use serde::Deserialize;
 
 use crate::config::{Config, Units};
 use crate::fetch::Net;
-use crate::{Article, Section, esc};
+use crate::tz::clock;
+use crate::{Article, Section, day, esc, frost, moon, seasons, showers, sun};
 
-const TITLE: &str = "Weather";
+const TITLE: &str = "Weather & Almanac";
 
 #[derive(Debug, Deserialize)]
 pub struct Forecast {
@@ -147,7 +150,9 @@ pub fn strip_word(f: &Forecast, day: usize, units: Units) -> String {
     }
     let word = describe(code);
     let wet = wet_hours(f, day);
-    if wet.is_empty() || wet.iter().any(|h| *h < 12) && wet.iter().any(|h| *h >= 12) {
+    // Only rain, snow and storm words take a time of day.
+    let falls = matches!(code, 51..=99);
+    if !falls || wet.is_empty() || wet.iter().any(|h| *h < 12) && wet.iter().any(|h| *h >= 12) {
         word.into()
     } else if wet[0] < 12 {
         format!("{word}, am")
@@ -206,120 +211,201 @@ impl Icon {
     }
 }
 
-fn clock(iso: &str) -> String {
-    NaiveDateTime::parse_from_str(iso, "%Y-%m-%dT%H:%M")
-        .map(|t| t.format("%-I:%M %p").to_string())
-        .unwrap_or_else(|_| iso.to_owned())
-}
-
 fn deg(v: f64) -> String {
     format!("{}°", v.round() as i64)
 }
 
-/// The Weather section and the one-line summary for the front page and cover.
-pub fn section(cfg: &Config, date: NaiveDate, net: &dyn Net) -> (Section, Option<String>) {
+/// The page's footer credit (almanac design §4).
+const CREDIT: &str = "Forecast: Open-Meteo · Sky and moon worked out on your Mac";
+
+/// Everything the page is built from; [`section`] fetches it, [`page`] lays it out.
+pub struct PageInputs<'a> {
+    pub cfg: &'a Config,
+    pub date: NaiveDate,
+    pub tz: Tz,
+    pub forecast: Result<Forecast, String>,
+    /// The usual frost dates, when the climate lookup has worked.
+    pub frost: Option<frost::Usual>,
+    /// Today's events, when calendars are configured.
+    pub agenda: Option<day::Agenda>,
+}
+
+/// `(href, PNG)` pictures a page shows; the EPUB ships each once.
+pub type Assets = Vec<(String, Vec<u8>)>;
+
+/// The Weather & Almanac page, the front page's weather line, and the pictures it shows.
+/// Each part prints on its own: a failed forecast leaves the almanac and Your Day.
+pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
+    let cfg = i.cfg;
+    let units = cfg.units;
+    let (lat, lon) = (
+        cfg.latitude.unwrap_or_default(),
+        cfg.longitude.unwrap_or_default(),
+    );
+    let mut articles = Vec::new();
+    let mut assets: Assets = Vec::new();
+    let mut line = None;
+
+    // 1. Today and the strip.
+    match &i.forecast {
+        Ok(f) if !f.daily.time.is_empty() => {
+            let (unit, wind_unit) = match units {
+                Units::Imperial => ("F", "mph"),
+                Units::Metric => ("C", "km/h"),
+            };
+            let d = &f.daily;
+            let sky = describe(d.weather_code[0]);
+            let rain = d.precipitation_probability_max[0].unwrap_or(0.0).round() as i64;
+            line = Some(format!(
+                "{sky} · {}/{}{unit} · {rain}% rain",
+                deg(d.temperature_2m_max[0]),
+                deg(d.temperature_2m_min[0]),
+            ));
+            let mut cells = String::new();
+            for n in 0..d.time.len().min(5) {
+                let icon = Icon::from_code(d.weather_code[n]);
+                if !assets.iter().any(|(h, _)| h == icon.href()) {
+                    assets.push((icon.href().to_owned(), icon.png().to_vec()));
+                }
+                let day = NaiveDate::parse_from_str(&d.time[n], "%Y-%m-%d")
+                    .map(|x| x.format("%a").to_string().to_uppercase())
+                    .unwrap_or_else(|_| d.time[n].clone());
+                cells.push_str(&format!(
+                    "<td><span class=\"wday\">{}</span><br/><img src=\"{}\" alt=\"\"/><br/>\
+                     <b>{}</b> {}<br/><span class=\"word\">{}</span></td>",
+                    esc(&day),
+                    icon.href(),
+                    deg(d.temperature_2m_max[n]),
+                    deg(d.temperature_2m_min[n]),
+                    esc(&strip_word(f, n, units)),
+                ));
+            }
+            articles.push(Article {
+                title: format!("Today: {sky}"),
+                body: format!(
+                    "<table class=\"strip\"><tr>{cells}</tr></table>\
+                     <p>Right now: {now}{unit} and {now_sky}, feels like {feels}. \
+                     Humidity {hum}%, wind {wind} {wind_unit}.</p>",
+                    now = deg(f.current.temperature_2m),
+                    now_sky = describe(f.current.weather_code).to_lowercase(),
+                    feels = deg(f.current.apparent_temperature),
+                    hum = f.current.relative_humidity_2m.round() as i64,
+                    wind = f.current.wind_speed_10m.round() as i64,
+                ),
+                ..Default::default()
+            });
+        }
+        Ok(_) => articles.push(forecast_down("no days in the forecast")),
+        Err(e) => articles.push(forecast_down(e)),
+    }
+
+    // 2. The almanac.
+    let today = sun::sun_day(i.date, lat, lon, i.tz);
+    let yesterday = sun::sun_day(i.date - Duration::days(1), lat, lon, i.tz);
+    let mut almanac = String::new();
+    if let sun::SunDay::Normal { rise, set } = today {
+        almanac.push_str(&format!(
+            "<p>Sunrise {} · Sunset {}</p>",
+            clock(rise.time(), units),
+            clock(set.time(), units)
+        ));
+    }
+    almanac.push_str(&format!(
+        "<p>Daylight {}</p>",
+        esc(&sun::daylight_line(&today, &yesterday))
+    ));
+    if let Some(frost) = i.frost.as_ref().and_then(|u| frost::line(u, i.date)) {
+        almanac.push_str(&format!("<p>{}</p>", esc(&frost)));
+    }
+    let moon = moon::phase(i.date);
+    almanac.push_str(&format!(
+        "<p>{}, {}% lit · {}</p>",
+        moon.name,
+        moon.illumination,
+        esc(&moon::next_line(i.date, i.tz, lat))
+    ));
+    if let Some(next) = seasons::coming_up(i.date, i.tz, lat, units) {
+        almanac.push_str(&format!("<p>Coming up: {}</p>", esc(&next)));
+    }
+    articles.push(Article {
+        title: "The almanac".into(),
+        body: almanac,
+        ..Default::default()
+    });
+
+    // 3. Tonight's sky.
+    if let Some(sky) = showers::tonight(i.date, lat, moon.illumination) {
+        articles.push(Article {
+            title: "Tonight's sky".into(),
+            body: format!("<p>{}</p>", esc(&sky)),
+            ..Default::default()
+        });
+    }
+
+    // 4. Your Day.
+    if let Some(agenda) = &i.agenda {
+        let mut body = day::render(agenda, cfg.day.max_items, units);
+        if cfg.day.weather_note
+            && let Ok(f) = &i.forecast
+            && let Some(note) = day::weather_note(&agenda.entries, f, i.date, units)
+        {
+            body.push_str(&format!("<p class=\"rain\">{}</p>", esc(&note)));
+        }
+        articles.push(Article {
+            title: "Your Day".into(),
+            body,
+            ..Default::default()
+        });
+    }
+
+    if let Some(last) = articles.last_mut() {
+        last.body
+            .push_str(&format!("<p class=\"credit\">{}</p>", esc(CREDIT)));
+    }
+    let section = Section {
+        title: TITLE.into(),
+        kicker: (!cfg.place.is_empty()).then(|| cfg.place.clone()),
+        articles,
+        ..Default::default()
+    };
+    (section, line, assets)
+}
+
+fn forecast_down(why: impl std::fmt::Display) -> Article {
+    Article {
+        title: "Today".into(),
+        body: format!(
+            "<p class=\"note\">Forecast unavailable: {}.</p>",
+            esc(&why.to_string())
+        ),
+        ..Default::default()
+    }
+}
+
+/// The page, fetched: the forecast, the frost dates (cached after the first time) and
+/// today's calendars.
+pub fn section(
+    cfg: &Config,
+    date: NaiveDate,
+    tz: Tz,
+    net: &dyn Net,
+) -> (Section, Option<String>, Assets) {
     let (Some(lat), Some(lon)) = (cfg.latitude, cfg.longitude) else {
         return (
             super::unavailable(TITLE, "set latitude and longitude in digest.toml"),
             None,
+            Vec::new(),
         );
     };
-    match net.get(&url(lat, lon, cfg.units)).and_then(|b| parse(&b)) {
-        Ok(f) => from_forecast(&f, cfg, date),
-        Err(e) => (super::unavailable(TITLE, e), None),
-    }
-}
-
-pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, Option<String>) {
-    let unit = match cfg.units {
-        Units::Imperial => "F",
-        Units::Metric => "C",
+    let inputs = PageInputs {
+        cfg,
+        date,
+        tz,
+        forecast: net.get(&url(lat, lon, cfg.units)).and_then(|b| parse(&b)),
+        frost: frost::usual(lat, lon, &cfg.almanac_cache(), net).ok(),
+        agenda: (!cfg.day.calendars.is_empty()).then(|| day::agenda(&cfg.day, date, tz, net)),
     };
-    let wind_unit = match cfg.units {
-        Units::Imperial => "mph",
-        Units::Metric => "km/h",
-    };
-    let d = &f.daily;
-    let mut articles = Vec::new();
-    let mut line = None;
-    if !d.time.is_empty() {
-        let rain = d.precipitation_probability_max[0].unwrap_or(0.0).round() as i64;
-        let sky = describe(d.weather_code[0]);
-        line = Some(format!(
-            "{sky} · {}/{}{unit} · {rain}% rain",
-            deg(d.temperature_2m_max[0]),
-            deg(d.temperature_2m_min[0]),
-        ));
-        articles.push(Article {
-            teaser: None,
-            photos: Vec::new(),
-            title: format!("Today: {sky}"),
-            meta: (!cfg.place.is_empty()).then(|| cfg.place.clone()),
-            body: format!(
-                "<p class=\"big\">{hi}<span class=\"lo\"> / {lo}{unit}</span></p>\
-                 <p>{rain}% chance of rain. Sunrise {rise}, sunset {set}.</p>\
-                 <p>Right now: {now}{unit} and {now_sky}, feels like {feels}. \
-                 Humidity {hum}%, wind {wind} {wind_unit}.</p>",
-                hi = deg(d.temperature_2m_max[0]),
-                lo = deg(d.temperature_2m_min[0]),
-                rise = clock(&d.sunrise[0]),
-                set = clock(&d.sunset[0]),
-                now = deg(f.current.temperature_2m),
-                now_sky = describe(f.current.weather_code).to_lowercase(),
-                feels = deg(f.current.apparent_temperature),
-                hum = f.current.relative_humidity_2m.round() as i64,
-                wind = f.current.wind_speed_10m.round() as i64,
-            ),
-        });
-    }
-    if d.time.len() > 1 {
-        let mut rows = String::new();
-        for i in 1..d.time.len() {
-            let day = NaiveDate::parse_from_str(&d.time[i], "%Y-%m-%d")
-                .map(|x| x.format("%A").to_string())
-                .unwrap_or_else(|_| d.time[i].clone());
-            rows.push_str(&format!(
-                "<tr><td class=\"day\">{}</td><td>{}</td><td class=\"num\">{}/{}</td><td class=\"num\">{}%</td></tr>",
-                esc(&day),
-                describe(d.weather_code[i]),
-                deg(d.temperature_2m_max[i]),
-                deg(d.temperature_2m_min[i]),
-                d.precipitation_probability_max[i].unwrap_or(0.0).round() as i64,
-            ));
-        }
-        articles.push(Article {
-            teaser: None,
-            photos: Vec::new(),
-            title: "The days ahead".into(),
-            meta: None,
-            body: format!("<table class=\"forecast\">{rows}</table>"),
-        });
-    }
-    let moon = crate::moon::phase(date);
-    articles.push(Article {
-        teaser: None,
-        photos: Vec::new(),
-        title: format!("The moon: {}", moon.name),
-        meta: None,
-        body: format!(
-            "<p>{}% illuminated, {:.0} days into its cycle. {}</p>",
-            moon.illumination,
-            moon.age_days,
-            esc(&crate::moon::next_line(
-                date,
-                crate::tz::local_tz(),
-                cfg.latitude.unwrap_or_default()
-            ))
-        ),
-    });
-    let section = Section {
-        key: String::new(),
-        title: TITLE.into(),
-        kicker: Some("Forecast by Open-Meteo".into()),
-        articles,
-        unavailable: None,
-    };
-    (section, line)
+    page(&inputs)
 }
 
 #[cfg(test)]
@@ -394,6 +480,20 @@ mod tests {
     }
 
     #[test]
+    fn dry_words_get_no_timing() {
+        // A clear or cloudy day with a wet hour stays "Clear": the suffix is for rain words.
+        assert_eq!(
+            strip_word(&day(0, 45.0, &[16]), 0, Units::Imperial),
+            "Clear"
+        );
+        assert_eq!(
+            strip_word(&day(3, 45.0, &[16]), 0, Units::Imperial),
+            "Overcast"
+        );
+        assert_eq!(strip_word(&day(45, 45.0, &[7]), 0, Units::Imperial), "Fog");
+    }
+
+    #[test]
     fn frost_at_dawn() {
         assert_eq!(
             strip_word(&day(1, 31.0, &[]), 0, Units::Imperial),
@@ -464,11 +564,5 @@ mod tests {
             assert_eq!((img.width(), img.height()), (64, 64), "{icon:?}");
             assert_eq!(img.color(), image::ColorType::L8, "{icon:?}");
         }
-    }
-
-    #[test]
-    fn clock_is_twelve_hour() {
-        assert_eq!(clock("2026-10-20T07:28"), "7:28 AM");
-        assert_eq!(clock("2026-10-20T18:36"), "6:36 PM");
     }
 }

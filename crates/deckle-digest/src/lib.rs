@@ -84,6 +84,8 @@ pub struct Edition {
     /// "Clear · 74°/40°F · 0% rain", for the front page and the cover.
     pub weather_line: Option<String>,
     pub sections: Vec<Section>,
+    /// Pictures pages show, `(href, PNG)` inside `OEBPS/`: the weather icons.
+    pub assets: Vec<(String, Vec<u8>)>,
 }
 
 impl Edition {
@@ -162,6 +164,7 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
         place: cfg.place.clone(),
         weather_line: None,
         sections: Vec::new(),
+        assets: Vec::new(),
     };
     let mut news = Vec::new();
     let mut g_reading = None;
@@ -201,8 +204,14 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                 }
             }
             SectionKind::Weather => {
-                let (section, line) = sources::weather::section(cfg, date, net);
+                let (section, line, assets) =
+                    sources::weather::section(cfg, date, tz::local_tz(), net);
                 edition.weather_line = line;
+                for (href, bytes) in assets {
+                    if !edition.assets.iter().any(|(h, _)| *h == href) {
+                        edition.assets.push((href, bytes));
+                    }
+                }
                 edition.sections.push(section);
             }
             SectionKind::Local => {
