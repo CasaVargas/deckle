@@ -35,11 +35,12 @@ coordinate `deckle_kfx::text` uses. A never-opened book has no `.sdr` or no `.yj
     library shows: The Devil Wears Prada shows 14%, position ÷ end 14.2%, stored fraction 9.1%;
     In the Shadow of Eight shows 16%, 12.4% and 14.1%; Harry Potter 1 shows 2%, 0.4% and 0.4%.
     Position ÷ end is within 4 points on all three; the stored fraction within 5, but only just
-    (4.9), so `KINDLE_FRACTION_OK` stays `false` until the Scribe agrees.
+    (4.9).
   - **Scribe 2024 (MTP):** only `documents/` is visible, and store-bought books (in Amazon's
     cloud storage) aren't exposed, so the walk found the sideloaded book and the editions. Their
     `.yjf` read fine, but no KFX is read over MTP, so a book Deckle didn't send has no end and
-    shows no percent unless the fraction is trusted. No clippings or vocabulary are shared. The
+    shows an "about N%" from the stored fraction: the Scribe shows 16% for a stored 15.05%, so
+    `KINDLE_FRACTION_OK` is `true` (one Scribe book was comparable). No clippings or vocabulary are shared. The
     MTP product string ends in the serial ("Kindle Scribe G6G3X…"), which the page drops. An
     edition Deckle sent by hand before date-named files ("Deckle - The Deckle Daily -- …")
     counts as the paper and stays off the nightstand.

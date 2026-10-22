@@ -18,9 +18,10 @@ use deckle_library::Library;
 
 /// Whether the Kindle's own `book.info.store` fraction can stand in for a percent ("about
 /// N%") when the book's end position is unknown. Off until the fraction has been compared with
-/// the progress the Scribe shows (plan task 1, step 6; `fixtures/yjf/README.md` has the one
-/// sample so far).
-pub const KINDLE_FRACTION_OK: bool = false;
+/// the progress the Kindles show. Checked 2026-10-22: Scribe 2024 shows 16% for a stored
+/// 15.05%; Paperwhite 5.19.2, three books, within 4.9 points (`docs/devices.md`). One Scribe
+/// book only, since store books aren't visible over MTP.
+pub const KINDLE_FRACTION_OK: bool = true;
 
 /// Days of lookups the snapshot keeps; the page prints the last seven.
 pub const WORD_DAYS: i64 = 14;
