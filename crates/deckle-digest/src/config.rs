@@ -991,9 +991,12 @@ mod tests {
     fn desktop_topic_save_round_trip() {
         // What the desktop app sends for a ticked topic (daily_save): a whole Config as JSON.
         let mut json = serde_json::to_value(Config::parse(STARTER).unwrap()).unwrap();
-        json["feeds"].as_array_mut().unwrap().push(serde_json::json!(
-            {"name": "Sports", "url": "", "topic": "SPORTS", "max_items": 5}
-        ));
+        json["feeds"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(
+                {"name": "Sports", "url": "", "topic": "SPORTS", "max_items": 5}
+            ));
         let cfg: Config = serde_json::from_value(json).unwrap();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("digest.toml");
