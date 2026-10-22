@@ -4,7 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import BookRowView from "./BookRow";
-import SettingsDrawer from "./SettingsDrawer";
+import SettingsView, { type SettingsPage } from "./SettingsView";
 import { parseAddresses } from "./articles";
 import DailyView from "./DailyView";
 import Icon from "./Icon";
@@ -45,8 +45,9 @@ export default function App() {
   const [plans, setPlans] = useState<Record<string, PlanRow>>({});
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [previewer, setPreviewer] = useState<PreviewerStatus | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [aboutFocus, setAboutFocus] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
+  /** The settings page last opened this session: the gear returns to it. */
+  const lastPage = useRef<SettingsPage>("general");
   const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -246,7 +247,7 @@ export default function App() {
     // A finished KFX is copied as is; only EPUBs need Kindle Previewer.
     if (!previewer?.found && runnable.some((b) => b.mode !== "ready")) {
       setNotice("Kindle Previewer is not installed. Open Settings to download it or point Deckle at it.");
-      setSettingsOpen(true);
+      openSettings("general");
       return;
     }
     setNotice(null);
@@ -299,6 +300,51 @@ export default function App() {
 
   const doneCount = books.filter((b) => b.status === "done").length;
 
+  const openSettings = (page: SettingsPage = lastPage.current) => setSettingsPage(page);
+  const pickPage = (page: SettingsPage) => {
+    lastPage.current = page;
+    setSettingsPage(page);
+  };
+  const closeSettings = useCallback(() => setSettingsPage(null), []);
+
+  const noticeBar = notice && (
+    <div className="notice" role="status">
+      {notice}
+      <button className="link" onClick={() => setNotice(null)}>
+        dismiss
+      </button>
+    </div>
+  );
+
+  if (settingsPage) {
+    return (
+      <div className="app">
+        {noticeBar}
+        <SettingsView
+          page={settingsPage}
+          onPage={pickPage}
+          onBack={closeSettings}
+          version={version}
+          settings={settings}
+          previewer={previewer}
+          devices={devices}
+          onChange={saveSettings}
+          onDeviceOptions={async (key, cde, verified) => {
+            await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
+            refreshDevices();
+          }}
+          update={update}
+          onUpdateState={setUpdate}
+          busy={busy}
+          onPickPreviewer={pickPreviewer}
+          library={library}
+          onLibrary={setLibraryOptions}
+          onPickLibrary={pickLibrary}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`app ${dragging ? "dragging" : ""}`}>
       <header className="topbar">
@@ -315,7 +361,7 @@ export default function App() {
           </button>
         </div>
         {!previewer?.found && previewer && (
-          <button className="pill warn" onClick={() => setSettingsOpen(true)}>
+          <button className="pill warn" onClick={() => openSettings("general")}>
             Kindle Previewer not found
           </button>
         )}
@@ -330,7 +376,7 @@ export default function App() {
             Clear done
           </button>
         )}
-        <button className="icon" aria-label="Settings" onClick={() => setSettingsOpen((o) => !o)}>
+        <button className="icon" aria-label="Settings" onClick={() => openSettings()}>
           <Icon name="settings" size={18} />
         </button>
       </header>
@@ -373,14 +419,7 @@ export default function App() {
       </main>
       )}
 
-      {notice && (
-        <div className="notice" role="status">
-          {notice}
-          <button className="link" onClick={() => setNotice(null)}>
-            dismiss
-          </button>
-        </div>
-      )}
+      {noticeBar}
 
       {(tab === "books" || tab === "kindle") && (
       <footer className="bar">
@@ -427,10 +466,7 @@ export default function App() {
         {hasUpdate(update) ? (
           <button
             className="version link"
-            onClick={() => {
-              setAboutFocus(true);
-              setSettingsOpen(true);
-            }}
+            onClick={() => openSettings("about")}
           >
             Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
           </button>
@@ -440,30 +476,6 @@ export default function App() {
       </footer>
       )}
 
-      <SettingsDrawer
-        open={settingsOpen}
-        version={version}
-        settings={settings}
-        previewer={previewer}
-        devices={devices}
-        onChange={saveSettings}
-        onDeviceOptions={async (key, cde, verified) => {
-          await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
-          refreshDevices();
-        }}
-        onClose={() => {
-          setSettingsOpen(false);
-          setAboutFocus(false);
-        }}
-        update={update}
-        onUpdateState={setUpdate}
-        busy={busy}
-        focusAbout={aboutFocus}
-        onPickPreviewer={pickPreviewer}
-        library={library}
-        onLibrary={setLibraryOptions}
-        onPickLibrary={pickLibrary}
-      />
     </div>
   );
 }
