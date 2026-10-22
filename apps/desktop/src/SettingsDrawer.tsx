@@ -68,7 +68,7 @@ function UpdateStatus({ update, onUpdateState, busy }: Pick<Props, "update" | "o
               <Link href={`${REPO}/releases/tag/v${update.update.version}`}>What's new</Link>
             </>
           )}
-          <button className="primary solo" disabled={busy} onClick={() => install(update.update, onUpdateState)}>
+          <button className="primary" disabled={busy} onClick={() => install(update.update, onUpdateState)}>
             {update.kind === "error" ? "Try again" : "Update"}
           </button>
           {busy ? <span>Finish the current job first.</span> : WINDOWS && <span>Deckle closes to finish installing.</span>}
@@ -92,7 +92,7 @@ function UpdateStatus({ update, onUpdateState, busy }: Pick<Props, "update" | "o
       return (
         <span className="update">
           Deckle {update.update.version} is installed.
-          <button className="primary solo" disabled={busy} onClick={() => relaunch()}>
+          <button className="primary" disabled={busy} onClick={() => relaunch()}>
             Restart to finish
           </button>
           {busy && <span>Finish the current job first.</span>}

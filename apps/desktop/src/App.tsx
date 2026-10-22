@@ -7,6 +7,7 @@ import BookRowView from "./BookRow";
 import SettingsDrawer from "./SettingsDrawer";
 import { parseAddresses } from "./articles";
 import DailyView from "./DailyView";
+import Icon from "./Icon";
 import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import type { BookRow, BookState, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
@@ -330,7 +331,7 @@ export default function App() {
           </button>
         )}
         <button className="icon" aria-label="Settings" onClick={() => setSettingsOpen((o) => !o)}>
-          ⚙
+          <Icon name="settings" size={18} />
         </button>
       </header>
 
@@ -341,7 +342,7 @@ export default function App() {
         {books.length === 0 ? (
           <div className="dropzone-inner">
             <div className="glyph" aria-hidden="true">
-              ⬇
+              <Icon name="download" size={40} />
             </div>
             <h1>Drop EPUBs here</h1>
             <p>Each book becomes a Kindle book with Enhanced Typesetting, a cover that shows, page numbers, and X-Ray and Word Wise where your Kindle allows them.</p>
@@ -408,12 +409,12 @@ export default function App() {
         </div>
         {tab === "books" && (
         <div className="actions">
-          <button className="primary" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
+          <button className="primary joined" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
             {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
           </button>
           <div className="split">
             <button className="secondary" aria-label="More actions" onClick={() => setExportOpen((o) => !o)} disabled={busy || runnable.length === 0}>
-              ▾
+              <Icon name="chevron-down" />
             </button>
             {exportOpen && (
               <div className="menu up" onMouseLeave={() => setExportOpen(false)}>

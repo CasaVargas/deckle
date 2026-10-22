@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from "react";
+import Icon from "./Icon";
 import type { BookState, PlanRow } from "./types";
 import { STAGES, STAGE_LABEL } from "./types";
 
@@ -176,7 +177,7 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
       </div>
       <div className="row-menu">
         <button className="icon" aria-label="Book options" onClick={() => setMenuOpen((o) => !o)} disabled={busy}>
-          ⋯
+          <Icon name="dots" size={18} />
         </button>
         {menuOpen && (
           <div className="menu" onMouseLeave={() => setMenuOpen(false)}>
