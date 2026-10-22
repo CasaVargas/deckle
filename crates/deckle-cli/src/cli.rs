@@ -226,6 +226,14 @@ pub enum Command {
         #[command(subcommand)]
         action: KindleCommand,
     },
+    /// Highlights and notes on a Kindle, as Markdown files (one per book).
+    Highlights {
+        /// `device` for the first connected Kindle, or a folder standing in for documents/.
+        #[arg(long, default_value = "device", global = true)]
+        from: String,
+        #[command(subcommand)]
+        action: HighlightsCommand,
+    },
     /// Your library: one folder per book, with a deckle.json beside it. Every book `run` sends
     /// is added once the library is set up.
     Library {
@@ -253,6 +261,17 @@ pub enum KindleCommand {
         /// Don't ask first.
         #[arg(long)]
         yes: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum HighlightsCommand {
+    /// Books with highlights, how many, and how many are new.
+    List,
+    /// Write new highlights into the folder (remembered after the first --to).
+    Export {
+        #[arg(long)]
+        to: Option<PathBuf>,
     },
 }
 

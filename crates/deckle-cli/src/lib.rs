@@ -289,6 +289,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Digest { config, action } => digest(json, config, action),
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
+        cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
         cli::Command::Save {
             targets,
             title,
@@ -501,6 +502,95 @@ fn add_to_library(source: &Path, mut report: RunReport, target: &Target) -> RunR
 
 fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
+/// `deckle highlights list|export` (highlights export design §6).
+fn highlights_cmd(
+    json: bool,
+    from: &str,
+    action: cli::HighlightsCommand,
+) -> Result<ExitCode, String> {
+    let target = resolve_target(from)?;
+    let read = deckle_core::clippings::read_on(&mut deckle_core::deliver::Conn::new(&target));
+    let bytes = match read {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            emit(
+                json,
+                &serde_json::json!({ "written": [], "failed": [] }),
+                || "no highlights on this Kindle yet".into(),
+            )?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Ok(ExitCode::from(1));
+        }
+    };
+    let state_path = highlights::state_path();
+    match action {
+        cli::HighlightsCommand::List => {
+            let parsed = deckle_highlights::parse(&bytes);
+            if let Some(e) = &parsed.error {
+                eprintln!("warning: My Clippings.txt line {}: {}", e.line, e.message);
+            }
+            let state = deckle_highlights::State::load(&state_path);
+            let books = deckle_highlights::group(parsed.entries);
+            let dir = state.folder.clone().unwrap_or_default();
+            let rows: Vec<_> = deckle_highlights::pending(&books, &dir, &state)
+                .into_iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "title": p.title, "author": p.author, "file": p.file,
+                        "total": p.total, "new": p.new,
+                    })
+                })
+                .collect();
+            emit(json, &rows, || {
+                rows.iter()
+                    .map(|r| {
+                        format!(
+                            "{:>4} ({} new)  {}  -> {}",
+                            r["total"],
+                            r["new"],
+                            r["title"].as_str().unwrap_or_default(),
+                            r["file"].as_str().unwrap_or_default()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::HighlightsCommand::Export { to } => {
+            match highlights::export(&bytes, &state_path, to.as_deref()) {
+                Ok(o) => {
+                    for (_, e) in &o.report.failed {
+                        eprintln!("error: {e}");
+                    }
+                    if let Some(e) = &o.parse_error {
+                        eprintln!("warning: My Clippings.txt line {}: {}", e.line, e.message);
+                    }
+                    emit(json, &o, || {
+                        o.report
+                            .written
+                            .iter()
+                            .map(|w| format!("{} new  {}", w.new, w.file))
+                            .chain(std::iter::once(
+                                o.describe().lines().next().unwrap_or_default().to_owned(),
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })?;
+                    Ok(ExitCode::SUCCESS)
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    Ok(ExitCode::from(2))
+                }
+            }
+        }
+    }
 }
 
 fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, String> {
