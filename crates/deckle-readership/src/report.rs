@@ -121,7 +121,7 @@ fn percent(x: f64) -> u8 {
 }
 
 /// The lower middle of `v` (sorted here).
-fn median<T: PartialOrd + Copy>(mut v: Vec<T>) -> Option<T> {
+pub(crate) fn median<T: PartialOrd + Copy>(mut v: Vec<T>) -> Option<T> {
     v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     v.get(v.len().checked_sub(1)? / 2).copied()
 }

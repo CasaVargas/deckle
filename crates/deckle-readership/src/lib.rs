@@ -5,6 +5,7 @@
 pub mod krds;
 pub mod layout;
 pub mod report;
+pub mod sizes;
 pub mod state;
 
 pub use krds::{KrdsError, Positions, parse_yjf, position_id};

@@ -156,6 +156,7 @@ mod tests {
             key: key.into(),
             name: name.into(),
             start,
+            items: None,
         };
         Layout {
             date,
@@ -219,6 +220,7 @@ mod tests {
             key: key.into(),
             name: name.into(),
             start,
+            items: None,
         };
         for i in 0..10u64 {
             let date = start + deckle_digest::chrono::Days::new(i);

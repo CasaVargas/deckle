@@ -1818,7 +1818,8 @@ fn record_layout(
         .map_err(|e| format!("{}: {e}", kfx.display()))
         .and_then(|bytes| {
             deckle_readership::layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)
-        });
+        })
+        .map(|l| with_items(l, built));
     let path = deckle_readership::state_path();
     let saved = layout.and_then(|l| {
         let mut state = deckle_readership::State::load(&path);
@@ -1828,6 +1829,22 @@ fn record_layout(
     if let Err(e) = saved {
         eprintln!("readership: {e}");
     }
+}
+
+/// Each section's item count from the build report, matched by key, so tomorrow's paper can
+/// estimate a story's length (tomorrow's paper design §6.3). The front page has none.
+fn with_items(
+    mut layout: deckle_readership::layout::Layout,
+    built: &deckle_digest::BuildReport,
+) -> deckle_readership::layout::Layout {
+    for s in &mut layout.sections {
+        s.items = built
+            .sections
+            .iter()
+            .find(|b| b.key == s.key)
+            .map(|b| b.items as u32);
+    }
+    layout
 }
 
 /// `digest readership [apply|dismiss N]` (readership design §7).
@@ -2320,5 +2337,49 @@ mod push_tests {
             None
         );
         assert_eq!(push_plan(on, false).map(|p| p.push), Some(true));
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use deckle_readership::layout::{Layout, SectionStart};
+
+    #[test]
+    fn layout_records_items() {
+        let sec = |key: &str| SectionStart {
+            key: key.into(),
+            name: key.into(),
+            start: 0,
+            items: None,
+        };
+        let layout = Layout {
+            date: "2026-10-22".parse().unwrap(),
+            title: "T".into(),
+            file: "f".into(),
+            end: 10,
+            sections: vec![sec("front"), sec("local"), sec("feeds:Science")],
+        };
+        let summary = |key: &str, items| deckle_digest::SectionSummary {
+            key: key.into(),
+            title: key.into(),
+            items,
+            unavailable: None,
+        };
+        let built = deckle_digest::BuildReport {
+            epub: PathBuf::new(),
+            title: "T".into(),
+            sections: vec![summary("feeds:Science", 7), summary("local", 3)],
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+        };
+        let items: Vec<Option<u32>> = with_items(layout, &built)
+            .sections
+            .iter()
+            .map(|s| s.items)
+            .collect();
+        // matched by key; the front page has none
+        assert_eq!(items, [None, Some(3), Some(7)]);
     }
 }

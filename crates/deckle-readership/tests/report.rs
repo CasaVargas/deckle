@@ -35,6 +35,7 @@ fn edition(s: &mut State, i: u64, secs: &[(&str, &str, i64)], reads: &[(&str, Op
                 key: (*k).into(),
                 name: (*n).into(),
                 start: *start,
+                items: None,
             })
             .collect(),
     });

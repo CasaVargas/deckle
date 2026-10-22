@@ -20,6 +20,7 @@ pub mod inbox;
 pub mod longread;
 pub mod mail;
 pub mod moon;
+pub mod next;
 pub mod press;
 pub mod reading;
 pub mod render;
