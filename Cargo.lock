@@ -1056,6 +1056,7 @@ dependencies = [
  "dom_query",
  "dom_smoothie",
  "feed-rs",
+ "flate2",
  "html-escape",
  "iana-time-zone",
  "image",

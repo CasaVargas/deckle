@@ -19,6 +19,7 @@ pub mod inbox;
 pub mod longread;
 pub mod mail;
 pub mod moon;
+pub mod puzzle;
 pub mod reading;
 pub mod render;
 pub mod schedule;
