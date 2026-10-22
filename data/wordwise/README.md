@@ -11,7 +11,10 @@ shasum -a 256 deckle-wordwise-en-v1.sqlite.gz   # → deckle_core::wordwise::DB_
 ```
 
 Publish the `.gz` as an asset of the `wordwise-v1` release. A new build needs a new release tag
-and file name (`…-v2`) or the pinned hash will refuse it.
+and file name (`…-v2`) or the pinned hash will refuse it. Never let it become the Latest release:
+installed apps read their updates from Latest, so publish with
+`gh release create wordwise-v2 deckle-wordwise-en-v2.sqlite.gz --latest=false …` (or untick
+**Set as the latest release**). The `latest-guard` workflow repairs it if you forget.
 
 Data licenses: Wiktionary content via kaikki.org is CC BY-SA 4.0 (`tests/sample.jsonl` is 22
 trimmed entries of it); wordfreq's word lists are CC BY-SA 4.0.

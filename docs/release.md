@@ -7,10 +7,39 @@
    entry.
 2. Merge to `main`, then tag and push: `git tag -a v0.1.0 -m "Deckle 0.1.0" && git push origin v0.1.0`.
 3. The `release` workflow builds macOS arm64 + x86_64 (`.dmg`, `.app.tar.gz`), Windows x64 (NSIS
-   `.exe`, `.msi`) and Linux (`.deb`, `.AppImage`) and attaches them to a **draft** release.
-4. Download one installer per platform, install, send a book. Then publish the draft.
+   `-setup.exe`) and Linux (`.deb`, `.AppImage`), each updater bundle with its `.sig`, plus
+   `latest.json`, and attaches them to a **draft** release. `check-updater-json` fails the run
+   if `latest.json` lacks a platform.
+4. Download one installer per platform, install, send a book. Then publish the draft, as a
+   normal release (not a pre-release). **Publishing ships the update:** every installed copy
+   offers it at its next launch, so test first.
 
 Rebuild an existing tag: *Actions → release → Run workflow* with the tag name.
+
+## Updater key (owner, one time)
+
+In-app updates (`docs/superpowers/specs/2026-10-22-auto-update-design.md`) are verified against
+the public key in `tauri.conf.json` (`plugins.updater.pubkey`). The matching private key signs
+each release's updater bundles.
+
+1. The key pair was generated with `pnpm tauri signer generate --ci -p "" -w ~/.tauri/deckle-updater.key`
+   (no password). It is Deckle's own, not DebridDownloader's.
+2. Store `~/.tauri/deckle-updater.key` in the password manager.
+3. Repository secret `TAURI_SIGNING_PRIVATE_KEY` = the file's contents. The release workflow
+   stops with an error without it.
+4. **Losing the private key strands every install:** copies in the field only accept updates
+   signed with it, so users would have to reinstall by hand. Rotating it is the same:
+   ship the new public key in a release signed with the old key, then switch the secret.
+
+A local `pnpm tauri build` needs the key in the environment too:
+`TAURI_SIGNING_PRIVATE_KEY=$(cat ~/.tauri/deckle-updater.key) pnpm tauri build`.
+
+### "Latest" must stay an app release
+
+Installs read `releases/latest/download/latest.json`. The `latest-guard` workflow runs whenever a
+release is published, edited or deleted. If Latest isn't the newest app release with a
+`latest.json` (for example a `wordwise-vN` data release), it moves Latest back and fails so you
+get the email. Publish data releases with `--latest=false`.
 
 ## macOS signing and notarization (owner, one time)
 
@@ -43,13 +72,13 @@ and DebridDownloader. The pieces:
   `windows/sign.ps1`. CI passes it with `--config` only when signing is configured, so local and
   pull-request builds stay unsigned.
 - `sign.ps1` runs signtool with the Artifact Signing dlib on each file Tauri hands it: the app
-  `.exe`, the NSIS installer and uninstaller, and the `.msi`. Timestamped by
+  `.exe` and the NSIS installer and uninstaller. Timestamped by
   `http://timestamp.acs.microsoft.com` (the certificates live for days).
 - The release workflow's "Azure Artifact Signing" step downloads the pinned, hash-checked
   `Microsoft.ArtifactSigning.Client` package, finds a Windows SDK signtool (10.0.22621+), checks
   for a .NET 8+ runtime, and signs a throwaway exe first, so a bad secret or a missing role fails
-  there, readably. After the build, "Verify Windows signatures" checks both installers and the
-  app exe inside the NSIS installer.
+  there, readably. After the build, "Verify Windows signatures" checks the installer and the
+  app exe inside it.
 
 Repository secrets (Settings → Secrets and variables → Actions), from the Entra app registration
 that has the **Artifact Signing Certificate Profile Signer** role on the `casavargas` account:
