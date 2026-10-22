@@ -1,0 +1,43 @@
+name: latest-guard
+# Installed copies of Deckle look for updates in the latest.json of the release GitHub marks
+# "Latest". A Word Wise data release (wordwise-vN) marked Latest has no latest.json, so every
+# install's check would fail silently until the next app release. This puts Latest back on the
+# newest app release that has a latest.json, then fails so the owner hears about it.
+# Data releases are published with `--latest=false` (data/wordwise/README.md).
+on:
+  release:
+    types: [published, edited, deleted]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  latest:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Keep Latest on an app release
+        run: |
+          set -euo pipefail
+          releases=$(gh api "repos/$REPO/releases?per_page=100")
+          # newest published, non-pre-release v* release that has a latest.json
+          good=$(jq -r '[.[] | select(.draft | not) | select(.prerelease | not)
+                          | select(.tag_name | test("^v[0-9]"))
+                          | select(any(.assets[]; .name == "latest.json"))]
+                        | sort_by(.published_at) | last | if . then "\(.id) \(.tag_name)" else empty end' <<<"$releases")
+          if [ -z "$good" ]; then
+            echo "::notice::No app release has a latest.json yet; nothing to guard."
+            exit 0
+          fi
+          read -r good_id good_tag <<<"$good"
+          latest=$(gh api "repos/$REPO/releases/latest" --jq .tag_name 2>/dev/null || echo "none")
+          if [ "$latest" = "$good_tag" ]; then
+            echo "Latest is $latest."
+            exit 0
+          fi
+          gh api -X PATCH "repos/$REPO/releases/$good_id" -f make_latest=true >/dev/null
+          echo "::error::$latest was Latest, so installs couldn't find updates; restored $good_tag. Publish data releases with --latest=false."
+          exit 1

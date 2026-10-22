@@ -302,8 +302,9 @@ deckle/
   release. macOS: Developer ID signed and notarized (owner's existing Apple developer account).
   Windows: signed with the owner's **Azure Artifact Signing** account (`casavargas`, profile
   `casavargas-public-trust`, the one Beltr and DebridDownloader use; decision 2026-10-20,
-  replacing "unsigned in v1"); see `docs/release.md`. **No Tauri auto-updater** in v1 (it phones home);
-  the app shows the current version and a link to Releases.
+  replacing "unsigned in v1"); see `docs/release.md`. ~~No Tauri auto-updater in v1 (it phones home)~~.
+  Superseded 2026-10-22 (owner): Deckle checks for and installs updates in-app, see
+  `2026-10-22-auto-update-design.md`.
 
 Each milestone ends with a verified book on a real device, not a passing test.
 
@@ -327,7 +328,8 @@ Each milestone ends with a verified book on a real device, not a passing test.
 - 2026-10-18 GPL-3.0-or-later; no Python; Previewer 4 detected not bundled; KFX-only output in
   v1 unless spike 1 misses its time box (then AZW3 fallback is promoted); no Amazon scraping,
   Open Library + print-ASIN heuristic for Match; Wikipedia opt-in default off; Windows unsigned
-  in v1 (superseded 2026-10-20: Azure Artifact Signing); no auto-updater; Word Wise data downloaded not bundled; working name "Deckle".
+  in v1 (superseded 2026-10-20: Azure Artifact Signing); no auto-updater; Word Wise data downloaded not bundled; working name "Deckle". (No auto-updater superseded
+  2026-10-22: in-app updates, `2026-10-22-auto-update-design.md`.)
   Claude's calls.
 - 2026-10-19 Word Wise points at the Kindle's own English dictionary when present (read at send
   time, never stored), else installs Deckle's Wiktionary dictionary in the Chinese slot (reader

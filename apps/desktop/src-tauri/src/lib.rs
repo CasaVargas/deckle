@@ -25,6 +25,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(move |app| {
             let settings_file = commands::settings_file(app.handle());
             let devices_file = commands::devices_file(app.handle());

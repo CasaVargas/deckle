@@ -4,7 +4,8 @@ name: release
 # pull requests are checked by ci.yml and don't build installers. macOS builds are signed and
 # notarized when the Apple secrets exist, and Windows builds are signed with Azure Artifact
 # Signing when the Azure secrets exist (docs/release.md); without them each platform builds
-# unsigned with a warning.
+# unsigned with a warning. Updater bundles are always signed with TAURI_SIGNING_PRIVATE_KEY, and
+# the release's latest.json is what installed copies read once the draft is published.
 on:
   push:
     tags: ["v*"]
@@ -60,6 +61,16 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
+      # No key, no release: unsigned updater bundles would publish a latest.json no install can verify.
+      - name: Updater signing key
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set: updater bundles can't be signed (docs/release.md)."
+            exit 1
+          fi
       # Only export the Apple variables when the secrets are set: an empty APPLE_CERTIFICATE
       # would make the bundler try (and fail) to import a certificate.
       - name: Apple signing and notarization (when configured)
@@ -85,8 +96,8 @@ jobs:
       # Windows: Azure Artifact Signing (account casavargas, profile casavargas-public-trust, the
       # same setup as Beltr and DebridDownloader). Tauri's signCommand
       # (src-tauri/windows/tauri.signing.conf.json, passed below only when this step enables it)
-      # runs src-tauri/windows/sign.ps1 on the app exe, the NSIS installer and uninstaller, and
-      # the MSI. This step fetches the signing dlib, finds signtool, and signs a throwaway exe
+      # runs src-tauri/windows/sign.ps1 on the app exe and the NSIS installer and uninstaller.
+      # This step fetches the signing dlib, finds signtool, and signs a throwaway exe
       # through the same script, so a bad secret, a missing signer role or a wrong endpoint fails
       # here, readably, instead of deep inside the bundler.
       - name: Azure Artifact Signing (when configured)
@@ -173,6 +184,8 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
           # read by src-tauri/windows/sign.ps1 when the step above enabled signing
           AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
           AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
@@ -185,12 +198,13 @@ jobs:
           releaseName: ${{ env.TAG && format('Deckle {0}', env.TAG) || '' }}
           releaseBody: |
             See CHANGELOG.md for what changed and README.md for install notes.
+            Updating from 0.2.x? Install this version once by hand; later versions update from inside Deckle (Settings → About). Windows: if you used the .msi, uninstall it first.
             macOS: signed with a Developer ID and notarized by Apple.
             Windows: code-signed by Casa Vargas LLC (Azure Artifact Signing).
             Requires Kindle Previewer 4 (free, from Amazon).
           releaseDraft: true
-          prerelease: true
-      # Both installers, and the app exe packed inside the NSIS installer, must carry a valid,
+          prerelease: false
+      # The installer, and the app exe packed inside it, must carry a valid,
       # timestamped signature. The loose target\...\release exe doesn't count: after each package
       # step the bundler puts the unsigned binary back, so only the packaged copies are signed.
       # Other files in the NSIS payload (stock NSIS plugins, the 7-Zip-rebuilt uninstall.exe) are
@@ -212,7 +226,7 @@ jobs:
             Write-Host "::error::$Path is not validly signed and timestamped: $($sig.Status) $($sig.StatusMessage)"
             return $false
           }
-          foreach ($f in Get-ChildItem $bundle -Recurse -Include *.exe, *.msi) {
+          foreach ($f in Get-ChildItem $bundle -Recurse -Include *.exe) {
             if (-not (Test-Signed $f.FullName)) { $bad++ }
           }
           $7z = (Get-Command 7z -ErrorAction SilentlyContinue).Source
@@ -240,3 +254,30 @@ jobs:
             }
           }
           if ($bad) { exit 1 }
+
+  # Every platform's updater entry must be in the draft's latest.json before it's published:
+  # an install whose key is missing finds no update, and a .deb install that only finds
+  # linux-x86_64 would be handed the AppImage.
+  check-updater-json:
+    needs: bundle
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    if: ${{ github.event.inputs.tag || startsWith(github.ref, 'refs/tags/') }}
+    steps:
+      - name: Check latest.json
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p latest.json -D "$RUNNER_TEMP"
+          json="$RUNNER_TEMP/latest.json"
+          cat "$json"
+          bad=0
+          for key in darwin-aarch64 darwin-x86_64 windows-x86_64 linux-x86_64 linux-x86_64-deb; do
+            if ! jq -e --arg k "$key" --arg t "/download/$TAG/" \
+              '.platforms[$k] | (.signature | length > 0) and (.url | contains($t))' "$json" >/dev/null; then
+              echo "::error::latest.json lacks a signed $key entry for $TAG"
+              bad=1
+            fi
+          done
+          exit $bad

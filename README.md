@@ -30,11 +30,15 @@ the Kindle that's plugged in.
    bundle it.
 2. Download Deckle from [Releases](https://github.com/CasaVargas/deckle/releases):
    - **macOS 14+**, Apple Silicon or Intel: `.dmg`, signed and notarized.
-   - **Windows 11**: `-setup.exe` (per-user, no admin) or `.msi`, code-signed. A new certificate
-     can still trigger SmartScreen: **More info → Run anyway**.
+   - **Windows 11**: `-setup.exe` (per-user, no admin), code-signed. A new certificate can still
+     trigger SmartScreen: **More info → Run anyway**.
    - **Linux** `.deb` / `.AppImage`: everything works except conversion, because Kindle
      Previewer doesn't run on Linux.
 3. Plug in the Kindle, drop EPUBs on the window, press **Send to Kindle**.
+
+From 0.3.0 on, Deckle updates itself: when a new version is out, the footer says so, and
+**Settings → About → Update** installs it (a `.deb` install asks for your password). Coming from
+0.2.x, install 0.3.0 by hand once; on Windows, uninstall a 0.2.x `.msi` first.
 
 Quit calibre, Android File Transfer and Amazon's Send to Kindle first. Only one program at a time
 can talk to an MTP Kindle (Scribe, Colorsoft, Paperwhite 2024).
@@ -73,6 +77,7 @@ Converting and sending a book is offline. Deckle goes online only for:
 
 | What | When | Default |
 |---|---|---|
+| Update check (`latest.json` from this repo's Releases); the update itself only when you click Update | each launch | on |
 | Word Wise dictionary (12 MB, from this repo's Releases) | once, the first time a book gets Word Wise | on |
 | LLM descriptions for X-Ray | each book with features | off |
 | Wikipedia summaries for X-Ray | each book with features | off |

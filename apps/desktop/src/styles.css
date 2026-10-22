@@ -100,6 +100,9 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .secondary { background: var(--accent); color: var(--accent-fg); border: 0; border-left: 1px solid rgba(255,255,255,.3); border-radius: 0 8px 8px 0; padding: 10px 10px; font-size: 14px; }
 .split { position: relative; display: flex; }
 .version { color: var(--muted); min-width: 90px; text-align: right; }
+.version.link { color: var(--accent); }
+.update { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.update-error { color: var(--warn); flex-basis: 100%; }
 
 .drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 420px; max-width: 100%; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.15); overflow: auto; padding: 16px 20px 24px; z-index: 10; }
 .drawer header { display: flex; align-items: center; justify-content: space-between; }

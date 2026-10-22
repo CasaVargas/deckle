@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — in-app updates
+
+- In-app updates: Deckle checks GitHub for a newer version when it starts. The footer says when
+  one is out, and **Settings → About → Update** downloads, verifies and installs it; nothing
+  installs or restarts without a click. Install this version by hand once; later ones update
+  themselves.
+- Windows ships only the per-user `-setup.exe`; the `.msi` is gone (uninstall a 0.2.x `.msi`
+  before installing).
+- Releases are normal releases, no longer marked pre-release.
+
 ## 0.2.1 — library, more inputs, the Deckle Daily (pre-alpha)
 
 0.2.0 was built but never published; everything listed under it ships in this release.
