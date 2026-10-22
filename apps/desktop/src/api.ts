@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
+import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -55,6 +55,7 @@ export const api = {
   dailyState: () => invoke<DailyState>("daily_state"),
   dailySetup: () => invoke<DailyState>("daily_setup"),
   dailySave: (config: DailyConfig) => invoke<DailyState>("daily_save", { config }),
+  dailyDayPreview: (day: DayConfig) => invoke<DayPreview>("daily_day_preview", { day }),
   geocode: (query: string) => invoke<PlaceRow[]>("geocode", { query }),
   readingList: () => invoke<ReadingEntry[]>("reading_list"),
   readingSave: (url: string) => invoke<string>("reading_save", { url }),

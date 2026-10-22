@@ -28,6 +28,9 @@ rand.workspace = true
 zeroize = "1"
 # Send-to-Kindle email: SMTP over rustls only (no native-tls), no async runtime.
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "rustls-tls", "builder"] }
+chrono-tz = "0.10"
+iana-time-zone = "0.1"
+rrule = "0.14.0"
 
 # The SMTP password's keychain (email design §6): each OS's own store.
 [target.'cfg(target_os = "macos")'.dependencies]

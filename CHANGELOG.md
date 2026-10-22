@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The Daily's weather section is now a **Weather & Almanac** page:
+  - a five-day strip with pictures and short words;
+  - sunrise, sunset and daylight, computed on your Mac;
+  - the usual first frost for your place;
+  - the moon with its next full moon and name (the Hunter's Moon);
+  - equinoxes, solstices, clock changes, and the meteor shower of the night.
+- **Your Day** puts today's events from your `.ics` calendars or private calendar addresses on
+  the page, with a line when rain is likely during one (Daily tab → **Your Day**, or `[day]` in
+  `digest.toml`). If the forecast is down, the rest of the page still prints.
 - No more Linux builds (`.deb`, `.AppImage`). Kindle Previewer doesn't run on Linux, so the
   main thing Deckle does, converting a book, never worked there. Existing Linux installs keep
   working but get no further updates. The CLI still builds on Linux from source.

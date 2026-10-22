@@ -289,3 +289,9 @@ input[type=checkbox] { padding: 0; }
   .readership-bars li { grid-template-columns: minmax(0, 1fr) 44px; }
   .readership-bar { grid-column: 1 / -1; grid-row: 2; }
 }
+
+/* Your Day (almanac design §5) */
+.yourday-list { list-style: none; margin: 8px 0; padding: 0; }
+.yourday-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.yourday-actions { display: flex; gap: 8px; margin: 8px 0; }
+.yourday-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0 4px; }
