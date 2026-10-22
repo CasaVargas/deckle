@@ -13,6 +13,8 @@ front page as its cover, and delivers it when the Kindle connects. Details in
 
 <img src="docs/screenshots/daily-front.jpg" width="320" alt="The front page of a Deckle Daily demo edition: a blackletter masthead, the date, the weather and the lead headlines (fictional town and stories)">
 
+![The Daily tab: tomorrow's paper so far, a live sketch of the next front page beside the page plan and the week's reads](docs/screenshots/daily-tomorrow.png)
+
 ![A book sent with X-Ray and Word Wise](docs/screenshots/gui-wordwise-done.png)
 
 ## Why
@@ -48,6 +50,28 @@ simulated mass-storage Kindle. On real hardware it's been verified on a Kindle S
 a Kindle Paperwhite (over USB mass storage); other models are pending. Results per device are in
 [docs/devices.md](docs/devices.md). Bug reports with your model and firmware are very welcome.
 
+## Being built right now
+
+On `main` and not in the latest release (0.3.1) yet; it ships in the next one. The first item is
+the screenshot above.
+
+- **Tomorrow's paper, so far.** The Daily tab opens on the next edition: a press bar with a
+  countdown and **Stop the presses**, a live sketch of the front page that fills in as you save
+  articles and your feeds post, a page plan you drag to reorder, and the week's reads.
+- **Local news for more places** ([#102](https://github.com/CasaVargas/deckle/issues/102)):
+  a relative's town or a vacation spot gets its own local section.
+- **A puzzle page:** a 5×5 mini crossword whose theme answers are yesterday's headlines, a word
+  ladder, and yesterday's answers.
+- **Weather & Almanac, Your Day, readership.** A five-day strip with sunrise, sunset, first frost,
+  the moon and meteor showers; today's calendar events on the page; and which sections of the
+  paper you actually reach.
+
+Designed, with a written plan, and waiting for code: **The Morgue**
+([#109](https://github.com/CasaVargas/deckle/issues/109)), **One Mac, many papers**
+([#110](https://github.com/CasaVargas/deckle/issues/110)) and **From Your Shelf**
+([#112](https://github.com/CasaVargas/deckle/issues/112)). The rest is on the
+[roadmap](https://github.com/CasaVargas/deckle/issues?q=is%3Aopen+label%3Aroadmap).
+
 ## What it does
 
 - **Enhanced Typesetting (KFX).** Previewer makes a KPF; Deckle packs it into the monolithic KFX
@@ -71,8 +95,8 @@ a Kindle Paperwhite (over USB mass storage); other models are pending. Results p
   stay. The Kindle Scribe (2024) doesn't keep that file, and keeps its highlights where they
   can't be read over USB ([#99](https://github.com/CasaVargas/deckle/issues/99)).
 - **The Deckle Daily (preview).** A morning newspaper built locally from weather, local news and
-  your RSS feeds, with full article text, delivered when the Kindle connects. Details in
-  [docs/daily.md](docs/daily.md).
+  your RSS feeds, with full article text and a generated front page as its cover, delivered when
+  the Kindle connects. Details in [docs/daily.md](docs/daily.md).
 
 ## Network
 
@@ -180,6 +204,12 @@ pnpm tauri build                                   # installers in target/releas
 Releases: [docs/release.md](docs/release.md). Word Wise database builder:
 [data/wordwise/README.md](data/wordwise/README.md). Design specs live in
 [docs/superpowers/specs/](docs/superpowers/specs/).
+
+## Built with AI
+
+Deckle is developed with AI assistance (Claude Code). Features start as a written spec and plan in
+[docs/superpowers/](docs/superpowers/), and what the AI writes is reviewed and tested, against
+fixtures and real Kindles, before it merges.
 
 ## Credits
 
