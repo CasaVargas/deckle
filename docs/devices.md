@@ -22,6 +22,9 @@ coordinate `deckle_kfx::text` uses. A never-opened book has no `.sdr` or no `.yj
   In `deckle-daily-2026-10-21.kfx`, `fpr` 103303 is exactly the "On This Day" heading. The
   `.yjr` beside it holds font settings; its `annotation.cache.object` stays empty, because this
   firmware keeps highlights in storage MTP doesn't show (#99).
+  End to end the same day: `deckle digest run --to device` recorded the 2026-10-22 edition's
+  sections; after reading and replugging, `deckle digest push` (empty outbox) read `fpr` 14565,
+  the first character of the Hacker News section, and `deckle digest readership` counted it.
 - **Paperwhite (mass storage):** not checked yet.
 
 ## Compatibility warnings (how to add a row)

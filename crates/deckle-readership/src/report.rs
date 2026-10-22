@@ -84,6 +84,23 @@ fn kind_of(key: &str) -> Option<SectionKind> {
         .find(|k| *k != SectionKind::Feeds && section_key(*k, None) == key)
 }
 
+/// What the paper prints for a section, for one no edition in the window had yet.
+fn paper_name(key: &str) -> String {
+    if let Some(feed) = key.strip_prefix("feeds:") {
+        return feed.to_owned();
+    }
+    match kind_of(key) {
+        Some(SectionKind::Reading) => "Your Reading",
+        Some(SectionKind::Weather) => "Weather",
+        Some(SectionKind::Local) => "Local",
+        Some(SectionKind::Lottery) => "Lottery",
+        Some(SectionKind::Horoscope) => "Horoscope",
+        Some(SectionKind::Onthisday) => "On This Day",
+        _ => key,
+    }
+    .to_owned()
+}
+
 /// The paper's section keys in `cfg`'s order, each feed on its own.
 fn current_keys(cfg: &Config) -> Vec<String> {
     cfg.sections
@@ -159,7 +176,7 @@ pub fn report(state: &State, cfg: &Config) -> Report {
             .first()
             .and_then(|l| l.sections.iter().find(|s| &s.key == key))
             .map(|s| s.name.clone())
-            .unwrap_or_else(|| key.clone());
+            .unwrap_or_else(|| paper_name(key));
         let start = |l: &Layout| l.sections.iter().find(|s| &s.key == key).map(|s| s.start);
         let with: Vec<(&Layout, i64)> = opened
             .iter()

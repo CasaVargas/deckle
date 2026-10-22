@@ -1386,7 +1386,8 @@ impl DigestOutcome {
                     lines.push(format!("      highlights: error: {e}"));
                 }
                 if let Some(r) = &self.readership {
-                    lines.push(format!("      readership: {} editions read", r.opened));
+                    let s = if r.opened == 1 { "" } else { "s" };
+                    lines.push(format!("      readership: {} edition{s} read", r.opened));
                     lines.extend(
                         r.errors
                             .iter()

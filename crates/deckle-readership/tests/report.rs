@@ -385,3 +385,13 @@ fn opened_editions_without_positions_suggest_nothing() {
     assert!(r.suggestions.is_empty(), "{:?}", ids(&r));
     assert!(r.sections.iter().all(|row| row.share.is_none()));
 }
+
+#[test]
+fn a_section_no_edition_had_yet_gets_its_paper_name() {
+    let r = report(
+        &papers(&[Some(9000); 3]),
+        &cfg(&["reading", "onthisday", "feeds"], &["Ars"]),
+    );
+    let names: Vec<_> = r.sections.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Your Reading", "On This Day", "Ars"]);
+}
