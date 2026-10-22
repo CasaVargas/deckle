@@ -9,6 +9,7 @@ pub mod article;
 pub mod bookmarklet;
 pub mod config;
 pub mod cover;
+pub mod day;
 pub mod epub;
 pub mod fetch;
 pub mod frost;

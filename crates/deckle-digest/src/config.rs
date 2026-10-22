@@ -72,6 +72,10 @@ pub struct Config {
     /// Send-to-Kindle email (email design §5). Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "EmailConfig::is_default")]
     pub email: EmailConfig,
+    /// Your Day: today's events from calendars (almanac design §5). Left out of a save
+    /// while it's untouched.
+    #[serde(skip_serializing_if = "DayConfig::is_default")]
+    pub day: DayConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
@@ -106,6 +110,7 @@ impl Default for Config {
             reading: ReadingConfig::default(),
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
+            day: DayConfig::default(),
             almanac_path: None,
         }
     }
@@ -159,6 +164,32 @@ impl Default for LotteryConfig {
         LotteryConfig {
             games: vec!["powerball".into(), "megamillions".into()],
         }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DayConfig {
+    /// `.ics` files or private `https://` (or `webcal://`) addresses. Empty: no Your Day.
+    pub calendars: Vec<String>,
+    pub max_items: usize,
+    /// "Rain likely around 4 PM, during School pickup."
+    pub weather_note: bool,
+}
+
+impl Default for DayConfig {
+    fn default() -> Self {
+        DayConfig {
+            calendars: Vec::new(),
+            max_items: 8,
+            weather_note: true,
+        }
+    }
+}
+
+impl DayConfig {
+    pub fn is_default(&self) -> bool {
+        *self == DayConfig::default()
     }
 }
 
@@ -379,6 +410,13 @@ games = ["powerball", "megamillions"]
 
 [horoscope]
 signs = []                        # e.g. ["leo", "virgo"]; empty prints all twelve
+
+# Your Day on the weather page: today's events from your calendars. Use .ics files or a
+# calendar's private address (it's a secret: anyone with it can read the calendar).
+# [day]
+# calendars = ["~/Calendars/Home.ics", "webcal://p01-caldav.icloud.com/published/2/…"]
+# max_items = 8
+# weather_note = true             # "Rain likely around 4 PM, during School pickup."
 
 # What `deckle digest watch` does when a Kindle is plugged in.
 [sync]
