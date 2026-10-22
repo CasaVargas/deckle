@@ -173,6 +173,8 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
     let mut long_reads = Vec::new();
     let mut reading_outcomes = Vec::new();
     let mut notes = Vec::new();
+    // Loaded when the paper has a puzzle; saved with today's headlines once all is gathered.
+    let mut puzzles: Option<puzzle::store::Store> = None;
     let queue = reading::ReadingQueue::new(
         cfg.reading
             .queue_path
@@ -232,9 +234,19 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
             }
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
             SectionKind::Horoscope => edition.sections.push(horoscope::section(cfg, date)),
-            SectionKind::Puzzle => edition
-                .sections
-                .push(sources::unavailable("Puzzle", "not built yet")),
+            SectionKind::Puzzle => {
+                let store = puzzles.get_or_insert_with(|| {
+                    let mut s = puzzle::store::Store::load(&cfg.puzzle_store());
+                    s.prune(date);
+                    s
+                });
+                edition.sections.push(puzzle::section(
+                    date,
+                    cfg,
+                    store,
+                    puzzle::words::Words::embedded(),
+                ));
+            }
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
@@ -243,6 +255,22 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
         for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {
             let feed = (*kind == SectionKind::Feeds).then(|| cfg.feeds[i].name.as_str());
             s.key = config::section_key(*kind, feed);
+        }
+    }
+    if let Some(mut store) = puzzles {
+        // tomorrow's theme: today's headlines from the news and Your Reading
+        let mut from = news.clone();
+        from.extend(g_reading);
+        let found = puzzle::theme::harvest(&edition, &from, puzzle::words::Words::embedded());
+        if let Some(day) = store.days.get_mut(&date) {
+            day.headlines = found;
+        }
+        let path = cfg.puzzle_store();
+        if let Err(e) = store.save(&path) {
+            notes.push(format!(
+                "The puzzle wasn't saved ({}: {e}); a rebuild today makes it again",
+                path.display()
+            ));
         }
     }
     Gathered {

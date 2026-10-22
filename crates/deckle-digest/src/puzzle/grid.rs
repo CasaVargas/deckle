@@ -53,7 +53,12 @@ impl Slot {
 /// The template's entries, numbered in standard crossword order: Across, then Down, each by
 /// number.
 pub fn slots(t: &Template) -> Vec<Slot> {
-    let white = |r: usize, c: usize| r < 5 && c < 5 && t.0[r].as_bytes()[c] != b'#';
+    slots_in(&t.0)
+}
+
+/// [`slots`] for any 5×5 rows where `#` is black: a template, or a filled grid.
+pub fn slots_in<S: AsRef<str>>(rows: &[S; 5]) -> Vec<Slot> {
+    let white = |r: usize, c: usize| r < 5 && c < 5 && rows[r].as_ref().as_bytes()[c] != b'#';
     let run = |mut r: usize, mut c: usize, dir: Dir| {
         let mut n = 0;
         while white(r, c) {
@@ -110,14 +115,31 @@ pub struct Fill {
 const NODE_BUDGET: u64 = 400_000;
 
 /// Fills a mini: the templates in an order shuffled by `rng`, each searched for at most `cap`.
-/// Seeds (theme words) go into the grid first, longest first; one that can't be placed is left
-/// out.
+/// Seeds (theme words) go into the grid first, longest first. The first fill that holds every
+/// seed wins; when none does, the one holding the most (the earliest of those).
 pub fn fill(words: &Words, seeds: &[String], rng: &mut StdRng, cap: Duration) -> Option<Fill> {
     let mut order: Vec<usize> = (0..TEMPLATES.len()).collect();
     order.shuffle(rng);
-    order
-        .into_iter()
-        .find_map(|t| fill_template(words, t, seeds, rng, Instant::now() + cap))
+    let wanted = seeds.iter().filter(|s| words.contains(s)).count();
+    let placed = |f: &Fill| {
+        seeds
+            .iter()
+            .filter(|s| f.answers.iter().any(|(_, a)| a == *s))
+            .count()
+    };
+    let mut best: Option<Fill> = None;
+    for t in order {
+        let Some(f) = fill_template(words, t, seeds, rng, Instant::now() + cap) else {
+            continue;
+        };
+        if placed(&f) == wanted {
+            return Some(f);
+        }
+        if best.as_ref().is_none_or(|b| placed(&f) > placed(b)) {
+            best = Some(f);
+        }
+    }
+    best
 }
 
 /// One template's fill, or `None` when it can't be done before `deadline`.
@@ -492,7 +514,8 @@ mod tests {
     #[test]
     fn seed_is_placed() {
         let words = Words::embedded();
-        for day in 0..5 {
+        // some templates have no 4-letter entry: another is chosen
+        for day in 0..20 {
             let f = fill(words, &["leaf".to_owned()], &mut day_rng(day), CAP).unwrap();
             assert!(f.answers.iter().any(|(_, a)| a == "leaf"), "day {day}");
             check(words, &f);

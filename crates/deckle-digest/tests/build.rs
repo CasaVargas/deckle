@@ -340,3 +340,58 @@ fn icons_ship_in_the_epub() {
         );
     }
 }
+
+#[test]
+fn gather_records_headlines_for_tomorrows_puzzle() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    c.puzzle_path = Some(dir.path().join("puzzles.json"));
+    let g = gather(&c, date(), now(), &fake);
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(puzzle.unavailable.is_none());
+    let store = deckle_digest::puzzle::store::Store::load(c.puzzle_path.as_ref().unwrap());
+    let day = &store.days[&date()];
+    assert!(!day.headlines.is_empty());
+    assert!(
+        day.headlines
+            .iter()
+            .all(|t| t.section == "Local" || t.section == "Hacker News")
+    );
+    // a rebuild prints the same puzzle
+    let again = gather(&c, date(), now(), &fake);
+    let p2 = again
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert_eq!(puzzle.articles[0].body, p2.articles[0].body);
+}
+
+#[test]
+fn puzzle_store_write_error_is_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    // a directory where the file should be: the save fails, the paper doesn't
+    let path = dir.path().join("puzzles.json");
+    std::fs::create_dir(&path).unwrap();
+    c.puzzle_path = Some(path);
+    let g = gather(&c, date(), now(), &fake);
+    assert!(
+        g.notes.iter().any(|n| n.contains("puzzle")),
+        "{:?}",
+        g.notes
+    );
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(!puzzle.articles.is_empty());
+}

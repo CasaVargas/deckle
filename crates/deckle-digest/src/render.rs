@@ -51,6 +51,16 @@ blockquote { margin: 0.6em 1.2em; font-style: italic; }
 .note { font-style: italic; }
 ul.index { list-style-type: none; padding-left: 0; }
 ul.index li { border-bottom: 1px solid black; padding: 0.3em 0; }
+table.grid { border-collapse: collapse; margin: 0.6em auto; }
+table.grid td { width: 2em; height: 2em; border: 1px solid black; padding: 0; vertical-align: top;
+  text-align: center; font-weight: bold; }
+table.grid td.b { background-color: black; }
+table.grid span.n { display: block; font-size: 0.5em; font-weight: normal; text-align: left;
+  line-height: 1; padding: 0.1em 0 0 0.15em; }
+table.grid.small td { width: 1.1em; height: 1.1em; font-size: 0.85em; }
+p.clue { margin: 0 0 0.25em 0; }
+p.ladder { text-align: center; font-weight: bold; letter-spacing: 0.05em; }
+p.score { font-weight: bold; }
 "#;
 
 pub(crate) fn page(title: &str, body: &str) -> Vec<u8> {

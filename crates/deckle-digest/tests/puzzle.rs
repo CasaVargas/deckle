@@ -225,3 +225,163 @@ fn the_store_sits_beside_digest_toml() {
         deckle_digest::config::default_path().parent()
     );
 }
+
+// --- the section on the page (Task 7) ---
+
+use deckle_digest::puzzle::section;
+use deckle_digest::puzzle::store::Solve;
+use deckle_digest::{Edition, Gathered, Section, render};
+
+fn fixture_words() -> Words {
+    Words::from_tsv(include_str!("fixtures/puzzle/words.tsv"))
+}
+
+fn page_cfg() -> Config {
+    Config::default()
+}
+
+fn xhtml(s: Section) -> String {
+    let g = Gathered {
+        edition: Edition {
+            paper: "The Deckle Daily".into(),
+            date: date(),
+            place: "New York, NY".into(),
+            weather_line: None,
+            sections: vec![s],
+            assets: Vec::new(),
+        },
+        news: Vec::new(),
+        reading: None,
+        long_reads: Vec::new(),
+        reading_outcomes: Vec::new(),
+        notes: Vec::new(),
+    };
+    let (_, bytes) = render::render(&g, Vec::new())
+        .into_iter()
+        .find(|(p, _)| p == "OEBPS/s1.xhtml")
+        .unwrap();
+    String::from_utf8(bytes).unwrap()
+}
+
+/// Yesterday made from the fixture list, solved 4 of its clues, with "leaf" in its headlines.
+fn solved_yesterday(words: &Words) -> Store {
+    let mut store = Store::default();
+    let cfg = PuzzleConfig::default();
+    let mut day = Day {
+        puzzle: make(yesterday(), &cfg, words, &store),
+        headlines: vec![leaf()],
+        solve: None,
+    };
+    day.solve = Some(Solve {
+        solved: 4,
+        of: day.puzzle.clues.len(),
+        ladder: false,
+    });
+    store.days.insert(yesterday(), day);
+    store
+}
+
+#[test]
+fn golden_page() {
+    let words = fixture_words();
+    let mut store = solved_yesterday(&words);
+    let s = section(date(), &page_cfg(), &mut store, &words);
+    assert!(s.unavailable.is_none());
+    let got = xhtml(s);
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/puzzle/golden-page.xhtml"
+    );
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        std::fs::write(path, &got).unwrap();
+    }
+    assert_eq!(got, std::fs::read_to_string(path).unwrap());
+    roxmltree::Document::parse(&got).expect("well-formed XHTML");
+    let of = store.days[&yesterday()].puzzle.clues.len();
+    for want in [
+        "Answers in tomorrow&#39;s paper",
+        "The Mini · No. 2",
+        "Word ladder",
+        "Yesterday&#39;s answers",
+        "Highlight a clue and add your answer as a note; tomorrow&#39;s paper checks it.",
+        &format!("You solved 4 of {of}"),
+        "Words and definitions from Wiktionary and wordfreq (CC BY-SA 4.0)",
+        "(Local, yesterday)",
+        "<table class=\"grid\">",
+        "<table class=\"grid small\">",
+        "<td class=\"b\"></td>",
+        "<span class=\"n\">1</span>",
+        "<h3 class=\"subhead\">Across</h3>",
+        "<h3 class=\"subhead\">Down</h3>",
+    ] {
+        assert!(got.contains(want), "missing {want:?}");
+    }
+}
+
+#[test]
+fn no_yesterday_no_answers() {
+    // two days ago is stored, yesterday isn't: no stale answers
+    let words = fixture_words();
+    let mut store = Store::default();
+    let cfg = PuzzleConfig::default();
+    today(date() - Days::new(2), &cfg, &words, &mut store);
+    let s = section(date(), &page_cfg(), &mut store, &words);
+    let titles: Vec<&str> = s.articles.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, ["The Mini · No. 2", "Word ladder"]);
+    assert!(xhtml(s).contains("Wiktionary and wordfreq"));
+}
+
+#[test]
+fn hint_hidden_when_notes_unreadable() {
+    let words = fixture_words();
+    let mut store = Store {
+        notes_readable: Some(false),
+        ..Store::default()
+    };
+    let s = section(date(), &page_cfg(), &mut store, &words);
+    assert!(!xhtml(s).contains("Highlight a clue"));
+    store.notes_readable = Some(true);
+    let s = section(date(), &page_cfg(), &mut store, &words);
+    assert!(xhtml(s).contains("Highlight a clue"));
+}
+
+#[test]
+fn fill_failure_keeps_the_ladder() {
+    let words = Words::from_tsv("cold\tx\ncord\tx\nword\tx\nward\tx\nwarm\tx\n");
+    let s = section(date(), &page_cfg(), &mut Store::default(), &words);
+    let titles: Vec<&str> = s.articles.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, ["Word ladder"]);
+    assert!(
+        s.articles[0]
+            .body
+            .contains("COLD → ____ → ____ → ____ → WARM")
+    );
+}
+
+#[test]
+fn everything_fails_unavailable() {
+    let s = section(
+        date(),
+        &page_cfg(),
+        &mut Store::default(),
+        &Words::default(),
+    );
+    assert!(s.unavailable.is_some());
+    assert!(s.articles.is_empty());
+    assert_eq!((s.key.as_str(), s.title.as_str()), ("puzzle", "Puzzle"));
+}
+
+#[test]
+fn yesterdays_ladder_solved_says_so() {
+    let words = fixture_words();
+    let mut store = solved_yesterday(&words);
+    let y = store.days.get_mut(&yesterday()).unwrap();
+    y.solve.as_mut().unwrap().ladder = true;
+    let s = section(date(), &page_cfg(), &mut store, &words);
+    let answers = s
+        .articles
+        .iter()
+        .find(|a| a.title == "Yesterday's answers")
+        .unwrap();
+    assert!(answers.body.contains("Ladder: solved"), "{}", answers.body);
+}
