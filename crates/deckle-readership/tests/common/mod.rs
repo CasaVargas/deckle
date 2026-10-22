@@ -88,6 +88,7 @@ pub fn layout(date: &str, starts: &[i64]) -> deckle_readership::layout::Layout {
                 },
                 name: format!("Section {i}"),
                 start,
+                items: None,
             })
             .collect(),
     }

@@ -240,6 +240,12 @@ fn outlet_of(meta: &str) -> Option<&str> {
     meta.split(" · ").find(|p| !p.starts_with("By "))
 }
 
+/// The lead story, `(section, article)`, by [`crate::front::lead`].
+pub fn lead_of(g: &Gathered) -> Option<(usize, usize)> {
+    let c = crate::front::candidates(g);
+    crate::front::lead(&c).map(|i| (c[i].section, c[i].article))
+}
+
 /// The cover as a JPEG.
 pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     let f = fonts()?;
@@ -304,13 +310,9 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     };
     let footer_top = HEIGHT as f32 - 110.0;
 
-    // Lead story: the first headline with an opening paragraph, else the first headline.
-    let lead = heads
-        .iter()
-        .position(|&(s, a)| e.sections[s].articles[a].teaser.is_some())
-        .or((!heads.is_empty()).then_some(0));
-    if let Some(i) = lead {
-        let (s, a) = heads[i];
+    // Lead story: the front page's rule (Local, else the first section with a story).
+    let lead = lead_of(g);
+    if let Some((s, a)) = lead {
         let art = &e.sections[s].articles[a];
         y += 52.0;
         c.text(&f.bold, 26.0, MARGIN, y, &label(s, a), BLACK);
@@ -331,20 +333,18 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     let top = y + 6.0;
     let mut col_y = [top, top];
     let mut drawn = [false, false];
-    // The news keeps the lead; up to two saved articles take the first grid spots.
-    let saved = g
-        .reading
-        .map(|r| (0..e.sections[r].articles.len().min(SAVED_ON_COVER)).map(move |a| (r, a)));
+    // Up to two saved articles take the first grid spots (skipping one that leads), then the
+    // news.
+    let saved = g.reading.map(|r| {
+        (0..e.sections[r].articles.len())
+            .map(move |a| (r, a))
+            .filter(|h| Some(*h) != lead)
+            .take(SAVED_ON_COVER)
+    });
     let grid: Vec<(usize, usize)> = saved
         .into_iter()
         .flatten()
-        .chain(
-            heads
-                .iter()
-                .enumerate()
-                .filter(|(k, _)| Some(*k) != lead)
-                .map(|(_, h)| *h),
-        )
+        .chain(heads.iter().copied().filter(|h| Some(*h) != lead))
         .collect();
     for &(s, a) in &grid {
         let col = if col_y[0] <= col_y[1] { 0 } else { 1 };

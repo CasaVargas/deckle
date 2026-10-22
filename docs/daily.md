@@ -3,9 +3,9 @@
 A morning paper built on your machine and delivered to your Kindle. This page holds the full
 reference; the README has the overview.
 
-In the app: the **Daily** tab sets up the paper (name, place, sections, feeds), saves links to
-Your Reading, copies the bookmarklet, turns on the morning schedule, and builds or sends an edition
-on demand. Everything below is the same thing from the command line; both edit the same
+In the app: the **Daily** tab shows tomorrow's paper as it stands (below), sets up the paper
+(name, place, feeds), saves links to Your Reading, copies the bookmarklet, sets the press time, and
+builds or sends an edition on demand. Everything below is the same thing from the command line; both edit the same
 `digest.toml`, and your own comments in it are kept.
 
 A morning paper built on your machine: weather (Open-Meteo), local news (a Google News search
@@ -25,6 +25,8 @@ deckle digest puzzle                # today's puzzle, and yesterday's answers
 deckle digest watch                 # keep running; deliver whenever a Kindle connects
 deckle digest schedule --at 05:30   # both, automatically: the paper daily, the watcher from login
 deckle digest schedule --off        # and gone again
+deckle digest next [--fetch]        # tomorrow's paper so far (--fetch checks the feeds first)
+deckle digest stop [--undo]         # skip the next scheduled paper, once (or restart the presses)
 ```
 
 `schedule` installs two LaunchAgents on macOS (or two Task Scheduler tasks on Windows) that run the
@@ -68,6 +70,32 @@ them for one device, using the id `deckle devices` shows. Push, prune and clippi
 connection. `clippings = true` writes the Kindle's highlights as Markdown into the highlights
 folder (set it once with `deckle highlights export --to <dir>`, or in **Settings → Kindles**). It
 runs once per plug-in, in the same connection as a push or a prune when there is one.
+
+### Tomorrow's paper, so far
+
+The Daily tab opens on the **next** edition, not the last one:
+
+- **The press bar** says when the paper goes to press ("Goes to press at 05:30 · in 14 h 22 m"),
+  with the time and the switch for the morning schedule.
+- **Stop the presses** skips the next scheduled paper, once (`deckle digest stop`). The stop is a
+  date in `press.json` next to `digest.toml`: it lapses by itself after that morning, and
+  **Restart the presses** (`deckle digest stop --undo`) lifts it before. A Mac asleep through
+  press time still skips it. **Send now** always sends (`deckle digest run --force`).
+- **Tomorrow's paper, so far** is a sketch of the front page: the masthead with the next
+  edition's number and date, the lead with one line saying why it leads, then a tile per saved
+  article and section in page-plan order. Saved articles appear at once. Your feeds' headlines
+  appear once fetched: their RSS only, each feed at most twice an hour, and only while the tab is
+  on screen. Weather, the lottery, the horoscope and On This Day fill in at press time.
+- **The lead rule** is the press's own: local news leads when there is some; otherwise the first
+  section in your page plan with a story, saved articles included.
+- **The page plan** lists the sections in order with their budgets. Drag a row (or use the
+  arrows) to reorder; pick how many stories Your Reading, Local and each feed print. Each edit
+  writes `digest.toml` at once, keeping your comments. "About N Kindle pages" comes from the sizes
+  of your own past editions (Readership), or from rough defaults until there are some.
+- **This week**: how far you read each of the last six papers, from Readership.
+
+`deckle digest next` prints the same view (`--json` for data). It only reads files; `--fetch`
+checks the feeds first, under the same twice-an-hour limit.
 
 ### How far you read
 

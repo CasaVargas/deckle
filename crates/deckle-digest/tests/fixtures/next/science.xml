@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+<title>Science Daily Brief</title>
+<link>https://science.example.org/</link>
+<item><title>Comet brightens over the eastern sky</title><link>https://science.example.org/comet</link><pubDate>Thu, 22 Oct 2026 18:00:00 GMT</pubDate></item>
+<item><title>A new map of the deep ocean floor</title><link>https://science.example.org/ocean</link><pubDate>Thu, 22 Oct 2026 10:10:00 GMT</pubDate></item>
+<item><title>Bees count better than we thought</title><link>https://science.example.org/bees</link><pubDate>Thu, 22 Oct 2026 09:00:00 GMT</pubDate></item>
+<item><title>Last month's eclipse, revisited</title><link>https://science.example.org/eclipse</link><pubDate>Mon, 21 Sep 2026 12:00:00 GMT</pubDate></item>
+</channel></rss>

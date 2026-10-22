@@ -1004,6 +1004,109 @@ fn library_line(b: &deckle_library::Book) -> String {
     )
 }
 
+/// `next.json`: the headlines fetched for tomorrow's front page (disposable).
+fn next_cache() -> PathBuf {
+    deckle_core::wordwise::default_cache_dir()
+        .join("digest")
+        .join("next.json")
+}
+
+/// Tomorrow's paper as of `now`, from local files.
+fn next_paper(
+    cfg: &deckle_digest::Config,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
+) -> deckle_digest::next::plan::NextPaper {
+    deckle_readership::sizes::next_paper(
+        cfg,
+        now,
+        schedule_at(),
+        &deckle_readership::state_path(),
+        &next_cache(),
+        &deckle_core::wordwise::default_cache_dir().join("digest"),
+    )
+}
+
+fn next_text(
+    p: &deckle_digest::next::plan::NextPaper,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono::Utc>,
+) -> String {
+    use deckle_digest::next::WeekState;
+    let mut lines = vec![
+        deckle_digest::press::bar_line(&p.press, now),
+        format!(
+            "{} · No. {} · {}",
+            p.paper,
+            p.number,
+            deckle_digest::long_date(p.date)
+        ),
+    ];
+    if p.weather {
+        lines.push("Weather · fills in at press time".into());
+    }
+    if let Some(l) = &p.lead {
+        lines.push(format!(
+            "Lead: {} — {}",
+            l.kicker,
+            l.title.as_deref().unwrap_or_default()
+        ));
+        if let Some(r) = &l.reason {
+            lines.push(format!("      {r}"));
+        }
+    }
+    for t in &p.tiles {
+        lines.push(match &t.title {
+            Some(title) => format!("  {} — {title}", t.kicker),
+            None => format!("  {}", t.kicker),
+        });
+    }
+    lines.push(match p.checked {
+        Some(c) => format!(
+            "Headlines checked {}",
+            c.with_timezone(&deckle_digest::tz::local_tz())
+                .format("%H:%M")
+        ),
+        None => "Headlines not checked yet".into(),
+    });
+    lines.push(String::new());
+    lines.push(format!("Page plan (about {} Kindle pages):", p.pages));
+    for (n, r) in p.plan.iter().enumerate() {
+        lines.push(format!(
+            "  {}. {} — {} [{}]",
+            n + 1,
+            r.name,
+            r.detail,
+            r.budget
+        ));
+    }
+    if !p.off.is_empty() {
+        let off: Vec<&str> = p.off.iter().map(|r| r.name.as_str()).collect();
+        lines.push(format!("  Off: {}", off.join(", ")));
+    }
+    let week: Vec<String> = p
+        .week
+        .iter()
+        .map(|d| {
+            let s = match d.state {
+                WeekState::Read(n) => format!("read {n}%"),
+                WeekState::NotOpened => "not opened".into(),
+                WeekState::Sent => "sent".into(),
+                WeekState::NoPaper => "no paper".into(),
+            };
+            format!("{} {s}", d.date.format("%a"))
+        })
+        .collect();
+    lines.push(String::new());
+    lines.push(format!("This week: {}", week.join(" · ")));
+    lines.join("\n")
+}
+
+/// The installed edition job's time, when there is one.
+fn schedule_at() -> Option<(u8, u8)> {
+    deckle_digest::schedule::status()
+        .at
+        .and_then(|a| deckle_digest::schedule::parse_at(&a).ok())
+}
+
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
     match arg {
         None => Ok(deckle_digest::chrono::Local::now().date_naive()),
@@ -1091,9 +1194,24 @@ fn digest(
             date,
             previewer: pv,
             keep_work_dir,
+            force,
         } => {
             let mut cfg = load_digest_config(&path)?;
             let date = parse_date(date.as_deref())?;
+            // Before anything is located or touched: a stopped morning builds nothing.
+            let today = deckle_digest::chrono::Local::now().date_naive();
+            let stop = deckle_digest::press::read_stop(&cfg.press_state(), today);
+            if !force && stop == Some(date) {
+                let out = serde_json::json!({ "stopped": date });
+                emit(json, &out, || {
+                    format!(
+                        "Presses stopped for {}: no paper today (deckle digest stop --undo \
+                         restarts them)",
+                        date.format("%A, %B %-d")
+                    )
+                })?;
+                return Ok(ExitCode::SUCCESS);
+            }
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             // A folder target must exist (and is created) before any work; `device` may be
             // absent: the edition then waits in the outbox.
@@ -1273,6 +1391,51 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
+        cli::DigestCommand::Next { fetch } => {
+            let cfg = load_digest_config(&path)?;
+            let now =
+                deckle_digest::chrono::Utc::now().with_timezone(&deckle_digest::tz::local_tz());
+            if fetch {
+                let path = next_cache();
+                let mut cache = deckle_digest::next::live::LiveCache::load(&path);
+                deckle_digest::next::live::refresh(
+                    &cfg,
+                    &mut cache,
+                    now.to_utc(),
+                    &deckle_digest::Http,
+                );
+                cache.save(&path)?;
+            }
+            let paper = next_paper(&cfg, now);
+            emit(json, &paper, || next_text(&paper, now.to_utc()))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Stop { undo, date } => {
+            let cfg = load_digest_config(&path)?;
+            let stop = if undo {
+                None
+            } else {
+                let date = match date {
+                    Some(d) => parse_date(Some(&d))?,
+                    None => {
+                        let now = deckle_digest::chrono::Utc::now()
+                            .with_timezone(&deckle_digest::tz::local_tz());
+                        deckle_digest::press::press(schedule_at(), None, now)
+                            .next
+                            .map(|n| n.date_naive())
+                            .ok_or("nothing is scheduled; there's no press to stop")?
+                    }
+                };
+                Some(date)
+            };
+            deckle_digest::press::write_stop(&cfg.press_state(), stop)?;
+            let out = serde_json::json!({ "stopped": stop });
+            emit(json, &out, || match stop {
+                Some(d) => format!("Presses stopped for {}.", deckle_digest::long_date(d)),
+                None => "Presses restarted.".to_owned(),
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
         cli::DigestCommand::Puzzle => digest_puzzle(json, &path),
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
@@ -1806,7 +1969,8 @@ fn record_layout(
         .map_err(|e| format!("{}: {e}", kfx.display()))
         .and_then(|bytes| {
             deckle_readership::layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)
-        });
+        })
+        .map(|l| with_items(l, built));
     let path = deckle_readership::state_path();
     let saved = layout.and_then(|l| {
         let mut state = deckle_readership::State::load(&path);
@@ -1816,6 +1980,22 @@ fn record_layout(
     if let Err(e) = saved {
         eprintln!("readership: {e}");
     }
+}
+
+/// Each section's item count from the build report, matched by key, so tomorrow's paper can
+/// estimate a story's length (tomorrow's paper design §6.3). The front page has none.
+fn with_items(
+    mut layout: deckle_readership::layout::Layout,
+    built: &deckle_digest::BuildReport,
+) -> deckle_readership::layout::Layout {
+    for s in &mut layout.sections {
+        s.items = built
+            .sections
+            .iter()
+            .find(|b| b.key == s.key)
+            .map(|b| b.items as u32);
+    }
+    layout
 }
 
 /// What `digest puzzle --json` prints: today's puzzle, and yesterday's day when there is one.
@@ -2412,5 +2592,49 @@ mod push_tests {
             Some((false, true, false))
         );
         assert_eq!(push_plan(on, false).map(|p| p.push), Some(true));
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use deckle_readership::layout::{Layout, SectionStart};
+
+    #[test]
+    fn layout_records_items() {
+        let sec = |key: &str| SectionStart {
+            key: key.into(),
+            name: key.into(),
+            start: 0,
+            items: None,
+        };
+        let layout = Layout {
+            date: "2026-10-22".parse().unwrap(),
+            title: "T".into(),
+            file: "f".into(),
+            end: 10,
+            sections: vec![sec("front"), sec("local"), sec("feeds:Science")],
+        };
+        let summary = |key: &str, items| deckle_digest::SectionSummary {
+            key: key.into(),
+            title: key.into(),
+            items,
+            unavailable: None,
+        };
+        let built = deckle_digest::BuildReport {
+            epub: PathBuf::new(),
+            title: "T".into(),
+            sections: vec![summary("feeds:Science", 7), summary("local", 3)],
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+        };
+        let items: Vec<Option<u32>> = with_items(layout, &built)
+            .sections
+            .iter()
+            .map(|s| s.items)
+            .collect();
+        // matched by key; the front page has none
+        assert_eq!(items, [None, Some(3), Some(7)]);
     }
 }

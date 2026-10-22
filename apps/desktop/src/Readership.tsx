@@ -5,7 +5,7 @@ import { barTone, headline, howFar } from "./readershipView";
 import type { ReadershipSuggestion, ReadershipView } from "./types";
 
 /** How far you read the paper, per section, with suggested edits (readership design §7). */
-export default function Readership() {
+export default function Readership({ onApplied }: { onApplied?: () => void }) {
   const [view, setView] = useState<ReadershipView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +83,11 @@ export default function Readership() {
                     <div className="muted small">{s.why}</div>
                   </div>
                   {s.kind !== "stop" && (
-                    <button className="ghost" disabled={busy !== null} onClick={() => act(s.id, () => api.readershipApply(s.id))}>
+                    <button
+                      className="ghost"
+                      disabled={busy !== null}
+                      onClick={() => act(s.id, () => api.readershipApply(s.id).finally(() => onApplied?.()))}
+                    >
                       {busy === s.id ? "Saving…" : s.kind === "drop" ? "Drop it" : "Move up"}
                     </button>
                   )}

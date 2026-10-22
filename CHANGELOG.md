@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Tomorrow's paper, so far**: the Daily tab now opens on the next edition. A press bar with
+  the countdown and **Stop the presses** (skip one morning; `deckle digest stop`), a live sketch
+  of the front page that fills in as you save articles and your feeds post (with a line saying
+  why the lead leads), a **page plan** you drag to reorder with story budgets and "about N Kindle
+  pages", and **This week**'s reads. `deckle digest next` prints the same. The cover's lead now
+  follows one rule everywhere: local news first, else the first section in your plan with a
+  story, so a saved article can lead the paper.
 - A **puzzle page** in the Daily: a 5×5 mini crossword whose theme answers are yesterday's
   headlines with the word blanked, a word ladder, and yesterday's answers. Answer a clue as a
   Kindle note and the next paper says "You solved N of M" (Kindles that keep `My Clippings.txt`).

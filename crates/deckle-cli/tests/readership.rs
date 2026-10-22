@@ -48,6 +48,7 @@ fn seeded() -> State {
             key: key.into(),
             name: name.into(),
             start,
+            items: None,
         };
         s.record_layout(Layout {
             date,
