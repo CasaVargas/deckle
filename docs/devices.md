@@ -25,7 +25,10 @@ coordinate `deckle_kfx::text` uses. A never-opened book has no `.sdr` or no `.yj
   End to end the same day: `deckle digest run --to device` recorded the 2026-10-22 edition's
   sections; after reading and replugging, `deckle digest push` (empty outbox) read `fpr` 14565,
   the first character of the Hacker News section, and `deckle digest readership` counted it.
-- **Paperwhite (mass storage):** not checked yet.
+- **Paperwhite (mass storage), checked 2026-10-22:** the same `documents/<stem>.sdr/<stem><suffix>.yjf`
+  (same suffix as the Scribe), decoded fine. Two differences: its `lpr` (89882) was ahead of its
+  `fpr` (89410), so the report takes the further of the two; and a pruned edition's `.sdr` stayed
+  behind without its `.kfx`, which Deckle treats as absent, not unopened.
 
 ## Compatibility warnings (how to add a row)
 

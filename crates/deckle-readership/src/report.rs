@@ -147,7 +147,8 @@ pub fn report(state: &State, cfg: &Config) -> Report {
             let f = reads
                 .values()
                 .filter(|r| r.opened)
-                .filter_map(|r| r.furthest.or(r.last))
+                // The further of the two: a Paperwhite's `lpr` can be ahead of its `fpr`.
+                .filter_map(|r| r.furthest.max(r.last))
                 .max()?;
             Some((*l, f))
         })

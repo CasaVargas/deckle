@@ -395,3 +395,12 @@ fn a_section_no_edition_had_yet_gets_its_paper_name() {
     let names: Vec<_> = r.sections.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["Your Reading", "On This Day", "Ars"]);
 }
+
+#[test]
+fn the_further_of_furthest_and_last_counts() {
+    // Seen on a Paperwhite: lpr 89882 ahead of fpr 89410.
+    let mut s = State::default();
+    edition(&mut s, 0, PAPER, &[("K", Some(3000))]);
+    s.reads.get_mut(&date(0)).unwrap().get_mut("K").unwrap().last = Some(8500);
+    assert_eq!(report(&s, &usual()).median_percent, Some(85));
+}
