@@ -354,6 +354,13 @@ pub enum DigestCommand {
         #[arg(long)]
         force: bool,
     },
+    /// Tomorrow's paper, so far: the press, the front page as it stands, the page plan and
+    /// this week's reads.
+    Next {
+        /// Check the feeds for new headlines first (each at most twice an hour).
+        #[arg(long)]
+        fetch: bool,
+    },
     /// Stop the presses: skip the next scheduled edition, once. `--undo` restarts them.
     Stop {
         #[arg(long)]

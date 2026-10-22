@@ -159,3 +159,77 @@ fn chrono_today() -> String {
         .format("%Y-%m-%d")
         .to_string()
 }
+
+// --- deckle digest next (Task 7) ---
+
+const PAPER: &str = "title = \"The Morning Deckle\"\nplace = \"Linden Falls, NC\"\n\
+sections = [\"reading\", \"weather\", \"feeds\", \"horoscope\"]\n\n\
+[[feeds]]\nname = \"Science\"\nurl = \"http://10.255.255.1/feed\"   # unroutable: never asked without --fetch\nmax_items = 4\n";
+
+fn paper_setup() -> tempfile::TempDir {
+    let (home, _) = setup();
+    std::fs::write(config_dir(home.path()).join("digest.toml"), PAPER).unwrap();
+    home
+}
+
+#[test]
+fn next_json_has_the_view() {
+    let home = paper_setup();
+    let o = deckle(home.path())
+        .args(["--json", "digest", "next"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert!(
+        v["lead"]["kicker"]
+            .as_str()
+            .unwrap()
+            .starts_with("YOUR READING"),
+        "{v}"
+    );
+    assert_eq!(v["plan"][0]["key"], "reading");
+    assert!(v["pages"].as_u64().unwrap() >= 1);
+    assert_eq!(v["week"].as_array().unwrap().len(), 6);
+}
+
+#[test]
+fn next_text_lines() {
+    let home = paper_setup();
+    let o = deckle(home.path())
+        .args(["digest", "next"])
+        .output()
+        .unwrap();
+    let text = String::from_utf8(o.stdout).unwrap();
+    for want in [
+        "The Morning Deckle · No. ",
+        "Lead: YOUR READING · EXAMPLE.COM — X",
+        "Weather · fills in at press time",
+        "Page plan (about ",
+        " Kindle pages):",
+        "Science — 10.255.255.1 [4 stories]",
+        "This week: ",
+        "No press time set",
+    ] {
+        assert!(text.contains(want), "missing {want:?} in:\n{text}");
+    }
+}
+
+#[test]
+fn next_without_fetch_makes_no_request() {
+    let home = paper_setup();
+    let start = std::time::Instant::now();
+    let o = deckle(home.path())
+        .args(["digest", "next"])
+        .output()
+        .unwrap();
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("Science · 4 slots"));
+    // nothing was cached either
+    assert!(
+        !home
+            .path()
+            .join("Library/Caches/deckle/digest/next.json")
+            .exists()
+    );
+}

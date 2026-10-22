@@ -87,6 +87,24 @@ pub fn countdown(from: DateTime<Utc>, to: DateTime<Utc>) -> String {
     }
 }
 
+/// The press bar's line (tomorrow's paper design §4.1).
+pub fn bar_line(p: &Press, now: DateTime<Utc>) -> String {
+    let (Some(at), Some(next)) = (&p.at, p.next) else {
+        return "No press time set".into();
+    };
+    match p.stopped {
+        Some(s) => format!(
+            "Presses stopped: no paper {} · next at {at} {}",
+            s.format("%A"),
+            next.format("%A")
+        ),
+        None => format!(
+            "Goes to press at {at} · {}",
+            countdown(now, next.with_timezone(&Utc))
+        ),
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct StopFile {
     stopped: NaiveDate,
@@ -217,6 +235,21 @@ mod tests {
         write_stop(&path, None).unwrap(); // removing nothing is fine
         std::fs::write(&path, "not json").unwrap();
         assert_eq!(read_stop(&path, day(22)), None);
+    }
+
+    #[test]
+    fn press_lines() {
+        let now = at(ny(), 2026, 10, 22, 15, 8);
+        let utc = now.with_timezone(&Utc);
+        assert_eq!(
+            bar_line(&press(Some((5, 30)), None, now), utc),
+            "Goes to press at 05:30 · in 14 h 22 m"
+        );
+        assert_eq!(
+            bar_line(&press(Some((5, 30)), Some(day(23)), now), utc),
+            "Presses stopped: no paper Friday · next at 05:30 Saturday"
+        );
+        assert_eq!(bar_line(&press(None, None, now), utc), "No press time set");
     }
 
     #[test]

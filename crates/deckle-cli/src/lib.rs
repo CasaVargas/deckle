@@ -1004,6 +1004,138 @@ fn library_line(b: &deckle_library::Book) -> String {
     )
 }
 
+/// `next.json`: the headlines fetched for tomorrow's front page (disposable).
+fn next_cache() -> PathBuf {
+    deckle_core::wordwise::default_cache_dir()
+        .join("digest")
+        .join("next.json")
+}
+
+/// What tomorrow's paper reads besides the config: the live cache, sizes and shares from
+/// Readership, and the week. Files only, never the network.
+fn next_inputs(
+    cfg: &deckle_digest::Config,
+    before: deckle_digest::chrono::NaiveDate,
+) -> (
+    deckle_digest::next::live::LiveCache,
+    deckle_digest::next::History,
+    std::collections::BTreeMap<String, u8>,
+    Vec<deckle_digest::next::WeekDay>,
+) {
+    let live = deckle_digest::next::live::LiveCache::load(&next_cache());
+    let state = deckle_readership::State::load(&deckle_readership::state_path());
+    let history = deckle_readership::sizes::history(&state);
+    let shares = deckle_readership::report(&state, cfg)
+        .sections
+        .into_iter()
+        .filter_map(|s| Some((s.key, s.share?)))
+        .collect();
+    // "sent": `digest run` leaves each edition's EPUB in the digest cache
+    let work = deckle_core::wordwise::default_cache_dir().join("digest");
+    let built =
+        |d: deckle_digest::chrono::NaiveDate| work.join(format!("deckle-daily-{d}.epub")).exists();
+    let week = deckle_readership::sizes::recent(&state, before, 6, &built);
+    (live, history, shares, week)
+}
+
+/// Tomorrow's paper as of `now`, from local files.
+fn next_paper(
+    cfg: &deckle_digest::Config,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
+) -> deckle_digest::next::plan::NextPaper {
+    let at = schedule_at();
+    let today = now.date_naive();
+    let stopped = deckle_digest::press::read_stop(&cfg.press_state(), today);
+    let edition = deckle_digest::press::press(at, stopped, now).edition;
+    let (live, history, shares, week) = next_inputs(cfg, edition);
+    let queue = reading_queue(cfg).load();
+    deckle_digest::next::plan::plan(&deckle_digest::next::plan::Inputs {
+        cfg,
+        now,
+        at,
+        stopped,
+        queue: &queue,
+        live: &live,
+        history: &history,
+        shares: &shares,
+        week,
+    })
+}
+
+fn next_text(
+    p: &deckle_digest::next::plan::NextPaper,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono::Utc>,
+) -> String {
+    use deckle_digest::next::WeekState;
+    let mut lines = vec![
+        deckle_digest::press::bar_line(&p.press, now),
+        format!(
+            "{} · No. {} · {}",
+            p.paper,
+            p.number,
+            deckle_digest::long_date(p.date)
+        ),
+    ];
+    if p.weather {
+        lines.push("Weather · fills in at press time".into());
+    }
+    if let Some(l) = &p.lead {
+        lines.push(format!(
+            "Lead: {} — {}",
+            l.kicker,
+            l.title.as_deref().unwrap_or_default()
+        ));
+        if let Some(r) = &l.reason {
+            lines.push(format!("      {r}"));
+        }
+    }
+    for t in &p.tiles {
+        lines.push(match &t.title {
+            Some(title) => format!("  {} — {title}", t.kicker),
+            None => format!("  {}", t.kicker),
+        });
+    }
+    lines.push(match p.checked {
+        Some(c) => format!(
+            "Headlines checked {}",
+            c.with_timezone(&deckle_digest::tz::local_tz())
+                .format("%H:%M")
+        ),
+        None => "Headlines not checked yet".into(),
+    });
+    lines.push(String::new());
+    lines.push(format!("Page plan (about {} Kindle pages):", p.pages));
+    for (n, r) in p.plan.iter().enumerate() {
+        lines.push(format!(
+            "  {}. {} — {} [{}]",
+            n + 1,
+            r.name,
+            r.detail,
+            r.budget
+        ));
+    }
+    if !p.off.is_empty() {
+        let off: Vec<&str> = p.off.iter().map(|r| r.name.as_str()).collect();
+        lines.push(format!("  Off: {}", off.join(", ")));
+    }
+    let week: Vec<String> = p
+        .week
+        .iter()
+        .map(|d| {
+            let s = match d.state {
+                WeekState::Read(n) => format!("read {n}%"),
+                WeekState::NotOpened => "not opened".into(),
+                WeekState::Sent => "sent".into(),
+                WeekState::NoPaper => "no paper".into(),
+            };
+            format!("{} {s}", d.date.format("%a"))
+        })
+        .collect();
+    lines.push(String::new());
+    lines.push(format!("This week: {}", week.join(" · ")));
+    lines.join("\n")
+}
+
 /// The installed edition job's time, when there is one.
 fn schedule_at() -> Option<(u8, u8)> {
     deckle_digest::schedule::status()
@@ -1295,6 +1427,25 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
+        cli::DigestCommand::Next { fetch } => {
+            let cfg = load_digest_config(&path)?;
+            let now =
+                deckle_digest::chrono::Utc::now().with_timezone(&deckle_digest::tz::local_tz());
+            if fetch {
+                let path = next_cache();
+                let mut cache = deckle_digest::next::live::LiveCache::load(&path);
+                deckle_digest::next::live::refresh(
+                    &cfg,
+                    &mut cache,
+                    now.to_utc(),
+                    &deckle_digest::Http,
+                );
+                cache.save(&path)?;
+            }
+            let paper = next_paper(&cfg, now);
+            emit(json, &paper, || next_text(&paper, now.to_utc()))?;
+            Ok(ExitCode::SUCCESS)
+        }
         cli::DigestCommand::Stop { undo, date } => {
             let cfg = load_digest_config(&path)?;
             let stop = if undo {
