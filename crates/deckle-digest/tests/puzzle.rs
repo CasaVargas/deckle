@@ -297,6 +297,10 @@ fn golden_page() {
     }
     assert_eq!(got, std::fs::read_to_string(path).unwrap());
     roxmltree::Document::parse(&got).expect("well-formed XHTML");
+    // yesterday's small grid is letters only: numbers would crowd its cells out of square
+    let small = got.split("<table class=\"grid small\">").nth(1).unwrap();
+    let small = small.split("</table>").next().unwrap();
+    assert!(!small.contains("class=\"n\""), "{small}");
     let of = store.days[&yesterday()].puzzle.clues.len();
     for want in [
         "Answers in tomorrow&#39;s paper",

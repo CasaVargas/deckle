@@ -379,6 +379,8 @@ pub enum DigestCommand {
         #[command(subcommand)]
         action: EmailCommand,
     },
+    /// Today's puzzle (made and kept if there's none yet) and yesterday's answers.
+    Puzzle,
     /// How far you read the last editions, per section, with suggested edits to the paper.
     Readership {
         #[command(subcommand)]

@@ -1273,6 +1273,7 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
+        cli::DigestCommand::Puzzle => digest_puzzle(json, &path),
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
@@ -1805,6 +1806,97 @@ fn record_layout(
     if let Err(e) = saved {
         eprintln!("readership: {e}");
     }
+}
+
+/// What `digest puzzle --json` prints: today's puzzle, and yesterday's day when there is one.
+#[derive(serde::Serialize)]
+struct PuzzleOut {
+    date: deckle_digest::chrono::NaiveDate,
+    #[serde(flatten)]
+    puzzle: deckle_digest::puzzle::store::Puzzle,
+    yesterday: Option<deckle_digest::puzzle::store::Day>,
+}
+
+/// `digest puzzle` (puzzle design goal 8): the same puzzle the paper prints today.
+fn digest_puzzle(json: bool, path: &Path) -> Result<ExitCode, String> {
+    use deckle_digest::puzzle;
+    let cfg = load_digest_config(path)?;
+    let date = deckle_digest::chrono::Local::now().date_naive();
+    let store_path = cfg.puzzle_store();
+    let mut store = puzzle::store::Store::load(&store_path);
+    let fresh = !store.days.contains_key(&date);
+    let p = puzzle::today(
+        date,
+        &cfg.puzzle,
+        puzzle::words::Words::embedded(),
+        &mut store,
+    )
+    .puzzle
+    .clone();
+    if fresh {
+        store.prune(date);
+        store
+            .save(&store_path)
+            .map_err(|e| format!("{}: {e}", store_path.display()))?;
+    }
+    let out = PuzzleOut {
+        date,
+        puzzle: p,
+        yesterday: store
+            .days
+            .get(&(date - deckle_digest::chrono::Days::new(1)))
+            .cloned(),
+    };
+    emit(json, &out, || puzzle_text(&out))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn puzzle_text(out: &PuzzleOut) -> String {
+    use deckle_digest::puzzle::grid::Dir;
+    let p = &out.puzzle;
+    let mut lines = Vec::new();
+    match &p.rows {
+        Some(rows) => {
+            lines.push(format!("The Mini · No. {}", p.number));
+            lines.extend(
+                rows.iter()
+                    .map(|r| format!("  {}", r.replace(|c: char| c != '#', "."))),
+            );
+            for (dir, name) in [(Dir::Across, "Across"), (Dir::Down, "Down")] {
+                lines.push(name.to_owned());
+                lines.extend(
+                    p.clues
+                        .iter()
+                        .filter(|c| c.dir == dir)
+                        .map(|c| format!("  {:>2}  {}", c.number, c.clue)),
+                );
+            }
+        }
+        None => lines.push("No mini today.".to_owned()),
+    }
+    if let Some(l) = &p.ladder {
+        lines.push(format!(
+            "Word ladder: {} to {} in {} steps",
+            l.from.to_uppercase(),
+            l.to.to_uppercase(),
+            l.path.len() - 1
+        ));
+    }
+    if let Some(y) = &out.yesterday {
+        lines.push(String::new());
+        lines.push("Yesterday:".to_owned());
+        if let Some(rows) = &y.puzzle.rows {
+            lines.extend(rows.iter().map(|r| format!("  {r}")));
+        }
+        if let Some(l) = &y.puzzle.ladder {
+            let path: Vec<String> = l.path.iter().map(|w| w.to_uppercase()).collect();
+            lines.push(format!("  Ladder: {}", path.join(", ")));
+        }
+        if let Some(s) = &y.solve {
+            lines.push(format!("  You solved {} of {}", s.solved, s.of));
+        }
+    }
+    lines.join("\n")
 }
 
 /// `digest readership [apply|dismiss N]` (readership design §7).

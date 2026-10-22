@@ -123,3 +123,29 @@ fn no_clippings_file_marks_unreadable() {
     assert_eq!(after.notes_readable, Some(false));
     assert_eq!(after.days[&yesterday()].solve, None);
 }
+
+#[test]
+fn digest_puzzle_prints_the_mini() {
+    let (home, _) = setup("sections = [\"puzzle\"]\n");
+    let out = deckle(home.path())
+        .args(["digest", "puzzle"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    assert!(text.contains("The Mini · No. 2"), "{text}");
+    assert!(text.contains("Across"), "{text}");
+    assert!(text.contains("Yesterday:"), "{text}");
+    // today's is kept: the paper prints the same one
+    let today = Local::now().date_naive();
+    let kept = stored(home.path()).days[&today].puzzle.clone();
+    let out = deckle(home.path())
+        .args(["--json", "digest", "puzzle"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(v["clues"].is_array());
+    assert_eq!(v["number"], 2);
+    assert_eq!(v["clues"].as_array().unwrap().len(), kept.clues.len());
+    assert_eq!(v["yesterday"]["puzzle"]["number"], 1);
+}

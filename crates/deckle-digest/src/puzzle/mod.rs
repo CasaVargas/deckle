@@ -204,8 +204,8 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
     }
 }
 
-/// The grid as a table: black squares filled, clue numbers small in the corner, and the
-/// letters when `letters`.
+/// The grid as a table, black squares filled: the clue numbers small in the corner, or the
+/// letters when `letters` (yesterday's small grid has no room for both).
 fn grid_table(rows: &[String; 5], class: &str, letters: bool) -> String {
     let mut numbers = [[None; 5]; 5];
     for s in grid::slots_in(rows) {
@@ -220,7 +220,7 @@ fn grid_table(rows: &[String; 5], class: &str, letters: bool) -> String {
                 continue;
             }
             out.push_str("<td>");
-            if let Some(n) = numbers[r][c] {
+            if let Some(n) = numbers[r][c].filter(|_| !letters) {
                 out.push_str(&format!("<span class=\"n\">{n}</span>"));
             }
             if letters {
