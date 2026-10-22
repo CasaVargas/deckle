@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use std::path::PathBuf;
 
-use deckle_core::previewer::{ConvertError, PREVIEWER_DOWNLOAD_URL, convert, locate, locate_in};
+use deckle_core::previewer::{
+    ConvertError, PREVIEWER_DOWNLOAD_URL, convert, locate, locate_in, windows_apps_candidates,
+};
 
 #[cfg(unix)]
 fn fake(name: &str) -> PathBuf {
@@ -66,6 +68,38 @@ fn override_path_that_does_not_exist_is_missing_too() {
         locate(Some(&PathBuf::from("/nonexistent/KindlePreviewer4CLI"))),
         Err(ConvertError::PreviewerMissing { .. })
     ));
+}
+
+#[test]
+fn windows_apps_aliases_are_candidates_cli_first() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in [
+        "KindlePreviewer4.exe",
+        "KindlePreviewer4CLI.exe",
+        "python.exe",
+        "kindle-notes.exe",
+    ] {
+        std::fs::write(dir.path().join(name), b"").unwrap();
+    }
+    let found = windows_apps_candidates(dir.path());
+    let names: Vec<_> = found
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(names, ["KindlePreviewer4CLI.exe", "KindlePreviewer4.exe"]);
+    assert!(windows_apps_candidates(&dir.path().join("absent")).is_empty());
+}
+
+#[test]
+#[cfg(unix)]
+fn override_that_exists_but_cannot_run_names_the_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("KindlePreviewer4CLI"); // not executable
+    std::fs::write(&p, b"").unwrap();
+    match locate_in(&[], Some(&p)) {
+        Err(ConvertError::PreviewerUnlaunchable { path, .. }) => assert_eq!(path, p),
+        other => panic!("expected PreviewerUnlaunchable, got {other:?}"),
+    }
 }
 
 /// Real Kindle Previewer, when installed and opted in with DECKLE_PREVIEWER_REAL=1.

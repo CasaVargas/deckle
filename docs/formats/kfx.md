@@ -6,8 +6,10 @@ authority is kfxlib (GPL-3) and a real device. Confidence tags: **device** / **r
 
 ## Kindle Previewer 4 CLI (reference)
 
-- Binary: `Kindle Previewer 4.app/Contents/MacOS/KindlePreviewer4CLI` (macOS). Windows path
-  to be confirmed (v3 lived in `%LOCALAPPDATA%\Amazon\Kindle Previewer 3\`).
+- Binary: `Kindle Previewer 4.app/Contents/MacOS/KindlePreviewer4CLI` (macOS). On Windows
+  the 4.x installer places App Execution Aliases in `%LOCALAPPDATA%\Microsoft\WindowsApps\`
+  (reparse points; `metadata` fails with OS error 1920, so detection checks the link itself);
+  v3 lived in `%LOCALAPPDATA%\Amazon\Kindle Previewer 3\`.
 - `KindlePreviewer4CLI <in.epub> --convert --locale en --output <dir>`. **The output dir must
   already exist**, or the CLI prints "Output should point to a valid folder." and exits 0 with
   no files.
