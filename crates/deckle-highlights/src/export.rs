@@ -85,13 +85,18 @@ fn ids_of(item: &Item) -> Vec<String> {
     }
 }
 
-fn taken(name: &str, key: &str, dir: &Path, state: &State) -> bool {
-    state.books.iter().any(|(k, b)| k != key && b.file == name) || dir.join(name).exists()
+/// Whether `name` is in the folder; with no folder chosen yet, nothing is.
+fn on_disk(dir: Option<&Path>, name: &str) -> bool {
+    dir.is_some_and(|d| d.join(name).exists())
+}
+
+fn taken(name: &str, key: &str, dir: Option<&Path>, state: &State) -> bool {
+    state.books.iter().any(|(k, b)| k != key && b.file == name) || on_disk(dir, name)
 }
 
 /// A free name for a book Deckle hasn't written yet: the title, then the title and author,
 /// then numbered.
-fn choose(book: &Book, dir: &Path, state: &State) -> String {
+fn choose(book: &Book, dir: Option<&Path>, state: &State) -> String {
     let first = file_name(&book.title);
     let mut candidates = vec![first.clone()];
     if !book.author.is_empty() {
@@ -105,12 +110,12 @@ fn choose(book: &Book, dir: &Path, state: &State) -> String {
         .unwrap_or(first)
 }
 
-fn plan(book: &Book, dir: &Path, state: &State) -> Planned {
+fn plan(book: &Book, dir: Option<&Path>, state: &State) -> Planned {
     let total = book.items.iter().map(|i| ids_of(i).len()).sum();
     let known = state
         .books
         .get(&book.key)
-        .filter(|b| dir.join(&b.file).exists());
+        .filter(|b| dir.is_none() || on_disk(dir, &b.file));
     let Some(known) = known else {
         // New, or its file is gone: everything, in a fresh file.
         let file = match state.books.get(&book.key) {
@@ -175,8 +180,8 @@ fn record(state: &mut State, book: &Book, planned: &Planned) {
     b.written.extend(planned.ids.iter().cloned());
 }
 
-/// What [`export`] would write, without writing it.
-pub fn pending(books: &[Book], dir: &Path, state: &State) -> Vec<Pending> {
+/// What [`export`] would write into `dir`, without writing it (`None`: no folder chosen yet).
+pub fn pending(books: &[Book], dir: Option<&Path>, state: &State) -> Vec<Pending> {
     let mut state = state.clone();
     books
         .iter()
@@ -220,7 +225,7 @@ fn write(path: &Path, created: bool, markdown: &str) -> std::io::Result<()> {
 pub fn export(books: &[Book], dir: &Path, state: &mut State) -> ExportReport {
     let mut report = ExportReport::default();
     for book in books {
-        let p = plan(book, dir, state);
+        let p = plan(book, Some(dir), state);
         if p.ids.is_empty() {
             continue;
         }

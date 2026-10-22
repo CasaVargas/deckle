@@ -22,6 +22,7 @@ deckle-xray.workspace = true
 deckle-kfx.workspace = true
 deckle-transport.workspace = true
 deckle-digest.workspace = true
+deckle-highlights.workspace = true
 deckle-cli.workspace = true
 deckle-library.workspace = true
 base64 = "0.23"

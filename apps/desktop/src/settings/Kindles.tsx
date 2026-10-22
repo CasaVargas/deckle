@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { DeviceRow } from "../types";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useEffect, useState } from "react";
+import { api } from "../api";
+import type { DeviceRow, HighlightsStatus } from "../types";
 import { Row, Switch } from "./Row";
 
 interface Props {
@@ -7,10 +10,46 @@ interface Props {
   onDeviceOptions: (key: string, cde: "pdoc" | "ebok" | null, verified: boolean) => void;
 }
 
+/** Where highlights go, and whether the morning schedule writes them (highlights export design §6). */
+function HighlightsSettings() {
+  const [status, setStatus] = useState<HighlightsStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.highlightsStatus().then(setStatus).catch((e) => setError(String(e)));
+  }, []);
+  const set = (folder: string | null, clippings: boolean) =>
+    api
+      .highlightsSet(folder, clippings)
+      .then((s) => {
+        setStatus(s);
+        setError(null);
+      })
+      .catch((e) => setError(String(e)));
+  const choose = async () => {
+    const dir = await openDialog({ directory: true, multiple: false });
+    if (typeof dir === "string") await set(dir, status?.clippings ?? false);
+  };
+  return (
+    <section className="set-device">
+      <h3>Highlights</h3>
+      <Row label="Folder" note={status?.folder ?? "Not chosen yet. One Markdown file per book goes here."}>
+        <button className="ghost" onClick={choose}>
+          {status?.folder ? "Change…" : "Choose…"}
+        </button>
+      </Row>
+      <Row label="Update these files every time this Kindle connects" note="Runs with the morning schedule (deckle digest watch).">
+        <Switch label="Update highlights on connect" checked={status?.clippings ?? false} disabled={!status?.folder} onChange={(on) => set(null, on)} />
+      </Row>
+      {error && <p className="set-note warn">{error}</p>}
+    </section>
+  );
+}
+
 export default function Kindles({ devices, onDeviceOptions }: Props) {
-  if (devices.length === 0) return <p className="set-foot">Connect a Kindle to set per-device options.</p>;
   return (
     <>
+      <HighlightsSettings />
+      {devices.length === 0 && <p className="set-foot">Connect a Kindle to set per-device options.</p>}
       {devices.map((d) => {
         const firmware = d.firmware ?? (d.kind === "mtp" ? "unknown until the first send" : "unknown");
         const covers = d.kind === "mtp" || !d.thumbnails_writable ? "covers via PDOC" : "thumbnails";

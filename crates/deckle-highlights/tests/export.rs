@@ -181,7 +181,7 @@ fn pending_matches_what_export_writes() {
     let dir = tempfile::tempdir().unwrap();
     let mut st = State::default();
     let first = books(&["h:10:one"]);
-    let p = pending(&first, dir.path(), &st);
+    let p = pending(&first, Some(dir.path()), &st);
     assert_eq!(
         (p[0].total, p[0].new, p[0].file.as_str()),
         (1, 1, "Walden.md")
@@ -193,7 +193,7 @@ fn pending_matches_what_export_writes() {
     );
 
     let next = books(&["h:10:one", "h:20:two"]);
-    let p = pending(&next, dir.path(), &st);
+    let p = pending(&next, Some(dir.path()), &st);
     assert_eq!((p[0].total, p[0].new), (2, 1));
     let before = fs::read_to_string(dir.path().join("Walden.md")).unwrap();
     export(&next, dir.path(), &mut st);
@@ -219,4 +219,31 @@ fn state_round_trips_and_tolerates_a_bad_file() {
             .folder
             .is_none()
     );
+}
+
+#[test]
+fn pending_without_a_folder_looks_at_no_disk() {
+    let cwd_has_it = std::env::current_dir().unwrap().join("Walden.md");
+    assert!(!cwd_has_it.exists());
+    let st = State::default();
+    let p = pending(&books(&["h:10:one"]), None, &st);
+    assert_eq!((p[0].file.as_str(), p[0].new), ("Walden.md", 1));
+}
+
+#[test]
+fn export_clippings_remembers_the_folder() {
+    let tmp = tempfile::tempdir().unwrap();
+    let state = tmp.path().join("cfg/highlights.json");
+    let bytes = b"Walden (H)\n- Your Highlight on page 1 | Location 1-2 | Added on Monday, March 3, 2025 10:14:22 AM\n\none\n==========\n";
+    assert!(
+        deckle_highlights::export_clippings(bytes, &state, None)
+            .unwrap_err()
+            .contains("--to")
+    );
+    let out = tmp.path().join("notes");
+    let o = deckle_highlights::export_clippings(bytes, &state, Some(&out)).unwrap();
+    assert_eq!(o.report.written.len(), 1);
+    assert!(o.describe().starts_with("highlights: 1 new in 1 file"));
+    let o = deckle_highlights::export_clippings(bytes, &state, None).unwrap();
+    assert!(o.report.written.is_empty());
 }

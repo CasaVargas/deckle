@@ -536,8 +536,7 @@ fn highlights_cmd(
             }
             let state = deckle_highlights::State::load(&state_path);
             let books = deckle_highlights::group(parsed.entries);
-            let dir = state.folder.clone().unwrap_or_default();
-            let rows: Vec<_> = deckle_highlights::pending(&books, &dir, &state)
+            let rows: Vec<_> = deckle_highlights::pending(&books, state.folder.as_deref(), &state)
                 .into_iter()
                 .map(|p| {
                     serde_json::json!({

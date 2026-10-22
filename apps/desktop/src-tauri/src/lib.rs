@@ -73,6 +73,9 @@ pub fn run() {
             kindle::library_set,
             kindle::device_books,
             kindle::device_remove,
+            kindle::highlights_status,
+            kindle::highlights_set,
+            kindle::highlights_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deckle");
