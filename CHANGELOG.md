@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — in-app updates
 
 - In-app updates: Deckle checks GitHub for a newer version when it starts. The footer says when
   one is out, and **Settings → About → Update** downloads, verifies and installs it; nothing
