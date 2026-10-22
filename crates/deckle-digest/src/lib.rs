@@ -235,11 +235,12 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                 }
             }
             SectionKind::Feeds => {
+                let mut taken = std::collections::HashSet::new();
                 for feed in &cfg.feeds {
                     news.push(edition.sections.len());
-                    edition
-                        .sections
-                        .push(sources::feeds::feed_section(feed, cfg, now, net));
+                    edition.sections.push(sources::feeds::feed_section(
+                        feed, cfg, now, net, &mut taken,
+                    ));
                 }
             }
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
