@@ -672,4 +672,106 @@ mod front {
         assert!(x.contains("A &amp; B &lt;c&gt;"));
         roxmltree::Document::parse(&x).unwrap();
     }
+
+    fn section_xhtml(g: &Gathered, n: usize) -> String {
+        let files = deckle_digest::render::render(g, Vec::new());
+        let want = format!("OEBPS/s{n}.xhtml");
+        let (_, bytes) = files.iter().find(|(p, _)| *p == want).unwrap();
+        String::from_utf8(bytes.clone()).unwrap()
+    }
+
+    fn hrefs(x: &str, class: &str) -> Vec<String> {
+        let doc = roxmltree::Document::parse(x).unwrap();
+        doc.descendants()
+            .filter(|n| n.attribute("class") == Some(class))
+            .flat_map(|n| n.descendants().filter(|c| c.has_tag_name("a")))
+            .filter_map(|a| a.attribute("href").map(String::from))
+            .collect()
+    }
+
+    #[test]
+    fn section_with_two_stories_has_headline_list() {
+        let g = paper(&[("local", &["One", "Two"])]);
+        let x = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("id=\"top\""));
+        assert!(x.contains("In this section"));
+        assert_eq!(hrefs(&x, "index"), vec!["#a1", "#a2"]);
+    }
+
+    #[test]
+    fn one_story_section_has_no_list() {
+        let x = section_xhtml(&paper(&[("local", &["Only"])]), 1);
+        assert!(!x.contains("class=\"index\""));
+        assert!(!x.contains("In this section"));
+        assert!(x.contains("class=\"back\""));
+    }
+
+    #[test]
+    fn back_links_target_the_tile_when_on_the_front_page() {
+        let g = with(4, 4);
+        let plan = front_plan(&g);
+        let x = section_xhtml(&g, 1);
+        let back = hrefs(&x, "back");
+        assert_eq!(back.len(), 8);
+        for j in 0..4 {
+            let want = if plan.contains(0, j) {
+                format!("front.xhtml#t0-{j}")
+            } else {
+                "front.xhtml".to_string()
+            };
+            assert_eq!(back[j * 2], "#top");
+            assert_eq!(back[j * 2 + 1], want);
+        }
+        assert!(back.iter().any(|h| h.starts_with("front.xhtml#t0-")));
+        assert!(x.contains("\u{21a9} local"));
+        assert!(x.contains("\u{21a9} Front page"));
+    }
+
+    #[test]
+    fn back_links_fall_back_to_front_xhtml() {
+        let g = with(1, 12);
+        let plan = front_plan(&g);
+        let j = (0..12)
+            .find(|&j| !plan.contains(1, j))
+            .expect("one is off the front");
+        let x = section_xhtml(&g, 2);
+        let back = hrefs(&x, "back");
+        assert_eq!(back[j * 2 + 1], "front.xhtml");
+    }
+
+    #[test]
+    fn unavailable_section_has_no_back_links() {
+        let mut g = paper(&[("local", &["One"]), ("feeds:A", &[])]);
+        g.edition.sections[1].unavailable = Some("Down".into());
+        let x = section_xhtml(&g, 2);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("Down"));
+        assert!(!x.contains("class=\"back\""));
+        assert!(!x.contains("class=\"index\""));
+    }
+
+    #[test]
+    fn duplicate_titles_keep_anchors_unique() {
+        let g = paper(&[("local", &["Same", "Same", "Same"])]);
+        let x = section_xhtml(&g, 1);
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let mut ids: Vec<_> = doc
+            .descendants()
+            .filter_map(|n| n.attribute("id"))
+            .collect();
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n);
+        assert_eq!(hrefs(&x, "index"), vec!["#a1", "#a2", "#a3"]);
+    }
+
+    #[test]
+    fn titles_are_escaped_in_the_list() {
+        let g = paper(&[("local", &["A & B <c>", "x"])]);
+        let x = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("A &amp; B &lt;c&gt;"));
+    }
 }

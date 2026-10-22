@@ -66,6 +66,9 @@ table.grid.small td { width: 1.1em; height: 1.1em; font-size: 0.85em; vertical-a
 p.clue { margin: 0 0 0.25em 0; }
 p.ladder { text-align: center; font-weight: bold; letter-spacing: 0.05em; }
 p.score { font-weight: bold; }
+p.back { font-size: 0.8em; margin: 0.8em 0 1.2em 0; }
+p.in-section { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; margin: 0.6em 0 0.2em 0; }
+ul.index { margin: 0 0 1em 0; padding-left: 1.2em; }
 "#;
 
 pub(crate) fn page(title: &str, body: &str) -> Vec<u8> {
@@ -169,11 +172,25 @@ fn front_page(g: &Gathered) -> Vec<u8> {
     page(&e.full_title(), &body)
 }
 
-fn section_page(e: &Edition, i: usize) -> Vec<u8> {
+fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8> {
     let s = &e.sections[i];
-    let mut body = format!("<h1 class=\"section-head\">{}</h1>\n", esc(&s.title));
+    let mut body = format!(
+        "<h1 class=\"section-head\" id=\"top\">{}</h1>\n",
+        esc(&s.title)
+    );
     if let Some(k) = &s.kicker {
         body.push_str(&format!("<p class=\"kicker\">{}</p>\n", esc(k)));
+    }
+    if s.articles.len() >= 2 {
+        body.push_str("<p class=\"in-section\">In this section</p>\n<ul class=\"index\">\n");
+        for (j, a) in s.articles.iter().enumerate() {
+            body.push_str(&format!(
+                "<li><a href=\"#a{}\">{}</a></li>\n",
+                j + 1,
+                esc(&a.title)
+            ));
+        }
+        body.push_str("</ul>\n");
     }
     for (j, a) in s.articles.iter().enumerate() {
         if j > 0 {
@@ -193,6 +210,15 @@ fn section_page(e: &Edition, i: usize) -> Vec<u8> {
         }
         body.push_str(&story);
         body.push('\n');
+        let front = if plan.contains(i, j) {
+            format!("front.xhtml#t{i}-{j}")
+        } else {
+            "front.xhtml".to_string()
+        };
+        body.push_str(&format!(
+            "<p class=\"back\"><a href=\"#top\">\u{21a9} {}</a> · <a href=\"{front}\">\u{21a9} Front page</a></p>\n",
+            esc(&s.title)
+        ));
     }
     if let Some(u) = &s.unavailable {
         body.push_str(&format!("<p class=\"unavailable\">{}</p>\n", esc(u)));
@@ -357,8 +383,12 @@ pub fn render(g: &Gathered, cover: Vec<u8>) -> Files {
     for (href, png) in &e.assets {
         files.push((format!("OEBPS/{href}"), png.clone()));
     }
+    let plan = crate::front::front_plan(g);
     for i in 0..e.sections.len() {
-        files.push((format!("OEBPS/{}", section_file(i)), section_page(e, i)));
+        files.push((
+            format!("OEBPS/{}", section_file(i)),
+            section_page(e, i, &plan),
+        ));
         for (j, a) in e.sections[i].articles.iter().enumerate() {
             for (n, jpeg) in a.photos.iter().enumerate() {
                 files.push((format!("OEBPS/{}", photo_file(i, j, n)), jpeg.clone()));
