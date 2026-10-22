@@ -186,7 +186,7 @@ impl Default for ReadingConfig {
 pub struct SyncConfig {
     pub push: bool,
     pub prune: bool,
-    /// Reserved for clippings pull (#60); accepted, does nothing yet.
+    /// Write the Kindle's highlights as Markdown into the highlights folder (#60).
     pub clippings: bool,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, DeviceSync>,
@@ -233,7 +233,7 @@ impl SyncConfig {
         }
     }
 
-    /// Clippings asked for anywhere (the watcher says it isn't built yet).
+    /// Clippings asked for anywhere.
     pub fn any_clippings(&self) -> bool {
         self.clippings || self.devices.values().any(|d| d.clippings == Some(true))
     }
@@ -358,7 +358,7 @@ signs = []                        # e.g. ["leo", "virgo"]; empty prints all twel
 [sync]
 push = true                       # deliver waiting editions
 prune = true                      # then keep only the newest `keep` on the Kindle
-clippings = false                 # not built yet
+clippings = false                 # write highlights as Markdown (folder: deckle highlights export --to)
 
 # Per Kindle, by the "sync id" `deckle devices` shows:
 # [sync.devices."G0000000000"]

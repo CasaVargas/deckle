@@ -42,6 +42,10 @@ pub struct FlushReport {
     pub pruned: Vec<String>,
     /// `<name>: <warning>` from finishing prepared books.
     pub warnings: Vec<String>,
+    /// `My Clippings.txt` as read in the same session, when the plan asked for it and the
+    /// Kindle has one.
+    #[serde(skip)]
+    pub clippings: Option<Vec<u8>>,
 }
 
 /// After a flush, editions named `<prefix>…` beyond the newest `keep` are removed.

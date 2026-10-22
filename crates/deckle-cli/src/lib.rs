@@ -2,6 +2,7 @@
 //! The `deckle` command line, as a library so the desktop app can run it too.
 
 mod cli;
+mod highlights;
 mod inbox;
 mod series;
 
@@ -1223,9 +1224,6 @@ fn digest(
                 Ok(None) => {}
                 Err(e) => eprintln!("bookmarklet: no token: {e}"),
             }
-            if cfg.sync.any_clippings() {
-                eprintln!("sync: clippings isn't built yet (#60); ignoring `clippings = true`");
-            }
             // Each device's [sync] actions run once per connection: a failed delivery waits
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
@@ -1258,12 +1256,17 @@ struct DigestOutcome {
     flush: Option<deckle_core::queue::FlushReport>,
     /// No Kindle connected: the edition waits in the outbox.
     queued: bool,
+    /// Highlights exported in the same session (`[sync] clippings`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    highlights: Option<highlights::Outcome>,
 }
 
 impl DigestOutcome {
     fn describe(&self, queue: &deckle_core::queue::Queue) -> String {
         match &self.flush {
-            Some(f) if f.delivered.is_empty() && f.pruned.is_empty() => {
+            Some(f)
+                if f.delivered.is_empty() && f.pruned.is_empty() && self.highlights.is_none() =>
+            {
                 "      nothing queued".to_owned()
             }
             Some(f) => {
@@ -1276,6 +1279,9 @@ impl DigestOutcome {
                     lines.push(format!("      removed {} older edition(s)", f.pruned.len()));
                 }
                 lines.extend(f.warnings.iter().map(|w| format!("      warning: {w}")));
+                if let Some(h) = &self.highlights {
+                    lines.extend(h.describe().lines().map(|l| format!("      {l}")));
+                }
                 lines.join("\n")
             }
             None if self.queued => format!(
@@ -1507,19 +1513,21 @@ fn push_queued(
     if queue.pending().is_empty() {
         return Ok(DigestOutcome {
             flush: Some(Default::default()),
-            queued: false,
+            ..Default::default()
         });
     }
     let Some(target) = detect_kindle() else {
         return Ok(DigestOutcome {
-            flush: None,
             queued: true,
+            ..Default::default()
         });
     };
-    // An explicit push always pushes; the device's `prune` still counts.
+    // An explicit push always pushes; the device's `prune` and `clippings` still count.
+    let actions = sync_actions(cfg, &deckle_core::sync::device_id(&target));
     let plan = deckle_core::sync::Plan {
         push: true,
-        prune: sync_actions(cfg, &deckle_core::sync::device_id(&target)).prune,
+        prune: actions.prune,
+        clippings: actions.clippings,
     };
     sync_to(queue, cfg, &target, plan)
 }
@@ -1530,6 +1538,7 @@ fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Act
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
+        clippings: a.clippings,
     }
 }
 
@@ -1558,9 +1567,21 @@ fn sync_to(
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
     )
     .map_err(|e| e.to_string())?;
+    // Read in the same session; written to the folder after it's closed.
+    let highlights = match flush.clippings.as_deref() {
+        Some(bytes) => match highlights::export(bytes, &highlights::state_path(), None) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                eprintln!("{e}");
+                None
+            }
+        },
+        None => None,
+    };
     Ok(DigestOutcome {
         flush: Some(flush),
-        queued: false,
+        highlights,
+        ..Default::default()
     })
 }
 

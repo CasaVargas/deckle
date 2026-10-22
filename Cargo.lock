@@ -960,6 +960,7 @@ dependencies = [
  "clap",
  "deckle-core",
  "deckle-digest",
+ "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
  "deckle-transport",
