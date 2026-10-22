@@ -7,7 +7,7 @@
    entry.
 2. Merge to `main`, then tag and push: `git tag -a v0.1.0 -m "Deckle 0.1.0" && git push origin v0.1.0`.
 3. The `release` workflow builds macOS arm64 + x86_64 (`.dmg`, `.app.tar.gz`), Windows x64 (NSIS
-   `-setup.exe`) and Linux (`.deb`, `.AppImage`), each updater bundle with its `.sig`, plus
+   `-setup.exe`), each updater bundle with its `.sig`, plus
    `latest.json`, and attaches them to a **draft** release. `check-updater-json` fails the run
    if `latest.json` lacks a platform.
 4. Download one installer per platform, install, send a book, look over Settings, and paste a

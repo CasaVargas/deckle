@@ -32,12 +32,10 @@ the Kindle that's plugged in.
    - **macOS 14+**, Apple Silicon or Intel: `.dmg`, signed and notarized.
    - **Windows 11**: `-setup.exe` (per-user, no admin), code-signed. A new certificate can still
      trigger SmartScreen: **More info → Run anyway**.
-   - **Linux** `.deb` / `.AppImage`: everything works except conversion, because Kindle
-     Previewer doesn't run on Linux.
 3. Plug in the Kindle, drop EPUBs on the window, press **Send to Kindle**.
 
 From 0.3.0 on, Deckle updates itself: when a new version is out, the footer says so, and
-**Settings → About → Update** installs it (a `.deb` install asks for your password). Coming from
+**Settings → About → Update** installs it. Coming from
 0.2.x, install 0.3.0 by hand once; on Windows, uninstall a 0.2.x `.msi` first.
 
 Quit calibre, Android File Transfer and Amazon's Send to Kindle first. Only one program at a time
