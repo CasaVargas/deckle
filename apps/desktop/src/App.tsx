@@ -5,6 +5,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import BookRowView from "./BookRow";
 import SettingsDrawer from "./SettingsDrawer";
+import { parseAddresses } from "./articles";
 import DailyView from "./DailyView";
 import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
@@ -31,8 +32,6 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** Link files and saved pages become articles (web-article design); everything else is a book. */
 const ARTICLE_FILE = /\.(webloc|url|html?)$/i;
-const WEB_ADDRESS = /https?:\/\/[^\s<>"]+/g;
-
 function toState(row: BookRow): BookState {
   return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false };
 }
@@ -177,10 +176,10 @@ export default function App() {
     const onPaste = (ev: ClipboardEvent) => {
       const el = ev.target as HTMLElement | null;
       if (tabRef.current !== "books" || el?.closest("input, textarea, select, [contenteditable]")) return;
-      const urls = ev.clipboardData?.getData("text").match(WEB_ADDRESS) ?? [];
+      const urls = parseAddresses(ev.clipboardData?.getData("text") ?? "");
       if (urls.length === 0) return;
       ev.preventDefault();
-      addArticles([...new Set(urls)]);
+      addArticles(urls);
     };
     document.addEventListener("paste", onPaste);
     return () => {
