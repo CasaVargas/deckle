@@ -29,7 +29,7 @@
   `digest.toml`). If the forecast is down, the rest of the page still prints.
 - No more Linux builds (`.deb`, `.AppImage`). Kindle Previewer doesn't run on Linux, so the
   main thing Deckle does, converting a book, never worked there. Existing Linux installs keep
-  working but get no further updates. The CLI still builds on Linux from source.
+  working but get no further updates. Linux is no longer tested in CI and is unsupported.
 - Highlights and notes out as Markdown: one file per book in a folder you choose, sideloaded
   books included. From the Kindle tab (**Write**), with `deckle highlights export`, or on every
   plug-in with the morning schedule (`[sync] clippings = true`, or **Settings → Kindles**). Later
