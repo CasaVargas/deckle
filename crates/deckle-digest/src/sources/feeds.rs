@@ -319,6 +319,7 @@ fn section_of(
         items.iter().map(|i| article(i, None)).collect()
     };
     let mut section = Section {
+        key: String::new(),
         title: title.into(),
         kicker,
         articles,

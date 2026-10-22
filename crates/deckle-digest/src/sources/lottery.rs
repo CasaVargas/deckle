@@ -123,6 +123,7 @@ pub fn section(cfg: &Config, net: &dyn Net) -> Section {
         );
     }
     Section {
+        key: String::new(),
         title: TITLE.into(),
         kicker: Some("Always check results with the official lottery.".into()),
         articles,

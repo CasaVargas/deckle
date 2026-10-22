@@ -20,6 +20,21 @@ pub enum SectionKind {
     Onthisday,
 }
 
+/// The key a section goes by across editions (readership design §4): the kind's name, or
+/// `feeds:<name>` for each `[[feeds]]` entry.
+pub fn section_key(kind: SectionKind, feed: Option<&str>) -> String {
+    let name = match kind {
+        SectionKind::Reading => "reading",
+        SectionKind::Weather => "weather",
+        SectionKind::Local => "local",
+        SectionKind::Feeds => return format!("feeds:{}", feed.unwrap_or_default()),
+        SectionKind::Lottery => "lottery",
+        SectionKind::Horoscope => "horoscope",
+        SectionKind::Onthisday => "onthisday",
+    };
+    name.to_owned()
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Units {
@@ -188,6 +203,8 @@ pub struct SyncConfig {
     pub prune: bool,
     /// Write the Kindle's highlights as Markdown into the highlights folder (#60).
     pub clippings: bool,
+    /// Note how far each edition was read, from the Kindle's `.yjf` (readership design).
+    pub readership: bool,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, DeviceSync>,
 }
@@ -198,6 +215,7 @@ impl Default for SyncConfig {
             push: true,
             prune: true,
             clippings: false,
+            readership: true,
             devices: BTreeMap::new(),
         }
     }
@@ -213,6 +231,8 @@ pub struct DeviceSync {
     pub prune: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clippings: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub readership: Option<bool>,
 }
 
 /// The actions settled for one device.
@@ -221,6 +241,7 @@ pub struct SyncActions {
     pub push: bool,
     pub prune: bool,
     pub clippings: bool,
+    pub readership: bool,
 }
 
 impl SyncConfig {
@@ -230,6 +251,7 @@ impl SyncConfig {
             push: d.push.unwrap_or(self.push),
             prune: d.prune.unwrap_or(self.prune),
             clippings: d.clippings.unwrap_or(self.clippings),
+            readership: d.readership.unwrap_or(self.readership),
         }
     }
 
@@ -359,6 +381,7 @@ signs = []                        # e.g. ["leo", "virgo"]; empty prints all twel
 push = true                       # deliver waiting editions
 prune = true                      # then keep only the newest `keep` on the Kindle
 clippings = false                 # write highlights as Markdown (folder: deckle highlights export --to)
+readership = true                 # note how far you read the paper (Daily tab)
 
 # Per Kindle, by the "sync id" `deckle devices` shows:
 # [sync.devices."G0000000000"]
@@ -438,11 +461,49 @@ fn merge_table(old: &mut toml_edit::Table, new: &toml_edit::Table) {
                     *o.decor_mut() = decor;
                 }
             }
-            // Arrays of tables ([[feeds]]) and new keys: take the new one whole.
+            // [[feeds]]: in the new order, each entry merged into the old one of the same name
+            // so its comments stay; new entries come whole, dropped ones go. (The serializer
+            // writes the new list as an inline array of inline tables.)
+            (Some(Item::ArrayOfTables(o)), n) if tables_of(n).is_some() => {
+                let name = |t: &toml_edit::Table| {
+                    t.get("name").and_then(|v| v.as_str()).map(str::to_owned)
+                };
+                // Tables print in document-position order: hand the old slots out in the new order.
+                let mut slots: Vec<_> = o.iter().filter_map(|t| t.position()).collect();
+                slots.sort_unstable();
+                let mut slots = slots.into_iter();
+                let mut merged = toml_edit::ArrayOfTables::new();
+                for nt in tables_of(n).unwrap_or_default() {
+                    let mut t = match o
+                        .iter()
+                        .find(|ot| name(ot).is_some() && name(ot) == name(&nt))
+                    {
+                        Some(ot) => ot.clone(),
+                        None => nt.clone(),
+                    };
+                    merge_table(&mut t, &nt);
+                    t.set_position(slots.next());
+                    merged.push(t);
+                }
+                *o = merged;
+            }
+            // New keys: take the new one whole.
             (_, n) => {
                 old.insert(k, n.clone());
             }
         }
+    }
+}
+
+/// `item` as a list of tables, when it is one: an array of tables, or an array of inline tables.
+fn tables_of(item: &toml_edit::Item) -> Option<Vec<toml_edit::Table>> {
+    match item {
+        toml_edit::Item::ArrayOfTables(a) => Some(a.iter().cloned().collect()),
+        toml_edit::Item::Value(toml_edit::Value::Array(a)) => a
+            .iter()
+            .map(|v| v.as_inline_table().map(|t| t.clone().into_table()))
+            .collect(),
+        _ => None,
     }
 }
 
@@ -467,6 +528,56 @@ pub fn default_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn readership_defaults_on_and_follows_device_overrides() {
+        let c = Config::parse("[sync.devices.\"G000\"]\nreadership = false\n").unwrap();
+        assert!(c.sync.readership);
+        assert!(!c.sync.for_device("G000").readership);
+        assert!(c.sync.for_device("other").readership);
+        assert!(STARTER.contains(
+            "readership = true                 # note how far you read the paper (Daily tab)"
+        ));
+    }
+
+    #[test]
+    fn section_keys() {
+        assert_eq!(section_key(SectionKind::Onthisday, None), "onthisday");
+        assert_eq!(section_key(SectionKind::Feeds, Some("HN")), "feeds:HN");
+    }
+
+    #[test]
+    fn saving_keeps_comments_inside_feeds_when_one_is_dropped_or_moved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("digest.toml");
+        std::fs::write(
+            &path,
+            "sections = [\"feeds\"]\n\n[[feeds]]\nname = \"A\" # morning tech\nurl = \"https://a.example/feed\"\n\n\
+             [[feeds]]\n# keep\nname = \"B\"\nurl = \"https://b.example/feed\"\nmax_items = 3 # three is plenty\n\n\
+             [[feeds]]\nname = \"C\"\nurl = \"https://c.example/feed\"\n",
+        )
+        .unwrap();
+        let mut cfg = Config::load(&path).unwrap();
+        cfg.feeds.retain(|f| f.name != "A");
+        cfg.feeds.swap(0, 1); // C, B
+        save(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("morning tech"), "{text}");
+        assert!(text.contains("# keep"), "{text}");
+        assert!(text.contains("# three is plenty"), "{text}");
+        assert!(
+            text.find("name = \"C\"").unwrap() < text.find("name = \"B\"").unwrap(),
+            "{text}"
+        );
+        let back = Config::load(&path).unwrap();
+        assert_eq!(
+            back.feeds
+                .iter()
+                .map(|f| f.name.as_str())
+                .collect::<Vec<_>>(),
+            ["C", "B"]
+        );
+    }
 
     #[test]
     fn starter_parses() {
@@ -528,6 +639,7 @@ mod tests {
             push: true,
             prune: true,
             clippings: false,
+            readership: true,
         };
         assert_eq!(c.sync.for_device("G000"), want);
         assert_eq!(
@@ -547,6 +659,7 @@ mod tests {
             push,
             prune,
             clippings,
+            readership: true,
         };
         assert_eq!(c.sync.for_device("G000"), actions(false, true, false));
         assert_eq!(

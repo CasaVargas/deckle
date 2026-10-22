@@ -375,6 +375,19 @@ pub enum DigestCommand {
         #[command(subcommand)]
         action: EmailCommand,
     },
+    /// How far you read the last editions, per section, with suggested edits to the paper.
+    Readership {
+        #[command(subcommand)]
+        action: Option<ReadershipCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReadershipCommand {
+    /// Make suggested edit N (as numbered in the report) to digest.toml.
+    Apply { n: usize },
+    /// Hide suggestion N for the next 14 editions.
+    Dismiss { n: usize },
 }
 
 #[derive(Subcommand, Debug)]

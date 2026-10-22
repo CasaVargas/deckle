@@ -254,3 +254,30 @@ fn a_long_read_that_must_print_inline_is_in_the_paper() {
     assert!(story.body.contains("roof repairs"));
     assert_eq!(g.reading_outcomes, [(ids[0].clone(), Outcome::Printed)]);
 }
+
+#[test]
+fn gathered_sections_carry_their_keys() {
+    let g = gather(&config(), date(), now(), &fake);
+    let keys: Vec<_> = g.edition.sections.iter().map(|s| s.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "weather",
+            "local",
+            "feeds:Hacker News",
+            "lottery",
+            "horoscope",
+            "onthisday"
+        ]
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    let r = build(&config(), date(), now(), tmp.path(), &fake).unwrap();
+    assert_eq!(r.sections[2].key, "feeds:Hacker News");
+}
+
+#[test]
+fn your_reading_has_the_reading_key() {
+    let (_tmp, c, _q, _urls) = reading_setup(&[WXII]);
+    let g = gather(&c, date(), now(), &net_with_pages);
+    assert_eq!(g.edition.sections[0].key, "reading");
+}

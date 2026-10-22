@@ -216,6 +216,7 @@ pub fn section(
         n => format!("{n} articles you saved"),
     };
     let section = Section {
+        key: String::new(),
         title: TITLE.into(),
         kicker: Some(kicker),
         articles,

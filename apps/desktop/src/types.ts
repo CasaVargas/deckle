@@ -314,3 +314,35 @@ export interface HighlightsReport {
   failed: [string, string][];
   parse_error?: { line: number; message: string };
 }
+
+/** One section of the readership report (readership design §6). */
+export interface ReadershipSection {
+  key: string;
+  name: string;
+  /** Percent of opened editions where you got to it; null until it appeared in 5. */
+  share: number | null;
+  seenIn: number;
+}
+
+export interface ReadershipSuggestion {
+  id: string;
+  kind: "drop" | "moveUp" | "stop";
+  key: string;
+  title: string;
+  why: string;
+}
+
+export interface ReadershipReport {
+  window: number;
+  opened: number;
+  medianPercent: number | null;
+  stopSection: string | null;
+  sections: ReadershipSection[];
+  suggestions: ReadershipSuggestion[];
+}
+
+export interface ReadershipView {
+  /** `[sync] readership` in digest.toml. */
+  enabled: boolean;
+  report: ReadershipReport;
+}

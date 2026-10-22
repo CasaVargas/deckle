@@ -4,6 +4,7 @@
 mod commands;
 mod daily;
 mod kindle;
+mod readership;
 
 use std::sync::Mutex;
 
@@ -76,6 +77,10 @@ pub fn run() {
             kindle::highlights_status,
             kindle::highlights_set,
             kindle::highlights_write,
+            readership::readership_report,
+            readership::readership_apply,
+            readership::readership_dismiss,
+            readership::readership_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deckle");

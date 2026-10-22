@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import Icon from "./Icon";
+import Readership from "./Readership";
 import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, PlaceRow, ReadingEntry, RunResult, ScheduleStatus, SectionKind } from "./types";
 import { ALL_SECTIONS, DEFAULT_EMAIL, SECTION_LABEL, SIGNS } from "./types";
 
@@ -283,6 +284,8 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           )}
         </div>
       </section>
+
+      <Readership />
 
       <section className="card">
         <h3>Your Reading</h3>

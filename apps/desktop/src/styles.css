@@ -264,3 +264,28 @@ input[type=checkbox] { padding: 0; }
 .highlights-md { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; max-height: 360px; overflow: auto; }
 .warn.small { color: var(--warn); font-size: 12px; margin: 0; }
 @media (max-width: 720px) { .highlights { grid-template-columns: 1fr; } }
+
+/* How far you read (readership design §7) */
+.readership-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+.readership-head p { max-width: 560px; }
+.readership-numbers { display: flex; gap: 20px; text-align: right; }
+.readership-numbers strong { display: block; font-family: ui-serif, Georgia, serif; font-size: 26px; line-height: 1.1; }
+.readership-legend { display: flex; justify-content: space-between; gap: 12px; margin: 10px 0 6px; }
+.readership-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.readership-bars li { display: grid; grid-template-columns: minmax(110px, 170px) minmax(0, 1fr) 48px; align-items: center; gap: 12px; }
+.readership-name { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.readership-bar { height: 16px; background: color-mix(in srgb, var(--line) 55%, var(--bg)); border-radius: 3px; overflow: hidden; }
+.readership-bar > span { display: block; height: 100%; }
+.readership-bar.strong > span { background: var(--accent); }
+.readership-bar.muted > span { background: color-mix(in srgb, var(--muted) 55%, var(--line)); }
+.readership-share { font-size: 13px; font-weight: 600; text-align: right; }
+.readership-tips { margin-top: 16px; display: flex; flex-direction: column; gap: 8px; }
+.readership-tips h4 { font-family: ui-serif, Georgia, serif; font-size: 15px; margin: 0; }
+.readership-tip { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; flex-wrap: wrap; }
+.readership-tip .grow { flex: 1; min-width: 220px; }
+.readership-tip-title { font-size: 14px; font-weight: 600; }
+@media (max-width: 560px) {
+  .readership-numbers { text-align: left; }
+  .readership-bars li { grid-template-columns: minmax(0, 1fr) 44px; }
+  .readership-bar { grid-column: 1 / -1; grid-row: 2; }
+}

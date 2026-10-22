@@ -963,6 +963,7 @@ dependencies = [
  "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
+ "deckle-readership",
  "deckle-transport",
  "deckle-xray",
  "predicates",
@@ -1019,6 +1020,7 @@ dependencies = [
  "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
+ "deckle-readership",
  "deckle-transport",
  "deckle-xray",
  "serde",
@@ -1113,6 +1115,20 @@ dependencies = [
  "tempfile",
  "unicode-normalization",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "deckle-readership"
+version = "0.3.1"
+dependencies = [
+ "chrono",
+ "deckle-digest",
+ "deckle-kfx",
+ "deckle-library",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

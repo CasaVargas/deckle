@@ -23,3 +23,4 @@ pub mod thumbnail;
 pub mod typography;
 pub mod wordwise;
 pub mod xray;
+pub mod yjf;

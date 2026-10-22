@@ -1144,6 +1144,9 @@ fn digest(
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             let mut outcome = DigestOutcome::default();
             let reading_outcomes = built.reading_outcomes.clone();
+            if let Some(k) = kfx {
+                record_layout(k, date, &built);
+            }
             if kfx.is_some() || !to_usb {
                 let name = deckle_digest::edition_filename(date);
                 match &folder {
@@ -1269,6 +1272,7 @@ fn digest(
             })?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
@@ -1348,13 +1352,20 @@ struct DigestOutcome {
     /// Highlights exported in the same session (`[sync] clippings`).
     #[serde(skip_serializing_if = "Option::is_none")]
     highlights: Option<highlights::Outcome>,
+    /// Reading positions recorded in the same session (`[sync] readership`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    readership: Option<deckle_readership::Recorded>,
 }
 
 impl DigestOutcome {
     fn describe(&self, queue: &deckle_core::queue::Queue) -> String {
         match &self.flush {
             Some(f)
-                if f.delivered.is_empty() && f.pruned.is_empty() && self.highlights.is_none() =>
+                if f.delivered.is_empty()
+                    && f.pruned.is_empty()
+                    && self.highlights.is_none()
+                    && self.readership.is_none()
+                    && f.positions_error.is_none() =>
             {
                 "      nothing queued".to_owned()
             }
@@ -1373,6 +1384,18 @@ impl DigestOutcome {
                 }
                 if let Some(e) = &f.clippings_error {
                     lines.push(format!("      highlights: error: {e}"));
+                }
+                if let Some(r) = &self.readership {
+                    let s = if r.opened == 1 { "" } else { "s" };
+                    lines.push(format!("      readership: {} edition{s} read", r.opened));
+                    lines.extend(
+                        r.errors
+                            .iter()
+                            .map(|(stem, e)| format!("      readership: {stem}: {e}")),
+                    );
+                }
+                if let Some(e) = &f.positions_error {
+                    lines.push(format!("      readership: {e}"));
                 }
                 lines.join("\n")
             }
@@ -1602,26 +1625,46 @@ fn push_queued(
     queue: &deckle_core::queue::Queue,
     cfg: &deckle_digest::Config,
 ) -> Result<DigestOutcome, String> {
-    if queue.pending().is_empty() {
+    let empty = queue.pending().is_empty();
+    let Some(target) = detect_kindle() else {
+        return Ok(DigestOutcome {
+            flush: empty.then(Default::default),
+            queued: !empty,
+            ..Default::default()
+        });
+    };
+    // An explicit push always pushes; the device's `prune`, `clippings` and `readership` count.
+    let actions = sync_actions(cfg, &deckle_core::sync::device_id(&target));
+    let Some(plan) = push_plan(actions, empty) else {
         return Ok(DigestOutcome {
             flush: Some(Default::default()),
             ..Default::default()
         });
-    }
-    let Some(target) = detect_kindle() else {
-        return Ok(DigestOutcome {
-            queued: true,
-            ..Default::default()
-        });
-    };
-    // An explicit push always pushes; the device's `prune` and `clippings` still count.
-    let actions = sync_actions(cfg, &deckle_core::sync::device_id(&target));
-    let plan = deckle_core::sync::Plan {
-        push: true,
-        prune: actions.prune,
-        clippings: actions.clippings,
     };
     sync_to(queue, cfg, &target, plan)
+}
+
+/// What `digest push` runs: the outbox with the device's actions, or (empty outbox) just the
+/// reading positions when readership is on; `None` leaves the Kindle alone.
+fn push_plan(
+    actions: deckle_core::sync::Actions,
+    outbox_empty: bool,
+) -> Option<deckle_core::sync::Plan> {
+    match (outbox_empty, actions.readership) {
+        (false, _) => Some(deckle_core::sync::Plan {
+            push: true,
+            prune: actions.prune,
+            clippings: actions.clippings,
+            readership: actions.readership,
+        }),
+        (true, true) => Some(deckle_core::sync::Plan {
+            push: false,
+            prune: false,
+            clippings: actions.clippings,
+            readership: true,
+        }),
+        (true, false) => None,
+    }
 }
 
 /// The device's `[sync]` actions (auto-sync design §3).
@@ -1631,6 +1674,7 @@ fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Act
         push: a.push,
         prune: a.prune,
         clippings: a.clippings,
+        readership: a.readership,
     }
 }
 
@@ -1649,6 +1693,12 @@ fn sync_to(
         profile: deckle_core::devices::profile_for(target, &registry),
         ..Default::default()
     };
+    let readership_path = deckle_readership::state_path();
+    let mut readership = deckle_readership::State::load(&readership_path);
+    let stems = match plan.readership {
+        true => readership.stems(),
+        false => Vec::new(),
+    };
     let mut conn = deckle_core::deliver::Conn::new(target);
     let flush = deckle_core::sync::run_with(
         queue,
@@ -1657,6 +1707,7 @@ fn sync_to(
         &digest_prune(cfg),
         &finishing,
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
+        &stems,
     )
     .map_err(|e| e.to_string())?;
     // Read in the same session; written to the folder after it's closed.
@@ -1670,11 +1721,140 @@ fn sync_to(
         },
         None => None,
     };
+    let recorded = (plan.readership && !flush.positions.is_empty()).then(|| {
+        let found: Vec<_> = flush
+            .positions
+            .iter()
+            .map(|(stem, on)| (stem.clone(), on_device(on)))
+            .collect();
+        let now = deckle_digest::chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string();
+        let r = readership.record_reads(&deckle_core::sync::device_id(target), &found, &now);
+        if let Err(e) = readership.save(&readership_path) {
+            eprintln!("readership: {e}");
+        }
+        r
+    });
     Ok(DigestOutcome {
         flush: Some(flush),
         highlights,
+        readership: recorded,
         ..Default::default()
     })
+}
+
+fn on_device(on: &deckle_core::yjf::OnDevice) -> deckle_readership::OnDevice {
+    match on {
+        deckle_core::yjf::OnDevice::Absent => deckle_readership::OnDevice::Absent,
+        deckle_core::yjf::OnDevice::Unopened => deckle_readership::OnDevice::Unopened,
+        deckle_core::yjf::OnDevice::Opened(b) => deckle_readership::OnDevice::Opened(b.clone()),
+    }
+}
+
+/// Where each section of the edition just built starts, for the readership report. Never fails
+/// the run.
+fn record_layout(
+    kfx: &Path,
+    date: deckle_digest::chrono::NaiveDate,
+    built: &deckle_digest::BuildReport,
+) {
+    let sections: Vec<(String, String)> = built
+        .sections
+        .iter()
+        .map(|s| (s.key.clone(), s.title.clone()))
+        .collect();
+    let name = deckle_digest::edition_filename(date);
+    let stem = name.trim_end_matches(".kfx");
+    let layout = std::fs::read(kfx)
+        .map_err(|e| format!("{}: {e}", kfx.display()))
+        .and_then(|bytes| {
+            deckle_readership::layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)
+        });
+    let path = deckle_readership::state_path();
+    let saved = layout.and_then(|l| {
+        let mut state = deckle_readership::State::load(&path);
+        state.record_layout(l);
+        state.save(&path)
+    });
+    if let Err(e) = saved {
+        eprintln!("readership: {e}");
+    }
+}
+
+/// `digest readership [apply|dismiss N]` (readership design §7).
+fn digest_readership(
+    json: bool,
+    path: &Path,
+    action: Option<cli::ReadershipCommand>,
+) -> Result<ExitCode, String> {
+    let mut cfg = load_digest_config(path)?;
+    let state_path = deckle_readership::state_path();
+    let mut state = deckle_readership::State::load(&state_path);
+    let report = deckle_readership::report(&state, &cfg);
+    let Some(action) = action else {
+        emit(json, &report, || {
+            if state.editions.is_empty() {
+                "No editions recorded yet. Build one with `deckle digest run --to device`.".into()
+            } else {
+                readership_text(&report)
+            }
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    };
+    let (cli::ReadershipCommand::Apply { n } | cli::ReadershipCommand::Dismiss { n }) = action;
+    let Some(s) = n.checked_sub(1).and_then(|i| report.suggestions.get(i)) else {
+        eprintln!(
+            "no suggestion {n}: the report has {}",
+            report.suggestions.len()
+        );
+        return Ok(ExitCode::from(2));
+    };
+    match action {
+        cli::ReadershipCommand::Apply { .. } => {
+            deckle_readership::apply(s, &mut cfg)?;
+            deckle_digest::config::save(path, &cfg)?;
+            // Set aside, or a Move up would come straight back from the same editions.
+            deckle_readership::dismiss(&mut state, s);
+            state.save(&state_path)?;
+            emit(json, s, || format!("applied: {}", s.title))?;
+        }
+        cli::ReadershipCommand::Dismiss { .. } => {
+            deckle_readership::dismiss(&mut state, s);
+            state.save(&state_path)?;
+            emit(json, s, || format!("dismissed: {}", s.title))?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+fn readership_text(r: &deckle_readership::Report) -> String {
+    let mut lines = vec![match r.median_percent {
+        Some(p) => format!(
+            "Opened {} of {} editions · usually about {p}% in",
+            r.opened, r.window
+        ),
+        None => format!("Opened {} of {} editions", r.opened, r.window),
+    }];
+    let width = r
+        .sections
+        .iter()
+        .map(|s| s.name.chars().count())
+        .max()
+        .unwrap_or(0);
+    for s in &r.sections {
+        let share = s
+            .share
+            .map_or("not enough editions yet".to_owned(), |p| format!("{p:>3}%"));
+        lines.push(format!("  {:<width$}  {share}", s.name));
+    }
+    if !r.suggestions.is_empty() {
+        lines.push("Suggested edits:".into());
+        for (i, s) in r.suggestions.iter().enumerate() {
+            lines.push(format!("  {}. {}: {}", i + 1, s.title, s.why));
+        }
+    }
+    lines.join("\n")
 }
 
 fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::ReadingQueue {
@@ -2061,5 +2241,36 @@ mod email_tests {
         for s in shown {
             assert!(!s.contains(PW), "{s}");
         }
+    }
+}
+
+#[cfg(test)]
+mod push_tests {
+    use super::*;
+    use deckle_core::sync::Actions;
+
+    #[test]
+    fn push_with_an_empty_outbox_still_reads_positions() {
+        let on = Actions {
+            push: true,
+            prune: true,
+            clippings: false,
+            readership: true,
+        };
+        assert_eq!(
+            push_plan(on, true).map(|p| (p.push, p.readership)),
+            Some((false, true))
+        );
+        assert_eq!(
+            push_plan(
+                Actions {
+                    readership: false,
+                    ..on
+                },
+                true
+            ),
+            None
+        );
+        assert_eq!(push_plan(on, false).map(|p| p.push), Some(true));
     }
 }

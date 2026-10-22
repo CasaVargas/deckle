@@ -60,6 +60,7 @@ pub fn article(json: &[u8], date: NaiveDate) -> Result<Article, String> {
 pub fn section(date: NaiveDate, net: &dyn Net) -> Section {
     match net.get(&url(date)).and_then(|b| article(&b, date)) {
         Ok(a) => Section {
+            key: String::new(),
             title: TITLE.into(),
             kicker: None,
             articles: vec![a],

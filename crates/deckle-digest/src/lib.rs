@@ -60,6 +60,8 @@ pub struct Article {
 
 #[derive(Clone, Debug, Default)]
 pub struct Section {
+    /// What the section is across editions: `config::section_key` (readership design §4).
+    pub key: String,
     pub title: String,
     /// One line under the section heading.
     pub kicker: Option<String>,
@@ -115,6 +117,7 @@ pub fn long_date(d: NaiveDate) -> String {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct SectionSummary {
+    pub key: String,
     pub title: String,
     pub items: usize,
     pub unavailable: Option<String>,
@@ -177,6 +180,7 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
         );
     }
     for kind in &kinds {
+        let first_new = edition.sections.len();
         match kind {
             SectionKind::Reading => {
                 if saved.is_empty() {
@@ -214,6 +218,11 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
+        }
+        // Each `[[feeds]]` entry is its own section, in file order.
+        for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {
+            let feed = (*kind == SectionKind::Feeds).then(|| cfg.feeds[i].name.as_str());
+            s.key = config::section_key(*kind, feed);
         }
     }
     Gathered {
@@ -268,6 +277,7 @@ fn report(edition: &Edition, epub: PathBuf) -> BuildReport {
             .sections
             .iter()
             .map(|s| SectionSummary {
+                key: s.key.clone(),
                 title: s.title.clone(),
                 items: s.articles.len(),
                 unavailable: s.unavailable.clone(),
