@@ -707,3 +707,159 @@ fn other_places_have_rows_tiles_and_headlines() {
     let t = labels(&p);
     assert!(t.contains(&"Asheville, NC · 4 slots".to_owned()), "{t:?}");
 }
+
+// --- topic sections (Task 8) ---
+
+use deckle_digest::config::Topic;
+
+#[test]
+fn topic_feed_is_fetched_by_its_topic_url() {
+    let net = Counting::new();
+    let mut c = cfg();
+    c.feeds = vec![FeedConfig {
+        name: "Science".into(),
+        topic: Some(Topic::Science),
+        max_items: 5,
+        ..Default::default()
+    }];
+    let topic_url = Topic::Science.url();
+    assert_eq!(live_urls(&c), std::slice::from_ref(&topic_url));
+    let mut cache = LiveCache::default();
+    assert_eq!(refresh(&c, &mut cache, t0(), &net), 1);
+    // "Headline - Source" is split, as for any Google News item
+    let item = &cache.feeds[&topic_url].items[0];
+    assert_eq!(item.title, "Linden Falls council votes on the bridge");
+    assert_eq!(item.source.as_deref(), Some("The Linden Ledger"));
+    // and the plan row reads it, titled by the feed's own title
+    let mut s = Setup::new();
+    s.cfg.feeds = c.feeds.clone();
+    s.live = cache;
+    let p = s.plan();
+    let row = p.plan.iter().find(|r| r.name == "Science").unwrap();
+    assert_eq!(row.detail, "\"Linden Falls\" - Google News");
+}
+
+#[test]
+fn topic_detail_falls_back_to_its_title() {
+    let mut s = Setup::new();
+    s.cfg.feeds = vec![FeedConfig {
+        name: "Science".into(),
+        topic: Some(Topic::Science),
+        max_items: 5,
+        ..Default::default()
+    }];
+    let p = s.plan();
+    assert_eq!(
+        p.plan.iter().find(|r| r.name == "Science").unwrap().detail,
+        "Science"
+    );
+}
+
+#[test]
+fn multi_source_row_merges_and_dedupes() {
+    let mut s = Setup::new();
+    s.cfg.feeds = vec![FeedConfig {
+        name: "Science".into(),
+        url: SCIENCE.into(),
+        urls: vec![OTHER.into()],
+        max_items: 3,
+        ..Default::default()
+    }];
+    s.queue = two_saved(); // so the feed is a tile list, not the lead
+    s.live.feeds.insert(
+        SCIENCE.into(),
+        fetched(&[
+            ("Comet brightens", local(2026, 10, 22, 14, 0)),
+            ("Bees count", local(2026, 10, 22, 9, 0)),
+        ]),
+    );
+    s.live.feeds.insert(
+        OTHER.into(),
+        fetched(&[
+            ("COMET  brightens!", local(2026, 10, 22, 13, 0)),
+            ("Ocean floor mapped", local(2026, 10, 22, 11, 0)),
+            ("Old news", local(2026, 10, 20, 11, 0)),
+        ]),
+    );
+    let p = s.plan();
+    let row = p.plan.iter().find(|r| r.name == "Science").unwrap();
+    assert_eq!(row.detail, "Science Daily Brief");
+    assert_eq!(row.budget, "3 stories");
+    // newest first, the repeated story once, cut to 3: the tile shows the newest
+    assert!(
+        labels(&p)
+            .iter()
+            .any(|l| l == "SCIENCE · 3 NEW SINCE 05:30 | Comet brightens"),
+        "{:?}",
+        labels(&p)
+    );
+}
+
+#[test]
+fn row_drops_a_title_an_earlier_row_has() {
+    let mut s = Setup::new();
+    s.cfg.local.feeds = vec![LOCAL.into()];
+    s.cfg.feeds = vec![
+        FeedConfig {
+            name: "Science".into(),
+            url: SCIENCE.into(),
+            max_items: 1,
+            ..Default::default()
+        },
+        FeedConfig {
+            name: "Other".into(),
+            url: OTHER.into(),
+            max_items: 1,
+            ..Default::default()
+        },
+    ];
+    s.queue = two_saved();
+    s.live.feeds.insert(
+        LOCAL.into(),
+        fetched(&[("Comet brightens", local(2026, 10, 22, 12, 0))]),
+    );
+    s.live.feeds.insert(
+        SCIENCE.into(),
+        fetched(&[
+            ("Comet brightens", local(2026, 10, 22, 14, 0)),
+            ("Bees count", local(2026, 10, 22, 9, 0)),
+        ]),
+    );
+    s.live.feeds.insert(
+        OTHER.into(),
+        fetched(&[
+            ("Bees count", local(2026, 10, 22, 13, 0)),
+            ("Ocean floor mapped", local(2026, 10, 22, 11, 0)),
+        ]),
+    );
+    let p = s.plan();
+    // Local keeps the comet; Science drops it and refills with the bees; Other drops the bees
+    let l = labels(&p);
+    assert!(
+        l.iter()
+            .any(|x| x == "SCIENCE · 1 NEW SINCE 05:30 | Bees count"),
+        "{l:?}"
+    );
+    assert!(
+        l.iter()
+            .any(|x| x == "OTHER · 1 NEW SINCE 05:30 | Ocean floor mapped"),
+        "{l:?}"
+    );
+    // Local still leads, by the press's rule
+    assert_eq!(p.lead.unwrap().title.as_deref(), Some("Comet brightens"));
+}
+
+#[test]
+fn url_only_feed_row_unchanged() {
+    let net = Counting::new();
+    let c = cfg();
+    let mut cache = LiveCache::default();
+    assert_eq!(refresh(&c, &mut cache, t0(), &net), 2);
+    assert_eq!(live_urls(&c), [SCIENCE, OTHER]);
+    let mut s = Setup::new();
+    s.live = cache;
+    let p = s.plan();
+    let row = p.plan.iter().find(|r| r.name == "Science").unwrap();
+    assert_eq!(row.detail, "Science Daily Brief");
+    assert_eq!(row.budget, "10 stories");
+}
