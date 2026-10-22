@@ -558,3 +558,118 @@ fn places_round_trip_and_stay_out_of_an_untouched_save() {
             .is_empty()
     );
 }
+
+// ---- The front page ----
+
+mod front {
+    use deckle_digest::chrono::NaiveDate;
+    use deckle_digest::front::front_plan;
+    use deckle_digest::{Article, Edition, Gathered, Section};
+
+    fn paper(sections: &[(&str, &[&str])]) -> Gathered {
+        let sections: Vec<Section> = sections
+            .iter()
+            .map(|(key, titles)| Section {
+                key: (*key).into(),
+                title: (*key).into(),
+                articles: titles
+                    .iter()
+                    .map(|t| Article {
+                        title: (*t).into(),
+                        meta: Some("meta".into()),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .collect();
+        Gathered {
+            news: (0..sections.len()).collect(),
+            reading: None,
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+            edition: Edition {
+                paper: "The Deckle Daily".into(),
+                date: NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+                place: String::new(),
+                weather_line: None,
+                sections,
+                assets: Vec::new(),
+            },
+        }
+    }
+
+    fn front_xhtml(g: &Gathered) -> String {
+        let files = deckle_digest::render::render(g, Vec::new());
+        let (_, bytes) = files
+            .iter()
+            .find(|(p, _)| p == "OEBPS/front.xhtml")
+            .unwrap();
+        String::from_utf8(bytes.clone()).unwrap()
+    }
+
+    fn named(n: usize, prefix: &str) -> Vec<String> {
+        (0..n).map(|i| format!("{prefix}{i}")).collect()
+    }
+
+    fn with(local: usize, feed: usize) -> Gathered {
+        let (l, f) = (named(local, "L"), named(feed, "F"));
+        let l: Vec<&str> = l.iter().map(String::as_str).collect();
+        let f: Vec<&str> = f.iter().map(String::as_str).collect();
+        paper(&[("local", &l), ("feeds:A", &f)])
+    }
+
+    #[test]
+    fn front_page_has_lead_table_and_inside_index() {
+        let g = with(4, 4);
+        let x = front_xhtml(&g);
+        roxmltree::Document::parse(&x).unwrap();
+        let plan = front_plan(&g);
+        let lead = x.find("class=\"lead\"").unwrap();
+        assert!(x.find("L0").unwrap() > lead - 40);
+        assert!(lead < x.find("table class=\"cols\"").unwrap());
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let tiles: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("td"))
+            .flat_map(|td| td.children().filter(|c| c.has_tag_name("a")))
+            .collect();
+        assert_eq!(tiles.len(), plan.tiles.len());
+        let mut ids: Vec<_> = doc
+            .descendants()
+            .filter_map(|n| n.attribute("id"))
+            .collect();
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "ids are unique");
+        assert!(x.contains("Inside today"));
+        assert!(!x.contains("Top stories"));
+    }
+
+    #[test]
+    fn odd_tiles_pad_the_last_row() {
+        // lead + 3 tiles
+        let x = front_xhtml(&with(2, 2));
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let tds: Vec<_> = doc.descendants().filter(|n| n.has_tag_name("td")).collect();
+        assert_eq!(tds.len(), 4);
+        assert!(tds[3].children().next().is_none());
+    }
+
+    #[test]
+    fn no_tiles_no_table() {
+        let x = front_xhtml(&with(1, 0));
+        assert!(x.contains("class=\"lead\""));
+        assert!(!x.contains("class=\"cols\""));
+    }
+
+    #[test]
+    fn headlines_are_escaped() {
+        let g = paper(&[("local", &["A & B <c>", "x"])]);
+        let x = front_xhtml(&g);
+        assert!(x.contains("A &amp; B &lt;c&gt;"));
+        roxmltree::Document::parse(&x).unwrap();
+    }
+}

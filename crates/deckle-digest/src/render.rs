@@ -49,6 +49,11 @@ h3.subhead { font-size: 1.05em; margin: 1em 0 0.3em 0; }
 blockquote { margin: 0.6em 1.2em; font-style: italic; }
 .source { font-size: 0.8em; font-style: italic; margin-top: 0.8em; }
 .note { font-style: italic; }
+table.cols { width: 100%; border-collapse: collapse; margin: 0.6em 0; }
+table.cols td { width: 50%; vertical-align: top; padding: 0.4em 0.5em; border-top: 1px solid black; }
+table.cols .label { font-variant: small-caps; text-transform: none; letter-spacing: 0.06em; margin: 0 0 0.1em 0; }
+h2.lead { font-size: 1.6em; margin: 0.6em 0 0.1em 0; }
+h2.lead a { text-decoration: none; color: black; }
 ul.index { list-style-type: none; padding-left: 0; }
 ul.index li { border-bottom: 1px solid black; padding: 0.3em 0; }
 table.grid { border-collapse: collapse; margin: 0.6em auto; }
@@ -99,24 +104,53 @@ fn front_page(g: &Gathered) -> Vec<u8> {
     if let Some(w) = &e.weather_line {
         body.push_str(&format!("<p class=\"weather\">{}</p>\n", esc(w)));
     }
-    let heads = e.headlines(&g.news, 8);
-    if !heads.is_empty() {
-        body.push_str("<h2>Top stories</h2>\n<ul class=\"index\">\n");
-        for (s, a) in heads {
-            let art = &e.sections[s].articles[a];
-            let meta = match &art.meta {
-                Some(m) => format!("{} · {m}", e.sections[s].title),
-                None => e.sections[s].title.clone(),
-            };
-            let meta = format!(" <span class=\"meta\">{}</span>", esc(&meta));
-            body.push_str(&format!(
-                "<li><a href=\"{}#a{}\">{}</a>{meta}</li>\n",
-                section_file(s),
-                a + 1,
-                esc(&art.title)
-            ));
+    let plan = crate::front::front_plan(g);
+    let meta_of = |s: usize, a: usize| {
+        let art = &e.sections[s].articles[a];
+        let meta = match &art.meta {
+            Some(m) => format!("{} · {m}", e.sections[s].title),
+            None => e.sections[s].title.clone(),
+        };
+        format!("<span class=\"meta\">{}</span>", esc(&meta))
+    };
+    let link = |s: usize, a: usize| {
+        format!(
+            "<a href=\"{}#a{}\">{}</a>",
+            section_file(s),
+            a + 1,
+            esc(&e.sections[s].articles[a].title)
+        )
+    };
+    if let Some((s, a)) = plan.lead {
+        body.push_str(&format!(
+            "<h2 class=\"lead\" id=\"t{s}-{a}\">{}</h2>\n<p>{}</p>\n",
+            link(s, a),
+            meta_of(s, a)
+        ));
+        if let Some(t) = &e.sections[s].articles[a].teaser {
+            body.push_str(&format!("<p>{}</p>\n", esc(t)));
         }
-        body.push_str("</ul>\n");
+    }
+    if !plan.tiles.is_empty() {
+        body.push_str("<table class=\"cols\">\n");
+        for row in plan.tiles.chunks(2) {
+            body.push_str("<tr>");
+            for &(s, a) in row {
+                body.push_str(&format!(
+                    "<td><p class=\"label\">{}</p><a id=\"t{s}-{a}\" href=\"{}#a{}\">{}</a><br/>{}</td>",
+                    esc(&e.sections[s].title),
+                    section_file(s),
+                    a + 1,
+                    esc(&e.sections[s].articles[a].title),
+                    meta_of(s, a)
+                ));
+            }
+            if row.len() == 1 {
+                body.push_str("<td></td>");
+            }
+            body.push_str("</tr>\n");
+        }
+        body.push_str("</table>\n");
     }
     body.push_str("<h2>Inside today</h2>\n<ul class=\"index\">\n");
     for (i, s) in e.sections.iter().enumerate() {
