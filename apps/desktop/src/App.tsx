@@ -8,6 +8,7 @@ import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
 import ArticleField from "./ArticleField";
 import { parseAddresses } from "./articles";
+import { runSummary } from "./bookStatus";
 import DailyView from "./DailyView";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
@@ -66,6 +67,7 @@ export default function App() {
   const articleInput = useRef<HTMLInputElement>(null);
   /** Whether ⌘V should open the article field: Books tab showing, nothing running. */
   const pasteReady = useRef(false);
+  const settingsOpen = useRef(false);
 
   const addRows = useCallback((rows: BookRow[]) => {
     setBooks((prev) => {
@@ -179,11 +181,21 @@ export default function App() {
         ),
       );
     });
-    const unlistenFinished = api.onRunFinished(() => setBusy(false));
+    const unlistenFinished = api.onRunFinished(() => {
+      setBusy(false);
+      // Settings hide the rows and the footer: say how the run went.
+      if (settingsOpen.current) {
+        setBooks((prev) => {
+          const summary = runSummary(prev);
+          if (summary) setNotice(summary);
+          return prev;
+        });
+      }
+    });
     // A pasted web address on the Books tab (not into a text field) becomes an article.
     const onPaste = (ev: ClipboardEvent) => {
       const el = ev.target as HTMLElement | null;
-      if (tabRef.current !== "books" || el?.closest("input, textarea, select, [contenteditable]")) return;
+      if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
       const urls = parseAddresses(ev.clipboardData?.getData("text") ?? "");
       if (urls.length === 0) return;
       ev.preventDefault();
@@ -317,6 +329,7 @@ export default function App() {
 
   const doneCount = books.filter((b) => b.status === "done").length;
   pasteReady.current = tab === "books" && settingsPage === null && !busy;
+  settingsOpen.current = settingsPage !== null;
 
   const openSettings = (page: SettingsPage = lastPage.current) => setSettingsPage(page);
   const pickPage = (page: SettingsPage) => {
@@ -334,179 +347,179 @@ export default function App() {
     </div>
   );
 
-  if (settingsPage) {
-    return (
-      <div className="app">
-        {noticeBar}
-        <SettingsView
-          page={settingsPage}
-          onPage={pickPage}
-          onBack={closeSettings}
-          version={version}
-          settings={settings}
-          previewer={previewer}
-          devices={devices}
-          onChange={saveSettings}
-          onDeviceOptions={async (key, cde, verified) => {
-            await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
-            refreshDevices();
-          }}
-          update={update}
-          onUpdateState={setUpdate}
-          busy={busy}
-          onPickPreviewer={pickPreviewer}
-          library={library}
-          onLibrary={setLibraryOptions}
-          onPickLibrary={pickLibrary}
-        />
-      </div>
-    );
-  }
-
+  // Settings cover the tabs without unmounting them, so a running Daily send or an unsaved
+  // edit is still there on Back.
   return (
     <div className={`app ${dragging ? "dragging" : ""}`}>
-      <header className="topbar">
-        <div className="brand">Deckle</div>
-        <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "books"} className={tab === "books" ? "on" : ""} onClick={() => setTab("books")}>
-            Books
-          </button>
-          <button role="tab" aria-selected={tab === "daily"} className={tab === "daily" ? "on" : ""} onClick={() => setTab("daily")}>
-            Daily
-          </button>
-          <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
-            Kindle
-          </button>
-        </div>
-        {!previewer?.found && previewer && (
-          <button className="pill warn" onClick={() => openSettings("general")}>
-            Kindle Previewer not found
-          </button>
-        )}
-        <div className="spacer" />
-        {tab === "books" && (
-          <button className="ghost with-icon" onClick={pickBooks} disabled={busy}>
-            <Icon name="plus" /> Add books
-          </button>
-        )}
-        {tab === "books" && (
-          <button className="ghost with-icon" onClick={() => setArticleOpen(true)} disabled={busy}>
-            <Icon name="link" /> Add article
-          </button>
-        )}
-        {tab === "books" && doneCount > 0 && !busy && (
-          <button className="ghost" onClick={clearDone}>
-            Clear done
-          </button>
-        )}
-        <button className="icon" aria-label="Settings" onClick={() => openSettings()}>
-          <Icon name="settings" size={18} />
-        </button>
-      </header>
-
-      {tab === "daily" && <DailyView onNotice={setNotice} />}
-      {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} />}
-      {tab === "books" && articleOpen && (
-        <ArticleField
-          ref={articleInput}
-          onAdd={(urls) => {
-            setArticleOpen(false);
-            addArticles(urls);
-          }}
-          onCancel={() => setArticleOpen(false)}
-        />
+      {settingsPage && (
+        <>
+          {noticeBar}
+          <SettingsView
+            page={settingsPage}
+            onPage={pickPage}
+            onBack={closeSettings}
+            version={version}
+            settings={settings}
+            previewer={previewer}
+            devices={devices}
+            onChange={saveSettings}
+            onDeviceOptions={async (key, cde, verified) => {
+              await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
+              refreshDevices();
+            }}
+            update={update}
+            onUpdateState={setUpdate}
+            busy={busy}
+            onPickPreviewer={pickPreviewer}
+            library={library}
+            onLibrary={setLibraryOptions}
+            onPickLibrary={pickLibrary}
+          />
+        </>
       )}
-      {tab === "books" && (
-      <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
-        {books.length === 0 ? (
-          <div className="dropzone-inner">
-            <div className="glyph" aria-hidden="true">
-              <Icon name="download" size={40} />
-            </div>
-            <h1>Drop EPUBs here</h1>
-            <p>They become Kindle books with covers, page numbers, X-Ray and Word Wise.</p>
-            <p className="muted small">Also .kfx, web links and saved pages</p>
-            <div className="empty-actions">
-              <button className="ghost" onClick={pickBooks}>
-                Choose files…
-              </button>
-              <button className="ghost" onClick={() => setArticleOpen(true)}>
-                Add article
-              </button>
-            </div>
-          </div>
-        ) : (
-          <ul className="books" aria-label="Books">
-            {books.map((b) => (
-              <BookRowView
-                key={b.id}
-                book={b}
-                busy={busy}
-                plan={plans[b.id]}
-                settings={settings}
-                onOverride={override}
-                onAsin={setAsin}
-                onToggleReport={toggleReport}
-                onRemove={remove}
-                onReveal={(p) => api.reveal(p)}
-              />
-            ))}
-          </ul>
-        )}
-        {dragging && <div className="drop-overlay">Drop to add</div>}
-      </main>
-      )}
-
-      {noticeBar}
-
-      {(tab === "books" || tab === "kindle") && (
-      <footer className="bar">
-        <div className="device">
-          <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
-          {devices.length === 0 ? (
-            "No Kindle connected"
-          ) : devices.length === 1 ? (
-            <span title={device?.root ?? undefined}>{device?.model_hint}</span>
-          ) : (
-            <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
-              {devices.map((d) => (
-                <option key={d.key} value={d.key}>
-                  {d.model_hint}
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
-        {tab === "books" && (
-        <div className="actions">
-          <button className="primary joined" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
-            {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
-          </button>
-          <div className="split">
-            <button className="secondary" aria-label="More actions" onClick={() => setExportOpen((o) => !o)} disabled={busy || runnable.length === 0}>
-              <Icon name="chevron-down" />
+      <div className="app-main" hidden={settingsPage !== null}>
+        <header className="topbar">
+          <div className="brand">Deckle</div>
+          <div className="tabs" role="tablist">
+            <button role="tab" aria-selected={tab === "books"} className={tab === "books" ? "on" : ""} onClick={() => setTab("books")}>
+              Books
             </button>
-            {exportOpen && (
-              <div className="menu up" onMouseLeave={() => setExportOpen(false)}>
-                <button onClick={exportToFolder}>Export to folder…</button>
+            <button role="tab" aria-selected={tab === "daily"} className={tab === "daily" ? "on" : ""} onClick={() => setTab("daily")}>
+              Daily
+            </button>
+            <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
+              Kindle
+            </button>
+          </div>
+          {!previewer?.found && previewer && (
+            <button className="pill warn" onClick={() => openSettings("general")}>
+              Kindle Previewer not found
+            </button>
+          )}
+          <div className="spacer" />
+          {tab === "books" && (
+            <button className="ghost with-icon" onClick={pickBooks} disabled={busy}>
+              <Icon name="plus" /> Add books
+            </button>
+          )}
+          {tab === "books" && (
+            <button className="ghost with-icon" onClick={() => setArticleOpen(true)} disabled={busy}>
+              <Icon name="link" /> Add article
+            </button>
+          )}
+          {tab === "books" && doneCount > 0 && !busy && (
+            <button className="ghost" onClick={clearDone}>
+              Clear done
+            </button>
+          )}
+          <button className="icon" aria-label="Settings" onClick={() => openSettings()}>
+            <Icon name="settings" size={18} />
+          </button>
+        </header>
+
+        {tab === "daily" && <DailyView onNotice={setNotice} />}
+        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} />}
+        {tab === "books" && articleOpen && (
+          <ArticleField
+            ref={articleInput}
+            onAdd={(urls) => {
+              setArticleOpen(false);
+              addArticles(urls);
+            }}
+            onCancel={() => setArticleOpen(false)}
+          />
+        )}
+        {tab === "books" && (
+        <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
+          {books.length === 0 ? (
+            <div className="dropzone-inner">
+              <div className="glyph" aria-hidden="true">
+                <Icon name="download" size={40} />
               </div>
+              <h1>Drop EPUBs here</h1>
+              <p>They become Kindle books with covers, page numbers, X-Ray and Word Wise.</p>
+              <p className="muted small">Also .kfx, web links and saved pages</p>
+              <div className="empty-actions">
+                <button className="ghost" onClick={pickBooks}>
+                  Choose files…
+                </button>
+                <button className="ghost" onClick={() => setArticleOpen(true)}>
+                  Add article
+                </button>
+              </div>
+            </div>
+          ) : (
+            <ul className="books" aria-label="Books">
+              {books.map((b) => (
+                <BookRowView
+                  key={b.id}
+                  book={b}
+                  busy={busy}
+                  plan={plans[b.id]}
+                  settings={settings}
+                  onOverride={override}
+                  onAsin={setAsin}
+                  onToggleReport={toggleReport}
+                  onRemove={remove}
+                  onReveal={(p) => api.reveal(p)}
+                />
+              ))}
+            </ul>
+          )}
+          {dragging && <div className="drop-overlay">Drop to add</div>}
+        </main>
+        )}
+
+        {!settingsPage && noticeBar}
+
+        {(tab === "books" || tab === "kindle") && (
+        <footer className="bar">
+          <div className="device">
+            <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
+            {devices.length === 0 ? (
+              "No Kindle connected"
+            ) : devices.length === 1 ? (
+              <span title={device?.root ?? undefined}>{device?.model_hint}</span>
+            ) : (
+              <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
+                {devices.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.model_hint}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
-        </div>
+          {tab === "books" && (
+          <div className="actions">
+            <button className="primary joined" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
+              {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
+            </button>
+            <div className="split">
+              <button className="secondary" aria-label="More actions" onClick={() => setExportOpen((o) => !o)} disabled={busy || runnable.length === 0}>
+                <Icon name="chevron-down" />
+              </button>
+              {exportOpen && (
+                <div className="menu up" onMouseLeave={() => setExportOpen(false)}>
+                  <button onClick={exportToFolder}>Export to folder…</button>
+                </div>
+              )}
+            </div>
+          </div>
+          )}
+          {hasUpdate(update) ? (
+            <button
+              className="version link"
+              onClick={() => openSettings("about")}
+            >
+              Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
+            </button>
+          ) : (
+            <div className="version">Deckle {version}</div>
+          )}
+        </footer>
         )}
-        {hasUpdate(update) ? (
-          <button
-            className="version link"
-            onClick={() => openSettings("about")}
-          >
-            Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
-          </button>
-        ) : (
-          <div className="version">Deckle {version}</div>
-        )}
-      </footer>
-      )}
-
+      </div>
     </div>
   );
 }

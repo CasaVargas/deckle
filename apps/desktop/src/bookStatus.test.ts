@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { beforeChip, doneChips } from "./bookStatus";
+import { beforeChip, doneChips, runSummary } from "./bookStatus";
 import type { BookState, Mode, PlanRow, WordWiseSummary } from "./types";
 
 const on = { xray: true, word_wise: true };
@@ -40,3 +40,8 @@ test("features and warnings", () =>
     ["2 warnings", "warn"],
   ]));
 test("one warning", () => expect(doneChips(done({ runWarnings: ["a"] })).at(-1)!.text).toBe("1 warning"));
+
+test("run summary: sent and failed", () =>
+  expect(runSummary([done(), done(), done({ status: "failed", runError: "x" }), done({ status: "idle" })])).toBe("Done: 2 sent, 1 failed"));
+test("run summary: exported", () => expect(runSummary([done({ exported: true })])).toBe("Done: 1 exported"));
+test("run summary: nothing ran", () => expect(runSummary([done({ status: "idle" })])).toBeNull());

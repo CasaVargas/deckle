@@ -25,3 +25,13 @@ export function doneChips(book: BookState): Chip[] {
   if (n > 0) chips.push({ text: `${n} warning${n > 1 ? "s" : ""}`, tone: "warn" });
   return chips;
 }
+
+/** One line for the notice bar when a run ends out of sight (Settings open): what went where. */
+export function runSummary(books: BookState[]): string | null {
+  const done = books.filter((b) => b.status === "done");
+  const failed = books.filter((b) => b.status === "failed").length;
+  if (done.length === 0 && failed === 0) return null;
+  const exported = done.filter((b) => b.exported).length;
+  const parts = [exported > 0 && `${exported} exported`, done.length - exported > 0 && `${done.length - exported} sent`, failed > 0 && `${failed} failed`];
+  return `Done: ${parts.filter(Boolean).join(", ")}`;
+}

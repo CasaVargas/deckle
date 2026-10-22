@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect } from "react";
 import Icon from "./Icon";
+import { escStaysInField } from "./settingsKeys";
 import About from "./settings/About";
 import Books from "./settings/Books";
 import General from "./settings/General";
@@ -48,7 +49,8 @@ export default function SettingsView(props: Props) {
   // Esc goes back, unless a field wants it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || (e.target as HTMLElement | null)?.closest("input, textarea, select")) return;
+      const el = e.target as HTMLInputElement | null;
+      if (e.key !== "Escape" || (el && escStaysInField(el.tagName, el.type ?? ""))) return;
       onBack();
     };
     document.addEventListener("keydown", onKey);
