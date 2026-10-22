@@ -1011,55 +1011,19 @@ fn next_cache() -> PathBuf {
         .join("next.json")
 }
 
-/// What tomorrow's paper reads besides the config: the live cache, sizes and shares from
-/// Readership, and the week. Files only, never the network.
-fn next_inputs(
-    cfg: &deckle_digest::Config,
-    before: deckle_digest::chrono::NaiveDate,
-) -> (
-    deckle_digest::next::live::LiveCache,
-    deckle_digest::next::History,
-    std::collections::BTreeMap<String, u8>,
-    Vec<deckle_digest::next::WeekDay>,
-) {
-    let live = deckle_digest::next::live::LiveCache::load(&next_cache());
-    let state = deckle_readership::State::load(&deckle_readership::state_path());
-    let history = deckle_readership::sizes::history(&state);
-    let shares = deckle_readership::report(&state, cfg)
-        .sections
-        .into_iter()
-        .filter_map(|s| Some((s.key, s.share?)))
-        .collect();
-    // "sent": `digest run` leaves each edition's EPUB in the digest cache
-    let work = deckle_core::wordwise::default_cache_dir().join("digest");
-    let built =
-        |d: deckle_digest::chrono::NaiveDate| work.join(format!("deckle-daily-{d}.epub")).exists();
-    let week = deckle_readership::sizes::recent(&state, before, 6, &built);
-    (live, history, shares, week)
-}
-
 /// Tomorrow's paper as of `now`, from local files.
 fn next_paper(
     cfg: &deckle_digest::Config,
     now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
 ) -> deckle_digest::next::plan::NextPaper {
-    let at = schedule_at();
-    let today = now.date_naive();
-    let stopped = deckle_digest::press::read_stop(&cfg.press_state(), today);
-    let edition = deckle_digest::press::press(at, stopped, now).edition;
-    let (live, history, shares, week) = next_inputs(cfg, edition);
-    let queue = reading_queue(cfg).load();
-    deckle_digest::next::plan::plan(&deckle_digest::next::plan::Inputs {
+    deckle_readership::sizes::next_paper(
         cfg,
         now,
-        at,
-        stopped,
-        queue: &queue,
-        live: &live,
-        history: &history,
-        shares: &shares,
-        week,
-    })
+        schedule_at(),
+        &deckle_readership::state_path(),
+        &next_cache(),
+        &deckle_core::wordwise::default_cache_dir().join("digest"),
+    )
 }
 
 fn next_text(

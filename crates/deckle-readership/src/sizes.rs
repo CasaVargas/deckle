@@ -86,3 +86,45 @@ pub fn recent(
         })
         .collect()
 }
+
+/// Tomorrow's paper from local files only (the CLI's `digest next` and the Daily tab): the
+/// config's queue and stop, Readership's `state`, the live headline cache at `live`, and the
+/// EPUBs `digest run` left in `built` (for "sent" in the week). Never the network.
+pub fn next_paper(
+    cfg: &deckle_digest::Config,
+    now: chrono::DateTime<deckle_digest::chrono_tz::Tz>,
+    at: Option<(u8, u8)>,
+    state: &std::path::Path,
+    live: &std::path::Path,
+    built: &std::path::Path,
+) -> deckle_digest::next::plan::NextPaper {
+    use deckle_digest::next::live::LiveCache;
+    use deckle_digest::reading::ReadingQueue;
+    let stopped = deckle_digest::press::read_stop(&cfg.press_state(), now.date_naive());
+    let edition = deckle_digest::press::press(at, stopped, now).edition;
+    let st = State::load(state);
+    let shares = crate::report(&st, cfg)
+        .sections
+        .into_iter()
+        .filter_map(|s| Some((s.key, s.share?)))
+        .collect();
+    let sent = |d: NaiveDate| built.join(format!("deckle-daily-{d}.epub")).exists();
+    let queue = ReadingQueue::new(
+        cfg.reading
+            .queue_path
+            .clone()
+            .unwrap_or_else(ReadingQueue::default_path),
+    )
+    .load();
+    deckle_digest::next::plan::plan(&deckle_digest::next::plan::Inputs {
+        cfg,
+        now,
+        at,
+        stopped,
+        queue: &queue,
+        live: &LiveCache::load(live),
+        history: &history(&st),
+        shares: &shares,
+        week: recent(&st, edition, 6, &sent),
+    })
+}
