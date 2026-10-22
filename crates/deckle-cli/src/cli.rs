@@ -399,6 +399,12 @@ pub enum DigestCommand {
     },
     /// Today's puzzle (made and kept if there's none yet) and yesterday's answers.
     Puzzle,
+    /// What From Your Shelf would print now, from the Kindle snapshots (`--forget` deletes them).
+    Shelf {
+        /// Delete every stored snapshot, highlights and looked-up words included.
+        #[arg(long)]
+        forget: bool,
+    },
     /// How far you read the last editions, per section, with suggested edits to the paper.
     Readership {
         #[command(subcommand)]

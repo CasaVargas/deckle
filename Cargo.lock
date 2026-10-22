@@ -974,6 +974,7 @@ dependencies = [
  "deckle-kfx",
  "deckle-library",
  "deckle-readership",
+ "deckle-shelf",
  "deckle-transport",
  "deckle-xray",
  "predicates",
@@ -1031,6 +1032,7 @@ dependencies = [
  "deckle-kfx",
  "deckle-library",
  "deckle-readership",
+ "deckle-shelf",
  "deckle-transport",
  "deckle-xray",
  "serde",
@@ -1144,6 +1146,21 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckle-shelf"
+version = "0.3.1"
+dependencies = [
+ "chrono",
+ "deckle-core",
+ "deckle-digest",
+ "deckle-highlights",
+ "deckle-library",
+ "deckle-readership",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

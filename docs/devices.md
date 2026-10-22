@@ -6,7 +6,7 @@ says whether `system/thumbnails` is writable over that transport, which decides 
 
 | Model | Firmware | Transport | Thumbnails writable | Tested | Result |
 |---|---|---|---|---|---|
-| Kindle Paperwhite (owner's, generation TBD) | TBD | TBD (mass storage if pre-2024, MTP if 2024) | TBD | not yet | pending M1 device check |
+| Kindle Paperwhite (owner's, generation TBD) | TBD | mass storage | TBD | 2026-10-22 | Verified on real hardware. Reading positions (`.yjf`) decode, see *Reading position* below; the highlights format was checked on a mass-storage Kindle the same day (see the Scribe row). Generation and firmware still to record |
 | Kindle Scribe (2024) | TBD | MTP only | no | 2026-10-19 | Spike 3 write: EBOK KFX + X-Ray `.sdr` delivered by the CLI (book opening on the device still to confirm). `system/` is not exposed over MTP: with `kll.en.en.klld` staged at `documents/deckle/` (copied on the device by a scriptlet), Word Wise shipped 3815 hints against the device dictionary; without it Word Wise is skipped with a warning. Highlights (#60) were checked on a mass-storage Kindle (firmware 5.19.2) on 2026-10-22: the English format parses, and an edited note shows up as several entries at one location. Highlights read `documents/My Clippings.txt`, which MTP does expose; on the Scribe 2024 (2026-10-22) an idle session is harmless: plugging in already shows "connected to computer", the session changes nothing, and the Kindle stays on the bus, so `IDLE_SESSION_OK` is `true`. The Scribe doesn't write `My Clippings.txt` at all, even right after a highlight in Amazon's reader (only a leftover `My Clippings.sdr/` exists): its annotations are per-book `.yjr`/`.yjf` files (binary, positions not text) inside each `.sdr` folder, so `deckle highlights` finds nothing there yet (#99). Highlights made in KOReader live in KOReader's own files and never reach `My Clippings.txt`. A USB reset on close drops it off the bus until replugged, so Deckle doesn't reset. Spike 2 passed: EBOK with the Kindle-edition ASIN typed by hand showed the store cover, and X-Ray and Word Wise kept working; marked *keeps Deckle's X-Ray for real ASINs* |
 | Kindle Scribe (2024), Front page + topic sections test edition | TBD | MTP only | no | not yet | pending: front page, "In this section" lists and the ↩ back links not yet checked on the device (layout on e-ink, whether the ↩ glyph renders, link jumps) |
 | Simulated mass-storage Kindle (FAT32 disk image with `documents/`, `system/thumbnails`) | n/a | mass storage | yes | 2026-10-19 | EBOK + thumbnail + restore copy delivered by CLI and GUI; M4: X-Ray + Word Wise sidecars and Deckle's `system/kll/kll.en.zh.klld` delivered by the GUI, dictionary not rewritten on a second send |
@@ -26,6 +26,25 @@ coordinate `deckle_kfx::text` uses. A never-opened book has no `.sdr` or no `.yj
   End to end the same day: `deckle digest run --to device` recorded the 2026-10-22 edition's
   sections; after reading and replugging, `deckle digest push` (empty outbox) read `fpr` 14565,
   the first character of the Hacker News section, and `deckle digest readership` counted it.
+- **From Your Shelf, checked on hardware 2026-10-22.**
+  - `book.info.store` in a book's `.yjf` holds the Kindle's own fraction through the book and a
+    word count; `timer.average.calculator`, nested in `timer.model`, holds pace samples.
+  - **Paperwhite (5.19.2, mass storage):** `.yjf` files sit beside KFX, MOBI and AZW3 books
+    (the shelf reads KFX only), under `documents/` and `documents/<Author>/`; books two folders
+    down (`Downloads/Items01/`) are found since the shelf walks three folders deep. `system/vocabulary/vocab.db` and
+    `My Clippings.txt` are readable (no `-wal` at the time). Percent against what the Kindle's
+    library shows: The Devil Wears Prada shows 14%, position ÷ end 14.2%, stored fraction 9.1%;
+    In the Shadow of Eight shows 16%, 12.4% and 14.1%; Harry Potter 1 shows 2%, 0.4% and 0.4%.
+    Position ÷ end is within 4 points on all three; the stored fraction within 5, but only just
+    (4.9).
+  - **Scribe 2024 (MTP):** only `documents/` is visible, and store-bought books (in Amazon's
+    cloud storage) aren't exposed, so the walk found the sideloaded book and the editions. Their
+    `.yjf` read fine, but no KFX is read over MTP, so a book Deckle didn't send has no end and
+    shows an "about N%" from the stored fraction: the Scribe shows 16% for a stored 15.05%, so
+    `KINDLE_FRACTION_OK` is `true` (one Scribe book was comparable). No clippings or vocabulary are shared. The
+    MTP product string ends in the serial ("Kindle Scribe G6G3X…"), which the page drops. An
+    edition Deckle sent by hand before date-named files ("Deckle - The Deckle Daily -- …")
+    counts as the paper and stays off the nightstand.
 - **Paperwhite (mass storage), checked 2026-10-22:** the same `documents/<stem>.sdr/<stem><suffix>.yjf`
   (same suffix as the Scribe), decoded fine. Two differences: its `lpr` (89882) was ahead of its
   `fpr` (89410), so the report takes the further of the two; and a pruned edition's `.sdr` stayed

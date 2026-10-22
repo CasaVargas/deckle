@@ -54,6 +54,12 @@ pub struct FlushReport {
     pub positions: Vec<(String, crate::yjf::OnDevice)>,
     /// Why the `.yjf` read failed; the delivery stands.
     pub positions_error: Option<String>,
+    /// The books' positions and the vocabulary, read in the same session (`[sync] shelf`).
+    #[serde(skip)]
+    pub shelf: Option<crate::sync::ShelfRead>,
+    /// Why the shelf read failed; the delivery stands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shelf_error: Option<String>,
 }
 
 /// After a flush, editions named `<prefix>…` beyond the newest `keep` are removed.

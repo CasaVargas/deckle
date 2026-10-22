@@ -6,7 +6,9 @@ use std::path::PathBuf;
 
 use crate::clippings::read_on;
 use crate::deliver::{Conn, DeliverError, Target, prune_named_on};
+use crate::inventory::{DeviceBook, list_with_positions};
 use crate::queue::{Finishing, FlushReport, Progress, Prune, Queue};
+use crate::vocab::{VocabFiles, read_vocab_on};
 use crate::yjf;
 
 /// Whether opening an MTP session with nothing to deliver leaves the Kindle where it was. It
@@ -25,6 +27,8 @@ pub struct Actions {
     pub clippings: bool,
     /// Read each edition's `.yjf` for the readership report.
     pub readership: bool,
+    /// Read the books' positions and the vocabulary for From Your Shelf.
+    pub shelf: bool,
 }
 
 impl Default for Actions {
@@ -35,6 +39,7 @@ impl Default for Actions {
             prune: true,
             clippings: false,
             readership: false,
+            shelf: false,
         }
     }
 }
@@ -46,12 +51,24 @@ pub struct Plan {
     pub prune: bool,
     pub clippings: bool,
     pub readership: bool,
+    pub shelf: bool,
 }
 
 impl Plan {
     pub fn is_empty(&self) -> bool {
-        !self.push && !self.prune && !self.clippings && !self.readership
+        !self.push && !self.prune && !self.clippings && !self.readership && !self.shelf
     }
+}
+
+/// What the shelf read found on the Kindle, for `deckle-shelf` to turn into a snapshot.
+#[derive(Clone, Debug, Default)]
+pub struct ShelfRead {
+    /// The books, each KFX with its `.yjf` when it had one.
+    pub books: Vec<DeviceBook>,
+    /// `.yjf` left unread past the per-connection cap.
+    pub skipped: usize,
+    /// `system/vocabulary/vocab.db`, when the Kindle shares it.
+    pub vocab: Option<VocabFiles>,
 }
 
 /// The key a device's `[sync.devices."<id>"]` uses: the USB serial for MTP, else the model and
@@ -85,6 +102,27 @@ struct Connected {
     pruned: bool,
     clipped: bool,
     read: bool,
+    shelved: bool,
+}
+
+impl Connected {
+    /// The reads that are due on this connection, each once. The shelf needs the clippings, so
+    /// it brings them when it is due.
+    fn reads(&mut self, actions: Actions) -> Plan {
+        let shelf = actions.shelf && !self.shelved;
+        self.shelved |= shelf;
+        let clippings = (actions.clippings && !self.clipped) || shelf;
+        self.clipped |= clippings;
+        let readership = actions.readership && !self.read;
+        self.read |= readership;
+        Plan {
+            push: false,
+            prune: false,
+            clippings,
+            readership,
+            shelf,
+        }
+    }
 }
 
 impl Watcher {
@@ -102,27 +140,17 @@ impl Watcher {
                 pruned: false,
                 clipped: false,
                 read: false,
+                shelved: false,
             }),
         };
-        // Clippings ride along with whatever opens a session, once per connection.
-        let clippings = |conn: &mut Connected| {
-            let due = actions.clippings && !conn.clipped;
-            conn.clipped |= due;
-            due
-        };
-        let readership = |conn: &mut Connected| {
-            let due = actions.readership && !conn.read;
-            conn.read |= due;
-            due
-        };
+        // The reads ride along with whatever opens a session, once per connection.
         if actions.push && !pending.is_empty() && conn.tried.as_deref() != Some(pending) {
             conn.tried = Some(pending.to_vec());
             conn.pruned |= actions.prune;
             return Plan {
                 push: true,
                 prune: actions.prune,
-                clippings: clippings(conn),
-                readership: readership(conn),
+                ..conn.reads(actions)
             };
         }
         // With push on, prune rides along with a push: an idle plug-in opens no MTP session
@@ -130,19 +158,12 @@ impl Watcher {
         if actions.prune && !actions.push && !conn.pruned {
             conn.pruned = true;
             return Plan {
-                push: false,
                 prune: true,
-                clippings: clippings(conn),
-                readership: readership(conn),
+                ..conn.reads(actions)
             };
         }
         if IDLE_SESSION_OK {
-            let plan = Plan {
-                push: false,
-                prune: false,
-                clippings: clippings(conn),
-                readership: readership(conn),
-            };
+            let plan = conn.reads(actions);
             if !plan.is_empty() {
                 return plan;
             }
@@ -152,7 +173,8 @@ impl Watcher {
 }
 
 /// Runs `plan` over `conn` in one session: read the reading positions of the editions named
-/// by `stems` (before prune removes any), push the outbox, prune, then read the clippings.
+/// by `stems` (before prune removes any), push the outbox, prune, then read the shelf and the
+/// clippings. The Kindle's own paper (`prune.prefix`) is left off the shelf.
 pub fn run(
     queue: &Queue,
     conn: &mut Conn<'_>,
@@ -168,11 +190,14 @@ pub fn run(
         &Finishing::default(),
         &mut |_, _, _| {},
         stems,
+        &prune.prefix,
     )
 }
 
 /// [`run`], finishing prepared books for this Kindle with `finishing` (its profile) and
-/// reporting each entry to `progress`. The Word Wise probe shares the session too.
+/// reporting each entry to `progress`. The Word Wise probe shares the session too. Books whose
+/// file starts with `skip_prefix` (the editions) are left off the shelf.
+#[allow(clippy::too_many_arguments)]
 pub fn run_with(
     queue: &Queue,
     conn: &mut Conn<'_>,
@@ -181,6 +206,7 @@ pub fn run_with(
     finishing: &Finishing,
     progress: &mut Progress<'_>,
     stems: &[String],
+    skip_prefix: &str,
 ) -> Result<FlushReport, DeliverError> {
     // First: prune deletes an edition's `.sdr`, and its `.yjf` with it. A failed read doesn't
     // stop the delivery.
@@ -200,6 +226,27 @@ pub fn run_with(
         report.pruned = prune_named_on(conn, &prune.prefix, prune.keep)?;
     }
     // A failed read doesn't undo a delivery: it's reported beside it.
+    if plan.shelf {
+        // The same cache the Kindle tab keeps, so a plug-in doesn't re-read every KFX.
+        let cache = finishing.word_wise.cache_dir.join("inventory");
+        match list_with_positions(conn, Some(&cache), skip_prefix) {
+            Ok((inventory, skipped)) => {
+                let vocab = match read_vocab_on(conn) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        report.shelf_error = Some(format!("vocabulary: {e}"));
+                        None
+                    }
+                };
+                report.shelf = Some(ShelfRead {
+                    books: inventory.books,
+                    skipped,
+                    vocab,
+                });
+            }
+            Err(e) => report.shelf_error = Some(e.to_string()),
+        }
+    }
     if plan.clippings {
         match read_on(conn) {
             Ok(bytes) => report.clippings = bytes,
@@ -257,24 +304,28 @@ mod tests {
         prune: false,
         clippings: false,
         readership: false,
+        shelf: false,
     };
     const PRUNE: Plan = Plan {
         push: false,
         prune: true,
         clippings: false,
         readership: false,
+        shelf: false,
     };
     const BOTH: Plan = Plan {
         push: true,
         prune: true,
         clippings: false,
         readership: false,
+        shelf: false,
     };
     const NONE: Plan = Plan {
         push: false,
         prune: false,
         clippings: false,
         readership: false,
+        shelf: false,
     };
 
     #[test]
@@ -285,6 +336,7 @@ mod tests {
             prune: false,
             clippings: false,
             readership: false,
+            shelf: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, push_only), PUSH);
@@ -299,6 +351,7 @@ mod tests {
             prune: true,
             clippings: false,
             readership: false,
+            shelf: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, prune_only), PRUNE);
@@ -320,6 +373,7 @@ mod tests {
             prune: false,
             clippings: false,
             readership: false,
+            shelf: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, off), NONE);
@@ -468,6 +522,7 @@ mod tests {
             prune: true,
             clippings: true,
             readership: false,
+            shelf: false,
         };
         let mut w = Watcher::default();
         assert_eq!(
@@ -477,6 +532,7 @@ mod tests {
                 prune: true,
                 clippings: true,
                 readership: false,
+                shelf: false,
             }
         );
         let b = files(&["b.kfx"]);
@@ -495,6 +551,7 @@ mod tests {
             prune: true,
             clippings: true,
             readership: false,
+            shelf: false,
         };
         let mut w = Watcher::default();
         assert_eq!(
@@ -504,6 +561,7 @@ mod tests {
                 prune: true,
                 clippings: true,
                 readership: false,
+                shelf: false,
             }
         );
     }
@@ -515,6 +573,7 @@ mod tests {
             prune: true,
             clippings: true,
             readership: false,
+            shelf: false,
         };
         let mut w = Watcher::default();
         let want = Plan {
@@ -522,6 +581,7 @@ mod tests {
             prune: false,
             clippings: IDLE_SESSION_OK,
             readership: false,
+            shelf: false,
         };
         assert_eq!(w.tick(Some("K"), &[], on), want);
         assert_eq!(w.tick(Some("K"), &[], on), NONE);
@@ -539,6 +599,7 @@ mod tests {
             prune: false,
             clippings: true,
             readership: false,
+            shelf: false,
         };
         let r = run(
             &q,
@@ -557,6 +618,7 @@ mod tests {
             prune: false,
             clippings: true,
             readership: false,
+            shelf: false,
         };
         fake::reset(&[]);
         let r = run(
@@ -584,6 +646,7 @@ mod tests {
             prune: false,
             clippings: true,
             readership: false,
+            shelf: false,
         };
         let r = run(
             &q,
@@ -606,6 +669,7 @@ mod tests {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: false,
         };
         let mut w = Watcher::default();
         assert!(w.tick(Some("K"), &a, on).readership);
@@ -625,6 +689,7 @@ mod tests {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: false,
         };
         let mut w = Watcher::default();
         let p = w.tick(Some("K"), &[], on);
@@ -650,6 +715,7 @@ mod tests {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: false,
         };
         let stems = vec![
             "deckle-daily-2026-10-18".to_owned(),
@@ -694,6 +760,7 @@ mod tests {
             prune: false,
             clippings: false,
             readership: true,
+            shelf: false,
         };
         let r = run(
             &q,
@@ -706,6 +773,115 @@ mod tests {
         assert_eq!(r.delivered.len(), 1);
         assert!(r.positions.is_empty());
         assert!(r.positions_error.as_deref().unwrap().contains("MTP"));
+    }
+
+    #[test]
+    fn shelf_rides_with_push_once_per_connection() {
+        let a = files(&["a.kfx"]);
+        let on = Actions {
+            push: true,
+            prune: true,
+            clippings: false,
+            readership: false,
+            shelf: true,
+        };
+        let mut w = Watcher::default();
+        let p = w.tick(Some("K"), &a, on);
+        assert!(p.shelf && p.clippings, "the shelf reads the clippings too");
+        let b = files(&["b.kfx"]);
+        let p = w.tick(Some("K"), &b, on);
+        assert!(!p.shelf && !p.clippings, "once per connection");
+        assert_eq!(w.tick(None, &b, on), NONE);
+        assert!(w.tick(Some("K"), &b, on).shelf, "a reconnect reads again");
+    }
+
+    #[test]
+    fn shelf_runs_alone_on_an_idle_plug_in() {
+        let on = Actions {
+            push: true,
+            prune: true,
+            clippings: false,
+            readership: false,
+            shelf: true,
+        };
+        let mut w = Watcher::default();
+        let p = w.tick(Some("K"), &[], on);
+        assert_eq!((p.push, p.prune, p.shelf), (false, false, IDLE_SESSION_OK));
+    }
+
+    #[test]
+    fn shelf_read_in_the_same_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (q, _) = outbox_and_folder(tmp.path());
+        fake::reset(&["Book.kfx", "deckle-longread-walden.kfx"]);
+        fake::put_bytes("Book.sdr/Book9d6e.yjf", b"YJF");
+        fake::put_bytes("deckle-longread-walden.sdr/w9d6e.yjf", b"LONG");
+        let target = mtp(Some("G0001"), Some("Kindle"));
+        let plan = Plan {
+            push: true,
+            prune: false,
+            clippings: true,
+            readership: false,
+            shelf: true,
+        };
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            plan,
+            &prune(),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(r.delivered.len(), 1);
+        assert_eq!(fake::opens(), 1, "one connection");
+        let shelf = r.shelf.expect("the shelf was read");
+        let yjf = |f: &str| {
+            shelf
+                .books
+                .iter()
+                .find(|b| b.file == f)
+                .and_then(|b| b.yjf.clone())
+        };
+        assert_eq!(yjf("Book.kfx").as_deref(), Some(&b"YJF"[..]));
+        assert_eq!(
+            yjf("deckle-longread-walden.kfx").as_deref(),
+            Some(&b"LONG"[..])
+        );
+        assert_eq!(
+            yjf("deckle-daily-2026-10-20.kfx"),
+            None,
+            "the paper itself is skipped"
+        );
+        assert_eq!(r.shelf_error, None);
+    }
+
+    #[test]
+    fn a_bad_yjf_fetch_costs_one_book_not_the_shelf() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (q, _) = outbox_and_folder(tmp.path());
+        fake::reset(&["Book.kfx"]);
+        fake::put_bytes("Book.sdr/Book9d6e.yjf", b"YJF");
+        fake::fail_get_object();
+        let target = mtp(Some("G0001"), Some("Kindle"));
+        let plan = Plan {
+            push: true,
+            prune: false,
+            clippings: false,
+            readership: false,
+            shelf: true,
+        };
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            plan,
+            &prune(),
+            &[],
+        )
+        .expect("the push succeeded");
+        assert_eq!(r.delivered.len(), 1);
+        let shelf = r.shelf.expect("the listing survives one bad sidecar");
+        let book = shelf.books.iter().find(|b| b.file == "Book.kfx").unwrap();
+        assert_eq!(book.yjf, None);
     }
 
     #[test]

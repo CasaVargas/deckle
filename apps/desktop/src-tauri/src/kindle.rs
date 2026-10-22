@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use deckle_core::clippings::read_on;
 use deckle_core::deliver::{Conn, Target};
-use deckle_core::inventory::{Space, list_on, remove_on};
+use deckle_core::inventory::{Space, list_on, list_with_positions, remove_on};
 use deckle_highlights::{Outcome, Pending, State};
 use deckle_library::freshness::Reason;
 use deckle_library::shelf::{Shelved, shelve, source_cover};
@@ -169,8 +169,21 @@ pub fn shelf_on(
     cache: Option<&Path>,
 ) -> Result<DeviceShelf, String> {
     let device = deckle_library::device_ref(conn.target);
-    let inv = list_on(conn, cache).map_err(|e| e.to_string())?;
+    // The shelf page wants each book's position too: read in this one walk, when it's due.
+    let digest = config.with_file_name("digest.toml");
+    let shelf_due = deckle_digest::Config::load(&digest).is_ok_and(|c| {
+        c.sections.contains(&deckle_digest::SectionKind::Shelf)
+            && c.sync
+                .for_device(&deckle_core::sync::device_id(conn.target))
+                .shelf
+    });
+    let (inv, skipped) = match shelf_due {
+        true => list_with_positions(conn, cache, deckle_digest::EDITION_PREFIX),
+        false => list_on(conn, cache).map(|inv| (inv, 0)),
+    }
+    .map_err(|e| e.to_string())?;
     let library = Library::configured(config).map(|(l, _)| l);
+    let shelf_books = shelf_due.then(|| inv.books.clone());
     let current = deckle_library::freshness::Current::now(&Default::default());
     let mut books: Vec<DeviceBookRow> = shelve(inv.books, library.as_ref(), &device.key, &current)
         .into_iter()
@@ -201,6 +214,9 @@ pub fn shelf_on(
         &config.with_file_name("readership.json"),
         &config.with_file_name("digest.toml"),
     );
+    if let Some(books) = shelf_books {
+        record_shelf(conn, config, books, skipped, library.as_ref(), &clippings);
+    }
     Ok(DeviceShelf {
         device: device.name,
         space: inv.space,
@@ -208,6 +224,53 @@ pub fn shelf_on(
         highlights,
         highlights_error,
     })
+}
+
+/// Turns what this session read into the Kindle's snapshot in `shelf.json`. Errors are logged:
+/// they never fail the listing.
+fn record_shelf(
+    conn: &mut Conn<'_>,
+    config: &Path,
+    books: Vec<deckle_core::inventory::DeviceBook>,
+    skipped: usize,
+    library: Option<&Library>,
+    clippings: &ClippingsRead,
+) {
+    let device = deckle_library::device_ref(conn.target);
+    let (vocab, vocab_failed) = match deckle_core::vocab::read_vocab_on(conn) {
+        Ok(v) => (v, false),
+        Err(e) => {
+            eprintln!("shelf: vocabulary: {e}");
+            (None, true)
+        }
+    };
+    let id = deckle_core::sync::device_id(conn.target);
+    let store = config.with_file_name("shelf.json");
+    let previous = deckle_digest::shelf::store::Shelf::load(&store)
+        .kindles
+        .get(&id)
+        .cloned();
+    let (snap, errors) = deckle_shelf::snapshot(
+        deckle_shelf::Read {
+            books,
+            skipped,
+            clippings: clippings.as_ref().ok().cloned().flatten(),
+            vocab,
+            clippings_failed: clippings.is_err(),
+            vocab_failed,
+            previous,
+        },
+        &device.name,
+        &device.key,
+        library,
+        deckle_digest::chrono::Utc::now(),
+    );
+    for e in errors {
+        eprintln!("shelf: {e}");
+    }
+    if let Err(e) = deckle_shelf::record(&store, &id, snap) {
+        eprintln!("shelf: {e}");
+    }
 }
 
 type ClippingsRead = Result<Option<Vec<u8>>, deckle_core::deliver::DeliverError>;
@@ -563,6 +626,55 @@ mod tests {
                 .unwrap()
                 .starts_with("line 54: ")
         );
+    }
+
+    #[test]
+    fn a_shelf_records_the_kindles_shelf_when_the_paper_has_one() {
+        use deckle_digest::shelf::store::Shelf;
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("library.json");
+        let out = tmp.path().join("Kindle");
+        std::fs::create_dir_all(out.join("Walden.sdr")).unwrap();
+        std::fs::write(out.join("Walden.kfx"), b"not a real kfx").unwrap();
+        std::fs::write(
+            out.join("Walden.sdr/Walden9d6e.yjf"),
+            std::fs::read(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/yjf/book.yjf"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(out.join("My Clippings.txt"), clippings_fixture()).unwrap();
+        let target = Target::Folder(out.clone());
+        let store = tmp.path().join("shelf.json");
+
+        // no shelf in the paper: nothing recorded
+        std::fs::write(tmp.path().join("digest.toml"), "sections = [\"weather\"]\n").unwrap();
+        shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert!(!store.exists());
+
+        std::fs::write(tmp.path().join("digest.toml"), "sections = [\"shelf\"]\n").unwrap();
+        let listed = shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert!(
+            listed.books.iter().any(|b| b.file == "Walden.kfx"),
+            "the tab still lists the books"
+        );
+        let snap = Shelf::load(&store);
+        let k = snap.kindles.values().next().expect("a snapshot");
+        assert_eq!(k.books.len(), 1);
+        assert_eq!(k.books[0].title, "Walden");
+        assert!(k.highlights_shared);
+
+        // left out for this Kindle: not read again
+        std::fs::remove_file(&store).unwrap();
+        let id = deckle_core::sync::device_id(&target);
+        std::fs::write(
+            tmp.path().join("digest.toml"),
+            format!("sections = [\"shelf\"]\n\n[sync.devices.'{id}']\nshelf = false\n"),
+        )
+        .unwrap();
+        shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert!(!store.exists());
     }
 
     #[test]

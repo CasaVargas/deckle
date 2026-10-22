@@ -38,6 +38,43 @@ fn unknown_objects_and_trailing_fields_are_skipped() {
 }
 
 #[test]
+fn book_info_store_from_a_book() {
+    let p = parse_yjf(&fixture("book.yjf")).unwrap();
+    assert_eq!(p.words_read, Some(9519));
+    assert_eq!((p.kindle_fraction.unwrap() * 10_000.0).round(), 1505.0);
+    assert_eq!(p.wpm.len(), 4);
+    assert_eq!(p.wpm[0].round(), 322.0);
+}
+
+#[test]
+fn book_info_store_from_an_edition() {
+    let p = parse_yjf(&fixture("daily-2026-10-21.yjf")).unwrap();
+    assert_eq!(p.words_read, Some(4611));
+    assert_eq!((p.kindle_fraction.unwrap() * 10_000.0).round(), 2984.0);
+    assert_eq!(p.furthest, Some(103303));
+}
+
+#[test]
+fn wpm_samples_flatten_all_groups() {
+    let p = parse_yjf(&fixture("daily-2026-10-21.yjf")).unwrap();
+    assert_eq!(p.wpm.len(), 13);
+}
+
+#[test]
+fn doubles_are_decoded_in_a_synthetic_file() {
+    let bytes = synthetic(&[
+        obj("book.info.store", &[int(12), dbl(0.5)]),
+        obj(
+            "timer.average.calculator",
+            &[int(2), dbl(300.0), dbl(250.0)],
+        ),
+    ]);
+    let p = parse_yjf(&bytes).unwrap();
+    assert_eq!((p.words_read, p.kindle_fraction), (Some(12), Some(0.5)));
+    assert_eq!(p.wpm, vec![300.0, 250.0]);
+}
+
+#[test]
 fn truncated_input_is_an_error_not_a_panic() {
     let b = fixture("book.yjf");
     for n in [0, 4, 8, 20, b.len() - 1] {
@@ -73,4 +110,19 @@ fn deep_nesting_is_an_error_not_a_crash() {
         b.extend([0xfe, 1]); // object begin, name flagged empty
     }
     assert!(parse_yjf(&b).is_err());
+}
+
+#[test]
+fn non_finite_doubles_are_dropped_not_kept() {
+    let bytes = synthetic(&[
+        obj("book.info.store", &[int(12), dbl(f64::NAN)]),
+        obj(
+            "timer.average.calculator",
+            &[int(3), dbl(300.0), dbl(f64::INFINITY), dbl(f64::NAN)],
+        ),
+    ]);
+    let p = parse_yjf(&bytes).unwrap();
+    assert_eq!(p.kindle_fraction, None);
+    assert_eq!(p.wpm, vec![300.0], "only finite samples survive");
+    assert_eq!(p.words_read, Some(12));
 }

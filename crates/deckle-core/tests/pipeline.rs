@@ -58,6 +58,12 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
     assert!(s.contains("B0") && s.contains("DECK"), "{s}");
     assert!(s.contains("PDOC"));
     assert_eq!(report.pages, Some(45));
+    assert_eq!(
+        report.end_position,
+        deckle_kfx::text::content_runs(&bytes).ok().map(|(_, e)| e),
+        "pipeline_reports_end"
+    );
+    assert!(report.end_position.is_some());
     assert!(report.warnings.is_empty(), "{:?}", report.warnings);
     for stage in ["inspect", "normalize", "convert", "repackage", "deliver"] {
         assert!(

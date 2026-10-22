@@ -87,7 +87,7 @@ pub struct NextPaper {
 }
 
 /// Every kind, in the starter's order: where an off section is listed.
-const KINDS: [SectionKind; 8] = [
+const KINDS: [SectionKind; 9] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
@@ -95,6 +95,7 @@ const KINDS: [SectionKind; 8] = [
     SectionKind::Lottery,
     SectionKind::Horoscope,
     SectionKind::Puzzle,
+    SectionKind::Shelf,
     SectionKind::Onthisday,
 ];
 
@@ -357,6 +358,11 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             "Mini crossword from yesterday's headlines".into(),
             "1 page".into(),
         )],
+        SectionKind::Shelf => vec![fixed(
+            "From Your Shelf",
+            "From your Kindle, as of its last plug-in".into(),
+            "1 page".into(),
+        )],
         SectionKind::Onthisday => vec![fixed(
             "On This Day",
             "From Wikipedia".into(),
@@ -452,7 +458,7 @@ pub fn estimate(rows: &[PlanRow], planned: &[usize], history: &History, cfg: &Co
                 };
                 whole(&r.key, 0.25 * signs as f64)
             }
-            SectionKind::Puzzle => whole(&r.key, 1.0),
+            SectionKind::Puzzle | SectionKind::Shelf => whole(&r.key, 1.0),
             SectionKind::Onthisday => whole(&r.key, 2.0),
         };
     }

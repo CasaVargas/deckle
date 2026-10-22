@@ -9,6 +9,13 @@
   several `urls` and `full_text = "lead"` (top story whole, the rest briefs). A story already
   printed in an earlier news section is dropped from later ones. Tomorrow's paper sketch shows it
   all.
+- **From Your Shelf**: a page in the Daily drawn from your own Kindle. **On your nightstand**
+  lists the books you're in the middle of, how far in and how long since you opened them, with a
+  nudge back into the newest one; it works on every Kindle, the Scribe included. A past highlight
+  (with your note) and **words you looked up this week** appear on Kindles that share them. It's
+  as of the Kindle's last plug-in, stays on this Mac, and **Forget what my Kindles shared** wipes
+  it. In the starter config; add `"shelf"` to `sections` for an existing paper. `deckle digest
+  shelf` prints it. Emailed papers include the page, so it passes through Amazon.
 - **Local news for more places** (#102): add a relative's town or a vacation spot under **The
   paper → Other places** (or `[[local.places]]` in `digest.toml`), and each gets its own local
   news section after yours. Weather stays on your place.

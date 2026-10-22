@@ -52,6 +52,12 @@ fn config() -> Config {
         "deckle-test-puzzles-{}-{n}.json",
         std::process::id()
     )));
+    // Nor the owner's Kindle snapshots; no Kindle is plugged in here, so the page stays out.
+    c.shelf_path = Some(
+        std::env::temp_dir().join(format!("deckle-test-no-shelf-{}.json", std::process::id())),
+    );
+    c.sections
+        .retain(|k| *k != deckle_digest::SectionKind::Shelf);
     c.horoscope.signs = vec!["leo".into(), "virgo".into()];
     // The fixtures were saved on 2026-10-20; keep a week of stories.
     c.max_age_hours = 24 * 7;

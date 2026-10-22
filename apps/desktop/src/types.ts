@@ -138,7 +138,7 @@ export const STAGE_LABEL: Record<string, string> = {
 
 // ---- The Daily tab (Daily design §5c) ----
 
-export type SectionKind = "reading" | "weather" | "local" | "feeds" | "lottery" | "horoscope" | "puzzle" | "onthisday";
+export type SectionKind = "reading" | "weather" | "local" | "feeds" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
 
 export interface FeedConfig {
   name: string;
@@ -273,13 +273,14 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   weather: "Weather & almanac",
   local: "Local news",
   feeds: "Your feeds",
+  shelf: "From Your Shelf",
   lottery: "Lottery",
   horoscope: "Horoscope",
   puzzle: "Puzzle",
   onthisday: "On This Day",
 };
 
-export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "puzzle", "onthisday"];
+export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
 
 export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
 
@@ -374,6 +375,21 @@ export interface ReadershipView {
   /** `[sync] readership` in digest.toml. */
   enabled: boolean;
   report: ReadershipReport;
+}
+
+/** What the last Kindle shared with From Your Shelf (shelf design §7). */
+export interface ShelfStatus {
+  /** The Kindle plugged in last; null before any. */
+  kindle: string | null;
+  /** When, as an ISO instant. */
+  seen: string | null;
+  inProgress: number;
+  highlightsShared: boolean;
+  wordsShared: boolean;
+  /** Emailed papers pass through Amazon. */
+  emailOn: boolean;
+  /** `[sync] shelf` in digest.toml. */
+  enabled: boolean;
 }
 
 /** The press (tomorrow's paper design §4): `next` and `since` are ISO instants with offsets. */
