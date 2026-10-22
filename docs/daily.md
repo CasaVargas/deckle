@@ -89,6 +89,49 @@ reach, **Move up** for a feed you rarely reach. One click (or `deckle digest rea
 - Editions that went by email only aren't tracked: no KFX is built for them on this machine, so
   there's nothing to compare the position against (`usb_too = true` editions are).
 
+### The weather page
+
+The **Weather & Almanac** page has a five-day strip (a picture, the high and low, and a word or
+two such as "Showers, pm" or "Frost at dawn"), what it's like right now, and an almanac:
+
+- Sunrise, sunset and daylight, with the change from yesterday.
+- The usual first (or last) frost, in the 45 days before it.
+- The moon: phase, how much is lit, and the next full or new moon with its traditional name
+  (Harvest, Hunter's, Blue Moon; northern hemisphere only).
+- An equinox, solstice or clock change in the next 7 days.
+- A meteor shower paragraph when one is active.
+
+Only the forecast comes from the network (Open-Meteo, the same single request as before).
+**The sun, moon, seasons and showers are worked out on your Mac**, so the almanac still prints
+when the forecast is down.
+
+The frost dates come from a 30-year climate record (1991–2020) for your place: one request to
+Open-Meteo's archive, the first time, cached in `almanac.json` next to `digest.toml`. A place
+where frost is rare (under 15 years in 30) gets no frost line.
+
+**Your Day** adds today's events from your calendars, plus one line when rain or snow is likely
+during one of them ("Rain likely around 4 PM, during School pickup."). Private and confidential
+events print as "Busy". Add calendars in the Daily tab's **Your Day** card, or in `digest.toml`:
+
+```toml
+[day]
+calendars = ["~/Calendars/Home.ics", "webcal://p01-caldav.icloud.com/published/2/…"]
+max_items = 8
+weather_note = true
+```
+
+A calendar is an `.ics` file or a private address (`https://` or `webcal://`). To find yours:
+
+- **Google Calendar:** Settings → the calendar → *Integrate calendar* → *Secret address in
+  iCal format*.
+- **iCloud:** in Calendar, the calendar's share button → *Public Calendar* → copy the link.
+- **Outlook:** Settings → *Calendar* → *Shared calendars* → *Publish a calendar* → the ICS link.
+
+A private address lets anyone holding it read that calendar, so Deckle never writes it into its
+messages or logs; it shows only the host (`https://calendar.google.com/…`). Calendars are read when
+the paper is built and the events go into that edition only. **One exception:** with email delivery
+on, the paper (agenda included) passes through Amazon on its way to your Kindle.
+
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 
 ## Email to Kindle (opt-in)

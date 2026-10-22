@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- The Daily's weather section is now a **Weather & Almanac** page:
+  - a five-day strip with pictures and short words;
+  - sunrise, sunset and daylight, computed on your Mac;
+  - the usual first frost for your place;
+  - the moon with its next full moon and name (the Hunter's Moon);
+  - equinoxes, solstices, clock changes, and the meteor shower of the night.
+- **Your Day** puts today's events from your `.ics` calendars or private calendar addresses on
+  the page, with a line when rain is likely during one (Daily tab → **Your Day**, or `[day]` in
+  `digest.toml`). If the forecast is down, the rest of the page still prints.
+
 - Highlights and notes out as Markdown: one file per book in a folder you choose, sideloaded
   books included. From the Kindle tab (**Write**), with `deckle highlights export`, or on every
   plug-in with the morning schedule (`[sync] clippings = true`, or **Settings → Kindles**). Later
