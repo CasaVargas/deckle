@@ -3,7 +3,7 @@
 //! English Wiktionary extract and wordfreq's `large_en` list. Rules are in
 //! `docs/formats/wordwise.md`; the selection follows Proficiency (GPL-3) where it applies.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, Read};
 use std::path::Path;
 
@@ -73,6 +73,136 @@ pub fn difficulty(zipf: Option<f64>) -> Option<i64> {
         z if z >= 2.0 => 2,
         _ => 1,
     })
+}
+
+/// Tags that keep a sense out of the puzzle list (puzzle design §4).
+const PUZZLE_MARKED: &[&str] = &[
+    "archaic",
+    "dated",
+    "rare",
+    "historical",
+    "dialectal",
+    "slang",
+    "vulgar",
+    "derogatory",
+    "offensive",
+    "obsolete",
+    "nonstandard",
+    "colloquial",
+    "informal",
+];
+
+/// The word list for the puzzle page (puzzle design §4): lowercase a–z words of 3 to 5 letters
+/// at zipf 3.0 or more, each with the short definition of its first everyday sense as the clue,
+/// sorted by word. Proper nouns, abbreviations, marked senses, plain inflections of a kept
+/// word, blocklisted words and clues that give the answer away are left out.
+pub fn puzzle_words(
+    jsonl: impl BufRead,
+    freq: &HashMap<String, f64>,
+    blocklist: &HashSet<String>,
+) -> Vec<(String, String)> {
+    // word → (clue, penalty, weight of its entry); and word → the lemmas it inflects
+    let mut best: BTreeMap<String, (String, u8, usize)> = BTreeMap::new();
+    let mut inflects: HashMap<String, Vec<String>> = HashMap::new();
+    let mut function_word: HashMap<String, bool> = HashMap::new();
+    for line in jsonl.lines() {
+        let Ok(line) = line else { break };
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let (Some(word), Some(pos)) = (
+            entry.get("word").and_then(Value::as_str),
+            entry.get("pos").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if entry.get("lang_code").and_then(Value::as_str) != Some("en")
+            || !(3..=5).contains(&word.len())
+            || !word.bytes().all(|b| b.is_ascii_lowercase())
+        {
+            continue;
+        }
+        function_word.entry(word.to_owned()).or_insert(matches!(
+            pos,
+            "pron" | "prep" | "conj" | "det" | "article" | "particle" | "num" | "intj"
+        ));
+        let senses = entry
+            .get("senses")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for s in senses {
+            for lemma in s
+                .get("form_of")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(l) = lemma.get("word").and_then(Value::as_str) {
+                    inflects
+                        .entry(word.to_owned())
+                        .or_default()
+                        .push(l.to_owned());
+                }
+            }
+        }
+        if kindle_pos(pos).is_none_or(|p| p == "other")
+            || tags(&entry).iter().any(|t| SKIP_SENSE_TAGS.contains(t))
+            || blocklist.contains(word)
+            || zipf(freq, word).is_none_or(|z| z < 3.0)
+        {
+            continue;
+        }
+        let mut good: Vec<(&Value, &str)> = senses
+            .iter()
+            .filter(|s| {
+                s.get("form_of").is_none()
+                    && s.get("alt_of").is_none()
+                    && !tags(s)
+                        .iter()
+                        .any(|t| SKIP_SENSE_TAGS.contains(t) || PUZZLE_MARKED.contains(t))
+            })
+            .filter_map(|s| {
+                let g = s.get("glosses")?.as_array()?.last()?.as_str()?;
+                (!g.contains("spelling of")).then_some((s, g))
+            })
+            .collect();
+        let weight = good.len();
+        good.sort_by_key(|(s, _)| sense_penalty(s)); // stable: the first everyday sense
+        let Some((s, clue)) = good.iter().find_map(|(s, g)| {
+            let c = short_def(g);
+            (!c.is_empty() && !gives_away(word, &c)).then_some((s, c))
+        }) else {
+            continue;
+        };
+        let cand = (clue, sense_penalty(s), weight);
+        match best.get(word) {
+            Some(b) if (b.1, std::cmp::Reverse(b.2)) <= (cand.1, std::cmp::Reverse(cand.2)) => {}
+            _ => {
+                best.insert(word.to_owned(), cand);
+            }
+        }
+    }
+    best.iter()
+        .filter(|(w, _)| !function_word.get(*w).copied().unwrap_or(false))
+        .filter(|(w, _)| {
+            // "cards" (of "card"), "baked" (of "bake"): a regular inflection of a kept word.
+            // Irregular forms with their own meaning ("bore", "left") stay.
+            !inflects.get(*w).into_iter().flatten().any(|l| {
+                let stem = l.trim_end_matches(['e', 'y']);
+                best.contains_key(l) && !stem.is_empty() && w.starts_with(stem)
+            })
+        })
+        .map(|(w, (c, _, _))| (w.clone(), c.clone()))
+        .collect()
+}
+
+/// A clue gives its answer away when one of its words is the answer or starts with it
+/// ("rose-coloured", "roses"), ignoring case.
+pub fn gives_away(answer: &str, clue: &str) -> bool {
+    clue.to_lowercase()
+        .split(|c: char| !c.is_alphabetic())
+        .any(|t| t.starts_with(answer))
 }
 
 /// Ordering key for picking a sense: 0 for an everyday sense, more for marked ones.

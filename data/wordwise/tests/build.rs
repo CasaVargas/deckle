@@ -2,11 +2,11 @@
 //! `sample.jsonl` is 22 real kaikki.org entries (Wiktionary, CC BY-SA 4.0), trimmed to the
 //! fields the builder reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use deckle_wordwise::lexicon::Lexicon;
-use deckle_wordwise_build::{build, difficulty, load_wordfreq, short_def, zipf};
+use deckle_wordwise_build::{build, difficulty, load_wordfreq, puzzle_words, short_def, zipf};
 
 fn freq() -> HashMap<String, f64> {
     [
@@ -157,4 +157,86 @@ fn dated_spellings_are_hinted_with_the_modern_word() {
     let s = deckle_wordwise_build::sense_from_entry(&e, &f).unwrap();
     assert_eq!(s.short_def, "connection");
     assert_eq!(s.full_def, "Dated spelling of connection");
+}
+
+/// Kaikki-shaped entries for the puzzle list (trimmed; glosses from Wiktionary, CC BY-SA 4.0).
+const PUZZLE_SAMPLE: &str = r#"{"word":"card","pos":"noun","lang_code":"en","forms":[{"form":"cards","tags":["plural"]}],"senses":[{"glosses":["A playing card."],"topics":["card-games"]},{"glosses":["A flat, rectangular piece of stiff paper, used for writing on."]}]}
+{"word":"cards","pos":"noun","lang_code":"en","senses":[{"glosses":["plural of card"],"tags":["form-of","plural"],"form_of":[{"word":"card"}]},{"glosses":["Any game played with a deck of fifty-two."]}]}
+{"word":"area","pos":"noun","lang_code":"en","forms":[{"form":"areas","tags":["plural"]}],"senses":[{"glosses":["Any particular extent of space or surface; a region."]}]}
+{"word":"bucket","pos":"noun","lang_code":"en","senses":[{"glosses":["A container made of rigid material, often with a handle."]}]}
+{"word":"Leith","pos":"noun","lang_code":"en","senses":[{"glosses":["A port district of Edinburgh."]}]}
+{"word":"re-up","pos":"verb","lang_code":"en","senses":[{"glosses":["To renew."]}]}
+{"word":"adze","pos":"noun","lang_code":"en","senses":[{"glosses":["A cutting tool with a curved blade."]}]}
+{"word":"dosh","pos":"noun","lang_code":"en","senses":[{"glosses":["Money."],"tags":["slang","UK"]}]}
+{"word":"heck","pos":"intj","lang_code":"en","senses":[{"glosses":["A mild expletive."]}]}
+{"word":"darn","pos":"verb","lang_code":"en","senses":[{"glosses":["To mend a hole by weaving thread."]}]}
+{"word":"rose","pos":"adj","lang_code":"en","senses":[{"glosses":["Of a rose-coloured hue."]},{"glosses":["Like roses in scent."]}]}
+{"word":"leaf","pos":"noun","lang_code":"en","senses":[{"glosses":["The usually green and flat organ of a plant that photosynthesizes."]}]}
+"#;
+
+fn puzzle_freq() -> HashMap<String, f64> {
+    [
+        ("card", 4.6),
+        ("cards", 4.4),
+        ("area", 5.3),
+        ("bucket", 3.9),
+        ("leith", 3.2),
+        ("re-up", 3.1),
+        ("adze", 1.9),
+        ("dosh", 3.1),
+        ("heck", 3.9),
+        ("darn", 3.4),
+        ("rose", 4.5),
+        ("leaf", 4.0),
+    ]
+    .into_iter()
+    .map(|(w, z)| (w.to_owned(), z))
+    .collect()
+}
+
+fn puzzle_list(blocked: &[&str]) -> Vec<(String, String)> {
+    let blocklist: HashSet<String> = blocked.iter().map(|w| (*w).to_owned()).collect();
+    puzzle_words(PUZZLE_SAMPLE.as_bytes(), &puzzle_freq(), &blocklist)
+}
+
+#[test]
+fn puzzle_words_keeps_common_short_words() {
+    let list = puzzle_list(&[]);
+    let clue = |w: &str| list.iter().find(|(x, _)| x == w).map(|(_, c)| c.as_str());
+    // the everyday sense, not the card-games one
+    assert_eq!(
+        clue("card"),
+        Some("A flat, rectangular piece of stiff paper")
+    );
+    assert_eq!(
+        clue("area"),
+        Some("Any particular extent of space or surface")
+    );
+    assert_eq!(
+        clue("leaf"),
+        Some("The usually green and flat organ of a plant that photosynthesizes")
+    );
+    let words: Vec<&str> = list.iter().map(|(w, _)| w.as_str()).collect();
+    let mut sorted = words.clone();
+    sorted.sort_unstable();
+    assert_eq!(words, sorted);
+}
+
+#[test]
+fn puzzle_words_filters() {
+    let list = puzzle_list(&["darn"]);
+    for w in ["cards", "bucket", "leith", "re-up", "adze", "dosh", "darn"] {
+        assert!(list.iter().all(|(x, _)| x != w), "{w} should be out");
+    }
+    // without the blocklist "darn" is in
+    assert!(puzzle_list(&[]).iter().any(|(x, _)| x == "darn"));
+}
+
+#[test]
+fn puzzle_clue_never_contains_answer() {
+    let list = puzzle_list(&[]);
+    assert!(list.iter().all(|(w, _)| w != "rose"));
+    for (w, c) in &list {
+        assert!(!c.to_lowercase().contains(w.as_str()), "{w}: {c}");
+    }
 }
