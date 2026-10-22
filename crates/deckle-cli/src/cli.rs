@@ -350,6 +350,17 @@ pub enum DigestCommand {
         previewer: Option<PathBuf>,
         #[arg(long)]
         keep_work_dir: bool,
+        /// Run even when the presses are stopped for this date (`digest stop`).
+        #[arg(long)]
+        force: bool,
+    },
+    /// Stop the presses: skip the next scheduled edition, once. `--undo` restarts them.
+    Stop {
+        #[arg(long)]
+        undo: bool,
+        /// The edition to skip, YYYY-MM-DD (default: the next scheduled one).
+        #[arg(long)]
+        date: Option<String>,
     },
     /// Deliver queued editions to a connected Kindle and prune old ones. Does nothing (and
     /// succeeds) when no Kindle is connected, so it is safe to run on a timer.

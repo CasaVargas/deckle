@@ -1,0 +1,161 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Stop the presses (tomorrow's paper design §4.2) with Deckle's config folder in a temp dir.
+
+use std::path::{Path, PathBuf};
+
+use assert_cmd::Command;
+
+fn deckle(home: &Path) -> Command {
+    let mut c = Command::cargo_bin("deckle").unwrap();
+    c.env("HOME", home)
+        .env("XDG_CONFIG_HOME", home)
+        .env("APPDATA", home)
+        .env("LOCALAPPDATA", home);
+    c
+}
+
+fn config_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/deckle")
+    } else {
+        home.join("deckle")
+    }
+}
+
+/// A config folder with a minimal paper and a reading queue holding one saved link.
+fn setup() -> (tempfile::TempDir, PathBuf) {
+    let home = tempfile::tempdir().unwrap();
+    let dir = config_dir(home.path());
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("digest.toml"), "sections = [\"horoscope\"]\n").unwrap();
+    std::fs::write(
+        dir.join("reading.jsonl"),
+        "{\"id\":\"a\",\"url\":\"https://example.com/x\",\"file\":null,\"title\":\"X\",\
+         \"saved_at\":\"2026-10-22T13:14:00Z\",\"source\":\"cli\",\"state\":\"pending\",\
+         \"tries\":0,\"printed_in\":null,\"note\":null}\n",
+    )
+    .unwrap();
+    let out = home.path().join("out");
+    std::fs::create_dir_all(&out).unwrap();
+    (home, out)
+}
+
+fn queue(home: &Path) -> Vec<u8> {
+    std::fs::read(config_dir(home).join("reading.jsonl")).unwrap()
+}
+
+#[test]
+fn stop_then_run_builds_nothing() {
+    let (home, out) = setup();
+    deckle(home.path())
+        .args(["digest", "stop", "--date", "2026-10-23"])
+        .assert()
+        .success();
+    let before = queue(home.path());
+    let o = deckle(home.path())
+        .args(["digest", "run", "--date", "2026-10-23", "--to"])
+        .arg(&out)
+        .env("PATH", "/nonexistent")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let text = String::from_utf8(o.stdout).unwrap();
+    assert!(
+        text.contains("Presses stopped for Friday, October 23"),
+        "{text}"
+    );
+    assert!(text.contains("deckle digest stop --undo"), "{text}");
+    assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0);
+    assert_eq!(queue(home.path()), before);
+    // the JSON form
+    let o = deckle(home.path())
+        .args(["--json", "digest", "run", "--date", "2026-10-23", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["stopped"], "2026-10-23");
+}
+
+#[test]
+fn force_runs_anyway() {
+    let (home, out) = setup();
+    deckle(home.path())
+        .args(["digest", "stop", "--date", "2026-10-23"])
+        .assert()
+        .success();
+    let o = deckle(home.path())
+        .args([
+            "digest",
+            "run",
+            "--force",
+            "--date",
+            "2026-10-23",
+            "--previewer",
+        ])
+        .arg(home.path().join("missing"))
+        .arg("--to")
+        .arg(&out)
+        .output()
+        .unwrap();
+    // past the stop: it fails on the missing Previewer instead
+    assert!(!o.status.success());
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("Previewer"), "{err}");
+}
+
+#[test]
+fn asleep_through_press() {
+    // the Mac slept through 05:30; launchd runs the job at 09:00 on wake, with no --date
+    let (home, out) = setup();
+    let today = chrono_today();
+    deckle(home.path())
+        .args(["digest", "stop", "--date", &today])
+        .assert()
+        .success();
+    let o = deckle(home.path())
+        .args(["digest", "run", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    assert!(String::from_utf8_lossy(&o.stdout).contains("Presses stopped for"));
+}
+
+#[test]
+fn undo_clears() {
+    let (home, _) = setup();
+    deckle(home.path())
+        .args(["digest", "stop", "--date", "2026-10-23"])
+        .assert()
+        .success();
+    assert!(config_dir(home.path()).join("press.json").exists());
+    let o = deckle(home.path())
+        .args(["digest", "stop", "--undo"])
+        .output()
+        .unwrap();
+    assert!(o.status.success());
+    assert!(String::from_utf8_lossy(&o.stdout).contains("Presses restarted."));
+    assert!(!config_dir(home.path()).join("press.json").exists());
+}
+
+#[test]
+fn stop_without_schedule_errors() {
+    let (home, _) = setup();
+    let o = deckle(home.path())
+        .args(["digest", "stop"])
+        .output()
+        .unwrap();
+    assert_eq!(o.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&o.stderr)
+            .contains("nothing is scheduled; there's no press to stop")
+    );
+}
+
+fn chrono_today() -> String {
+    deckle_digest::chrono::Local::now()
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string()
+}

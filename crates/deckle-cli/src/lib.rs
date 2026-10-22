@@ -1004,6 +1004,13 @@ fn library_line(b: &deckle_library::Book) -> String {
     )
 }
 
+/// The installed edition job's time, when there is one.
+fn schedule_at() -> Option<(u8, u8)> {
+    deckle_digest::schedule::status()
+        .at
+        .and_then(|a| deckle_digest::schedule::parse_at(&a).ok())
+}
+
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
     match arg {
         None => Ok(deckle_digest::chrono::Local::now().date_naive()),
@@ -1091,9 +1098,24 @@ fn digest(
             date,
             previewer: pv,
             keep_work_dir,
+            force,
         } => {
             let mut cfg = load_digest_config(&path)?;
             let date = parse_date(date.as_deref())?;
+            // Before anything is located or touched: a stopped morning builds nothing.
+            let today = deckle_digest::chrono::Local::now().date_naive();
+            let stop = deckle_digest::press::read_stop(&cfg.press_state(), today);
+            if !force && stop == Some(date) {
+                let out = serde_json::json!({ "stopped": date });
+                emit(json, &out, || {
+                    format!(
+                        "Presses stopped for {}: no paper today (deckle digest stop --undo \
+                         restarts them)",
+                        date.format("%A, %B %-d")
+                    )
+                })?;
+                return Ok(ExitCode::SUCCESS);
+            }
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             // A folder target must exist (and is created) before any work; `device` may be
             // absent: the edition then waits in the outbox.
@@ -1273,6 +1295,32 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
+        cli::DigestCommand::Stop { undo, date } => {
+            let cfg = load_digest_config(&path)?;
+            let stop = if undo {
+                None
+            } else {
+                let date = match date {
+                    Some(d) => parse_date(Some(&d))?,
+                    None => {
+                        let now = deckle_digest::chrono::Utc::now()
+                            .with_timezone(&deckle_digest::tz::local_tz());
+                        deckle_digest::press::press(schedule_at(), None, now)
+                            .next
+                            .map(|n| n.date_naive())
+                            .ok_or("nothing is scheduled; there's no press to stop")?
+                    }
+                };
+                Some(date)
+            };
+            deckle_digest::press::write_stop(&cfg.press_state(), stop)?;
+            let out = serde_json::json!({ "stopped": stop });
+            emit(json, &out, || match stop {
+                Some(d) => format!("Presses stopped for {}.", deckle_digest::long_date(d)),
+                None => "Presses restarted.".to_owned(),
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
