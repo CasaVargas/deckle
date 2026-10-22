@@ -166,6 +166,22 @@ export interface DailyConfig {
   reading: { inbox: string; max_items: number; long_read_words: number };
   /** Absent while it's untouched (the backend leaves the defaults out). */
   email?: EmailConfig;
+  /** `[day]`: Your Day on the weather page. Absent while untouched. */
+  day?: DayConfig;
+}
+
+/** Calendars for Your Day (almanac design §5). Addresses are secrets: show `DayPreview.labels`. */
+export interface DayConfig {
+  calendars: string[];
+  max_items: number;
+  weather_note: boolean;
+}
+
+export interface DayPreview {
+  events: number;
+  /** Each calendar as it may be shown: a file name, or `https://host/…`. */
+  labels: string[];
+  errors: string[];
 }
 
 /** `[email]`: Send-to-Kindle over the owner's SMTP (email design §5). No password here. */
@@ -242,7 +258,7 @@ export interface PlaceRow {
 
 export const SECTION_LABEL: Record<SectionKind, string> = {
   reading: "Your Reading",
-  weather: "Weather",
+  weather: "Weather & almanac",
   local: "Local news",
   feeds: "Your feeds",
   lottery: "Lottery",

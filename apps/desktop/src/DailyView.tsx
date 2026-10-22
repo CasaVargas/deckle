@@ -6,6 +6,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import Icon from "./Icon";
 import Readership from "./Readership";
+import YourDay from "./YourDay";
 import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, PlaceRow, ReadingEntry, RunResult, ScheduleStatus, SectionKind } from "./types";
 import { ALL_SECTIONS, DEFAULT_EMAIL, SECTION_LABEL, SIGNS } from "./types";
 
@@ -638,6 +639,17 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           Saved to <span className="mono">{state.config_path}</span>; your own comments in that file are kept.
         </p>
       </section>
+
+      <YourDay
+        day={draft.day}
+        emailOn={draft.email?.enabled ?? false}
+        onSave={(day) => {
+          const c = structuredClone(draft);
+          c.day = day;
+          setDraft(c);
+          return save(c);
+        }}
+      />
     </div>
   );
 }
