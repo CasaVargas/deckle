@@ -36,7 +36,7 @@ fn forecast() -> Forecast {
         .position(|t| t == "2026-10-22T16:00")
         .unwrap();
     f.hourly.precipitation_probability[i] = Some(70.0);
-    f.hourly.weather_code[i] = 61;
+    f.hourly.weather_code[i] = Some(61);
     f
 }
 

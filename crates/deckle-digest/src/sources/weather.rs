@@ -46,11 +46,13 @@ pub struct Hourly {
     /// Local wall-clock times, `2026-10-22T16:00`.
     pub time: Vec<String>,
     pub precipitation_probability: Vec<Option<f64>>,
-    pub temperature_2m: Vec<f64>,
-    pub weather_code: Vec<u32>,
+    /// Null for an hour the model doesn't cover.
+    pub weather_code: Vec<Option<u32>>,
 }
 
-pub fn url(lat: f64, lon: f64, units: Units) -> String {
+/// The forecast in `tz`, the paper's own clock, so hourly times line up with Your Day and
+/// the edition date even when the Mac isn't where the forecast is for.
+pub fn url(lat: f64, lon: f64, units: Units, tz: Tz) -> String {
     let (t, w) = match units {
         Units::Imperial => ("fahrenheit", "mph"),
         Units::Metric => ("celsius", "kmh"),
@@ -59,8 +61,9 @@ pub fn url(lat: f64, lon: f64, units: Units) -> String {
         "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}\
          &current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code\
          &daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset\
-         &hourly=precipitation_probability,temperature_2m,weather_code\
-         &temperature_unit={t}&wind_speed_unit={w}&timezone=auto&forecast_days=5"
+         &hourly=precipitation_probability,weather_code\
+         &temperature_unit={t}&wind_speed_unit={w}&timezone={zone}&forecast_days=5",
+        zone = tz.name().replace('/', "%2F")
     )
 }
 
@@ -84,13 +87,9 @@ pub fn parse(json: &[u8]) -> Result<Forecast, String> {
     }
     let h = &f.hourly;
     let n = h.time.len();
-    if [
-        h.precipitation_probability.len(),
-        h.temperature_2m.len(),
-        h.weather_code.len(),
-    ]
-    .iter()
-    .any(|&l| l != n)
+    if [h.precipitation_probability.len(), h.weather_code.len()]
+        .iter()
+        .any(|&l| l != n)
     {
         return Err("hourly forecast series have different lengths".into());
     }
@@ -401,7 +400,9 @@ pub fn section(
         cfg,
         date,
         tz,
-        forecast: net.get(&url(lat, lon, cfg.units)).and_then(|b| parse(&b)),
+        forecast: net
+            .get(&url(lat, lon, cfg.units, tz))
+            .and_then(|b| parse(&b)),
         frost: frost::usual(lat, lon, &cfg.almanac_cache(), net).ok(),
         agenda: (!cfg.day.calendars.is_empty()).then(|| day::agenda(&cfg.day, date, tz, net)),
     };
@@ -448,8 +449,7 @@ mod tests {
                     .iter()
                     .map(|h| Some(if wet.contains(h) { 80.0 } else { 10.0 }))
                     .collect(),
-                temperature_2m: vec![50.0; 24],
-                weather_code: vec![code; 24],
+                weather_code: vec![Some(code); 24],
             },
         }
     }
@@ -477,6 +477,15 @@ mod tests {
             "Rain"
         );
         assert_eq!(strip_word(&day(0, 45.0, &[]), 0, Units::Imperial), "Clear");
+    }
+
+    #[test]
+    fn forecast_uses_the_papers_clock() {
+        // Hourly times must share a clock with Your Day: the Mac's zone, not the place's.
+        let la: Tz = "America/Los_Angeles".parse().unwrap();
+        let u = url(40.71, -74.01, Units::Imperial, la);
+        assert!(u.contains("&timezone=America%2FLos_Angeles&"), "{u}");
+        assert!(!u.contains("timezone=auto"));
     }
 
     #[test]
@@ -544,6 +553,17 @@ mod tests {
             assert_eq!(Icon::from_code(code), icon, "{code}");
         }
         assert_eq!(Icon::Rain.href(), "images/wx-rain.png");
+    }
+
+    #[test]
+    fn hourly_nulls_are_tolerated() {
+        // Open-Meteo sends null for an hour a model doesn't cover.
+        let mut v: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/weather/forecast.json"))
+                .unwrap();
+        v["hourly"]["weather_code"][5] = serde_json::Value::Null;
+        v["hourly"]["temperature_2m"][5] = serde_json::Value::Null;
+        assert!(parse(v.to_string().as_bytes()).is_ok());
     }
 
     #[test]

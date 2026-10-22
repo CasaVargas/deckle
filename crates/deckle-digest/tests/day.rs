@@ -478,10 +478,9 @@ fn forecast(wet: &[u32], code: u32) -> Forecast {
                 .iter()
                 .map(|h| Some(if wet.contains(h) { 80.0 } else { 10.0 }))
                 .collect(),
-            temperature_2m: vec![50.0; 24],
             weather_code: hours
                 .iter()
-                .map(|h| if wet.contains(h) { code } else { 0 })
+                .map(|h| Some(if wet.contains(h) { code } else { 0 }))
                 .collect(),
         },
     }

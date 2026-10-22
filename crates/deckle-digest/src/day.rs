@@ -655,7 +655,7 @@ pub fn weather_note(
         .filter_map(|((t, _), code)| {
             Some((
                 NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M").ok()?,
-                *code,
+                code.unwrap_or_default(),
             ))
         })
         .filter(|(t, _)| t.date() == date)
