@@ -67,9 +67,11 @@ reports with your model and firmware are very welcome.
   into pop-up notes.
 - **Library.** A plain folder (`Author/Title/` plus a `deckle.json`), no database. Deckle can
   tell you which books on the Kindle it could now build better and re-send them.
-- **Highlights out.** Every highlight and note on the Kindle, as one Markdown file per book in a
-  folder you choose (a notes vault, iCloud Drive). It covers sideloaded books, which Amazon's own
-  export leaves out, and later exports only add what's new, so your own edits stay.
+- **Highlights out.** Highlights and notes from the Kindle's `My Clippings.txt`, as one Markdown
+  file per book in a folder you choose (a notes vault, iCloud Drive). It covers sideloaded books,
+  which Amazon's own export leaves out, and later exports only add what's new, so your own edits
+  stay. The Kindle Scribe (2024) doesn't keep that file; reading its highlights is
+  [#99](https://github.com/CasaVargas/deckle/issues/99).
 - **The Deckle Daily (preview).** A morning newspaper built locally from weather, local news and
   your RSS feeds, with full article text, delivered when the Kindle connects. Details in
   [docs/daily.md](docs/daily.md).

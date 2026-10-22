@@ -31,6 +31,10 @@ with the paper). `~/SecondBrain/Reading/Walden.md` appears with both
 passages, the note under its passage, and page and date for each. Highlight one more passage and
 plug in again: the file gains one entry, and anything you typed into it yourself is still there.
 
+> **Found on hardware, 2026-10-22:** the Kindle Scribe (2024) doesn't write `My Clippings.txt`;
+> its annotations are per-book `.yjr`/`.yjf` files. This design covers Kindles that keep the
+> clippings file (checked on a Paperwhite); reading `.yjr` is #99.
+
 ## 2. Goals, non-goals, anti-goals
 
 **Goals**

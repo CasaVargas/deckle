@@ -54,7 +54,7 @@ export default function Highlights({ target, rows, error, busy, onWritten }: Pro
     <section className="highlights" aria-label="Highlights">
       <div className="highlights-books">
         <h3>Highlights</h3>
-        <p className="muted small">Every highlight and note on this Kindle, including books you sideloaded, which Amazon's own export leaves out.</p>
+        <p className="muted small">Highlights and notes from this Kindle, including books you sideloaded, which Amazon's own export leaves out.</p>
         <ul>
           {rows.map((r) => (
             <li key={r.key}>
