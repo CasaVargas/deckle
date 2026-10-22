@@ -670,7 +670,7 @@ mod tests {
         let id = deckle_core::sync::device_id(&target);
         std::fs::write(
             tmp.path().join("digest.toml"),
-            format!("sections = [\"shelf\"]\n\n[sync.devices.\"{id}\"]\nshelf = false\n"),
+            format!("sections = [\"shelf\"]\n\n[sync.devices.'{id}']\nshelf = false\n"),
         )
         .unwrap();
         shelf_on(&mut Conn::new(&target), &config, None).unwrap();

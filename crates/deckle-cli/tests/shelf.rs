@@ -81,7 +81,7 @@ fn push_records_the_shelf() {
 fn shelf_off_for_device_reads_nothing() {
     let (home, k) = setup("");
     let digest = format!(
-        "sections = [\"shelf\"]\n\n[sync.devices.\"{}\"]\nshelf = false\n",
+        "sections = [\"shelf\"]\n\n[sync.devices.'{}']\nshelf = false\n",
         k.display()
     );
     std::fs::write(config_dir(home.path()).join("digest.toml"), digest).unwrap();
