@@ -51,11 +51,11 @@ function UpdateStatus({ update, onUpdateState, busy }: Pick<Props, "update" | "o
   const releases = <Link href={`${REPO}/releases`}>Releases</Link>;
   switch (update.kind) {
     case "checking":
-      return <>checking for updates…</>;
+      return <>Checking for updates…</>;
     case "current":
-      return <>up to date</>;
+      return <>Up to date</>;
     case "failed":
-      return <>couldn't check for updates ({releases})</>;
+      return <>Couldn't check for updates ({releases})</>;
     case "available":
     case "error":
       return (
@@ -64,7 +64,7 @@ function UpdateStatus({ update, onUpdateState, busy }: Pick<Props, "update" | "o
             <span className="update-error">The update didn't install: {update.message}</span>
           ) : (
             <>
-              Deckle {update.update.version} is available ·{" "}
+              Deckle {update.update.version} is available
               <Link href={`${REPO}/releases/tag/v${update.update.version}`}>What's new</Link>
             </>
           )}
@@ -78,14 +78,14 @@ function UpdateStatus({ update, onUpdateState, busy }: Pick<Props, "update" | "o
     case "downloading": {
       const pct = update.total ? Math.min(100, (update.done / update.total) * 100) : 0;
       return (
-        <span className="progress">
-          <span className="progress-track">
-            <span className="progress-fill" style={{ width: `${pct}%` }} />
-          </span>
+        <div className="progress">
+          <div className="progress-track">
+            <div className="progress-fill" style={{ width: `${pct}%` }} />
+          </div>
           <span className="progress-label">
             Downloading… {update.total ? `${mb(update.done)} of ${mb(update.total)}` : mb(update.done)}
           </span>
-        </span>
+        </div>
       );
     }
     case "ready":
@@ -317,9 +317,9 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
         <p className="hint">
           Deckle {version} · GPL-3.0-or-later · <Link href={REPO}>Source</Link>
         </p>
-        <p className="hint">
+        <div className="hint">
           <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} />
-        </p>
+        </div>
         <p className="hint">
           Deckle checks GitHub for a newer version when it starts; the request carries nothing about you or your books.
           Otherwise it goes online only for: the Word Wise dictionary
