@@ -25,6 +25,14 @@ coordinate `deckle_kfx::text` uses. A never-opened book has no `.sdr` or no `.yj
   End to end the same day: `deckle digest run --to device` recorded the 2026-10-22 edition's
   sections; after reading and replugging, `deckle digest push` (empty outbox) read `fpr` 14565,
   the first character of the Hacker News section, and `deckle digest readership` counted it.
+- **From Your Shelf (`.yjf` of ordinary books and `vocab.db`), not yet checked on hardware.**
+  `book.info.store` in a book's `.yjf` holds the Kindle's own fraction through the book and a word
+  count (`fixtures/yjf/book.yjf`: 15.05%, 9519 words); `timer.average.calculator`, nested in
+  `timer.model`, holds pace samples. Still to confirm with the owner: on the Scribe, that the
+  fraction matches the progress the Kindle shows (until then `KINDLE_FRACTION_OK` is `false` and
+  a book with no known end shows no percent); where store books sit under `documents/`; on the
+  Paperwhite, that `.yjf` files sit beside KFX books and `system/vocabulary/vocab.db` (and a
+  `-wal`) is readable over USB mass storage.
 - **Paperwhite (mass storage), checked 2026-10-22:** the same `documents/<stem>.sdr/<stem><suffix>.yjf`
   (same suffix as the Scribe), decoded fine. Two differences: its `lpr` (89882) was ahead of its
   `fpr` (89410), so the report takes the further of the two; and a pruned edition's `.sdr` stayed

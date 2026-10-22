@@ -2,7 +2,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { DeviceRow, HighlightsStatus, ReadershipView } from "../types";
+import type { DeviceRow, HighlightsStatus, ReadershipView, ShelfStatus } from "../types";
 import { Row, Switch } from "./Row";
 
 interface Props {
@@ -71,11 +71,41 @@ function ReadershipSettings() {
   );
 }
 
+/** `[sync] shelf`: read the books in progress (and what the Kindle shares) for From Your Shelf. */
+function ShelfSettings() {
+  const [status, setStatus] = useState<ShelfStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.shelfStatus().then(setStatus).catch((e) => setError(String(e)));
+  }, []);
+  const set = (on: boolean) =>
+    api
+      .shelfSet(on)
+      .then((s) => {
+        setStatus(s);
+        setError(null);
+      })
+      .catch((e) => setError(String(e)));
+  return (
+    <section className="set-device">
+      <h3>From Your Shelf</h3>
+      <Row
+        label="Use my Kindle for From Your Shelf"
+        note="Reads the books you're in the middle of when it connects, and a past highlight and words you looked up on Kindles that share them. Stays on this Mac."
+      >
+        <Switch label="Use my Kindle for From Your Shelf" checked={status?.enabled ?? true} disabled={!status} onChange={set} />
+      </Row>
+      {error && <p className="set-note warn">{error}</p>}
+    </section>
+  );
+}
+
 export default function Kindles({ devices, onDeviceOptions }: Props) {
   return (
     <>
       <HighlightsSettings />
       <ReadershipSettings />
+      <ShelfSettings />
       {devices.length === 0 && <p className="set-foot">Connect a Kindle to set per-device options.</p>}
       {devices.map((d) => {
         const firmware = d.firmware ?? (d.kind === "mtp" ? "unknown until the first send" : "unknown");

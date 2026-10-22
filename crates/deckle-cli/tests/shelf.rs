@@ -124,3 +124,70 @@ fn a_second_kindle_keeps_the_first_ones_snapshot() {
     assert_eq!(shelf.kindles.len(), 2);
     assert!(shelf.kindles.values().any(|k| !k.highlights.is_empty()));
 }
+
+fn seeded_shelf(home: &Path) {
+    use deckle_digest::chrono::{Duration, Utc};
+    use deckle_digest::shelf::store::{BookSnap, KindleSnapshot};
+    let stamp =
+        |t: deckle_digest::chrono::DateTime<Utc>| t.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    let now = Utc::now();
+    let mut shelf = Shelf::default();
+    shelf.put(
+        "S",
+        KindleSnapshot {
+            name: "Kindle Scribe".into(),
+            seen: stamp(now),
+            books: vec![BookSnap {
+                file: "Monte.kfx".into(),
+                title: "The Count of Monte Cristo".into(),
+                last: Some(62),
+                end: Some(100),
+                last_read: Some(stamp(now - Duration::days(1))),
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+    );
+    shelf.save(&shelf_json(home)).unwrap();
+}
+
+#[test]
+fn digest_shelf_prints_the_page() {
+    let (home, _) = setup("sections = [\"shelf\"]\n");
+    seeded_shelf(home.path());
+    let out = deckle(home.path())
+        .args(["digest", "shelf"])
+        .assert()
+        .success();
+    let text = String::from_utf8(out.get_output().stdout.clone()).unwrap();
+    assert!(text.contains("Kindle Scribe"), "{text}");
+    assert!(text.contains("On your nightstand"), "{text}");
+    assert!(text.contains("The Count of Monte Cristo"), "{text}");
+    assert!(text.contains("62%"), "{text}");
+
+    let out = deckle(home.path())
+        .args(["--json", "digest", "shelf"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert!(v["page"]["nightstand"]["books"].is_array(), "{v}");
+    assert_eq!(v["page"]["nightstand"]["books"][0]["percent"], 62);
+    assert_eq!(v["kindles"][0]["name"], "Kindle Scribe");
+
+    deckle(home.path())
+        .args(["digest", "shelf", "--forget"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Forgot the shelf snapshot."));
+    assert!(!shelf_json(home.path()).exists());
+}
+
+#[test]
+fn digest_shelf_with_nothing_says_how_to_start() {
+    let (home, _) = setup("sections = [\"shelf\"]\n");
+    deckle(home.path())
+        .args(["digest", "shelf"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("plug"));
+}

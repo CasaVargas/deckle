@@ -160,6 +160,7 @@ deckle highlights list                            # books with highlights, and w
 deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (folder remembered)
 deckle digest readership                          # how far you read the paper, per section
 deckle digest readership apply 1                  # make suggested edit 1 to digest.toml
+deckle digest shelf                               # what From Your Shelf would print now
 deckle digest next                                # tomorrow's paper so far: lead, page plan, this week
 deckle digest stop                                # stop the presses: skip the next scheduled paper
 ```

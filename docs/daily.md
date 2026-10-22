@@ -22,6 +22,7 @@ deckle digest build -o ./out        # today's edition as an EPUB
 deckle digest run --to device       # build, convert, send (cover first), keep the newest 3
 deckle digest push                  # deliver a queued edition to the Kindle now connected
 deckle digest puzzle                # today's puzzle, and yesterday's answers
+deckle digest shelf                 # what From Your Shelf would print now (--forget deletes it)
 deckle digest watch                 # keep running; deliver whenever a Kindle connects
 deckle digest schedule --at 05:30   # both, automatically: the paper daily, the watcher from login
 deckle digest schedule --off        # and gone again
@@ -210,6 +211,45 @@ to `sections`, or switch it on in the Daily tab. Optional settings:
 [puzzle]
 ladder = true
 theme = true      # clues from yesterday's headlines
+```
+
+### From Your Shelf
+
+A page drawn from your own Kindle, after your feeds: **On your nightstand** (the books you're in the
+middle of, how far in, how long since you opened them, and a nudge back into the newest one),
+**You highlighted this … ago** (a passage from at least six months back, with your note under it)
+and **Words you looked up this week**.
+
+- **It's as of the last plug-in.** The page says which Kindle and when ("Taken from your Kindle
+  (Scribe) when it was last plugged in, Wednesday"). Deckle reads the Kindle when it connects
+  (`watch`, `push`, or the Kindle tab) and keeps one snapshot per Kindle in `shelf.json` next to
+  `digest.toml`. A snapshot older than 30 days isn't printed.
+- **The nightstand works on every Kindle, the Scribe included.** It comes from the reading
+  positions the Kindle keeps beside each book. The highlight and the words appear only on Kindles
+  that share them: a Paperwhite over USB does; the Scribe 2024 doesn't over USB (#99), and the
+  Daily tab says "Highlights and words aren't shared by this Kindle." instead of failing.
+- **Percent.** Exact for books Deckle sent and for any KFX on a USB-storage Kindle; a book with
+  no known end shows its last-read day without a percent.
+- **What it shares.** The page reads only books, never the Kindle's account. Turn it off for
+  one Kindle with `[sync.devices."<id>"] shelf = false`, for all of them under Settings →
+  Kindles, or leave `"shelf"` out of `sections`. **Forget what my Kindles shared** on the Daily
+  tab (or `deckle digest shelf --forget`) deletes every snapshot.
+- **Email.** With email delivery on, the paper (this page included) passes through Amazon.
+- **Where the words' definitions come from.** A short definition only from a Word Wise database
+  already on this Mac; Deckle never downloads one for this.
+
+It's in the starter config. An existing `digest.toml` doesn't get it on its own: add `"shelf"` to
+`sections`, or switch it on in the Daily tab. Optional settings:
+
+```toml
+[shelf]
+nightstand = true
+highlights = true
+words = true
+hide = []         # titles containing any of these stay off the nightstand
+
+[sync]
+shelf = true      # read the books (and what the Kindle shares) when it connects
 ```
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.

@@ -1458,6 +1458,7 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Puzzle => digest_puzzle(json, &path),
+        cli::DigestCommand::Shelf { forget } => digest_shelf(json, &path, forget),
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
@@ -2172,6 +2173,148 @@ fn puzzle_text(out: &PuzzleOut) -> String {
         }
         if let Some(s) = &y.solve {
             lines.push(format!("  You solved {} of {}", s.solved, s.of));
+        }
+    }
+    lines.join("\n")
+}
+
+/// What `digest shelf --json` prints: each Kindle's snapshot in brief, and the page as of today.
+#[derive(serde::Serialize)]
+struct ShelfOut {
+    kindles: Vec<ShelfKindle>,
+    page: ShelfPage,
+}
+
+#[derive(serde::Serialize)]
+struct ShelfKindle {
+    id: String,
+    name: String,
+    seen: String,
+    books: usize,
+    highlights_shared: bool,
+    highlights: usize,
+    words_shared: bool,
+    words: usize,
+}
+
+#[derive(serde::Serialize)]
+struct ShelfPage {
+    nightstand: Option<deckle_digest::shelf::select::Nightstand>,
+    highlight: Option<deckle_digest::shelf::select::Pick>,
+    /// Each word with its "<Book>, <Weekday>" line.
+    words: Vec<(deckle_digest::shelf::store::WordSnap, String)>,
+}
+
+/// `digest shelf [--forget]`: the page From Your Shelf would print today, from the snapshots.
+fn digest_shelf(json: bool, path: &Path, forget: bool) -> Result<ExitCode, String> {
+    use deckle_digest::shelf::{select, store::Shelf};
+    let cfg = load_digest_config(path)?;
+    let store = cfg.shelf_store();
+    if forget {
+        Shelf::forget(&store)?;
+        println!("Forgot the shelf snapshot.");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let shelf = Shelf::load(&store);
+    let date = deckle_digest::chrono::Local::now().date_naive();
+    let tz = deckle_digest::tz::local_tz();
+    let out = ShelfOut {
+        kindles: shelf
+            .kindles
+            .iter()
+            .map(|(id, k)| ShelfKindle {
+                id: id.clone(),
+                name: k.name.clone(),
+                seen: k.seen.clone(),
+                books: k.books.len(),
+                highlights_shared: k.highlights_shared,
+                highlights: k.highlights.len(),
+                words_shared: k.words_shared,
+                words: k.words.len(),
+            })
+            .collect(),
+        page: ShelfPage {
+            nightstand: select::nightstand(
+                &shelf,
+                &cfg.shelf,
+                date,
+                tz,
+                deckle_shelf::KINDLE_FRACTION_OK,
+            ),
+            highlight: cfg
+                .shelf
+                .highlights
+                .then(|| select::highlight(&shelf, date))
+                .flatten(),
+            words: if cfg.shelf.words {
+                select::words(&shelf, date, tz)
+            } else {
+                Vec::new()
+            },
+        },
+    };
+    emit(json, &out, || shelf_text(&out))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn shelf_text(out: &ShelfOut) -> String {
+    if out.kindles.is_empty() {
+        return "Nothing on the shelf yet: add \"shelf\" to sections in digest.toml and plug \
+                your Kindle in (or run `deckle digest push`)."
+            .to_owned();
+    }
+    let mut lines = Vec::new();
+    for k in &out.kindles {
+        let shares = |shared: bool, n: usize, what: &str| match shared {
+            true => format!("{n} {what}"),
+            false => format!("no {what} shared"),
+        };
+        lines.push(format!(
+            "{} · seen {} · {} books · {} · {}",
+            k.name,
+            k.seen,
+            k.books,
+            shares(k.highlights_shared, k.highlights, "highlights"),
+            shares(k.words_shared, k.words, "words"),
+        ));
+    }
+    let page = &out.page;
+    if let Some(n) = &page.nightstand {
+        lines.push(String::new());
+        lines.push("On your nightstand".to_owned());
+        for b in &n.books {
+            let pct = b
+                .percent
+                .map(|p| format!("{}{p}% · ", if b.about { "about " } else { "" }))
+                .unwrap_or_default();
+            lines.push(format!("  {} — {pct}{}", b.title, b.state));
+        }
+        if let Some(nudge) = &n.nudge {
+            lines.push(format!("  {}", nudge.replace('*', "")));
+        }
+    }
+    if let Some(p) = &page.highlight {
+        lines.push(String::new());
+        lines.push(format!("You highlighted this {} ago", p.age));
+        lines.push(format!("  \u{201C}{}\u{201D}", p.highlight.text));
+        lines.push(format!("  {}, {}", p.highlight.title, p.highlight.author));
+        lines.extend(
+            p.highlight
+                .notes
+                .iter()
+                .map(|n| format!("  Your note: {n}")),
+        );
+    }
+    if !page.words.is_empty() {
+        lines.push(String::new());
+        lines.push("Words you looked up this week".to_owned());
+        for (w, from) in &page.words {
+            let def = w
+                .definition
+                .as_deref()
+                .map(|d| format!(" — {d}"))
+                .unwrap_or_default();
+            lines.push(format!("  {}{def} ({from})", w.word));
         }
     }
     lines.join("\n")

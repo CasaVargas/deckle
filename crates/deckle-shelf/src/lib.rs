@@ -103,20 +103,24 @@ impl Summary {
     }
 }
 
-/// Stores `snap` as Kindle `id` in the shelf file at `path`, replacing that Kindle's last
-/// snapshot and no other's.
-pub fn record(path: &Path, id: &str, snap: KindleSnapshot) -> Result<Summary, String> {
-    let in_progress = snap
-        .books
+/// How many of the snapshot's books are being read: a read time, and not yet (or nearly) done.
+/// The page's own rules add a 60-day window and the hide list.
+pub fn in_progress(snap: &KindleSnapshot) -> usize {
+    snap.books
         .iter()
         .filter(|b| b.last_read.is_some())
         .filter(|b| {
             deckle_digest::shelf::select::percent(b, KINDLE_FRACTION_OK)
                 .is_none_or(|(p, _)| (1..=97).contains(&p))
         })
-        .count();
+        .count()
+}
+
+/// Stores `snap` as Kindle `id` in the shelf file at `path`, replacing that Kindle's last
+/// snapshot and no other's.
+pub fn record(path: &Path, id: &str, snap: KindleSnapshot) -> Result<Summary, String> {
     let summary = Summary {
-        in_progress,
+        in_progress: in_progress(&snap),
         highlights: snap.highlights_shared,
         words: snap.words.len(),
     };

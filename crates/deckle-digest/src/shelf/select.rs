@@ -9,6 +9,7 @@ use chrono::{DateTime, Datelike, NaiveDate};
 use chrono_tz::Tz;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use serde::Serialize;
 
 use super::store::{BookSnap, HighlightSnap, Shelf, WordSnap};
 use crate::EDITION_PREFIX;
@@ -32,7 +33,7 @@ const WORD_DAYS: i64 = 7;
 const WORDS: usize = 3;
 
 /// One book on the nightstand.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Line {
     pub title: String,
     pub percent: Option<u8>,
@@ -42,7 +43,7 @@ pub struct Line {
     pub state: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Nightstand {
     pub books: Vec<Line>,
     pub nudge: Option<String>,
@@ -185,7 +186,7 @@ pub fn age(added: NaiveDate, date: NaiveDate) -> String {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Pick {
     pub highlight: HighlightSnap,
     pub age: String,

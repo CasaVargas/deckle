@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
+import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -45,6 +45,9 @@ export const api = {
   readershipApply: (id: string) => invoke<ReadershipView>("readership_apply", { id }),
   readershipDismiss: (id: string) => invoke<ReadershipView>("readership_dismiss", { id }),
   readershipSet: (on: boolean) => invoke<ReadershipView>("readership_set", { on }),
+  shelfStatus: () => invoke<ShelfStatus>("shelf_status"),
+  shelfForget: () => invoke<ShelfStatus>("shelf_forget"),
+  shelfSet: (on: boolean) => invoke<ShelfStatus>("shelf_set", { on }),
   /** Opens an https link in the default browser (webview links do not). */
   openLink: (url: string) => openUrl(url),
   onProgress: (cb: (e: ProgressEvent) => void): Promise<UnlistenFn> =>

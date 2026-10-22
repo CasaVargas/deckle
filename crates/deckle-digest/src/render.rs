@@ -50,6 +50,7 @@ blockquote { margin: 0.6em 1.2em; font-style: italic; }
 .bar { border: 1px solid black; height: 0.5em; width: 60%; }
 .bar > div { background-color: black; height: 100%; }
 .nudge { font-style: italic; }
+.nudge i { font-style: normal; font-weight: bold; }
 .shelf-book { font-weight: bold; margin-bottom: 0.2em; }
 .source { font-size: 0.8em; font-style: italic; margin-top: 0.8em; }
 .note { font-style: italic; }
