@@ -4,7 +4,7 @@
 //! operation code. Open it with `Conn::with_opener(&target, fake_mtp::open)`.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use deckle_transport::ptp::{Container, ContainerKind, ObjectInfo, StorageInfo, fmt, op, rsp};
 use deckle_transport::session::{Mtp, Transport, TransportError};
@@ -19,6 +19,8 @@ pub const FREE: u64 = 12_000_000_000;
 #[derive(Default)]
 struct Kindle {
     objects: Vec<(u32, ObjectInfo)>,
+    /// What GetObject returns for a file put with [`put_bytes`].
+    contents: HashMap<u32, Vec<u8>>,
     ops: Vec<u16>,
     opens: u32,
     next: u32,
@@ -83,6 +85,23 @@ pub fn put(path: &str, size: u32) {
                 }
             };
         }
+    });
+}
+
+/// [`put`] with these bytes as the file's contents.
+pub fn put_bytes(path: &str, bytes: &[u8]) {
+    put(path, bytes.len() as u32);
+    KINDLE.with(|k| {
+        let mut k = k.borrow_mut();
+        let name = path.rsplit('/').next().unwrap_or(path);
+        let h = k
+            .objects
+            .iter()
+            .rev()
+            .find(|(_, o)| o.filename == name && !o.association)
+            .map(|(h, _)| *h)
+            .unwrap();
+        k.contents.insert(h, bytes.to_vec());
     });
 }
 
@@ -218,6 +237,10 @@ impl Wire {
                     let (_, i) = k.objects.iter().find(|(h, _)| *h == c.params[0]).unwrap();
                     self.replies.push_back(data(c.code, tx, &i.encode()));
                 }
+                op::GET_OBJECT => {
+                    let bytes = k.contents.get(&c.params[0]).cloned().unwrap_or_default();
+                    self.replies.push_back(data(c.code, tx, &bytes));
+                }
                 op::DELETE_OBJECT => {
                     let h = c.params[0];
                     k.objects.retain(|(o, i)| *o != h && i.parent != h);
@@ -265,7 +288,11 @@ impl Transport for Wire {
     }
 
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, TransportError> {
-        let r = self.replies.pop_front().ok_or(TransportError::Timeout)?;
+        let mut r = self.replies.pop_front().ok_or(TransportError::Timeout)?;
+        // A reply longer than the reader's buffer arrives over several reads, as over USB.
+        if r.len() > buf.len() {
+            self.replies.push_front(r.split_off(buf.len()));
+        }
         buf[..r.len()].copy_from_slice(&r);
         Ok(r.len())
     }
