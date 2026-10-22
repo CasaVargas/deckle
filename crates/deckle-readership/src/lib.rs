@@ -4,7 +4,9 @@
 
 pub mod krds;
 pub mod layout;
+pub mod report;
 pub mod state;
 
 pub use krds::{KrdsError, Positions, parse_yjf, position_id};
+pub use report::{Report, SectionRow, Suggestion, SuggestionKind, apply, dismiss, report};
 pub use state::{OnDevice, Recorded, State, state_path};
