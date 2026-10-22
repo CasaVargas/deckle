@@ -185,6 +185,7 @@ const PUZZLE_SAMPLE: &str = r#"{"word":"card","pos":"noun","lang_code":"en","for
 {"word":"beth","pos":"noun","lang_code":"en","senses":[{"glosses":["The second letter of the Phoenician alphabet."]},{"glosses":["The second letter of the Aramaic alphabet."]},{"glosses":["The second letter of the Syriac alphabet."]},{"glosses":["The second letter of the Hebrew alphabet."]}]}
 {"word":"roar","pos":"verb","lang_code":"en","senses":[{"glosses":["To make a loud, deep cry, especially from pain, anger, or other strong emotion; to bellow."]}]}
 {"word":"hose","pos":"noun","lang_code":"en","senses":[{"glosses":["Specifically, a flexible tube conveying water."]}]}
+{"word":"wood","pos":"noun","lang_code":"en","senses":[{"glosses":["Firewood."]},{"glosses":["The substance making up the trunk of a tree."]}]}
 {"word":"leaf","pos":"noun","lang_code":"en","senses":[{"glosses":["The usually green and flat organ of a plant that photosynthesizes."]}]}
 "#;
 
@@ -202,6 +203,7 @@ fn puzzle_freq() -> HashMap<String, f64> {
         ("darn", 3.4),
         ("rose", 4.5),
         ("leaf", 4.0),
+        ("wood", 4.7),
         ("warm", 4.5),
         ("water", 5.2),
         ("pane", 3.3),
@@ -275,6 +277,11 @@ fn puzzle_words_filters() {
 fn puzzle_clue_never_contains_answer() {
     let list = puzzle_list(&[]);
     assert!(list.iter().all(|(w, _)| w != "rose"));
+    // inside another word counts too: "Firewood" gives "wood" away
+    assert!(list.contains(&(
+        "wood".into(),
+        "The substance making up the trunk of a tree".into()
+    )));
     for (w, c) in &list {
         assert!(!c.to_lowercase().contains(w.as_str()), "{w}: {c}");
     }

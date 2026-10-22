@@ -238,12 +238,10 @@ fn puzzle_clue(gloss: &str) -> String {
     }
 }
 
-/// A clue gives its answer away when one of its words is the answer or starts with it
-/// ("rose-coloured", "roses"), ignoring case.
+/// A clue gives its answer away when the answer is anywhere in it, ignoring case: "roses",
+/// "rose-coloured", "Firewood".
 pub fn gives_away(answer: &str, clue: &str) -> bool {
-    clue.to_lowercase()
-        .split(|c: char| !c.is_alphabetic())
-        .any(|t| t.starts_with(answer))
+    clue.to_lowercase().contains(answer)
 }
 
 /// Ordering key for picking a sense: 0 for an everyday sense, more for marked ones.

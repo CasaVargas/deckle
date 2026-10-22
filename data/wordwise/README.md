@@ -32,7 +32,7 @@ to `puzzle-blocklist.txt`, and rebuild.
 
 | Built | Sources downloaded | Words (3 / 4 / 5 letters) | Gzipped |
 |---|---|---|---|
-| 2026-10-22 | 2026-10-22 | 3,095 (415 / 1,170 / 1,510) | 61 KB |
+| 2026-10-22 | 2026-10-22 | 3,090 (412 / 1,168 / 1,510) | 61 KB |
 
 Data licenses: Wiktionary content via kaikki.org is CC BY-SA 4.0 (`tests/sample.jsonl` is 22
 trimmed entries of it); wordfreq's word lists are CC BY-SA 4.0.
