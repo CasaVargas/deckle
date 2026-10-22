@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
+import ArticleField from "./ArticleField";
 import { parseAddresses } from "./articles";
 import DailyView from "./DailyView";
 import Icon from "./Icon";
@@ -60,6 +62,10 @@ export default function App() {
   booksRef.current = books;
   const tabRef = useRef(tab);
   tabRef.current = tab;
+  const [articleOpen, setArticleOpen] = useState(false);
+  const articleInput = useRef<HTMLInputElement>(null);
+  /** Whether ⌘V should open the article field: Books tab showing, nothing running. */
+  const pasteReady = useRef(false);
 
   const addRows = useCallback((rows: BookRow[]) => {
     setBooks((prev) => {
@@ -184,8 +190,19 @@ export default function App() {
       addArticles(urls);
     };
     document.addEventListener("paste", onPaste);
+    // The Mac webview sends no paste event unless a text field has focus, so ⌘V (Ctrl+V) on the
+    // Books tab first opens and focuses the article field; the paste then lands in it.
+    const onKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (ev.key.toLowerCase() !== "v" || !(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey) return;
+      if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
+      flushSync(() => setArticleOpen(true));
+      articleInput.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("paste", onPaste);
+      document.removeEventListener("keydown", onKey);
       clearInterval(timer);
       unlistenDrop.then((f) => f());
       unlistenProgress.then((f) => f());
@@ -299,6 +316,7 @@ export default function App() {
   const clearDone = () => setBooks((p) => p.filter((b) => b.status !== "done"));
 
   const doneCount = books.filter((b) => b.status === "done").length;
+  pasteReady.current = tab === "books" && settingsPage === null && !busy;
 
   const openSettings = (page: SettingsPage = lastPage.current) => setSettingsPage(page);
   const pickPage = (page: SettingsPage) => {
@@ -371,6 +389,11 @@ export default function App() {
             <Icon name="plus" /> Add books
           </button>
         )}
+        {tab === "books" && (
+          <button className="ghost with-icon" onClick={() => setArticleOpen(true)} disabled={busy}>
+            <Icon name="link" /> Add article
+          </button>
+        )}
         {tab === "books" && doneCount > 0 && !busy && (
           <button className="ghost" onClick={clearDone}>
             Clear done
@@ -383,6 +406,16 @@ export default function App() {
 
       {tab === "daily" && <DailyView onNotice={setNotice} />}
       {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} />}
+      {tab === "books" && articleOpen && (
+        <ArticleField
+          ref={articleInput}
+          onAdd={(urls) => {
+            setArticleOpen(false);
+            addArticles(urls);
+          }}
+          onCancel={() => setArticleOpen(false)}
+        />
+      )}
       {tab === "books" && (
       <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
         {books.length === 0 ? (
@@ -396,6 +429,9 @@ export default function App() {
             <div className="empty-actions">
               <button className="ghost" onClick={pickBooks}>
                 Choose files…
+              </button>
+              <button className="ghost" onClick={() => setArticleOpen(true)}>
+                Add article
               </button>
             </div>
           </div>
