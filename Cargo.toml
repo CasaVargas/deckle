@@ -45,3 +45,7 @@ tauri-build = { version = "2.7", features = [] }
 uuid = { version = "1", features = ["v4"] }
 assert_cmd = "2"
 predicates = "3"
+
+# Dependencies build without debug info: smaller, faster dev builds; our own crates keep it.
+[profile.dev.package."*"]
+debug = false
