@@ -72,6 +72,9 @@ pub struct Config {
     /// Send-to-Kindle email (email design §5). Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "EmailConfig::is_default")]
     pub email: EmailConfig,
+    /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
+    #[serde(skip)]
+    pub almanac_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -103,6 +106,7 @@ impl Default for Config {
             reading: ReadingConfig::default(),
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
+            almanac_path: None,
         }
     }
 }
@@ -509,6 +513,15 @@ fn tables_of(item: &toml_edit::Item) -> Option<Vec<toml_edit::Table>> {
 
 /// `~/Library/Application Support/deckle/digest.toml`, `%APPDATA%\deckle\digest.toml`, or
 /// `$XDG_CONFIG_HOME/deckle/digest.toml` (`~/.config`).
+impl Config {
+    /// Where the frost dates are cached.
+    pub fn almanac_cache(&self) -> PathBuf {
+        self.almanac_path
+            .clone()
+            .unwrap_or_else(|| default_path().with_file_name("almanac.json"))
+    }
+}
+
 pub fn default_path() -> PathBuf {
     let home = || std::env::var_os("HOME").map(PathBuf::from);
     let base = if cfg!(target_os = "macos") {
