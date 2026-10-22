@@ -92,6 +92,9 @@ const PUZZLE_MARKED: &[&str] = &[
     "informal",
 ];
 
+/// Longer definitions don't fit beside a 5×5 grid.
+const MAX_CLUE: usize = 90;
+
 /// The word list for the puzzle page (puzzle design §4): lowercase a–z words of 3 to 5 letters
 /// at zipf 3.0 or more, each with the short definition of its first everyday sense as the clue,
 /// sorted by word. Proper nouns, abbreviations, marked senses, plain inflections of a kept
@@ -101,12 +104,19 @@ pub fn puzzle_words(
     freq: &HashMap<String, f64>,
     blocklist: &HashSet<String>,
 ) -> Vec<(String, String)> {
-    // word → (clue, penalty, weight of its entry); and word → the lemmas it inflects
-    let mut best: BTreeMap<String, (String, u8, usize)> = BTreeMap::new();
+    // word → its clue, from the first entry and sense that give one; word → the lemmas it
+    // inflects; word → whether its lowercase entries are all nouns; names ("Goa", "Beth")
+    let mut best: BTreeMap<String, String> = BTreeMap::new();
     let mut inflects: HashMap<String, Vec<String>> = HashMap::new();
+    let mut nouns_only: HashMap<String, bool> = HashMap::new();
+    let mut names: HashSet<String> = HashSet::new();
     let mut function_word: HashMap<String, bool> = HashMap::new();
     for line in jsonl.lines() {
-        let Ok(line) = line else { break };
+        let line = match line {
+            Ok(l) => l,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(e) => panic!("reading kaikki: {e}"),
+        };
         let Ok(entry) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
@@ -118,8 +128,14 @@ pub fn puzzle_words(
         };
         if entry.get("lang_code").and_then(Value::as_str) != Some("en")
             || !(3..=5).contains(&word.len())
-            || !word.bytes().all(|b| b.is_ascii_lowercase())
+            || !word.bytes().all(|b| b.is_ascii_alphabetic())
         {
+            continue;
+        }
+        if !word.bytes().all(|b| b.is_ascii_lowercase()) {
+            if pos == "name" {
+                names.insert(word.to_ascii_lowercase());
+            }
             continue;
         }
         function_word.entry(word.to_owned()).or_insert(matches!(
@@ -153,7 +169,8 @@ pub fn puzzle_words(
         {
             continue;
         }
-        let mut good: Vec<(&Value, &str)> = senses
+        // Wiktionary lists the main entry and its everyday senses first
+        let clues: Vec<String> = senses
             .iter()
             .filter(|s| {
                 s.get("form_of").is_none()
@@ -164,27 +181,26 @@ pub fn puzzle_words(
             })
             .filter_map(|s| {
                 let g = s.get("glosses")?.as_array()?.last()?.as_str()?;
-                (!g.contains("spelling of")).then_some((s, g))
+                (!g.contains("spelling of")).then(|| puzzle_clue(g))
             })
             .collect();
-        let weight = good.len();
-        good.sort_by_key(|(s, _)| sense_penalty(s)); // stable: the first everyday sense
-        let Some((s, clue)) = good.iter().find_map(|(s, g)| {
-            let c = short_def(g);
-            (!c.is_empty() && !gives_away(word, &c)).then_some((s, c))
-        }) else {
-            continue;
-        };
-        let cand = (clue, sense_penalty(s), weight);
-        match best.get(word) {
-            Some(b) if (b.1, std::cmp::Reverse(b.2)) <= (cand.1, std::cmp::Reverse(cand.2)) => {}
-            _ => {
-                best.insert(word.to_owned(), cand);
-            }
+        if !clues.is_empty() {
+            *nouns_only.entry(word.to_owned()).or_insert(true) &= pos == "noun";
+        }
+        let clue = clues.into_iter().find(|c| {
+            c.chars().next().is_some_and(char::is_uppercase)
+                && c.chars().count() <= MAX_CLUE
+                && !gives_away(word, c)
+        });
+        if let Some(c) = clue {
+            best.entry(word.to_owned()).or_insert(c);
         }
     }
     best.iter()
         .filter(|(w, _)| !function_word.get(*w).copied().unwrap_or(false))
+        // wordfreq counts "goa" for Goa: a name whose lowercase spelling is only a rare noun.
+        // "bath" (a verb too) is a word whatever Bath is.
+        .filter(|(w, _)| !(names.contains(*w) && nouns_only.get(*w).copied().unwrap_or(true)))
         .filter(|(w, _)| {
             // "cards" (of "card"), "baked" (of "bake"): a regular inflection of a kept word.
             // Irregular forms with their own meaning ("bore", "left") stay.
@@ -193,8 +209,33 @@ pub fn puzzle_words(
                 best.contains_key(l) && !stem.is_empty() && w.starts_with(stem)
             })
         })
-        .map(|(w, (c, _, _))| (w.clone(), c.clone()))
+        .map(|(w, c)| (w.clone(), c.clone()))
         .collect()
+}
+
+/// A definition as a clue: its first clause whole when it fits, else the Word Wise short
+/// definition.
+fn puzzle_clue(gloss: &str) -> String {
+    let g = trim_stop(&strip_parens(gloss));
+    // "Specifically, a flexible tube" → "A flexible tube"
+    let g = match ["Specifically, ", "Especially, ", "In particular, "]
+        .iter()
+        .find_map(|p| g.strip_prefix(p))
+    {
+        Some(rest) => {
+            let mut c = rest.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect())
+                .unwrap_or_default()
+        }
+        None => g,
+    };
+    let first = trim_stop(g.split(';').next().unwrap_or(""));
+    if first.chars().count() <= MAX_CLUE {
+        first
+    } else {
+        short_def(&g)
+    }
 }
 
 /// A clue gives its answer away when one of its words is the answer or starts with it

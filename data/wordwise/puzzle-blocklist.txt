@@ -130,3 +130,8 @@ died
 dies
 dead
 death
+# from the skim of the built list (2026-10-22)
+xxx
+lynch
+kinda
+sus
