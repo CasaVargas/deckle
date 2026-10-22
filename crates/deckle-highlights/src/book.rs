@@ -156,6 +156,15 @@ fn items(entries: Vec<Entry>) -> Vec<Item> {
         kept.retain(|k| !extends(k, &h));
         kept.push(h);
     }
+    // A Kindle keeps one note per location: editing or re-saving one appends a new entry and
+    // leaves the old, so the latest at each location is the note.
+    let mut latest: Vec<Entry> = Vec::new();
+    for n in notes {
+        latest
+            .retain(|k| !(k.title == n.title && k.location.is_some() && k.location == n.location));
+        latest.push(n);
+    }
+    let notes = latest;
     let mut items: Vec<Item> = kept
         .into_iter()
         .map(|entry| Item::Highlight {

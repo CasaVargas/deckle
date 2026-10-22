@@ -130,6 +130,9 @@ read this again before the cabin trip
   later one is kept. Two different passages that merely share a location (a location is about
   150 bytes, so consecutive sentences often do) both stay. *(Amended after the final review: the
   first rule, overlap alone, silently dropped the earlier of two adjacent highlights.)* Across exports, whatever was already written stays (append-only).
+- **Edited notes:** a Kindle keeps one note per location, and editing or re-saving it appends a
+  new entry while the old one stays. Notes of the same book at the same location count as one:
+  the latest. *(Found on a real Paperwhite, 2026-10-22: one note saved three times.)*
 - **Bookmarks** are skipped (no text).
 - **Notes attach** to the highlight of the same book whose location range contains the note's
   location (or ends at it). A note with no such highlight stands on its own.

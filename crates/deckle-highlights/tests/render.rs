@@ -187,3 +187,25 @@ fn adjacent_highlights_with_different_text_both_survive() {
     let books = group(vec![a, b, c, d]);
     assert_eq!(books[0].items.len(), 4);
 }
+
+/// Editing or re-saving a note on the Kindle appends a new entry at the same location and keeps
+/// the old one (seen on a real Paperwhite: "Oops", then "Oops!!" twice).
+#[test]
+fn notes_at_one_location_keep_only_the_latest() {
+    let mut h = highlight_at(570);
+    h.location = Some((570, 572));
+    let note = |text: &str| Entry {
+        kind: Kind::Note,
+        location: Some((572, 572)),
+        text: text.into(),
+        ..highlight_at(572)
+    };
+    let books = group(vec![h, note("Oops"), note("Oops!!"), note("Oops!!")]);
+    assert_eq!(books[0].items.len(), 1);
+    let Item::Highlight { notes, .. } = &books[0].items[0] else {
+        unreachable!()
+    };
+    assert_eq!(notes.len(), 1);
+    assert_eq!(notes[0].text, "Oops!!");
+    assert_eq!(render_new_file(&books[0]).matches("- Note:").count(), 1);
+}
