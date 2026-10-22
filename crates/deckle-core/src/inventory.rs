@@ -42,6 +42,9 @@ pub struct DeviceBook {
     /// The KFX's end position (`erl`), the denominator of a reading position.
     #[serde(skip)]
     pub end: Option<i64>,
+    /// The `.yjf` reading-position sidecar's bytes, when [`list_with_positions`] read it.
+    #[serde(skip)]
+    pub yjf: Option<Vec<u8>>,
     /// The KFX's cover, JPEG.
     #[serde(skip)]
     pub cover: Option<Vec<u8>>,
@@ -72,6 +75,24 @@ fn is_word_wise(name: &str) -> bool {
 }
 
 /// `<stem>.sdr` for a book file.
+/// Over MTP, at most this many `.yjf` are read per connection; the rest are counted.
+pub const MAX_YJF: usize = 300;
+
+/// Asks the walk to also read each book's `.yjf`. Books whose file name starts with
+/// `skip_prefix` (the editions) are left out.
+struct Positions<'a> {
+    skip_prefix: &'a str,
+    read: usize,
+    over: usize,
+}
+
+impl Positions<'_> {
+    fn wanted(&self, file: &str) -> bool {
+        let name = file.rsplit('/').next().unwrap_or(file);
+        format_of(name).as_deref() == Some("kfx") && !name.starts_with(self.skip_prefix)
+    }
+}
+
 fn sdr_name(file: &str) -> String {
     Path::new(file)
         .with_extension("sdr")
@@ -185,7 +206,11 @@ fn names_in(dir: &Path) -> Vec<String> {
 }
 
 /// Books in a `documents` folder on disk and one level of subfolders (not `.sdr`).
-fn list_dir(docs: &Path, cache: Option<&Path>) -> Result<Vec<DeviceBook>, DeliverError> {
+fn list_dir(
+    docs: &Path,
+    cache: Option<&Path>,
+    want: &Option<Positions<'_>>,
+) -> Result<Vec<DeviceBook>, DeliverError> {
     let io = |path: &Path| {
         let path = path.to_path_buf();
         move |source| DeliverError::Io { path, source }
@@ -211,25 +236,37 @@ fn list_dir(docs: &Path, cache: Option<&Path>) -> Result<Vec<DeviceBook>, Delive
                 .filter(|n| format_of(n).is_some())
                 .map(|n| (format!("{name}/{n}"), path.join(n)))
             {
-                out.push(book_on_disk(docs, &file, &path, cache));
+                out.push(book_on_disk(docs, &file, &path, cache, want));
             }
         } else if format_of(&name).is_some() {
-            out.push(book_on_disk(docs, &name, &path, cache));
+            out.push(book_on_disk(docs, &name, &path, cache, want));
         }
     }
     Ok(out)
 }
 
-fn book_on_disk(docs: &Path, file: &str, path: &Path, cache: Option<&Path>) -> DeviceBook {
+fn book_on_disk(
+    docs: &Path,
+    file: &str,
+    path: &Path,
+    cache: Option<&Path>,
+    want: &Option<Positions<'_>>,
+) -> DeviceBook {
     let mut book = DeviceBook {
         file: file.to_owned(),
         size: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
         format: format_of(file).unwrap_or_default(),
         ..Default::default()
     };
-    sidecar_flags(&mut book, names_in(&docs.join(sdr_name(file))));
+    let sdr = docs.join(sdr_name(file));
+    sidecar_flags(&mut book, names_in(&sdr));
     if book.format == "kfx" {
         details_cached(&mut book, path, cache);
+    }
+    if want.as_ref().is_some_and(|w| w.wanted(file))
+        && let Some(name) = names_in(&sdr).into_iter().find(|n| crate::yjf::is_yjf(n))
+    {
+        book.yjf = std::fs::read(sdr.join(name)).ok();
     }
     book
 }
@@ -246,7 +283,7 @@ fn mtp_err(e: MtpError) -> DeliverError {
     DeliverError::Mtp(e.to_string())
 }
 
-fn list_mtp(dev: &mut Mtp) -> Result<Inventory, DeliverError> {
+fn list_mtp(dev: &mut Mtp, want: &mut Option<Positions<'_>>) -> Result<Inventory, DeliverError> {
     let storage = *dev
         .storages()
         .map_err(mtp_err)?
@@ -287,12 +324,21 @@ fn list_mtp(dev: &mut Mtp) -> Result<Inventory, DeliverError> {
                 .iter()
                 .find(|(_, i)| i.association && i.filename.eq_ignore_ascii_case(&sdr))
             {
-                let names = dev
-                    .list(storage, *sh)
-                    .map_err(mtp_err)?
-                    .into_iter()
-                    .map(|(_, i)| i.filename);
-                sidecar_flags(&mut book, names);
+                let inside = dev.list(storage, *sh).map_err(mtp_err)?;
+                sidecar_flags(&mut book, inside.iter().map(|(_, i)| i.filename.clone()));
+                if let Some(w) = want.as_mut()
+                    && w.wanted(&book.file)
+                    && let Some((fh, _)) = inside
+                        .iter()
+                        .find(|(_, i)| !i.association && crate::yjf::is_yjf(&i.filename))
+                {
+                    if w.read < MAX_YJF {
+                        w.read += 1;
+                        book.yjf = Some(dev.get_object(*fh).map_err(mtp_err)?);
+                    } else {
+                        w.over += 1;
+                    }
+                }
             }
             books.push(book);
         }
@@ -305,17 +351,42 @@ fn list_mtp(dev: &mut Mtp) -> Result<Inventory, DeliverError> {
 /// What's on the connection's target. A folder export lists like a `documents` folder.
 /// `cache` keeps KFX details between listings (mass storage and folders).
 pub fn list_on(conn: &mut Conn<'_>, cache: Option<&Path>) -> Result<Inventory, DeliverError> {
+    walk(conn, cache, &mut None)
+}
+
+/// [`list_on`], also reading each KFX book's `.yjf` in the same walk (and the same MTP
+/// session). Books whose file name starts with `skip_prefix` get none. The count is how many
+/// `.yjf` went unread past [`MAX_YJF`].
+pub fn list_with_positions(
+    conn: &mut Conn<'_>,
+    cache: Option<&Path>,
+    skip_prefix: &str,
+) -> Result<(Inventory, usize), DeliverError> {
+    let mut want = Some(Positions {
+        skip_prefix,
+        read: 0,
+        over: 0,
+    });
+    let inv = walk(conn, cache, &mut want)?;
+    Ok((inv, want.map_or(0, |w| w.over)))
+}
+
+fn walk(
+    conn: &mut Conn<'_>,
+    cache: Option<&Path>,
+    want: &mut Option<Positions<'_>>,
+) -> Result<Inventory, DeliverError> {
     match conn.target {
         Target::Folder(dir) => Ok(Inventory {
-            books: list_dir(dir, cache)?,
+            books: list_dir(dir, cache, want)?,
             space: space_of(dir),
         }),
         Target::MassStorage(dev) => Ok(Inventory {
-            books: list_dir(&dev.root.join("documents"), cache)?,
+            books: list_dir(&dev.root.join("documents"), cache, want)?,
             space: space_of(&dev.root),
         }),
         Target::Mtp(_) => match conn.mtp() {
-            Some(Ok(dev)) => list_mtp(dev),
+            Some(Ok(dev)) => list_mtp(dev, want),
             Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
             None => unreachable!("an MTP target always has a connection"),
         },
@@ -569,6 +640,111 @@ mod device_tests {
         assert!(json.contains("\"end\""), "{json}");
         let again = list_on(&mut conn, Some(&cache)).unwrap();
         assert_eq!(again.books[0].end, Some(want));
+    }
+
+    fn mtp_target() -> Target {
+        Target::Mtp(deckle_transport::usb::MtpInfo {
+            vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
+            product_id: 1,
+            serial: Some("G0001".into()),
+            product: Some("Kindle".into()),
+            bus: 1,
+            address: 2,
+        })
+    }
+
+    const EDITION: &str = "deckle-daily-";
+    const E: &str = "deckle-daily-2026-10-21";
+
+    fn assert_positions(inv: &Inventory) {
+        let by = |f: &str| inv.books.iter().find(|b| b.file == f);
+        assert_eq!(by("Book.kfx").unwrap().yjf.as_deref(), Some(&b"BOOK"[..]));
+        assert_eq!(
+            by("deckle-longread-walden.kfx").unwrap().yjf.as_deref(),
+            Some(&b"LONG"[..]),
+            "a long read is a book"
+        );
+        assert_eq!(
+            by("Sub/Inner.kfx").unwrap().yjf.as_deref(),
+            Some(&b"INNER"[..])
+        );
+        assert_eq!(by("Other.kfx").unwrap().yjf, None);
+        let edition = format!("{E}.kfx");
+        assert!(
+            by(&edition).is_none_or(|b| b.yjf.is_none()),
+            "editions get no .yjf"
+        );
+    }
+
+    #[test]
+    fn positions_ride_in_the_listing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let docs = tmp.path().join("documents");
+        std::fs::create_dir_all(docs.join("Sub/Inner.sdr")).unwrap();
+        for (kfx, sdr, bytes) in [
+            ("Book", "Book.sdr", "BOOK"),
+            (E, &format!("{E}.sdr"), "EDITION"),
+            (
+                "deckle-longread-walden",
+                "deckle-longread-walden.sdr",
+                "LONG",
+            ),
+        ] {
+            std::fs::write(docs.join(format!("{kfx}.kfx")), b"x").unwrap();
+            std::fs::create_dir_all(docs.join(sdr)).unwrap();
+            std::fs::write(docs.join(sdr).join("p9d6e.yjf"), bytes).unwrap();
+            std::fs::write(docs.join(sdr).join("p9d6e.yjr"), b"YJR").unwrap();
+            std::fs::write(docs.join(sdr).join("p9d6e.yjr.bad_file"), b"BAD").unwrap();
+        }
+        std::fs::write(docs.join("Other.kfx"), b"x").unwrap();
+        std::fs::write(docs.join("Sub/Inner.kfx"), b"x").unwrap();
+        std::fs::write(docs.join("Sub/Inner.sdr/i9d6e.yjf"), b"INNER").unwrap();
+        let target = kindle(tmp.path());
+        let mut conn = Conn::new(&target);
+        let (inv, over) = list_with_positions(&mut conn, None, EDITION).unwrap();
+        assert_eq!(over, 0);
+        assert_positions(&inv);
+    }
+
+    #[test]
+    fn positions_over_mtp_in_one_session() {
+        fake::reset(&[
+            "Book.kfx",
+            "Other.kfx",
+            &format!("{E}.kfx"),
+            "deckle-longread-walden.kfx",
+        ]);
+        fake::put("Sub/Inner.kfx", 1);
+        fake::put_bytes("Book.sdr/Book9d6e.yjf", b"BOOK");
+        fake::put_bytes("Book.sdr/Book9d6e.yjr", b"YJR");
+        fake::put_bytes(&format!("{E}.sdr/{E}9d6e.yjf"), b"EDITION");
+        fake::put_bytes("deckle-longread-walden.sdr/w9d6e.yjf", b"LONG");
+        fake::put_bytes("Sub/Inner.sdr/Inner9d6e.yjf", b"INNER");
+        let target = mtp_target();
+        let mut conn = Conn::with_opener(&target, fake::open);
+        let (inv, over) = list_with_positions(&mut conn, None, EDITION).unwrap();
+        assert_eq!(over, 0);
+        assert_positions(&inv);
+        drop(conn);
+        assert_eq!(fake::opens(), 1);
+    }
+
+    #[test]
+    fn cap_counts_the_rest() {
+        let names: Vec<String> = (0..302).map(|i| format!("B{i:03}.kfx")).collect();
+        let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+        fake::reset(&refs);
+        for i in 0..302 {
+            fake::put_bytes(&format!("B{i:03}.sdr/B{i:03}x.yjf"), b"Y");
+        }
+        let target = mtp_target();
+        let mut conn = Conn::with_opener(&target, fake::open);
+        let (inv, over) = list_with_positions(&mut conn, None, EDITION).unwrap();
+        assert_eq!(
+            inv.books.iter().filter(|b| b.yjf.is_some()).count(),
+            MAX_YJF
+        );
+        assert_eq!(over, 2);
     }
 
     #[test]

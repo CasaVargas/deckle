@@ -55,7 +55,8 @@ pub fn reset(docs: &[&str]) {
         for (i, n) in docs.iter().enumerate() {
             k.objects.push((10 + i as u32, info(DOCUMENTS, n, false)));
         }
-        k.next = 100;
+        // Past the handles given to `docs`, which would collide with 100+ for a long list.
+        k.next = 100.max(10 + docs.len() as u32);
     });
 }
 
