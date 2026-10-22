@@ -599,3 +599,21 @@ fn next_paper_serializes_camel_case() {
     assert!(v["pages"].as_u64().unwrap() >= 1);
     assert!(v["press"]["next"].is_string());
 }
+
+#[test]
+fn saved_articles_print_even_with_reading_off() {
+    // the press puts Your Reading first when something is saved and it's off (gather): the
+    // preview must lead with it too
+    let mut s = Setup::new();
+    s.cfg.sections.retain(|k| *k != SectionKind::Reading);
+    s.live.feeds.insert(
+        SCIENCE.into(),
+        fetched(&[("Comet brightens", local(2026, 10, 22, 14, 0))]),
+    );
+    assert_eq!(s.plan().lead.unwrap().kicker, "SCIENCE · 1 NEW SINCE 05:30");
+    s.queue = two_saved();
+    let p = s.plan();
+    assert_eq!(p.plan[0].key, "reading");
+    assert!(p.off.iter().all(|r| r.key != "reading"));
+    assert_eq!(p.lead.unwrap().kicker, "YOUR READING · THEATLANTIC.COM");
+}

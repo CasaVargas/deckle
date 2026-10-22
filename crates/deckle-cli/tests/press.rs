@@ -48,12 +48,12 @@ fn queue(home: &Path) -> Vec<u8> {
 fn stop_then_run_builds_nothing() {
     let (home, out) = setup();
     deckle(home.path())
-        .args(["digest", "stop", "--date", "2026-10-23"])
+        .args(["digest", "stop", "--date", &tomorrow()])
         .assert()
         .success();
     let before = queue(home.path());
     let o = deckle(home.path())
-        .args(["digest", "run", "--date", "2026-10-23", "--to"])
+        .args(["digest", "run", "--date", &tomorrow(), "--to"])
         .arg(&out)
         .env("PATH", "/nonexistent")
         .output()
@@ -61,7 +61,7 @@ fn stop_then_run_builds_nothing() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let text = String::from_utf8(o.stdout).unwrap();
     assert!(
-        text.contains("Presses stopped for Friday, October 23"),
+        text.contains(&format!("Presses stopped for {}", long_tomorrow())),
         "{text}"
     );
     assert!(text.contains("deckle digest stop --undo"), "{text}");
@@ -69,19 +69,20 @@ fn stop_then_run_builds_nothing() {
     assert_eq!(queue(home.path()), before);
     // the JSON form
     let o = deckle(home.path())
-        .args(["--json", "digest", "run", "--date", "2026-10-23", "--to"])
+        .args(["--json", "digest", "run", "--date", &tomorrow(), "--to"])
         .arg(&out)
+        .env("PATH", "/nonexistent")
         .output()
         .unwrap();
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
-    assert_eq!(v["stopped"], "2026-10-23");
+    assert_eq!(v["stopped"], tomorrow());
 }
 
 #[test]
 fn force_runs_anyway() {
     let (home, out) = setup();
     deckle(home.path())
-        .args(["digest", "stop", "--date", "2026-10-23"])
+        .args(["digest", "stop", "--date", &tomorrow()])
         .assert()
         .success();
     let o = deckle(home.path())
@@ -90,7 +91,7 @@ fn force_runs_anyway() {
             "run",
             "--force",
             "--date",
-            "2026-10-23",
+            &tomorrow(),
             "--previewer",
         ])
         .arg(home.path().join("missing"))
@@ -126,7 +127,7 @@ fn asleep_through_press() {
 fn undo_clears() {
     let (home, _) = setup();
     deckle(home.path())
-        .args(["digest", "stop", "--date", "2026-10-23"])
+        .args(["digest", "stop", "--date", &tomorrow()])
         .assert()
         .success();
     assert!(config_dir(home.path()).join("press.json").exists());
@@ -232,4 +233,17 @@ fn next_without_fetch_makes_no_request() {
             .join("Library/Caches/deckle/digest/next.json")
             .exists()
     );
+}
+
+/// The stop tests use tomorrow: a stop for a day already past is ignored.
+fn tomorrow() -> String {
+    (deckle_digest::chrono::Local::now().date_naive() + deckle_digest::chrono::Days::new(1))
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+fn long_tomorrow() -> String {
+    (deckle_digest::chrono::Local::now().date_naive() + deckle_digest::chrono::Days::new(1))
+        .format("%A, %B %-d")
+        .to_string()
 }

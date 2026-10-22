@@ -3,6 +3,7 @@
 //! local files, the polite headline refresh, and Stop the presses.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use deckle_digest::chrono::{DateTime, Utc};
 use deckle_digest::chrono_tz::Tz;
@@ -91,15 +92,38 @@ pub fn daily_next() -> Result<NextPaper, String> {
     )
 }
 
+/// Runs `f` unless another call holding `flag` is still running; says whether it ran.
+fn single_flight(flag: &AtomicBool, f: impl FnOnce()) -> bool {
+    if flag.swap(true, Ordering::AcqRel) {
+        return false;
+    }
+    f();
+    flag.store(false, Ordering::Release);
+    true
+}
+
+/// A refresh in progress: a focus while one runs doesn't start a second over the same feeds.
+static REFRESHING: AtomicBool = AtomicBool::new(false);
+
 /// Checks the feeds for headlines (each URL at most twice an hour), then the view.
 #[tauri::command]
 pub async fn daily_next_refresh() -> Result<NextPaper, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let cfg = config_at(&digest_path())?;
-        let path = cache_dir().join("next.json");
-        let mut cache = deckle_digest::next::live::LiveCache::load(&path);
-        deckle_digest::next::live::refresh(&cfg, &mut cache, Utc::now(), &deckle_digest::Http);
-        cache.save(&path)
+        let mut out = Ok(());
+        single_flight(&REFRESHING, || {
+            out = config_at(&digest_path()).and_then(|cfg| {
+                let path = cache_dir().join("next.json");
+                let mut cache = deckle_digest::next::live::LiveCache::load(&path);
+                deckle_digest::next::live::refresh(
+                    &cfg,
+                    &mut cache,
+                    Utc::now(),
+                    &deckle_digest::Http,
+                );
+                cache.save(&path)
+            });
+        });
+        out
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -180,5 +204,25 @@ mod tests {
             stop_at(&digest, true, None, now()),
             Err("nothing is scheduled; there's no press to stop".to_owned())
         );
+    }
+}
+
+#[cfg(test)]
+mod flight_tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn one_refresh_at_a_time() {
+        let flag = AtomicBool::new(false);
+        let mut ran = 0;
+        // while one runs, a second asks and is turned away
+        assert!(single_flight(&flag, || {
+            assert!(!single_flight(&flag, || unreachable!("ran twice")));
+            ran += 1;
+        }));
+        // and the flag is free again after
+        assert!(single_flight(&flag, || ran += 1));
+        assert_eq!(ran, 2);
     }
 }

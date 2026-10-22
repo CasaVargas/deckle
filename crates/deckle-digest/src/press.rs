@@ -62,9 +62,12 @@ pub fn press(at: Option<(u8, u8)>, stopped: Option<NaiveDate>, now: DateTime<Tz>
     };
     let first = next_press(at, now);
     let since = on(first.date_naive() - Days::new(1), at, tz);
+    // Only a stop on the next press shows: one whose morning has passed is spent (it lapses at
+    // midnight for `digest run`), and one further on isn't what the bar is about.
+    let stopped = stopped.filter(|s| *s == first.date_naive());
     let next = match stopped {
-        Some(s) if s == first.date_naive() => on(s + Days::new(1), at, tz),
-        _ => first,
+        Some(s) => on(s + Days::new(1), at, tz),
+        None => first,
     };
     Press {
         at: Some(format!("{:02}:{:02}", at.0, at.1)),
@@ -215,6 +218,18 @@ mod tests {
         );
         assert_eq!(p.stopped, Some(day(23)));
         assert_eq!(p.since, at(ny(), 2026, 10, 22, 5, 30).fixed_offset());
+    }
+
+    #[test]
+    fn a_spent_stop_isnt_shown() {
+        // Friday's paper was stopped; at 06:00 Friday that morning is over: the bar is back to
+        // Saturday's press, with Stop available again
+        let p = press(Some((5, 30)), Some(day(23)), at(ny(), 2026, 10, 23, 6, 0));
+        assert_eq!(p.stopped, None);
+        assert_eq!(p.edition, day(24));
+        // a stop for a morning further on isn't the next press either
+        let p = press(Some((5, 30)), Some(day(27)), at(ny(), 2026, 10, 22, 15, 8));
+        assert_eq!((p.stopped, p.edition), (None, day(23)));
     }
 
     #[test]

@@ -58,7 +58,7 @@ const row = (key: string, kind: SectionKind, feed: number | null = null, items: 
   key,
   kind,
   feed,
-  name: key,
+  name: key.replace(/^feeds:/, ""),
   detail: "",
   budget: "",
   items,
@@ -105,7 +105,9 @@ describe("reorder", () => {
   test("two feeds with the same name are both kept", () => {
     const base = cfg();
     base.feeds[1].name = "A";
-    const c = reorder(base, rows(), 4, 3);
+    const r = rows();
+    r[4].name = "A";
+    const c = reorder(base, r, 4, 3);
     expect(c.feeds.map((f) => f.url)).toEqual(["https://b.example/feed", "https://a.example/feed"]);
   });
 
@@ -131,4 +133,13 @@ test("week labels", () => {
   expect(weekLabel({ date: "2026-10-18", state: { state: "notOpened" } })).toBe("not opened");
   expect(weekLabel({ date: "2026-10-19", state: { state: "sent" } })).toBe("sent");
   expect(weekLabel({ date: "2026-10-20", state: { state: "noPaper" } })).toBe("no paper");
+});
+
+describe("a plan out of step with the config", () => {
+  test("rows naming feeds the config no longer has change nothing", () => {
+    const base = cfg();
+    base.feeds = [base.feeds[1]]; // A removed, not saved yet
+    expect(reorder(base, rows(), 5, 1)).toBe(base);
+    expect(setBudget(base, rows()[4], 3)).toBe(base);
+  });
 });

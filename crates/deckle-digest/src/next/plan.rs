@@ -408,14 +408,15 @@ pub fn plan(i: &Inputs) -> NextPaper {
     let press = press(i.at, i.stopped, i.now);
     let date = press.edition;
     let since = press.since.with_timezone(&i.now.timezone());
-    let mut on: Vec<Row> = cfg
-        .sections
-        .iter()
-        .flat_map(|k| rows(i, *k, date))
-        .collect();
+    // As `gather` does: saved articles print first even when Your Reading is off.
+    let mut kinds = cfg.sections.clone();
+    if !kinds.contains(&SectionKind::Reading) && !pending(i.queue, date).is_empty() {
+        kinds.insert(0, SectionKind::Reading);
+    }
+    let mut on: Vec<Row> = kinds.iter().flat_map(|k| rows(i, *k, date)).collect();
     let off: Vec<PlanRow> = KINDS
         .iter()
-        .filter(|k| !cfg.sections.contains(k))
+        .filter(|k| !kinds.contains(k))
         .flat_map(|k| rows(i, *k, date))
         .map(|r| r.row)
         .collect();

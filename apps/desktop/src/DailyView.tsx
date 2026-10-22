@@ -64,6 +64,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [saveUrl, setSaveUrl] = useState("");
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [next, setNext] = useState<NextPaper | null>(null);
+  const [planSaving, setPlanSaving] = useState(false);
   const [time, setTime] = useState("05:30");
   const [placeQuery, setPlaceQuery] = useState("");
   const [places, setPlaces] = useState<PlaceRow[] | null>(null);
@@ -262,14 +263,24 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     );
   }
 
-  // Page plan edits write digest.toml at once (unsaved edits elsewhere go with them)
-  const planMove = (from: number, to: number) => next && save(reorder(draft, next.plan, from, to));
-  const planBudget = (row: PagePlanRow, n: number) => save(setBudget(draft, row, n));
-  const planToggle = (row: PagePlanRow, on: boolean) => {
-    const c = structuredClone(draft);
-    c.sections = on ? [...c.sections, row.kind] : c.sections.filter((x) => x !== row.kind);
-    save(c);
+  // Page plan edits write digest.toml at once. They apply to the saved config the plan was
+  // made from, one at a time: with unsaved edits in The paper (a feed added or removed) the
+  // plan waits for them to be saved.
+  const planLocked = dirty || planSaving || !next;
+  const planSave = async (f: (c: DailyConfig) => DailyConfig) => {
+    if (planLocked || !state.config) return;
+    setPlanSaving(true);
+    try {
+      const c = f(structuredClone(state.config));
+      if (c !== state.config) await save(c);
+    } finally {
+      setPlanSaving(false);
+    }
   };
+  const planMove = (from: number, to: number) => planSave((c) => (next ? reorder(c, next.plan, from, to) : c));
+  const planBudget = (row: PagePlanRow, n: number) => planSave((c) => setBudget(c, row, n));
+  const planToggle = (row: PagePlanRow, on: boolean) =>
+    planSave((c) => ({ ...c, sections: on ? [...c.sections, row.kind] : c.sections.filter((x) => x !== row.kind) }));
 
   return (
     <div className="daily">
@@ -299,7 +310,14 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           )}
         </TomorrowsPaper>
         <div className="daily-side">
-          <PagePlanCard next={next} onMove={planMove} onBudget={planBudget} onToggle={planToggle} />
+          <PagePlanCard
+            next={next}
+            locked={planLocked}
+            lockedWhy={dirty ? "Save The paper's changes first." : undefined}
+            onMove={planMove}
+            onBudget={planBudget}
+            onToggle={planToggle}
+          />
           {next && <ThisWeek week={next.week} />}
         </div>
       </div>

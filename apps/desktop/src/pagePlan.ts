@@ -27,12 +27,18 @@ export function pressLine(p: Press, nowMs: number): string {
 
 const isFeed = (r: PagePlanRow) => r.kind === "feeds";
 
+/** The rows were made from this config: each feed row names the feed at its index. */
+function matches(cfg: DailyConfig, rows: PagePlanRow[]): boolean {
+  return rows.filter(isFeed).every((r) => r.feed !== null && cfg.feeds[r.feed]?.name === r.name);
+}
+
 /**
  * Moves row `from` to `to` and writes the result into `sections` and `[[feeds]]` (spec §6.2).
  * The feeds stay one block: a section dropped inside it, or a feed dropped outside it, goes to
  * the block's nearest end.
  */
 export function reorder(cfg: DailyConfig, rows: PagePlanRow[], from: number, to: number): DailyConfig {
+  if (!matches(cfg, rows)) return cfg;
   const order = rows.slice();
   const [moved] = order.splice(from, 1);
   order.splice(Math.max(0, Math.min(to, order.length)), 0, moved);
@@ -65,6 +71,7 @@ export function reorder(cfg: DailyConfig, rows: PagePlanRow[], from: number, to:
 
 /** Sets a row's story budget, 1–20, on its own key. */
 export function setBudget(cfg: DailyConfig, row: PagePlanRow, n: number): DailyConfig {
+  if (!matches(cfg, [row])) return cfg;
   const v = Math.max(1, Math.min(20, Math.round(n)));
   switch (row.kind) {
     case "reading":
