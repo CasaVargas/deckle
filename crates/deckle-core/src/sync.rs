@@ -433,9 +433,8 @@ mod tests {
         let b = files(&["b.kfx"]);
         assert_eq!(w.tick(Some("K"), &b, on), BOTH, "once per connection");
         assert_eq!(w.tick(None, &b, on), NONE);
-        assert_eq!(
+        assert!(
             w.tick(Some("K"), &b, on).clippings,
-            true,
             "a reconnect exports again"
         );
     }

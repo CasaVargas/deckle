@@ -205,8 +205,10 @@ fn pending_matches_what_export_writes() {
 fn state_round_trips_and_tolerates_a_bad_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("highlights.json");
-    let mut st = State::default();
-    st.folder = Some(dir.path().to_owned());
+    let mut st = State {
+        folder: Some(dir.path().to_owned()),
+        ..Default::default()
+    };
     export(&books(&["h:10:one"]), dir.path(), &mut st);
     st.save(&path).unwrap();
     let back = State::load(&path);

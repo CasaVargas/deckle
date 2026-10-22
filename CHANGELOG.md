@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Highlights and notes out as Markdown: one file per book in a folder you choose, sideloaded
+  books included. From the Kindle tab (**Write**), with `deckle highlights export`, or on every
+  plug-in with the morning schedule (`[sync] clippings = true`, or **Settings → Kindles**). Later
+  exports only append what's new, so edits you make to the files stay (#60).
+
 ## 0.3.1 — full-window settings
 
 - Settings open full-window with a sidebar (General, Books, X-Ray, Word Wise, Kindles, About)
