@@ -10,6 +10,7 @@ import PagePlanCard from "./PagePlanCard";
 import { reorder, setBudget } from "./pagePlan";
 import PressBar from "./PressBar";
 import Readership from "./Readership";
+import Shelf from "./Shelf";
 import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
 import YourDay from "./YourDay";
@@ -323,6 +324,8 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       </div>
 
       <Readership onApplied={() => load().then(loadNext)} />
+
+      <Shelf inPaper={draft.sections.includes("shelf")} />
 
       <section className="card">
         <h3>Your Reading</h3>

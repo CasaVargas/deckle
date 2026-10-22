@@ -398,6 +398,27 @@ fn a_section_no_edition_had_yet_gets_its_paper_name() {
 }
 
 #[test]
+fn the_shelf_page_is_a_row_of_its_own() {
+    let r = report(
+        &papers(&[Some(9000); 3]),
+        &cfg(&["weather", "shelf", "lottery"], &[]),
+    );
+    let rows: Vec<_> = r
+        .sections
+        .iter()
+        .map(|s| (s.key.as_str(), s.name.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("weather", "Weather"),
+            ("shelf", "From Your Shelf"),
+            ("lottery", "Lottery")
+        ]
+    );
+}
+
+#[test]
 fn the_further_of_furthest_and_last_counts() {
     // Seen on a Paperwhite: lpr 89882 ahead of fpr 89410.
     let mut s = State::default();

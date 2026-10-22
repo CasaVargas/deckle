@@ -93,6 +93,8 @@ pub fn shelve(
                 Some(s) => {
                     book.cde = book.cde.take().or_else(|| s.cde.clone());
                     book.asin = book.asin.take().or_else(|| s.asin.clone());
+                    // Over MTP the KFX isn't read: the send knew where the book ends.
+                    book.end = book.end.or(s.end);
                     freshness(s, book.xray, book.word_wise, current)
                 }
                 None => Vec::new(),

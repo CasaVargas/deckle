@@ -504,7 +504,7 @@ fn plan_rows_and_budgets() {
         ]
     );
     let off: Vec<&str> = p.off.iter().map(|r| r.key.as_str()).collect();
-    assert_eq!(off, ["lottery", "puzzle"]);
+    assert_eq!(off, ["lottery", "puzzle", "shelf"]);
 
     // twelve waiting, ten fit; a cached channel title names the feed; Your Day on the weather
     s.queue = (0..12)

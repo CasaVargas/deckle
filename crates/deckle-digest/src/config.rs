@@ -19,6 +19,9 @@ pub enum SectionKind {
     Horoscope,
     /// The mini crossword and word ladder (puzzle design).
     Puzzle,
+    /// A page drawn from your own Kindle: the books in progress, a past highlight, words you
+    /// looked up (shelf design).
+    Shelf,
     Onthisday,
 }
 
@@ -37,6 +40,7 @@ pub fn section_key(kind: SectionKind, feed: Option<&str>) -> String {
         SectionKind::Lottery => "lottery",
         SectionKind::Horoscope => "horoscope",
         SectionKind::Puzzle => "puzzle",
+        SectionKind::Shelf => "shelf",
         SectionKind::Onthisday => "onthisday",
     };
     name.to_owned()
@@ -86,6 +90,9 @@ pub struct Config {
     /// The puzzle page (puzzle design §6). Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "PuzzleConfig::is_default")]
     pub puzzle: PuzzleConfig,
+    /// From Your Shelf (shelf design §6). Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "ShelfConfig::is_default")]
+    pub shelf: ShelfConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
@@ -95,6 +102,9 @@ pub struct Config {
     /// Each day's puzzle (tests); the default is `puzzles.json` beside `digest.toml`.
     #[serde(skip)]
     pub puzzle_path: Option<PathBuf>,
+    /// What the Kindles shared (tests); the default is `shelf.json` beside `digest.toml`.
+    #[serde(skip)]
+    pub shelf_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -115,6 +125,7 @@ impl Default for Config {
                 SectionKind::Weather,
                 SectionKind::Local,
                 SectionKind::Feeds,
+                SectionKind::Shelf,
                 SectionKind::Lottery,
                 SectionKind::Horoscope,
                 SectionKind::Onthisday,
@@ -128,9 +139,11 @@ impl Default for Config {
             email: EmailConfig::default(),
             day: DayConfig::default(),
             puzzle: PuzzleConfig::default(),
+            shelf: ShelfConfig::default(),
             almanac_path: None,
             press_path: None,
             puzzle_path: None,
+            shelf_path: None,
         }
     }
 }
@@ -257,6 +270,37 @@ impl PuzzleConfig {
     }
 }
 
+/// `[shelf]`: what From Your Shelf prints.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ShelfConfig {
+    /// "On your nightstand": the books in progress.
+    pub nightstand: bool,
+    /// A past highlight, on Kindles that share them.
+    pub highlights: bool,
+    /// Words you looked up this week, on Kindles that share them.
+    pub words: bool,
+    /// Titles containing any of these (case-insensitive) stay off the nightstand.
+    pub hide: Vec<String>,
+}
+
+impl Default for ShelfConfig {
+    fn default() -> Self {
+        ShelfConfig {
+            nightstand: true,
+            highlights: true,
+            words: true,
+            hide: Vec::new(),
+        }
+    }
+}
+
+impl ShelfConfig {
+    pub fn is_default(&self) -> bool {
+        *self == ShelfConfig::default()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct HoroscopeConfig {
@@ -304,6 +348,8 @@ pub struct SyncConfig {
     pub clippings: bool,
     /// Note how far each edition was read, from the Kindle's `.yjf` (readership design).
     pub readership: bool,
+    /// Take a snapshot of what's on the Kindle for From Your Shelf (shelf design §6).
+    pub shelf: bool,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, DeviceSync>,
 }
@@ -315,6 +361,7 @@ impl Default for SyncConfig {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: true,
             devices: BTreeMap::new(),
         }
     }
@@ -332,6 +379,8 @@ pub struct DeviceSync {
     pub clippings: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub readership: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shelf: Option<bool>,
 }
 
 /// The actions settled for one device.
@@ -341,6 +390,7 @@ pub struct SyncActions {
     pub prune: bool,
     pub clippings: bool,
     pub readership: bool,
+    pub shelf: bool,
 }
 
 impl SyncConfig {
@@ -351,6 +401,7 @@ impl SyncConfig {
             prune: d.prune.unwrap_or(self.prune),
             clippings: d.clippings.unwrap_or(self.clippings),
             readership: d.readership.unwrap_or(self.readership),
+            shelf: d.shelf.unwrap_or(self.shelf),
         }
     }
 
@@ -450,7 +501,7 @@ photos = true                     # with their photos, in grayscale for e-ink
 max_photos = 4                    # per story
 
 # Order of the paper. Remove a name to drop that section.
-sections = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "puzzle", "onthisday"]
+sections = ["reading", "weather", "local", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"]
 
 [reading]
 inbox = "~/Deckle/Inbox"          # point at iCloud Drive to save from an iPhone
@@ -486,6 +537,14 @@ signs = []                        # e.g. ["leo", "virgo"]; empty prints all twel
 # ladder = true
 # theme = true                    # clues from yesterday's headlines, the word blanked
 
+# From Your Shelf: the books in progress on your Kindle, a past highlight and the words you
+# looked up this week (the last two only on Kindles that share them).
+# [shelf]
+# nightstand = true
+# highlights = true
+# words = true
+# hide = []                       # titles containing any of these stay off the nightstand
+
 # Your Day on the weather page: today's events from your calendars. Use .ics files or a
 # calendar's private address (it's a secret: anyone with it can read the calendar).
 # [day]
@@ -499,6 +558,7 @@ push = true                       # deliver waiting editions
 prune = true                      # then keep only the newest `keep` on the Kindle
 clippings = false                 # write highlights as Markdown (folder: deckle highlights export --to)
 readership = true                 # note how far you read the paper (Daily tab)
+shelf = true                      # From Your Shelf reads this Kindle (Daily tab)
 
 # Per Kindle, by the "sync id" `deckle devices` shows:
 # [sync.devices."G0000000000"]
@@ -641,6 +701,13 @@ impl Config {
             .unwrap_or_else(|| default_path().with_file_name("press.json"))
     }
 
+    /// Where what the Kindles shared is kept.
+    pub fn shelf_store(&self) -> PathBuf {
+        self.shelf_path
+            .clone()
+            .unwrap_or_else(|| default_path().with_file_name("shelf.json"))
+    }
+
     /// Where each day's puzzle is kept.
     pub fn puzzle_store(&self) -> PathBuf {
         self.puzzle_path
@@ -724,7 +791,7 @@ mod tests {
         let c = Config::parse(STARTER).unwrap();
         assert_eq!(c.feeds.len(), 1);
         assert_eq!(c.local.google_news, "New York City");
-        assert_eq!(c.sections.len(), 8);
+        assert_eq!(c.sections.len(), 9);
         assert_eq!(c.sections[0], SectionKind::Reading);
         assert_eq!(c.reading.long_read_words, 4000);
     }
@@ -780,6 +847,7 @@ mod tests {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: true,
         };
         assert_eq!(c.sync.for_device("G000"), want);
         assert_eq!(
@@ -800,6 +868,7 @@ mod tests {
             prune,
             clippings,
             readership: true,
+            shelf: true,
         };
         assert_eq!(c.sync.for_device("G000"), actions(false, true, false));
         assert_eq!(

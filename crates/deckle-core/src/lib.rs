@@ -21,6 +21,7 @@ pub mod queue;
 pub mod sync;
 pub mod thumbnail;
 pub mod typography;
+pub mod vocab;
 pub mod wordwise;
 pub mod xray;
 pub mod yjf;

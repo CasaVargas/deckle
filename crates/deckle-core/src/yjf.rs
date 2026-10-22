@@ -17,7 +17,7 @@ pub enum OnDevice {
     Opened(Vec<u8>),
 }
 
-fn is_yjf(name: &str) -> bool {
+pub(crate) fn is_yjf(name: &str) -> bool {
     name.to_ascii_lowercase().ends_with(".yjf")
 }
 

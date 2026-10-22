@@ -554,6 +554,7 @@ pub fn send_record(report: &RunReport, device: &DeviceRef) -> Option<SendRecord>
         stamped: true,
         xray_engine: report.xray.as_ref().map(|x| x.engine),
         wordwise_db: report.word_wise.as_ref().map(|w| w.database.clone()),
+        end: report.end_position,
         extra: Default::default(),
     })
 }

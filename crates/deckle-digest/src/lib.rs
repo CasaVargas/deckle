@@ -28,6 +28,7 @@ pub mod render;
 pub mod schedule;
 pub mod seasons;
 pub mod secret;
+pub mod shelf;
 pub mod showers;
 pub mod sources;
 pub mod sun;
@@ -160,9 +161,28 @@ pub struct Gathered {
     pub notes: Vec<String>,
 }
 
+/// What a caller knows that the config doesn't.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GatherOptions {
+    /// The Kindle's own progress fraction may print as "about N%" on From Your Shelf (set from
+    /// `deckle_shelf::KINDLE_FRACTION_OK`, which this crate can't see).
+    pub shelf_fraction_ok: bool,
+}
+
 /// Fetches every configured source through `get`. Never fails: a source error becomes the
 /// section's `unavailable` note.
 pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) -> Gathered {
+    gather_with(cfg, date, now, net, &GatherOptions::default())
+}
+
+/// [`gather`] with the options a caller supplies.
+pub fn gather_with(
+    cfg: &Config,
+    date: NaiveDate,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    opts: &GatherOptions,
+) -> Gathered {
     let mut edition = Edition {
         paper: cfg.title.clone(),
         date,
@@ -254,6 +274,32 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                     puzzle::words::Words::embedded(),
                 ));
             }
+            SectionKind::Shelf => {
+                let path = cfg.shelf_store();
+                let mut store = shelf::store::Shelf::load(&path);
+                let before = store.clone();
+                match shelf::section(
+                    &mut store,
+                    cfg,
+                    date,
+                    tz::local_tz(),
+                    opts.shelf_fraction_ok,
+                ) {
+                    Some(section) => edition.sections.push(section),
+                    None if store.kindles.is_empty() => notes.push(
+                        "From Your Shelf left out: plug your Kindle in once to fill it".into(),
+                    ),
+                    None => {}
+                }
+                store.prune_shown(date);
+                if store != before
+                    && let Err(e) = store.save(&path)
+                {
+                    notes.push(format!(
+                        "From Your Shelf wasn't saved ({e}); a rebuild today prints the same page"
+                    ));
+                }
+            }
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
@@ -306,7 +352,19 @@ pub fn build(
     out_dir: &Path,
     net: &dyn Net,
 ) -> Result<BuildReport, String> {
-    let gathered = gather(cfg, date, now, net);
+    build_with(cfg, date, now, out_dir, net, &GatherOptions::default())
+}
+
+/// [`build`] with the options a caller supplies.
+pub fn build_with(
+    cfg: &Config,
+    date: NaiveDate,
+    now: DateTime<Utc>,
+    out_dir: &Path,
+    net: &dyn Net,
+    opts: &GatherOptions,
+) -> Result<BuildReport, String> {
+    let gathered = gather_with(cfg, date, now, net, opts);
     let path = out_dir.join(format!("deckle-daily-{date}.epub"));
     write_edition(&gathered, &path)?;
     let mut long_reads = Vec::new();

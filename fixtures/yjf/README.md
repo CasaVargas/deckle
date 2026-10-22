@@ -11,3 +11,7 @@ personal.
 - `book.yjf`: a sideloaded book's. `fpr` 56657, `lpr` 54797.
 
 Decoded with `deckle_readership::parse_yjf` (a port of `krds.py`, K-R-D-S/KRDS).
+
+`book.yjf` also carries `book.info.store` (words read 9519, the Kindle's fraction 0.15048…) and
+`timer.average.calculator` (four pace samples) inside `timer.model`. The Kindle's own progress for
+that book hasn't been compared with the fraction yet; see `docs/devices.md` (From Your Shelf).

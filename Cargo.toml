@@ -23,6 +23,7 @@ deckle-library = { path = "crates/deckle-library" }
 deckle-readership = { path = "crates/deckle-readership" }
 deckle-cover = { path = "crates/deckle-cover" }
 deckle-highlights = { path = "crates/deckle-highlights" }
+deckle-shelf = { path = "crates/deckle-shelf" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }

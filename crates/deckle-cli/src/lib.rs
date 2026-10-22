@@ -1165,7 +1165,14 @@ fn digest(
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let report = deckle_digest::build(&cfg, date, now, &output, &deckle_digest::Http)?;
+            let report = deckle_digest::build_with(
+                &cfg,
+                date,
+                now,
+                &output,
+                &deckle_digest::Http,
+                &gather_options(),
+            )?;
             emit(json, &report, || {
                 let mut text = format!(
                     "OK    {}\n      -> {}\n{}",
@@ -1221,7 +1228,14 @@ fn digest(
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let mut built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+            let mut built = deckle_digest::build_with(
+                &cfg,
+                date,
+                now,
+                &work,
+                &deckle_digest::Http,
+                &gather_options(),
+            )?;
             let opts = paper_options(Some(located.path.clone()), keep_work_dir, &converted);
             let (mut long_reads, failed) = prepare_long_reads(&built, &opts);
             let mut notes: Vec<String> = Vec::new();
@@ -1232,7 +1246,14 @@ fn digest(
                     ));
                 }
                 cfg.reading.inline = failed.into_iter().map(|(id, _)| id).collect();
-                built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+                built = deckle_digest::build_with(
+                    &cfg,
+                    date,
+                    now,
+                    &work,
+                    &deckle_digest::Http,
+                    &gather_options(),
+                )?;
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
@@ -1437,6 +1458,7 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Puzzle => digest_puzzle(json, &path),
+        cli::DigestCommand::Shelf { forget } => digest_shelf(json, &path, forget),
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
@@ -1523,6 +1545,9 @@ struct DigestOutcome {
     /// Reading positions recorded in the same session (`[sync] readership`).
     #[serde(skip_serializing_if = "Option::is_none")]
     readership: Option<deckle_readership::Recorded>,
+    /// The Kindle's shelf recorded in the same session (`[sync] shelf`).
+    #[serde(skip)]
+    shelf: Option<deckle_shelf::Summary>,
 }
 
 impl DigestOutcome {
@@ -1533,6 +1558,8 @@ impl DigestOutcome {
                     && f.pruned.is_empty()
                     && self.highlights.is_none()
                     && self.readership.is_none()
+                    && self.shelf.is_none()
+                    && f.shelf_error.is_none()
                     && f.positions_error.is_none() =>
             {
                 "      nothing queued".to_owned()
@@ -1564,6 +1591,12 @@ impl DigestOutcome {
                 }
                 if let Some(e) = &f.positions_error {
                     lines.push(format!("      readership: {e}"));
+                }
+                if let Some(s) = &self.shelf {
+                    lines.push(format!("      {}", s.describe()));
+                }
+                if let Some(e) = &f.shelf_error {
+                    lines.push(format!("      shelf: {e}"));
                 }
                 lines.join("\n")
             }
@@ -1825,25 +1858,41 @@ fn push_plan(
             prune: actions.prune,
             clippings: actions.clippings,
             readership: actions.readership,
+            shelf: actions.shelf,
         });
     }
-    (actions.readership || actions.clippings).then_some(deckle_core::sync::Plan {
+    (actions.readership || actions.clippings || actions.shelf).then_some(deckle_core::sync::Plan {
         push: false,
         prune: false,
         clippings: actions.clippings,
         readership: actions.readership,
+        shelf: actions.shelf,
     })
 }
 
 /// The device's `[sync]` actions (auto-sync design §3). The clippings are read whenever the
-/// paper has a puzzle: its answers are notes (puzzle design §5).
+/// paper has a puzzle (its answers are notes, puzzle design §5) or a shelf (its highlights).
 fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Actions {
     let a = cfg.sync.for_device(id);
+    let shelf = shelf_on(cfg, id);
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
-        clippings: a.clippings || puzzle_on(cfg),
+        clippings: a.clippings || puzzle_on(cfg) || shelf,
         readership: a.readership,
+        shelf,
+    }
+}
+
+/// The paper has a shelf page and this Kindle isn't left out of it.
+fn shelf_on(cfg: &deckle_digest::Config, id: &str) -> bool {
+    cfg.sections.contains(&deckle_digest::SectionKind::Shelf) && cfg.sync.for_device(id).shelf
+}
+
+/// What `gather` can't know: whether `deckle-shelf` trusts the Kindle's own progress fraction.
+fn gather_options() -> deckle_digest::GatherOptions {
+    deckle_digest::GatherOptions {
+        shelf_fraction_ok: deckle_shelf::KINDLE_FRACTION_OK,
     }
 }
 
@@ -1882,6 +1931,7 @@ fn sync_to(
         &finishing,
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
         &stems,
+        deckle_digest::EDITION_PREFIX,
     )
     .map_err(|e| e.to_string())?;
     // Read in the same session; written to the folder after it's closed. The puzzle may have
@@ -1935,12 +1985,60 @@ fn sync_to(
         }
         r
     });
+    let shelf = record_shelf(cfg, target, &flush);
     Ok(DigestOutcome {
         flush: Some(flush),
         highlights,
         readership: recorded,
+        shelf,
         ..Default::default()
     })
+}
+
+/// Turns what the session read into this Kindle's snapshot in `shelf.json`. A problem with one
+/// book is reported and the rest are kept; a problem with the file is reported and nothing is
+/// lost but this connection's snapshot.
+fn record_shelf(
+    cfg: &deckle_digest::Config,
+    target: &Target,
+    flush: &deckle_core::queue::FlushReport,
+) -> Option<deckle_shelf::Summary> {
+    let read = flush.shelf.as_ref()?;
+    let device = deckle_library::device_ref(target);
+    let id = deckle_core::sync::device_id(target);
+    let path = cfg.shelf_store();
+    // A read that failed (not "no file") must not blank what the last plug-in found.
+    let previous = deckle_digest::shelf::store::Shelf::load(&path)
+        .kindles
+        .get(&id)
+        .cloned();
+    let library = deckle_library::Library::configured(&deckle_library::config::default_path())
+        .map(|(lib, _)| lib);
+    let (snap, errors) = deckle_shelf::snapshot(
+        deckle_shelf::Read {
+            books: read.books.clone(),
+            skipped: read.skipped,
+            clippings: flush.clippings.clone(),
+            vocab: read.vocab.clone(),
+            clippings_failed: flush.clippings_error.is_some(),
+            vocab_failed: flush.shelf_error.is_some() && read.vocab.is_none(),
+            previous,
+        },
+        &device.name,
+        &device.key,
+        library.as_ref(),
+        deckle_digest::chrono::Utc::now(),
+    );
+    for e in errors {
+        eprintln!("shelf: {e}");
+    }
+    match deckle_shelf::record(&path, &id, snap) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("shelf: {e}");
+            None
+        }
+    }
 }
 
 fn on_device(on: &deckle_core::yjf::OnDevice) -> deckle_readership::OnDevice {
@@ -2084,6 +2182,148 @@ fn puzzle_text(out: &PuzzleOut) -> String {
         }
         if let Some(s) = &y.solve {
             lines.push(format!("  You solved {} of {}", s.solved, s.of));
+        }
+    }
+    lines.join("\n")
+}
+
+/// What `digest shelf --json` prints: each Kindle's snapshot in brief, and the page as of today.
+#[derive(serde::Serialize)]
+struct ShelfOut {
+    kindles: Vec<ShelfKindle>,
+    page: ShelfPage,
+}
+
+#[derive(serde::Serialize)]
+struct ShelfKindle {
+    id: String,
+    name: String,
+    seen: String,
+    books: usize,
+    highlights_shared: bool,
+    highlights: usize,
+    words_shared: bool,
+    words: usize,
+}
+
+#[derive(serde::Serialize)]
+struct ShelfPage {
+    nightstand: Option<deckle_digest::shelf::select::Nightstand>,
+    highlight: Option<deckle_digest::shelf::select::Pick>,
+    /// Each word with its "<Book>, <Weekday>" line.
+    words: Vec<(deckle_digest::shelf::store::WordSnap, String)>,
+}
+
+/// `digest shelf [--forget]`: the page From Your Shelf would print today, from the snapshots.
+fn digest_shelf(json: bool, path: &Path, forget: bool) -> Result<ExitCode, String> {
+    use deckle_digest::shelf::{select, store::Shelf};
+    let cfg = load_digest_config(path)?;
+    let store = cfg.shelf_store();
+    if forget {
+        Shelf::forget(&store)?;
+        println!("Forgot the shelf snapshot.");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let shelf = Shelf::load(&store);
+    let date = deckle_digest::chrono::Local::now().date_naive();
+    let tz = deckle_digest::tz::local_tz();
+    let out = ShelfOut {
+        kindles: shelf
+            .kindles
+            .iter()
+            .map(|(id, k)| ShelfKindle {
+                id: id.clone(),
+                name: k.name.clone(),
+                seen: k.seen.clone(),
+                books: k.books.len(),
+                highlights_shared: k.highlights_shared,
+                highlights: k.highlights.len(),
+                words_shared: k.words_shared,
+                words: k.words.len(),
+            })
+            .collect(),
+        page: ShelfPage {
+            nightstand: select::nightstand(
+                &shelf,
+                &cfg.shelf,
+                date,
+                tz,
+                deckle_shelf::KINDLE_FRACTION_OK,
+            ),
+            highlight: cfg
+                .shelf
+                .highlights
+                .then(|| select::highlight(&shelf, date))
+                .flatten(),
+            words: if cfg.shelf.words {
+                select::words(&shelf, date, tz)
+            } else {
+                Vec::new()
+            },
+        },
+    };
+    emit(json, &out, || shelf_text(&out))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn shelf_text(out: &ShelfOut) -> String {
+    if out.kindles.is_empty() {
+        return "Nothing on the shelf yet: add \"shelf\" to sections in digest.toml and plug \
+                your Kindle in (or run `deckle digest push`)."
+            .to_owned();
+    }
+    let mut lines = Vec::new();
+    for k in &out.kindles {
+        let shares = |shared: bool, n: usize, what: &str| match shared {
+            true => format!("{n} {what}"),
+            false => format!("no {what} shared"),
+        };
+        lines.push(format!(
+            "{} · seen {} · {} books · {} · {}",
+            k.name,
+            k.seen,
+            k.books,
+            shares(k.highlights_shared, k.highlights, "highlights"),
+            shares(k.words_shared, k.words, "words"),
+        ));
+    }
+    let page = &out.page;
+    if let Some(n) = &page.nightstand {
+        lines.push(String::new());
+        lines.push("On your nightstand".to_owned());
+        for b in &n.books {
+            let pct = b
+                .percent
+                .map(|p| format!("{}{p}% · ", if b.about { "about " } else { "" }))
+                .unwrap_or_default();
+            lines.push(format!("  {} — {pct}{}", b.title, b.state));
+        }
+        if let Some(nudge) = &n.nudge {
+            lines.push(format!("  {}", nudge.replace('*', "")));
+        }
+    }
+    if let Some(p) = &page.highlight {
+        lines.push(String::new());
+        lines.push(format!("You highlighted this {} ago", p.age));
+        lines.push(format!("  \u{201C}{}\u{201D}", p.highlight.text));
+        lines.push(format!("  {}, {}", p.highlight.title, p.highlight.author));
+        lines.extend(
+            p.highlight
+                .notes
+                .iter()
+                .map(|n| format!("  Your note: {n}")),
+        );
+    }
+    if !page.words.is_empty() {
+        lines.push(String::new());
+        lines.push("Words you looked up this week".to_owned());
+        for (w, from) in &page.words {
+            let def = w
+                .definition
+                .as_deref()
+                .map(|d| format!(" — {d}"))
+                .unwrap_or_default();
+            lines.push(format!("  {}{def} ({from})", w.word));
         }
     }
     lines.join("\n")
@@ -2563,6 +2803,7 @@ mod push_tests {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: false,
         };
         assert_eq!(
             push_plan(on, true).map(|p| (p.push, p.readership)),
@@ -2590,6 +2831,19 @@ mod push_tests {
             )
             .map(|p| (p.push, p.clippings, p.readership)),
             Some((false, true, false))
+        );
+        // the shelf alone is too
+        assert_eq!(
+            push_plan(
+                Actions {
+                    readership: false,
+                    shelf: true,
+                    ..on
+                },
+                true
+            )
+            .map(|p| (p.push, p.shelf)),
+            Some((false, true))
         );
         assert_eq!(push_plan(on, false).map(|p| p.push), Some(true));
     }
