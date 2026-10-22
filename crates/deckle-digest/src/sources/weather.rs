@@ -195,7 +195,11 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
             "<p>{}% illuminated, {:.0} days into its cycle. {}</p>",
             moon.illumination,
             moon.age_days,
-            esc(&moon.next)
+            esc(&crate::moon::next_line(
+                date,
+                crate::tz::local_tz(),
+                cfg.latitude.unwrap_or_default()
+            ))
         ),
     });
     let section = Section {
