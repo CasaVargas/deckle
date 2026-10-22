@@ -22,18 +22,18 @@ const HORIZON_DEG: f64 = -0.833;
 
 /// Declination (degrees) and equation of time (minutes) at `jd` (NOAA's spreadsheet).
 fn solar(jd: f64) -> (f64, f64) {
-    let jc = (jd - 2_451_545.0) / 36_525.0;
-    let l0 = (280.46646 + jc * (36_000.76983 + jc * 0.000_303_2)).rem_euclid(360.0);
-    let m = 357.52911 + jc * (35_999.05029 - 0.000_153_7 * jc);
-    let e = 0.016_708_634 - jc * (0.000_042_037 + 0.000_000_126_7 * jc);
+    let jc = (jd - 2451545.0) / 36525.0;
+    let l0 = (280.46646 + jc * (36000.76983 + jc * 0.0003032)).rem_euclid(360.0);
+    let m = 357.52911 + jc * (35999.05029 - 0.0001537 * jc);
+    let e = 0.016708634 - jc * (0.000042037 + 0.0000001267 * jc);
     let mr = m.to_radians();
-    let c = mr.sin() * (1.914_602 - jc * (0.004_817 + 0.000_014 * jc))
-        + (2.0 * mr).sin() * (0.019_993 - 0.000_101 * jc)
-        + (3.0 * mr).sin() * 0.000_289;
+    let c = mr.sin() * (1.914602 - jc * (0.004817 + 0.000014 * jc))
+        + (2.0 * mr).sin() * (0.019993 - 0.000101 * jc)
+        + (3.0 * mr).sin() * 0.000289;
     let omega = (125.04 - 1934.136 * jc).to_radians();
     let app_long = (l0 + c - 0.00569 - 0.00478 * omega.sin()).to_radians();
     let mean_obliq =
-        23.0 + (26.0 + (21.448 - jc * (46.815 + jc * (0.00059 - jc * 0.001_813))) / 60.0) / 60.0;
+        23.0 + (26.0 + (21.448 - jc * (46.815 + jc * (0.00059 - jc * 0.001813))) / 60.0) / 60.0;
     let obliq = (mean_obliq + 0.00256 * omega.cos()).to_radians();
     let decl = (obliq.sin() * app_long.sin()).asin().to_degrees();
     let y = (obliq / 2.0).tan().powi(2);
@@ -53,7 +53,7 @@ fn cos_hour_angle(lat: f64, decl: f64) -> f64 {
 }
 
 fn julian(t: DateTime<Utc>) -> f64 {
-    t.timestamp() as f64 / 86_400.0 + 2_440_587.5
+    t.timestamp() as f64 / 86400.0 + 2440587.5
 }
 
 /// Sunrise and sunset on the local `date` at (`lat`, `lon`), in `tz`.
