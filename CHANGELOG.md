@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Tomorrow's paper, so far**: the Daily tab now opens on the next edition. A press bar with
+  the countdown and **Stop the presses** (skip one morning; `deckle digest stop`), a live sketch
+  of the front page that fills in as you save articles and your feeds post (with a line saying
+  why the lead leads), a **page plan** you drag to reorder with story budgets and "about N Kindle
+  pages", and **This week**'s reads. `deckle digest next` prints the same. The cover's lead now
+  follows one rule everywhere: local news first, else the first section in your plan with a
+  story, so a saved article can lead the paper.
 - The Daily's weather section is now a **Weather & Almanac** page:
   - a five-day strip with pictures and short words;
   - sunrise, sunset and daylight, computed on your Mac;
