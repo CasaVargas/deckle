@@ -17,11 +17,14 @@ fn bundle_targets_macos_14_and_installs_per_user_on_windows() {
         .iter()
         .filter_map(|t| t.as_str())
         .collect();
-    for t in ["app", "dmg", "nsis", "appimage", "deb"] {
+    for t in ["app", "dmg", "nsis"] {
         assert!(targets.contains(&t), "missing bundle target {t}");
     }
     // NSIS is the one Windows installer: it's what the updater installs.
     assert!(!targets.contains(&"msi"), "the MSI target is dropped");
+    for t in ["appimage", "deb"] {
+        assert!(!targets.contains(&t), "Linux bundles are dropped: {t}");
+    }
 }
 
 #[test]
