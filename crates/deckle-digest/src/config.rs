@@ -17,6 +17,8 @@ pub enum SectionKind {
     Feeds,
     Lottery,
     Horoscope,
+    /// The mini crossword and word ladder (puzzle design).
+    Puzzle,
     Onthisday,
 }
 
@@ -30,6 +32,7 @@ pub fn section_key(kind: SectionKind, feed: Option<&str>) -> String {
         SectionKind::Feeds => return format!("feeds:{}", feed.unwrap_or_default()),
         SectionKind::Lottery => "lottery",
         SectionKind::Horoscope => "horoscope",
+        SectionKind::Puzzle => "puzzle",
         SectionKind::Onthisday => "onthisday",
     };
     name.to_owned()
@@ -76,12 +79,18 @@ pub struct Config {
     /// while it's untouched.
     #[serde(skip_serializing_if = "DayConfig::is_default")]
     pub day: DayConfig,
+    /// The puzzle page (puzzle design §6). Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "PuzzleConfig::is_default")]
+    pub puzzle: PuzzleConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
     /// Stop the presses (tests); the default is `press.json` beside `digest.toml`.
     #[serde(skip)]
     pub press_path: Option<PathBuf>,
+    /// Each day's puzzle (tests); the default is `puzzles.json` beside `digest.toml`.
+    #[serde(skip)]
+    pub puzzle_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -114,8 +123,10 @@ impl Default for Config {
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
             day: DayConfig::default(),
+            puzzle: PuzzleConfig::default(),
             almanac_path: None,
             press_path: None,
+            puzzle_path: None,
         }
     }
 }
@@ -194,6 +205,30 @@ impl Default for DayConfig {
 impl DayConfig {
     pub fn is_default(&self) -> bool {
         *self == DayConfig::default()
+    }
+}
+
+/// `[puzzle]`: what the puzzle page prints.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PuzzleConfig {
+    pub ladder: bool,
+    /// Theme answers from yesterday's headlines, clued as the headline with the word blanked.
+    pub theme: bool,
+}
+
+impl Default for PuzzleConfig {
+    fn default() -> Self {
+        PuzzleConfig {
+            ladder: true,
+            theme: true,
+        }
+    }
+}
+
+impl PuzzleConfig {
+    pub fn is_default(&self) -> bool {
+        *self == PuzzleConfig::default()
     }
 }
 
@@ -390,7 +425,7 @@ photos = true                     # with their photos, in grayscale for e-ink
 max_photos = 4                    # per story
 
 # Order of the paper. Remove a name to drop that section.
-sections = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "onthisday"]
+sections = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "puzzle", "onthisday"]
 
 [reading]
 inbox = "~/Deckle/Inbox"          # point at iCloud Drive to save from an iPhone
@@ -414,6 +449,11 @@ games = ["powerball", "megamillions"]
 
 [horoscope]
 signs = []                        # e.g. ["leo", "virgo"]; empty prints all twelve
+
+# The puzzle page: a mini crossword, a word ladder, and yesterday's answers.
+# [puzzle]
+# ladder = true
+# theme = true                    # clues from yesterday's headlines, the word blanked
 
 # Your Day on the weather page: today's events from your calendars. Use .ics files or a
 # calendar's private address (it's a secret: anyone with it can read the calendar).
@@ -569,6 +609,13 @@ impl Config {
             .clone()
             .unwrap_or_else(|| default_path().with_file_name("press.json"))
     }
+
+    /// Where each day's puzzle is kept.
+    pub fn puzzle_store(&self) -> PathBuf {
+        self.puzzle_path
+            .clone()
+            .unwrap_or_else(|| default_path().with_file_name("puzzles.json"))
+    }
 }
 
 pub fn default_path() -> PathBuf {
@@ -646,7 +693,7 @@ mod tests {
         let c = Config::parse(STARTER).unwrap();
         assert_eq!(c.feeds.len(), 1);
         assert_eq!(c.local.google_news, "New York City");
-        assert_eq!(c.sections.len(), 7);
+        assert_eq!(c.sections.len(), 8);
         assert_eq!(c.sections[0], SectionKind::Reading);
         assert_eq!(c.reading.long_read_words, 4000);
     }

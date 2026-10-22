@@ -10,7 +10,7 @@ builds or sends an edition on demand. Everything below is the same thing from th
 
 A morning paper built on your machine: weather (Open-Meteo), local news (a Google News search
 plus any local feeds), your RSS/Atom feeds, Powerball and Mega Millions, a horoscope Deckle
-writes itself, and "On this day" from Wikipedia. Its cover is a generated front page, so the
+writes itself, a puzzle page, and "On this day" from Wikipedia. Its cover is a generated front page, so the
 Kindle library tile is today's paper. Every story comes with its full text and photos (grayscale
 for e-ink), pulled Reader-View style from the publisher, so nothing sends you to a browser; a
 story behind a paywall stays a headline. No keys or accounts; a source that fails prints
@@ -21,6 +21,7 @@ deckle digest init                  # starter config: ~/Library/Application Supp
 deckle digest build -o ./out        # today's edition as an EPUB
 deckle digest run --to device       # build, convert, send (cover first), keep the newest 3
 deckle digest push                  # deliver a queued edition to the Kindle now connected
+deckle digest puzzle                # today's puzzle, and yesterday's answers
 deckle digest watch                 # keep running; deliver whenever a Kindle connects
 deckle digest schedule --at 05:30   # both, automatically: the paper daily, the watcher from login
 deckle digest schedule --off        # and gone again
@@ -159,6 +160,38 @@ A private address lets anyone holding it read that calendar, so Deckle never wri
 messages or logs; it shows only the host (`https://calendar.google.com/…`). Calendars are read when
 the paper is built and the events go into that edition only. **One exception:** with email delivery
 on, the paper (agenda included) passes through Amazon on its way to your Kindle.
+
+### The puzzle page
+
+Near the back of the paper, after the horoscope: **The Mini**, a 5×5 crossword, and a **word
+ladder** (one 4-letter word into another, a letter a rung). Up to two of the mini's answers come
+from yesterday's headlines, clued as the headline with the word blanked: "Leaf ____ peaks on the
+ridge this weekend (Local, yesterday)". The rest are clued from a short dictionary definition.
+The next paper prints **Yesterday's answers**: the filled grid and the ladder.
+
+- **Check your answers on a Kindle that keeps notes.** Highlight a clue, add a note with your
+  answer (case, spaces and punctuation don't matter; for the ladder, highlight its line and write
+  the whole path). The next time that Kindle connects (`watch`, `push`, or the Kindle tab), Deckle
+  reads the notes from `My Clippings.txt`, and the next paper says "You solved 4 of 10". This
+  runs whenever the puzzle is in `sections`, even with `[sync] clippings = false` (no highlights
+  are exported then). A Kindle Scribe (2024) keeps its notes where they can't be read over USB:
+  you get the answers without a score, and the hint line goes away.
+- **The same puzzle all day.** Each day's puzzle is made once and kept in `puzzles.json` next to
+  `digest.toml` (the last 60 days), so every rebuild, the email copy and tomorrow's answers
+  match what you saw. `deckle digest puzzle` prints today's (and yesterday's answers);
+  `--json` gives the same as data.
+- **Offline.** The words come from a list built into Deckle from Wiktionary and wordfreq (CC BY-SA
+  4.0); nothing about your paper leaves your Mac for the puzzle. If a mini can't be made, the
+  ladder still prints; if nothing can, the page says "Unavailable today".
+
+It's in the starter config. An existing `digest.toml` doesn't get it on its own: add `"puzzle"`
+to `sections`, or switch it on in the Daily tab. Optional settings:
+
+```toml
+[puzzle]
+ladder = true
+theme = true      # clues from yesterday's headlines
+```
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 

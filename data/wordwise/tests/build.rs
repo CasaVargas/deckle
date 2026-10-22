@@ -2,11 +2,11 @@
 //! `sample.jsonl` is 22 real kaikki.org entries (Wiktionary, CC BY-SA 4.0), trimmed to the
 //! fields the builder reads.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use deckle_wordwise::lexicon::Lexicon;
-use deckle_wordwise_build::{build, difficulty, load_wordfreq, short_def, zipf};
+use deckle_wordwise_build::{build, difficulty, load_wordfreq, puzzle_words, short_def, zipf};
 
 fn freq() -> HashMap<String, f64> {
     [
@@ -21,6 +21,7 @@ fn freq() -> HashMap<String, f64> {
         ("lugubrious", 1.8),
         ("perspicacious", 1.3),
         ("bath", 4.3),
+        ("beth", 3.9),
         ("house", 5.7),
         ("o'er", 2.5),
         ("ran", 5.0),
@@ -157,4 +158,131 @@ fn dated_spellings_are_hinted_with_the_modern_word() {
     let s = deckle_wordwise_build::sense_from_entry(&e, &f).unwrap();
     assert_eq!(s.short_def, "connection");
     assert_eq!(s.full_def, "Dated spelling of connection");
+}
+
+/// Kaikki-shaped entries for the puzzle list (trimmed; glosses from Wiktionary, CC BY-SA 4.0).
+const PUZZLE_SAMPLE: &str = r#"{"word":"card","pos":"noun","lang_code":"en","forms":[{"form":"cards","tags":["plural"]}],"senses":[{"glosses":["A playing card."],"topics":["card-games"]},{"glosses":["A flat, rectangular piece of stiff paper, used for writing on."]}]}
+{"word":"cards","pos":"noun","lang_code":"en","senses":[{"glosses":["plural of card"],"tags":["form-of","plural"],"form_of":[{"word":"card"}]},{"glosses":["Any game played with a deck of fifty-two."]}]}
+{"word":"area","pos":"noun","lang_code":"en","forms":[{"form":"areas","tags":["plural"]}],"senses":[{"glosses":["Any particular extent of space or surface; a region."]}]}
+{"word":"bucket","pos":"noun","lang_code":"en","senses":[{"glosses":["A container made of rigid material, often with a handle."]}]}
+{"word":"Leith","pos":"noun","lang_code":"en","senses":[{"glosses":["A port district of Edinburgh."]}]}
+{"word":"re-up","pos":"verb","lang_code":"en","senses":[{"glosses":["To renew."]}]}
+{"word":"adze","pos":"noun","lang_code":"en","senses":[{"glosses":["A cutting tool with a curved blade."]}]}
+{"word":"dosh","pos":"noun","lang_code":"en","senses":[{"glosses":["Money."],"tags":["slang","UK"]}]}
+{"word":"heck","pos":"intj","lang_code":"en","senses":[{"glosses":["A mild expletive."]}]}
+{"word":"darn","pos":"verb","lang_code":"en","senses":[{"glosses":["To mend a hole by weaving thread."]}]}
+{"word":"rose","pos":"adj","lang_code":"en","senses":[{"glosses":["Of a rose-coloured hue."]},{"glosses":["Like roses in scent."]}]}
+{"word":"warm","pos":"adj","lang_code":"en","senses":[{"glosses":["Having a fairly high temperature."]}]}
+{"word":"warm","pos":"verb","lang_code":"en","senses":[{"glosses":["To heat up."]},{"glosses":["To become ardent."]},{"glosses":["To favour increasingly."]}]}
+{"word":"water","pos":"noun","lang_code":"en","senses":[{"glosses":["An inorganic compound found at room temperature and pressure as a clear, colourless, tasteless liquid; its solid form is ice"]},{"glosses":["A clear liquid that falls as rain."]}]}
+{"word":"pane","pos":"noun","lang_code":"en","senses":[{"glosses":["A sheet of flat glass or clear plastic that is fitted into the frame of a window in a building or a vehicle or a greenhouse."]}]}
+{"word":"Goa","pos":"name","lang_code":"en","senses":[{"glosses":["A state of India."]}]}
+{"word":"goa","pos":"noun","lang_code":"en","senses":[{"glosses":["A Tibetan gazelle."]}]}
+{"word":"Bath","pos":"name","lang_code":"en","senses":[{"glosses":["A city in Somerset, England."]}]}
+{"word":"bath","pos":"noun","lang_code":"en","senses":[{"glosses":["A tub for washing the body."]}]}
+{"word":"bath","pos":"verb","lang_code":"en","senses":[{"glosses":["To wash in a tub."]}]}
+{"word":"Beth","pos":"name","lang_code":"en","senses":[{"glosses":["A female given name."]}]}
+{"word":"beth","pos":"noun","lang_code":"en","senses":[{"glosses":["The second letter of the Phoenician alphabet."]},{"glosses":["The second letter of the Aramaic alphabet."]},{"glosses":["The second letter of the Syriac alphabet."]},{"glosses":["The second letter of the Hebrew alphabet."]}]}
+{"word":"roar","pos":"verb","lang_code":"en","senses":[{"glosses":["To make a loud, deep cry, especially from pain, anger, or other strong emotion; to bellow."]}]}
+{"word":"hose","pos":"noun","lang_code":"en","senses":[{"glosses":["Specifically, a flexible tube conveying water."]}]}
+{"word":"wood","pos":"noun","lang_code":"en","senses":[{"glosses":["Firewood."]},{"glosses":["The substance making up the trunk of a tree."]}]}
+{"word":"leaf","pos":"noun","lang_code":"en","senses":[{"glosses":["The usually green and flat organ of a plant that photosynthesizes."]}]}
+"#;
+
+fn puzzle_freq() -> HashMap<String, f64> {
+    [
+        ("card", 4.6),
+        ("cards", 4.4),
+        ("area", 5.3),
+        ("bucket", 3.9),
+        ("leith", 3.2),
+        ("re-up", 3.1),
+        ("adze", 1.9),
+        ("dosh", 3.1),
+        ("heck", 3.9),
+        ("darn", 3.4),
+        ("rose", 4.5),
+        ("leaf", 4.0),
+        ("wood", 4.7),
+        ("warm", 4.5),
+        ("water", 5.2),
+        ("pane", 3.3),
+        ("goa", 3.4),
+        ("bath", 4.3),
+        ("beth", 3.9),
+        ("roar", 3.6),
+        ("hose", 3.5),
+    ]
+    .into_iter()
+    .map(|(w, z)| (w.to_owned(), z))
+    .collect()
+}
+
+fn puzzle_list(blocked: &[&str]) -> Vec<(String, String)> {
+    let blocklist: HashSet<String> = blocked.iter().map(|w| (*w).to_owned()).collect();
+    puzzle_words(PUZZLE_SAMPLE.as_bytes(), &puzzle_freq(), &blocklist)
+}
+
+#[test]
+fn puzzle_words_keeps_common_short_words() {
+    let list = puzzle_list(&[]);
+    let clue = |w: &str| list.iter().find(|(x, _)| x == w).map(|(_, c)| c.as_str());
+    // the everyday sense, not the card-games one
+    assert_eq!(
+        clue("card"),
+        Some("A flat, rectangular piece of stiff paper, used for writing on")
+    );
+    assert_eq!(
+        clue("area"),
+        Some("Any particular extent of space or surface")
+    );
+    assert_eq!(
+        clue("leaf"),
+        Some("The usually green and flat organ of a plant that photosynthesizes")
+    );
+    // the first entry in Wiktionary's order, not the one with more senses
+    assert_eq!(clue("warm"), Some("Having a fairly high temperature"));
+    // a fragment ("its solid form is ice") is no clue: the next sense is
+    assert_eq!(clue("water"), Some("A clear liquid that falls as rain"));
+    // a name's spelling whose lowercase entries are only nouns ("Goa", "Beth") is out; a word
+    // used another way too stays
+    assert_eq!(clue("goa"), None);
+    assert_eq!(clue("beth"), None);
+    assert_eq!(clue("bath"), Some("A tub for washing the body"));
+    // the whole first clause when it fits, not its first comma part; no "Specifically,"
+    assert_eq!(
+        clue("roar"),
+        Some("To make a loud, deep cry, especially from pain, anger, or other strong emotion")
+    );
+    assert_eq!(clue("hose"), Some("A flexible tube conveying water"));
+    // too long to print beside a 5×5 grid
+    assert_eq!(clue("pane"), None);
+    let words: Vec<&str> = list.iter().map(|(w, _)| w.as_str()).collect();
+    let mut sorted = words.clone();
+    sorted.sort_unstable();
+    assert_eq!(words, sorted);
+}
+
+#[test]
+fn puzzle_words_filters() {
+    let list = puzzle_list(&["darn"]);
+    for w in ["cards", "bucket", "leith", "re-up", "adze", "dosh", "darn"] {
+        assert!(list.iter().all(|(x, _)| x != w), "{w} should be out");
+    }
+    // without the blocklist "darn" is in
+    assert!(puzzle_list(&[]).iter().any(|(x, _)| x == "darn"));
+}
+
+#[test]
+fn puzzle_clue_never_contains_answer() {
+    let list = puzzle_list(&[]);
+    assert!(list.iter().all(|(w, _)| w != "rose"));
+    // inside another word counts too: "Firewood" gives "wood" away
+    assert!(list.contains(&(
+        "wood".into(),
+        "The substance making up the trunk of a tree".into()
+    )));
+    for (w, c) in &list {
+        assert!(!c.to_lowercase().contains(w.as_str()), "{w}: {c}");
+    }
 }

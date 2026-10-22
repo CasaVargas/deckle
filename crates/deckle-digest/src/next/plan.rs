@@ -85,13 +85,14 @@ pub struct NextPaper {
 }
 
 /// Every kind, in the starter's order: where an off section is listed.
-const KINDS: [SectionKind; 7] = [
+const KINDS: [SectionKind; 8] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
     SectionKind::Feeds,
     SectionKind::Lottery,
     SectionKind::Horoscope,
+    SectionKind::Puzzle,
     SectionKind::Onthisday,
 ];
 
@@ -301,6 +302,11 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             };
             vec![fixed("Horoscope", detail, format!("{n} signs"))]
         }
+        SectionKind::Puzzle => vec![fixed(
+            "Puzzle",
+            "Mini crossword from yesterday's headlines".into(),
+            "1 page".into(),
+        )],
         SectionKind::Onthisday => vec![fixed(
             "On This Day",
             "From Wikipedia".into(),
@@ -396,6 +402,7 @@ pub fn estimate(rows: &[PlanRow], planned: &[usize], history: &History, cfg: &Co
                 };
                 whole(&r.key, 0.25 * signs as f64)
             }
+            SectionKind::Puzzle => whole(&r.key, 1.0),
             SectionKind::Onthisday => whole(&r.key, 2.0),
         };
     }
@@ -529,6 +536,13 @@ pub fn plan(i: &Inputs) -> NextPaper {
             },
             // the masthead says it: "Weather · fills in at press time"
             SectionKind::Weather => {}
+            SectionKind::Puzzle => tiles.push(Tile {
+                key: r.row.key.clone(),
+                kicker: "Puzzle · yesterday's answers".into(),
+                title: None,
+                reason: None,
+                dashed: true,
+            }),
             _ => tiles.push(Tile {
                 key: r.row.key.clone(),
                 kicker: format!("{} · fills at press time", r.row.name),

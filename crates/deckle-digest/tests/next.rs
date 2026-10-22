@@ -504,7 +504,7 @@ fn plan_rows_and_budgets() {
         ]
     );
     let off: Vec<&str> = p.off.iter().map(|r| r.key.as_str()).collect();
-    assert_eq!(off, ["lottery"]);
+    assert_eq!(off, ["lottery", "puzzle"]);
 
     // twelve waiting, ten fit; a cached channel title names the feed; Your Day on the weather
     s.queue = (0..12)
@@ -616,4 +616,24 @@ fn saved_articles_print_even_with_reading_off() {
     assert_eq!(p.plan[0].key, "reading");
     assert!(p.off.iter().all(|r| r.key != "reading"));
     assert_eq!(p.lead.unwrap().kicker, "YOUR READING · THEATLANTIC.COM");
+}
+
+#[test]
+fn the_puzzle_has_a_row_and_a_tile() {
+    let mut s = Setup::new();
+    let before = s.plan().pages;
+    // between the horoscope and On This Day, as the starter has it
+    s.cfg.sections.insert(5, SectionKind::Puzzle);
+    let p = s.plan();
+    let row = p.plan.iter().find(|r| r.key == "puzzle").unwrap();
+    assert_eq!(row.name, "Puzzle");
+    assert_eq!(row.detail, "Mini crossword from yesterday's headlines");
+    assert_eq!((row.budget.as_str(), row.items), ("1 page", None));
+    let t = p.tiles.iter().find(|t| t.key == "puzzle").unwrap();
+    assert_eq!(t.kicker, "Puzzle · yesterday's answers");
+    assert!(t.dashed);
+    assert_eq!(p.pages, before + 1);
+    // off, it's listed to switch on
+    s.cfg.sections.retain(|k| *k != SectionKind::Puzzle);
+    assert!(s.plan().off.iter().any(|r| r.key == "puzzle"));
 }
