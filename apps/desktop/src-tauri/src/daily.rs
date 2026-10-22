@@ -227,6 +227,46 @@ pub struct PlaceRow {
     pub longitude: f64,
 }
 
+/// What the Daily tab's Your Day card shows: today's count, each calendar as masked for
+/// display, and the calendars that couldn't be read (almanac design §5).
+#[derive(Clone, Debug, Serialize)]
+pub struct DayPreview {
+    pub events: usize,
+    pub labels: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+pub fn day_preview_with(
+    day: &deckle_digest::config::DayConfig,
+    date: deckle_digest::chrono::NaiveDate,
+    tz: deckle_digest::chrono_tz::Tz,
+    net: &dyn deckle_digest::fetch::Net,
+) -> DayPreview {
+    let agenda = deckle_digest::day::agenda(day, date, tz, net);
+    DayPreview {
+        events: agenda.entries.len(),
+        labels: day
+            .calendars
+            .iter()
+            .map(|c| deckle_digest::day::mask(c))
+            .collect(),
+        errors: agenda.errors,
+    }
+}
+
+#[tauri::command]
+pub async fn daily_day_preview(
+    day: deckle_digest::config::DayConfig,
+) -> Result<DayPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let tz = deckle_digest::tz::local_tz();
+        let date = Utc::now().with_timezone(&tz).date_naive();
+        day_preview_with(&day, date, tz, &deckle_digest::Http)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn geocode(query: String) -> Result<Vec<PlaceRow>, String> {
     let places = tauri::async_runtime::spawn_blocking(move || {
@@ -381,6 +421,32 @@ pub async fn email_test() -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn day_preview_counts_events_and_masks_addresses() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("Home.ics");
+        std::fs::write(
+            &file,
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\nDTSTART:20261022T090000\r\n\
+             SUMMARY:Standup\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n",
+        )
+        .unwrap();
+        let day = deckle_digest::config::DayConfig {
+            calendars: vec![
+                file.display().to_string(),
+                "webcal://cal.example/s3cr3t/x.ics".into(),
+            ],
+            ..Default::default()
+        };
+        let net = |_: &str| -> Result<Vec<u8>, String> { Err("offline".into()) };
+        let tz: deckle_digest::chrono_tz::Tz = "America/New_York".parse().unwrap();
+        let date = deckle_digest::chrono::NaiveDate::from_ymd_opt(2026, 10, 22).unwrap();
+        let p = day_preview_with(&day, date, tz, &net);
+        assert_eq!(p.events, 1);
+        assert_eq!(p.labels, ["Home.ics", "https://cal.example/…"]);
+        assert_eq!(p.errors, ["https://cal.example/…: offline"]);
+    }
 
     #[test]
     fn a_missing_config_is_a_first_run_and_a_broken_one_says_why() {

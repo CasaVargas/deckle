@@ -24,8 +24,16 @@ p { text-indent: 0; margin: 0 0 0.5em 0; }
 .link { font-size: 0.8em; }
 .big { font-size: 2.2em; font-weight: bold; margin: 0.1em 0; }
 .lo { font-size: 0.6em; font-weight: normal; }
-table.forecast { width: 100%; border-collapse: collapse; }
-table.forecast td { border-bottom: 1px solid black; padding: 0.25em 0.2em; }
+table.strip { width: 100%; border-collapse: collapse; border-top: 1px solid black; border-bottom: 1px solid black; }
+table.strip td { width: 20%; text-align: center; vertical-align: top; padding: 0.3em 0.1em; font-size: 0.85em; }
+table.strip img { width: 2.2em; height: 2.2em; }
+.wday { font-weight: bold; letter-spacing: 0.08em; }
+.word { font-style: italic; }
+table.day { width: 100%; border-collapse: collapse; }
+table.day td { border-bottom: 1px solid black; padding: 0.2em 0.2em; vertical-align: top; }
+td.when { white-space: nowrap; font-weight: bold; width: 5.5em; }
+.rain { font-weight: bold; margin-top: 0.4em; }
+.credit { font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.08em; text-align: center; margin-top: 1.2em; }
 td.num { text-align: right; }
 td.day { font-weight: bold; }
 .balls { font-size: 1.3em; font-weight: bold; }
@@ -243,6 +251,13 @@ fn opf(e: &Edition, uid: &str) -> Vec<u8> {
             }
         }
     }
+    for (n, (href, _)) in e.assets.iter().enumerate() {
+        manifest.push_str(&format!(
+            "<item id=\"x{}\" href=\"{}\" media-type=\"image/png\"/>\n",
+            n + 1,
+            esc(href)
+        ));
+    }
     for i in 0..e.sections.len() {
         manifest.push_str(&format!(
             "<item id=\"s{n}\" href=\"{}\" media-type=\"application/xhtml+xml\"/>\n",
@@ -295,6 +310,9 @@ pub fn render(g: &Gathered, cover: Vec<u8>) -> Files {
         ("OEBPS/cover.jpg".into(), cover),
         ("OEBPS/front.xhtml".into(), front_page(g)),
     ];
+    for (href, png) in &e.assets {
+        files.push((format!("OEBPS/{href}"), png.clone()));
+    }
     for i in 0..e.sections.len() {
         files.push((format!("OEBPS/{}", section_file(i)), section_page(e, i)));
         for (j, a) in e.sections[i].articles.iter().enumerate() {

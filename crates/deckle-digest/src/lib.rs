@@ -9,8 +9,10 @@ pub mod article;
 pub mod bookmarklet;
 pub mod config;
 pub mod cover;
+pub mod day;
 pub mod epub;
 pub mod fetch;
+pub mod frost;
 pub mod geocode;
 pub mod horoscope;
 pub mod inbox;
@@ -20,8 +22,12 @@ pub mod moon;
 pub mod reading;
 pub mod render;
 pub mod schedule;
+pub mod seasons;
 pub mod secret;
+pub mod showers;
 pub mod sources;
+pub mod sun;
+pub mod tz;
 pub mod web_book;
 
 use std::path::{Path, PathBuf};
@@ -30,6 +36,7 @@ use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde::Serialize;
 
 pub use chrono;
+pub use chrono_tz;
 pub use config::{Config, SectionKind};
 pub use fetch::{Http, Net};
 pub use zeroize;
@@ -78,6 +85,8 @@ pub struct Edition {
     /// "Clear · 74°/40°F · 0% rain", for the front page and the cover.
     pub weather_line: Option<String>,
     pub sections: Vec<Section>,
+    /// Pictures pages show, `(href, PNG)` inside `OEBPS/`: the weather icons.
+    pub assets: Vec<(String, Vec<u8>)>,
 }
 
 impl Edition {
@@ -156,6 +165,7 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
         place: cfg.place.clone(),
         weather_line: None,
         sections: Vec::new(),
+        assets: Vec::new(),
     };
     let mut news = Vec::new();
     let mut g_reading = None;
@@ -195,8 +205,14 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                 }
             }
             SectionKind::Weather => {
-                let (section, line) = sources::weather::section(cfg, date, net);
+                let (section, line, assets) =
+                    sources::weather::section(cfg, date, tz::local_tz(), net);
                 edition.weather_line = line;
+                for (href, bytes) in assets {
+                    if !edition.assets.iter().any(|(h, _)| *h == href) {
+                        edition.assets.push((href, bytes));
+                    }
+                }
                 edition.sections.push(section);
             }
             SectionKind::Local => {

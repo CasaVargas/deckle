@@ -58,6 +58,7 @@ pub fn run() {
             daily::daily_state,
             daily::daily_setup,
             daily::daily_save,
+            daily::daily_day_preview,
             daily::geocode,
             daily::reading_list,
             daily::reading_save,

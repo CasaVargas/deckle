@@ -1,0 +1,128 @@
+{
+ "2024": [
+  {
+   "phenom": "Equinox",
+   "utc": "2024-03-20T03:06"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2024-06-20T20:51"
+  },
+  {
+   "phenom": "Equinox",
+   "utc": "2024-09-22T12:44"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2024-12-21T09:20"
+  }
+ ],
+ "2025": [
+  {
+   "phenom": "Equinox",
+   "utc": "2025-03-20T09:01"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2025-06-21T02:42"
+  },
+  {
+   "phenom": "Equinox",
+   "utc": "2025-09-22T18:19"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2025-12-21T15:03"
+  }
+ ],
+ "2026": [
+  {
+   "phenom": "Equinox",
+   "utc": "2026-03-20T14:46"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2026-06-21T08:24"
+  },
+  {
+   "phenom": "Equinox",
+   "utc": "2026-09-23T00:05"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2026-12-21T20:50"
+  }
+ ],
+ "2027": [
+  {
+   "phenom": "Equinox",
+   "utc": "2027-03-20T20:25"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2027-06-21T14:11"
+  },
+  {
+   "phenom": "Equinox",
+   "utc": "2027-09-23T06:02"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2027-12-22T02:42"
+  }
+ ],
+ "2028": [
+  {
+   "phenom": "Equinox",
+   "utc": "2028-03-20T02:17"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2028-06-20T20:02"
+  },
+  {
+   "phenom": "Equinox",
+   "utc": "2028-09-22T11:45"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2028-12-21T08:19"
+  }
+ ],
+ "2029": [
+  {
+   "phenom": "Equinox",
+   "utc": "2029-03-20T08:02"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2029-06-21T01:48"
+  },
+  {
+   "phenom": "Equinox",
+   "utc": "2029-09-22T17:38"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2029-12-21T14:14"
+  }
+ ],
+ "2030": [
+  {
+   "phenom": "Equinox",
+   "utc": "2030-03-20T13:52"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2030-06-21T07:31"
+  },
+  {
+   "phenom": "Equinox",
+   "utc": "2030-09-22T23:27"
+  },
+  {
+   "phenom": "Solstice",
+   "utc": "2030-12-21T20:09"
+  }
+ ]
+}
