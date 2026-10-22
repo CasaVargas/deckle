@@ -456,7 +456,7 @@ pub fn feed_section(
     cfg: &Config,
     now: DateTime<Utc>,
     net: &dyn Net,
-    _taken: &mut HashSet<String>,
+    taken: &mut HashSet<String>,
 ) -> Section {
     let sources = feed.sources();
     let topic_url = feed.topic.map(Topic::url);
@@ -476,7 +476,11 @@ pub fn feed_section(
     items.sort_by_key(|i| std::cmp::Reverse(i.published));
     let mut seen = HashSet::new();
     items.retain(|i| seen.insert(title_key(&i.title)));
+    // Stories an earlier section printed are dropped before the cut, so this section refills
+    // from its own next-newest items; what it keeps is recorded for the sections after it.
+    items.retain(|i| !taken.contains(&title_key(&i.title)));
     items.truncate(feed.max_items);
+    taken.extend(items.iter().map(|i| title_key(&i.title)));
     section_of(
         &feed.name,
         None,

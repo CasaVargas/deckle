@@ -280,3 +280,135 @@ fn old_feed_behaviour_unchanged() {
     assert_eq!(s.articles.len(), 2);
     assert!(s.articles.iter().all(|a| a.teaser.is_some()));
 }
+
+// ---- one story prints once across sections (spec §3) ----
+
+use deckle_digest::config::SectionKind;
+
+/// Local (one feed) and one topic feed, in `order`; no real queue, no network beyond `net`.
+fn edition_config(order: &[SectionKind], topic_max: usize) -> Config {
+    let mut c = config();
+    c.reading.queue_path = Some(
+        std::env::temp_dir().join(format!("deckle-test-no-queue-{}.jsonl", std::process::id())),
+    );
+    c.sections = order.to_vec();
+    c.local.google_news = String::new();
+    c.local.feeds = vec![url("local")];
+    c.local.max_age_hours = 24 * 7;
+    c.feeds = vec![topic_feed(topic_max)];
+    c
+}
+
+fn gathered(c: &Config, net: &Fake) -> deckle_digest::Gathered {
+    let date = "2026-10-20".parse().unwrap();
+    deckle_digest::gather(c, date, now(), net)
+}
+
+fn titles(s: &deckle_digest::Section) -> Vec<&str> {
+    s.articles.iter().map(|a| a.title.as_str()).collect()
+}
+
+fn shared_net(topic: &[(&str, &str, u32)]) -> Fake {
+    Fake::new(vec![
+        (url("local"), rss(&[("X", "https://x.example/x", 10)])),
+        (Topic::Sports.url(), rss(topic)),
+    ])
+}
+
+#[test]
+fn shared_title_prints_once_in_the_first_section() {
+    let net = shared_net(&[
+        ("X", "https://x.example/x2", 9),
+        ("Y", "https://x.example/y", 8),
+    ]);
+    let c = edition_config(&[SectionKind::Local, SectionKind::Feeds], 5);
+    let g = gathered(&c, &net);
+    assert_eq!(titles(&g.edition.sections[0]), ["X"]);
+    assert_eq!(titles(&g.edition.sections[1]), ["Y"]);
+}
+
+#[test]
+fn reordering_sections_moves_it() {
+    // Two feed sections share X; the earlier one in `[[feeds]]` order keeps it.
+    let net = Fake::new(vec![
+        (
+            url("a"),
+            rss(&[
+                ("X", "https://x.example/x", 10),
+                ("A1", "https://x.example/a1", 9),
+            ]),
+        ),
+        (
+            url("b"),
+            rss(&[
+                ("X", "https://x.example/x2", 10),
+                ("B1", "https://x.example/b1", 9),
+            ]),
+        ),
+    ]);
+    let feed = |name: &str, u: &str| FeedConfig {
+        name: name.into(),
+        urls: vec![url(u)],
+        full_text: Some(FullText::No),
+        max_items: 5,
+        ..Default::default()
+    };
+    let mut c = edition_config(&[SectionKind::Feeds], 5);
+    c.feeds = vec![feed("A", "a"), feed("B", "b")];
+    let g = gathered(&c, &net);
+    assert_eq!(titles(&g.edition.sections[0]), ["X", "A1"]);
+    assert_eq!(titles(&g.edition.sections[1]), ["B1"]);
+    c.feeds.reverse();
+    let g = gathered(&c, &net);
+    assert_eq!(titles(&g.edition.sections[0]), ["X", "B1"]);
+    assert_eq!(titles(&g.edition.sections[1]), ["A1"]);
+}
+
+#[test]
+fn dedupe_happens_before_the_cut() {
+    let net = shared_net(&[
+        ("X", "https://x.example/x2", 11),
+        ("Y", "https://x.example/y", 9),
+        ("Z", "https://x.example/z", 8),
+        ("W", "https://x.example/w", 7),
+    ]);
+    let c = edition_config(&[SectionKind::Local, SectionKind::Feeds], 2);
+    let g = gathered(&c, &net);
+    // X goes to Local; the topic refills from its own next-newest stories.
+    assert_eq!(titles(&g.edition.sections[1]), ["Y", "Z"]);
+}
+
+#[test]
+fn section_emptied_by_dedupe_says_no_new_stories() {
+    let net = shared_net(&[("X", "https://x.example/x2", 9)]);
+    let c = edition_config(&[SectionKind::Local, SectionKind::Feeds], 5);
+    let g = gathered(&c, &net);
+    let s = &g.edition.sections[1];
+    assert!(s.articles.is_empty());
+    assert_eq!(s.unavailable.as_deref(), Some("No new stories today."));
+}
+
+#[test]
+fn reading_is_never_deduped() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = deckle_digest::reading::ReadingQueue::new(dir.path().join("reading.jsonl"));
+    let page = "https://www.wxii12.com/article/candor-peach-street-standoff/74194295";
+    q.add_url(page, None, "cli", now()).unwrap();
+    let net = Fake::new(vec![
+        (
+            Topic::Sports.url(),
+            rss(&[(
+                "Montgomery County standoff: Barricaded subject hospitalized, sheriff says",
+                "https://x.example/s",
+                9,
+            )]),
+        ),
+        (page.to_owned(), fixture("article-wxii.html")),
+    ]);
+    let mut c = edition_config(&[SectionKind::Reading, SectionKind::Feeds], 5);
+    c.reading.queue_path = Some(q.path.clone());
+    let g = gathered(&c, &net);
+    assert_eq!(g.edition.sections[0].title, "Your Reading");
+    assert_eq!(g.edition.sections[0].articles.len(), 1);
+    assert_eq!(g.edition.sections[1].articles.len(), 1);
+}
