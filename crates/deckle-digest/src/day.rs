@@ -79,7 +79,9 @@ pub fn mask(spec: &str) -> String {
         .or_else(|| spec.strip_prefix("webcal://"))
         .or_else(|| spec.strip_prefix("http://"))
     {
-        let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        // Never `user:password@`: only the host is shown.
+        let host = authority.rsplit('@').next().unwrap_or_default();
         return format!("https://{host}/…");
     }
     if spec.contains("://") {
@@ -320,18 +322,20 @@ fn duration(text: &str) -> Option<Duration> {
             unit => {
                 let n: i64 = num.parse().ok()?;
                 num.clear();
-                total += match (unit, in_time) {
-                    ('W', _) => Duration::weeks(n),
-                    ('D', _) => Duration::days(n),
-                    ('H', true) => Duration::hours(n),
-                    ('M', true) => Duration::minutes(n),
-                    ('S', true) => Duration::seconds(n),
+                let part = match (unit, in_time) {
+                    ('W', _) => Duration::try_weeks(n),
+                    ('D', _) => Duration::try_days(n),
+                    ('H', true) => Duration::try_hours(n),
+                    ('M', true) => Duration::try_minutes(n),
+                    ('S', true) => Duration::try_seconds(n),
                     _ => return None,
-                };
+                }?;
+                total = total.checked_add(&part)?;
             }
         }
     }
-    Some(if neg { -total } else { total })
+    // Anything past ten years is a broken feed, not an event.
+    (total <= Duration::days(3653)).then_some(if neg { -total } else { total })
 }
 
 /// RRULE's UNTIL must be UTC when the start has a zone; rewrite a local or date-only one.
@@ -486,7 +490,12 @@ pub fn on_date(ics: &str, date: NaiveDate, tz: Tz) -> Result<(Vec<Entry>, bool),
         };
         let window_from = day_start - Duration::days(1);
         let window_to = day_end + Duration::days(1);
-        for o in occurrences(ev, &mut zones, window_from, window_to)? {
+        // A rule the recurrence library refuses (Google leaves UNTIL before DTSTART after
+        // splitting a series) costs that event only, not the whole calendar.
+        let Ok(found) = occurrences(ev, &mut zones, window_from, window_to) else {
+            continue;
+        };
+        for o in found {
             if !is_override
                 && moved
                     .get(&uid)
@@ -496,7 +505,9 @@ pub fn on_date(ics: &str, date: NaiveDate, tz: Tz) -> Result<(Vec<Entry>, bool),
             }
             let when = if o.all_day {
                 let first = o.start.date_naive();
-                let days = o.length.num_days().max(1);
+                // Whole days, rounded: midnight to midnight is 23 or 25 hours across a
+                // clock change.
+                let days = ((o.length.num_minutes() as f64) / 1440.0).round().max(1.0) as i64;
                 if !(first <= date && date < first + Duration::days(days)) {
                     continue;
                 }
@@ -584,7 +595,7 @@ pub fn agenda(cfg: &DayConfig, date: NaiveDate, tz: Tz, net: &dyn Net) -> Agenda
 /// Your Day as printed: all-day rows, then timed rows, up to `max`, then any problems.
 pub fn render(agenda: &Agenda, max: usize, units: Units) -> String {
     let mut out = String::new();
-    if !agenda.entries.is_empty() {
+    if !agenda.entries.is_empty() && max > 0 {
         out.push_str("<table class=\"day\">");
         for e in agenda.entries.iter().take(max) {
             let when = match &e.when {
@@ -603,10 +614,11 @@ pub fn render(agenda: &Agenda, max: usize, units: Units) -> String {
             ));
         }
         out.push_str("</table>");
-        if agenda.entries.len() > max {
-            out.push_str(&format!("<p>and {} more</p>", agenda.entries.len() - max));
-        }
-    } else if agenda.errors.is_empty() {
+    }
+    if agenda.entries.len() > max {
+        out.push_str(&format!("<p>and {} more</p>", agenda.entries.len() - max));
+    }
+    if agenda.entries.is_empty() && agenda.errors.is_empty() {
         out.push_str("<p>Nothing on the calendar today.</p>");
     }
     for err in &agenda.errors {

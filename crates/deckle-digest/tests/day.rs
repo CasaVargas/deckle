@@ -562,3 +562,80 @@ fn note_metric_clock() {
     let note = weather_note(&es, &forecast(&[16], 61), DAY(), Units::Metric).unwrap();
     assert!(note.contains("around 16:00"), "{note}");
 }
+
+// ---- Final review fixes ------------------------------------------------------------------
+
+fn ics(events: &[&str]) -> String {
+    let mut s = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\n");
+    for e in events {
+        s.push_str("BEGIN:VEVENT\r\n");
+        for line in e.lines() {
+            s.push_str(line.trim());
+            s.push_str("\r\n");
+        }
+        s.push_str("END:VEVENT\r\n");
+    }
+    s.push_str("END:VCALENDAR\r\n");
+    s
+}
+
+#[test]
+fn one_bad_rule_skips_only_that_event() {
+    // Google leaves UNTIL before DTSTART after a "this and following" split.
+    let text = ics(&[
+        "UID:split@t\nDTSTART;TZID=America/New_York:20261022T090000\nRRULE:FREQ=WEEKLY;UNTIL=20200101T000000Z\nSUMMARY:Old series",
+        "UID:junk@t\nDTSTART;TZID=America/New_York:20261022T100000\nRRULE:FREQ=WEEKLY;X-EVOLUTION-ENDDATE=20301010T000000Z\nSUMMARY:Odd rule",
+        "UID:ok@t\nDTSTART;TZID=America/New_York:20261022T110000\nSUMMARY:Dentist",
+    ]);
+    let (es, _) = on_date(&text, d(2026, 10, 22), ny()).unwrap();
+    let titles: Vec<&str> = es.iter().map(|e| e.title.as_str()).collect();
+    assert!(titles.contains(&"Dentist"), "{titles:?}");
+}
+
+#[test]
+fn all_day_span_survives_spring_forward() {
+    // Midnight Mar 7 to midnight Mar 9 is only 47 hours in New York.
+    let text =
+        ics(&["UID:trip@t\nDTSTART;VALUE=DATE:20260307\nDTEND;VALUE=DATE:20260309\nSUMMARY:Trip"]);
+    for (date, shows) in [
+        (d(2026, 3, 7), true),
+        (d(2026, 3, 8), true),
+        (d(2026, 3, 9), false),
+    ] {
+        let (es, _) = on_date(&text, date, ny()).unwrap();
+        assert_eq!(es.iter().any(|e| e.title == "Trip"), shows, "{date}");
+    }
+}
+
+#[test]
+fn mask_strips_credentials() {
+    assert_eq!(
+        mask("https://jon:apppass@dav.example/cal.ics"),
+        "https://dav.example/…"
+    );
+    assert_eq!(
+        mask("webcal://jon@dav.example:8443/c"),
+        "https://dav.example:8443/…"
+    );
+}
+
+#[test]
+fn absurd_duration_does_not_panic() {
+    let text = ics(&[
+        "UID:huge@t\nDTSTART;TZID=America/New_York:20261022T090000\nDURATION:P999999999999W\nSUMMARY:Forever",
+        "UID:ok@t\nDTSTART;TZID=America/New_York:20261022T110000\nSUMMARY:Dentist",
+    ]);
+    let (es, _) = on_date(&text, d(2026, 10, 22), ny()).unwrap();
+    assert!(es.iter().any(|e| e.title == "Dentist"));
+}
+
+#[test]
+fn max_zero_prints_no_empty_table() {
+    let a = Agenda {
+        entries: vec![timed("Standup", 9, 0, 15)],
+        ..Default::default()
+    };
+    let html = render(&a, 0, Units::Imperial);
+    assert!(!html.contains("<table"), "{html}");
+    assert!(html.contains("and 1 more"), "{html}");
+}
