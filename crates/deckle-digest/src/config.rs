@@ -988,6 +988,29 @@ mod tests {
     }
 
     #[test]
+    fn desktop_topic_save_round_trip() {
+        // What the desktop app sends for a ticked topic (daily_save): a whole Config as JSON.
+        let mut json = serde_json::to_value(Config::parse(STARTER).unwrap()).unwrap();
+        json["feeds"].as_array_mut().unwrap().push(serde_json::json!(
+            {"name": "Sports", "url": "", "topic": "SPORTS", "max_items": 5}
+        ));
+        let cfg: Config = serde_json::from_value(json).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, STARTER).unwrap();
+        save(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# Deckle Daily"), "comments kept:\n{text}");
+        assert!(text.contains("topic = \"SPORTS\""), "{text}");
+        let back = Config::load(&path).unwrap();
+        let f = back.feeds.iter().find(|f| f.name == "Sports").unwrap();
+        assert_eq!(f.sources(), vec![Topic::Sports.url()]);
+        assert_eq!(f.max_items, 5);
+        assert_eq!(f.full(true), FullText::Lead);
+        assert_eq!(back, cfg);
+    }
+
+    #[test]
     fn starter_parses() {
         let c = Config::parse(STARTER).unwrap();
         assert_eq!(c.feeds.len(), 1);
