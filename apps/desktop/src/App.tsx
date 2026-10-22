@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import BookRowView from "./BookRow";
-import SettingsDrawer from "./SettingsDrawer";
+import SettingsView, { type SettingsPage } from "./SettingsView";
+import ArticleField from "./ArticleField";
+import { parseAddresses } from "./articles";
+import { runSummary } from "./bookStatus";
 import DailyView from "./DailyView";
+import Icon from "./Icon";
 import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import type { BookRow, BookState, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
@@ -31,10 +36,8 @@ const DEFAULT_SETTINGS: Settings = {
 
 /** Link files and saved pages become articles (web-article design); everything else is a book. */
 const ARTICLE_FILE = /\.(webloc|url|html?)$/i;
-const WEB_ADDRESS = /https?:\/\/[^\s<>"]+/g;
-
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [] };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false };
 }
 
 export default function App() {
@@ -45,8 +48,9 @@ export default function App() {
   const [plans, setPlans] = useState<Record<string, PlanRow>>({});
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [previewer, setPreviewer] = useState<PreviewerStatus | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [aboutFocus, setAboutFocus] = useState(false);
+  const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
+  /** The settings page last opened this session: the gear returns to it. */
+  const lastPage = useRef<SettingsPage>("general");
   const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -59,6 +63,11 @@ export default function App() {
   booksRef.current = books;
   const tabRef = useRef(tab);
   tabRef.current = tab;
+  const [articleOpen, setArticleOpen] = useState(false);
+  const articleInput = useRef<HTMLInputElement>(null);
+  /** Whether ⌘V should open the article field: Books tab showing, nothing running. */
+  const pasteReady = useRef(false);
+  const settingsOpen = useRef(false);
 
   const addRows = useCallback((rows: BookRow[]) => {
     setBooks((prev) => {
@@ -105,7 +114,7 @@ export default function App() {
       : { kind: "device", root: device.root ?? "" }
     : null;
 
-  // Ask the cover rule what each book gets on the current target (badges).
+  // Ask the cover rule what each book gets on the current target (the chips).
   useEffect(() => {
     const runnable = books.filter((b) => b.mode !== "error" && b.mode !== "ready");
     if (runnable.length === 0) {
@@ -172,19 +181,40 @@ export default function App() {
         ),
       );
     });
-    const unlistenFinished = api.onRunFinished(() => setBusy(false));
+    const unlistenFinished = api.onRunFinished(() => {
+      setBusy(false);
+      // Settings hide the rows and the footer: say how the run went.
+      if (settingsOpen.current) {
+        setBooks((prev) => {
+          const summary = runSummary(prev);
+          if (summary) setNotice(summary);
+          return prev;
+        });
+      }
+    });
     // A pasted web address on the Books tab (not into a text field) becomes an article.
     const onPaste = (ev: ClipboardEvent) => {
       const el = ev.target as HTMLElement | null;
-      if (tabRef.current !== "books" || el?.closest("input, textarea, select, [contenteditable]")) return;
-      const urls = ev.clipboardData?.getData("text").match(WEB_ADDRESS) ?? [];
+      if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
+      const urls = parseAddresses(ev.clipboardData?.getData("text") ?? "");
       if (urls.length === 0) return;
       ev.preventDefault();
-      addArticles([...new Set(urls)]);
+      addArticles(urls);
     };
     document.addEventListener("paste", onPaste);
+    // The Mac webview sends no paste event unless a text field has focus, so ⌘V (Ctrl+V) on the
+    // Books tab first opens and focuses the article field; the paste then lands in it.
+    const onKey = (ev: KeyboardEvent) => {
+      const el = ev.target as HTMLElement | null;
+      if (ev.key.toLowerCase() !== "v" || !(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey) return;
+      if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
+      flushSync(() => setArticleOpen(true));
+      articleInput.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("paste", onPaste);
+      document.removeEventListener("keydown", onKey);
       clearInterval(timer);
       unlistenDrop.then((f) => f());
       unlistenProgress.then((f) => f());
@@ -231,7 +261,7 @@ export default function App() {
     });
     setTab("books");
     const skipped = items.length - rows.length;
-    setNotice(`${what} Check the badges, then Send to Kindle.${skipped ? ` ${skipped} Word document${skipped > 1 ? "s" : ""} left out: send with \`deckle library reprocess\`.` : ""}`);
+    setNotice(`${what} Check each book, then Send to Kindle.${skipped ? ` ${skipped} Word document${skipped > 1 ? "s" : ""} left out: send with \`deckle library reprocess\`.` : ""}`);
   };
 
   const pickPreviewer = async () => {
@@ -246,13 +276,13 @@ export default function App() {
     // A finished KFX is copied as is; only EPUBs need Kindle Previewer.
     if (!previewer?.found && runnable.some((b) => b.mode !== "ready")) {
       setNotice("Kindle Previewer is not installed. Open Settings to download it or point Deckle at it.");
-      setSettingsOpen(true);
+      openSettings("general");
       return;
     }
     setNotice(null);
     setBusy(true);
     setBooks((prev) =>
-      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null })),
+      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", exported: target.kind === "folder", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null })),
     );
     try {
       await api.runBooks(
@@ -298,172 +328,198 @@ export default function App() {
   const clearDone = () => setBooks((p) => p.filter((b) => b.status !== "done"));
 
   const doneCount = books.filter((b) => b.status === "done").length;
+  pasteReady.current = tab === "books" && settingsPage === null && !busy;
+  settingsOpen.current = settingsPage !== null;
 
+  const openSettings = (page: SettingsPage = lastPage.current) => setSettingsPage(page);
+  const pickPage = (page: SettingsPage) => {
+    lastPage.current = page;
+    setSettingsPage(page);
+  };
+  const closeSettings = useCallback(() => setSettingsPage(null), []);
+
+  const noticeBar = notice && (
+    <div className="notice" role="status">
+      {notice}
+      <button className="link" onClick={() => setNotice(null)}>
+        dismiss
+      </button>
+    </div>
+  );
+
+  // Settings cover the tabs without unmounting them, so a running Daily send or an unsaved
+  // edit is still there on Back.
   return (
     <div className={`app ${dragging ? "dragging" : ""}`}>
-      <header className="topbar">
-        <div className="brand">Deckle</div>
-        <div className="tabs" role="tablist">
-          <button role="tab" aria-selected={tab === "books"} className={tab === "books" ? "on" : ""} onClick={() => setTab("books")}>
-            Books
-          </button>
-          <button role="tab" aria-selected={tab === "daily"} className={tab === "daily" ? "on" : ""} onClick={() => setTab("daily")}>
-            Daily
-          </button>
-          <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
-            Kindle
-          </button>
-        </div>
-        {!previewer?.found && previewer && (
-          <button className="pill warn" onClick={() => setSettingsOpen(true)}>
-            Kindle Previewer not found
-          </button>
-        )}
-        <div className="spacer" />
-        {tab === "books" && (
-          <button className="ghost" onClick={pickBooks} disabled={busy}>
-            Add books…
-          </button>
-        )}
-        {tab === "books" && doneCount > 0 && !busy && (
-          <button className="ghost" onClick={clearDone}>
-            Clear done
-          </button>
-        )}
-        <button className="icon" aria-label="Settings" onClick={() => setSettingsOpen((o) => !o)}>
-          ⚙
-        </button>
-      </header>
-
-      {tab === "daily" && <DailyView onNotice={setNotice} />}
-      {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} />}
-      {tab === "books" && (
-      <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
-        {books.length === 0 ? (
-          <div className="dropzone-inner">
-            <div className="glyph" aria-hidden="true">
-              ⬇
-            </div>
-            <h1>Drop EPUBs here</h1>
-            <p>Each book becomes a Kindle book with Enhanced Typesetting, a cover that shows, page numbers, and X-Ray and Word Wise where your Kindle allows them.</p>
-            <p className="muted">Finished Kindle books (.kfx) are sent as they are.</p>
-            <p className="muted">Web articles too: paste an address, or drop a link (.webloc, .url) or a saved page (.html).</p>
-            <button className="ghost" onClick={pickBooks}>
-              or choose files…
+      {settingsPage && (
+        <>
+          {noticeBar}
+          <SettingsView
+            page={settingsPage}
+            onPage={pickPage}
+            onBack={closeSettings}
+            version={version}
+            settings={settings}
+            previewer={previewer}
+            devices={devices}
+            onChange={saveSettings}
+            onDeviceOptions={async (key, cde, verified) => {
+              await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
+              refreshDevices();
+            }}
+            update={update}
+            onUpdateState={setUpdate}
+            busy={busy}
+            onPickPreviewer={pickPreviewer}
+            library={library}
+            onLibrary={setLibraryOptions}
+            onPickLibrary={pickLibrary}
+          />
+        </>
+      )}
+      <div className="app-main" hidden={settingsPage !== null}>
+        <header className="topbar">
+          <div className="brand">Deckle</div>
+          <div className="tabs" role="tablist">
+            <button role="tab" aria-selected={tab === "books"} className={tab === "books" ? "on" : ""} onClick={() => setTab("books")}>
+              Books
+            </button>
+            <button role="tab" aria-selected={tab === "daily"} className={tab === "daily" ? "on" : ""} onClick={() => setTab("daily")}>
+              Daily
+            </button>
+            <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
+              Kindle
             </button>
           </div>
-        ) : (
-          <ul className="books" aria-label="Books">
-            {books.map((b) => (
-              <BookRowView
-                key={b.id}
-                book={b}
-                busy={busy}
-                plan={plans[b.id]}
-                onOverride={override}
-                onAsin={setAsin}
-                onToggleReport={toggleReport}
-                onRemove={remove}
-                onReveal={(p) => api.reveal(p)}
-              />
-            ))}
-          </ul>
-        )}
-        {dragging && <div className="drop-overlay">Drop to add</div>}
-      </main>
-      )}
-
-      {notice && (
-        <div className="notice" role="status">
-          {notice}
-          <button className="link" onClick={() => setNotice(null)}>
-            dismiss
-          </button>
-        </div>
-      )}
-
-      {(tab === "books" || tab === "kindle") && (
-      <footer className="bar">
-        <div className="device">
-          <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
-          {devices.length === 0 ? (
-            "No Kindle connected"
-          ) : devices.length === 1 ? (
-            <span title={device?.root ?? undefined}>{device?.model_hint}</span>
-          ) : (
-            <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
-              {devices.map((d) => (
-                <option key={d.key} value={d.key}>
-                  {d.model_hint}
-                </option>
-              ))}
-            </select>
-          )}
-          {device && (
-            <span className="muted">
-              {" · "}
-              {device.kind === "mtp" ? "MTP" : "USB"}
-              {device.kind === "mtp" || !device.thumbnails_writable ? " · covers via PDOC" : " · thumbnails"}
-            </span>
-          )}
-        </div>
-        {tab === "books" && (
-        <div className="actions">
-          <button className="primary" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
-            {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
-          </button>
-          <div className="split">
-            <button className="secondary" aria-label="More actions" onClick={() => setExportOpen((o) => !o)} disabled={busy || runnable.length === 0}>
-              ▾
+          {!previewer?.found && previewer && (
+            <button className="pill warn" onClick={() => openSettings("general")}>
+              Kindle Previewer not found
             </button>
-            {exportOpen && (
-              <div className="menu up" onMouseLeave={() => setExportOpen(false)}>
-                <button onClick={exportToFolder}>Export to folder…</button>
+          )}
+          <div className="spacer" />
+          {tab === "books" && (
+            <button className="ghost with-icon" onClick={pickBooks} disabled={busy}>
+              <Icon name="plus" /> Add books
+            </button>
+          )}
+          {tab === "books" && (
+            <button className="ghost with-icon" onClick={() => setArticleOpen(true)} disabled={busy}>
+              <Icon name="link" /> Add article
+            </button>
+          )}
+          {tab === "books" && doneCount > 0 && !busy && (
+            <button className="ghost" onClick={clearDone}>
+              Clear done
+            </button>
+          )}
+          <button className="icon" aria-label="Settings" onClick={() => openSettings()}>
+            <Icon name="settings" size={18} />
+          </button>
+        </header>
+
+        {tab === "daily" && <DailyView onNotice={setNotice} />}
+        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} />}
+        {tab === "books" && articleOpen && (
+          <ArticleField
+            ref={articleInput}
+            onAdd={(urls) => {
+              setArticleOpen(false);
+              addArticles(urls);
+            }}
+            onCancel={() => setArticleOpen(false)}
+          />
+        )}
+        {tab === "books" && (
+        <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
+          {books.length === 0 ? (
+            <div className="dropzone-inner">
+              <div className="glyph" aria-hidden="true">
+                <Icon name="download" size={40} />
               </div>
+              <h1>Drop EPUBs here</h1>
+              <p>They become Kindle books with covers, page numbers, X-Ray and Word Wise.</p>
+              <p className="muted small">Also .kfx, web links and saved pages</p>
+              <div className="empty-actions">
+                <button className="ghost" onClick={pickBooks}>
+                  Choose files…
+                </button>
+                <button className="ghost" onClick={() => setArticleOpen(true)}>
+                  Add article
+                </button>
+              </div>
+            </div>
+          ) : (
+            <ul className="books" aria-label="Books">
+              {books.map((b) => (
+                <BookRowView
+                  key={b.id}
+                  book={b}
+                  busy={busy}
+                  plan={plans[b.id]}
+                  settings={settings}
+                  onOverride={override}
+                  onAsin={setAsin}
+                  onToggleReport={toggleReport}
+                  onRemove={remove}
+                  onReveal={(p) => api.reveal(p)}
+                />
+              ))}
+            </ul>
+          )}
+          {dragging && <div className="drop-overlay">Drop to add</div>}
+        </main>
+        )}
+
+        {!settingsPage && noticeBar}
+
+        {(tab === "books" || tab === "kindle") && (
+        <footer className="bar">
+          <div className="device">
+            <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
+            {devices.length === 0 ? (
+              "No Kindle connected"
+            ) : devices.length === 1 ? (
+              <span title={device?.root ?? undefined}>{device?.model_hint}</span>
+            ) : (
+              <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
+                {devices.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.model_hint}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
-        </div>
+          {tab === "books" && (
+          <div className="actions">
+            <button className="primary joined" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
+              {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
+            </button>
+            <div className="split">
+              <button className="secondary" aria-label="More actions" onClick={() => setExportOpen((o) => !o)} disabled={busy || runnable.length === 0}>
+                <Icon name="chevron-down" />
+              </button>
+              {exportOpen && (
+                <div className="menu up" onMouseLeave={() => setExportOpen(false)}>
+                  <button onClick={exportToFolder}>Export to folder…</button>
+                </div>
+              )}
+            </div>
+          </div>
+          )}
+          {hasUpdate(update) ? (
+            <button
+              className="version link"
+              onClick={() => openSettings("about")}
+            >
+              Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
+            </button>
+          ) : (
+            <div className="version">Deckle {version}</div>
+          )}
+        </footer>
         )}
-        {hasUpdate(update) ? (
-          <button
-            className="version link"
-            onClick={() => {
-              setAboutFocus(true);
-              setSettingsOpen(true);
-            }}
-          >
-            Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
-          </button>
-        ) : (
-          <div className="version">Deckle {version}</div>
-        )}
-      </footer>
-      )}
-
-      <SettingsDrawer
-        open={settingsOpen}
-        version={version}
-        settings={settings}
-        previewer={previewer}
-        devices={devices}
-        onChange={saveSettings}
-        onDeviceOptions={async (key, cde, verified) => {
-          await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
-          refreshDevices();
-        }}
-        onClose={() => {
-          setSettingsOpen(false);
-          setAboutFocus(false);
-        }}
-        update={update}
-        onUpdateState={setUpdate}
-        busy={busy}
-        focusAbout={aboutFocus}
-        onPickPreviewer={pickPreviewer}
-        library={library}
-        onLibrary={setLibraryOptions}
-        onPickLibrary={pickLibrary}
-      />
+      </div>
     </div>
   );
 }

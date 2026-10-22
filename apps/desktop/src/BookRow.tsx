@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from "react";
-import type { BookState, PlanRow } from "./types";
+import { beforeChip, doneChips, type Chip } from "./bookStatus";
+import Icon from "./Icon";
+import type { BookState, PlanRow, Settings } from "./types";
 import { STAGES, STAGE_LABEL } from "./types";
 
 interface Props {
@@ -8,6 +10,8 @@ interface Props {
   busy: boolean;
   /** What the cover rule will do on the current target (undefined until planned). */
   plan?: PlanRow;
+  /** Which features are on: the before-sending chip names them. */
+  settings: Pick<Settings, "xray" | "word_wise">;
   onOverride: (id: string, cde: "pdoc" | "ebok" | null) => void;
   onAsin: (id: string, asin: string | null) => void;
   onToggleReport: (id: string) => void;
@@ -15,19 +19,23 @@ interface Props {
   onReveal: (path: string) => void;
 }
 
-function badge(book: BookState, plan: PlanRow | undefined) {
-  if (book.mode === "error") return { cls: "badge error", text: "Error", title: book.reason };
-  if (book.mode === "ready") return { cls: "badge ready", text: "Ready", title: book.reason };
-  if (!plan) return { cls: "badge cover", text: "Cover", title: book.reason };
-  if (plan.cde === "ebok") {
-    return { cls: "badge features", text: plan.write_thumbnail ? "Everything" : "Features", title: plan.reason };
-  }
-  return { cls: "badge cover", text: "Cover", title: plan.reason };
+function Chips({ chips }: { chips: Chip[] }) {
+  return (
+    <>
+      {chips.map((c) => (
+        <span key={c.text} className={`chip ${c.tone}`} title={c.title}>
+          {c.text}
+        </span>
+      ))}
+    </>
+  );
 }
+
+const SOURCE = { llm: "AI model", wikipedia: "Wikipedia", basic: "basic" } as const;
 
 const ASIN = /^[A-Z0-9]{10}$/;
 
-export default function BookRowView({ book, busy, plan, onOverride, onAsin, onToggleReport, onRemove, onReveal }: Props) {
+export default function BookRowView({ book, busy, plan, settings, onOverride, onAsin, onToggleReport, onRemove, onReveal }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   /** The ASIN field's text while it is open; `null` when closed. */
   const [asinDraft, setAsinDraft] = useState<string | null>(null);
@@ -39,10 +47,10 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
     setAsinDraft(null);
   };
   const effectiveCde = book.cdeOverride ?? plan?.cde ?? "pdoc";
-  const b = badge(book, plan);
+  const before = beforeChip(book, plan, settings);
   const stageIndex = book.stage ? STAGES.indexOf(book.stage as (typeof STAGES)[number]) : -1;
 
-  let statusLine: React.ReactNode = null;
+  let statusLine: React.ReactNode;
   if (book.status === "running") {
     statusLine = (
       <div className="progress" aria-label={`${STAGE_LABEL[book.stage ?? ""] ?? book.stage}`}>
@@ -54,50 +62,47 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
     );
   } else if (book.status === "done") {
     statusLine = (
-      <div className="result ok">
-        Done{book.mode === "ready" ? " · sent as is" : ""}
-        {book.pages ? ` · ${book.pages} pages` : ""}
+      <div className="chips">
+        <Chips chips={doneChips(book)} />
         {book.delivered && (
           <button className="link" onClick={() => onReveal(book.delivered!)}>
             Show file
           </button>
         )}
-        {book.runWarnings.length > 0 && <span className="warn"> · {book.runWarnings.length} warning{book.runWarnings.length > 1 ? "s" : ""}</span>}
-        {book.replaced.length > 0 && <div className="shipped">Replaced the older copy {book.replaced.join(", ")}</div>}
-        {book.shipped && (
-          <div className="shipped" title={book.shipped.reason}>
-            {book.shipped.cde} · {book.shipped.reason}
-          </div>
-        )}
-        {(book.xray || book.wordWise) && (
-          <div className="shipped">
-            {book.xray && (
-              <>
-                X-Ray: {book.xray.people} people, {book.xray.terms} terms (
-                {book.xray.source === "llm" ? "LLM" : book.xray.source === "wikipedia" ? "Wikipedia" : "basic"})
-              </>
-            )}
-            {book.xray && book.wordWise && " · "}
-            {book.wordWise && (
-              <>
-                Word Wise: {book.wordWise.hints.toLocaleString()} hints (level {book.wordWise.level},{" "}
-                {book.wordWise.dictionary === "device" ? "Kindle's dictionary" : "Deckle's dictionary"})
-              </>
-            )}
-          </div>
-        )}
       </div>
     );
   } else if (book.status === "failed") {
-    statusLine = <div className="result fail">{book.runError}</div>;
+    statusLine = (
+      <div className="chips">
+        <span className="chip fail">Failed</span>
+        <span className="chip-text fail" title={book.runError ?? undefined}>
+          {book.runError}
+        </span>
+      </div>
+    );
   } else if (book.status === "queued") {
-    statusLine = <div className="result muted">Waiting…</div>;
-  } else if (book.error) {
-    statusLine = <div className="result fail">{book.error}</div>;
-  } else if (book.mode === "ready") {
-    statusLine = <div className="result muted">Already a Kindle book: sent as is, no conversion.</div>;
-  } else if (book.warnings.length > 0) {
-    statusLine = <div className="result muted">{book.warnings.join("; ")}</div>;
+    statusLine = (
+      <div className="chips">
+        <span className="chip plain">Waiting…</span>
+      </div>
+    );
+  } else {
+    const notes = book.warnings.length;
+    statusLine = (
+      <div className="chips">
+        <Chips chips={[before]} />
+        {book.error && (
+          <span className="chip-text fail" title={book.error}>
+            {book.error}
+          </span>
+        )}
+        {notes > 0 && (
+          <span className="chip warn" title={book.warnings.join("\n")}>
+            {notes} note{notes > 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -109,9 +114,6 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
         <div className="title-line">
           <span className="title" title={book.path}>
             {book.title}
-          </span>
-          <span className={b.cls} title={b.title}>
-            {b.text}
           </span>
         </div>
         <div className="byline">
@@ -153,30 +155,59 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
         )}
         {statusLine}
         {book.showReport && (
-          <div className="report">
-            <div>
-              <b>Mode:</b> {effectiveCde.toUpperCase()} — {b.title}
-            </div>
-            <div>
-              <b>File:</b> {book.path}
-            </div>
+          <dl className="report">
+            <dt>Mode</dt>
+            <dd>
+              {(book.shipped?.cde ?? effectiveCde).toUpperCase()} · {book.shipped?.reason ?? plan?.reason ?? book.reason}
+            </dd>
+            {book.asin && (
+              <>
+                <dt>ASIN</dt>
+                <dd>{book.asin}</dd>
+              </>
+            )}
+            <dt>File</dt>
+            <dd>{book.path}</dd>
             {book.delivered && (
-              <div>
-                <b>Delivered:</b> {book.delivered}
-              </div>
+              <>
+                <dt>{book.exported ? "Exported" : "Delivered"}</dt>
+                <dd>{book.delivered}</dd>
+              </>
+            )}
+            {book.replaced.length > 0 && (
+              <>
+                <dt>Replaced</dt>
+                <dd>{book.replaced.join(", ")}</dd>
+              </>
+            )}
+            {book.xray && (
+              <>
+                <dt>X-Ray</dt>
+                <dd>
+                  {book.xray.people} people, {book.xray.terms} terms ({SOURCE[book.xray.source]})
+                </dd>
+              </>
+            )}
+            {book.wordWise && (
+              <>
+                <dt>Word Wise</dt>
+                <dd>
+                  {book.wordWise.hints.toLocaleString()} hints, level {book.wordWise.level}, {book.wordWise.dictionary === "device" ? "Kindle's dictionary" : "Deckle's dictionary"}
+                </dd>
+              </>
             )}
             {[...book.warnings, ...book.runWarnings].map((w, i) => (
-              <div key={i} className="warn">
+              <dd key={i} className="warn wide">
                 {w}
-              </div>
+              </dd>
             ))}
-            {book.runError && <div className="fail">{book.runError}</div>}
-          </div>
+            {(book.runError || book.error) && <dd className="fail wide">{book.runError ?? book.error}</dd>}
+          </dl>
         )}
       </div>
       <div className="row-menu">
         <button className="icon" aria-label="Book options" onClick={() => setMenuOpen((o) => !o)} disabled={busy}>
-          ⋯
+          <Icon name="dots" size={18} />
         </button>
         {menuOpen && (
           <div className="menu" onMouseLeave={() => setMenuOpen(false)}>
@@ -196,7 +227,7 @@ export default function BookRowView({ book, busy, plan, onOverride, onAsin, onTo
               <button onClick={() => { onAsin(book.id, null); setMenuOpen(false); }}>Clear ASIN</button>
             )}
             <button onClick={() => { onToggleReport(book.id); setMenuOpen(false); }}>
-              {book.showReport ? "Hide report" : "Show report"}
+              {book.showReport ? "Hide details" : "Details"}
             </button>
             <button className="danger" onClick={() => { onRemove(book.id); setMenuOpen(false); }}>
               Remove

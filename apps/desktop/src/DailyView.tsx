@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
+import Icon from "./Icon";
 import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, PlaceRow, ReadingEntry, RunResult, ScheduleStatus, SectionKind } from "./types";
 import { ALL_SECTIONS, DEFAULT_EMAIL, SECTION_LABEL, SIGNS } from "./types";
 
@@ -310,7 +311,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                   {e.note && e.state !== "printed" && <span className="muted"> · {e.note}</span>}
                 </span>
                 <button className="icon small" aria-label="Remove" onClick={() => api.readingRemove(e.id).then(refreshSide)}>
-                  ✕
+                  <Icon name="x" size={14} />
                 </button>
               </li>
             ))}
@@ -543,10 +544,10 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
               </label>
               <span>
                 <button className="icon small" aria-label="Move up" disabled={i === 0} onClick={() => move(s, -1)}>
-                  ↑
+                  <Icon name="arrow-up" size={14} />
                 </button>
                 <button className="icon small" aria-label="Move down" disabled={i === enabled.length - 1} onClick={() => move(s, 1)}>
-                  ↓
+                  <Icon name="arrow-down" size={14} />
                 </button>
               </span>
             </li>
@@ -573,7 +574,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
               <input value={f.name} placeholder="Section name" onChange={(e) => edit((c) => (c.feeds[i].name = e.target.value))} />
               <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
               <button className="icon small" aria-label="Remove feed" onClick={() => edit((c) => c.feeds.splice(i, 1))}>
-                ✕
+                <Icon name="x" size={14} />
               </button>
             </div>
           ))}

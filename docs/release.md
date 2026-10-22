@@ -10,7 +10,8 @@
    `-setup.exe`) and Linux (`.deb`, `.AppImage`), each updater bundle with its `.sig`, plus
    `latest.json`, and attaches them to a **draft** release. `check-updater-json` fails the run
    if `latest.json` lacks a platform.
-4. Download one installer per platform, install, send a book. Then publish the draft, as a
+4. Download one installer per platform, install, send a book, look over Settings, and paste a
+   web address on the Books tab (⌘V / Ctrl+V). Then publish the draft, as a
    normal release (not a pre-release). **Publishing ships the update:** every installed copy
    offers it at its next launch, so test first.
 

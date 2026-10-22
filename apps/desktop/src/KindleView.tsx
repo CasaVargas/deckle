@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import Icon from "./Icon";
 import type { DeviceBookRow, DeviceShelf, RunTarget } from "./types";
 
 interface Props {
@@ -105,7 +106,7 @@ function BookLine({ book, busy, onResend, onRemove }: { book: DeviceBookRow; bus
       </div>
       <div className="row-menu">
         <button className="icon" aria-label={`Actions for ${title}`} onClick={() => setMenuOpen((o) => !o)} disabled={busy || removing}>
-          ⋯
+          <Icon name="dots" size={18} />
         </button>
         {menuOpen && (
           <div className="menu" onMouseLeave={() => setMenuOpen(false)}>
@@ -246,7 +247,7 @@ export default function KindleView({ target, targetKey, busy, onResend, onNotice
             </strong>{" "}
             — Deckle can build {updatable.length === 1 ? "it" : "them"} better now.
           </span>
-          <button className="primary solo" onClick={updateAll} disabled={busy}>
+          <button className="primary" onClick={updateAll} disabled={busy}>
             Update all
           </button>
         </div>
