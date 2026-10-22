@@ -14,6 +14,8 @@ const TITLE: &str = "Weather";
 pub struct Forecast {
     pub current: Current,
     pub daily: Daily,
+    /// For the strip's "am"/"pm" and the rain note only (almanac design §4.1).
+    pub hourly: Hourly,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,6 +38,15 @@ pub struct Daily {
     pub sunset: Vec<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct Hourly {
+    /// Local wall-clock times, `2026-10-22T16:00`.
+    pub time: Vec<String>,
+    pub precipitation_probability: Vec<Option<f64>>,
+    pub temperature_2m: Vec<f64>,
+    pub weather_code: Vec<u32>,
+}
+
 pub fn url(lat: f64, lon: f64, units: Units) -> String {
     let (t, w) = match units {
         Units::Imperial => ("fahrenheit", "mph"),
@@ -45,6 +56,7 @@ pub fn url(lat: f64, lon: f64, units: Units) -> String {
         "https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}\
          &current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code\
          &daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset\
+         &hourly=precipitation_probability,temperature_2m,weather_code\
          &temperature_unit={t}&wind_speed_unit={w}&timezone=auto&forecast_days=5"
     )
 }
@@ -66,6 +78,18 @@ pub fn parse(json: &[u8]) -> Result<Forecast, String> {
     .any(|&l| l != n)
     {
         return Err("forecast series have different lengths".into());
+    }
+    let h = &f.hourly;
+    let n = h.time.len();
+    if [
+        h.precipitation_probability.len(),
+        h.temperature_2m.len(),
+        h.weather_code.len(),
+    ]
+    .iter()
+    .any(|&l| l != n)
+    {
+        return Err("hourly forecast series have different lengths".into());
     }
     Ok(f)
 }
@@ -91,8 +115,94 @@ pub fn describe(code: u32) -> &'static str {
         80..=82 => "Showers",
         85 | 86 => "Snow showers",
         95 => "Thunderstorms",
-        96 | 99 => "Thunderstorms with hail",
+        96 | 99 => "Hailstorms",
         _ => "Unsettled",
+    }
+}
+
+/// An hour this likely to be wet counts as wet.
+pub(crate) const WET_PERCENT: f64 = 50.0;
+
+/// The hours of daily entry `day` with rain or snow likely, as hours of the day.
+fn wet_hours(f: &Forecast, day: usize) -> Vec<u32> {
+    let date = &f.daily.time[day];
+    f.hourly
+        .time
+        .iter()
+        .zip(&f.hourly.precipitation_probability)
+        .filter(|(t, p)| t.starts_with(date.as_str()) && p.unwrap_or(0.0) >= WET_PERCENT)
+        .filter_map(|(t, _)| t.get(11..13)?.parse().ok())
+        .collect()
+}
+
+/// The strip's word for daily entry `day`: "Showers, pm", "Frost at dawn".
+pub fn strip_word(f: &Forecast, day: usize, units: Units) -> String {
+    let code = f.daily.weather_code[day];
+    let frost = match units {
+        Units::Imperial => 32.0,
+        Units::Metric => 0.0,
+    };
+    if code <= 2 && f.daily.temperature_2m_min[day] <= frost {
+        return "Frost at dawn".into();
+    }
+    let word = describe(code);
+    let wet = wet_hours(f, day);
+    if wet.is_empty() || wet.iter().any(|h| *h < 12) && wet.iter().any(|h| *h >= 12) {
+        word.into()
+    } else if wet[0] < 12 {
+        format!("{word}, am")
+    } else {
+        format!("{word}, pm")
+    }
+}
+
+/// The strip's pictures; each always sits beside its word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Icon {
+    Clear,
+    Partly,
+    Cloudy,
+    Fog,
+    Rain,
+    Snow,
+    Storm,
+}
+
+impl Icon {
+    pub fn from_code(code: u32) -> Icon {
+        match code {
+            0 | 1 => Icon::Clear,
+            2 => Icon::Partly,
+            45 | 48 => Icon::Fog,
+            51..=67 | 80..=82 => Icon::Rain,
+            71..=77 | 85 | 86 => Icon::Snow,
+            95..=99 => Icon::Storm,
+            _ => Icon::Cloudy,
+        }
+    }
+
+    pub fn href(self) -> &'static str {
+        match self {
+            Icon::Clear => "images/wx-clear.png",
+            Icon::Partly => "images/wx-partly.png",
+            Icon::Cloudy => "images/wx-cloudy.png",
+            Icon::Fog => "images/wx-fog.png",
+            Icon::Rain => "images/wx-rain.png",
+            Icon::Snow => "images/wx-snow.png",
+            Icon::Storm => "images/wx-storm.png",
+        }
+    }
+
+    pub fn png(self) -> &'static [u8] {
+        match self {
+            Icon::Clear => include_bytes!("../../assets/weather/clear.png"),
+            Icon::Partly => include_bytes!("../../assets/weather/partly.png"),
+            Icon::Cloudy => include_bytes!("../../assets/weather/cloudy.png"),
+            Icon::Fog => include_bytes!("../../assets/weather/fog.png"),
+            Icon::Rain => include_bytes!("../../assets/weather/rain.png"),
+            Icon::Snow => include_bytes!("../../assets/weather/snow.png"),
+            Icon::Storm => include_bytes!("../../assets/weather/storm.png"),
+        }
     }
 }
 
@@ -221,6 +331,139 @@ mod tests {
         assert_eq!(describe(0), "Clear");
         assert_eq!(describe(81), "Showers");
         assert_eq!(describe(1234), "Unsettled");
+    }
+
+    /// One day, 2026-10-22, with wet hours (probability 80) at `wet`.
+    fn day(code: u32, low: f64, wet: &[u32]) -> Forecast {
+        let hours: Vec<u32> = (0..24).collect();
+        Forecast {
+            current: Current {
+                temperature_2m: 50.0,
+                apparent_temperature: 48.0,
+                relative_humidity_2m: 60.0,
+                wind_speed_10m: 5.0,
+                weather_code: code,
+            },
+            daily: Daily {
+                time: vec!["2026-10-22".into()],
+                weather_code: vec![code],
+                temperature_2m_max: vec![60.0],
+                temperature_2m_min: vec![low],
+                precipitation_probability_max: vec![Some(80.0)],
+                sunrise: vec!["2026-10-22T07:20".into()],
+                sunset: vec!["2026-10-22T18:10".into()],
+            },
+            hourly: Hourly {
+                time: hours
+                    .iter()
+                    .map(|h| format!("2026-10-22T{h:02}:00"))
+                    .collect(),
+                precipitation_probability: hours
+                    .iter()
+                    .map(|h| Some(if wet.contains(h) { 80.0 } else { 10.0 }))
+                    .collect(),
+                temperature_2m: vec![50.0; 24],
+                weather_code: vec![code; 24],
+            },
+        }
+    }
+
+    #[test]
+    fn pm_showers() {
+        assert_eq!(
+            strip_word(&day(80, 45.0, &[13, 14, 15]), 0, Units::Imperial),
+            "Showers, pm"
+        );
+    }
+
+    #[test]
+    fn am_rain() {
+        assert_eq!(
+            strip_word(&day(61, 45.0, &[6, 7, 11]), 0, Units::Imperial),
+            "Light rain, am"
+        );
+    }
+
+    #[test]
+    fn all_day_no_suffix() {
+        assert_eq!(
+            strip_word(&day(63, 45.0, &[9, 15]), 0, Units::Imperial),
+            "Rain"
+        );
+        assert_eq!(strip_word(&day(0, 45.0, &[]), 0, Units::Imperial), "Clear");
+    }
+
+    #[test]
+    fn frost_at_dawn() {
+        assert_eq!(
+            strip_word(&day(1, 31.0, &[]), 0, Units::Imperial),
+            "Frost at dawn"
+        );
+        assert_eq!(
+            strip_word(&day(1, -1.0, &[]), 0, Units::Metric),
+            "Frost at dawn"
+        );
+        assert_eq!(
+            strip_word(&day(1, 1.0, &[]), 0, Units::Metric),
+            "Mostly clear"
+        );
+        assert_eq!(
+            strip_word(&day(3, 31.0, &[]), 0, Units::Imperial),
+            "Overcast"
+        );
+    }
+
+    #[test]
+    fn words_fit() {
+        let cap = "Freezing drizzle, pm".len();
+        for code in 0..100 {
+            for wet in [&[13][..], &[6][..]] {
+                let w = strip_word(&day(code, 45.0, wet), 0, Units::Imperial);
+                assert!(w.len() <= cap, "{code}: {w}");
+            }
+        }
+    }
+
+    #[test]
+    fn icon_mapping() {
+        use Icon::*;
+        for (code, icon) in [
+            (0, Clear),
+            (1, Clear),
+            (2, Partly),
+            (3, Cloudy),
+            (45, Fog),
+            (63, Rain),
+            (51, Rain),
+            (73, Snow),
+            (77, Snow),
+            (95, Storm),
+            (81, Rain),
+            (85, Snow),
+        ] {
+            assert_eq!(Icon::from_code(code), icon, "{code}");
+        }
+        assert_eq!(Icon::Rain.href(), "images/wx-rain.png");
+    }
+
+    #[test]
+    fn hourly_length_mismatch_rejected() {
+        let mut v: serde_json::Value =
+            serde_json::from_str(include_str!("../../tests/fixtures/weather/forecast.json"))
+                .unwrap();
+        assert!(parse(v.to_string().as_bytes()).is_ok());
+        v["hourly"]["weather_code"].as_array_mut().unwrap().pop();
+        assert!(parse(v.to_string().as_bytes()).is_err());
+    }
+
+    #[test]
+    fn pngs_decode() {
+        use Icon::*;
+        for icon in [Clear, Partly, Cloudy, Fog, Rain, Snow, Storm] {
+            let img = image::load_from_memory(icon.png()).unwrap();
+            assert_eq!((img.width(), img.height()), (64, 64), "{icon:?}");
+            assert_eq!(img.color(), image::ColorType::L8, "{icon:?}");
+        }
     }
 
     #[test]
