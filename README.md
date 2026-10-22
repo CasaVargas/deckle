@@ -1,5 +1,11 @@
 # Deckle
 
+[![Latest release](https://img.shields.io/github/v/release/CasaVargas/deckle)](https://github.com/CasaVargas/deckle/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/CasaVargas/deckle/total)](https://github.com/CasaVargas/deckle/releases)
+[![Stars](https://img.shields.io/github/stars/CasaVargas/deckle)](https://github.com/CasaVargas/deckle/stargazers)
+[![CI](https://img.shields.io/github/actions/workflow/status/CasaVargas/deckle/ci.yml?branch=main&label=ci)](https://github.com/CasaVargas/deckle/actions/workflows/ci.yml)
+[![License: GPL-3.0](https://img.shields.io/github/license/CasaVargas/deckle)](LICENSE)
+
 Deckle turns EPUBs you own into Kindle books that behave like store books, and puts them on your
 Kindle over USB: Enhanced Typesetting, a cover that shows, real page numbers, X-Ray and Word Wise.
 
