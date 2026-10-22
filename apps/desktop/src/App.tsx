@@ -106,7 +106,7 @@ export default function App() {
       : { kind: "device", root: device.root ?? "" }
     : null;
 
-  // Ask the cover rule what each book gets on the current target (badges).
+  // Ask the cover rule what each book gets on the current target (the chips).
   useEffect(() => {
     const runnable = books.filter((b) => b.mode !== "error" && b.mode !== "ready");
     if (runnable.length === 0) {
@@ -232,7 +232,7 @@ export default function App() {
     });
     setTab("books");
     const skipped = items.length - rows.length;
-    setNotice(`${what} Check the badges, then Send to Kindle.${skipped ? ` ${skipped} Word document${skipped > 1 ? "s" : ""} left out: send with \`deckle library reprocess\`.` : ""}`);
+    setNotice(`${what} Check each book, then Send to Kindle.${skipped ? ` ${skipped} Word document${skipped > 1 ? "s" : ""} left out: send with \`deckle library reprocess\`.` : ""}`);
   };
 
   const pickPreviewer = async () => {
@@ -367,8 +367,8 @@ export default function App() {
         )}
         <div className="spacer" />
         {tab === "books" && (
-          <button className="ghost" onClick={pickBooks} disabled={busy}>
-            Add books…
+          <button className="ghost with-icon" onClick={pickBooks} disabled={busy}>
+            <Icon name="plus" /> Add books
           </button>
         )}
         {tab === "books" && doneCount > 0 && !busy && (
@@ -391,12 +391,13 @@ export default function App() {
               <Icon name="download" size={40} />
             </div>
             <h1>Drop EPUBs here</h1>
-            <p>Each book becomes a Kindle book with Enhanced Typesetting, a cover that shows, page numbers, and X-Ray and Word Wise where your Kindle allows them.</p>
-            <p className="muted">Finished Kindle books (.kfx) are sent as they are.</p>
-            <p className="muted">Web articles too: paste an address, or drop a link (.webloc, .url) or a saved page (.html).</p>
-            <button className="ghost" onClick={pickBooks}>
-              or choose files…
-            </button>
+            <p>They become Kindle books with covers, page numbers, X-Ray and Word Wise.</p>
+            <p className="muted small">Also .kfx, web links and saved pages</p>
+            <div className="empty-actions">
+              <button className="ghost" onClick={pickBooks}>
+                Choose files…
+              </button>
+            </div>
           </div>
         ) : (
           <ul className="books" aria-label="Books">
@@ -406,6 +407,7 @@ export default function App() {
                 book={b}
                 busy={busy}
                 plan={plans[b.id]}
+                settings={settings}
                 onOverride={override}
                 onAsin={setAsin}
                 onToggleReport={toggleReport}
@@ -437,13 +439,6 @@ export default function App() {
                 </option>
               ))}
             </select>
-          )}
-          {device && (
-            <span className="muted">
-              {" · "}
-              {device.kind === "mtp" ? "MTP" : "USB"}
-              {device.kind === "mtp" || !device.thumbnails_writable ? " · covers via PDOC" : " · thumbnails"}
-            </span>
           )}
         </div>
         {tab === "books" && (

@@ -50,7 +50,7 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .dropzone-inner p { color: var(--muted); margin: 0 0 16px; line-height: 1.5; font-size: 14px; }
 
 .books { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.row { display: grid; grid-template-columns: 56px 1fr 36px; gap: 14px; align-items: start; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.row { display: grid; grid-template-columns: 56px minmax(0, 1fr) 36px; gap: 14px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
 .row.done { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
 .row.failed { border-color: color-mix(in srgb, var(--fail) 50%, var(--line)); }
 .cover-thumb { width: 56px; height: 84px; border-radius: 4px; overflow: hidden; background: var(--line); box-shadow: 0 1px 2px rgba(0,0,0,.2); }
@@ -76,7 +76,6 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .warn { color: var(--warn); }
 .fail { color: var(--fail); }
 .link { background: none; border: 0; color: var(--accent); text-decoration: underline; padding: 0 4px; font-size: 13px; }
-.report { margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 12px; line-height: 1.5; word-break: break-all; }
 .asin-edit { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
 .asin-edit input { font: inherit; font-size: 13px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); width: 16ch; text-transform: uppercase; letter-spacing: .03em; }
 .asin-edit input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -111,7 +110,6 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .hint a { color: var(--accent); }
 .device-compat { margin: 0 0 8px; padding-left: 18px; font-size: 12px; line-height: 1.45; }
 .device-compat li + li { margin-top: 4px; }
-.shipped { color: var(--muted); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Books | Daily switch */
 .tabs { display: inline-flex; margin-left: 14px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -226,3 +224,19 @@ input[type=checkbox] { padding: 0; }
   .settings-page { padding: 18px 18px 28px; }
   .set-control input[type="text"], .set-control input[type="password"] { width: 180px; }
 }
+
+/* Book rows: one line of chips */
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; min-width: 0; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: color-mix(in srgb, var(--line) 55%, transparent); color: var(--muted); white-space: nowrap; }
+.chip.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.chip.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.chip.fail { color: var(--fail); background: color-mix(in srgb, var(--fail) 14%, transparent); }
+.chip-text { font-size: 12px; min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips .link { font-size: 12px; }
+.report { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 12px; margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 12px; line-height: 1.5; }
+.report dt { color: var(--muted); }
+.report dd { margin: 0; word-break: break-all; }
+.report dd.wide { grid-column: 1 / -1; word-break: normal; }
+.with-icon { display: inline-flex; align-items: center; gap: 6px; }
+.empty-actions { display: flex; gap: 8px; justify-content: center; }
+.shipped { color: var(--muted); font-size: 12px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
