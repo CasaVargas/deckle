@@ -44,9 +44,9 @@ can talk to an MTP Kindle (Scribe, Colorsoft, Paperwhite 2024).
 ## Status
 
 Early. The whole pipeline works from the app and the CLI and is tested against fixtures and a
-simulated mass-storage Kindle. On real hardware it's been verified on a Kindle Scribe (2024);
-other models are pending. Results per device are in [docs/devices.md](docs/devices.md). Bug
-reports with your model and firmware are very welcome.
+simulated mass-storage Kindle. On real hardware it's been verified on a Kindle Scribe (2024) and
+a Kindle Paperwhite (over USB mass storage); other models are pending. Results per device are in
+[docs/devices.md](docs/devices.md). Bug reports with your model and firmware are very welcome.
 
 ## What it does
 
