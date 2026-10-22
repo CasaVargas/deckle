@@ -272,8 +272,11 @@ fn path_read() {
             .contains("School pickup")
     );
     // `~/` is the home folder.
-    let home = std::env::var("HOME").unwrap();
-    if let Ok(rel) = p.strip_prefix(&home) {
+    // (Only where `HOME` is set: Windows has no such variable.)
+    if let Some(rel) = std::env::var("HOME")
+        .ok()
+        .and_then(|h| p.strip_prefix(h).ok().map(|r| r.to_owned()))
+    {
         let tilde = format!("~/{}", rel.display());
         assert!(read_calendar(&tilde, &net).is_ok());
     }
