@@ -79,6 +79,9 @@ pub struct Config {
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
+    /// Stop the presses (tests); the default is `press.json` beside `digest.toml`.
+    #[serde(skip)]
+    pub press_path: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -112,6 +115,7 @@ impl Default for Config {
             email: EmailConfig::default(),
             day: DayConfig::default(),
             almanac_path: None,
+            press_path: None,
         }
     }
 }
@@ -557,6 +561,13 @@ impl Config {
         self.almanac_path
             .clone()
             .unwrap_or_else(|| default_path().with_file_name("almanac.json"))
+    }
+
+    /// Where a stopped morning is kept (tomorrow's paper design §4.2).
+    pub fn press_state(&self) -> PathBuf {
+        self.press_path
+            .clone()
+            .unwrap_or_else(|| default_path().with_file_name("press.json"))
     }
 }
 
