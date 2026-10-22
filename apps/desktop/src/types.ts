@@ -34,6 +34,8 @@ export interface BookState extends BookRow {
   /** The book's Amazon ASIN, typed by the owner: EBOK then gets the store cover. */
   asin: string | null;
   showReport: boolean;
+  /** The last run went to a folder (Export to folder…), not a Kindle. */
+  exported: boolean;
   /** Older copies this send removed from the Kindle. */
   replaced: string[];
 }

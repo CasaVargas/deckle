@@ -34,7 +34,7 @@ const ARTICLE_FILE = /\.(webloc|url|html?)$/i;
 const WEB_ADDRESS = /https?:\/\/[^\s<>"]+/g;
 
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [] };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false };
 }
 
 export default function App() {
@@ -252,7 +252,7 @@ export default function App() {
     setNotice(null);
     setBusy(true);
     setBooks((prev) =>
-      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null })),
+      prev.map((b) => (b.mode === "error" ? b : { ...b, status: "queued", exported: target.kind === "folder", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null })),
     );
     try {
       await api.runBooks(
