@@ -110,8 +110,23 @@ fn choose(book: &Book, dir: Option<&Path>, state: &State) -> String {
         .unwrap_or(first)
 }
 
-fn plan(book: &Book, dir: Option<&Path>, state: &State) -> Planned {
+/// iCloud Drive's stand-in for a file evicted from this Mac (`.Walden.md.icloud`).
+fn evicted(dir: Option<&Path>, name: &str) -> bool {
+    on_disk(dir, &format!(".{name}.icloud"))
+}
+
+fn plan(book: &Book, dir: Option<&Path>, state: &State) -> Result<Planned, String> {
     let total = book.items.iter().map(|i| ids_of(i).len()).sum();
+    if let Some(b) = state.books.get(&book.key)
+        && !on_disk(dir, &b.file)
+        && evicted(dir, &b.file)
+    {
+        // Not gone, just not downloaded: writing it fresh would duplicate every entry.
+        return Err(format!(
+            "{}: in iCloud Drive but not downloaded to this Mac; open it once, then export again",
+            b.file
+        ));
+    }
     let known = state
         .books
         .get(&book.key)
@@ -122,13 +137,13 @@ fn plan(book: &Book, dir: Option<&Path>, state: &State) -> Planned {
             Some(b) => b.file.clone(),
             None => choose(book, dir, state),
         };
-        return Planned {
+        return Ok(Planned {
             file,
             created: true,
             markdown: render_new_file(book),
             ids: book.items.iter().flat_map(ids_of).collect(),
             total,
-        };
+        });
     };
     let mut new_items: Vec<Item> = Vec::new();
     let mut ids = BTreeSet::new();
@@ -147,22 +162,36 @@ fn plan(book: &Book, dir: Option<&Path>, state: &State) -> Planned {
                     }
                 }
             }
-            item => {
-                let item_ids = ids_of(item);
-                if item_ids.iter().any(|id| !known.written.contains(id)) {
-                    ids.extend(item_ids);
+            Item::Highlight { entry, notes } => {
+                // A new passage (or an extended one): with only the notes not written yet.
+                let notes: Vec<_> = notes
+                    .iter()
+                    .filter(|n| !known.written.contains(&entry_id(n)))
+                    .cloned()
+                    .collect();
+                ids.insert(entry_id(entry));
+                ids.extend(notes.iter().map(entry_id));
+                new_items.push(Item::Highlight {
+                    entry: entry.clone(),
+                    notes,
+                });
+            }
+            item @ Item::Note { entry, .. } => {
+                let id = entry_id(entry);
+                if !known.written.contains(&id) {
+                    ids.insert(id);
                     new_items.push(item.clone());
                 }
             }
         }
     }
-    Planned {
+    Ok(Planned {
         file: known.file.clone(),
         created: false,
         markdown: render_items(book, &new_items.iter().collect::<Vec<_>>()),
         ids,
         total,
-    }
+    })
 }
 
 fn record(state: &mut State, book: &Book, planned: &Planned) {
@@ -186,7 +215,13 @@ pub fn pending(books: &[Book], dir: Option<&Path>, state: &State) -> Vec<Pending
     books
         .iter()
         .map(|book| {
-            let p = plan(book, dir, &state);
+            let p = plan(book, dir, &state).unwrap_or_else(|_| Planned {
+                file: state.books[&book.key].file.clone(),
+                created: false,
+                markdown: String::new(),
+                ids: BTreeSet::new(),
+                total: book.items.iter().map(|i| ids_of(i).len()).sum(),
+            });
             record(&mut state, book, &p);
             Pending {
                 key: book.key.clone(),
@@ -225,7 +260,16 @@ fn write(path: &Path, created: bool, markdown: &str) -> std::io::Result<()> {
 pub fn export(books: &[Book], dir: &Path, state: &mut State) -> ExportReport {
     let mut report = ExportReport::default();
     for book in books {
-        let p = plan(book, Some(dir), state);
+        let p = match plan(book, Some(dir), state) {
+            Ok(p) => p,
+            Err(e) => {
+                let file = state.books[&book.key].file.clone();
+                report
+                    .failed
+                    .push((file, format!("{}: {e}", dir.display())));
+                continue;
+            }
+        };
         if p.ids.is_empty() {
             continue;
         }

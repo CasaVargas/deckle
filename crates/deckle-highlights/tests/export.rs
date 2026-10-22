@@ -249,3 +249,45 @@ fn export_clippings_remembers_the_folder() {
     let o = deckle_highlights::export_clippings(bytes, &state, None).unwrap();
     assert!(o.report.written.is_empty());
 }
+
+#[test]
+fn extending_a_highlight_does_not_rewrite_its_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut st = State::default();
+    export(
+        &books(&["h:10:I went to the woods", "n:11:read again"]),
+        dir.path(),
+        &mut st,
+    );
+    let r = export(
+        &books(&[
+            "h:10:I went to the woods",
+            "n:11:read again",
+            "h:9:So I went to the woods because",
+        ]),
+        dir.path(),
+        &mut st,
+    );
+    assert_eq!(r.written[0].new, 1, "only the extended passage is new");
+    let text = fs::read_to_string(dir.path().join("Walden.md")).unwrap();
+    assert_eq!(text.matches("read again").count(), 1, "{text}");
+}
+
+#[test]
+fn a_file_evicted_to_icloud_is_not_written_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut st = State::default();
+    export(&books(&["h:10:one"]), dir.path(), &mut st);
+    fs::rename(
+        dir.path().join("Walden.md"),
+        dir.path().join(".Walden.md.icloud"),
+    )
+    .unwrap();
+    let r = export(&books(&["h:10:one", "h:20:two"]), dir.path(), &mut st);
+    assert!(r.written.is_empty());
+    assert_eq!(r.failed.len(), 1);
+    assert!(r.failed[0].1.contains("iCloud"), "{:?}", r.failed);
+    assert!(!dir.path().join("Walden.md").exists());
+    let p = pending(&books(&["h:10:one", "h:20:two"]), Some(dir.path()), &st);
+    assert_eq!(p[0].new, 0, "nothing to write until it's downloaded");
+}

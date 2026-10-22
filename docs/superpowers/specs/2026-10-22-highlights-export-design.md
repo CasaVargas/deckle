@@ -125,8 +125,11 @@ read this again before the cabin trip
   the raw line-2 text in the entry (so nothing is lost). The date is kept as written if it can't
   be parsed.
 - **Edited highlights:** extending a highlight on the Kindle appends a *new* entry with an
-  overlapping location range. Within one export, overlapping highlights of the same book collapse
-  to the latest one. Across exports, whatever was already written stays (append-only).
+  overlapping location range. Within one export, a highlight collapses into a later one when the
+  ranges overlap **and** one passage contains the other (ignoring punctuation at the edges); the
+  later one is kept. Two different passages that merely share a location (a location is about
+  150 bytes, so consecutive sentences often do) both stay. *(Amended after the final review: the
+  first rule, overlap alone, silently dropped the earlier of two adjacent highlights.)* Across exports, whatever was already written stays (append-only).
 - **Bookmarks** are skipped (no text).
 - **Notes attach** to the highlight of the same book whose location range contains the note's
   location (or ends at it). A note with no such highlight stands on its own.

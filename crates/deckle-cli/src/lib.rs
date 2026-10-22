@@ -1371,6 +1371,9 @@ impl DigestOutcome {
                 if let Some(h) = &self.highlights {
                     lines.extend(h.describe().lines().map(|l| format!("      {l}")));
                 }
+                if let Some(e) = &f.clippings_error {
+                    lines.push(format!("      highlights: error: {e}"));
+                }
                 lines.join("\n")
             }
             None if self.queued => format!(

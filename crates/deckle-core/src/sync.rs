@@ -167,8 +167,12 @@ pub fn run_with(
     if plan.prune && !plan.push {
         report.pruned = prune_named_on(conn, &prune.prefix, prune.keep)?;
     }
+    // A failed read doesn't undo a delivery: it's reported beside it.
     if plan.clippings {
-        report.clippings = read_on(conn)?;
+        match read_on(conn) {
+            Ok(bytes) => report.clippings = bytes,
+            Err(e) => report.clippings_error = Some(e.to_string()),
+        }
     }
     Ok(report)
 }
@@ -512,6 +516,31 @@ mod tests {
         .unwrap();
         assert_eq!(r.clippings, None, "no file: nothing, and no error");
         assert_eq!(fake::opens(), 1);
+    }
+
+    #[test]
+    fn a_failed_clippings_read_keeps_the_delivery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (q, _) = outbox_and_folder(tmp.path());
+        fake::reset(&[]);
+        fake::put_bytes("My Clippings.txt", b"Walden (H)\n");
+        fake::fail_get_object();
+        let target = mtp(Some("G0001"), Some("Kindle"));
+        let plan = Plan {
+            push: true,
+            prune: false,
+            clippings: true,
+        };
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            plan,
+            &prune(),
+        )
+        .expect("the push succeeded");
+        assert_eq!(r.delivered.len(), 1);
+        assert_eq!(r.clippings, None);
+        assert!(r.clippings_error.as_deref().unwrap().contains("MTP"));
     }
 
     #[test]

@@ -85,9 +85,17 @@ pub fn entry_id(e: &Entry) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn overlaps(a: &Entry, b: &Entry) -> bool {
+/// `b` is `a` extended (or trimmed) on the Kindle: the ranges overlap and one passage holds the
+/// other. Two different passages that only share a location (a location is ~150 bytes) stay
+/// apart.
+fn extends(a: &Entry, b: &Entry) -> bool {
+    // The edges move with the selection ("life." becomes "life, and …"): compare the words.
+    let core = |t: &str| t.trim_matches(|c: char| !c.is_alphanumeric()).to_owned();
+    let (ta, tb) = (core(&a.text), core(&b.text));
+    let (ta, tb) = (ta.as_str(), tb.as_str());
+    let related = ta.contains(tb) || tb.contains(ta);
     match (a.location, b.location) {
-        (Some((a0, a1)), Some((b0, b1))) => a.title == b.title && a0 <= b1 && b0 <= a1,
+        (Some((a0, a1)), Some((b0, b1))) => a.title == b.title && a0 <= b1 && b0 <= a1 && related,
         _ => false,
     }
 }
@@ -142,10 +150,10 @@ fn items(entries: Vec<Entry>) -> Vec<Item> {
     }
     let (highlights, notes): (Vec<Entry>, Vec<Entry>) =
         entries.into_iter().partition(|e| e.kind == Kind::Highlight);
-    // An extended highlight is a new entry over the old range: keep the later one.
+    // An extended highlight is a new entry over the old range and text: keep the later one.
     let mut kept: Vec<Entry> = Vec::new();
     for h in highlights {
-        kept.retain(|k| !overlaps(k, &h));
+        kept.retain(|k| !extends(k, &h));
         kept.push(h);
     }
     let mut items: Vec<Item> = kept

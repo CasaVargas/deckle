@@ -46,6 +46,9 @@ pub struct FlushReport {
     /// Kindle has one.
     #[serde(skip)]
     pub clippings: Option<Vec<u8>>,
+    /// Reading `My Clippings.txt` failed; what was delivered still was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub clippings_error: Option<String>,
 }
 
 /// After a flush, editions named `<prefix>…` beyond the newest `keep` are removed.

@@ -21,6 +21,8 @@ struct Kindle {
     objects: Vec<(u32, ObjectInfo)>,
     /// What GetObject returns for a file put with [`put_bytes`].
     contents: HashMap<u32, Vec<u8>>,
+    /// GetObject answers with an error (a read that times out on a real Kindle).
+    fail_get_object: bool,
     ops: Vec<u16>,
     opens: u32,
     next: u32,
@@ -103,6 +105,11 @@ pub fn put_bytes(path: &str, bytes: &[u8]) {
             .unwrap();
         k.contents.insert(h, bytes.to_vec());
     });
+}
+
+/// Makes every GetObject fail until the next [`reset`].
+pub fn fail_get_object() {
+    KINDLE.with(|k| k.borrow_mut().fail_get_object = true);
 }
 
 /// Every path under `documents/`, folders with a trailing `/`, sorted.
@@ -236,6 +243,18 @@ impl Wire {
                 op::GET_OBJECT_INFO => {
                     let (_, i) = k.objects.iter().find(|(h, _)| *h == c.params[0]).unwrap();
                     self.replies.push_back(data(c.code, tx, &i.encode()));
+                }
+                op::GET_OBJECT if k.fail_get_object => {
+                    self.replies.push_back(
+                        Container {
+                            kind: ContainerKind::Response,
+                            code: rsp::INVALID_DATASET,
+                            tx_id: tx,
+                            params: Vec::new(),
+                        }
+                        .encode(&[]),
+                    );
+                    return;
                 }
                 op::GET_OBJECT => {
                     let bytes = k.contents.get(&c.params[0]).cloned().unwrap_or_default();

@@ -170,3 +170,20 @@ fn twenty_thousand_entries_group_quickly() {
     assert_eq!(books.len(), 300);
     assert!(t.elapsed() < std::time::Duration::from_secs(3));
 }
+
+#[test]
+fn adjacent_highlights_with_different_text_both_survive() {
+    let mut a = highlight_at(100);
+    a.location = Some((100, 105));
+    a.text = "First sentence.".into();
+    let mut b = highlight_at(105);
+    b.location = Some((105, 110));
+    b.text = "Second sentence.".into();
+    let mut c = highlight_at(200);
+    c.location = Some((200, 200));
+    c.text = "One.".into();
+    let mut d = c.clone();
+    d.text = "Another, same location.".into();
+    let books = group(vec![a, b, c, d]);
+    assert_eq!(books[0].items.len(), 4);
+}
