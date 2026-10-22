@@ -32,6 +32,7 @@ chrono-tz = "0.10"
 iana-time-zone = "0.1"
 rrule = "0.14.0"
 flate2 = "1"
+deckle-highlights.workspace = true
 
 # The SMTP password's keychain (email design §6): each OS's own store.
 [target.'cfg(target_os = "macos")'.dependencies]

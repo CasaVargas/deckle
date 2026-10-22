@@ -1052,6 +1052,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
+ "deckle-highlights",
  "deunicode",
  "dom_query",
  "dom_smoothie",

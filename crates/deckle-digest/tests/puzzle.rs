@@ -385,3 +385,127 @@ fn yesterdays_ladder_solved_says_so() {
         .unwrap();
     assert!(answers.body.contains("Ladder: solved"), "{}", answers.body);
 }
+
+// --- checking answers from Kindle notes (Task 8) ---
+
+use deckle_digest::puzzle::check::{record, score};
+use deckle_digest::puzzle::grid::Dir;
+use deckle_digest::puzzle::ladder::Ladder;
+use deckle_digest::puzzle::store::{Clue, Puzzle};
+
+const CLIPPINGS: &[u8] = include_bytes!("fixtures/puzzle/clippings.txt");
+
+fn clue(number: u8, dir: Dir, answer: &str, text: &str) -> Clue {
+    Clue {
+        number,
+        dir,
+        answer: answer.into(),
+        clue: text.into(),
+        theme: false,
+    }
+}
+
+/// The 2026-10-22 puzzle the fixture's notes answer.
+fn checked_puzzle() -> Puzzle {
+    Puzzle {
+        number: 41,
+        rows: Some([
+            "CARD#".into(),
+            "O...#".into(),
+            "R....".into(),
+            "D....".into(),
+            "#....".into(),
+        ]),
+        clues: vec![
+            clue(1, Dir::Across, "card", "A flat piece of stiff paper"),
+            clue(
+                6,
+                Dir::Across,
+                "area",
+                "Any particular extent of space or surface",
+            ),
+            clue(7, Dir::Across, "leaf", "A green organ of a plant"),
+            clue(1, Dir::Down, "cord", "A long thin rope"),
+            clue(2, Dir::Down, "tree", "A tall woody plant"),
+        ],
+        ladder: Some(Ladder {
+            from: "cold".into(),
+            to: "warm".into(),
+            path: ["cold", "cord", "word", "ward", "warm"]
+                .map(String::from)
+                .to_vec(),
+        }),
+    }
+}
+
+fn entries(bytes: &[u8]) -> Vec<deckle_highlights::parse::Entry> {
+    deckle_highlights::parse::parse(bytes).entries
+}
+
+#[test]
+fn notes_score_the_edition() {
+    // 1A right; 6A wrong ("AREX"); 7A wrong then right (the latest wins, " Leaf. " counts);
+    // 1D right from the renamed paper ("c o r d"); 2D answered only on yesterday's edition;
+    // a note on a headline is no answer
+    let s = score(&checked_puzzle(), date(), &entries(CLIPPINGS)).unwrap();
+    assert_eq!((s.solved, s.of, s.ladder), (3, 5, true));
+}
+
+#[test]
+fn another_editions_notes_dont_count() {
+    assert_eq!(
+        score(
+            &checked_puzzle(),
+            yesterday() - Days::new(1),
+            &entries(CLIPPINGS)
+        ),
+        None
+    );
+    // yesterday's own edition has one note, on a clue today's puzzle has
+    let s = score(&checked_puzzle(), yesterday(), &entries(CLIPPINGS)).unwrap();
+    assert_eq!((s.solved, s.ladder), (1, false));
+}
+
+#[test]
+fn a_short_highlight_inside_a_clue_counts() {
+    let text = "\u{feff}The Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Highlight on Location 5-6 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\nextent of space\r\n==========\r\nThe Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Note on Location 6 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\narea\r\n==========\r\nThe Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Highlight on Location 9-9 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\ntall\r\n==========\r\nThe Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Note on Location 9 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\ntree\r\n==========\r\n";
+    // 12+ letters of a clue name it; "tall" alone could be anything
+    let s = score(&checked_puzzle(), date(), &entries(text.as_bytes())).unwrap();
+    assert_eq!(s.solved, 1);
+}
+
+#[test]
+fn record_scores_recent_days_and_marks_readable() {
+    let mut store = Store::default();
+    store.days.insert(
+        date(),
+        Day {
+            puzzle: checked_puzzle(),
+            headlines: Vec::new(),
+            solve: None,
+        },
+    );
+    record(&mut store, Some(CLIPPINGS), date() + Days::new(1));
+    assert_eq!(store.notes_readable, Some(true));
+    let s = store.days[&date()].solve.clone().unwrap();
+    assert_eq!((s.solved, s.of), (3, 5));
+    // a Kindle without readable notes leaves the solves alone
+    record(&mut store, None, date() + Days::new(1));
+    assert_eq!(store.notes_readable, Some(false));
+    assert!(store.days[&date()].solve.is_some());
+    // nor do notes that say nothing about it (another Kindle, a cleared file)
+    record(&mut store, Some(b""), date() + Days::new(1));
+    assert!(store.days[&date()].solve.is_some());
+    // more than a week back isn't looked at
+    let mut old = Store::default();
+    old.days.insert(
+        date(),
+        Day {
+            puzzle: checked_puzzle(),
+            headlines: Vec::new(),
+            solve: None,
+        },
+    );
+    record(&mut old, Some(CLIPPINGS), date() + Days::new(8));
+    assert_eq!(old.days[&date()].solve, None);
+}
