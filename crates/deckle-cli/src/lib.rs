@@ -1167,7 +1167,7 @@ fn digest(
                             Some(deckle_digest::EDITION_PREFIX),
                             &long_reads,
                         )?;
-                        outcome = push_queued(&queue, &cfg)?;
+                        outcome = push_queued(&queue, &cfg, detect_kindle())?;
                     }
                 }
                 // Only a run that shipped (or queued) the edition uses up the saved articles.
@@ -1277,10 +1277,14 @@ fn digest(
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
         }
-        cli::DigestCommand::Push => {
+        cli::DigestCommand::Push { to } => {
             let cfg = load_digest_config(&path)?;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
-            let outcome = push_queued(&queue, &cfg)?;
+            let target = match to.as_str() {
+                "device" => detect_kindle(),
+                folder => Some(resolve_target(folder)?),
+            };
+            let outcome = push_queued(&queue, &cfg, target)?;
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
         }
@@ -1620,13 +1624,14 @@ fn detect_kindle() -> Option<Target> {
     resolve_target("device").ok()
 }
 
-/// Flushes the outbox to a connected Kindle, or reports it queued.
+/// Flushes the outbox to `target` (a connected Kindle, or a folder), or reports it queued.
 fn push_queued(
     queue: &deckle_core::queue::Queue,
     cfg: &deckle_digest::Config,
+    target: Option<Target>,
 ) -> Result<DigestOutcome, String> {
     let empty = queue.pending().is_empty();
-    let Some(target) = detect_kindle() else {
+    let Some(target) = target else {
         return Ok(DigestOutcome {
             flush: empty.then(Default::default),
             queued: !empty,
@@ -1645,37 +1650,42 @@ fn push_queued(
 }
 
 /// What `digest push` runs: the outbox with the device's actions, or (empty outbox) just the
-/// reading positions when readership is on; `None` leaves the Kindle alone.
+/// reads (positions, clippings) that are on; `None` leaves the Kindle alone.
 fn push_plan(
     actions: deckle_core::sync::Actions,
     outbox_empty: bool,
 ) -> Option<deckle_core::sync::Plan> {
-    match (outbox_empty, actions.readership) {
-        (false, _) => Some(deckle_core::sync::Plan {
+    if !outbox_empty {
+        return Some(deckle_core::sync::Plan {
             push: true,
             prune: actions.prune,
             clippings: actions.clippings,
             readership: actions.readership,
-        }),
-        (true, true) => Some(deckle_core::sync::Plan {
-            push: false,
-            prune: false,
-            clippings: actions.clippings,
-            readership: true,
-        }),
-        (true, false) => None,
+        });
     }
+    (actions.readership || actions.clippings).then_some(deckle_core::sync::Plan {
+        push: false,
+        prune: false,
+        clippings: actions.clippings,
+        readership: actions.readership,
+    })
 }
 
-/// The device's `[sync]` actions (auto-sync design §3).
+/// The device's `[sync]` actions (auto-sync design §3). The clippings are read whenever the
+/// paper has a puzzle: its answers are notes (puzzle design §5).
 fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Actions {
     let a = cfg.sync.for_device(id);
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
-        clippings: a.clippings,
+        clippings: a.clippings || puzzle_on(cfg),
         readership: a.readership,
     }
+}
+
+/// The paper has a puzzle page.
+fn puzzle_on(cfg: &deckle_digest::Config) -> bool {
+    cfg.sections.contains(&deckle_digest::SectionKind::Puzzle)
 }
 
 /// Runs `plan` on `target` over one connection.
@@ -1710,8 +1720,23 @@ fn sync_to(
         &stems,
     )
     .map_err(|e| e.to_string())?;
-    // Read in the same session; written to the folder after it's closed.
-    let highlights = match flush.clippings.as_deref() {
+    // Read in the same session; written to the folder after it's closed. The puzzle may have
+    // read them alone: highlights are exported only when they're asked for.
+    let export = cfg
+        .sync
+        .for_device(&deckle_core::sync::device_id(target))
+        .clippings;
+    if plan.clippings && puzzle_on(cfg) && flush.clippings_error.is_none() {
+        // the read ran: no file is a Kindle whose notes can't be read
+        let path = cfg.puzzle_store();
+        let mut store = deckle_digest::puzzle::store::Store::load(&path);
+        let today = deckle_digest::chrono::Local::now().date_naive();
+        deckle_digest::puzzle::check::record(&mut store, flush.clippings.as_deref(), today);
+        if let Err(e) = store.save(&path) {
+            eprintln!("puzzle: {}: {e}", path.display());
+        }
+    }
+    let highlights = match flush.clippings.as_deref().filter(|_| export) {
         Some(bytes) => match highlights::export(bytes, &highlights::state_path(), None) {
             Ok(o) => Some(o),
             Err(e) => {
@@ -2270,6 +2295,19 @@ mod push_tests {
                 true
             ),
             None
+        );
+        // the puzzle's notes alone are reason enough to read the Kindle
+        assert_eq!(
+            push_plan(
+                Actions {
+                    readership: false,
+                    clippings: true,
+                    ..on
+                },
+                true
+            )
+            .map(|p| (p.push, p.clippings, p.readership)),
+            Some((false, true, false))
         );
         assert_eq!(push_plan(on, false).map(|p| p.push), Some(true));
     }
