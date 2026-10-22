@@ -20,6 +20,7 @@ pub mod moon;
 pub mod reading;
 pub mod render;
 pub mod schedule;
+pub mod seasons;
 pub mod secret;
 pub mod sources;
 pub mod sun;
