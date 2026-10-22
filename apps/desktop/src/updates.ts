@@ -26,7 +26,7 @@ export async function checkForUpdate(): Promise<UpdateState> {
 }
 
 /**
- * Downloads, verifies and installs; on macOS and Linux the restart is a separate click. On
+ * Downloads, verifies and installs; on macOS the restart is a separate click. On
  * Windows the NSIS installer takes over and closes Deckle itself, so callers don't start this
  * while a job runs. Never rejects.
  */

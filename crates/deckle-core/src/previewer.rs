@@ -60,6 +60,8 @@ pub struct KpfResult {
 pub enum ConvertError {
     #[error("Kindle Previewer is not installed; download it from {download_url}")]
     PreviewerMissing { download_url: &'static str },
+    #[error("Kindle Previewer at {path} could not be started: {reason}")]
+    PreviewerUnlaunchable { path: PathBuf, reason: String },
     #[error("Kindle Previewer refused Enhanced Typesetting: {first_error}")]
     EnhancedTypesettingUnsupported { first_error: String },
     #[error("Kindle Previewer could not convert the book: {message}")]
@@ -93,7 +95,10 @@ pub fn default_candidates() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         if let Some(local) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
-            // Verify on a Windows machine; mirrors the 3.x layout plus the 4.x CLI name.
+            // The 4.x installer drops App Execution Aliases into WindowsApps (issue #101).
+            v.extend(windows_apps_candidates(
+                &local.join("Microsoft/WindowsApps"),
+            ));
             v.push(local.join("Amazon/Kindle Previewer 4/KindlePreviewer4CLI.exe"));
             v.push(local.join("Amazon/Kindle Previewer 4/kindlepreviewer4.exe"));
             v.push(local.join("Amazon/Kindle Previewer 3/lib/fc/bin/kindlepreviewer.exe"));
@@ -101,6 +106,31 @@ pub fn default_candidates() -> Vec<PathBuf> {
     }
     let _ = home;
     v
+}
+
+/// Kindle Previewer executables in a WindowsApps-style folder, CLI aliases first. The alias
+/// names aren't documented, so match any `*kindle*previewer*.exe`.
+pub fn windows_apps_candidates(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(bool, PathBuf)> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            let hit =
+                name.ends_with(".exe") && name.contains("kindle") && name.contains("previewer");
+            hit.then(|| (!name.contains("cli"), e.path()))
+        })
+        .collect();
+    found.sort();
+    found.into_iter().map(|(_, p)| p).collect()
+}
+
+/// Whether `p` looks like something we can run. App Execution Aliases are reparse points that
+/// `metadata` can't follow (OS error 1920), so fall back to the link's own metadata.
+fn is_executable_candidate(p: &Path) -> bool {
+    p.is_file() || (cfg!(windows) && std::fs::symlink_metadata(p).is_ok_and(|m| !m.is_dir()))
 }
 
 /// Finds Kindle Previewer: an explicit path, else `DECKLE_PREVIEWER`, else the default install
@@ -120,14 +150,14 @@ pub fn locate_in(
 ) -> Result<Previewer, ConvertError> {
     let path = match override_path {
         Some(p) => {
-            if !p.is_file() {
+            if !is_executable_candidate(p) {
                 return Err(ConvertError::PreviewerMissing {
                     download_url: PREVIEWER_DOWNLOAD_URL,
                 });
             }
             p.to_path_buf()
         }
-        None => match candidates.iter().find(|c| c.is_file()) {
+        None => match candidates.iter().find(|c| is_executable_candidate(c)) {
             Some(c) => c.clone(),
             None => {
                 return Err(ConvertError::PreviewerMissing {
@@ -136,7 +166,17 @@ pub fn locate_in(
             }
         },
     };
-    let version = probe_version(&path);
+    let version = match probe_version(&path) {
+        Ok(v) => v,
+        // A path the user chose should say why it won't run, not claim Previewer is absent.
+        Err(e) if override_path.is_some() => {
+            return Err(ConvertError::PreviewerUnlaunchable {
+                path,
+                reason: e.to_string(),
+            });
+        }
+        Err(_) => String::from("unknown"),
+    };
     let major = version
         .split('.')
         .next()
@@ -155,16 +195,13 @@ pub fn locate_in(
     })
 }
 
-fn probe_version(path: &Path) -> String {
-    let out = Command::new(path).arg("--help").output();
-    let text = match out {
-        Ok(o) => format!(
-            "{}{}",
-            String::from_utf8_lossy(&o.stdout),
-            String::from_utf8_lossy(&o.stderr)
-        ),
-        Err(_) => String::new(),
-    };
+fn probe_version(path: &Path) -> std::io::Result<String> {
+    let o = Command::new(path).arg("--help").output()?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr)
+    );
     // "Kindle Previewer 4.0.3 Copyright (c) Amazon.com"
     for line in text.lines() {
         if let Some(rest) = line.trim().strip_prefix("Kindle Previewer ") {
@@ -173,11 +210,11 @@ fn probe_version(path: &Path) -> String {
                 .take_while(|c| c.is_ascii_digit() || *c == '.')
                 .collect();
             if !ver.is_empty() {
-                return ver;
+                return Ok(ver);
             }
         }
     }
-    String::from("unknown")
+    Ok(String::from("unknown"))
 }
 
 /// Runs the conversion. `out_dir` is created if needed (the CLI refuses a missing folder).
