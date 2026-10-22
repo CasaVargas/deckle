@@ -92,7 +92,9 @@ plug in again: the file gains one entry, and anything you typed into it yourself
     happen. **Check this on the owner's Scribe before building the watcher part.** If opening a
     session is now harmless, the watcher also exports on idle plug-ins, once per connection. If
     it still disrupts, export rides along with a push only, which is still at least daily while
-    the paper is scheduled.
+    the paper is scheduled. *(Checked 2026-10-22 on a Scribe 2024: harmless, since plugging
+    in already shows "connected to computer" and the Kindle stays on the bus. The watcher
+    exports on idle plug-ins.)*
 - Mass storage: read `<mount>/documents/My Clippings.txt` directly.
 - The file is UTF-8, usually starting with a BOM, with CRLF or LF line endings.
 - Plain files only: no database, no index in the output folder (library design §2.1 spirit).

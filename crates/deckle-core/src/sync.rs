@@ -8,11 +8,12 @@ use crate::clippings::read_on;
 use crate::deliver::{Conn, DeliverError, Target, prune_named_on};
 use crate::queue::{Finishing, FlushReport, Progress, Prune, Queue};
 
-/// Whether opening an MTP session with nothing to deliver leaves the Kindle where it was.
-/// It used to send the Scribe to its home screen (auto-sync design §4); until that is checked
-/// again on a real Scribe (highlights export design §3), clippings ride along with a push or a
-/// prune and an idle plug-in still opens nothing.
-pub const IDLE_SESSION_OK: bool = false;
+/// Whether opening an MTP session with nothing to deliver leaves the Kindle where it was. It
+/// used to send the Scribe to its home screen (auto-sync design §4). Checked again on a Scribe
+/// 2024 on 2026-10-22: plugging in already shows "connected to computer", a session changes
+/// nothing, and the Kindle stays on the bus after it closes (no reset on close since `usb.rs`
+/// stopped sending one). So clippings may open a session of their own, once per connection.
+pub const IDLE_SESSION_OK: bool = true;
 
 /// The actions a device has on (`[sync]` in `digest.toml`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

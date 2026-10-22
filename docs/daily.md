@@ -66,8 +66,7 @@ What `watch` does on plug-in is set per Kindle in `digest.toml`: `[sync]` holds 
 them for one device, using the id `deckle devices` shows. Push, prune and clippings share one
 connection. `clippings = true` writes the Kindle's highlights as Markdown into the highlights
 folder (set it once with `deckle highlights export --to <dir>`, or in **Settings → Kindles**). It
-runs alongside a push or a prune, so at least once a day while the paper is scheduled; a plug-in
-with nothing to deliver opens no connection.
+runs once per plug-in, in the same connection as a push or a prune when there is one.
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 
