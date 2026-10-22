@@ -19,3 +19,8 @@ export function addressError(text: string): string | null {
   if (!t) return "Paste the calendar's address.";
   return /^(https|webcal):\/\/\S+$/i.test(t) ? null : "Use an https:// or webcal:// address.";
 }
+
+/** The preview without calendar `i`'s label, until a fresh preview arrives. */
+export function withoutCalendar(p: DayPreview | null, i: number): DayPreview | null {
+  return p && { ...p, labels: p.labels.filter((_, j) => j !== i) };
+}

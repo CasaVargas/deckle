@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, test } from "vitest";
-import { DEFAULT_DAY, addressError, previewLine } from "./dayView";
+import { DEFAULT_DAY, addressError, previewLine, withoutCalendar } from "./dayView";
 
 describe("Your Day card", () => {
   test("preview line counts today's events", () => {
@@ -32,5 +32,13 @@ describe("Your Day card", () => {
 
   test("defaults match digest.toml", () => {
     expect(DEFAULT_DAY).toEqual({ calendars: [], max_items: 8, weather_note: true });
+  });
+});
+
+describe("removing a calendar", () => {
+  test("drops that row's label right away, so no row shows another's", () => {
+    const p = { events: 3, labels: ["Home.ics", "https://a.example/…", "Work.ics"], errors: ["https://a.example/…: timed out"] };
+    expect(withoutCalendar(p, 1)).toEqual({ events: 3, labels: ["Home.ics", "Work.ics"], errors: ["https://a.example/…: timed out"] });
+    expect(withoutCalendar(null, 0)).toBeNull();
   });
 });

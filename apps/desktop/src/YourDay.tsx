@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
-import { DEFAULT_DAY, addressError, previewLine } from "./dayView";
+import { DEFAULT_DAY, addressError, previewLine, withoutCalendar } from "./dayView";
 import Icon from "./Icon";
 import { Switch } from "./settings/Row";
 import type { DayConfig, DayPreview } from "./types";
@@ -80,7 +80,10 @@ export default function YourDay({
               <button
                 className="icon small"
                 aria-label="Remove calendar"
-                onClick={() => change({ ...current, calendars: current.calendars.filter((x) => x !== c) })}
+                onClick={() => {
+                  setPreview((p) => withoutCalendar(p, i));
+                  change({ ...current, calendars: current.calendars.filter((x) => x !== c) });
+                }}
               >
                 <Icon name="x" size={14} />
               </button>
