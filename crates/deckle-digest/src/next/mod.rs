@@ -2,6 +2,8 @@
 //! Tomorrow's paper, so far (docs/superpowers/specs/2026-10-22-tomorrows-paper-design.md): what
 //! the next edition will hold, from what's known before press time.
 
+pub mod live;
+
 use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
