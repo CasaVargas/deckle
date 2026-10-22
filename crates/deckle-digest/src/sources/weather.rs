@@ -199,6 +199,7 @@ pub fn from_forecast(f: &Forecast, cfg: &Config, date: NaiveDate) -> (Section, O
         ),
     });
     let section = Section {
+        key: String::new(),
         title: TITLE.into(),
         kicker: Some("Forecast by Open-Meteo".into()),
         articles,
