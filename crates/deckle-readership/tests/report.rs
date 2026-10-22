@@ -137,7 +137,7 @@ fn a_new_section_has_no_share_until_five_editions() {
 fn share_counts_only_editions_that_had_the_section() {
     let mut s = State::default();
     let no_lottery: Vec<_> = PAPER.iter().copied().filter(|p| p.0 != "lottery").collect();
-    for i in 0..10 {
+    for i in 0..10u64 {
         let secs = if i.is_multiple_of(2) {
             PAPER.to_vec()
         } else {
