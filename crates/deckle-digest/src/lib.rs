@@ -12,6 +12,7 @@ pub mod cover;
 pub mod day;
 pub mod epub;
 pub mod fetch;
+pub mod front;
 pub mod frost;
 pub mod geocode;
 pub mod horoscope;
