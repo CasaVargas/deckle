@@ -100,6 +100,7 @@ fn paper_name(key: &str) -> String {
         Some(SectionKind::Lottery) => "Lottery",
         Some(SectionKind::Horoscope) => "Horoscope",
         Some(SectionKind::Puzzle) => "Puzzle",
+        Some(SectionKind::Shelf) => "From Your Shelf",
         Some(SectionKind::Onthisday) => "On This Day",
         _ => key,
     }

@@ -28,6 +28,7 @@ pub mod render;
 pub mod schedule;
 pub mod seasons;
 pub mod secret;
+pub mod shelf;
 pub mod showers;
 pub mod sources;
 pub mod sun;
@@ -254,6 +255,8 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                     puzzle::words::Words::embedded(),
                 ));
             }
+            // The page itself arrives with the shelf design's later tasks.
+            SectionKind::Shelf => {}
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
