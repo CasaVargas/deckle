@@ -189,8 +189,6 @@ fn starter_has_puzzle_before_onthisday() {
     assert_eq!(at(SectionKind::Onthisday), at(SectionKind::Puzzle) + 1);
     assert_eq!(c.puzzle, PuzzleConfig::default());
     assert!(c.puzzle.ladder && c.puzzle.theme);
-    let d = Config::default();
-    assert_eq!(d.sections, c.sections);
     assert_eq!(
         deckle_digest::config::section_key(SectionKind::Puzzle, None),
         "puzzle"
@@ -451,7 +449,13 @@ fn notes_score_the_edition() {
     // 1A right; 6A wrong ("AREX"); 7A wrong then right (the latest wins, " Leaf. " counts);
     // 1D right from the renamed paper ("c o r d"); 2D answered only on yesterday's edition;
     // a note on a headline is no answer
-    let s = score(&checked_puzzle(), date(), &entries(CLIPPINGS)).unwrap();
+    let s = score(
+        &checked_puzzle(),
+        date(),
+        &entries(CLIPPINGS),
+        Words::embedded(),
+    )
+    .unwrap();
     assert_eq!((s.solved, s.of, s.ladder), (3, 5, true));
 }
 
@@ -461,12 +465,19 @@ fn another_editions_notes_dont_count() {
         score(
             &checked_puzzle(),
             yesterday() - Days::new(1),
-            &entries(CLIPPINGS)
+            &entries(CLIPPINGS),
+            Words::embedded()
         ),
         None
     );
     // yesterday's own edition has one note, on a clue today's puzzle has
-    let s = score(&checked_puzzle(), yesterday(), &entries(CLIPPINGS)).unwrap();
+    let s = score(
+        &checked_puzzle(),
+        yesterday(),
+        &entries(CLIPPINGS),
+        Words::embedded(),
+    )
+    .unwrap();
     assert_eq!((s.solved, s.ladder), (1, false));
 }
 
@@ -474,7 +485,13 @@ fn another_editions_notes_dont_count() {
 fn a_short_highlight_inside_a_clue_counts() {
     let text = "\u{feff}The Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Highlight on Location 5-6 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\nextent of space\r\n==========\r\nThe Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Note on Location 6 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\narea\r\n==========\r\nThe Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Highlight on Location 9-9 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\ntall\r\n==========\r\nThe Deckle Daily — Thursday, October 22, 2026 (Deckle)\r\n- Your Note on Location 9 | Added on Thursday, October 22, 2026 8:00:00 AM\r\n\r\ntree\r\n==========\r\n";
     // 12+ letters of a clue name it; "tall" alone could be anything
-    let s = score(&checked_puzzle(), date(), &entries(text.as_bytes())).unwrap();
+    let s = score(
+        &checked_puzzle(),
+        date(),
+        &entries(text.as_bytes()),
+        Words::embedded(),
+    )
+    .unwrap();
     assert_eq!(s.solved, 1);
 }
 
@@ -489,16 +506,31 @@ fn record_scores_recent_days_and_marks_readable() {
             solve: None,
         },
     );
-    record(&mut store, Some(CLIPPINGS), date() + Days::new(1));
+    record(
+        &mut store,
+        Notes::Read(CLIPPINGS),
+        date() + Days::new(1),
+        Words::embedded(),
+    );
     assert_eq!(store.notes_readable, Some(true));
     let s = store.days[&date()].solve.clone().unwrap();
     assert_eq!((s.solved, s.of), (3, 5));
     // a Kindle without readable notes leaves the solves alone
-    record(&mut store, None, date() + Days::new(1));
+    record(
+        &mut store,
+        Notes::Unreachable,
+        date() + Days::new(1),
+        Words::embedded(),
+    );
     assert_eq!(store.notes_readable, Some(false));
     assert!(store.days[&date()].solve.is_some());
     // nor do notes that say nothing about it (another Kindle, a cleared file)
-    record(&mut store, Some(b""), date() + Days::new(1));
+    record(
+        &mut store,
+        Notes::Read(b""),
+        date() + Days::new(1),
+        Words::embedded(),
+    );
     assert!(store.days[&date()].solve.is_some());
     // more than a week back isn't looked at
     let mut old = Store::default();
@@ -510,6 +542,128 @@ fn record_scores_recent_days_and_marks_readable() {
             solve: None,
         },
     );
-    record(&mut old, Some(CLIPPINGS), date() + Days::new(8));
+    record(
+        &mut old,
+        Notes::Read(CLIPPINGS),
+        date() + Days::new(8),
+        Words::embedded(),
+    );
     assert_eq!(old.days[&date()].solve, None);
+}
+
+// --- final review fixes ---
+
+use deckle_digest::puzzle::check::Notes;
+
+fn note_on(loc: u32, highlight: &str, note: &str) -> String {
+    let t = "The Deckle Daily — Thursday, October 22, 2026 (Deckle)";
+    let w = "Added on Thursday, October 22, 2026 8:00:00 AM";
+    format!(
+        "{t}\r\n- Your Highlight on Location {loc}-{loc} | {w}\r\n\r\n{highlight}\r\n==========\r\n\
+         {t}\r\n- Your Note on Location {loc} | {w}\r\n\r\n{note}\r\n==========\r\n"
+    )
+}
+
+#[test]
+fn a_note_goes_to_the_clue_it_highlights_not_one_inside_it() {
+    // "Help" is inside "To help someone in need": the longer, whole-word match wins
+    let mut p = checked_puzzle();
+    p.clues = vec![
+        clue(1, Dir::Across, "aid", "Help"),
+        clue(4, Dir::Across, "abet", "To help someone in need"),
+    ];
+    let text = note_on(10, "4 To help someone in need", "abet") + &note_on(20, "1 Help", "aid");
+    let s = score(&p, date(), &entries(text.as_bytes()), Words::embedded()).unwrap();
+    assert_eq!(s.solved, 2);
+    // "Helping" isn't the clue "Help"
+    let text = note_on(10, "Helping hands", "aid");
+    assert_eq!(
+        score(&p, date(), &entries(text.as_bytes()), Words::embedded()),
+        None
+    );
+}
+
+#[test]
+fn any_ladder_of_the_shown_length_counts() {
+    let p = checked_puzzle();
+    let words = Words::from_tsv("cold\tx\ncord\tx\ncard\tx\nword\tx\nward\tx\nwarm\tx\nworm\tx\n");
+    let ladder = |note: &str| {
+        let text = note_on(140, "COLD → ____ → ____ → ____ → WARM", note);
+        score(&p, date(), &entries(text.as_bytes()), &words).map(|s| s.ladder)
+    };
+    assert_eq!(ladder("COLD CORD WORD WARD WARM"), Some(true));
+    assert_eq!(
+        ladder("cord word ward"),
+        Some(true),
+        "the blank rungs alone"
+    );
+    assert_eq!(ladder("cord card ward"), Some(true), "another path");
+    assert_eq!(
+        ladder("cord word worm"),
+        Some(true),
+        "worm to warm is a step too"
+    );
+    assert_eq!(
+        ladder("cord word word"),
+        Some(false),
+        "a repeated rung isn't a step"
+    );
+    assert_eq!(ladder("cord wxrd ward"), Some(false), "not a word");
+    assert_eq!(ladder("cord word"), Some(false), "too short");
+    // a highlight running past the ladder line still is the ladder
+    let text = note_on(
+        140,
+        "Word ladder COLD → ____ → ____ → ____ → WARM Change one letter a rung",
+        "cord word ward",
+    );
+    let s = score(&p, date(), &entries(text.as_bytes()), &words).unwrap();
+    assert!(s.ladder);
+}
+
+#[test]
+fn a_kindle_without_the_file_keeps_the_hint() {
+    let mut store = Store::default();
+    record(&mut store, Notes::NoFile, date(), Words::embedded());
+    assert_eq!(store.notes_readable, None);
+    store.notes_readable = Some(true);
+    record(&mut store, Notes::NoFile, date(), Words::embedded());
+    assert_eq!(store.notes_readable, Some(true));
+    // only a Kindle whose notes can't be reached hides it
+    record(&mut store, Notes::Unreachable, date(), Words::embedded());
+    assert_eq!(store.notes_readable, Some(false));
+}
+
+#[test]
+fn a_word_in_the_section_name_is_no_theme() {
+    use deckle_digest::puzzle::theme::harvest;
+    use deckle_digest::{Article, Edition};
+    let e = Edition {
+        paper: "The Deckle Daily".into(),
+        date: date(),
+        place: String::new(),
+        weather_line: None,
+        sections: vec![Section {
+            title: "Rain Gauge".into(),
+            articles: vec![Article {
+                title: "Rain totals top the storm record".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+        assets: Vec::new(),
+    };
+    let found = harvest(&e, &[0], Words::embedded());
+    assert!(found.iter().all(|t| t.word != "rain"), "{found:?}");
+    assert!(found.iter().any(|t| t.word == "storm"), "{found:?}");
+}
+
+#[test]
+fn a_config_without_sections_gets_no_puzzle() {
+    // goal 1: only the starter has it
+    assert!(
+        !Config::parse("")
+            .unwrap()
+            .sections
+            .contains(&SectionKind::Puzzle)
+    );
 }

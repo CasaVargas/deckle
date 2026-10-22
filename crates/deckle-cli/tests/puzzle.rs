@@ -111,7 +111,7 @@ fn puzzle_off_reads_no_clippings() {
 }
 
 #[test]
-fn no_clippings_file_marks_unreadable() {
+fn no_clippings_file_keeps_the_hint() {
     let (home, store) = setup("sections = [\"puzzle\"]\n");
     let k = kindle(home.path(), &store, false);
     deckle(home.path())
@@ -119,8 +119,9 @@ fn no_clippings_file_marks_unreadable() {
         .arg(&k)
         .assert()
         .success();
+    // a Kindle makes the file at its first highlight: not having one yet isn't "unreadable"
     let after = stored(home.path());
-    assert_eq!(after.notes_readable, Some(false));
+    assert_eq!(after.notes_readable, None);
     assert_eq!(after.days[&yesterday()].solve, None);
 }
 

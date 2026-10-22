@@ -46,6 +46,13 @@ fn read_file(path: &Path) -> Result<Option<Vec<u8>>, DeliverError> {
     }
 }
 
+/// A Kindle that keeps its notes where USB can't reach them: the Scribe 2024 over MTP has no
+/// `My Clippings.txt` there (#99), so a missing file says nothing about its owner's notes.
+pub fn notes_unreachable(target: &Target) -> bool {
+    matches!(target, Target::Mtp(i)
+        if i.product.as_deref().is_some_and(|p| p.to_lowercase().contains("scribe")))
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
@@ -123,5 +130,22 @@ mod tests {
             read_on(&mut Conn::with_opener(&target, fake::open)).unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn only_a_scribe_over_mtp_hides_its_notes() {
+        let mtp = |product: &str| {
+            Target::Mtp(deckle_transport::usb::MtpInfo {
+                vendor_id: 0x1949,
+                product_id: 0x9981,
+                serial: None,
+                product: Some(product.into()),
+                bus: 1,
+                address: 2,
+            })
+        };
+        assert!(notes_unreachable(&mtp("Kindle Scribe")));
+        assert!(!notes_unreachable(&mtp("Kindle Paperwhite")));
+        assert!(!notes_unreachable(&Target::Folder("/tmp/k".into())));
     }
 }

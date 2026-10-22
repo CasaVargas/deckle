@@ -235,11 +235,8 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
             SectionKind::Horoscope => edition.sections.push(horoscope::section(cfg, date)),
             SectionKind::Puzzle => {
-                let store = puzzles.get_or_insert_with(|| {
-                    let mut s = puzzle::store::Store::load(&cfg.puzzle_store());
-                    s.prune(date);
-                    s
-                });
+                let store =
+                    puzzles.get_or_insert_with(|| puzzle::store::Store::load(&cfg.puzzle_store()));
                 edition.sections.push(puzzle::section(
                     date,
                     cfg,
@@ -257,7 +254,11 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
             s.key = config::section_key(*kind, feed);
         }
     }
-    if let Some(mut store) = puzzles {
+    // Only the paper of the day (or the next one, built late) is kept: a preview of another date
+    // prints a puzzle but neither stores it nor prunes the real ones.
+    let today = now.with_timezone(&tz::local_tz()).date_naive();
+    if let Some(mut store) = puzzles.filter(|_| (date - today).num_days().abs() <= 1) {
+        store.prune(today);
         // tomorrow's theme: today's headlines from the news and Your Reading
         let mut from = news.clone();
         from.extend(g_reading);

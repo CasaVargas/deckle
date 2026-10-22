@@ -110,7 +110,6 @@ impl Default for Config {
                 SectionKind::Feeds,
                 SectionKind::Lottery,
                 SectionKind::Horoscope,
-                SectionKind::Puzzle,
                 SectionKind::Onthisday,
             ],
             local: LocalConfig::default(),

@@ -191,6 +191,7 @@ pub fn shelf_on(
     // The puzzle's answers are notes: scored whenever the paper has a puzzle (puzzle design §5).
     puzzle_on(
         &clippings,
+        deckle_core::clippings::notes_unreachable(conn.target),
         &config.with_file_name("digest.toml"),
         &config.with_file_name("puzzles.json"),
     );
@@ -213,7 +214,7 @@ type ClippingsRead = Result<Option<Vec<u8>>, deckle_core::deliver::DeliverError>
 
 /// Scores the stored puzzles from the clippings the shelf read, when the paper has a puzzle and
 /// the read worked. Errors are logged: they never fail the listing.
-fn puzzle_on(clippings: &ClippingsRead, digest: &Path, store_path: &Path) {
+fn puzzle_on(clippings: &ClippingsRead, unreachable: bool, digest: &Path, store_path: &Path) {
     let on = deckle_digest::Config::load(digest)
         .is_ok_and(|c| c.sections.contains(&deckle_digest::SectionKind::Puzzle));
     let Ok(bytes) = clippings else {
@@ -222,9 +223,20 @@ fn puzzle_on(clippings: &ClippingsRead, digest: &Path, store_path: &Path) {
     if !on {
         return;
     }
+    use deckle_digest::puzzle::check::Notes;
+    let notes = match bytes {
+        Some(b) => Notes::Read(b),
+        None if unreachable => Notes::Unreachable,
+        None => Notes::NoFile,
+    };
     let mut store = deckle_digest::puzzle::store::Store::load(store_path);
     let today = deckle_digest::chrono::Local::now().date_naive();
-    deckle_digest::puzzle::check::record(&mut store, bytes.as_deref(), today);
+    deckle_digest::puzzle::check::record(
+        &mut store,
+        notes,
+        today,
+        deckle_digest::puzzle::words::Words::embedded(),
+    );
     if let Err(e) = store.save(store_path) {
         eprintln!("puzzle: {}: {e}", store_path.display());
     }
@@ -510,9 +522,10 @@ mod tests {
         );
         assert_eq!(after.notes_readable, Some(true));
 
+        // a Kindle with no file yet (no highlights) keeps the hint
         std::fs::remove_file(out.join("My Clippings.txt")).unwrap();
         shelf_on(&mut Conn::new(&target), &config, None).unwrap();
-        assert_eq!(Store::load(&store_path).notes_readable, Some(false));
+        assert_eq!(Store::load(&store_path).notes_readable, Some(true));
     }
 
     #[test]

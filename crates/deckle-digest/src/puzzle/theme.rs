@@ -31,7 +31,8 @@ pub const STOP: &[&str] = &[
 ];
 
 /// Every word of the given sections' headlines that is in the list, 3 to 5 letters, not a
-/// stop word and not part of the edition's place name; the first time each word appears.
+/// stop word and not part of the edition's place name or the section's title; the first time
+/// each word appears.
 /// `sections` are the news sections (and Your Reading), in paper order.
 pub fn harvest(e: &Edition, sections: &[usize], words: &Words) -> Vec<ThemeWord> {
     let place: Vec<String> = tokens(&e.place).map(|t| t.to_lowercase()).collect();
@@ -40,6 +41,8 @@ pub fn harvest(e: &Edition, sections: &[usize], words: &Words) -> Vec<ThemeWord>
         let Some(section) = e.sections.get(i) else {
             continue;
         };
+        // "Rain" in a feed called "Rain Gauge": the clue names the section, so it would show
+        let named: Vec<String> = tokens(&section.title).map(|t| t.to_lowercase()).collect();
         for a in &section.articles {
             for t in tokens(&a.title) {
                 let w = t.to_lowercase();
@@ -47,6 +50,7 @@ pub fn harvest(e: &Edition, sections: &[usize], words: &Words) -> Vec<ThemeWord>
                     && words.contains(&w)
                     && !STOP.contains(&w.as_str())
                     && !place.contains(&w)
+                    && !named.contains(&w)
                     && !out.iter().any(|x| x.word == w)
                 {
                     out.push(ThemeWord {

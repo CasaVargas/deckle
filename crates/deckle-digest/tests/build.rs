@@ -45,9 +45,13 @@ fn config() -> Config {
     // Nor the owner's frost cache; the archive is offline here, so nothing is written.
     c.almanac_path =
         Some(std::env::temp_dir().join(format!("deckle-test-almanac-{}.json", std::process::id())));
-    // Nor the owner's puzzles: a fresh store per test run.
-    c.puzzle_path =
-        Some(std::env::temp_dir().join(format!("deckle-test-puzzles-{}.json", std::process::id())));
+    // Nor the owner's puzzles: a fresh store per call, so parallel tests don't share one.
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    c.puzzle_path = Some(std::env::temp_dir().join(format!(
+        "deckle-test-puzzles-{}-{n}.json",
+        std::process::id()
+    )));
     c.horoscope.signs = vec!["leo".into(), "virgo".into()];
     // The fixtures were saved on 2026-10-20; keep a week of stories.
     c.max_age_hours = 24 * 7;
@@ -394,4 +398,27 @@ fn puzzle_store_write_error_is_a_note() {
         .find(|s| s.key == "puzzle")
         .unwrap();
     assert!(!puzzle.articles.is_empty());
+}
+
+#[test]
+fn building_another_date_leaves_the_puzzle_store_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    c.puzzle_path = Some(dir.path().join("puzzles.json"));
+    gather(&c, date(), now(), &fake);
+    let before = std::fs::read(c.puzzle_path.as_ref().unwrap()).unwrap();
+    // a preview of next year's paper: printed, but neither kept nor pruning today's
+    let later = date() + chrono::Days::new(400);
+    let g = gather(&c, later, now(), &fake);
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(!puzzle.articles.is_empty());
+    assert_eq!(
+        std::fs::read(c.puzzle_path.as_ref().unwrap()).unwrap(),
+        before
+    );
 }

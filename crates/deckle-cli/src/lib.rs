@@ -1728,11 +1728,21 @@ fn sync_to(
         .for_device(&deckle_core::sync::device_id(target))
         .clippings;
     if plan.clippings && puzzle_on(cfg) && flush.clippings_error.is_none() {
-        // the read ran: no file is a Kindle whose notes can't be read
         let path = cfg.puzzle_store();
         let mut store = deckle_digest::puzzle::store::Store::load(&path);
         let today = deckle_digest::chrono::Local::now().date_naive();
-        deckle_digest::puzzle::check::record(&mut store, flush.clippings.as_deref(), today);
+        use deckle_digest::puzzle::check::Notes;
+        let notes = match flush.clippings.as_deref() {
+            Some(b) => Notes::Read(b),
+            None if deckle_core::clippings::notes_unreachable(target) => Notes::Unreachable,
+            None => Notes::NoFile,
+        };
+        deckle_digest::puzzle::check::record(
+            &mut store,
+            notes,
+            today,
+            deckle_digest::puzzle::words::Words::embedded(),
+        );
         if let Err(e) = store.save(&path) {
             eprintln!("puzzle: {}: {e}", path.display());
         }
