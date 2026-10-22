@@ -239,6 +239,8 @@ impl Topic {
         }
     }
 
+    /// The Google News topic feed. Google answers this with a 302 to a `/rss/topics/<id>`
+    /// feed; the fetcher (ureq) follows redirects.
     pub fn url(self) -> String {
         format!(
             "https://news.google.com/rss/headlines/section/topic/{}?hl=en-US&gl=US&ceid=US:en",
@@ -690,19 +692,19 @@ readership = true                 # note how far you read the paper (Daily tab)
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
-        for f in &mut cfg.feeds {
-            if f.sources().is_empty() {
-                return Err(format!(
-                    "[[feeds]] \"{}\": give a url, urls or topic",
-                    f.name
-                ));
-            }
+        cfg.normalize();
+        cfg.email.validate()?;
+        Ok(cfg)
+    }
+
+    /// Fills in what a person (or the app's "Add feed") left unset: a feed's `max_items` of 0
+    /// becomes 5 for a topic entry, else 10. A feed with no source is kept; its section says so.
+    pub fn normalize(&mut self) {
+        for f in &mut self.feeds {
             if f.max_items == 0 {
                 f.max_items = if f.topic.is_some() { 5 } else { 10 };
             }
         }
-        cfg.email.validate()?;
-        Ok(cfg)
     }
 
     pub fn load(path: &Path) -> Result<Self, String> {
@@ -716,6 +718,9 @@ impl Config {
 /// [`STARTER`] (Daily design §5c).
 pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     cfg.email.validate()?;
+    let mut cfg = cfg.clone();
+    cfg.normalize();
+    let cfg = &cfg;
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => STARTER.to_owned(),
@@ -940,11 +945,29 @@ mod tests {
     }
 
     #[test]
-    fn no_source_is_an_error_naming_the_entry() {
-        let e = feed("[[feeds]]\nname = \"Empty\"\nurl = \" \"\n").unwrap_err();
+    fn a_feed_with_no_source_still_loads() {
+        let f = feed("[[feeds]]\nname = \"Empty\"\nurl = \" \"\nmax_items = 0\n").unwrap();
+        assert!(f.sources().is_empty());
+        assert_eq!(f.max_items, 10);
+    }
+
+    #[test]
+    fn save_normalizes_a_zero_max_items() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("digest.toml");
+        let mut cfg = Config::parse("").unwrap();
+        cfg.feeds.push(FeedConfig {
+            name: "New".into(),
+            max_items: 0,
+            ..Default::default()
+        });
+        save(&path, &cfg).unwrap();
+        let back = Config::load(&path).unwrap();
+        assert_eq!(back.feeds[0].max_items, 10);
         assert!(
-            e.contains("\"Empty\"") && e.contains("give a url, urls or topic"),
-            "{e}"
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("max_items = 10")
         );
     }
 

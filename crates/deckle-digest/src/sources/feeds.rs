@@ -459,6 +459,9 @@ pub fn feed_section(
     taken: &mut HashSet<String>,
 ) -> Section {
     let sources = feed.sources();
+    if sources.is_empty() {
+        return super::unavailable(&feed.name, "give a url, urls or topic");
+    }
     let topic_url = feed.topic.map(Topic::url);
     let mut items = Vec::new();
     let mut errors = Vec::new();
@@ -466,10 +469,20 @@ pub fn feed_section(
         match net.get(url).and_then(|b| parse(&b, now, cfg.max_age_hours)) {
             Ok((_, found)) if topic_url.as_ref() == Some(url) => items.extend(as_briefs(found)),
             Ok((name, found)) => items.extend(found.into_iter().map(|mut i| {
-                i.source = i.source.or(name.clone());
+                // Several sources: name the channel so a reader can tell them apart.
+                if sources.len() > 1 {
+                    i.source = i.source.or(name.clone());
+                }
                 i
             })),
-            Err(e) => errors.push(format!("{url}: {e}")),
+            Err(e) => {
+                let what = if topic_url.as_ref() == Some(url) {
+                    "Google News"
+                } else {
+                    host(url)
+                };
+                errors.push(format!("{what}: {e}"));
+            }
         }
     }
     // Newest first, so the newest copy of a repeated story is the one kept.

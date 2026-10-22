@@ -412,6 +412,19 @@ fn feed_leads_line() {
 }
 
 #[test]
+fn a_feed_with_no_source_is_a_row_not_a_crash() {
+    let mut s = Setup::new();
+    s.cfg.feeds.push(FeedConfig {
+        name: "Blank".into(),
+        max_items: 10,
+        ..Default::default()
+    });
+    let p = s.plan();
+    let t = p.tiles.iter().find(|t| t.key == "feeds:Blank").unwrap();
+    assert!(t.dashed);
+}
+
+#[test]
 fn new_since_last_press() {
     let mut s = Setup::new();
     s.queue = two_saved(); // so Science is a tile, not the lead

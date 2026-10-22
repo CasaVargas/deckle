@@ -303,7 +303,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     .find_map(|x| x.title.clone())
                     .or_else(|| f.topic.map(|t| t.title().to_owned()))
                     .or_else(|| sources.first().and_then(|u| host(u)))
-                    .unwrap_or_else(|| f.url.clone());
+                    .unwrap_or_else(|| "No sources yet".to_owned());
                 // merged, newest first, one copy of a repeated story; `plan` drops what earlier
                 // rows show and cuts to the budget
                 let stories = if got.is_empty() {

@@ -279,6 +279,83 @@ fn old_feed_behaviour_unchanged() {
     assert_eq!(s.title, "Plain");
     assert_eq!(s.articles.len(), 2);
     assert!(s.articles.iter().all(|a| a.teaser.is_some()));
+    // A single url leaves the channel name ("Feed") off the story: no source in the meta line,
+    // and the closing line names the article's own host, as before sections.
+    for a in &s.articles {
+        assert!(
+            !a.meta.as_deref().unwrap_or("").contains("Feed"),
+            "{:?}",
+            a.meta
+        );
+        assert!(a.body.contains("Source: ok.example"), "{}", a.body);
+        assert!(!a.body.contains("Source: Feed"), "{}", a.body);
+    }
+}
+
+#[test]
+fn several_sources_stamp_the_channel_name() {
+    let net = Fake::new(vec![
+        (url("a"), rss(&[("Alpha", "https://ok.example/a", 10)])),
+        (url("b"), rss(&[("Beta", "https://ok.example/b", 9)])),
+    ]);
+    let feed = FeedConfig {
+        name: "Two".into(),
+        urls: vec![url("a"), url("b")],
+        full_text: Some(FullText::No),
+        max_items: 5,
+        ..Default::default()
+    };
+    let s = run(&feed, &net);
+    assert!(
+        s.articles
+            .iter()
+            .all(|a| a.meta.as_deref().unwrap().contains("Feed"))
+    );
+}
+
+#[test]
+fn unavailable_text_names_hosts_not_urls() {
+    struct Down;
+    impl Net for Down {
+        fn get(&self, _: &str) -> Result<Vec<u8>, String> {
+            Err("connection refused".into())
+        }
+    }
+    let feed = FeedConfig {
+        name: "Dead".into(),
+        topic: Some(Topic::Sports),
+        urls: vec![url("a")],
+        max_items: 5,
+        ..Default::default()
+    };
+    let why = feed_section(&feed, &config(), now(), &Down, &mut HashSet::new())
+        .unavailable
+        .unwrap();
+    assert!(why.contains("Google News: connection refused"), "{why}");
+    assert!(why.contains("feeds.example: connection refused"), "{why}");
+    assert!(!why.contains("https://"), "{why}");
+}
+
+#[test]
+fn a_feed_with_no_source_is_unavailable_and_the_paper_still_builds() {
+    let net = shared_net(&[("Y", "https://x.example/y", 8)]);
+    let mut c = edition_config(&[SectionKind::Local, SectionKind::Feeds], 5);
+    c.feeds.insert(
+        0,
+        FeedConfig {
+            name: "Blank".into(),
+            max_items: 10,
+            ..Default::default()
+        },
+    );
+    let g = gathered(&c, &net);
+    let blank = &g.edition.sections[1];
+    assert_eq!(blank.title, "Blank");
+    assert_eq!(
+        blank.unavailable.as_deref(),
+        Some("Unavailable today (give a url, urls or topic).")
+    );
+    assert_eq!(titles(&g.edition.sections[2]), ["Y"]);
 }
 
 // ---- one story prints once across sections (spec §3) ----
