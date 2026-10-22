@@ -1,0 +1,93 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Tomorrow's paper, so far (tomorrow's paper design §4, §6, §7): the press bar's copy and the
+// page plan's edits, as pure functions over the config the Daily tab saves.
+import type { DailyConfig, PagePlanRow, Press, SectionKind, WeekDay } from "./types";
+
+/** "in 14 h 22 m", "in 38 m", or "now"; minutes round down (as `press::countdown`). */
+export function countdown(nextIso: string, nowMs: number): string {
+  const secs = Math.floor((Date.parse(nextIso) - nowMs) / 1000);
+  if (secs <= 0) return "now";
+  const mins = Math.floor(secs / 60);
+  const h = Math.floor(mins / 60);
+  return h === 0 ? `in ${mins % 60} m` : `in ${h} h ${mins % 60} m`;
+}
+
+/** The weekday of a YYYY-MM-DD date, whatever the machine's zone. */
+function weekday(date: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+}
+
+/** The press bar's line (as `press::bar_line`). */
+export function pressLine(p: Press, nowMs: number): string {
+  if (!p.at || !p.next) return "No press time set";
+  if (p.stopped) return `Presses stopped: no paper ${weekday(p.stopped)} · next at ${p.at} ${weekday(p.edition)}`;
+  return `Goes to press at ${p.at} · ${countdown(p.next, nowMs)}`;
+}
+
+const isFeed = (r: PagePlanRow) => r.kind === "feeds";
+
+/**
+ * Moves row `from` to `to` and writes the result into `sections` and `[[feeds]]` (spec §6.2).
+ * The feeds stay one block: a section dropped inside it, or a feed dropped outside it, goes to
+ * the block's nearest end.
+ */
+export function reorder(cfg: DailyConfig, rows: PagePlanRow[], from: number, to: number): DailyConfig {
+  const order = rows.slice();
+  const [moved] = order.splice(from, 1);
+  order.splice(Math.max(0, Math.min(to, order.length)), 0, moved);
+  const at = order.indexOf(moved);
+  const others = order.map((r, i) => (isFeed(r) && r !== moved ? i : -1)).filter((i) => i >= 0);
+  if (others.length > 0) {
+    const first = others[0];
+    const last = others[others.length - 1];
+    const snap = (end: "start" | "end") => {
+      order.splice(order.indexOf(moved), 1);
+      const block = order.map((r, i) => (isFeed(r) && r !== moved ? i : -1)).filter((i) => i >= 0);
+      order.splice(end === "start" ? block[0] : block[block.length - 1] + 1, 0, moved);
+    };
+    const nearest = (): "start" | "end" => (at - first < last - at ? "start" : "end");
+    if (!isFeed(moved) && at > first && at < last) snap(nearest());
+    // a feed must touch the block: next to another feed, or between them
+    if (isFeed(moved) && !(at >= first - 1 && at <= last + 1)) snap(at < first ? "start" : "end");
+  }
+  const sections: SectionKind[] = [];
+  for (const r of order) {
+    const kind = r.kind;
+    if (!sections.includes(kind)) sections.push(kind);
+  }
+  // sections not shown as rows (none today) keep their place at the end
+  for (const s of cfg.sections) if (!sections.includes(s)) sections.push(s);
+  const feedRows = order.filter(isFeed);
+  const feeds = feedRows.length > 0 ? feedRows.map((r) => ({ ...cfg.feeds[r.feed ?? 0] })) : cfg.feeds.slice();
+  return { ...cfg, sections, feeds };
+}
+
+/** Sets a row's story budget, 1–20, on its own key. */
+export function setBudget(cfg: DailyConfig, row: PagePlanRow, n: number): DailyConfig {
+  const v = Math.max(1, Math.min(20, Math.round(n)));
+  switch (row.kind) {
+    case "reading":
+      return { ...cfg, reading: { ...cfg.reading, max_items: v } };
+    case "local":
+      return { ...cfg, local: { ...cfg.local, max_items: v } };
+    case "feeds":
+      return { ...cfg, feeds: cfg.feeds.map((f, i) => (i === row.feed ? { ...f, max_items: v } : f)) };
+    default:
+      return cfg;
+  }
+}
+
+/** "read 90%", "not opened", "sent", "no paper". */
+export function weekLabel(d: WeekDay): string {
+  switch (d.state.state) {
+    case "read":
+      return `read ${d.state.percent}%`;
+    case "notOpened":
+      return "not opened";
+    case "sent":
+      return "sent";
+    case "noPaper":
+      return "no paper";
+  }
+}

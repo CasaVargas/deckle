@@ -362,3 +362,60 @@ export interface ReadershipView {
   enabled: boolean;
   report: ReadershipReport;
 }
+
+/** The press (tomorrow's paper design §4): `next` and `since` are ISO instants with offsets. */
+export interface Press {
+  at: string | null;
+  next: string | null;
+  /** YYYY-MM-DD of the paper the preview shows. */
+  edition: string;
+  stopped: string | null;
+  since: string;
+}
+
+export interface Tile {
+  key: string;
+  kicker: string;
+  title: string | null;
+  reason: string | null;
+  dashed: boolean;
+}
+
+export interface PagePlanRow {
+  key: string;
+  kind: SectionKind;
+  /** The `[[feeds]]` index of a feed row. */
+  feed: number | null;
+  name: string;
+  detail: string;
+  budget: string;
+  /** The editable budget (`max_items`); null for fixed sections. */
+  items: number | null;
+}
+
+export type WeekState =
+  | { state: "read"; percent: number }
+  | { state: "notOpened" }
+  | { state: "sent" }
+  | { state: "noPaper" };
+
+export interface WeekDay {
+  date: string;
+  state: WeekState;
+}
+
+export interface NextPaper {
+  press: Press;
+  paper: string;
+  place: string;
+  date: string;
+  number: number;
+  weather: boolean;
+  lead: Tile | null;
+  tiles: Tile[];
+  checked: string | null;
+  plan: PagePlanRow[];
+  off: PagePlanRow[];
+  pages: number;
+  week: WeekDay[];
+}

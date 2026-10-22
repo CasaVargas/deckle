@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
+import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -67,6 +67,9 @@ export const api = {
     listen<RunResult>("daily-finished", (ev) => cb(ev.payload)),
   scheduleGet: () => invoke<ScheduleStatus>("schedule_get"),
   scheduleSet: (at: string | null) => invoke<ScheduleStatus>("schedule_set", { at }),
+  dailyNext: () => invoke<NextPaper>("daily_next"),
+  dailyNextRefresh: () => invoke<NextPaper>("daily_next_refresh"),
+  pressStop: (on: boolean) => invoke<NextPaper>("press_stop", { on }),
   emailStatus: () => invoke<EmailStatus>("email_status"),
   /** Write-only: the keychain keeps it, nothing reads it back. */
   emailSetPassword: (password: string) => invoke<EmailStatus>("email_set_password", { password }),
