@@ -3,6 +3,7 @@
 //! the next edition will hold, from what's known before press time.
 
 pub mod live;
+pub mod plan;
 
 use std::collections::BTreeMap;
 
