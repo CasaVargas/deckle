@@ -6,7 +6,7 @@ use chrono::{DateTime, Datelike, Duration, NaiveDate, NaiveTime, Offset, TimeZon
 use chrono_tz::Tz;
 
 use crate::config::Units;
-use crate::tz::clock;
+use crate::tz::short_clock;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Season {
@@ -164,12 +164,7 @@ pub fn coming_up(date: NaiveDate, tz: Tz, lat: f64, units: Units) -> Option<Stri
         }
     }
     if let Some(c) = clock_change(date, tz, WINDOW as u32) {
-        let at = match units {
-            Units::Imperial if c.at.format("%M").to_string() == "00" => {
-                c.at.format("%-I %p").to_string()
-            }
-            _ => clock(c.at, units),
-        };
+        let at = short_clock(c.at, units);
         let way = if c.forward { "forward" } else { "back" };
         offer(
             c.date,

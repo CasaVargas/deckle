@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The Mac's time zone and the paper's clock style (almanac design §3).
 
-use chrono::NaiveTime;
+use chrono::{NaiveTime, Timelike};
 use chrono_tz::Tz;
 
 use crate::config::Units;
@@ -19,5 +19,13 @@ pub fn clock(t: NaiveTime, units: Units) -> String {
     match units {
         Units::Imperial => t.format("%-I:%M %p").to_string(),
         Units::Metric => t.format("%H:%M").to_string(),
+    }
+}
+
+/// Like [`clock`], but "4 PM" on the hour for imperial papers.
+pub fn short_clock(t: NaiveTime, units: Units) -> String {
+    match units {
+        Units::Imperial if t.minute() == 0 => t.format("%-I %p").to_string(),
+        _ => clock(t, units),
     }
 }

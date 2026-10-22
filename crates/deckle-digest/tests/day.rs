@@ -353,3 +353,212 @@ fn untouched_config_has_no_day_table() {
     assert!(c.day.weather_note);
     assert!(deckle_digest::config::STARTER.contains("# [day]"));
 }
+
+// ---- Task 8: the printed list and the rain note ----------------------------------------
+
+use deckle_digest::config::Units;
+use deckle_digest::day::{Agenda, render, weather_note};
+use deckle_digest::sources::weather::{Current, Daily, Forecast, Hourly};
+
+fn timed(title: &str, h: u32, m: u32, mins: i64) -> Entry {
+    let start = at(d(2026, 10, 22), h, m);
+    Entry {
+        when: When::Timed {
+            start,
+            end: start + chrono::Duration::minutes(mins),
+            from_yesterday: false,
+        },
+        title: title.into(),
+        private: false,
+        uid: format!("{title}@t"),
+    }
+}
+
+fn all_day(title: &str) -> Entry {
+    Entry {
+        when: When::AllDay,
+        title: title.into(),
+        private: false,
+        uid: format!("{title}@t"),
+    }
+}
+
+#[test]
+fn render_order_and_overflow() {
+    let mut entries = vec![all_day("Birthday"), all_day("Conference")];
+    entries.push(Entry {
+        when: When::Timed {
+            start: at(d(2026, 10, 21), 22, 0),
+            end: at(d(2026, 10, 22), 10, 0),
+            from_yesterday: true,
+        },
+        title: "Night shift".into(),
+        private: false,
+        uid: "n@t".into(),
+    });
+    for h in 11..19 {
+        entries.push(timed(&format!("Thing {h}"), h, 0, 30));
+    }
+    let a = Agenda {
+        entries,
+        ..Default::default()
+    };
+    let html = render(&a, 8, Units::Imperial);
+    assert_eq!(html.matches("<tr").count(), 8, "{html}");
+    assert!(html.contains("and 3 more"), "{html}");
+    let birthday = html.find("Birthday").unwrap();
+    assert!(birthday < html.find("Night shift").unwrap());
+    assert!(html.contains("All day"));
+    assert!(html.contains("until 10 AM"), "{html}");
+    assert!(html.contains("11 AM"), "{html}");
+}
+
+#[test]
+fn render_empty() {
+    let html = render(&Agenda::default(), 8, Units::Imperial);
+    assert!(html.contains("Nothing on the calendar today."));
+}
+
+#[test]
+fn render_errors() {
+    let a = Agenda {
+        errors: vec!["https://cal.example/…: timed out".into()],
+        guessed_zones: true,
+        entries: vec![timed("Standup", 9, 0, 15)],
+    };
+    let html = render(&a, 8, Units::Metric);
+    assert!(
+        html.contains("Calendar unavailable: https://cal.example/…: timed out"),
+        "{html}"
+    );
+    assert!(html.contains("Some times shown in local time."));
+    assert!(html.contains("09:00"));
+    assert!(!html.contains("Nothing on the calendar"));
+}
+
+#[test]
+fn render_escapes() {
+    let a = Agenda {
+        entries: vec![timed("<b>&", 9, 0, 15)],
+        ..Default::default()
+    };
+    let html = render(&a, 8, Units::Imperial);
+    assert!(
+        html.contains("&lt;b&gt;&amp;") && !html.contains("<b>"),
+        "{html}"
+    );
+}
+
+/// 2026-10-22 hourly: probability 80 and `code` at `wet` hours, else 10 and clear.
+fn forecast(wet: &[u32], code: u32) -> Forecast {
+    let hours: Vec<u32> = (0..24).collect();
+    Forecast {
+        current: Current {
+            temperature_2m: 50.0,
+            apparent_temperature: 48.0,
+            relative_humidity_2m: 60.0,
+            wind_speed_10m: 5.0,
+            weather_code: 0,
+        },
+        daily: Daily {
+            time: vec!["2026-10-22".into()],
+            weather_code: vec![code],
+            temperature_2m_max: vec![60.0],
+            temperature_2m_min: vec![45.0],
+            precipitation_probability_max: vec![Some(80.0)],
+            sunrise: vec!["2026-10-22T07:20".into()],
+            sunset: vec!["2026-10-22T18:10".into()],
+        },
+        hourly: Hourly {
+            time: hours
+                .iter()
+                .map(|h| format!("2026-10-22T{h:02}:00"))
+                .collect(),
+            precipitation_probability: hours
+                .iter()
+                .map(|h| Some(if wet.contains(h) { 80.0 } else { 10.0 }))
+                .collect(),
+            temperature_2m: vec![50.0; 24],
+            weather_code: hours
+                .iter()
+                .map(|h| if wet.contains(h) { code } else { 0 })
+                .collect(),
+        },
+    }
+}
+
+const DAY: fn() -> NaiveDate = || d(2026, 10, 22);
+
+#[test]
+fn note_rain() {
+    let es = [timed("School pickup", 15, 45, 45)];
+    assert_eq!(
+        weather_note(&es, &forecast(&[16], 61), DAY(), Units::Imperial).as_deref(),
+        Some("Rain likely around 4 PM, during School pickup.")
+    );
+}
+
+#[test]
+fn note_snow() {
+    let es = [timed("School pickup", 15, 45, 45)];
+    let note = weather_note(&es, &forecast(&[16], 73), DAY(), Units::Imperial).unwrap();
+    assert!(note.starts_with("Snow likely"), "{note}");
+}
+
+#[test]
+fn note_first_wet_only() {
+    let es = [
+        timed("Lunch", 12, 30, 60),
+        timed("School pickup", 15, 45, 45),
+    ];
+    assert_eq!(
+        weather_note(&es, &forecast(&[13, 16], 61), DAY(), Units::Imperial).as_deref(),
+        Some("Rain likely around 1 PM, during Lunch.")
+    );
+}
+
+#[test]
+fn note_none() {
+    let es = [timed("School pickup", 15, 45, 45), all_day("Conference")];
+    assert_eq!(
+        weather_note(&es, &forecast(&[], 61), DAY(), Units::Imperial),
+        None
+    );
+    // Rain all day never mentions an all-day event.
+    let all: Vec<u32> = (0..24).collect();
+    assert_eq!(
+        weather_note(
+            &[all_day("Conference")],
+            &forecast(&all, 61),
+            DAY(),
+            Units::Imperial
+        ),
+        None
+    );
+}
+
+#[test]
+fn note_private() {
+    let mut e = timed("Busy", 16, 0, 60);
+    e.private = true;
+    assert_eq!(
+        weather_note(&[e], &forecast(&[16], 61), DAY(), Units::Imperial).as_deref(),
+        Some("Rain likely around 4 PM, during your 4 PM event.")
+    );
+}
+
+#[test]
+fn note_uses_forecast_clock() {
+    // Hourly times and event times are both local wall-clock times: 16:00 matches 16:00,
+    // whatever zone the Mac is in.
+    let es = [timed("Pickup", 16, 0, 30)];
+    assert!(weather_note(&es, &forecast(&[16], 61), DAY(), Units::Imperial).is_some());
+    assert!(weather_note(&es, &forecast(&[17], 61), DAY(), Units::Imperial).is_none());
+}
+
+#[test]
+fn note_metric_clock() {
+    let es = [timed("School pickup", 15, 45, 45)];
+    let note = weather_note(&es, &forecast(&[16], 61), DAY(), Units::Metric).unwrap();
+    assert!(note.contains("around 16:00"), "{note}");
+}

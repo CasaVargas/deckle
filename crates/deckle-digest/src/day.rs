@@ -8,9 +8,12 @@ use std::collections::{BTreeMap, HashSet};
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 
-use crate::config::DayConfig;
+use crate::config::{DayConfig, Units};
+use crate::esc;
 use crate::fetch::Net;
 use crate::inbox::expand_home;
+use crate::sources::weather::{Forecast, WET_PERCENT};
+use crate::tz::short_clock;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum When {
@@ -576,4 +579,100 @@ pub fn agenda(cfg: &DayConfig, date: NaiveDate, tz: Tz, net: &dyn Net) -> Agenda
         e.uid.is_empty() || seen.insert((e.uid.clone(), start))
     });
     a
+}
+
+/// Your Day as printed: all-day rows, then timed rows, up to `max`, then any problems.
+pub fn render(agenda: &Agenda, max: usize, units: Units) -> String {
+    let mut out = String::new();
+    if !agenda.entries.is_empty() {
+        out.push_str("<table class=\"day\">");
+        for e in agenda.entries.iter().take(max) {
+            let when = match &e.when {
+                When::AllDay => "All day".to_owned(),
+                When::Timed {
+                    end,
+                    from_yesterday: true,
+                    ..
+                } => format!("until {}", short_clock(end.time(), units)),
+                When::Timed { start, .. } => short_clock(start.time(), units),
+            };
+            out.push_str(&format!(
+                "<tr><td class=\"when\">{}</td><td>{}</td></tr>",
+                esc(&when),
+                esc(&e.title)
+            ));
+        }
+        out.push_str("</table>");
+        if agenda.entries.len() > max {
+            out.push_str(&format!("<p>and {} more</p>", agenda.entries.len() - max));
+        }
+    } else if agenda.errors.is_empty() {
+        out.push_str("<p>Nothing on the calendar today.</p>");
+    }
+    for err in &agenda.errors {
+        out.push_str(&format!(
+            "<p class=\"note\">Calendar unavailable: {}</p>",
+            esc(err)
+        ));
+    }
+    if agenda.guessed_zones {
+        out.push_str("<p class=\"note\">Some times shown in local time.</p>");
+    }
+    out
+}
+
+/// WMO codes that mean snow.
+const SNOW_CODES: [u32; 6] = [71, 73, 75, 77, 85, 86];
+
+/// "Rain likely around 4 PM, during School pickup.": the first timed event that overlaps an
+/// hour with rain or snow likely. Hourly times and event times are both local wall-clock
+/// times, compared as written.
+pub fn weather_note(
+    entries: &[Entry],
+    f: &Forecast,
+    date: NaiveDate,
+    units: Units,
+) -> Option<String> {
+    let wet: Vec<(NaiveDateTime, u32)> = f
+        .hourly
+        .time
+        .iter()
+        .zip(&f.hourly.precipitation_probability)
+        .zip(&f.hourly.weather_code)
+        .filter(|((_, p), _)| p.unwrap_or(0.0) >= WET_PERCENT)
+        .filter_map(|((t, _), code)| {
+            Some((
+                NaiveDateTime::parse_from_str(t, "%Y-%m-%dT%H:%M").ok()?,
+                *code,
+            ))
+        })
+        .filter(|(t, _)| t.date() == date)
+        .collect();
+    entries.iter().find_map(|e| {
+        let When::Timed { start, end, .. } = e.when else {
+            return None;
+        };
+        let (hour, code) = wet.iter().find(|(h, _)| {
+            let h_end = *h + Duration::hours(1);
+            if end > start {
+                *h < end && h_end > start
+            } else {
+                *h <= start && start < h_end
+            }
+        })?;
+        let what = if SNOW_CODES.contains(code) {
+            "Snow"
+        } else {
+            "Rain"
+        };
+        let during = if e.private {
+            format!("your {} event", short_clock(start.time(), units))
+        } else {
+            e.title.clone()
+        };
+        Some(format!(
+            "{what} likely around {}, during {during}.",
+            short_clock(hour.time(), units)
+        ))
+    })
 }
