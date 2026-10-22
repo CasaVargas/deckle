@@ -93,7 +93,14 @@ export default function YourDay({
         <button className="ghost" onClick={addFile}>
           Add file…
         </button>
-        <button className="ghost" onClick={() => setAdding((a) => !a)}>
+        <button
+          className="ghost"
+          onClick={() => {
+            setAdding((a) => !a);
+            setAddress("");
+            setError(null);
+          }}
+        >
           Add address
         </button>
       </div>
