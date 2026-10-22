@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Settings open full-window with a sidebar (General, Books, X-Ray, Word Wise, Kindles, About)
+  instead of a crowded slide-over; each option is one short row with a switch.
+- Tidier book rows: one line of plain-word chips ("Keeps cover", "X-Ray + Word Wise",
+  "Sent · 496 pages"); the counts, mode and paths moved to **Details** in the ⋯ menu.
+- A visible **Add article** button. Pasting a web address on the Books tab (⌘V / Ctrl+V) now
+  works on the Mac, where it silently did nothing before.
+- Real icons in place of text symbols.
+
 ## 0.3.0 — in-app updates
 
 - In-app updates: Deckle checks GitHub for a newer version when it starts. The footer says when
