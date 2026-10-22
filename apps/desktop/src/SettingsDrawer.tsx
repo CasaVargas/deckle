@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { api } from "./api";
+import { install, type UpdateState } from "./updates";
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings } from "./types";
 
 const REPO = "https://github.com/CasaVargas/deckle";
@@ -33,9 +35,77 @@ interface Props {
   library: LibraryStatus | null;
   onLibrary: (root: string | null, autoAdd: boolean) => void;
   onPickLibrary: () => void;
+  update: UpdateState;
+  onUpdateState: (s: UpdateState) => void;
+  /** A conversion or send is running: nothing that closes Deckle may start. */
+  busy: boolean;
+  /** Opened from the footer's update marker: scroll to About. */
+  focusAbout: boolean;
 }
 
-export default function SettingsDrawer({ open, version, settings, previewer, devices, onChange, onDeviceOptions, onClose, onPickPreviewer, library, onLibrary, onPickLibrary }: Props) {
+const WINDOWS = navigator.userAgent.includes("Windows");
+const mb = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`;
+
+/** The About section's update line: one state at a time, and nothing happens without a click. */
+function UpdateStatus({ update, onUpdateState, busy }: Pick<Props, "update" | "onUpdateState" | "busy">) {
+  const releases = <Link href={`${REPO}/releases`}>Releases</Link>;
+  switch (update.kind) {
+    case "checking":
+      return <>checking for updates…</>;
+    case "current":
+      return <>up to date</>;
+    case "failed":
+      return <>couldn't check for updates ({releases})</>;
+    case "available":
+    case "error":
+      return (
+        <span className="update">
+          {update.kind === "error" ? (
+            <span className="update-error">The update didn't install: {update.message}</span>
+          ) : (
+            <>
+              Deckle {update.update.version} is available ·{" "}
+              <Link href={`${REPO}/releases/tag/v${update.update.version}`}>What's new</Link>
+            </>
+          )}
+          <button className="primary solo" disabled={busy} onClick={() => install(update.update, onUpdateState)}>
+            {update.kind === "error" ? "Try again" : "Update"}
+          </button>
+          {busy ? <span>Finish the current job first.</span> : WINDOWS && <span>Deckle closes to finish installing.</span>}
+          {update.kind === "error" && <span>Or download it from {releases}.</span>}
+        </span>
+      );
+    case "downloading": {
+      const pct = update.total ? Math.min(100, (update.done / update.total) * 100) : 0;
+      return (
+        <span className="progress">
+          <span className="progress-track">
+            <span className="progress-fill" style={{ width: `${pct}%` }} />
+          </span>
+          <span className="progress-label">
+            Downloading… {update.total ? `${mb(update.done)} of ${mb(update.total)}` : mb(update.done)}
+          </span>
+        </span>
+      );
+    }
+    case "ready":
+      return (
+        <span className="update">
+          Deckle {update.update.version} is installed.
+          <button className="primary solo" disabled={busy} onClick={() => relaunch()}>
+            Restart to finish
+          </button>
+          {busy && <span>Finish the current job first.</span>}
+        </span>
+      );
+  }
+}
+
+export default function SettingsDrawer({ open, version, settings, previewer, devices, onChange, onDeviceOptions, onClose, onPickPreviewer, library, onLibrary, onPickLibrary, update, onUpdateState, busy, focusAbout }: Props) {
+  const about = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (open && focusAbout) about.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [open, focusAbout]);
   if (!open) return null;
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...settings, [k]: v });
   return (
@@ -242,14 +312,17 @@ export default function SettingsDrawer({ open, version, settings, previewer, dev
         </label>
         <p className="hint">Notes the book marks always convert; others only when the note links back to its number.</p>
       </section>
-      <section className="about">
+      <section className="about" ref={about}>
         <h3>About</h3>
         <p className="hint">
-          Deckle {version} · GPL-3.0-or-later · <Link href={`${REPO}/releases`}>Check for a newer version</Link> ·{" "}
-          <Link href={REPO}>Source</Link>
+          Deckle {version} · GPL-3.0-or-later · <Link href={REPO}>Source</Link>
         </p>
         <p className="hint">
-          Deckle never checks for updates or sends anything about you. It goes online only for: the Word Wise dictionary
+          <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} />
+        </p>
+        <p className="hint">
+          Deckle checks GitHub for a newer version when it starts; the request carries nothing about you or your books.
+          Otherwise it goes online only for: the Word Wise dictionary
           (downloaded once from GitHub), and, when you turn them on, an LLM for X-Ray, Wikipedia summaries, Amazon edition
           matching and filling in missing book details (both Open Library). A Kindle itself may ask Amazon about books sent with features (EBOK).
         </p>

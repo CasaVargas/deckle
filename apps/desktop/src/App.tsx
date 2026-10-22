@@ -7,6 +7,7 @@ import BookRowView from "./BookRow";
 import SettingsDrawer from "./SettingsDrawer";
 import DailyView from "./DailyView";
 import KindleView from "./KindleView";
+import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import type { BookRow, BookState, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
@@ -45,6 +46,8 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [previewer, setPreviewer] = useState<PreviewerStatus | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aboutFocus, setAboutFocus] = useState(false);
+  const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -122,6 +125,7 @@ export default function App() {
 
   useEffect(() => {
     api.appVersion().then(setVersion).catch(() => setVersion("dev"));
+    checkForUpdate().then(setUpdate);
     api.startTab().then(setTab).catch(() => {});
     api.getSettings().then(setSettings).catch(() => {});
     api.previewerStatus().then(setPreviewer).catch(() => {});
@@ -420,7 +424,19 @@ export default function App() {
           </div>
         </div>
         )}
-        <div className="version">Deckle {version}</div>
+        {hasUpdate(update) ? (
+          <button
+            className="version link"
+            onClick={() => {
+              setAboutFocus(true);
+              setSettingsOpen(true);
+            }}
+          >
+            Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
+          </button>
+        ) : (
+          <div className="version">Deckle {version}</div>
+        )}
       </footer>
       )}
 
@@ -435,7 +451,14 @@ export default function App() {
           await api.setDeviceOptions(key, cde, verified).catch((e) => setNotice(String(e)));
           refreshDevices();
         }}
-        onClose={() => setSettingsOpen(false)}
+        onClose={() => {
+          setSettingsOpen(false);
+          setAboutFocus(false);
+        }}
+        update={update}
+        onUpdateState={setUpdate}
+        busy={busy}
+        focusAbout={aboutFocus}
         onPickPreviewer={pickPreviewer}
         library={library}
         onLibrary={setLibraryOptions}
