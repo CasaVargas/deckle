@@ -23,11 +23,13 @@ fn cfg() -> Config {
                 name: "Science".into(),
                 url: SCIENCE.into(),
                 max_items: 10,
+                ..Default::default()
             },
             FeedConfig {
                 name: "Other".into(),
                 url: OTHER.into(),
                 max_items: 10,
+                ..Default::default()
             },
         ],
         ..Config::default()
@@ -230,6 +232,7 @@ fn paper_cfg() -> Config {
             name: "Science".into(),
             url: SCIENCE.into(),
             max_items: 10,
+            ..Default::default()
         }],
         ..Config::default()
     }
