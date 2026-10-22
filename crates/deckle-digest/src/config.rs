@@ -179,6 +179,90 @@ impl Default for LocalConfig {
     }
 }
 
+/// A Google News topic, the source of a newspaper topic section.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum Topic {
+    World,
+    Nation,
+    Business,
+    Technology,
+    Entertainment,
+    Sports,
+    Science,
+    Health,
+}
+
+impl Topic {
+    pub const ALL: [Topic; 8] = [
+        Topic::World,
+        Topic::Nation,
+        Topic::Business,
+        Topic::Technology,
+        Topic::Entertainment,
+        Topic::Sports,
+        Topic::Science,
+        Topic::Health,
+    ];
+
+    /// Case-insensitive, whitespace-trimmed lookup by slug.
+    pub fn parse(s: &str) -> Option<Topic> {
+        let s = s.trim();
+        Topic::ALL
+            .into_iter()
+            .find(|t| t.slug().eq_ignore_ascii_case(s))
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            Topic::World => "WORLD",
+            Topic::Nation => "NATION",
+            Topic::Business => "BUSINESS",
+            Topic::Technology => "TECHNOLOGY",
+            Topic::Entertainment => "ENTERTAINMENT",
+            Topic::Sports => "SPORTS",
+            Topic::Science => "SCIENCE",
+            Topic::Health => "HEALTH",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Topic::World => "World",
+            Topic::Nation => "Nation",
+            Topic::Business => "Business",
+            Topic::Technology => "Technology",
+            Topic::Entertainment => "Entertainment",
+            Topic::Sports => "Sports",
+            Topic::Science => "Science",
+            Topic::Health => "Health",
+        }
+    }
+
+    pub fn url(self) -> String {
+        format!(
+            "https://news.google.com/rss/headlines/section/topic/{}?hl=en-US&gl=US&ceid=US:en",
+            self.slug()
+        )
+    }
+}
+
+impl TryFrom<String> for Topic {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, String> {
+        Topic::parse(&s).ok_or_else(|| {
+            let all: Vec<&str> = Topic::ALL.iter().map(|t| t.slug()).collect();
+            format!("unknown topic \"{s}\"; use one of {}", all.join(", "))
+        })
+    }
+}
+
+impl From<Topic> for String {
+    fn from(t: Topic) -> String {
+        t.slug().to_string()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeedConfig {
@@ -918,5 +1002,39 @@ mod tests {
     fn typo_is_an_error() {
         assert!(Config::parse("titel = \"x\"").is_err());
         assert!(Config::parse("sections = [\"wether\"]").is_err());
+    }
+
+    #[test]
+    fn topic_parse_is_case_insensitive() {
+        assert_eq!(Topic::parse(" sports "), Some(Topic::Sports));
+        assert_eq!(Topic::parse("golf"), None);
+    }
+
+    #[test]
+    fn topic_urls() {
+        assert_eq!(
+            Topic::Technology.url(),
+            "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
+        );
+        let urls: std::collections::BTreeSet<String> = Topic::ALL.iter().map(|t| t.url()).collect();
+        assert_eq!(urls.len(), 8);
+    }
+
+    #[test]
+    fn topic_serde_round_trip() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Holder {
+            topic: Topic,
+        }
+        let h: Holder = toml::from_str("topic = \"sports\"").unwrap();
+        assert_eq!(h.topic, Topic::Sports);
+        assert_eq!(toml::to_string(&h).unwrap().trim(), "topic = \"SPORTS\"");
+        let err = toml::from_str::<Holder>("topic = \"nonsense\"")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown topic \"nonsense\""), "{err}");
+        for t in Topic::ALL {
+            assert!(err.contains(t.slug()), "{err}");
+        }
     }
 }
