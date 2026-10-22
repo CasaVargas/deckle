@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, LibraryStatus, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
+import type { BookRow, DailyConfig, DailyState, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -37,6 +37,10 @@ export const api = {
   /** Slow over MTP (a few seconds). */
   deviceBooks: (target: RunTarget) => invoke<DeviceShelf>("device_books", { target }),
   deviceRemove: (target: RunTarget, file: string) => invoke<string[]>("device_remove", { target, file }),
+  highlightsStatus: () => invoke<HighlightsStatus>("highlights_status"),
+  highlightsSet: (folder: string | null, clippings: boolean) => invoke<HighlightsStatus>("highlights_set", { folder, clippings }),
+  /** Reads the Kindle again (its own session) and writes what's new into the folder. */
+  highlightsWrite: (target: RunTarget) => invoke<HighlightsReport>("highlights_write", { target }),
   /** Opens an https link in the default browser (webview links do not). */
   openLink: (url: string) => openUrl(url),
   onProgress: (cb: (e: ProgressEvent) => void): Promise<UnlistenFn> =>

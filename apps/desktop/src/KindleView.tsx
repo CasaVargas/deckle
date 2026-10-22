@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
+import Highlights from "./Highlights";
 import Icon from "./Icon";
 import type { DeviceBookRow, DeviceShelf, RunTarget } from "./types";
 
@@ -259,6 +260,9 @@ export default function KindleView({ target, targetKey, busy, onResend, onNotice
             <BookLine key={b.file} book={b} busy={busy || loading} onResend={onResend} onRemove={remove} />
           ))}
         </ul>
+      )}
+      {shelf && target && (shelf.highlights.length > 0 || shelf.highlights_error) && (
+        <Highlights target={target} rows={shelf.highlights} error={shelf.highlights_error} busy={busy || loading} onWritten={load} />
       )}
     </main>
   );

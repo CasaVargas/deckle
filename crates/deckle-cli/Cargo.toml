@@ -20,6 +20,7 @@ deckle-transport.workspace = true
 deckle-xray.workspace = true
 deckle-digest.workspace = true
 deckle-library.workspace = true
+deckle-highlights.workspace = true
 clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true

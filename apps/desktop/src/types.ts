@@ -284,4 +284,33 @@ export interface DeviceShelf {
   device: string;
   space: { total: number; free: number } | null;
   books: DeviceBookRow[];
+  /** The Kindle's highlights by book, as the next export would write them. */
+  highlights: HighlightRow[];
+  highlights_error: string | null;
+}
+
+/** One book's highlights (highlights export design §6). */
+export interface HighlightRow {
+  key: string;
+  title: string;
+  author: string;
+  /** The file's name in the highlights folder. */
+  file: string;
+  total: number;
+  new: number;
+  /** The whole new file, or the block that would be appended; empty when nothing is new. */
+  markdown: string;
+}
+
+export interface HighlightsStatus {
+  folder: string | null;
+  /** `[sync] clippings`: the morning schedule writes highlights on plug-in. */
+  clippings: boolean;
+}
+
+export interface HighlightsReport {
+  written: { file: string; new: number; created: boolean }[];
+  /** `[file, error]` */
+  failed: [string, string][];
+  parse_error?: { line: number; message: string };
 }

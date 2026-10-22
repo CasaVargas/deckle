@@ -248,3 +248,19 @@ input[type=checkbox] { padding: 0; }
 .article-error { color: var(--fail); font-size: 12px; margin-top: 6px; }
 .app-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .app-main[hidden] { display: none; }
+
+/* Highlights on the Kindle tab (highlights export design §6) */
+.highlights { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; margin: 18px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+.highlights h3 { font-family: ui-serif, Georgia, serif; font-size: 17px; margin: 0 0 4px; }
+.highlights-books ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 360px; overflow-y: auto; }
+.highlight-book { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; color: inherit; cursor: pointer; }
+.highlight-book.on { border-color: var(--accent); }
+.highlight-title { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.highlight-book .muted { grid-column: 1; }
+.highlight-new { grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 12px; font-weight: 700; color: var(--accent); }
+.highlights-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.highlights-target { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.highlights-target .grow { flex: 1; min-width: 200px; }
+.highlights-md { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 1.55; white-space: pre-wrap; max-height: 360px; overflow: auto; }
+.warn.small { color: var(--warn); font-size: 12px; margin: 0; }
+@media (max-width: 720px) { .highlights { grid-template-columns: 1fr; } }

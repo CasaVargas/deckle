@@ -2,6 +2,7 @@
 //! The `deckle` command line, as a library so the desktop app can run it too.
 
 mod cli;
+mod highlights;
 mod inbox;
 mod series;
 
@@ -288,6 +289,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Digest { config, action } => digest(json, config, action),
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
+        cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
         cli::Command::Save {
             targets,
             title,
@@ -500,6 +502,94 @@ fn add_to_library(source: &Path, mut report: RunReport, target: &Target) -> RunR
 
 fn megabytes(bytes: u64) -> String {
     format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
+/// `deckle highlights list|export` (highlights export design §6).
+fn highlights_cmd(
+    json: bool,
+    from: &str,
+    action: cli::HighlightsCommand,
+) -> Result<ExitCode, String> {
+    let target = resolve_target(from)?;
+    let read = deckle_core::clippings::read_on(&mut deckle_core::deliver::Conn::new(&target));
+    let bytes = match read {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            emit(
+                json,
+                &serde_json::json!({ "written": [], "failed": [] }),
+                || "no highlights on this Kindle yet".into(),
+            )?;
+            return Ok(ExitCode::SUCCESS);
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Ok(ExitCode::from(1));
+        }
+    };
+    let state_path = highlights::state_path();
+    match action {
+        cli::HighlightsCommand::List => {
+            let parsed = deckle_highlights::parse(&bytes);
+            if let Some(e) = &parsed.error {
+                eprintln!("warning: My Clippings.txt line {}: {}", e.line, e.message);
+            }
+            let state = deckle_highlights::State::load(&state_path);
+            let books = deckle_highlights::group(parsed.entries);
+            let rows: Vec<_> = deckle_highlights::pending(&books, state.folder.as_deref(), &state)
+                .into_iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "title": p.title, "author": p.author, "file": p.file,
+                        "total": p.total, "new": p.new,
+                    })
+                })
+                .collect();
+            emit(json, &rows, || {
+                rows.iter()
+                    .map(|r| {
+                        format!(
+                            "{:>4} ({} new)  {}  -> {}",
+                            r["total"],
+                            r["new"],
+                            r["title"].as_str().unwrap_or_default(),
+                            r["file"].as_str().unwrap_or_default()
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::HighlightsCommand::Export { to } => {
+            match highlights::export(&bytes, &state_path, to.as_deref()) {
+                Ok(o) => {
+                    for (_, e) in &o.report.failed {
+                        eprintln!("error: {e}");
+                    }
+                    if let Some(e) = &o.parse_error {
+                        eprintln!("warning: My Clippings.txt line {}: {}", e.line, e.message);
+                    }
+                    emit(json, &o, || {
+                        o.report
+                            .written
+                            .iter()
+                            .map(|w| format!("{} new  {}", w.new, w.file))
+                            .chain(std::iter::once(
+                                o.describe().lines().next().unwrap_or_default().to_owned(),
+                            ))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })?;
+                    Ok(ExitCode::SUCCESS)
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    Ok(ExitCode::from(2))
+                }
+            }
+        }
+    }
 }
 
 fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, String> {
@@ -1223,9 +1313,6 @@ fn digest(
                 Ok(None) => {}
                 Err(e) => eprintln!("bookmarklet: no token: {e}"),
             }
-            if cfg.sync.any_clippings() {
-                eprintln!("sync: clippings isn't built yet (#60); ignoring `clippings = true`");
-            }
             // Each device's [sync] actions run once per connection: a failed delivery waits
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
@@ -1258,12 +1345,17 @@ struct DigestOutcome {
     flush: Option<deckle_core::queue::FlushReport>,
     /// No Kindle connected: the edition waits in the outbox.
     queued: bool,
+    /// Highlights exported in the same session (`[sync] clippings`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    highlights: Option<highlights::Outcome>,
 }
 
 impl DigestOutcome {
     fn describe(&self, queue: &deckle_core::queue::Queue) -> String {
         match &self.flush {
-            Some(f) if f.delivered.is_empty() && f.pruned.is_empty() => {
+            Some(f)
+                if f.delivered.is_empty() && f.pruned.is_empty() && self.highlights.is_none() =>
+            {
                 "      nothing queued".to_owned()
             }
             Some(f) => {
@@ -1276,6 +1368,12 @@ impl DigestOutcome {
                     lines.push(format!("      removed {} older edition(s)", f.pruned.len()));
                 }
                 lines.extend(f.warnings.iter().map(|w| format!("      warning: {w}")));
+                if let Some(h) = &self.highlights {
+                    lines.extend(h.describe().lines().map(|l| format!("      {l}")));
+                }
+                if let Some(e) = &f.clippings_error {
+                    lines.push(format!("      highlights: error: {e}"));
+                }
                 lines.join("\n")
             }
             None if self.queued => format!(
@@ -1507,19 +1605,21 @@ fn push_queued(
     if queue.pending().is_empty() {
         return Ok(DigestOutcome {
             flush: Some(Default::default()),
-            queued: false,
+            ..Default::default()
         });
     }
     let Some(target) = detect_kindle() else {
         return Ok(DigestOutcome {
-            flush: None,
             queued: true,
+            ..Default::default()
         });
     };
-    // An explicit push always pushes; the device's `prune` still counts.
+    // An explicit push always pushes; the device's `prune` and `clippings` still count.
+    let actions = sync_actions(cfg, &deckle_core::sync::device_id(&target));
     let plan = deckle_core::sync::Plan {
         push: true,
-        prune: sync_actions(cfg, &deckle_core::sync::device_id(&target)).prune,
+        prune: actions.prune,
+        clippings: actions.clippings,
     };
     sync_to(queue, cfg, &target, plan)
 }
@@ -1530,6 +1630,7 @@ fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Act
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
+        clippings: a.clippings,
     }
 }
 
@@ -1558,9 +1659,21 @@ fn sync_to(
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
     )
     .map_err(|e| e.to_string())?;
+    // Read in the same session; written to the folder after it's closed.
+    let highlights = match flush.clippings.as_deref() {
+        Some(bytes) => match highlights::export(bytes, &highlights::state_path(), None) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                eprintln!("{e}");
+                None
+            }
+        },
+        None => None,
+    };
     Ok(DigestOutcome {
         flush: Some(flush),
-        queued: false,
+        highlights,
+        ..Default::default()
     })
 }
 

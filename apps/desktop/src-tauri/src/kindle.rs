@@ -5,8 +5,10 @@
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
+use deckle_core::clippings::read_on;
 use deckle_core::deliver::{Conn, Target};
 use deckle_core::inventory::{Space, list_on, remove_on};
+use deckle_highlights::{Outcome, Pending, State};
 use deckle_library::freshness::Reason;
 use deckle_library::shelf::{Shelved, shelve, source_cover};
 use deckle_library::{Library, LibraryConfig};
@@ -57,6 +59,23 @@ pub struct DeviceShelf {
     pub device: String,
     pub space: Option<Space>,
     pub books: Vec<DeviceBookRow>,
+    /// The Kindle's highlights by book, as the next export would write them (highlights
+    /// export design §6).
+    pub highlights: Vec<Pending>,
+    /// Reading or parsing `My Clippings.txt` went wrong (the rows it could read still show).
+    pub highlights_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HighlightsStatus {
+    pub folder: Option<String>,
+    /// `[sync] clippings` in `digest.toml`: `digest watch` exports on plug-in.
+    pub clippings: bool,
+}
+
+/// `highlights.json` beside the library's `library.json`.
+fn highlights_state(config: &Path) -> PathBuf {
+    config.with_file_name("highlights.json")
 }
 
 fn data_url(bytes: &[u8]) -> String {
@@ -167,10 +186,86 @@ pub fn shelf_on(
                 .to_lowercase(),
         )
     });
+    let (highlights, highlights_error) = highlights_on(conn, &highlights_state(config));
     Ok(DeviceShelf {
         device: device.name,
         space: inv.space,
         books,
+        highlights,
+        highlights_error,
+    })
+}
+
+/// The clippings in the shelf's own session: never fails the listing.
+fn highlights_on(conn: &mut Conn<'_>, state: &Path) -> (Vec<Pending>, Option<String>) {
+    let bytes = match read_on(conn) {
+        Ok(Some(b)) => b,
+        Ok(None) => return (Vec::new(), None),
+        Err(e) => return (Vec::new(), Some(e.to_string())),
+    };
+    let parsed = deckle_highlights::parse(&bytes);
+    let state = State::load(state);
+    let rows = deckle_highlights::pending(
+        &deckle_highlights::group(parsed.entries),
+        state.folder.as_deref(),
+        &state,
+    );
+    let error = parsed
+        .error
+        .map(|e| format!("line {}: {}", e.line, e.message));
+    (rows, error)
+}
+
+pub fn highlights_status_at(state: &Path, digest: &Path) -> HighlightsStatus {
+    HighlightsStatus {
+        folder: State::load(state)
+            .folder
+            .map(|f| f.to_string_lossy().into_owned()),
+        clippings: deckle_digest::Config::load(digest).is_ok_and(|c| c.sync.clippings),
+    }
+}
+
+/// The folder goes in `highlights.json`; `clippings` into `digest.toml`'s `[sync]`, keeping the
+/// rest of the file as written.
+pub fn highlights_set_at(
+    state: &Path,
+    digest: &Path,
+    folder: Option<String>,
+    clippings: bool,
+) -> Result<HighlightsStatus, String> {
+    let mut st = State::load(state);
+    if let Some(folder) = folder {
+        let folder = PathBuf::from(folder);
+        std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+        st.folder = Some(folder.canonicalize().unwrap_or(folder));
+    }
+    if let Some(dir) = state.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    st.save(state)
+        .map_err(|e| format!("{}: {e}", state.display()))?;
+    let mut cfg = match digest.exists() {
+        true => deckle_digest::Config::load(digest)?,
+        false => deckle_digest::Config::parse(deckle_digest::config::STARTER)?,
+    };
+    if cfg.sync.clippings != clippings {
+        cfg.sync.clippings = clippings;
+        deckle_digest::config::save(digest, &cfg)?;
+    }
+    Ok(highlights_status_at(state, digest))
+}
+
+/// Reads the clippings over `conn` and writes what's new into the remembered folder.
+pub fn write_highlights_on(conn: &mut Conn<'_>, state: &Path) -> Result<Outcome, String> {
+    let bytes = read_on(conn)
+        .map_err(|e| e.to_string())?
+        .ok_or("No highlights on this Kindle yet.")?;
+    deckle_highlights::export_clippings(&bytes, state, None).map_err(|e| {
+        if State::load(state).folder.is_none() {
+            "Choose a folder for your highlights first.".to_owned()
+        } else {
+            e
+        }
     })
 }
 
@@ -210,6 +305,38 @@ pub async fn device_books(target: RunTarget) -> Result<DeviceShelf, String> {
         with_target(target, |conn, config| {
             let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
             shelf_on(conn, config, Some(&cache))
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn highlights_status() -> HighlightsStatus {
+    let config = deckle_library::config::default_path();
+    highlights_status_at(
+        &highlights_state(&config),
+        &deckle_digest::config::default_path(),
+    )
+}
+
+#[tauri::command]
+pub fn highlights_set(folder: Option<String>, clippings: bool) -> Result<HighlightsStatus, String> {
+    let config = deckle_library::config::default_path();
+    highlights_set_at(
+        &highlights_state(&config),
+        &deckle_digest::config::default_path(),
+        folder,
+        clippings,
+    )
+}
+
+/// Its own session, like Remove.
+#[tauri::command]
+pub async fn highlights_write(target: RunTarget) -> Result<Outcome, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        with_target(target, |conn, config| {
+            write_highlights_on(conn, &highlights_state(config))
         })
     })
     .await
@@ -283,5 +410,109 @@ mod tests {
         assert!(!out.join(file).exists());
         assert!(lib.list()[0].sidecar.sends.is_empty());
         assert!(remove_from(&mut conn, &config, "../x.kfx").is_err());
+    }
+    fn clippings_fixture() -> Vec<u8> {
+        std::fs::read(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/clippings/variants.txt"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_shelf_carries_the_kindles_highlights() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("library.json");
+        let out = tmp.path().join("Kindle");
+        std::fs::create_dir_all(&out).unwrap();
+        let target = Target::Folder(out.clone());
+
+        let shelf = shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert!(shelf.highlights.is_empty());
+        assert!(shelf.highlights_error.is_none());
+
+        std::fs::write(out.join("My Clippings.txt"), clippings_fixture()).unwrap();
+        let shelf = shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        let walden = shelf
+            .highlights
+            .iter()
+            .find(|h| h.title == "Walden")
+            .unwrap();
+        assert_eq!((walden.total, walden.new), (3, 3));
+        assert!(walden.markdown.starts_with("---\ntitle: Walden\n"));
+        assert!(shelf.highlights_error.is_none());
+
+        let mut bytes = clippings_fixture();
+        bytes.extend_from_slice(b"Broken (X)\r\nnot a meta line\r\n==========\r\n");
+        std::fs::write(out.join("My Clippings.txt"), bytes).unwrap();
+        let shelf = shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert_eq!(shelf.highlights.len(), 6);
+        assert!(
+            shelf
+                .highlights_error
+                .as_deref()
+                .unwrap()
+                .starts_with("line 54: ")
+        );
+    }
+
+    #[test]
+    fn highlights_settings_write_the_folder_and_the_sync_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = tmp.path().join("highlights.json");
+        let digest = tmp.path().join("digest.toml");
+        assert_eq!(
+            highlights_status_at(&state, &digest),
+            HighlightsStatus {
+                folder: None,
+                clippings: false
+            }
+        );
+        let notes = tmp.path().join("notes");
+        let s = highlights_set_at(
+            &state,
+            &digest,
+            Some(notes.to_string_lossy().into_owned()),
+            true,
+        )
+        .unwrap();
+        assert!(s.folder.as_deref().unwrap().ends_with("notes"));
+        assert!(s.clippings);
+        let text = std::fs::read_to_string(&digest).unwrap();
+        assert!(text.contains("clippings = true"), "{text}");
+        assert!(
+            text.contains("# What `deckle digest watch` does"),
+            "comments kept"
+        );
+        let s = highlights_set_at(
+            &state,
+            &digest,
+            Some(notes.to_string_lossy().into_owned()),
+            false,
+        )
+        .unwrap();
+        assert!(!s.clippings);
+    }
+
+    #[test]
+    fn writing_highlights_needs_a_folder_then_exports() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = tmp.path().join("highlights.json");
+        let out = tmp.path().join("Kindle");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("My Clippings.txt"), clippings_fixture()).unwrap();
+        let target = Target::Folder(out);
+        assert!(write_highlights_on(&mut Conn::new(&target), &state).is_err());
+        let notes = tmp.path().join("notes");
+        let digest = tmp.path().join("digest.toml");
+        highlights_set_at(
+            &state,
+            &digest,
+            Some(notes.to_string_lossy().into_owned()),
+            false,
+        )
+        .unwrap();
+        let o = write_highlights_on(&mut Conn::new(&target), &state).unwrap();
+        assert_eq!(o.report.written.len(), 6);
+        assert!(notes.join("Walden.md").exists());
     }
 }

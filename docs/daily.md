@@ -62,8 +62,11 @@ by a `deckle run`. If finishing fails, the book still goes over as a personal do
 cover. The paper itself is always PDOC.
 
 What `watch` does on plug-in is set per Kindle in `digest.toml`: `[sync]` holds the defaults
-(`push = true`, `prune = true`), and `[sync.devices."<sync id>"]` overrides them for one device,
-using the id `deckle devices` shows. Push and prune share one connection.
+(`push = true`, `prune = true`, `clippings = false`), and `[sync.devices."<sync id>"]` overrides
+them for one device, using the id `deckle devices` shows. Push, prune and clippings share one
+connection. `clippings = true` writes the Kindle's highlights as Markdown into the highlights
+folder (set it once with `deckle highlights export --to <dir>`, or in **Settings → Kindles**). It
+runs once per plug-in, in the same connection as a push or a prune when there is one.
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 

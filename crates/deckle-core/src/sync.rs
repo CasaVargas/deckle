@@ -4,14 +4,24 @@
 
 use std::path::PathBuf;
 
+use crate::clippings::read_on;
 use crate::deliver::{Conn, DeliverError, Target, prune_named_on};
 use crate::queue::{Finishing, FlushReport, Progress, Prune, Queue};
 
-/// The actions a device has on (`[sync]` in `digest.toml`). Clippings (#60) isn't one yet.
+/// Whether opening an MTP session with nothing to deliver leaves the Kindle where it was. It
+/// used to send the Scribe to its home screen (auto-sync design §4). Checked again on a Scribe
+/// 2024 on 2026-10-22: plugging in already shows "connected to computer", a session changes
+/// nothing, and the Kindle stays on the bus after it closes (no reset on close since `usb.rs`
+/// stopped sending one). So clippings may open a session of their own, once per connection.
+pub const IDLE_SESSION_OK: bool = true;
+
+/// The actions a device has on (`[sync]` in `digest.toml`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Actions {
     pub push: bool,
     pub prune: bool,
+    /// Read `My Clippings.txt` for the highlights export (#60).
+    pub clippings: bool,
 }
 
 impl Default for Actions {
@@ -20,20 +30,22 @@ impl Default for Actions {
         Actions {
             push: true,
             prune: true,
+            clippings: false,
         }
     }
 }
 
-/// What one check runs, both over one connection.
+/// What one check runs, all over one connection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub push: bool,
     pub prune: bool,
+    pub clippings: bool,
 }
 
 impl Plan {
     pub fn is_empty(&self) -> bool {
-        !self.push && !self.prune
+        !self.push && !self.prune && !self.clippings
     }
 }
 
@@ -66,6 +78,7 @@ struct Connected {
     /// or a new file instead of retrying every check.
     tried: Option<Vec<PathBuf>>,
     pruned: bool,
+    clipped: bool,
 }
 
 impl Watcher {
@@ -81,7 +94,14 @@ impl Watcher {
                 id: id.to_owned(),
                 tried: None,
                 pruned: false,
+                clipped: false,
             }),
+        };
+        // Clippings ride along with whatever opens a session, once per connection.
+        let clippings = |conn: &mut Connected| {
+            let due = actions.clippings && !conn.clipped;
+            conn.clipped |= due;
+            due
         };
         if actions.push && !pending.is_empty() && conn.tried.as_deref() != Some(pending) {
             conn.tried = Some(pending.to_vec());
@@ -89,6 +109,7 @@ impl Watcher {
             return Plan {
                 push: true,
                 prune: actions.prune,
+                clippings: clippings(conn),
             };
         }
         // With push on, prune rides along with a push: an idle plug-in opens no MTP session
@@ -98,13 +119,21 @@ impl Watcher {
             return Plan {
                 push: false,
                 prune: true,
+                clippings: clippings(conn),
+            };
+        }
+        if IDLE_SESSION_OK && clippings(conn) {
+            return Plan {
+                push: false,
+                prune: false,
+                clippings: true,
             };
         }
         Plan::default()
     }
 }
 
-/// Runs `plan` over `conn`: push the outbox, then prune, in one session.
+/// Runs `plan` over `conn`: push the outbox, prune, then read the clippings, in one session.
 pub fn run(
     queue: &Queue,
     conn: &mut Conn<'_>,
@@ -131,12 +160,20 @@ pub fn run_with(
     finishing: &Finishing,
     progress: &mut Progress<'_>,
 ) -> Result<FlushReport, DeliverError> {
-    if plan.push {
-        return queue.flush_with(conn, plan.prune.then_some(prune), finishing, progress);
-    }
-    let mut report = FlushReport::default();
-    if plan.prune {
+    let mut report = if plan.push {
+        queue.flush_with(conn, plan.prune.then_some(prune), finishing, progress)?
+    } else {
+        FlushReport::default()
+    };
+    if plan.prune && !plan.push {
         report.pruned = prune_named_on(conn, &prune.prefix, prune.keep)?;
+    }
+    // A failed read doesn't undo a delivery: it's reported beside it.
+    if plan.clippings {
+        match read_on(conn) {
+            Ok(bytes) => report.clippings = bytes,
+            Err(e) => report.clippings_error = Some(e.to_string()),
+        }
     }
     Ok(report)
 }
@@ -184,18 +221,22 @@ mod tests {
     const PUSH: Plan = Plan {
         push: true,
         prune: false,
+        clippings: false,
     };
     const PRUNE: Plan = Plan {
         push: false,
         prune: true,
+        clippings: false,
     };
     const BOTH: Plan = Plan {
         push: true,
         prune: true,
+        clippings: false,
     };
     const NONE: Plan = Plan {
         push: false,
         prune: false,
+        clippings: false,
     };
 
     #[test]
@@ -204,6 +245,7 @@ mod tests {
         let push_only = Actions {
             push: true,
             prune: false,
+            clippings: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, push_only), PUSH);
@@ -216,6 +258,7 @@ mod tests {
         let prune_only = Actions {
             push: false,
             prune: true,
+            clippings: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, prune_only), PRUNE);
@@ -235,6 +278,7 @@ mod tests {
         let off = Actions {
             push: false,
             prune: false,
+            clippings: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, off), NONE);
@@ -372,6 +416,132 @@ mod tests {
         assert_eq!(q.pending().len(), 1, "the outbox waits");
         assert_eq!(fake::opens(), 1);
         assert!(!fake::ops().contains(&op::SEND_OBJECT_INFO));
+    }
+
+    #[test]
+    fn clippings_ride_along_with_a_push_once_per_connection() {
+        let a = files(&["a.kfx"]);
+        let on = Actions {
+            push: true,
+            prune: true,
+            clippings: true,
+        };
+        let mut w = Watcher::default();
+        assert_eq!(
+            w.tick(Some("K"), &a, on),
+            Plan {
+                push: true,
+                prune: true,
+                clippings: true
+            }
+        );
+        let b = files(&["b.kfx"]);
+        assert_eq!(w.tick(Some("K"), &b, on), BOTH, "once per connection");
+        assert_eq!(w.tick(None, &b, on), NONE);
+        assert!(
+            w.tick(Some("K"), &b, on).clippings,
+            "a reconnect exports again"
+        );
+    }
+
+    #[test]
+    fn clippings_ride_along_with_a_prune_alone() {
+        let on = Actions {
+            push: false,
+            prune: true,
+            clippings: true,
+        };
+        let mut w = Watcher::default();
+        assert_eq!(
+            w.tick(Some("K"), &[], on),
+            Plan {
+                push: false,
+                prune: true,
+                clippings: true
+            }
+        );
+    }
+
+    #[test]
+    fn an_idle_plug_in_exports_only_when_sessions_are_harmless() {
+        let on = Actions {
+            push: true,
+            prune: true,
+            clippings: true,
+        };
+        let mut w = Watcher::default();
+        let want = Plan {
+            push: false,
+            prune: false,
+            clippings: IDLE_SESSION_OK,
+        };
+        assert_eq!(w.tick(Some("K"), &[], on), want);
+        assert_eq!(w.tick(Some("K"), &[], on), NONE);
+    }
+
+    #[test]
+    fn clippings_share_the_push_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (q, _) = outbox_and_folder(tmp.path());
+        fake::reset(&[]);
+        fake::put_bytes("My Clippings.txt", b"Walden (H)\n");
+        let target = mtp(Some("G0001"), Some("Kindle"));
+        let plan = Plan {
+            push: true,
+            prune: false,
+            clippings: true,
+        };
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            plan,
+            &prune(),
+        )
+        .unwrap();
+        assert_eq!(r.delivered.len(), 1);
+        assert_eq!(r.clippings.as_deref(), Some(&b"Walden (H)\n"[..]));
+        assert_eq!(fake::opens(), 1, "one connection");
+
+        let alone = Plan {
+            push: false,
+            prune: false,
+            clippings: true,
+        };
+        fake::reset(&[]);
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            alone,
+            &prune(),
+        )
+        .unwrap();
+        assert_eq!(r.clippings, None, "no file: nothing, and no error");
+        assert_eq!(fake::opens(), 1);
+    }
+
+    #[test]
+    fn a_failed_clippings_read_keeps_the_delivery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (q, _) = outbox_and_folder(tmp.path());
+        fake::reset(&[]);
+        fake::put_bytes("My Clippings.txt", b"Walden (H)\n");
+        fake::fail_get_object();
+        let target = mtp(Some("G0001"), Some("Kindle"));
+        let plan = Plan {
+            push: true,
+            prune: false,
+            clippings: true,
+        };
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            plan,
+            &prune(),
+        )
+        .expect("the push succeeded");
+        assert_eq!(r.delivered.len(), 1);
+        assert_eq!(r.clippings, None);
+        assert!(r.clippings_error.as_deref().unwrap().contains("MTP"));
     }
 
     #[test]

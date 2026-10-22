@@ -960,6 +960,7 @@ dependencies = [
  "clap",
  "deckle-core",
  "deckle-digest",
+ "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
  "deckle-transport",
@@ -1015,6 +1016,7 @@ dependencies = [
  "deckle-cli",
  "deckle-core",
  "deckle-digest",
+ "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
  "deckle-transport",
@@ -1068,6 +1070,16 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "deckle-highlights"
+version = "0.3.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha1 0.11.0",
+ "tempfile",
 ]
 
 [[package]]
