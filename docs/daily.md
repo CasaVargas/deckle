@@ -97,6 +97,25 @@ The Daily tab opens on the **next** edition, not the last one:
 `deckle digest next` prints the same view (`--json` for data). It only reads files; `--fetch`
 checks the feeds first, under the same twice-an-hour limit.
 
+### Other places
+
+Keep up with a relative's town or a trip: each extra place gets its own local news section,
+printed right after your own Local and built the same way (its Google News search and any local
+feeds, merged, newest first). Weather, the almanac and the cover stay on your place. Add places in
+the Daily tab (**The paper → Other places**), or in `digest.toml`:
+
+```toml
+[[local.places]]
+name = "Asheville, NC"          # the section's title
+google_news = "Asheville NC"
+feeds = []                      # local paper RSS feeds, merged in
+# max_items = 6                 # stories; default: [local] max_items
+```
+
+Each place is its own row in the page plan (its story budget is editable there) and in How far
+you read, where a Drop suggestion removes just that place. Turning Local off turns the places off
+with it.
+
 ### How far you read
 
 Each time a Kindle connects (`watch`, `push`, or the Kindle tab), Deckle reads the reading

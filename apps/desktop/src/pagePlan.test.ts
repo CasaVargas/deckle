@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, test } from "vitest";
-import { countdown, pressLine, reorder, setBudget, weekLabel } from "./pagePlan";
+import { countdown, pressLine, reorder, setBudget, step, weekLabel } from "./pagePlan";
 import type { DailyConfig, PagePlanRow, Press, SectionKind } from "./types";
 
 const at = "2026-10-22T15:08:00-04:00";
@@ -44,7 +44,13 @@ const cfg = (): DailyConfig => ({
   photos: true,
   max_photos: 4,
   sections: ["reading", "weather", "local", "feeds", "horoscope"],
-  local: { google_news: "", feeds: [], max_items: 12, max_age_hours: 72 },
+  local: {
+    google_news: "",
+    feeds: [],
+    max_items: 12,
+    max_age_hours: 72,
+    places: [{ name: "Asheville, NC", google_news: "Asheville NC", feeds: [] }],
+  },
   feeds: [
     { name: "A", url: "https://a.example/feed", max_items: 10 },
     { name: "B", url: "https://b.example/feed", max_items: 10 },
@@ -54,10 +60,11 @@ const cfg = (): DailyConfig => ({
   reading: { inbox: "", max_items: 10, long_read_words: 4000 },
 });
 
-const row = (key: string, kind: SectionKind, feed: number | null = null, items: number | null = null): PagePlanRow => ({
+const row = (key: string, kind: SectionKind, feed: number | null = null, items: number | null = null, place: number | null = null): PagePlanRow => ({
   key,
   kind,
   feed,
+  place,
   name: key.replace(/^feeds:/, ""),
   detail: "",
   budget: "",
@@ -141,5 +148,42 @@ describe("a plan out of step with the config", () => {
     base.feeds = [base.feeds[1]]; // A removed, not saved yet
     expect(reorder(base, rows(), 5, 1)).toBe(base);
     expect(setBudget(base, rows()[4], 3)).toBe(base);
+  });
+});
+
+
+describe("other places' rows", () => {
+  const withPlace = (): PagePlanRow[] => {
+    const r = rows();
+    r.splice(3, 0, { ...row("local:Asheville, NC", "local", null, 12, 0), name: "Asheville, NC" });
+    return r; // reading, weather, local, Asheville, A, B, horoscope
+  };
+
+  test("a place's budget lands on the place", () => {
+    const c = setBudget(cfg(), withPlace()[3], 4);
+    expect(c.local.places?.[0].max_items).toBe(4);
+    expect(c.local.max_items).toBe(12);
+  });
+
+  test("a place row isn't dragged on its own", () => {
+    const base = cfg();
+    expect(reorder(base, withPlace(), 3, 0)).toBe(base);
+  });
+
+  test("the arrows step over places", () => {
+    const r = withPlace(); // reading, weather, local, Asheville, A, B, horoscope
+    expect(step(r, 2, 1)).toBe(4); // Local down: past its places, below A
+    expect(reorder(cfg(), r, 2, step(r, 2, 1)!).sections).toEqual(["reading", "weather", "feeds", "local", "horoscope"]);
+    expect(step(r, 4, -1)).toBe(2); // A up: above Local
+    expect(step(r, 0, -1)).toBeNull();
+    expect(step(r, 6, 1)).toBeNull();
+  });
+
+  test("places follow Local, and dropping onto one means Local's spot", () => {
+    const c = reorder(cfg(), withPlace(), 6, 3); // horoscope onto Asheville
+    expect(c.sections).toEqual(["reading", "weather", "horoscope", "local", "feeds"]);
+    const d = reorder(cfg(), withPlace(), 2, 0); // Local to the top
+    expect(d.sections).toEqual(["local", "reading", "weather", "feeds", "horoscope"]);
+    expect(d.local.places).toEqual(cfg().local.places);
   });
 });

@@ -334,22 +334,68 @@ fn section_of(
 /// The Local section: the Google News search and local feeds, merged, deduplicated, newest
 /// first.
 pub fn local_section(cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section {
-    let title = "Local";
+    let l = &cfg.local;
+    if l.google_news.trim().is_empty() && l.feeds.is_empty() {
+        return super::unavailable(
+            "Local",
+            "add a Google News search or local feeds to [local]",
+        );
+    }
+    let kicker = (!cfg.place.is_empty()).then(|| format!("News from around {}", cfg.place));
+    let (search, feeds, max) = (&l.google_news, &l.feeds, l.max_items);
+    local_news("Local", kicker, search, feeds, max, cfg, now, net)
+}
+
+/// Another place's local news (#102), built as Local is.
+pub fn place_section(
+    place: &crate::config::PlaceNews,
+    cfg: &Config,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+) -> Section {
+    if place.google_news.trim().is_empty() && place.feeds.is_empty() {
+        return super::unavailable(
+            &place.name,
+            format!("add a Google News search or local feeds for {}", place.name),
+        );
+    }
+    local_news(
+        &place.name,
+        Some(format!("News from around {}", place.name)),
+        &place.google_news,
+        &place.feeds,
+        place.max_items.unwrap_or(cfg.local.max_items),
+        cfg,
+        now,
+        net,
+    )
+}
+
+/// A Google News search and local feeds, merged, deduplicated, newest first, under
+/// `[local] max_age_hours`.
+#[allow(clippy::too_many_arguments)]
+fn local_news(
+    title: &str,
+    kicker: Option<String>,
+    search: &str,
+    feeds: &[String],
+    max_items: usize,
+    cfg: &Config,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+) -> Section {
     let mut items = Vec::new();
     let mut errors = Vec::new();
-    if !cfg.local.google_news.trim().is_empty() {
+    if !search.trim().is_empty() {
         match net
-            .get(&google_news_url(
-                &cfg.local.google_news,
-                cfg.local.max_age_hours,
-            ))
+            .get(&google_news_url(search, cfg.local.max_age_hours))
             .and_then(|b| parse(&b, now, cfg.local.max_age_hours))
         {
             Ok((_, found)) => items.extend(as_briefs(found)),
             Err(e) => errors.push(format!("Google News: {e}")),
         }
     }
-    for url in &cfg.local.feeds {
+    for url in feeds {
         match net
             .get(url)
             .and_then(|b| parse(&b, now, cfg.local.max_age_hours))
@@ -361,14 +407,10 @@ pub fn local_section(cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section
             Err(e) => errors.push(format!("{url}: {e}")),
         }
     }
-    if cfg.local.google_news.trim().is_empty() && cfg.local.feeds.is_empty() {
-        return super::unavailable(title, "add a Google News search or local feeds to [local]");
-    }
     let mut seen = HashSet::new();
     items.retain(|i| seen.insert(key(&i.title)));
     items.sort_by_key(|i| std::cmp::Reverse(i.published));
-    items.truncate(cfg.local.max_items);
-    let kicker = (!cfg.place.is_empty()).then(|| format!("News from around {}", cfg.place));
+    items.truncate(max_items);
     section_of(title, kicker, &items, &errors, cfg, net)
 }
 

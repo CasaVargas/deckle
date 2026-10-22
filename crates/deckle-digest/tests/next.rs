@@ -637,3 +637,70 @@ fn the_puzzle_has_a_row_and_a_tile() {
     s.cfg.sections.retain(|k| *k != SectionKind::Puzzle);
     assert!(s.plan().off.iter().any(|r| r.key == "puzzle"));
 }
+
+#[test]
+fn other_places_have_rows_tiles_and_headlines() {
+    use deckle_digest::config::PlaceNews;
+    let mut s = Setup::new();
+    s.cfg.local.places = vec![
+        PlaceNews {
+            name: "Asheville, NC".into(),
+            google_news: "Asheville NC".into(),
+            feeds: Vec::new(),
+            max_items: Some(4),
+        },
+        PlaceNews {
+            name: "Boone".into(),
+            google_news: String::new(),
+            feeds: vec!["https://boone.example/rss".into()],
+            max_items: None,
+        },
+    ];
+    // each place's sources are fetched, under Local's limits
+    let urls = live_urls(&s.cfg);
+    assert!(
+        urls.iter().any(|u| u.contains("q=Asheville+NC")),
+        "{urls:?}"
+    );
+    assert!(urls.contains(&"https://boone.example/rss".to_owned()));
+    s.live.feeds.insert(
+        "https://boone.example/rss".into(),
+        fetched(&[("Boone council meets", local(2026, 10, 22, 13, 0))]),
+    );
+    let p = s.plan();
+    let keys: Vec<&str> = p.plan.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "reading",
+            "weather",
+            "local",
+            "local:Asheville, NC",
+            "local:Boone",
+            "feeds:Science",
+            "horoscope",
+            "onthisday"
+        ]
+    );
+    let row = |k: &str| p.plan.iter().find(|r| r.key == k).unwrap().clone();
+    let a = row("local:Asheville, NC");
+    assert_eq!(
+        (a.name.as_str(), a.kind, a.place, a.items),
+        ("Asheville, NC", SectionKind::Local, Some(0), Some(4))
+    );
+    assert_eq!(a.detail, "Google News");
+    assert_eq!(
+        (row("local:Boone").place, row("local:Boone").items),
+        (Some(1), Some(12))
+    );
+    assert_eq!(row("local").place, None);
+    // the main Local is still the only local tier: Boone's headline leads like a feed's
+    let lead = p.lead.clone().unwrap();
+    assert_eq!(lead.title.as_deref(), Some("Boone council meets"));
+    assert_eq!(
+        lead.reason.as_deref(),
+        Some("Leads the paper: nothing local yet, and Boone comes first in your page plan.")
+    );
+    let t = labels(&p);
+    assert!(t.contains(&"Asheville, NC · 4 slots".to_owned()), "{t:?}");
+}

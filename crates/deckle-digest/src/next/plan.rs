@@ -56,6 +56,8 @@ pub struct PlanRow {
     pub kind: SectionKind,
     /// The `[[feeds]]` index of a feed row.
     pub feed: Option<usize>,
+    /// The `[[local.places]]` index of another place's row.
+    pub place: Option<usize>,
     pub name: String,
     pub detail: String,
     pub budget: String,
@@ -121,15 +123,19 @@ fn pending(queue: &[Entry], date: NaiveDate) -> Vec<&Entry> {
     out
 }
 
-/// Local's headlines: the Google News search and local feeds, merged and deduplicated, newest
-/// first, cut to the budget; `None` when none of them has been fetched without an error.
-fn local_stories(cfg: &Config, live: &LiveCache) -> Option<Vec<LiveItem>> {
-    let mut urls: Vec<String> = cfg.local.feeds.clone();
-    if !cfg.local.google_news.trim().is_empty() {
-        urls.insert(
-            0,
-            google_news_url(&cfg.local.google_news, cfg.local.max_age_hours),
-        );
+/// Local's (or another place's) headlines: its Google News search and feeds, merged and
+/// deduplicated, newest first, cut to the budget; `None` when none of them has been fetched
+/// without an error.
+fn local_stories(
+    search: &str,
+    feeds: &[String],
+    max: usize,
+    cfg: &Config,
+    live: &LiveCache,
+) -> Option<Vec<LiveItem>> {
+    let mut urls: Vec<String> = feeds.to_vec();
+    if !search.trim().is_empty() {
+        urls.insert(0, google_news_url(search, cfg.local.max_age_hours));
     }
     let got: Vec<&super::live::Fetched> = urls
         .iter()
@@ -146,8 +152,25 @@ fn local_stories(cfg: &Config, live: &LiveCache) -> Option<Vec<LiveItem>> {
         .filter(|i| seen.insert(i.title.to_lowercase()))
         .collect();
     items.sort_by_key(|i| std::cmp::Reverse(i.published));
-    items.truncate(cfg.local.max_items);
+    items.truncate(max);
     Some(items)
+}
+
+/// "wxii.com + Google News": a local section's sources.
+fn local_detail(search: &str, feeds: &[String]) -> String {
+    let mut parts: Vec<String> = feeds.iter().filter_map(|u| host(u)).collect();
+    if !search.trim().is_empty() {
+        parts.push(if parts.is_empty() {
+            "Google News".into()
+        } else {
+            "+ Google News".into()
+        });
+    }
+    if parts.is_empty() {
+        "No sources yet".to_owned()
+    } else {
+        parts.join(", ").replace(", + ", " + ")
+    }
 }
 
 fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> {
@@ -157,6 +180,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             key: section_key(kind, None),
             kind,
             feed: None,
+            place: None,
             name: name.into(),
             detail,
             budget,
@@ -166,26 +190,28 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
         stories: None,
         planned: 0,
     };
-    let stories_row = |key: String, feed, name: &str, detail: String, max: usize, stories| {
-        let planned = match &stories {
-            Some(s) => max.min(Vec::len(s)),
-            None => max,
+    let stories_row =
+        |key: String, feed, place, name: &str, detail: String, max: usize, stories| {
+            let planned = match &stories {
+                Some(s) => max.min(Vec::len(s)),
+                None => max,
+            };
+            Row {
+                row: PlanRow {
+                    key,
+                    kind,
+                    feed,
+                    place,
+                    name: name.into(),
+                    detail,
+                    budget: format!("{max} stories"),
+                    items: Some(max),
+                },
+                saved: Vec::new(),
+                stories,
+                planned,
+            }
         };
-        Row {
-            row: PlanRow {
-                key,
-                kind,
-                feed,
-                name: name.into(),
-                detail,
-                budget: format!("{max} stories"),
-                items: Some(max),
-            },
-            saved: Vec::new(),
-            stories,
-            planned,
-        }
-    };
     match kind {
         SectionKind::Reading => {
             let all = pending(i.queue, date);
@@ -210,6 +236,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     key: section_key(kind, None),
                     kind,
                     feed: None,
+                    place: None,
                     name: "Your Reading".into(),
                     detail,
                     budget: if n <= max {
@@ -235,27 +262,30 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             vec![fixed("Weather", detail, "1 page".into())]
         }
         SectionKind::Local => {
-            let mut parts: Vec<String> = cfg.local.feeds.iter().filter_map(|u| host(u)).collect();
-            if !cfg.local.google_news.trim().is_empty() {
-                parts.push(if parts.is_empty() {
-                    "Google News".into()
-                } else {
-                    "+ Google News".into()
-                });
-            }
-            let detail = if parts.is_empty() {
-                "No sources yet".to_owned()
-            } else {
-                parts.join(", ").replace(", + ", " + ")
-            };
-            vec![stories_row(
+            let l = &cfg.local;
+            let mut out = vec![stories_row(
                 section_key(kind, None),
                 None,
+                None,
                 "Local",
-                detail,
-                cfg.local.max_items,
-                local_stories(cfg, i.live),
-            )]
+                local_detail(&l.google_news, &l.feeds),
+                l.max_items,
+                local_stories(&l.google_news, &l.feeds, l.max_items, cfg, i.live),
+            )];
+            // then each other place's local news (#102)
+            for (n, p) in l.places.iter().enumerate() {
+                let max = p.max_items.unwrap_or(l.max_items);
+                out.push(stories_row(
+                    section_key(kind, Some(&p.name)),
+                    None,
+                    Some(n),
+                    &p.name,
+                    local_detail(&p.google_news, &p.feeds),
+                    max,
+                    local_stories(&p.google_news, &p.feeds, max, cfg, i.live),
+                ));
+            }
+            out
         }
         SectionKind::Feeds => cfg
             .feeds
@@ -270,6 +300,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                 stories_row(
                     section_key(kind, Some(&f.name)),
                     Some(n),
+                    None,
                     &f.name,
                     detail,
                     f.max_items,
@@ -443,7 +474,11 @@ pub fn plan(i: &Inputs) -> NextPaper {
     for (s, r) in on.iter().enumerate() {
         let (tier, n) = match r.row.kind {
             SectionKind::Reading => (Tier::Reading, r.saved.len()),
-            SectionKind::Local => (Tier::Local, r.stories.as_ref().map_or(0, Vec::len)),
+            // only your own Local leads by rule; another place counts like a feed
+            SectionKind::Local if r.row.place.is_none() => {
+                (Tier::Local, r.stories.as_ref().map_or(0, Vec::len))
+            }
+            SectionKind::Local => (Tier::Feed, r.stories.as_ref().map_or(0, Vec::len)),
             SectionKind::Feeds => (Tier::Feed, r.stories.as_ref().map_or(0, Vec::len)),
             _ => continue,
         };
@@ -474,7 +509,7 @@ pub fn plan(i: &Inputs) -> NextPaper {
             }
             kind => {
                 let items = r.stories.as_deref().unwrap_or_default();
-                let reason = if kind == SectionKind::Local {
+                let reason = if kind == SectionKind::Local && r.row.place.is_none() {
                     "Leads the paper: local news always leads.".to_owned()
                 } else {
                     format!(

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Local news for more places** (#102): add a relative's town or a vacation spot under **The
+  paper → Other places** (or `[[local.places]]` in `digest.toml`), and each gets its own local
+  news section after yours. Weather stays on your place.
 - **Tomorrow's paper, so far**: the Daily tab now opens on the next edition. A press bar with
   the countdown and **Stop the presses** (skip one morning; `deckle digest stop`), a live sketch
   of the front page that fills in as you save articles and your feeds post (with a line saying

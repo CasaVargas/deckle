@@ -87,8 +87,11 @@ fn kind_of(key: &str) -> Option<SectionKind> {
 
 /// What the paper prints for a section, for one no edition in the window had yet.
 fn paper_name(key: &str) -> String {
-    if let Some(feed) = key.strip_prefix("feeds:") {
-        return feed.to_owned();
+    if let Some(name) = key
+        .strip_prefix("feeds:")
+        .or_else(|| key.strip_prefix("local:"))
+    {
+        return name.to_owned();
     }
     match kind_of(key) {
         Some(SectionKind::Reading) => "Your Reading",
@@ -112,6 +115,15 @@ fn current_keys(cfg: &Config) -> Vec<String> {
                 .feeds
                 .iter()
                 .map(|f| section_key(*k, Some(&f.name)))
+                .collect(),
+            // Local, then each other place's local news
+            SectionKind::Local => std::iter::once(section_key(*k, None))
+                .chain(
+                    cfg.local
+                        .places
+                        .iter()
+                        .map(|p| section_key(*k, Some(&p.name))),
+                )
                 .collect(),
             _ => vec![section_key(*k, None)],
         })
@@ -314,6 +326,15 @@ pub fn apply(s: &Suggestion, cfg: &mut Config) -> Result<(), String> {
     let feed = s.key.strip_prefix("feeds:");
     match (s.kind, feed) {
         (SuggestionKind::Stop, _) => Err("nothing to apply".into()),
+        // another place's local news goes on its own; Local stays
+        (SuggestionKind::Drop, None) if s.key.starts_with("local:") => {
+            let name = &s.key["local:".len()..];
+            let before = cfg.local.places.len();
+            cfg.local.places.retain(|p| p.name != name);
+            (cfg.local.places.len() < before)
+                .then_some(())
+                .ok_or_else(|| format!("no place named {name}"))
+        }
         (SuggestionKind::Drop, Some(name)) => {
             let before = cfg.feeds.len();
             cfg.feeds.retain(|f| f.name != name);

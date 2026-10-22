@@ -90,6 +90,26 @@ fn sources(cfg: &Config) -> Vec<Source> {
             briefs: false,
         });
     }
+    // other places' local news (#102), under Local's age window
+    for p in &cfg.local.places {
+        let max_items = p.max_items.unwrap_or(cfg.local.max_items);
+        if !p.google_news.trim().is_empty() {
+            push(Source {
+                url: google_news_url(&p.google_news, cfg.local.max_age_hours),
+                max_age_hours: cfg.local.max_age_hours,
+                max_items,
+                briefs: true,
+            });
+        }
+        for url in &p.feeds {
+            push(Source {
+                url: url.clone(),
+                max_age_hours: cfg.local.max_age_hours,
+                max_items,
+                briefs: false,
+            });
+        }
+    }
     for f in &cfg.feeds {
         push(Source {
             url: f.url.clone(),
@@ -101,7 +121,8 @@ fn sources(cfg: &Config) -> Vec<Source> {
     out
 }
 
-/// The URLs the front page reads: the Google News search, `[local] feeds`, then `[[feeds]]`.
+/// The URLs the front page reads: the Google News search, `[local] feeds`, other places' searches
+/// and feeds, then `[[feeds]]`.
 pub fn live_urls(cfg: &Config) -> Vec<String> {
     sources(cfg).into_iter().map(|s| s.url).collect()
 }

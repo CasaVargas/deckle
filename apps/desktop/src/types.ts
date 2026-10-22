@@ -159,7 +159,7 @@ export interface DailyConfig {
   photos: boolean;
   max_photos: number;
   sections: SectionKind[];
-  local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number };
+  local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number; places?: PlaceNews[] };
   feeds: FeedConfig[];
   lottery: { games: string[] };
   horoscope: { signs: string[] };
@@ -168,6 +168,15 @@ export interface DailyConfig {
   email?: EmailConfig;
   /** `[day]`: Your Day on the weather page. Absent while untouched. */
   day?: DayConfig;
+}
+
+/** `[[local.places]]`: another place's local news, its own section after Local (#102). */
+export interface PlaceNews {
+  name: string;
+  google_news: string;
+  feeds: string[];
+  /** Stories; `[local] max_items` when absent. */
+  max_items?: number;
 }
 
 /** Calendars for Your Day (almanac design §5). Addresses are secrets: show `DayPreview.labels`. */
@@ -387,6 +396,8 @@ export interface PagePlanRow {
   kind: SectionKind;
   /** The `[[feeds]]` index of a feed row. */
   feed: number | null;
+  /** The `[[local.places]]` index of another place's row. */
+  place: number | null;
   name: string;
   detail: string;
   budget: string;

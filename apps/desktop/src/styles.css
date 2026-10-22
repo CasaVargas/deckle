@@ -343,3 +343,5 @@ input[type=checkbox] { padding: 0; }
 .week-day.noPaper .week-label, .week-day.notOpened .week-label { color: var(--muted); }
 .press-switch { white-space: nowrap; margin: 0; font-size: 13px; }
 .plan-rows.locked .plan-row { cursor: default; opacity: .7; }
+.plan-row.place { cursor: default; padding-left: 18px; }
+.place-mark { color: var(--muted); text-align: center; }

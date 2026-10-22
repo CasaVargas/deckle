@@ -27,9 +27,12 @@ export function pressLine(p: Press, nowMs: number): string {
 
 const isFeed = (r: PagePlanRow) => r.kind === "feeds";
 
-/** The rows were made from this config: each feed row names the feed at its index. */
+/** The rows were made from this config: each feed (and place) row names the one at its index. */
 function matches(cfg: DailyConfig, rows: PagePlanRow[]): boolean {
-  return rows.filter(isFeed).every((r) => r.feed !== null && cfg.feeds[r.feed]?.name === r.name);
+  return (
+    rows.filter(isFeed).every((r) => r.feed !== null && cfg.feeds[r.feed]?.name === r.name) &&
+    rows.every((r) => r.place === null || cfg.local.places?.[r.place]?.name === r.name)
+  );
 }
 
 /**
@@ -37,8 +40,17 @@ function matches(cfg: DailyConfig, rows: PagePlanRow[]): boolean {
  * The feeds stay one block: a section dropped inside it, or a feed dropped outside it, goes to
  * the block's nearest end.
  */
-export function reorder(cfg: DailyConfig, rows: PagePlanRow[], from: number, to: number): DailyConfig {
-  if (!matches(cfg, rows)) return cfg;
+export function reorder(cfg: DailyConfig, all: PagePlanRow[], from: number, to: number): DailyConfig {
+  if (!matches(cfg, all)) return cfg;
+  // Other places follow Local: they aren't moved on their own, and a drop onto one is Local's spot
+  const moving = all[from];
+  if (!moving || moving.place !== null) return cfg;
+  const rows = all.filter((r) => r.place === null);
+  const target = all[to];
+  const local = rows.findIndex((r) => r.kind === "local" && r.place === null);
+  from = rows.indexOf(moving);
+  to = target && target.place !== null ? local : rows.indexOf(target ?? rows[rows.length - 1]);
+  if (to < 0) to = rows.length - 1;
   const order = rows.slice();
   const [moved] = order.splice(from, 1);
   order.splice(Math.max(0, Math.min(to, order.length)), 0, moved);
@@ -77,6 +89,10 @@ export function setBudget(cfg: DailyConfig, row: PagePlanRow, n: number): DailyC
     case "reading":
       return { ...cfg, reading: { ...cfg.reading, max_items: v } };
     case "local":
+      if (row.place !== null) {
+        const places = (cfg.local.places ?? []).map((p, i) => (i === row.place ? { ...p, max_items: v } : p));
+        return { ...cfg, local: { ...cfg.local, places } };
+      }
       return { ...cfg, local: { ...cfg.local, max_items: v } };
     case "feeds":
       return { ...cfg, feeds: cfg.feeds.map((f, i) => (i === row.feed ? { ...f, max_items: v } : f)) };
@@ -97,4 +113,13 @@ export function weekLabel(d: WeekDay): string {
     case "noPaper":
       return "no paper";
   }
+}
+
+/** The row an up (-1) or down (+1) arrow moves row `i` to: the next one that isn't another
+ * place (places follow Local), or null at the ends. */
+export function step(rows: PagePlanRow[], i: number, dir: -1 | 1): number | null {
+  for (let j = i + dir; j >= 0 && j < rows.length; j += dir) {
+    if (rows[j].place === null) return j;
+  }
+  return null;
 }
