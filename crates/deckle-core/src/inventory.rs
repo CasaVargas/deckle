@@ -85,11 +85,23 @@ struct Positions<'a> {
     over: usize,
 }
 
+/// Formats whose `.yjf` holds a reading position: the Kindle's own, not a PDF's or a text file's.
+const POSITION_FORMATS: [&str; 5] = ["kfx", "azw3", "azw", "mobi", "prc"];
+
+/// How many folders down the shelf's walk looks for books; the Kindle tab's listing is one.
+const SHELF_DEPTH: usize = 3;
+
 impl Positions<'_> {
     fn wanted(&self, file: &str) -> bool {
         let name = file.rsplit('/').next().unwrap_or(file);
-        format_of(name).as_deref() == Some("kfx") && !name.starts_with(self.skip_prefix)
+        format_of(name).is_some_and(|f| POSITION_FORMATS.contains(&f.as_str()))
+            && !name.starts_with(self.skip_prefix)
     }
+}
+
+/// How many folders below `documents/` a walk looks into.
+fn depth_for(want: &Option<Positions<'_>>) -> usize {
+    if want.is_some() { SHELF_DEPTH } else { 1 }
 }
 
 /// `<stem>.sdr` for a book file.
@@ -216,32 +228,37 @@ fn list_dir(
         move |source| DeliverError::Io { path, source }
     };
     let mut out = Vec::new();
-    let mut entries: Vec<_> = std::fs::read_dir(docs)
-        .map_err(io(docs))?
-        .flatten()
-        .collect();
-    entries.sort_by_key(|e| e.file_name());
-    for e in entries {
-        let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') {
-            continue;
-        }
-        let path = e.path();
-        if path.is_dir() {
-            if is_sdr(&name) {
+    let mut dirs = vec![(String::new(), 0usize)];
+    let max = depth_for(want);
+    while let Some((prefix, depth)) = dirs.pop() {
+        let dir = docs.join(&prefix);
+        let mut entries: Vec<_> = std::fs::read_dir(&dir)
+            .map_err(io(&dir))?
+            .flatten()
+            .collect();
+        entries.sort_by_key(|e| e.file_name());
+        for e in entries {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') {
                 continue;
             }
-            for (file, path) in names_in(&path)
-                .into_iter()
-                .filter(|n| format_of(n).is_some())
-                .map(|n| (format!("{name}/{n}"), path.join(n)))
-            {
-                out.push(book_on_disk(docs, &file, &path, cache, want));
+            let path = e.path();
+            if path.is_dir() {
+                if !is_sdr(&name) && depth < max {
+                    dirs.push((format!("{prefix}{name}/"), depth + 1));
+                }
+            } else if format_of(&name).is_some() {
+                out.push(book_on_disk(
+                    docs,
+                    &format!("{prefix}{name}"),
+                    &path,
+                    cache,
+                    want,
+                ));
             }
-        } else if format_of(&name).is_some() {
-            out.push(book_on_disk(docs, &name, &path, cache, want));
         }
     }
+    out.sort_by(|a, b| a.file.cmp(&b.file));
     Ok(out)
 }
 
@@ -297,16 +314,17 @@ fn list_mtp(dev: &mut Mtp, want: &mut Option<Positions<'_>>) -> Result<Inventory
     let mut books = Vec::new();
     let top = dev.list(storage, docs).map_err(mtp_err)?;
     // `<folder>/` prefix, the folder's children.
-    let mut levels = vec![(String::new(), top)];
+    let max = depth_for(want);
+    let mut levels = vec![(String::new(), top, 0usize)];
     let mut i = 0;
     while i < levels.len() {
-        let (prefix, entries) = levels[i].clone();
+        let (prefix, entries, depth) = levels[i].clone();
         for (h, info) in &entries {
             let name = &info.filename;
             if info.association {
-                if prefix.is_empty() && !is_sdr(name) && !name.starts_with('.') {
+                if depth < max && !is_sdr(name) && !name.starts_with('.') {
                     let children = dev.list(storage, *h).map_err(mtp_err)?;
-                    levels.push((format!("{name}/"), children));
+                    levels.push((format!("{prefix}{name}/"), children, depth + 1));
                 }
                 continue;
             }
@@ -726,6 +744,68 @@ mod device_tests {
         let (inv, over) = list_with_positions(&mut conn, None, EDITION).unwrap();
         assert_eq!(over, 0);
         assert_positions(&inv);
+        drop(conn);
+        assert_eq!(fake::opens(), 1);
+    }
+
+    #[test]
+    fn positions_cover_other_formats_and_deeper_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let docs = tmp.path().join("documents");
+        for (book, sdr, bytes) in [
+            ("Plain.mobi", "Plain.sdr", "MOBI"),
+            ("Books/Items/Deep.azw3", "Books/Items/Deep.sdr", "DEEP"),
+            ("Doc.pdf", "Doc.sdr", "PDF"),
+        ] {
+            let b = docs.join(book);
+            std::fs::create_dir_all(b.parent().unwrap()).unwrap();
+            std::fs::write(&b, b"x").unwrap();
+            std::fs::create_dir_all(docs.join(sdr)).unwrap();
+            std::fs::write(docs.join(sdr).join("p9d6e.yjf"), bytes).unwrap();
+        }
+        let target = kindle(tmp.path());
+        let mut conn = Conn::new(&target);
+        let (inv, _) = list_with_positions(&mut conn, None, EDITION).unwrap();
+        let yjf = |f: &str| {
+            inv.books
+                .iter()
+                .find(|b| b.file == f)
+                .map(|b| b.yjf.clone())
+        };
+        assert_eq!(yjf("Plain.mobi"), Some(Some(b"MOBI".to_vec())));
+        assert_eq!(yjf("Books/Items/Deep.azw3"), Some(Some(b"DEEP".to_vec())));
+        assert_eq!(
+            yjf("Doc.pdf"),
+            Some(None),
+            "a PDF's position isn't a reading position"
+        );
+        // The Kindle tab's own listing stays one folder deep.
+        let plain = list_on(&mut conn, None).unwrap();
+        assert!(
+            plain
+                .books
+                .iter()
+                .all(|b| b.file != "Books/Items/Deep.azw3")
+        );
+    }
+
+    #[test]
+    fn positions_over_mtp_cover_other_formats_and_deeper_folders() {
+        fake::reset(&["Plain.mobi"]);
+        fake::put_bytes("Plain.sdr/p9d6e.yjf", b"MOBI");
+        fake::put("Books/Items/Deep.azw3", 1);
+        fake::put_bytes("Books/Items/Deep.sdr/d9d6e.yjf", b"DEEP");
+        let target = mtp_target();
+        let mut conn = Conn::with_opener(&target, fake::open);
+        let (inv, _) = list_with_positions(&mut conn, None, EDITION).unwrap();
+        let yjf = |f: &str| {
+            inv.books
+                .iter()
+                .find(|b| b.file == f)
+                .and_then(|b| b.yjf.clone())
+        };
+        assert_eq!(yjf("Plain.mobi"), Some(b"MOBI".to_vec()));
+        assert_eq!(yjf("Books/Items/Deep.azw3"), Some(b"DEEP".to_vec()));
         drop(conn);
         assert_eq!(fake::opens(), 1);
     }

@@ -117,6 +117,27 @@ fn titles_from_file_names() {
         ("Walden_EBOK.kfx", Some("Walden")),
         ("Walden_PDOC.kfx", Some("Walden")),
         ("Sub/Plain Name.kfx", Some("Plain Name")),
+        (
+            "Gosselin, Collin and Kingsley Baker, Allie - In the Shadow of Eight.kfx",
+            Some("In the Shadow of Eight"),
+        ),
+        (
+            "Devil Wears Prada, The - Lauren Weisberger.kfx",
+            Some("Devil Wears Prada, The"),
+        ),
+        (
+            "The Total Money Makeover (Dave Ramsey) (Z-Library)_5R5DBGF3VMJXRLJMLR2YOGTDMBMSLCBQ.azw3",
+            Some("The Total Money Makeover (Dave Ramsey)"),
+        ),
+        (
+            "Linux Basics for Hackers Getting Started with N... (Z-Library)_L555K6JG7DQMKPSNIVDYBRR33MV5MFWM.azw3",
+            Some("Linux Basics for Hackers Getting Started with N..."),
+        ),
+        ("The Woman in Me_B0BL1LWW6H.azw3", Some("The Woman in Me")),
+        (
+            "Spare - Prince Harry, The Duke Of Sussex.mobi",
+            Some("Spare - Prince Harry, The Duke Of Sussex"),
+        ),
         ("B0ABCDEFGH_EBOK.kfx", None),
         ("B0ABCDEFGH.kfx", None),
         (".kfx", None),

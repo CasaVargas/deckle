@@ -224,6 +224,9 @@ and **Words you looked up this week**.
   (Scribe) when it was last plugged in, Wednesday"). Deckle reads the Kindle when it connects
   (`watch`, `push`, or the Kindle tab) and keeps one snapshot per Kindle in `shelf.json` next to
   `digest.toml`. A snapshot older than 30 days isn't printed.
+- **KFX, MOBI and AZW3 books, up to three folders down.** A book Deckle can't open (over MTP,
+  or a MOBI) shows a title read from its file name, and a percent from the Kindle's own
+  progress ("about 15%"). PDFs and text files have no reading position and don't appear.
 - **The nightstand works on every Kindle, the Scribe included.** It comes from the reading
   positions the Kindle keeps beside each book. The highlight and the words appear only on Kindles
   that share them: a Paperwhite over USB does; the Scribe 2024 doesn't over USB (#99), and the

@@ -30,7 +30,7 @@ coordinate `deckle_kfx::text` uses. A never-opened book has no `.sdr` or no `.yj
     word count; `timer.average.calculator`, nested in `timer.model`, holds pace samples.
   - **Paperwhite (5.19.2, mass storage):** `.yjf` files sit beside KFX, MOBI and AZW3 books
     (the shelf reads KFX only), under `documents/` and `documents/<Author>/`; books two folders
-    down (`Downloads/Items01/`) aren't walked. `system/vocabulary/vocab.db` and
+    down (`Downloads/Items01/`) are found since the shelf walks three folders deep. `system/vocabulary/vocab.db` and
     `My Clippings.txt` are readable (no `-wal` at the time). Percent against what the Kindle's
     library shows: The Devil Wears Prada shows 14%, position ÷ end 14.2%, stored fraction 9.1%;
     In the Shadow of Eight shows 16%, 12.4% and 14.1%; Harry Potter 1 shows 2%, 0.4% and 0.4%.
