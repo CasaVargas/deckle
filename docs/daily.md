@@ -68,6 +68,27 @@ connection. `clippings = true` writes the Kindle's highlights as Markdown into t
 folder (set it once with `deckle highlights export --to <dir>`, or in **Settings → Kindles**). It
 runs once per plug-in, in the same connection as a push or a prune when there is one.
 
+### How far you read
+
+Each time a Kindle connects (`watch`, `push`, or the Kindle tab), Deckle reads the reading
+position the Kindle keeps for every edition still on it: the `.yjf` file in the edition's `.sdr`
+folder. It does this first in the connection, before prune removes old editions. When an edition
+is built, Deckle notes where each of its sections starts. Put together, the Daily tab's **How
+far you read** panel and `deckle digest readership` show, over the last 14 editions, how many
+you opened, how far in you usually get, and per section how often you got to it. With 7 opened
+editions it suggests up to three edits: **Drop it** for a section near the end you rarely
+reach, **Move up** for a feed you rarely reach. One click (or `deckle digest readership apply
+<n>`) changes `digest.toml`, keeping its comments; **Dismiss** (`… dismiss <n>`) hides one for
+14 editions.
+
+- It's on by default (`[sync] readership = true`, per device under `[sync.devices."<sync id>"]`,
+  or **Settings → Kindles**). Everything stays in `readership.json` next to `digest.toml`.
+- "Got to" means got to or past: the Kindle moves its furthest position on a contents jump too,
+  so jumping to *On This Day* counts every section before it as reached. That can hide a Drop
+  suggestion, never invent one.
+- Editions that went by email only aren't tracked: no KFX is built for them on this machine, so
+  there's nothing to compare the position against (`usb_too = true` editions are).
+
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 
 ## Email to Kindle (opt-in)

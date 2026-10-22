@@ -6,8 +6,12 @@
   books included. From the Kindle tab (**Write**), with `deckle highlights export`, or on every
   plug-in with the morning schedule (`[sync] clippings = true`, or **Settings → Kindles**). Later
   exports only append what's new, so edits you make to the files stay (#60). Works on Kindles
-  that keep `My Clippings.txt`; the Kindle Scribe (2024) keeps its highlights elsewhere, which
-  is #99.
+  that keep `My Clippings.txt`; the Kindle Scribe (2024) keeps its highlights where they can't be
+  read over USB (#99).
+- How far you read the paper: each time the Kindle connects, Deckle reads its reading position
+  for every edition and shows, on the Daily tab and with `deckle digest readership`, how often you
+  got to each section, with one-click suggestions (drop a section you rarely reach, move a feed
+  up). Local only, on by default (`[sync] readership`).
 
 ## 0.3.1 — full-window settings
 
