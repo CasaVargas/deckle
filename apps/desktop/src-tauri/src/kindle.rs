@@ -237,19 +237,28 @@ fn record_shelf(
     clippings: &ClippingsRead,
 ) {
     let device = deckle_library::device_ref(conn.target);
-    let vocab = match deckle_core::vocab::read_vocab_on(conn) {
-        Ok(v) => v,
+    let (vocab, vocab_failed) = match deckle_core::vocab::read_vocab_on(conn) {
+        Ok(v) => (v, false),
         Err(e) => {
             eprintln!("shelf: vocabulary: {e}");
-            None
+            (None, true)
         }
     };
+    let id = deckle_core::sync::device_id(conn.target);
+    let store = config.with_file_name("shelf.json");
+    let previous = deckle_digest::shelf::store::Shelf::load(&store)
+        .kindles
+        .get(&id)
+        .cloned();
     let (snap, errors) = deckle_shelf::snapshot(
         deckle_shelf::Read {
             books,
             skipped,
             clippings: clippings.as_ref().ok().cloned().flatten(),
             vocab,
+            clippings_failed: clippings.is_err(),
+            vocab_failed,
+            previous,
         },
         &device.name,
         &device.key,
@@ -259,8 +268,7 @@ fn record_shelf(
     for e in errors {
         eprintln!("shelf: {e}");
     }
-    let id = deckle_core::sync::device_id(conn.target);
-    if let Err(e) = deckle_shelf::record(&config.with_file_name("shelf.json"), &id, snap) {
+    if let Err(e) = deckle_shelf::record(&store, &id, snap) {
         eprintln!("shelf: {e}");
     }
 }

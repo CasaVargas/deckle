@@ -5,7 +5,8 @@ import { emailLine, statusLine } from "./shelfView";
 import type { ShelfStatus } from "./types";
 
 /** What From Your Shelf last read from a Kindle, and a way to forget it (shelf design §7). */
-export default function Shelf() {
+/** `inPaper`: the section is on. Off, the card stays only while a snapshot is kept, so it can be forgotten. */
+export default function Shelf({ inPaper }: { inPaper: boolean }) {
   const [status, setStatus] = useState<ShelfStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -20,6 +21,7 @@ export default function Shelf() {
       })
       .catch((e) => setError(String(e)));
   if (!status) return error ? <section className="card shelf"><p className="warn small">{error}</p></section> : null;
+  if (!inPaper && !status.kindle) return null;
   const email = emailLine(status);
   return (
     <section className="card shelf" aria-label="From Your Shelf">

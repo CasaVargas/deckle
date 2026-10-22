@@ -23,7 +23,11 @@ pub fn title_from_file(file: &str) -> Option<String> {
         title = head;
     }
     let title = title.trim();
-    (!title.is_empty()).then(|| title.to_owned())
+    // A store book named only by its ASIN has no title to show.
+    let is_asin = title.len() == 10
+        && title.starts_with("B0")
+        && title.bytes().all(|b| b.is_ascii_alphanumeric());
+    (!title.is_empty() && !is_asin).then(|| title.to_owned())
 }
 
 /// The snapshot entry of each book that has a readable `.yjf` and a title, and one message per

@@ -325,7 +325,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
       <Readership onApplied={() => load().then(loadNext)} />
 
-      {draft.sections.includes("shelf") && <Shelf />}
+      <Shelf inPaper={draft.sections.includes("shelf")} />
 
       <section className="card">
         <h3>Your Reading</h3>

@@ -227,7 +227,9 @@ pub fn run_with(
     }
     // A failed read doesn't undo a delivery: it's reported beside it.
     if plan.shelf {
-        match list_with_positions(conn, None, skip_prefix) {
+        // The same cache the Kindle tab keeps, so a plug-in doesn't re-read every KFX.
+        let cache = finishing.word_wise.cache_dir.join("inventory");
+        match list_with_positions(conn, Some(&cache), skip_prefix) {
             Ok((inventory, skipped)) => {
                 let vocab = match read_vocab_on(conn) {
                     Ok(v) => v,
@@ -854,7 +856,7 @@ mod tests {
     }
 
     #[test]
-    fn shelf_error_keeps_the_delivery() {
+    fn a_bad_yjf_fetch_costs_one_book_not_the_shelf() {
         let tmp = tempfile::tempdir().unwrap();
         let (q, _) = outbox_and_folder(tmp.path());
         fake::reset(&["Book.kfx"]);
@@ -877,8 +879,9 @@ mod tests {
         )
         .expect("the push succeeded");
         assert_eq!(r.delivered.len(), 1);
-        assert!(r.shelf.is_none());
-        assert!(r.shelf_error.as_deref().unwrap().contains("MTP"));
+        let shelf = r.shelf.expect("the listing survives one bad sidecar");
+        let book = shelf.books.iter().find(|b| b.file == "Book.kfx").unwrap();
+        assert_eq!(book.yjf, None);
     }
 
     #[test]

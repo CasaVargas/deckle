@@ -32,6 +32,9 @@ const NO_REPEAT_DAYS: i64 = 90;
 const WORD_DAYS: i64 = 7;
 const WORDS: usize = 3;
 
+/// One book's latest read: (read on, timestamp, book key, percent, line, Kindle name).
+type Read = (NaiveDate, String, String, Option<(u8, bool)>, Line, String);
+
 /// One book on the nightstand.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Line {
@@ -58,7 +61,7 @@ pub fn percent(b: &BookSnap, fraction_ok: bool) -> Option<(u8, bool)> {
     if let (Some(last), Some(end)) = (b.last, b.end)
         && end > 0
     {
-        let p = (last.max(0) * 100 / end).min(100);
+        let p = (i128::from(last.max(0)) * 100 / i128::from(end)).min(100);
         return Some((if last < end { p.min(99) } else { 100 } as u8, false));
     }
     let f = b.kindle_fraction.filter(|_| fraction_ok)?;
@@ -111,8 +114,9 @@ pub fn nightstand(
         return None;
     }
     let hide: Vec<String> = cfg.hide.iter().map(|h| h.to_lowercase()).collect();
-    // (read on, key, line, kindle)
-    let mut found: Vec<(NaiveDate, String, String, Line, String)> = Vec::new();
+    // (read on, timestamp, key, percent, state, title, kindle): every book, so the latest read of
+    // a book decides whether it is in progress, whichever Kindle it was on.
+    let mut found: Vec<Read> = Vec::new();
     for (_, k) in shelf.fresh(date) {
         for b in &k.books {
             let Some(raw) = b.last_read.as_deref() else {
@@ -121,16 +125,12 @@ pub fn nightstand(
             let Some(read) = local_date(raw, tz) else {
                 continue;
             };
-            let days = (date - read).num_days();
-            let pct = percent(b, fraction_ok);
             let title_lc = b.title.to_lowercase();
-            if days > IN_PROGRESS_DAYS
-                || pct.is_some_and(|(p, _)| !(1..=97).contains(&p))
-                || is_edition(&b.file)
-                || hide.iter().any(|h| !h.is_empty() && title_lc.contains(h))
-            {
+            if is_edition(&b.file) || hide.iter().any(|h| !h.is_empty() && title_lc.contains(h)) {
                 continue;
             }
+            let days = (date - read).num_days();
+            let pct = percent(b, fraction_ok);
             let key = b.asin.clone().unwrap_or_else(|| title_lc.clone());
             let line = Line {
                 title: b.title.clone(),
@@ -138,20 +138,25 @@ pub fn nightstand(
                 about: pct.is_some_and(|(_, a)| a),
                 state: state(days, pct.map(|(p, _)| p), read),
             };
-            found.push((read, raw.to_owned(), key, line, k.name.clone()));
+            found.push((read, raw.to_owned(), key, pct, line, k.name.clone()));
         }
     }
-    // Newest read first (the timestamp breaks same-day ties), then one line per book.
+    // Newest read first (the timestamp breaks same-day ties), one entry per book, and only then
+    // the in-progress rules.
     found.sort_by(|a, b| (b.0, &b.1).cmp(&(a.0, &a.1)));
     let mut seen = BTreeSet::new();
     found.retain(|f| seen.insert(f.2.clone()));
+    found.retain(|f| {
+        (date - f.0).num_days() <= IN_PROGRESS_DAYS
+            && f.3.is_none_or(|(p, _)| (1..=97).contains(&p))
+    });
     found.truncate(NIGHTSTAND_BOOKS);
     let newest = found.first()?;
     let days = (date - newest.0).num_days();
-    let nudge = (days < NUDGE_DAYS).then(|| nudge(&newest.3));
-    let from = newest.4.clone();
+    let nudge = (days < NUDGE_DAYS).then(|| nudge(&newest.4));
+    let from = newest.5.clone();
     Some(Nightstand {
-        books: found.into_iter().map(|f| f.3).collect(),
+        books: found.into_iter().map(|f| f.4).collect(),
         nudge,
         from,
     })

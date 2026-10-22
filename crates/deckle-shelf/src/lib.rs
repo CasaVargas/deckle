@@ -34,6 +34,12 @@ pub struct Read {
     pub clippings: Option<Vec<u8>>,
     /// `system/vocabulary/vocab.db`, when the Kindle shares it.
     pub vocab: Option<VocabFiles>,
+    /// Reading the clippings failed (not "there is no file"): keep the last snapshot's.
+    pub clippings_failed: bool,
+    /// Reading the vocabulary failed: keep the last snapshot's.
+    pub vocab_failed: bool,
+    /// This Kindle's last snapshot, for what a failed read can't replace.
+    pub previous: Option<KindleSnapshot>,
 }
 
 /// The snapshot of one Kindle (`device_key` is its profile key, as library send records name
@@ -47,19 +53,23 @@ pub fn snapshot(
     now: DateTime<Utc>,
 ) -> (KindleSnapshot, Vec<String>) {
     let (books, mut errors) = books::build(read.books, library, device_key);
-    let (highlights_shared, highlights) = match &read.clippings {
-        Some(bytes) => (true, highlights::build(bytes)),
-        None => (false, Vec::new()),
+    let kept = read.previous.as_ref();
+    let (highlights_shared, highlights) = match (&read.clippings, kept) {
+        (Some(bytes), _) => (true, highlights::build(bytes)),
+        (None, Some(k)) if read.clippings_failed => (k.highlights_shared, k.highlights.clone()),
+        (None, _) => (false, Vec::new()),
     };
     let define = words::wordwise_definer();
+    let kept_words = || kept.map_or((false, Vec::new()), |k| (k.words_shared, k.words.clone()));
     let (words_shared, words) = match &read.vocab {
         Some(files) => match words::read(files, now - Duration::days(WORD_DAYS), &*define) {
             Ok(w) => (true, w),
             Err(e) => {
                 errors.push(format!("vocabulary: {e}"));
-                (false, Vec::new())
+                kept_words()
             }
         },
+        None if read.vocab_failed => kept_words(),
         None => (false, Vec::new()),
     };
     let snap = KindleSnapshot {

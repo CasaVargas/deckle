@@ -272,6 +272,36 @@ mod select {
     }
 
     #[test]
+    fn the_later_read_wins_even_when_it_finished_the_book() {
+        let mut fin = at_percent("Same", 1, 98);
+        fin.asin = Some("B0SAME".into());
+        let mut stale = at_percent("Same", 21, 50);
+        stale.asin = Some("B0SAME".into());
+        let mut shelf = Shelf::default();
+        let mut p = snap("Paperwhite", date());
+        p.books = vec![fin];
+        let mut s = snap("Scribe", date());
+        s.books = vec![stale];
+        shelf.put("P", p);
+        shelf.put("S", s);
+        let n = select::nightstand(&shelf, &ShelfConfig::default(), date(), TZ, false);
+        assert!(
+            n.is_none(),
+            "finished on the Paperwhite: not mid-book: {n:?}"
+        );
+    }
+
+    #[test]
+    fn a_hostile_position_does_not_overflow() {
+        let b = BookSnap {
+            last: Some(i64::MAX),
+            end: Some(i64::MAX - 1),
+            ..Default::default()
+        };
+        assert_eq!(select::percent(&b, false), Some((100, false)));
+    }
+
+    #[test]
     fn nudge_rules() {
         let nudge = |b| {
             let shelf = shelf_of("Scribe", vec![b]);

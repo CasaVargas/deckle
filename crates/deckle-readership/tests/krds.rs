@@ -111,3 +111,18 @@ fn deep_nesting_is_an_error_not_a_crash() {
     }
     assert!(parse_yjf(&b).is_err());
 }
+
+#[test]
+fn non_finite_doubles_are_dropped_not_kept() {
+    let bytes = synthetic(&[
+        obj("book.info.store", &[int(12), dbl(f64::NAN)]),
+        obj(
+            "timer.average.calculator",
+            &[int(3), dbl(300.0), dbl(f64::INFINITY), dbl(f64::NAN)],
+        ),
+    ]);
+    let p = parse_yjf(&bytes).unwrap();
+    assert_eq!(p.kindle_fraction, None);
+    assert_eq!(p.wpm, vec![300.0], "only finite samples survive");
+    assert_eq!(p.words_read, Some(12));
+}

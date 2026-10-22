@@ -40,6 +40,9 @@ fn read_of(books: Vec<DeviceBook>) -> Read {
         skipped: 0,
         clippings: None,
         vocab: None,
+        clippings_failed: false,
+        vocab_failed: false,
+        previous: None,
     }
 }
 
@@ -114,6 +117,8 @@ fn titles_from_file_names() {
         ("Walden_EBOK.kfx", Some("Walden")),
         ("Walden_PDOC.kfx", Some("Walden")),
         ("Sub/Plain Name.kfx", Some("Plain Name")),
+        ("B0ABCDEFGH_EBOK.kfx", None),
+        ("B0ABCDEFGH.kfx", None),
         (".kfx", None),
         ("_EBOK.kfx", None),
     ] {
@@ -286,4 +291,62 @@ fn record_keeps_other_kindles() {
         "the Paperwhite's highlights survive"
     );
     assert!(shelf.kindles["S"].highlights.is_empty());
+}
+
+#[test]
+fn a_long_usage_is_trimmed_at_a_word_boundary() {
+    let long = "word ".repeat(80);
+    let dir = tempfile::tempdir().unwrap();
+    let c = make_vocab(dir.path());
+    let ms = (now() - Duration::days(1)).timestamp_millis();
+    c.execute(
+        "INSERT INTO WORDS VALUES ('w1','verbose','verbose','en',0,?1,'p')",
+        [ms],
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO LOOKUPS VALUES ('l1','w1','b1','d','n',?1,?2)",
+        rusqlite::params![long, ms],
+    )
+    .unwrap();
+    c.execute_batch("PRAGMA wal_checkpoint(FULL);").unwrap();
+    let files = VocabFiles {
+        db: std::fs::read(dir.path().join("vocab.db")).unwrap(),
+        wal: None,
+    };
+    let got = words::read(&files, now() - Duration::days(14), &|_| None).unwrap();
+    let u = &got[0].usage;
+    assert!(u.chars().count() <= 161, "{}", u.chars().count());
+    assert!(u.ends_with('\u{2026}'), "{u}");
+    assert!(!u.trim_end_matches('\u{2026}').ends_with(' '));
+    assert!(u.starts_with("word word"));
+}
+
+#[test]
+fn a_failed_read_keeps_what_the_last_plug_in_found() {
+    let previous = KindleSnapshot {
+        name: "Paperwhite".into(),
+        seen: "2026-10-20".into(),
+        highlights_shared: true,
+        highlights: vec![Default::default()],
+        words_shared: true,
+        words: vec![Default::default()],
+        ..Default::default()
+    };
+    let mut read = read_of(vec![]);
+    read.clippings_failed = true;
+    read.vocab_failed = true;
+    read.previous = Some(previous);
+    let (snap, _) = snapshot(read, "Paperwhite", "ms:P", None, now());
+    assert!(snap.highlights_shared && snap.highlights.len() == 1);
+    assert!(snap.words_shared && snap.words.len() == 1);
+    // With no failure, a missing file really means nothing shared.
+    let mut read = read_of(vec![]);
+    read.previous = Some(KindleSnapshot {
+        highlights_shared: true,
+        highlights: vec![Default::default()],
+        ..Default::default()
+    });
+    let (snap, _) = snapshot(read, "Paperwhite", "ms:P", None, now());
+    assert!(!snap.highlights_shared && snap.highlights.is_empty());
 }

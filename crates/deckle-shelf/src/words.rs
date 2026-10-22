@@ -58,12 +58,25 @@ pub fn read(
             definition: define(&stem),
             word,
             stem,
-            usage: usage.unwrap_or_default().trim().to_owned(),
+            usage: trim_usage(usage.unwrap_or_default().trim()),
             book: book.unwrap_or_default(),
             at: at.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
         });
     }
     Ok(out)
+}
+
+/// The longest sentence kept with a looked-up word.
+const USAGE_CHARS: usize = 160;
+
+/// `s` cut at a word boundary to at most [`USAGE_CHARS`], with an ellipsis when cut.
+fn trim_usage(s: &str) -> String {
+    if s.chars().count() <= USAGE_CHARS {
+        return s.to_owned();
+    }
+    let cut: String = s.chars().take(USAGE_CHARS).collect();
+    let at = cut.rfind(char::is_whitespace).unwrap_or(cut.len());
+    format!("{}\u{2026}", cut[..at].trim_end())
 }
 
 /// Looks up a short definition for a word's stem.

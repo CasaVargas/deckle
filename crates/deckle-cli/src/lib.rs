@@ -2005,6 +2005,13 @@ fn record_shelf(
 ) -> Option<deckle_shelf::Summary> {
     let read = flush.shelf.as_ref()?;
     let device = deckle_library::device_ref(target);
+    let id = deckle_core::sync::device_id(target);
+    let path = cfg.shelf_store();
+    // A read that failed (not "no file") must not blank what the last plug-in found.
+    let previous = deckle_digest::shelf::store::Shelf::load(&path)
+        .kindles
+        .get(&id)
+        .cloned();
     let library = deckle_library::Library::configured(&deckle_library::config::default_path())
         .map(|(lib, _)| lib);
     let (snap, errors) = deckle_shelf::snapshot(
@@ -2013,6 +2020,9 @@ fn record_shelf(
             skipped: read.skipped,
             clippings: flush.clippings.clone(),
             vocab: read.vocab.clone(),
+            clippings_failed: flush.clippings_error.is_some(),
+            vocab_failed: flush.shelf_error.is_some() && read.vocab.is_none(),
+            previous,
         },
         &device.name,
         &device.key,
@@ -2022,8 +2032,7 @@ fn record_shelf(
     for e in errors {
         eprintln!("shelf: {e}");
     }
-    let path = cfg.shelf_store();
-    match deckle_shelf::record(&path, &deckle_core::sync::device_id(target), snap) {
+    match deckle_shelf::record(&path, &id, snap) {
         Ok(s) => Some(s),
         Err(e) => {
             eprintln!("shelf: {e}");

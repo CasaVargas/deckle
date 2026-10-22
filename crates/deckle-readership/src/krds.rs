@@ -137,7 +137,7 @@ fn utc_time(ms: i64) -> Option<String> {
 fn collect_wpm(name: &str, values: &[Value], out: &mut Vec<f64>) {
     for v in values {
         match v {
-            Value::Double(d) if name == "timer.average.calculator" => out.push(*d),
+            Value::Double(d) if name == "timer.average.calculator" && d.is_finite() => out.push(*d),
             Value::Object(inner, vs) => collect_wpm(inner, vs, out),
             _ => {}
         }
@@ -172,7 +172,8 @@ pub fn parse_yjf(bytes: &[u8]) -> Result<Positions, KrdsError> {
             }
             ("book.info.store", [Value::Int(words), Value::Double(fraction), ..]) => {
                 p.words_read = Some(*words);
-                p.kindle_fraction = Some(*fraction);
+                // NaN and infinity can't be stored as JSON numbers.
+                p.kindle_fraction = Some(*fraction).filter(|f| f.is_finite());
             }
             // The pace samples sit inside `timer.model` in real files.
             (_, values) => collect_wpm(&name, values, &mut p.wpm),

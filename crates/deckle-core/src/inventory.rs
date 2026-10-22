@@ -74,7 +74,6 @@ fn is_word_wise(name: &str) -> bool {
     name.starts_with("LanguageLayer.") && name.ends_with(".kll")
 }
 
-/// `<stem>.sdr` for a book file.
 /// Over MTP, at most this many `.yjf` are read per connection; the rest are counted.
 pub const MAX_YJF: usize = 300;
 
@@ -93,6 +92,7 @@ impl Positions<'_> {
     }
 }
 
+/// `<stem>.sdr` for a book file.
 fn sdr_name(file: &str) -> String {
     Path::new(file)
         .with_extension("sdr")
@@ -334,7 +334,8 @@ fn list_mtp(dev: &mut Mtp, want: &mut Option<Positions<'_>>) -> Result<Inventory
                 {
                     if w.read < MAX_YJF {
                         w.read += 1;
-                        book.yjf = Some(dev.get_object(*fh).map_err(mtp_err)?);
+                        // One sidecar that won't download costs that book, not the listing.
+                        book.yjf = dev.get_object(*fh).ok();
                     } else {
                         w.over += 1;
                     }
