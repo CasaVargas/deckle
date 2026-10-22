@@ -68,13 +68,14 @@ pub struct Suggestion {
     pub why: String,
 }
 
-const KINDS: [SectionKind; 7] = [
+const KINDS: [SectionKind; 8] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
     SectionKind::Feeds,
     SectionKind::Lottery,
     SectionKind::Horoscope,
+    SectionKind::Puzzle,
     SectionKind::Onthisday,
 ];
 
@@ -95,6 +96,7 @@ fn paper_name(key: &str) -> String {
         Some(SectionKind::Local) => "Local",
         Some(SectionKind::Lottery) => "Lottery",
         Some(SectionKind::Horoscope) => "Horoscope",
+        Some(SectionKind::Puzzle) => "Puzzle",
         Some(SectionKind::Onthisday) => "On This Day",
         _ => key,
     }

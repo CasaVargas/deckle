@@ -353,7 +353,11 @@ pub enum DigestCommand {
     },
     /// Deliver queued editions to a connected Kindle and prune old ones. Does nothing (and
     /// succeeds) when no Kindle is connected, so it is safe to run on a timer.
-    Push,
+    Push {
+        /// `device` for the first connected Kindle, or a folder standing in for its documents.
+        #[arg(long, default_value = "device")]
+        to: String,
+    },
     /// Make the paper arrive by itself: the edition daily at a time, and the watcher from
     /// login on (macOS LaunchAgents, Windows Task Scheduler). No option: show what's set.
     Schedule {
@@ -375,6 +379,8 @@ pub enum DigestCommand {
         #[command(subcommand)]
         action: EmailCommand,
     },
+    /// Today's puzzle (made and kept if there's none yet) and yesterday's answers.
+    Puzzle,
     /// How far you read the last editions, per section, with suggested edits to the paper.
     Readership {
         #[command(subcommand)]

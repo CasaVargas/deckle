@@ -3,7 +3,7 @@
 //! English Wiktionary extract and wordfreq's `large_en` list. Rules are in
 //! `docs/formats/wordwise.md`; the selection follows Proficiency (GPL-3) where it applies.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{BufRead, Read};
 use std::path::Path;
 
@@ -73,6 +73,175 @@ pub fn difficulty(zipf: Option<f64>) -> Option<i64> {
         z if z >= 2.0 => 2,
         _ => 1,
     })
+}
+
+/// Tags that keep a sense out of the puzzle list (puzzle design §4).
+const PUZZLE_MARKED: &[&str] = &[
+    "archaic",
+    "dated",
+    "rare",
+    "historical",
+    "dialectal",
+    "slang",
+    "vulgar",
+    "derogatory",
+    "offensive",
+    "obsolete",
+    "nonstandard",
+    "colloquial",
+    "informal",
+];
+
+/// Longer definitions don't fit beside a 5×5 grid.
+const MAX_CLUE: usize = 90;
+
+/// The word list for the puzzle page (puzzle design §4): lowercase a–z words of 3 to 5 letters
+/// at zipf 3.0 or more, each with the short definition of its first everyday sense as the clue,
+/// sorted by word. Proper nouns, abbreviations, marked senses, plain inflections of a kept
+/// word, blocklisted words and clues that give the answer away are left out.
+pub fn puzzle_words(
+    jsonl: impl BufRead,
+    freq: &HashMap<String, f64>,
+    blocklist: &HashSet<String>,
+) -> Vec<(String, String)> {
+    // word → its clue, from the first entry and sense that give one; word → the lemmas it
+    // inflects; word → whether its lowercase entries are all nouns; names ("Goa", "Beth")
+    let mut best: BTreeMap<String, String> = BTreeMap::new();
+    let mut inflects: HashMap<String, Vec<String>> = HashMap::new();
+    let mut nouns_only: HashMap<String, bool> = HashMap::new();
+    let mut names: HashSet<String> = HashSet::new();
+    let mut function_word: HashMap<String, bool> = HashMap::new();
+    for line in jsonl.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(e) => panic!("reading kaikki: {e}"),
+        };
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let (Some(word), Some(pos)) = (
+            entry.get("word").and_then(Value::as_str),
+            entry.get("pos").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        if entry.get("lang_code").and_then(Value::as_str) != Some("en")
+            || !(3..=5).contains(&word.len())
+            || !word.bytes().all(|b| b.is_ascii_alphabetic())
+        {
+            continue;
+        }
+        if !word.bytes().all(|b| b.is_ascii_lowercase()) {
+            if pos == "name" {
+                names.insert(word.to_ascii_lowercase());
+            }
+            continue;
+        }
+        function_word.entry(word.to_owned()).or_insert(matches!(
+            pos,
+            "pron" | "prep" | "conj" | "det" | "article" | "particle" | "num" | "intj"
+        ));
+        let senses = entry
+            .get("senses")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for s in senses {
+            for lemma in s
+                .get("form_of")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(l) = lemma.get("word").and_then(Value::as_str) {
+                    inflects
+                        .entry(word.to_owned())
+                        .or_default()
+                        .push(l.to_owned());
+                }
+            }
+        }
+        if kindle_pos(pos).is_none_or(|p| p == "other")
+            || tags(&entry).iter().any(|t| SKIP_SENSE_TAGS.contains(t))
+            || blocklist.contains(word)
+            || zipf(freq, word).is_none_or(|z| z < 3.0)
+        {
+            continue;
+        }
+        // Wiktionary lists the main entry and its everyday senses first
+        let clues: Vec<String> = senses
+            .iter()
+            .filter(|s| {
+                s.get("form_of").is_none()
+                    && s.get("alt_of").is_none()
+                    && !tags(s)
+                        .iter()
+                        .any(|t| SKIP_SENSE_TAGS.contains(t) || PUZZLE_MARKED.contains(t))
+            })
+            .filter_map(|s| {
+                let g = s.get("glosses")?.as_array()?.last()?.as_str()?;
+                (!g.contains("spelling of")).then(|| puzzle_clue(g))
+            })
+            .collect();
+        if !clues.is_empty() {
+            *nouns_only.entry(word.to_owned()).or_insert(true) &= pos == "noun";
+        }
+        let clue = clues.into_iter().find(|c| {
+            c.chars().next().is_some_and(char::is_uppercase)
+                && c.chars().count() <= MAX_CLUE
+                && !gives_away(word, c)
+        });
+        if let Some(c) = clue {
+            best.entry(word.to_owned()).or_insert(c);
+        }
+    }
+    best.iter()
+        .filter(|(w, _)| !function_word.get(*w).copied().unwrap_or(false))
+        // wordfreq counts "goa" for Goa: a name whose lowercase spelling is only a rare noun.
+        // "bath" (a verb too) is a word whatever Bath is.
+        .filter(|(w, _)| !(names.contains(*w) && nouns_only.get(*w).copied().unwrap_or(true)))
+        .filter(|(w, _)| {
+            // "cards" (of "card"), "baked" (of "bake"): a regular inflection of a kept word.
+            // Irregular forms with their own meaning ("bore", "left") stay.
+            !inflects.get(*w).into_iter().flatten().any(|l| {
+                let stem = l.trim_end_matches(['e', 'y']);
+                best.contains_key(l) && !stem.is_empty() && w.starts_with(stem)
+            })
+        })
+        .map(|(w, c)| (w.clone(), c.clone()))
+        .collect()
+}
+
+/// A definition as a clue: its first clause whole when it fits, else the Word Wise short
+/// definition.
+fn puzzle_clue(gloss: &str) -> String {
+    let g = trim_stop(&strip_parens(gloss));
+    // "Specifically, a flexible tube" → "A flexible tube"
+    let g = match ["Specifically, ", "Especially, ", "In particular, "]
+        .iter()
+        .find_map(|p| g.strip_prefix(p))
+    {
+        Some(rest) => {
+            let mut c = rest.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect())
+                .unwrap_or_default()
+        }
+        None => g,
+    };
+    let first = trim_stop(g.split(';').next().unwrap_or(""));
+    if first.chars().count() <= MAX_CLUE {
+        first
+    } else {
+        short_def(&g)
+    }
+}
+
+/// A clue gives its answer away when the answer is anywhere in it, ignoring case: "roses",
+/// "rose-coloured", "Firewood".
+pub fn gives_away(answer: &str, clue: &str) -> bool {
+    clue.to_lowercase().contains(answer)
 }
 
 /// Ordering key for picking a sense: 0 for an everyday sense, more for marked ones.

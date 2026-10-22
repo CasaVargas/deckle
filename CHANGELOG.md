@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A **puzzle page** in the Daily: a 5×5 mini crossword whose theme answers are yesterday's
+  headlines with the word blanked, a word ladder, and yesterday's answers. Answer a clue as a
+  Kindle note and the next paper says "You solved N of M" (Kindles that keep `My Clippings.txt`).
+  Each day's puzzle is kept, so rebuilds print the same one. In the starter config; add
+  `"puzzle"` to `sections` (or use the Daily tab) for an existing paper. `deckle digest puzzle`
+  prints it; `deckle digest push --to <folder>` pushes to a folder standing in for a Kindle.
 - The Daily's weather section is now a **Weather & Almanac** page:
   - a five-day strip with pictures and short words;
   - sunrise, sunset and daylight, computed on your Mac;

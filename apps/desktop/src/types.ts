@@ -138,7 +138,7 @@ export const STAGE_LABEL: Record<string, string> = {
 
 // ---- The Daily tab (Daily design §5c) ----
 
-export type SectionKind = "reading" | "weather" | "local" | "feeds" | "lottery" | "horoscope" | "onthisday";
+export type SectionKind = "reading" | "weather" | "local" | "feeds" | "lottery" | "horoscope" | "puzzle" | "onthisday";
 
 export interface FeedConfig {
   name: string;
@@ -263,10 +263,11 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   feeds: "Your feeds",
   lottery: "Lottery",
   horoscope: "Horoscope",
+  puzzle: "Puzzle",
   onthisday: "On This Day",
 };
 
-export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "onthisday"];
+export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "puzzle", "onthisday"];
 
 export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
 

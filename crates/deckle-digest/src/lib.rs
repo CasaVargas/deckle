@@ -19,6 +19,7 @@ pub mod inbox;
 pub mod longread;
 pub mod mail;
 pub mod moon;
+pub mod puzzle;
 pub mod reading;
 pub mod render;
 pub mod schedule;
@@ -172,6 +173,8 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
     let mut long_reads = Vec::new();
     let mut reading_outcomes = Vec::new();
     let mut notes = Vec::new();
+    // Loaded when the paper has a puzzle; saved with today's headlines once all is gathered.
+    let mut puzzles: Option<puzzle::store::Store> = None;
     let queue = reading::ReadingQueue::new(
         cfg.reading
             .queue_path
@@ -231,6 +234,16 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
             }
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
             SectionKind::Horoscope => edition.sections.push(horoscope::section(cfg, date)),
+            SectionKind::Puzzle => {
+                let store =
+                    puzzles.get_or_insert_with(|| puzzle::store::Store::load(&cfg.puzzle_store()));
+                edition.sections.push(puzzle::section(
+                    date,
+                    cfg,
+                    store,
+                    puzzle::words::Words::embedded(),
+                ));
+            }
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
@@ -239,6 +252,26 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
         for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {
             let feed = (*kind == SectionKind::Feeds).then(|| cfg.feeds[i].name.as_str());
             s.key = config::section_key(*kind, feed);
+        }
+    }
+    // Only the paper of the day (or the next one, built late) is kept: a preview of another date
+    // prints a puzzle but neither stores it nor prunes the real ones.
+    let today = now.with_timezone(&tz::local_tz()).date_naive();
+    if let Some(mut store) = puzzles.filter(|_| (date - today).num_days().abs() <= 1) {
+        store.prune(today);
+        // tomorrow's theme: today's headlines from the news and Your Reading
+        let mut from = news.clone();
+        from.extend(g_reading);
+        let found = puzzle::theme::harvest(&edition, &from, puzzle::words::Words::embedded());
+        if let Some(day) = store.days.get_mut(&date) {
+            day.headlines = found;
+        }
+        let path = cfg.puzzle_store();
+        if let Err(e) = store.save(&path) {
+            notes.push(format!(
+                "The puzzle wasn't saved ({}: {e}); a rebuild today makes it again",
+                path.display()
+            ));
         }
     }
     Gathered {
