@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — full-window settings
 
 - Settings open full-window with a sidebar (General, Books, X-Ray, Word Wise, Kindles, About)
   instead of a crowded slide-over; each option is one short row with a switch.
