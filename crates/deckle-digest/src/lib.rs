@@ -226,6 +226,13 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                 edition
                     .sections
                     .push(sources::feeds::local_section(cfg, now, net));
+                // then other places' local news, each its own section (#102)
+                for p in &cfg.local.places {
+                    news.push(edition.sections.len());
+                    edition
+                        .sections
+                        .push(sources::feeds::place_section(p, cfg, now, net));
+                }
             }
             SectionKind::Feeds => {
                 for feed in &cfg.feeds {
@@ -251,10 +258,14 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
                 .sections
                 .push(sources::onthisday::section(date, net)),
         }
-        // Each `[[feeds]]` entry is its own section, in file order.
+        // Each `[[feeds]]` entry is its own section, in file order; so is each place after Local.
         for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {
-            let feed = (*kind == SectionKind::Feeds).then(|| cfg.feeds[i].name.as_str());
-            s.key = config::section_key(*kind, feed);
+            let name = match kind {
+                SectionKind::Feeds => Some(cfg.feeds[i].name.as_str()),
+                SectionKind::Local if i > 0 => Some(cfg.local.places[i - 1].name.as_str()),
+                _ => None,
+            };
+            s.key = config::section_key(*kind, name);
         }
     }
     // Only the paper of the day (or the next one, built late) is kept: a preview of another date

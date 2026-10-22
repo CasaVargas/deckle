@@ -23,12 +23,16 @@ pub enum SectionKind {
 }
 
 /// The key a section goes by across editions (readership design §4): the kind's name, or
-/// `feeds:<name>` for each `[[feeds]]` entry.
+/// `feeds:<name>` for each `[[feeds]]` entry and `local:<name>` for each `[[local.places]]` one.
 pub fn section_key(kind: SectionKind, feed: Option<&str>) -> String {
     let name = match kind {
         SectionKind::Reading => "reading",
         SectionKind::Weather => "weather",
-        SectionKind::Local => "local",
+        SectionKind::Local => match feed {
+            // another place's local news (#102)
+            Some(place) => return format!("local:{place}"),
+            None => "local",
+        },
         SectionKind::Feeds => return format!("feeds:{}", feed.unwrap_or_default()),
         SectionKind::Lottery => "lottery",
         SectionKind::Horoscope => "horoscope",
@@ -141,6 +145,26 @@ pub struct LocalConfig {
     pub max_items: usize,
     /// Local news moves slower than the wires: a longer window than `max_age_hours`.
     pub max_age_hours: u32,
+    /// `[[local.places]]`: other towns' local news, each its own section after Local (#102).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub places: Vec<PlaceNews>,
+}
+
+/// Another place's local news: a relative's town, a vacation spot (local places design §1).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlaceNews {
+    /// The section's title in the paper.
+    pub name: String,
+    /// A Google News search. Empty: none.
+    #[serde(default)]
+    pub google_news: String,
+    /// Local paper RSS/Atom feeds, merged with the search.
+    #[serde(default)]
+    pub feeds: Vec<String>,
+    /// Stories kept; `[local] max_items` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<usize>,
 }
 
 impl Default for LocalConfig {
@@ -150,6 +174,7 @@ impl Default for LocalConfig {
             feeds: Vec::new(),
             max_items: 12,
             max_age_hours: 72,
+            places: Vec::new(),
         }
     }
 }
@@ -437,6 +462,12 @@ google_news = "New York City"     # a Google News search; "" for none
 feeds = []                        # local paper RSS feeds, merged in
 max_items = 12
 max_age_hours = 72                # local news moves slower
+
+# Other places' local news, each its own section after Local: a relative's town, a trip.
+# [[local.places]]
+# name = "Asheville, NC"          # the section's title
+# google_news = "Asheville NC"
+# feeds = []
 
 # Each [[feeds]] entry becomes its own section, in this order.
 [[feeds]]

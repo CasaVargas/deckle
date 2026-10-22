@@ -422,3 +422,139 @@ fn building_another_date_leaves_the_puzzle_store_alone() {
         before
     );
 }
+
+// --- local news for more places (#102) ---
+
+use deckle_digest::config::PlaceNews;
+
+fn place(name: &str, search: &str) -> PlaceNews {
+    PlaceNews {
+        name: name.into(),
+        google_news: search.into(),
+        feeds: Vec::new(),
+        max_items: None,
+    }
+}
+
+#[test]
+fn places_print_after_local_each_from_its_own_search() {
+    let mut c = config();
+    c.local.places = vec![
+        place("Asheville, NC", "Asheville NC"),
+        place("Boone, NC", ""),
+    ];
+    c.local.places[1].feeds = vec!["https://boone.example/rss".into()]; // offline in the fake
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        fake(url)
+    };
+    let g = gather(&c, date(), now(), &net);
+    let keys: Vec<&str> = g.edition.sections.iter().map(|s| s.key.as_str()).collect();
+    let at = keys.iter().position(|k| *k == "local").unwrap();
+    assert_eq!(
+        &keys[at..at + 3],
+        ["local", "local:Asheville, NC", "local:Boone, NC"]
+    );
+    let asheville = &g.edition.sections[at + 1];
+    assert_eq!(asheville.title, "Asheville, NC");
+    assert_eq!(
+        asheville.kicker.as_deref(),
+        Some("News from around Asheville, NC")
+    );
+    assert!(!asheville.articles.is_empty());
+    // its own search, and only Local and Asheville search Google News
+    let asked = asked.lock().unwrap();
+    assert!(
+        asked.iter().any(|u| u.contains("q=Asheville+NC")),
+        "{asked:?}"
+    );
+    let searches = asked
+        .iter()
+        .filter(|u| u.starts_with("https://news.google.com/rss/search"))
+        .count();
+    assert_eq!(searches, 2, "{asked:?}");
+    // Boone's feed is down: its section says so, and nothing else is touched
+    let boone = &g.edition.sections[at + 2];
+    assert!(
+        boone
+            .unavailable
+            .as_deref()
+            .unwrap()
+            .contains("boone.example"),
+        "{boone:?}"
+    );
+    assert!(g.edition.sections[at].unavailable.is_none());
+    // all three are news, but only Local is the local tier
+    assert!(g.news.contains(&(at + 1)) && g.news.contains(&(at + 2)));
+}
+
+#[test]
+fn a_place_with_nothing_to_read_says_so() {
+    let mut c = config();
+    c.local.places = vec![place("Nowhere", "")];
+    let g = gather(&c, date(), now(), &fake);
+    let s = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "local:Nowhere")
+        .unwrap();
+    assert!(s.unavailable.as_deref().unwrap().contains("for Nowhere"));
+}
+
+#[test]
+fn places_follow_local_off() {
+    let mut c = config();
+    c.sections
+        .retain(|k| *k != deckle_digest::SectionKind::Local);
+    c.local.places = vec![place("Asheville, NC", "Asheville NC")];
+    let g = gather(&c, date(), now(), &fake);
+    assert!(
+        g.edition
+            .sections
+            .iter()
+            .all(|s| !s.key.starts_with("local"))
+    );
+}
+
+#[test]
+fn place_budget_defaults_to_locals() {
+    let mut c = config();
+    c.local.max_items = 2;
+    c.local.places = vec![place("A", "Asheville NC"), place("B", "Boone NC")];
+    c.local.places[1].max_items = Some(1);
+    c.full_text = false;
+    let g = gather(&c, date(), now(), &fake);
+    let n = |k: &str| {
+        g.edition
+            .sections
+            .iter()
+            .find(|s| s.key == k)
+            .unwrap()
+            .articles
+            .len()
+    };
+    assert_eq!((n("local:A"), n("local:B")), (2, 1));
+}
+
+#[test]
+fn places_round_trip_and_stay_out_of_an_untouched_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut c = Config::parse(deckle_digest::config::STARTER).unwrap();
+    deckle_digest::config::save(&path, &c).unwrap();
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("places ="));
+    c.local.places = vec![place("Asheville, NC", "Asheville NC")];
+    deckle_digest::config::save(&path, &c).unwrap();
+    let back = Config::load(&path).unwrap();
+    assert_eq!(back.local.places, c.local.places);
+    // an old file without places still reads
+    assert!(
+        Config::parse("[local]\ngoogle_news = \"x\"\n")
+            .unwrap()
+            .local
+            .places
+            .is_empty()
+    );
+}
