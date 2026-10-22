@@ -46,8 +46,10 @@ topic = "SPORTS"                 # a Google News topic, see below
   (case-insensitive) and builds the Google News topic feed
   (`https://news.google.com/rss/headlines/section/topic/<TOPIC>?hl=en-US&gl=US&ceid=US:en`,
   to be confirmed against a live fetch).
-- A feed needs at least one of `url`, `urls`, `topic`; none fails config validation with the
-  entry's name. `url` stops being required by serde; nothing else about existing files changes.
+- A feed should have at least one of `url`, `urls`, `topic`; one with none still loads (so a
+  freshly added, still-blank row in the app cannot make the config unreadable) and its section
+  prints "Unavailable today (give a url, urls or topic)." `url` stops being required by serde;
+  nothing else about existing files changes.
 - All of an entry's sources are fetched, merged, deduplicated by title, newest first and cut to
   `max_items`, the way Local merges its search and feeds (`local_news`). One source failing
   leaves the others; all failing shows the section's usual "Unavailable today".
@@ -70,7 +72,9 @@ topic = "SPORTS"                 # a Google News topic, see below
 Stories in `[[feeds]]` sections are dropped when the same title (the existing normalized title
 key in `feeds.rs`) already appears in an earlier section of the paper: Local, other places, or an
 earlier feed, in page-plan order. Your Reading is never deduplicated. The first section wins, so
-reordering the page plan changes where a shared story prints. A section emptied by this prints
+reordering the page plan changes where a shared story prints. Local and other places only
+RECORD their titles (they are never trimmed themselves); `[[feeds]]` sections DROP what an
+earlier section recorded, and record what they keep. A section emptied by this prints
 "No new stories today." like any empty section.
 
 *My call:* dedupe happens at assembly, before each section is cut to `max_items`, so a section
@@ -146,8 +150,8 @@ page now matches its structure, not its pixels.
   and the two-column cells are tuned there. Expect one round of CSS adjustments.
 - **Paper length:** eight topic sections of 5 stories (one full each) is 8 articles plus about 32 briefs. The page
   plan's "about N Kindle pages" is the guardrail; the builder checks the estimate with a full set.
-- **Google News limits:** many topic fetches per run add up; sources are fetched in parallel
-  (`par_map`) as Local's are.
+- **Google News limits:** many topic fetches per run add up; a section's sources are fetched
+  one after another (only whole-story page fetches run in parallel, via `par_map`).
 
 ## 8. Testing
 
@@ -157,8 +161,9 @@ page now matches its structure, not its pixels.
   validation error listing the valid ones.
 - Merge: two sources with a shared title keep one; one failing keeps the other; all failing
   gives "Unavailable today".
-- Cross-section dedupe: a title in Local and in a feed prints only in Local; reversing the page
-  plan moves it; Your Reading is untouched.
+- Cross-section dedupe: a title in Local and in a feed prints only in Local (Local is never
+  dropped from); two feeds sharing a title keep it in the earlier one and reversing their order
+  moves it; Your Reading is untouched.
 - Front page: lead and teaser; the two-column table has the expected cells in order and no
   cell for the lead; anchors exist for every cell; with one section only, no empty cells break
   the table.

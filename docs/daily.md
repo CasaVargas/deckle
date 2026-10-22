@@ -119,7 +119,7 @@ full_text = "lead"              # true, false or "lead"
   briefs. `true` prints every story whole, `false` none. A plain `url` entry follows the global
   full-text setting unless you set it.
 - **No repeats across sections:** a `[[feeds]]` section drops a story whose title an earlier news
-  section already printed (Local, other places, and earlier topics). Local and other places only
+  section already printed (Local, other places, and earlier feed sections). Local and other places only
   record their titles and are never trimmed themselves; Your Reading is never trimmed or recorded.
 
 ### The front page and section fronts
