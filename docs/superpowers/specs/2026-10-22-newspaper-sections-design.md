@@ -155,7 +155,7 @@ page now matches its structure, not its pixels.
 
 ## 8. Testing
 
-- Config: `topic` alone, `urls` alone, `url` alone, all three, none (error naming the entry);
+- Config: `topic` alone, `urls` alone, `url` alone, all three, none (loads, and the section prints "Unavailable today (give a url, urls or topic)");
   an old config parses unchanged; round-trip keeps comments and new fields.
 - Topic URL: each of the eight builds the expected URL, case-insensitive; an unknown topic is a
   validation error listing the valid ones.
