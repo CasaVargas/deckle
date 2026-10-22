@@ -1116,6 +1116,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-readership"
+version = "0.3.1"
+dependencies = [
+ "chrono",
+ "deckle-digest",
+ "deckle-kfx",
+ "deckle-library",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "deckle-transport"
 version = "0.3.1"
 dependencies = [

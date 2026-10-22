@@ -1,0 +1,19 @@
+[package]
+name = "deckle-readership"
+description = "Deckle readership: how far each Deckle Daily edition was read, from the Kindle's .yjf"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+deckle-digest.workspace = true
+deckle-kfx.workspace = true
+deckle-library.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
