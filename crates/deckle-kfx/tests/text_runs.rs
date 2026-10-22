@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use deckle_kfx::text::{content_runs, position_of};
+use deckle_kfx::text::{content_runs, position_of, section_first_runs};
 
 #[test]
 fn runs_from_the_mini_kfx_have_increasing_positions_and_the_right_text() {
@@ -42,4 +42,17 @@ fn runs_from_the_mini_kfx_have_increasing_positions_and_the_right_text() {
 #[test]
 fn garbage_is_not_a_kfx() {
     assert!(content_runs(b"not a container").is_err());
+}
+
+#[test]
+fn section_first_runs_of_the_mini_kfx_are_its_chapter_headings() {
+    let kfx = std::fs::read(deckle_kfx::fixtures::path("deckle-mini-pdoc.golden.kfx")).unwrap();
+    let firsts = section_first_runs(&kfx).unwrap();
+    let texts: Vec<_> = firsts.iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(firsts[0].text, "Chapter One", "{texts:?}");
+    assert_eq!(firsts[0].pid, 3);
+    assert_eq!(firsts.len(), 3, "{texts:?}");
+    assert!(firsts.windows(2).all(|w| w[0].pid < w[1].pid));
+    let (runs, _) = content_runs(&kfx).unwrap();
+    assert!(firsts.iter().all(|f| runs.contains(f)));
 }

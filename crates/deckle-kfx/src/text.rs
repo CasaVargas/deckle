@@ -64,6 +64,37 @@ fn walk(v: &Value, contents: &HashMap<String, Vec<String>>, out: &mut HashMap<i6
 /// Text runs in reading order and the end position (`erl`) of the book.
 pub fn content_runs(kfx: &[u8]) -> Result<(Vec<Run>, i64), TextError> {
     let doc = read_kfx(kfx)?;
+    let (runs, erl) = runs_of(&doc)?;
+    Ok((runs.into_iter().map(|(_, r)| r).collect(), erl))
+}
+
+/// The first text run of each section, in reading order (`$264` lists each section's elements
+/// in that order). Sections without text, like a cover, are left out.
+pub fn section_first_runs(kfx: &[u8]) -> Result<Vec<Run>, TextError> {
+    let doc = read_kfx(kfx)?;
+    let (runs, _) = runs_of(&doc)?;
+    let map = doc
+        .fragments
+        .get_single(&Sym::new("$264"))
+        .and_then(|f| f.value.as_list())
+        .ok_or(TextError::NoPositionMap)?;
+    let mut firsts = Vec::new();
+    for section in map {
+        let eids: std::collections::HashSet<i64> = section
+            .as_struct()
+            .and_then(|s| s.get("$181"))
+            .and_then(Value::as_list)
+            .map(|l| l.iter().filter_map(Value::as_int).collect())
+            .unwrap_or_default();
+        if let Some((_, r)) = runs.iter().find(|(eid, _)| eids.contains(eid)) {
+            firsts.push(r.clone());
+        }
+    }
+    Ok(firsts)
+}
+
+/// Runs with the element each comes from, in position order, and `erl`.
+fn runs_of(doc: &crate::container::KfxDoc) -> Result<(Vec<(i64, Run)>, i64), TextError> {
     let mut contents: HashMap<String, Vec<String>> = HashMap::new();
     for f in doc.fragments.all(&Sym::new("$145")) {
         if let (Some(fid), Some(list)) = (
@@ -102,10 +133,13 @@ pub fn content_runs(kfx: &[u8]) -> Result<(Vec<Run>, i64), TextError> {
         }
         if let Some(text) = texts.get(&eid) {
             erl = erl.max(pid + text.chars().count() as i64);
-            runs.push(Run {
-                pid,
-                text: text.clone(),
-            });
+            runs.push((
+                eid,
+                Run {
+                    pid,
+                    text: text.clone(),
+                },
+            ));
         }
     }
     Ok((runs, erl))

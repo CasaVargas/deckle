@@ -3,5 +3,6 @@
 //! the Kindle's `.yjf` reading position, set against where each section of the edition starts.
 
 pub mod krds;
+pub mod layout;
 
 pub use krds::{KrdsError, Positions, parse_yjf, position_id};
