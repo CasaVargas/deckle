@@ -649,6 +649,37 @@ mod front {
     }
 
     #[test]
+    fn tile_meta_leaves_out_the_section_name() {
+        let g = with(4, 4);
+        let x = front_xhtml(&g);
+        let plan = front_plan(&g);
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let metas: Vec<String> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("td"))
+            .flat_map(|td| {
+                td.descendants()
+                    .filter(|c| c.attribute("class") == Some("meta"))
+            })
+            .filter_map(|m| m.text().map(String::from))
+            .collect();
+        assert_eq!(metas.len(), plan.tiles.len());
+        assert!(metas.iter().all(|m| m == "meta"), "{metas:?}");
+        // the lead keeps the section name
+        assert!(x.contains("local · meta"));
+    }
+
+    #[test]
+    fn inside_today_tells_empty_from_unavailable() {
+        let mut g = paper(&[("local", &["One"]), ("feeds:A", &[]), ("feeds:B", &[])]);
+        g.edition.sections[1].unavailable = Some("No new stories today.".into());
+        g.edition.sections[2].unavailable = Some("Unavailable today (offline).".into());
+        let x = front_xhtml(&g);
+        assert!(x.contains("no new stories"), "{x}");
+        assert_eq!(x.matches(">unavailable<").count(), 1);
+    }
+
+    #[test]
     fn odd_tiles_pad_the_last_row() {
         // lead + 3 tiles
         let x = front_xhtml(&with(2, 2));
@@ -696,13 +727,13 @@ mod front {
         roxmltree::Document::parse(&x).unwrap();
         assert!(x.contains("id=\"top\""));
         assert!(x.contains("In this section"));
-        assert_eq!(hrefs(&x, "index"), vec!["#a1", "#a2"]);
+        assert_eq!(hrefs(&x, "toc"), vec!["#a1", "#a2"]);
     }
 
     #[test]
     fn one_story_section_has_no_list() {
         let x = section_xhtml(&paper(&[("local", &["Only"])]), 1);
-        assert!(!x.contains("class=\"index\""));
+        assert!(!x.contains("class=\"toc\""));
         assert!(!x.contains("In this section"));
         assert!(x.contains("class=\"back\""));
     }
@@ -748,7 +779,7 @@ mod front {
         roxmltree::Document::parse(&x).unwrap();
         assert!(x.contains("Down"));
         assert!(!x.contains("class=\"back\""));
-        assert!(!x.contains("class=\"index\""));
+        assert!(!x.contains("class=\"toc\""));
     }
 
     #[test]
@@ -764,7 +795,7 @@ mod front {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), n);
-        assert_eq!(hrefs(&x, "index"), vec!["#a1", "#a2", "#a3"]);
+        assert_eq!(hrefs(&x, "toc"), vec!["#a1", "#a2", "#a3"]);
     }
 
     #[test]

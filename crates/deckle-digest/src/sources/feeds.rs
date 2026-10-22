@@ -263,6 +263,8 @@ pub(crate) fn story_body(
 
 /// Stories tried, in order, for the whole one in a `Lead` section.
 const LEAD_TRIES: usize = 3;
+/// A section's note when every story it found was already printed or too old.
+pub const NO_NEW_STORIES: &str = "No new stories today.";
 const UNAVAILABLE: &str = "Full story unavailable offline.";
 /// Article pages fetched at once.
 const WORKERS: usize = 8;
@@ -356,7 +358,7 @@ fn section_of(
         unavailable: None,
     };
     if items.is_empty() {
-        section.unavailable = Some("No new stories today.".into());
+        section.unavailable = Some(NO_NEW_STORIES.into());
     }
     section
 }

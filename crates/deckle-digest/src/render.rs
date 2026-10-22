@@ -68,7 +68,7 @@ p.ladder { text-align: center; font-weight: bold; letter-spacing: 0.05em; }
 p.score { font-weight: bold; }
 p.back { font-size: 0.8em; margin: 0.8em 0 1.2em 0; }
 p.in-section { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; margin: 0.6em 0 0.2em 0; }
-ul.index { margin: 0 0 1em 0; padding-left: 1.2em; }
+ul.toc { margin: 0 0 1em 0; padding-left: 1.2em; }
 "#;
 
 pub(crate) fn page(title: &str, body: &str) -> Vec<u8> {
@@ -116,6 +116,11 @@ fn front_page(g: &Gathered) -> Vec<u8> {
         };
         format!("<span class=\"meta\">{}</span>", esc(&meta))
     };
+    // A tile sits under its section's label already, so its meta leaves the section name out.
+    let tile_meta = |s: usize, a: usize| match &e.sections[s].articles[a].meta {
+        Some(m) => format!("<br/><span class=\"meta\">{}</span>", esc(m)),
+        None => String::new(),
+    };
     let link = |s: usize, a: usize| {
         format!(
             "<a href=\"{}#a{}\">{}</a>",
@@ -140,12 +145,12 @@ fn front_page(g: &Gathered) -> Vec<u8> {
             body.push_str("<tr>");
             for &(s, a) in row {
                 body.push_str(&format!(
-                    "<td><p class=\"label\">{}</p><a id=\"t{s}-{a}\" href=\"{}#a{}\">{}</a><br/>{}</td>",
+                    "<td><p class=\"label\">{}</p><a id=\"t{s}-{a}\" href=\"{}#a{}\">{}</a>{}</td>",
                     esc(&e.sections[s].title),
                     section_file(s),
                     a + 1,
                     esc(&e.sections[s].articles[a].title),
-                    meta_of(s, a)
+                    tile_meta(s, a)
                 ));
             }
             if row.len() == 1 {
@@ -158,6 +163,9 @@ fn front_page(g: &Gathered) -> Vec<u8> {
     body.push_str("<h2>Inside today</h2>\n<ul class=\"index\">\n");
     for (i, s) in e.sections.iter().enumerate() {
         let count = match (s.articles.len(), &s.unavailable) {
+            (0, Some(u)) if u == crate::sources::feeds::NO_NEW_STORIES => {
+                "no new stories".to_owned()
+            }
             (0, Some(_)) => "unavailable".to_owned(),
             (1, _) => "1 item".to_owned(),
             (n, _) => format!("{n} items"),
@@ -182,7 +190,7 @@ fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8
         body.push_str(&format!("<p class=\"kicker\">{}</p>\n", esc(k)));
     }
     if s.articles.len() >= 2 {
-        body.push_str("<p class=\"in-section\">In this section</p>\n<ul class=\"index\">\n");
+        body.push_str("<p class=\"in-section\">In this section</p>\n<ul class=\"toc\">\n");
         for (j, a) in s.articles.iter().enumerate() {
             body.push_str(&format!(
                 "<li><a href=\"#a{}\">{}</a></li>\n",
