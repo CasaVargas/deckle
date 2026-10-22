@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Two Kindles of one model no longer share a snapshot.** A USB-storage Kindle is now told apart
+  by its USB serial number (macOS, Windows and Linux), so a second Paperwhite keeps its own shelf
+  snapshot and per-Kindle settings. Settings written before keep working. `[sync.devices."<id>"]
+  name = "..."` names a Kindle on the From Your Shelf page, which no longer prints the firmware
+  line as the Kindle's name.
 - **From Your Shelf**: a page in the Daily drawn from your own Kindle. **On your nightstand**
   lists the books you're in the middle of, how far in and how long since you opened them, with a
   nudge back into the newest one; it works on every Kindle, the Scribe included. A past highlight

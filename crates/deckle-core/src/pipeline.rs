@@ -922,6 +922,7 @@ mod tests {
             model_hint: "Kindle 5.16.2.1.1 (4184940002)".into(),
             thumbnails_writable: false,
             firmware: Some("5.16.2.1.1".into()),
+            serial: None,
         });
         let used = SendUse {
             ebok_without_cover_source: true,

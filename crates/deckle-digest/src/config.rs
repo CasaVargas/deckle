@@ -381,6 +381,9 @@ pub struct DeviceSync {
     pub readership: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shelf: Option<bool>,
+    /// What From Your Shelf calls this Kindle ("Mom's Kindle"); else the model.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 /// The actions settled for one device.
@@ -394,8 +397,33 @@ pub struct SyncActions {
 }
 
 impl SyncConfig {
+    /// The entry for `id`, each key falling back to the entry written for the same Kindle before
+    /// serial numbers (`<model>/<volume>#<serial>` → `<model>/<volume>`).
+    fn entry(&self, id: &str) -> DeviceSync {
+        let exact = self.devices.get(id).cloned().unwrap_or_default();
+        let Some(older) = id
+            .rsplit_once('#')
+            .and_then(|(base, _)| self.devices.get(base))
+        else {
+            return exact;
+        };
+        DeviceSync {
+            push: exact.push.or(older.push),
+            prune: exact.prune.or(older.prune),
+            clippings: exact.clippings.or(older.clippings),
+            readership: exact.readership.or(older.readership),
+            shelf: exact.shelf.or(older.shelf),
+            name: exact.name.or_else(|| older.name.clone()),
+        }
+    }
+
+    /// The name the owner gave this Kindle.
+    pub fn device_name(&self, id: &str) -> Option<String> {
+        self.entry(id).name.filter(|n| !n.trim().is_empty())
+    }
+
     pub fn for_device(&self, id: &str) -> SyncActions {
-        let d = self.devices.get(id).cloned().unwrap_or_default();
+        let d = self.entry(id);
         SyncActions {
             push: d.push.unwrap_or(self.push),
             prune: d.prune.unwrap_or(self.prune),
@@ -837,6 +865,28 @@ mod tests {
                 .unwrap()
                 .starts_with("# Deckle Daily")
         );
+    }
+
+    #[test]
+    fn a_serial_id_falls_back_to_the_settings_written_before_serials() {
+        let c = Config::parse(
+            "[sync.devices.\"Kindle/Kindle\"]\nshelf = false\nname = \"Den\"\n\n\
+             [sync.devices.\"Kindle/Kindle#G0B0AAAA\"]\nname = \"Mom's Kindle\"\n",
+        )
+        .unwrap();
+        // An exact entry wins, and only for the keys it sets.
+        assert_eq!(
+            c.sync.device_name("Kindle/Kindle#G0B0AAAA").as_deref(),
+            Some("Mom's Kindle")
+        );
+        assert!(!c.sync.for_device("Kindle/Kindle").shelf);
+        // Another Kindle of the same model and volume inherits the older entry.
+        assert!(!c.sync.for_device("Kindle/Kindle#G0B0BBBB").shelf);
+        assert_eq!(
+            c.sync.device_name("Kindle/Kindle#G0B0BBBB").as_deref(),
+            Some("Den")
+        );
+        assert_eq!(c.sync.device_name("Other/Kindle"), None);
     }
 
     #[test]

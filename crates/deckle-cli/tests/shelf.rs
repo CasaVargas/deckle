@@ -191,3 +191,20 @@ fn digest_shelf_with_nothing_says_how_to_start() {
         .success()
         .stdout(predicates::str::contains("plug"));
 }
+
+#[test]
+fn a_kindle_can_be_given_a_name() {
+    let (home, k) = setup("");
+    let digest = format!(
+        "sections = [\"shelf\"]\n\n[sync.devices.'{}']\nname = \"Mom's Kindle\"\n",
+        k.display()
+    );
+    std::fs::write(config_dir(home.path()).join("digest.toml"), digest).unwrap();
+    deckle(home.path())
+        .args(["digest", "push", "--to"])
+        .arg(&k)
+        .assert()
+        .success();
+    let shelf = Shelf::load(&shelf_json(home.path()));
+    assert_eq!(shelf.kindles.values().next().unwrap().name, "Mom's Kindle");
+}

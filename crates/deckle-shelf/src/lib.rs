@@ -47,6 +47,18 @@ pub struct Read {
 /// ("Kindle Scribe G6G3X308536500ME"), which doesn't belong in print.
 pub fn friendly_name(raw: &str) -> String {
     let raw = raw.trim();
+    // A mass-storage Kindle is named by its firmware line: "Kindle 5.19.2 (467076 040)".
+    if let Some(rest) = raw.strip_prefix("Kindle ")
+        && rest.starts_with(|c: char| c.is_ascii_digit())
+    {
+        return "Kindle".to_owned();
+    }
+    if let Some((head, tail)) = raw.rsplit_once(' ')
+        && tail.starts_with(|c: char| c.is_ascii_digit())
+        && tail.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+    {
+        return head.trim().to_owned();
+    }
     match raw.rsplit_once(' ') {
         Some((head, last))
             if last.len() >= 10

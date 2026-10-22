@@ -2024,7 +2024,7 @@ fn record_shelf(
             vocab_failed: flush.shelf_error.is_some() && read.vocab.is_none(),
             previous,
         },
-        &device.name,
+        &cfg.sync.device_name(&id).unwrap_or(device.name),
         &device.key,
         library.as_ref(),
         deckle_digest::chrono::Utc::now(),

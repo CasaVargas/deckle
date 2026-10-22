@@ -92,6 +92,7 @@ mod tests {
             model_hint: "Kindle".into(),
             thumbnails_writable: true,
             firmware: None,
+            serial: None,
         });
         assert_eq!(
             read_on(&mut Conn::new(&ms)).unwrap().as_deref(),
@@ -122,6 +123,7 @@ mod tests {
             model_hint: "Kindle".into(),
             thumbnails_writable: false,
             firmware: None,
+            serial: None,
         });
         assert_eq!(read_on(&mut Conn::new(&ms)).unwrap(), None);
         fake::reset(&["a.kfx"]);

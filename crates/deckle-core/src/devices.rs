@@ -245,7 +245,7 @@ pub fn seen_mass_storage(d: &crate::deliver::Device) -> Seen {
         model_hint: d.model_hint.clone(),
         transport: TransportKind::MassStorage,
         thumbnails_writable: d.thumbnails_writable,
-        serial: None,
+        serial: d.serial.clone(),
         firmware: d.firmware.clone(),
     }
 }

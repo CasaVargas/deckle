@@ -300,6 +300,7 @@ fn auto_add_records_a_send_only_with_a_library_and_a_delivery() {
         model_hint: "Kindle Paperwhite".into(),
         thumbnails_writable: true,
         firmware: None,
+        serial: None,
     });
     let report = RunReport {
         delivered: Some(
