@@ -38,7 +38,7 @@ name = "Sports"
 topic = "SPORTS"                 # a Google News topic, see below
 # urls = ["https://example.com/rss"]   # more feeds, merged with the topic and url
 # max_items = 5
-# full_text = false              # brief or whole stories for this section
+# full_text = "lead"            # "lead" (default for topics), true or false
 ```
 
 - `url` stays and still works alone. `urls` is a list of extra feeds. `topic` is one of
@@ -52,13 +52,15 @@ topic = "SPORTS"                 # a Google News topic, see below
   `max_items`, the way Local merges its search and feeds (`local_news`). One source failing
   leaves the others; all failing shows the section's usual "Unavailable today".
 - **Defaults (my call):** `max_items` is 5 for an entry with a `topic` and 10 otherwise (as now).
-  `full_text` defaults to the global setting for entries without a `topic`, and to `false` (brief
-  stories, `as_briefs`) for topic entries, so a starter set of eight sections doesn't fetch eighty
-  full articles. The setting per entry overrides either.
-- **Brief stories** (`full_text = false`) still get an entry in the section page with its `#a<N>`
+  `full_text` is `true`, `false` or `"lead"`. It defaults to the global setting for entries
+  without a `topic`, and to `"lead"` for topic entries (owner's decision, 2026-10-22): the
+  section's top story is fetched whole and the rest are briefs (`as_briefs`), so eight sections
+  fetch eight full articles, not eighty. The setting per entry overrides either.
+- **Brief stories** (the non-lead stories of a `"lead"` entry, or all of a `false` one) still get an entry in the section page with its `#a<N>`
   anchor: headline, source line, and the "Source:" host line, but no body and no `teaser` (the
-  feed gives only a title). Tiles and back links work the same for them. Because they have no
-  teaser, they only lead the front page when nothing else can (the existing lead rule).
+  feed gives only a title). Tiles and back links work the same for them. The lead story of a `"lead"` section has its full text and a teaser, so it can lead the front
+  page and is the best tap target; briefs have no teaser, so they only lead when nothing else can
+  (the existing lead rule).
 - **Keys** stay `feeds:<name>`: readership and the page plan need no change.
 - The config writer keeps comments and the new fields through a save, like the rest of
   `[[feeds]]` (existing round-trip tests extend to them).
@@ -142,7 +144,7 @@ page now matches its structure, not its pixels.
 - **Device look:** nothing here can be judged on e-ink without a device. The plan ends with a
   test edition sent to the Scribe (and a Paperwhite if available); table widths, rule weights
   and the two-column cells are tuned there. Expect one round of CSS adjustments.
-- **Paper length:** eight topic sections at 5 briefs each is about 40 short stories. The page
+- **Paper length:** eight topic sections of 5 stories (one full each) is 8 articles plus about 32 briefs. The page
   plan's "about N Kindle pages" is the guardrail; the builder checks the estimate with a full set.
 - **Google News limits:** many topic fetches per run add up; sources are fetched in parallel
   (`par_map`) as Local's are.
