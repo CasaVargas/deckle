@@ -1165,7 +1165,14 @@ fn digest(
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let report = deckle_digest::build(&cfg, date, now, &output, &deckle_digest::Http)?;
+            let report = deckle_digest::build_with(
+                &cfg,
+                date,
+                now,
+                &output,
+                &deckle_digest::Http,
+                &gather_options(),
+            )?;
             emit(json, &report, || {
                 let mut text = format!(
                     "OK    {}\n      -> {}\n{}",
@@ -1221,7 +1228,14 @@ fn digest(
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let mut built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+            let mut built = deckle_digest::build_with(
+                &cfg,
+                date,
+                now,
+                &work,
+                &deckle_digest::Http,
+                &gather_options(),
+            )?;
             let opts = paper_options(Some(located.path.clone()), keep_work_dir, &converted);
             let (mut long_reads, failed) = prepare_long_reads(&built, &opts);
             let mut notes: Vec<String> = Vec::new();
@@ -1232,7 +1246,14 @@ fn digest(
                     ));
                 }
                 cfg.reading.inline = failed.into_iter().map(|(id, _)| id).collect();
-                built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+                built = deckle_digest::build_with(
+                    &cfg,
+                    date,
+                    now,
+                    &work,
+                    &deckle_digest::Http,
+                    &gather_options(),
+                )?;
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
@@ -1523,6 +1544,9 @@ struct DigestOutcome {
     /// Reading positions recorded in the same session (`[sync] readership`).
     #[serde(skip_serializing_if = "Option::is_none")]
     readership: Option<deckle_readership::Recorded>,
+    /// The Kindle's shelf recorded in the same session (`[sync] shelf`).
+    #[serde(skip)]
+    shelf: Option<deckle_shelf::Summary>,
 }
 
 impl DigestOutcome {
@@ -1533,6 +1557,8 @@ impl DigestOutcome {
                     && f.pruned.is_empty()
                     && self.highlights.is_none()
                     && self.readership.is_none()
+                    && self.shelf.is_none()
+                    && f.shelf_error.is_none()
                     && f.positions_error.is_none() =>
             {
                 "      nothing queued".to_owned()
@@ -1564,6 +1590,12 @@ impl DigestOutcome {
                 }
                 if let Some(e) = &f.positions_error {
                     lines.push(format!("      readership: {e}"));
+                }
+                if let Some(s) = &self.shelf {
+                    lines.push(format!("      {}", s.describe()));
+                }
+                if let Some(e) = &f.shelf_error {
+                    lines.push(format!("      shelf: {e}"));
                 }
                 lines.join("\n")
             }
@@ -1825,25 +1857,41 @@ fn push_plan(
             prune: actions.prune,
             clippings: actions.clippings,
             readership: actions.readership,
+            shelf: actions.shelf,
         });
     }
-    (actions.readership || actions.clippings).then_some(deckle_core::sync::Plan {
+    (actions.readership || actions.clippings || actions.shelf).then_some(deckle_core::sync::Plan {
         push: false,
         prune: false,
         clippings: actions.clippings,
         readership: actions.readership,
+        shelf: actions.shelf,
     })
 }
 
 /// The device's `[sync]` actions (auto-sync design §3). The clippings are read whenever the
-/// paper has a puzzle: its answers are notes (puzzle design §5).
+/// paper has a puzzle (its answers are notes, puzzle design §5) or a shelf (its highlights).
 fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Actions {
     let a = cfg.sync.for_device(id);
+    let shelf = shelf_on(cfg, id);
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
-        clippings: a.clippings || puzzle_on(cfg),
+        clippings: a.clippings || puzzle_on(cfg) || shelf,
         readership: a.readership,
+        shelf,
+    }
+}
+
+/// The paper has a shelf page and this Kindle isn't left out of it.
+fn shelf_on(cfg: &deckle_digest::Config, id: &str) -> bool {
+    cfg.sections.contains(&deckle_digest::SectionKind::Shelf) && cfg.sync.for_device(id).shelf
+}
+
+/// What `gather` can't know: whether `deckle-shelf` trusts the Kindle's own progress fraction.
+fn gather_options() -> deckle_digest::GatherOptions {
+    deckle_digest::GatherOptions {
+        shelf_fraction_ok: deckle_shelf::KINDLE_FRACTION_OK,
     }
 }
 
@@ -1882,6 +1930,7 @@ fn sync_to(
         &finishing,
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
         &stems,
+        deckle_digest::EDITION_PREFIX,
     )
     .map_err(|e| e.to_string())?;
     // Read in the same session; written to the folder after it's closed. The puzzle may have
@@ -1935,12 +1984,51 @@ fn sync_to(
         }
         r
     });
+    let shelf = record_shelf(cfg, target, &flush);
     Ok(DigestOutcome {
         flush: Some(flush),
         highlights,
         readership: recorded,
+        shelf,
         ..Default::default()
     })
+}
+
+/// Turns what the session read into this Kindle's snapshot in `shelf.json`. A problem with one
+/// book is reported and the rest are kept; a problem with the file is reported and nothing is
+/// lost but this connection's snapshot.
+fn record_shelf(
+    cfg: &deckle_digest::Config,
+    target: &Target,
+    flush: &deckle_core::queue::FlushReport,
+) -> Option<deckle_shelf::Summary> {
+    let read = flush.shelf.as_ref()?;
+    let device = deckle_library::device_ref(target);
+    let library = deckle_library::Library::configured(&deckle_library::config::default_path())
+        .map(|(lib, _)| lib);
+    let (snap, errors) = deckle_shelf::snapshot(
+        deckle_shelf::Read {
+            books: read.books.clone(),
+            skipped: read.skipped,
+            clippings: flush.clippings.clone(),
+            vocab: read.vocab.clone(),
+        },
+        &device.name,
+        &device.key,
+        library.as_ref(),
+        deckle_digest::chrono::Utc::now(),
+    );
+    for e in errors {
+        eprintln!("shelf: {e}");
+    }
+    let path = cfg.shelf_store();
+    match deckle_shelf::record(&path, &deckle_core::sync::device_id(target), snap) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("shelf: {e}");
+            None
+        }
+    }
 }
 
 fn on_device(on: &deckle_core::yjf::OnDevice) -> deckle_readership::OnDevice {
@@ -2563,6 +2651,7 @@ mod push_tests {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: false,
         };
         assert_eq!(
             push_plan(on, true).map(|p| (p.push, p.readership)),
@@ -2590,6 +2679,19 @@ mod push_tests {
             )
             .map(|p| (p.push, p.clippings, p.readership)),
             Some((false, true, false))
+        );
+        // the shelf alone is too
+        assert_eq!(
+            push_plan(
+                Actions {
+                    readership: false,
+                    shelf: true,
+                    ..on
+                },
+                true
+            )
+            .map(|p| (p.push, p.shelf)),
+            Some((false, true))
         );
         assert_eq!(push_plan(on, false).map(|p| p.push), Some(true));
     }

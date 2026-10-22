@@ -974,6 +974,7 @@ dependencies = [
  "deckle-kfx",
  "deckle-library",
  "deckle-readership",
+ "deckle-shelf",
  "deckle-transport",
  "deckle-xray",
  "predicates",

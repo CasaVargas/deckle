@@ -352,7 +352,19 @@ pub fn build(
     out_dir: &Path,
     net: &dyn Net,
 ) -> Result<BuildReport, String> {
-    let gathered = gather(cfg, date, now, net);
+    build_with(cfg, date, now, out_dir, net, &GatherOptions::default())
+}
+
+/// [`build`] with the options a caller supplies.
+pub fn build_with(
+    cfg: &Config,
+    date: NaiveDate,
+    now: DateTime<Utc>,
+    out_dir: &Path,
+    net: &dyn Net,
+    opts: &GatherOptions,
+) -> Result<BuildReport, String> {
+    let gathered = gather_with(cfg, date, now, net, opts);
     let path = out_dir.join(format!("deckle-daily-{date}.epub"));
     write_edition(&gathered, &path)?;
     let mut long_reads = Vec::new();
