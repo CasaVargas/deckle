@@ -22,6 +22,7 @@ pub mod render;
 pub mod schedule;
 pub mod seasons;
 pub mod secret;
+pub mod showers;
 pub mod sources;
 pub mod sun;
 pub mod tz;
