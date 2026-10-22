@@ -4,6 +4,7 @@
 
 use std::path::Path;
 
+use deckle_digest::chrono::{DateTime, Utc};
 use deckle_digest::shelf::store::Shelf;
 use serde::Serialize;
 
@@ -31,14 +32,14 @@ fn load_config(digest: &Path) -> Result<deckle_digest::Config, String> {
     }
 }
 
-pub fn status_at(shelf: &Path, digest: &Path) -> ShelfStatus {
+pub fn status_at(shelf: &Path, digest: &Path, now: DateTime<Utc>) -> ShelfStatus {
     let cfg = load_config(digest).unwrap_or_default();
     let shelf = Shelf::load(shelf);
     let newest = shelf.kindles.values().max_by(|a, b| a.seen.cmp(&b.seen));
     ShelfStatus {
         kindle: newest.map(|k| k.name.clone()),
         seen: newest.map(|k| k.seen.clone()),
-        in_progress: newest.map_or(0, deckle_shelf::in_progress),
+        in_progress: newest.map_or(0, |k| deckle_shelf::in_progress(k, now)),
         highlights_shared: newest.is_some_and(|k| k.highlights_shared),
         words_shared: newest.is_some_and(|k| k.words_shared),
         email_on: cfg.email.enabled,
@@ -49,7 +50,7 @@ pub fn status_at(shelf: &Path, digest: &Path) -> ShelfStatus {
 /// Deletes every snapshot: the books, highlights and words the Kindles shared.
 pub fn forget_at(shelf: &Path, digest: &Path) -> Result<ShelfStatus, String> {
     Shelf::forget(shelf)?;
-    Ok(status_at(shelf, digest))
+    Ok(status_at(shelf, digest, Utc::now()))
 }
 
 /// Writes `[sync] shelf`, keeping the file's comments. Returns the new value.
@@ -72,7 +73,7 @@ fn paths() -> (std::path::PathBuf, std::path::PathBuf) {
 #[tauri::command]
 pub fn shelf_status() -> ShelfStatus {
     let (s, d) = paths();
-    status_at(&s, &d)
+    status_at(&s, &d, Utc::now())
 }
 
 #[tauri::command]
@@ -85,7 +86,7 @@ pub fn shelf_forget() -> Result<ShelfStatus, String> {
 pub fn shelf_set(on: bool) -> Result<ShelfStatus, String> {
     let (s, d) = paths();
     set_at(&d, on)?;
-    Ok(status_at(&s, &d))
+    Ok(status_at(&s, &d, Utc::now()))
 }
 
 #[cfg(test)]
@@ -95,6 +96,10 @@ mod tests {
     use deckle_digest::shelf::store::{BookSnap, KindleSnapshot, Shelf};
 
     use super::*;
+
+    fn now() -> DateTime<Utc> {
+        "2026-10-22T12:00:00Z".parse().unwrap()
+    }
 
     fn book(title: &str, pct: i64) -> BookSnap {
         BookSnap {
@@ -128,7 +133,7 @@ mod tests {
     fn status_says_what_the_kindle_shares() {
         let tmp = tempfile::tempdir().unwrap();
         let (shelf, digest) = setup(tmp.path(), scribe());
-        let s = status_at(&shelf, &digest);
+        let s = status_at(&shelf, &digest, now());
         assert_eq!(s.kindle.as_deref(), Some("Kindle Scribe"));
         assert_eq!(s.seen.as_deref(), Some("2026-10-21T20:00:00Z"));
         assert_eq!(s.in_progress, 1);
@@ -152,7 +157,7 @@ mod tests {
              from = \"me@example.com\"\nsmtp_host = \"smtp.example.com\"\nusername = \"me\"\n",
         )
         .unwrap();
-        let s = status_at(&shelf, &digest);
+        let s = status_at(&shelf, &digest, now());
         assert!(s.email_on);
         assert!(!s.enabled);
     }
@@ -163,6 +168,7 @@ mod tests {
         let s = status_at(
             &tmp.path().join("shelf.json"),
             &tmp.path().join("digest.toml"),
+            now(),
         );
         assert_eq!((s.kindle, s.seen, s.in_progress), (None, None, 0));
     }
@@ -183,7 +189,7 @@ mod tests {
             },
         );
         s.save(&shelf).unwrap();
-        let st = status_at(&shelf, &digest);
+        let st = status_at(&shelf, &digest, now());
         assert_eq!(st.kindle.as_deref(), Some("Kindle Paperwhite"));
         assert!(st.highlights_shared && st.words_shared);
     }

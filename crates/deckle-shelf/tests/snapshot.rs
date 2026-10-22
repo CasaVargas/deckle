@@ -148,6 +148,47 @@ fn titles_from_file_names() {
 }
 
 #[test]
+fn in_progress_counts_only_recent_unfinished_books() {
+    let day = |days: i64| {
+        Some(
+            (now() - Duration::days(days))
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string(),
+        )
+    };
+    let b = |title: &str, days: i64, pct: i64| deckle_digest::shelf::store::BookSnap {
+        title: title.into(),
+        last: Some(pct),
+        end: Some(100),
+        last_read: day(days),
+        ..Default::default()
+    };
+    let snap = KindleSnapshot {
+        books: vec![
+            b("recent", 3, 40),
+            b("old", 200, 40),
+            b("done", 3, 99),
+            b("edge", 60, 10),
+            b("past", 61, 10),
+        ],
+        ..Default::default()
+    };
+    assert_eq!(deckle_shelf::in_progress(&snap, now()), 2);
+}
+
+#[test]
+fn a_store_tag_is_dropped_from_a_books_own_title() {
+    let mut k = book(
+        "Walden.kfx",
+        Some("Vibe Coding (Gene Kim) (z-library.sk, 1lib.sk, z-lib.sk)"),
+        Some(fixture("yjf/book.yjf")),
+    );
+    k.authors = vec![];
+    let (snap, _) = snapshot(read_of(vec![k]), "Scribe", "mtp:S", None, now());
+    assert_eq!(snap.books[0].title, "Vibe Coding (Gene Kim)");
+}
+
+#[test]
 fn a_kindle_is_named_without_its_serial() {
     for (raw, want) in [
         ("Kindle Scribe G6G3X308536500ME", "Kindle Scribe"),
