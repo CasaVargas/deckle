@@ -2,7 +2,7 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { DeviceRow, HighlightsStatus } from "../types";
+import type { DeviceRow, HighlightsStatus, ReadershipView } from "../types";
 import { Row, Switch } from "./Row";
 
 interface Props {
@@ -45,10 +45,37 @@ function HighlightsSettings() {
   );
 }
 
+/** `[sync] readership`: note how far the paper was read (readership design §7). */
+function ReadershipSettings() {
+  const [view, setView] = useState<ReadershipView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.readershipReport().then(setView).catch((e) => setError(String(e)));
+  }, []);
+  const set = (on: boolean) =>
+    api
+      .readershipSet(on)
+      .then((v) => {
+        setView(v);
+        setError(null);
+      })
+      .catch((e) => setError(String(e)));
+  return (
+    <section className="set-device">
+      <h3>Reading</h3>
+      <Row label="Note how far I read the paper" note="Read from the Kindle's own reading position when it connects. Shown on the Daily tab; stays on this Mac.">
+        <Switch label="Note how far I read the paper" checked={view?.enabled ?? true} disabled={!view} onChange={set} />
+      </Row>
+      {error && <p className="set-note warn">{error}</p>}
+    </section>
+  );
+}
+
 export default function Kindles({ devices, onDeviceOptions }: Props) {
   return (
     <>
       <HighlightsSettings />
+      <ReadershipSettings />
       {devices.length === 0 && <p className="set-foot">Connect a Kindle to set per-device options.</p>}
       {devices.map((d) => {
         const firmware = d.firmware ?? (d.kind === "mtp" ? "unknown until the first send" : "unknown");

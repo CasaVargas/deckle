@@ -1020,6 +1020,7 @@ dependencies = [
  "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
+ "deckle-readership",
  "deckle-transport",
  "deckle-xray",
  "serde",

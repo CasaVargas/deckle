@@ -187,6 +187,12 @@ pub fn shelf_on(
         )
     });
     let (highlights, highlights_error) = highlights_on(conn, &highlights_state(config));
+    // Reading positions ride in the same session (readership design §3).
+    crate::readership::record_on(
+        conn,
+        &config.with_file_name("readership.json"),
+        &config.with_file_name("digest.toml"),
+    );
     Ok(DeviceShelf {
         device: device.name,
         space: inv.space,
