@@ -176,3 +176,18 @@ fn archive_url() {
          &start_date=1991-01-01&end_date=2020-12-31&daily=temperature_2m_min&timezone=auto"
     );
 }
+
+#[test]
+fn mild_winters_count_january_frosts_as_autumn() {
+    // Frost every winter, but after New Year in 20 of 30 seasons (Gulf Coast, Florida).
+    let s = series(|i, day| {
+        let y = day.year();
+        if i < 20 {
+            day == d(y, 1, 10)
+        } else {
+            day == d(y, 12, 20)
+        }
+    });
+    let u = usual_from_series(&s, 30.0);
+    assert_eq!(u.first_autumn, Some((1, 10)), "{u:?}");
+}

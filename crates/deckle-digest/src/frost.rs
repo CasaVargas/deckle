@@ -49,33 +49,37 @@ fn usual_day(mut offsets: Vec<i64>, lat: f64) -> Option<(u32, u32)> {
 }
 
 pub fn usual_from_series(days: &[(NaiveDate, f64)], lat: f64) -> Usual {
-    let north = lat >= 0.0;
-    // Per year: the first frost on or after midsummer, the last one before the next.
+    let (Some(&(start, _)), Some(&(end, _))) = (days.first(), days.last()) else {
+        return Usual::default();
+    };
+    // A frost season runs from midsummer to the next: July to June up north, the calendar
+    // year down south. A January frost in a mild winter belongs to the season before.
+    let season_of = |day: NaiveDate| {
+        let y = day.year();
+        if day >= midsummer(y, lat) { y } else { y - 1 }
+    };
     let mut first: BTreeMap<i32, NaiveDate> = BTreeMap::new();
     let mut last: BTreeMap<i32, NaiveDate> = BTreeMap::new();
     for &(day, low) in days {
         if low > FROST_C {
             continue;
         }
-        let y = day.year();
-        if day >= midsummer(y, lat) {
-            first.entry(y).or_insert(day);
-        }
-        // North: spring is before July 1 of the same year. South: the whole calendar year
-        // follows January 1, so the last frost of the year is spring's.
-        if !north || day < midsummer(y, lat) {
-            last.insert(y, day);
-        }
+        let s = season_of(day);
+        first.entry(s).or_insert(day);
+        last.insert(s, day);
     }
-    let from = |day: NaiveDate, season_year: i32| (day - midsummer(season_year, lat)).num_days();
+    // Only seasons the record covers from end to end.
+    let whole =
+        |s: &i32| midsummer(*s, lat) >= start && midsummer(s + 1, lat) - Duration::days(1) <= end;
+    let offsets = |m: &BTreeMap<i32, NaiveDate>| {
+        m.iter()
+            .filter(|(s, _)| whole(s))
+            .map(|(s, d)| (*d - midsummer(*s, lat)).num_days())
+            .collect::<Vec<_>>()
+    };
     Usual {
-        first_autumn: usual_day(first.iter().map(|(y, d)| from(*d, *y)).collect(), lat),
-        last_spring: usual_day(
-            last.iter()
-                .map(|(y, d)| from(*d, if north { y - 1 } else { *y }))
-                .collect(),
-            lat,
-        ),
+        first_autumn: usual_day(offsets(&first), lat),
+        last_spring: usual_day(offsets(&last), lat),
     }
 }
 
