@@ -169,6 +169,7 @@ deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (
 Rust (stable, 1.85+), Node 22, pnpm. Conversion needs macOS or Windows.
 
 ```sh
+git config core.hooksPath .githooks                # once: fmt + clippy before every push
 cargo test --workspace
 cd apps/desktop && pnpm install && pnpm tauri dev   # app with hot reload
 pnpm tauri build                                   # installers in target/release/bundle
