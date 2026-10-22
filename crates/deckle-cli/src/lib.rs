@@ -1620,6 +1620,7 @@ fn push_queued(
         push: true,
         prune: actions.prune,
         clippings: actions.clippings,
+        readership: false,
     };
     sync_to(queue, cfg, &target, plan)
 }
@@ -1631,6 +1632,7 @@ fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Act
         push: a.push,
         prune: a.prune,
         clippings: a.clippings,
+        readership: false,
     }
 }
 
@@ -1657,6 +1659,7 @@ fn sync_to(
         &digest_prune(cfg),
         &finishing,
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
+        &[],
     )
     .map_err(|e| e.to_string())?;
     // Read in the same session; written to the folder after it's closed.

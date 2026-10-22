@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use crate::clippings::read_on;
 use crate::deliver::{Conn, DeliverError, Target, prune_named_on};
 use crate::queue::{Finishing, FlushReport, Progress, Prune, Queue};
+use crate::yjf;
 
 /// Whether opening an MTP session with nothing to deliver leaves the Kindle where it was. It
 /// used to send the Scribe to its home screen (auto-sync design §4). Checked again on a Scribe
@@ -22,6 +23,8 @@ pub struct Actions {
     pub prune: bool,
     /// Read `My Clippings.txt` for the highlights export (#60).
     pub clippings: bool,
+    /// Read each edition's `.yjf` for the readership report.
+    pub readership: bool,
 }
 
 impl Default for Actions {
@@ -31,6 +34,7 @@ impl Default for Actions {
             push: true,
             prune: true,
             clippings: false,
+            readership: false,
         }
     }
 }
@@ -41,11 +45,12 @@ pub struct Plan {
     pub push: bool,
     pub prune: bool,
     pub clippings: bool,
+    pub readership: bool,
 }
 
 impl Plan {
     pub fn is_empty(&self) -> bool {
-        !self.push && !self.prune && !self.clippings
+        !self.push && !self.prune && !self.clippings && !self.readership
     }
 }
 
@@ -79,6 +84,7 @@ struct Connected {
     tried: Option<Vec<PathBuf>>,
     pruned: bool,
     clipped: bool,
+    read: bool,
 }
 
 impl Watcher {
@@ -95,12 +101,18 @@ impl Watcher {
                 tried: None,
                 pruned: false,
                 clipped: false,
+                read: false,
             }),
         };
         // Clippings ride along with whatever opens a session, once per connection.
         let clippings = |conn: &mut Connected| {
             let due = actions.clippings && !conn.clipped;
             conn.clipped |= due;
+            due
+        };
+        let readership = |conn: &mut Connected| {
+            let due = actions.readership && !conn.read;
+            conn.read |= due;
             due
         };
         if actions.push && !pending.is_empty() && conn.tried.as_deref() != Some(pending) {
@@ -110,6 +122,7 @@ impl Watcher {
                 push: true,
                 prune: actions.prune,
                 clippings: clippings(conn),
+                readership: readership(conn),
             };
         }
         // With push on, prune rides along with a push: an idle plug-in opens no MTP session
@@ -120,25 +133,32 @@ impl Watcher {
                 push: false,
                 prune: true,
                 clippings: clippings(conn),
+                readership: readership(conn),
             };
         }
-        if IDLE_SESSION_OK && clippings(conn) {
-            return Plan {
+        if IDLE_SESSION_OK {
+            let plan = Plan {
                 push: false,
                 prune: false,
-                clippings: true,
+                clippings: clippings(conn),
+                readership: readership(conn),
             };
+            if !plan.is_empty() {
+                return plan;
+            }
         }
         Plan::default()
     }
 }
 
-/// Runs `plan` over `conn`: push the outbox, prune, then read the clippings, in one session.
+/// Runs `plan` over `conn` in one session: read the reading positions of the editions named
+/// by `stems` (before prune removes any), push the outbox, prune, then read the clippings.
 pub fn run(
     queue: &Queue,
     conn: &mut Conn<'_>,
     plan: Plan,
     prune: &Prune,
+    stems: &[String],
 ) -> Result<FlushReport, DeliverError> {
     run_with(
         queue,
@@ -147,6 +167,7 @@ pub fn run(
         prune,
         &Finishing::default(),
         &mut |_, _, _| {},
+        stems,
     )
 }
 
@@ -159,7 +180,17 @@ pub fn run_with(
     prune: &Prune,
     finishing: &Finishing,
     progress: &mut Progress<'_>,
+    stems: &[String],
 ) -> Result<FlushReport, DeliverError> {
+    // First: prune deletes an edition's `.sdr`, and its `.yjf` with it. A failed read doesn't
+    // stop the delivery.
+    let (positions, positions_error) = match plan.readership {
+        true => match yjf::read_on(conn, stems) {
+            Ok(p) => (p, None),
+            Err(e) => (Vec::new(), Some(e.to_string())),
+        },
+        false => (Vec::new(), None),
+    };
     let mut report = if plan.push {
         queue.flush_with(conn, plan.prune.then_some(prune), finishing, progress)?
     } else {
@@ -175,6 +206,8 @@ pub fn run_with(
             Err(e) => report.clippings_error = Some(e.to_string()),
         }
     }
+    report.positions = positions;
+    report.positions_error = positions_error;
     Ok(report)
 }
 
@@ -188,6 +221,7 @@ mod tests {
     use super::*;
     use crate::deliver::Device;
     use crate::fake_mtp as fake;
+    use crate::yjf::OnDevice;
 
     fn mtp(serial: Option<&str>, product: Option<&str>) -> Target {
         Target::Mtp(MtpInfo {
@@ -222,21 +256,25 @@ mod tests {
         push: true,
         prune: false,
         clippings: false,
+        readership: false,
     };
     const PRUNE: Plan = Plan {
         push: false,
         prune: true,
         clippings: false,
+        readership: false,
     };
     const BOTH: Plan = Plan {
         push: true,
         prune: true,
         clippings: false,
+        readership: false,
     };
     const NONE: Plan = Plan {
         push: false,
         prune: false,
         clippings: false,
+        readership: false,
     };
 
     #[test]
@@ -246,6 +284,7 @@ mod tests {
             push: true,
             prune: false,
             clippings: false,
+            readership: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, push_only), PUSH);
@@ -259,6 +298,7 @@ mod tests {
             push: false,
             prune: true,
             clippings: false,
+            readership: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, prune_only), PRUNE);
@@ -279,6 +319,7 @@ mod tests {
             push: false,
             prune: false,
             clippings: false,
+            readership: false,
         };
         let mut w = Watcher::default();
         assert_eq!(w.tick(Some("K"), &a, off), NONE);
@@ -334,12 +375,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (q, kindle) = outbox_and_folder(tmp.path());
         let target = Target::Folder(kindle.clone());
-        let r = run(&q, &mut Conn::new(&target), PUSH, &prune()).unwrap();
+        let r = run(&q, &mut Conn::new(&target), PUSH, &prune(), &[]).unwrap();
         assert_eq!(r.delivered.len(), 1);
         assert!(r.pruned.is_empty());
         assert!(kindle.join("deckle-daily-2026-10-17.kfx").exists());
 
-        let r = run(&q, &mut Conn::new(&target), PRUNE, &prune()).unwrap();
+        let r = run(&q, &mut Conn::new(&target), PRUNE, &prune(), &[]).unwrap();
         assert!(r.delivered.is_empty());
         assert_eq!(r.pruned, ["deckle-daily-2026-10-17.kfx"]);
     }
@@ -372,7 +413,7 @@ mod tests {
         let target = mtp(Some("G0001"), Some("Kindle"));
         let r = {
             let mut conn = Conn::with_opener(&target, fake::open);
-            run(&q, &mut conn, BOTH, &prune()).unwrap()
+            run(&q, &mut conn, BOTH, &prune(), &[]).unwrap()
         };
         assert_eq!(
             r.delivered,
@@ -409,6 +450,7 @@ mod tests {
             &mut Conn::with_opener(&target, fake::open),
             PRUNE,
             &prune(),
+            &[],
         )
         .unwrap();
         assert!(r.delivered.is_empty());
@@ -425,6 +467,7 @@ mod tests {
             push: true,
             prune: true,
             clippings: true,
+            readership: false,
         };
         let mut w = Watcher::default();
         assert_eq!(
@@ -432,7 +475,8 @@ mod tests {
             Plan {
                 push: true,
                 prune: true,
-                clippings: true
+                clippings: true,
+                readership: false,
             }
         );
         let b = files(&["b.kfx"]);
@@ -450,6 +494,7 @@ mod tests {
             push: false,
             prune: true,
             clippings: true,
+            readership: false,
         };
         let mut w = Watcher::default();
         assert_eq!(
@@ -457,7 +502,8 @@ mod tests {
             Plan {
                 push: false,
                 prune: true,
-                clippings: true
+                clippings: true,
+                readership: false,
             }
         );
     }
@@ -468,12 +514,14 @@ mod tests {
             push: true,
             prune: true,
             clippings: true,
+            readership: false,
         };
         let mut w = Watcher::default();
         let want = Plan {
             push: false,
             prune: false,
             clippings: IDLE_SESSION_OK,
+            readership: false,
         };
         assert_eq!(w.tick(Some("K"), &[], on), want);
         assert_eq!(w.tick(Some("K"), &[], on), NONE);
@@ -490,12 +538,14 @@ mod tests {
             push: true,
             prune: false,
             clippings: true,
+            readership: false,
         };
         let r = run(
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
             &prune(),
+            &[],
         )
         .unwrap();
         assert_eq!(r.delivered.len(), 1);
@@ -506,6 +556,7 @@ mod tests {
             push: false,
             prune: false,
             clippings: true,
+            readership: false,
         };
         fake::reset(&[]);
         let r = run(
@@ -513,6 +564,7 @@ mod tests {
             &mut Conn::with_opener(&target, fake::open),
             alone,
             &prune(),
+            &[],
         )
         .unwrap();
         assert_eq!(r.clippings, None, "no file: nothing, and no error");
@@ -531,17 +583,129 @@ mod tests {
             push: true,
             prune: false,
             clippings: true,
+            readership: false,
         };
         let r = run(
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
             &prune(),
+            &[],
         )
         .expect("the push succeeded");
         assert_eq!(r.delivered.len(), 1);
         assert_eq!(r.clippings, None);
         assert!(r.clippings_error.as_deref().unwrap().contains("MTP"));
+    }
+
+    #[test]
+    fn readership_rides_along_with_a_push_once_per_connection() {
+        let a = files(&["a.kfx"]);
+        let on = Actions {
+            push: true,
+            prune: true,
+            clippings: false,
+            readership: true,
+        };
+        let mut w = Watcher::default();
+        assert!(w.tick(Some("K"), &a, on).readership);
+        let b = files(&["b.kfx"]);
+        assert!(!w.tick(Some("K"), &b, on).readership, "once per connection");
+        assert_eq!(w.tick(None, &b, on), NONE);
+        assert!(
+            w.tick(Some("K"), &b, on).readership,
+            "a reconnect reads again"
+        );
+    }
+
+    #[test]
+    fn readership_runs_alone_on_an_idle_plug_in() {
+        let on = Actions {
+            push: true,
+            prune: true,
+            clippings: false,
+            readership: true,
+        };
+        let mut w = Watcher::default();
+        let p = w.tick(Some("K"), &[], on);
+        assert_eq!(
+            (p.push, p.prune, p.readership),
+            (false, false, IDLE_SESSION_OK)
+        );
+        assert_eq!(w.tick(Some("K"), &[], on), NONE);
+    }
+
+    #[test]
+    fn positions_are_read_before_prune_removes_the_edition() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (q, _) = outbox_and_folder(tmp.path());
+        fake::reset(&["deckle-daily-2026-10-17.kfx", "deckle-daily-2026-10-18.kfx"]);
+        fake::put_bytes(
+            "deckle-daily-2026-10-17.sdr/deckle-daily-2026-10-179d6e5f44.yjf",
+            b"YJF17",
+        );
+        let target = mtp(Some("G0001"), Some("Kindle"));
+        let plan = Plan {
+            push: true,
+            prune: true,
+            clippings: false,
+            readership: true,
+        };
+        let stems = vec![
+            "deckle-daily-2026-10-18".to_owned(),
+            "deckle-daily-2026-10-17".to_owned(),
+        ];
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            plan,
+            &prune(),
+            &stems,
+        )
+        .unwrap();
+        assert_eq!(
+            r.positions,
+            [
+                ("deckle-daily-2026-10-18".to_owned(), OnDevice::Unopened),
+                (
+                    "deckle-daily-2026-10-17".to_owned(),
+                    OnDevice::Opened(b"YJF17".to_vec())
+                ),
+            ]
+        );
+        assert!(
+            !fake::documents().contains(&"deckle-daily-2026-10-17.kfx".to_owned()),
+            "pruned after the read: {:?}",
+            fake::documents()
+        );
+        assert_eq!(fake::opens(), 1, "one connection");
+    }
+
+    #[test]
+    fn a_failed_yjf_read_keeps_the_delivery() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (q, _) = outbox_and_folder(tmp.path());
+        fake::reset(&["deckle-daily-2026-10-18.kfx"]);
+        fake::put_bytes("deckle-daily-2026-10-18.sdr/x.yjf", b"YJF");
+        fake::fail_get_object();
+        let target = mtp(Some("G0001"), Some("Kindle"));
+        let plan = Plan {
+            push: true,
+            prune: false,
+            clippings: false,
+            readership: true,
+        };
+        let r = run(
+            &q,
+            &mut Conn::with_opener(&target, fake::open),
+            plan,
+            &prune(),
+            &["deckle-daily-2026-10-18".to_owned()],
+        )
+        .expect("the push succeeded");
+        assert_eq!(r.delivered.len(), 1);
+        assert!(r.positions.is_empty());
+        assert!(r.positions_error.as_deref().unwrap().contains("MTP"));
     }
 
     #[test]
@@ -555,6 +719,7 @@ mod tests {
             &mut Conn::with_opener(&target, fake::open),
             NONE,
             &prune(),
+            &[],
         )
         .unwrap();
         assert_eq!(fake::opens(), 0);

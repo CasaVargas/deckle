@@ -49,6 +49,11 @@ pub struct FlushReport {
     /// Reading `My Clippings.txt` failed; what was delivered still was.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub clippings_error: Option<String>,
+    /// Each edition's `.yjf`, read first in the session (`[sync] readership`).
+    #[serde(skip)]
+    pub positions: Vec<(String, crate::yjf::OnDevice)>,
+    /// Why the `.yjf` read failed; the delivery stands.
+    pub positions_error: Option<String>,
 }
 
 /// After a flush, editions named `<prefix>…` beyond the newest `keep` are removed.
