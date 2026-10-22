@@ -26,11 +26,11 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": [
       "app",
       "dmg",
       "nsis",
-      "msi",
       "deb",
       "appimage"
     ],
@@ -54,6 +54,17 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFREUyRDA1NEJFRUQ1OTcKUldTWDFlNUxCUzNlcnB0dTlGcDZteXFlTlRoblNpVFh5clFQaTJ2ZFlFRC9RVmtoZHZGRnhkdUUK",
+      "endpoints": [
+        "https://github.com/CasaVargas/deckle/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

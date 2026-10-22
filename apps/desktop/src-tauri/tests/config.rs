@@ -17,9 +17,11 @@ fn bundle_targets_macos_14_and_installs_per_user_on_windows() {
         .iter()
         .filter_map(|t| t.as_str())
         .collect();
-    for t in ["app", "dmg", "nsis", "msi"] {
+    for t in ["app", "dmg", "nsis", "appimage", "deb"] {
         assert!(targets.contains(&t), "missing bundle target {t}");
     }
+    // NSIS is the one Windows installer: it's what the updater installs.
+    assert!(!targets.contains(&"msi"), "the MSI target is dropped");
 }
 
 #[test]
@@ -33,15 +35,22 @@ fn csp_allows_data_cover_thumbnails_and_nothing_remote() {
 }
 
 #[test]
-fn no_updater_plugin() {
-    // design §12: no auto-updater (it phones home); the About section links to Releases.
-    assert!(
-        config()
-            .get("plugins")
-            .and_then(|p| p.get("updater"))
-            .is_none()
+fn updater_points_at_latest_release_and_is_signed() {
+    // auto-update design §4: the Latest GitHub release's latest.json, minisign-verified.
+    let c = config();
+    let u = &c["plugins"]["updater"];
+    assert_eq!(
+        u["endpoints"],
+        serde_json::json!([
+            "https://github.com/CasaVargas/deckle/releases/latest/download/latest.json"
+        ])
     );
-    assert!(!include_str!("../Cargo.toml").contains("tauri-plugin-updater"));
+    assert!(!u["pubkey"].as_str().unwrap_or("").is_empty());
+    assert_eq!(u["windows"]["installMode"], "passive");
+    assert_eq!(c["bundle"]["createUpdaterArtifacts"], true);
+    let cargo = include_str!("../Cargo.toml");
+    assert!(cargo.contains("tauri-plugin-updater"));
+    assert!(cargo.contains("tauri-plugin-process"));
 }
 
 #[test]
