@@ -9,6 +9,8 @@
 use chrono::{TimeZone, Utc};
 
 const SIGNATURE: [u8; 8] = [0, 0, 0, 0, 0, 0x1a, 0xb1, 0x26];
+/// Real files nest two or three objects deep; anything past this is refused, not recursed into.
+const MAX_DEPTH: usize = 32;
 
 /// Where the reader is in a book, as the Kindle recorded it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -29,6 +31,8 @@ pub enum KrdsError {
     Truncated { at: usize },
     #[error("unknown value type {byte} at byte {at}")]
     BadType { byte: u8, at: usize },
+    #[error("objects nested too deep (at byte {at})")]
+    TooDeep { at: usize },
 }
 
 #[derive(Debug)]
@@ -73,8 +77,11 @@ impl Reader<'_> {
         Ok(String::from_utf8_lossy(self.take(n)?).into_owned())
     }
 
-    fn value(&mut self) -> Result<Value, KrdsError> {
+    fn value(&mut self, depth: usize) -> Result<Value, KrdsError> {
         let at = self.at;
+        if depth > MAX_DEPTH {
+            return Err(KrdsError::TooDeep { at });
+        }
         let ty = self.byte()?;
         Ok(match ty as i8 {
             0 | 9 => {
@@ -98,7 +105,7 @@ impl Reader<'_> {
                 let name = self.utf()?;
                 let mut values = Vec::new();
                 while self.peek()? as i8 != -1 {
-                    values.push(self.value()?);
+                    values.push(self.value(depth + 1)?);
                 }
                 self.byte()?;
                 Value::Object(name, values)
@@ -128,14 +135,14 @@ pub fn parse_yjf(bytes: &[u8]) -> Result<Positions, KrdsError> {
     if r.take(SIGNATURE.len())? != SIGNATURE {
         return Err(KrdsError::BadSignature);
     }
-    r.value()?; // header value (1)
-    let count = match r.value()? {
+    r.value(0)?; // header value (1)
+    let count = match r.value(0)? {
         Value::Int(n) => n.max(0) as usize,
         _ => return Err(KrdsError::BadType { byte: 0, at: r.at }),
     };
     let mut p = Positions::default();
     for _ in 0..count {
-        let Value::Object(name, values) = r.value()? else {
+        let Value::Object(name, values) = r.value(0)? else {
             continue;
         };
         match (name.as_str(), values.as_slice()) {

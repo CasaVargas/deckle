@@ -92,3 +92,11 @@ fn layouts_round_trip_as_json() {
     let back: Layout = serde_json::from_str(&serde_json::to_string(&l).unwrap()).unwrap();
     assert_eq!(back, l);
 }
+
+#[test]
+fn headings_match_with_whitespace_normalised() {
+    let mut names = chapter_names();
+    names[0].1 = names[0].1.replace(' ', "  ");
+    names[0].1.push('\n');
+    assert!(layout_from_kfx(&mini(), d("2026-10-21"), "Mini", "f", &names).is_ok());
+}

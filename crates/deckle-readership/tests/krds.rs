@@ -63,3 +63,14 @@ fn position_ids() {
     assert_eq!(position_id("AQULAAB1AgAA:54797"), Some(54797));
     assert_eq!(position_id("nonsense"), None);
 }
+
+#[test]
+fn deep_nesting_is_an_error_not_a_crash() {
+    let mut b = SIGNATURE.to_vec();
+    b.extend(long(1));
+    b.extend(int(1));
+    for _ in 0..200_000 {
+        b.extend([0xfe, 1]); // object begin, name flagged empty
+    }
+    assert!(parse_yjf(&b).is_err());
+}

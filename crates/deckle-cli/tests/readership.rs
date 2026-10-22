@@ -121,7 +121,10 @@ fn apply_drops_the_section_from_digest_toml_keeping_comments() {
         .assert()
         .success();
     let text = std::fs::read_to_string(&digest).unwrap();
-    assert!(text.contains("sections = [\"weather\"] # what goes in"), "{text}");
+    assert!(
+        text.contains("sections = [\"weather\"] # what goes in"),
+        "{text}"
+    );
     assert!(
         text.contains("# my paper") && text.contains("# what goes in"),
         "{text}"

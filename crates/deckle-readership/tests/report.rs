@@ -366,3 +366,22 @@ fn dismissed_suggestions_return_after_fourteen_editions() {
         "14 newer: back"
     );
 }
+
+#[test]
+fn opened_editions_without_positions_suggest_nothing() {
+    let mut s = State::default();
+    for i in 0..8 {
+        edition(&mut s, i, PAPER, &[("K", None)]);
+        s.reads
+            .get_mut(&date(i))
+            .unwrap()
+            .get_mut("K")
+            .unwrap()
+            .opened = true;
+    }
+    let r = report(&s, &usual());
+    assert_eq!(r.opened, 8);
+    assert_eq!(r.median_percent, None);
+    assert!(r.suggestions.is_empty(), "{:?}", ids(&r));
+    assert!(r.sections.iter().all(|row| row.share.is_none()));
+}

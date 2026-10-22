@@ -1813,6 +1813,9 @@ fn digest_readership(
         cli::ReadershipCommand::Apply { .. } => {
             deckle_readership::apply(s, &mut cfg)?;
             deckle_digest::config::save(path, &cfg)?;
+            // Set aside, or a Move up would come straight back from the same editions.
+            deckle_readership::dismiss(&mut state, s);
+            state.save(&state_path)?;
             emit(json, s, || format!("applied: {}", s.title))?;
         }
         cli::ReadershipCommand::Dismiss { .. } => {

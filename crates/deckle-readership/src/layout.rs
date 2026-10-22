@@ -48,7 +48,7 @@ pub fn layout_from_kfx(
     let mut rest = firsts[1..].iter();
     for (key, name) in sections {
         let run = rest
-            .find(|r| r.text.trim() == name.trim())
+            .find(|r| words(&r.text) == words(name))
             .ok_or_else(|| format!("section \"{name}\" not found in the edition"))?;
         out.push(SectionStart {
             key: key.clone(),
@@ -63,6 +63,11 @@ pub fn layout_from_kfx(
         end,
         sections: out,
     })
+}
+
+/// `s` with runs of whitespace as single spaces: the converter may collapse or keep them.
+fn words(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The section a position falls in: the last one starting at or before it.

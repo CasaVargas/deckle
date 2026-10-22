@@ -111,7 +111,18 @@ fn median<T: PartialOrd + Copy>(mut v: Vec<T>) -> Option<T> {
 
 pub fn report(state: &State, cfg: &Config) -> Report {
     let window: Vec<&Layout> = state.editions.values().rev().take(WINDOW).collect();
-    // Each opened edition with the furthest any Kindle got.
+    let opened_count = window
+        .iter()
+        .filter(|l| {
+            state
+                .reads
+                .get(&l.date)
+                .is_some_and(|m| m.values().any(|r| r.opened))
+        })
+        .count();
+    // Each opened edition with the furthest any Kindle got. An opened read without a position
+    // (a format this firmware writes differently) says nothing about how far: left out here,
+    // so it can't turn into "you never got there".
     let opened: Vec<(&Layout, i64)> = window
         .iter()
         .filter_map(|l| {
@@ -119,7 +130,7 @@ pub fn report(state: &State, cfg: &Config) -> Report {
             let f = reads
                 .values()
                 .filter(|r| r.opened)
-                .map(|r| r.furthest.or(r.last).unwrap_or(0))
+                .filter_map(|r| r.furthest.or(r.last))
                 .max()?;
             Some((*l, f))
         })
@@ -255,7 +266,7 @@ pub fn report(state: &State, cfg: &Config) -> Report {
 
     Report {
         window: window.len(),
-        opened: opened.len(),
+        opened: opened_count,
         median_percent,
         stop_section,
         sections: rows,

@@ -44,12 +44,17 @@ fn suggestion(
         .ok_or_else(|| "That suggestion no longer applies.".to_owned())
 }
 
-/// Makes suggestion `id` to `digest.toml`, keeping its comments.
+/// Makes suggestion `id` to `digest.toml`, keeping its comments. It's then set aside like a
+/// dismissed one: the editions already read still say what they said, so a Move up would
+/// otherwise come straight back and move the feed again.
 pub fn apply_at(state: &Path, digest: &Path, id: &str) -> Result<ReadershipView, String> {
     let s = suggestion(state, digest, id)?;
     let mut cfg = load_config(digest)?;
     deckle_readership::apply(&s, &mut cfg)?;
     deckle_digest::config::save(digest, &cfg)?;
+    let mut st = State::load(state);
+    deckle_readership::dismiss(&mut st, &s);
+    st.save(state)?;
     view_at(state, digest)
 }
 
@@ -203,6 +208,70 @@ mod tests {
             apply_at(&state, &digest, "drop:lottery").is_err(),
             "gone now"
         );
+    }
+
+    #[test]
+    fn an_applied_move_up_does_not_come_straight_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = State::default();
+        let start: deckle_digest::chrono::NaiveDate = "2026-09-01".parse().unwrap();
+        let sec = |key: &str, name: &str, start| SectionStart {
+            key: key.into(),
+            name: name.into(),
+            start,
+        };
+        for i in 0..10u64 {
+            let date = start + deckle_digest::chrono::Days::new(i);
+            s.record_layout(Layout {
+                date,
+                title: "The Deckle Daily".into(),
+                file: format!("deckle-daily-{date}"),
+                end: 10_000,
+                sections: vec![
+                    sec("front", "Front page", 0),
+                    sec("weather", "Weather", 1000),
+                    sec("feeds:A", "A", 2000),
+                    sec("feeds:B", "B", 7000),
+                ],
+            });
+            let r = Read {
+                opened: true,
+                furthest: Some(3000),
+                last: Some(3000),
+                last_read: None,
+                seen: "x".into(),
+            };
+            s.reads.entry(date).or_default().insert("K".into(), r);
+        }
+        let (state, digest) = (
+            tmp.path().join("readership.json"),
+            tmp.path().join("digest.toml"),
+        );
+        s.save(&state).unwrap();
+        std::fs::write(
+            &digest,
+            "sections = [\"weather\", \"feeds\"]\n\n[[feeds]]\nname = \"A\"\nurl = \"https://a.example/f\"\n\n[[feeds]]\nname = \"B\"\nurl = \"https://b.example/f\"\n",
+        )
+        .unwrap();
+        assert!(
+            view_at(&state, &digest)
+                .unwrap()
+                .report
+                .suggestions
+                .iter()
+                .any(|x| x.id == "up:feeds:B")
+        );
+        let v = apply_at(&state, &digest, "up:feeds:B").unwrap();
+        assert!(
+            v.report
+                .suggestions
+                .iter()
+                .all(|x| !x.id.starts_with("up:")),
+            "{:?}",
+            v.report.suggestions
+        );
+        let cfg = deckle_digest::Config::load(&digest).unwrap();
+        assert_eq!(cfg.feeds[0].name, "B");
     }
 
     #[test]
