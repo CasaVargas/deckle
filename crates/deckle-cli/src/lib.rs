@@ -1417,10 +1417,14 @@ fn digest(
             // paper still goes to them, and nothing is converted or queued for a Kindle.
             let located = match previewer::locate(pv.as_deref()) {
                 Ok(l) => Some(l),
-                Err(e) if to == "device" && (!cfg.export.is_empty() || reader_seen()) => {
+                Err(e)
+                    if to == "device"
+                        && (!cfg.export.is_empty() || reader_seen() || cfg.remarkable.enabled) =>
+                {
                     let to: Vec<&str> = [
                         (!cfg.export.is_empty()).then_some("the export folders"),
                         reader_seen().then_some("the e-reader outbox"),
+                        cfg.remarkable.enabled.then_some("the reMarkable"),
                     ]
                     .into_iter()
                     .flatten()
@@ -1431,7 +1435,10 @@ fn digest(
                     ));
                     // A long read with no book to become prints in the paper, unless an
                     // e-reader or an export folder takes it as a book.
-                    if !reader_seen() && !cfg.export.iter().any(|x| x.books) {
+                    if !reader_seen()
+                        && !cfg.export.iter().any(|x| x.books)
+                        && !(cfg.remarkable.enabled && cfg.remarkable.books)
+                    {
                         cfg.reading.long_read_words = usize::MAX;
                     }
                     None
@@ -1537,10 +1544,23 @@ fn digest(
                     built.notes.extend(note);
                 }
             }
+            // The reMarkable's PDF, from its own outbox.
+            let rm_queue = remarkable_queue();
+            let rm_queued = folder.is_none()
+                && cfg.remarkable.enabled
+                && match queue_remarkable(&rm_queue, &cfg, &built, date) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        built
+                            .notes
+                            .push(format!("not queued for the reMarkable: {e}"));
+                        false
+                    }
+                };
             if located.is_none() {
-                // Nothing for a Kindle: the export folders, the e-reader outbox or the email were
-                // the delivery.
-                if exported || epub_queued || !to_usb {
+                // Nothing for a Kindle: the export folders, the e-reader or reMarkable outbox or
+                // the email were the delivery.
+                if exported || epub_queued || rm_queued || !to_usb {
                     reading_queue(&cfg)
                         .commit(date, &reading_outcomes)
                         .map_err(|e| format!("reading queue: {e}"))?;
@@ -1575,6 +1595,8 @@ fn digest(
                     .commit(date, &reading_outcomes)
                     .map_err(|e| format!("reading queue: {e}"))?;
             }
+            // A reMarkable plugged in now takes the PDF at once.
+            let remarkable = rm_queued.then(|| push_remarkable(&cfg)).flatten();
             // A Kobo or a PocketBook plugged in now takes its copy at once.
             let device = detect_reader().filter(|_| folder.is_none() && epub_queued);
             let reader = match push_reader(&kobo_queue, &cfg, device.as_ref()) {
@@ -1600,6 +1622,12 @@ fn digest(
                 /// A Kobo or a PocketBook was connected and took it.
                 #[serde(skip_serializing_if = "Option::is_none")]
                 reader: Option<&'a DigestOutcome>,
+                /// The paper's PDF queued for a reMarkable (`outbox-remarkable`).
+                #[serde(skip_serializing_if = "std::ops::Not::not")]
+                remarkable_queued: bool,
+                /// A reMarkable answered and took it.
+                #[serde(skip_serializing_if = "Option::is_none")]
+                remarkable: Option<&'a deckle_core::sync::RemarkablePush>,
             }
             let all = DigestRun {
                 build: &built,
@@ -1609,6 +1637,8 @@ fn digest(
                 exports: &exports,
                 epub_queued,
                 reader: reader.as_ref(),
+                remarkable_queued: rm_queued,
+                remarkable: remarkable.as_ref(),
             };
             let failed = report.as_ref().and_then(|r| r.error.as_ref());
             emit(json, &all, || {
@@ -1631,7 +1661,14 @@ fn digest(
                         .to_owned(),
                     _ => String::new(),
                 };
-                for part in [email.lines(), exported, usb, reader_lines] {
+                let rm_lines = match &remarkable {
+                    Some(p) => remarkable_lines(p),
+                    None if rm_queued => "      queued for the reMarkable: it goes over when it's \
+                                          plugged in with its USB web interface on"
+                        .to_owned(),
+                    None => String::new(),
+                };
+                for part in [email.lines(), exported, usb, reader_lines, rm_lines] {
                     if !part.is_empty() {
                         text.push_str(&format!("\n{part}"));
                     }
@@ -1772,17 +1809,30 @@ fn digest(
                 "device" => detect_reader(),
                 _ => None,
             };
+            // A reMarkable that answers takes its outbox too (other readers design §9).
+            let remarkable = match to.as_str() {
+                "device" => push_remarkable(&cfg),
+                _ => None,
+            };
             if target.is_none()
                 && let Some(reader) = &reader
             {
-                let outcome = push_reader(&kobo_queue, &cfg, Some(reader))?.unwrap_or_default();
+                let mut outcome = push_reader(&kobo_queue, &cfg, Some(reader))?.unwrap_or_default();
+                outcome.remarkable = remarkable;
                 emit(json, &outcome, || match &outcome.flush {
                     Some(_) => outcome.describe(&kobo_queue),
-                    None => format!("      nothing queued for the {}", reader.name()),
+                    None => {
+                        let none = format!("      nothing queued for the {}", reader.name());
+                        match &outcome.remarkable {
+                            Some(p) => format!("{none}\n{}", remarkable_lines(p)),
+                            None => none,
+                        }
+                    }
                 })?;
                 return Ok(ExitCode::SUCCESS);
             }
-            let outcome = push_queued(&queue, &cfg, target)?;
+            let mut outcome = push_queued(&queue, &cfg, target)?;
+            outcome.remarkable = remarkable;
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
         }
@@ -1790,7 +1840,8 @@ fn digest(
             let cfg = load_digest_config(&path)?;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             eprintln!(
-                "watching for a Kindle, a Kobo or a PocketBook every {interval}s; outbox {}",
+                "watching for a Kindle, a Kobo, a PocketBook or a reMarkable every {interval}s; \
+                 outbox {}",
                 queue.dir.display()
             );
             // The bookmarklet's listener (save-to-paper §4). A busy port only costs the
@@ -1826,6 +1877,9 @@ fn digest(
             // A Kobo or a PocketBook has its own outbox and connection (other readers design §8).
             let kobo_queue = epub_queue();
             let mut reader_watcher = deckle_core::sync::Watcher::default();
+            // A reMarkable answers on its USB link; one push per connection, as for the others.
+            let rm_queue = remarkable_queue();
+            let mut rm_watcher = deckle_core::sync::Watcher::default();
             loop {
                 scan_inbox(&cfg);
                 let pending = queue.pending();
@@ -1862,6 +1916,26 @@ fn digest(
                         Err(e) => eprintln!("error: {e}"),
                     }
                 }
+                if cfg.remarkable.enabled {
+                    let pending = rm_queue.pending();
+                    // Asked only while something waits: an absent tablet costs a second a tick.
+                    let tablet = (!pending.is_empty())
+                        .then(deckle_core::remarkable::detect)
+                        .flatten();
+                    let id = tablet.as_ref().map(deckle_core::remarkable::Remarkable::id);
+                    let push_only = deckle_core::sync::Actions {
+                        push: true,
+                        prune: false,
+                        clippings: false,
+                        readership: false,
+                        shelf: false,
+                    };
+                    let plan = rm_watcher.tick(id.as_deref(), &pending, push_only);
+                    if let (Some(r), true) = (&tablet, plan.push) {
+                        let p = deckle_core::sync::run_remarkable(&rm_queue, r);
+                        emit(json, &p, || remarkable_lines(&p))?;
+                    }
+                }
                 std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
             }
         }
@@ -1883,10 +1957,38 @@ struct DigestOutcome {
     /// The Kindle's shelf recorded in the same session (`[sync] shelf`).
     #[serde(skip)]
     shelf: Option<deckle_shelf::Summary>,
+    /// What went to a reMarkable in the same run (`[remarkable]`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remarkable: Option<deckle_core::sync::RemarkablePush>,
+}
+
+/// One push to a reMarkable, as lines of the run's report.
+fn remarkable_lines(p: &deckle_core::sync::RemarkablePush) -> String {
+    let mut lines: Vec<String> = p
+        .uploaded
+        .iter()
+        .map(|f| format!("      reMarkable -> {f}"))
+        .collect();
+    lines.extend(
+        p.already
+            .iter()
+            .map(|f| format!("      reMarkable already has {f}")),
+    );
+    lines.extend(p.errors.iter().map(|e| format!("      reMarkable: {e}")));
+    lines.join("\n")
 }
 
 impl DigestOutcome {
     fn describe(&self, queue: &deckle_core::queue::Queue) -> String {
+        let main = self.describe_device(queue);
+        match &self.remarkable {
+            Some(p) if !main.is_empty() => format!("{main}\n{}", remarkable_lines(p)),
+            Some(p) => remarkable_lines(p),
+            None => main,
+        }
+    }
+
+    fn describe_device(&self, queue: &deckle_core::queue::Queue) -> String {
         match &self.flush {
             Some(f)
                 if f.delivered.is_empty()
@@ -2253,6 +2355,53 @@ fn detect_kindle() -> Option<Target> {
 /// (other readers design §8).
 fn detect_reader() -> Option<deckle_core::reader::Reader> {
     deckle_core::reader::detect().into_iter().next()
+}
+
+/// What waits for a reMarkable: the paper's PDF and the long reads' EPUBs.
+fn remarkable_queue() -> deckle_core::queue::Queue {
+    deckle_core::queue::Queue::new(deckle_core::queue::Queue::remarkable_dir())
+}
+
+/// Puts the paper's PDF for the reMarkable's screen (and, with `books`, the long reads) in its
+/// outbox.
+fn queue_remarkable(
+    queue: &deckle_core::queue::Queue,
+    cfg: &deckle_digest::Config,
+    built: &deckle_digest::BuildReport,
+    date: deckle_digest::chrono::NaiveDate,
+) -> Result<(), String> {
+    let rm = &cfg.remarkable;
+    let pdf = built
+        .pdf(rm.screen, rm.photos())
+        .ok_or("the PDF edition wasn't built")?;
+    let name = format!("{}{date}.pdf", deckle_digest::EDITION_PREFIX);
+    queue
+        .add(pdf, &name, Some(deckle_digest::EDITION_PREFIX))
+        .map_err(|e| e.to_string())?;
+    if rm.books {
+        for p in &built.long_reads {
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            queue.add(p, &name, None).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Uploads the reMarkable outbox when `[remarkable]` is on and the tablet answers.
+fn push_remarkable(cfg: &deckle_digest::Config) -> Option<deckle_core::sync::RemarkablePush> {
+    if !cfg.remarkable.enabled {
+        return None;
+    }
+    let queue = remarkable_queue();
+    if queue.pending().is_empty() {
+        return None;
+    }
+    let r = deckle_core::remarkable::detect()?;
+    Some(deckle_core::sync::run_remarkable(&queue, &r))
 }
 
 /// What waits for a Kobo or a PocketBook: EPUBs, made KEPUBs for a Kobo as they go over.
@@ -3416,6 +3565,7 @@ mod tests {
             long_reads: vec![mini, broken],
             color_epub: None,
             color_long_reads: Vec::new(),
+            pdfs: Vec::new(),
             reading_outcomes: vec![
                 ("a1".into(), Outcome::Printed),
                 ("b2".into(), Outcome::Book),
@@ -3770,6 +3920,7 @@ mod layout_tests {
             long_reads: Vec::new(),
             color_epub: None,
             color_long_reads: Vec::new(),
+            pdfs: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
         };

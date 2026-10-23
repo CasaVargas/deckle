@@ -79,6 +79,9 @@ the screenshot above.
 - **The paper on an iPad, or in any folder:** each morning's edition also goes to the folders you
   choose, as an EPUB with color photos if you like. An iCloud Drive folder reaches an iPad's
   Files app. No Kindle Previewer needed for it.
+- **reMarkable, and a PDF paper:** the paper laid out as a PDF for a reMarkable's screen
+  (crossword and all, to write on), uploaded over its USB web interface; the same PDF can go to
+  an export folder for an iPad or a Boox. Not yet checked on a real tablet.
 - **Kobo and PocketBook:** the paper, long reads and Inbox books go to a Kobo as KEPUBs and to a
   PocketBook as EPUBs; a Kobo's highlights export as Markdown, and From Your Shelf reads it. No
   Previewer needed. Not yet checked on real devices

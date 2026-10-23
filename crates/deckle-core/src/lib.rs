@@ -23,6 +23,7 @@ pub mod pipeline;
 pub mod previewer;
 pub mod queue;
 pub mod reader;
+pub mod remarkable;
 pub mod sync;
 pub mod thumbnail;
 pub mod typography;

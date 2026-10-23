@@ -175,14 +175,38 @@ export interface DailyConfig {
   morgue?: { folder: string; keep_days: number };
   /** `[[export]]`: folders each edition also goes to (other readers design §7). Absent while empty. */
   export?: ExportConfig[];
+  /** `[remarkable]`: the paper as a PDF to a reMarkable (other readers design §9). Absent while untouched. */
+  remarkable?: RemarkableConfig;
+}
+
+/** A screen the PDF edition is laid out for (PDF edition design §5). */
+export type Screen = "remarkable-2" | "remarkable-paper-pro" | "remarkable-paper-pro-move" | "ipad" | "a5";
+
+export const SCREEN_LABEL: Record<Screen, string> = {
+  "remarkable-2": "reMarkable 2",
+  "remarkable-paper-pro": "reMarkable Paper Pro",
+  "remarkable-paper-pro-move": "reMarkable Paper Pro Move",
+  ipad: "iPad",
+  a5: "A5 page",
+};
+
+/** `[remarkable]`: plugged in with its USB web interface on. */
+export interface RemarkableConfig {
+  enabled: boolean;
+  screen: Screen;
+  /** Absent: the screen's own choice (color on a Paper Pro). */
+  photos?: "color" | "gray";
+  books: boolean;
 }
 
 /** One `[[export]]` folder: an iCloud Drive folder for an iPad, a Dropbox one for a Boox. */
 export interface ExportConfig {
   name: string;
   dir: string;
-  format: "epub";
+  format: "epub" | "pdf";
   photos: "color" | "gray";
+  /** With a PDF: the screen it's laid out for. */
+  screen: Screen;
   /** Editions kept in the folder; 0 keeps all. */
   keep: number;
   /** Also the long reads, not only the paper. */

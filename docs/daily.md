@@ -402,7 +402,7 @@ iPad's Files app (tap it to open it in Books); a Dropbox or Google Drive folder 
 [[export]]
 name = "iPad"
 dir = "~/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily"
-format = "epub"                  # only EPUB for now; Kobo's KEPUB and a PDF edition come later
+format = "epub"                  # or "pdf": the paper laid out for one screen (below)
 photos = "color"                 # or "gray" for an e-ink reader
 keep = 7                         # editions kept in the folder; 0 keeps all
 books = false                    # also the long reads, not only the paper
@@ -468,3 +468,39 @@ like the Kobo, it hasn't been checked on a real one (`docs/devices.md`).
 
 Deckle remembers every Kobo and PocketBook it has seen in `readers.json` beside the app's
 `devices.json`; while that names one, `digest run` queues the paper for it, plugged in or not.
+
+## The PDF edition and a reMarkable
+
+The paper can also be a PDF laid out for one screen: the page is the screen's size, so nothing is
+zoomed or panned, and the masthead, the weather strip, the photos and the crossword grid keep
+their places. It has an outline (front page, sections, stories) and the front page links to each
+section. The text is the paper's own fonts, so it can be searched and copied.
+(`docs/superpowers/specs/2026-10-23-pdf-edition-design.md`)
+
+Screens: `remarkable-2` (the default), `remarkable-paper-pro`, `remarkable-paper-pro-move`,
+`ipad`, `a5`.
+
+- **In an export folder:** `format = "pdf"` and `screen = "…"` in an `[[export]]` block, or **As:
+  PDF** on the Daily tab's Export folders card. Pruning counts `deckle-daily-*.pdf` there.
+- **To a reMarkable**, over its USB web interface (no account, no cloud): turn on *Settings →
+  Storage → USB web interface* on the tablet, then
+
+  ```toml
+  [remarkable]
+  enabled = true
+  screen = "remarkable-2"          # or remarkable-paper-pro, remarkable-paper-pro-move
+  books = false                    # also the long reads, as EPUBs
+  ```
+
+  or the **reMarkable** card on the Daily tab. Each morning's PDF waits in its own outbox and is
+  uploaded the next time the tablet is plugged in and answers (`digest run`, `push` or `watch`).
+  The photos are gray on a reMarkable 2 and in color on a Paper Pro (`photos = "gray"` or
+  `"color"` overrides it). A file the tablet already shows is not sent twice.
+- **No pruning on a reMarkable:** its USB web interface can't delete, so older papers stay on the
+  tablet until you remove them there.
+- **No Kindle Previewer needed** for either.
+
+The reMarkable side is built from how its USB web interface is known to work (`GET
+/documents/`, `POST /upload` at `10.11.99.1`) and tested against a stand-in; it hasn't been
+checked on a tablet yet (`docs/devices.md`). The page sizes for each screen are checked there
+too.

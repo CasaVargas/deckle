@@ -284,7 +284,7 @@ The owner delegated these; each is ruled as below and can be reopened on the PR.
 1. **Export folder (M), built.** §6.1, §7 `[[export]]`, and the app's export-folder card. iPad and Boox work at the end of it. The `Target` refactor (§5) and outbox v2 (§6) moved to phase 2 (§15).
 2. **Kobo (M–L), built** (§16). Detection, KEPUB, the EPUB outbox, prune, highlights and the shelf. Readership and the app tab moved on. Spikes 1–2 are still owed.
 3. **PocketBook (S), built** (§17). Detection, delivery and prune. Its reads are left for later. Spike 3 is still owed.
-4. **PDF edition and reMarkable (L).** Its own typesetting spec, then §9. Spike 4 comes first.
+4. **PDF edition and reMarkable (L), built** (§18). Its own typesetting spec (`2026-10-23-pdf-edition-design.md`), then §9. Spike 4 is still owed.
 
 None of this can be tested in CI against a real Kobo, PocketBook or reMarkable. Each phase ends with the owner's hardware check, recorded in `docs/devices.md`.
 
@@ -350,3 +350,24 @@ Built without a PocketBook: tested on a simulated drive, so spike 3 (§11) is st
   - A PocketBook's prune counts `deckle-daily-*.epub` and never a `.kepub.epub`.
 - **Not read:** a PocketBook has no highlights export and no shelf, and `deckle highlights` with only a PocketBook plugged in says there's no reader to read from. Its library database (`system/explorer-3/explorer-3.db`) is the obvious source when this is picked up.
 - **JSON:** `digest run`'s `kobo_queued` and `kobo` fields became `epub_queued` and `reader`, also before any release.
+
+## 18. Build notes, phase 4 (PDF edition and reMarkable)
+
+Built without a reMarkable: the USB web interface is tested against a stand-in HTTP server, and the PDF is read back through PDFium. Spike 4 (§11) is still owed.
+
+- **The PDF edition** follows its own spec (`2026-10-23-pdf-edition-design.md`). In short:
+  - it's built on `pdf-writer`, laid out by Deckle from the same XHTML the EPUB carries;
+  - it uses the paper's fonts, embedded whole, with a ToUnicode map;
+  - it has an outline and links from the front page;
+  - the crossword is drawn as a real grid.
+  
+  The build writes one PDF per screen and photos asked for, under `pdf/<screen>-<photos>/` beside the paper (`BuildReport.pdfs`). An export folder or the reMarkable takes the one for its screen.
+- **`[remarkable]`** has `enabled`, `screen`, `photos` (the screen's own choice when unset: color on a Paper Pro) and `books`. There is no `format` key, per the §13 ruling: the paper is always the PDF, and books are always EPUB.
+- **The tablet** is found by asking `GET /documents/` at `10.11.99.1`, with a one-second timeout and never through a proxy. `DECKLE_REMARKABLE_URL` stands in for the address. `digest watch` only asks while something waits, so an absent tablet costs at most a second a tick.
+- **Its outbox** is `outbox-remarkable/`, holding the paper's PDF and, with `books`, the long reads' EPUBs.
+  - A push lists the tablet first. A file whose name (without its extension) the tablet already shows is taken as delivered and not uploaded again; the rest go up one at a time.
+  - A failed upload stays queued.
+  - There's no prune, because the interface can't delete.
+- **Without Previewer**, a reMarkable counts as somewhere the paper can go, like an export folder or a Kobo. Long reads print inside the paper unless `books = true`.
+- **App:** a **reMarkable** card on the Daily tab (on/off, model, long reads), and **As** and **Screen** on each export folder.
+- **Kept for later:** reMarkable's cloud (§13), Inbox books to a reMarkable, and subsetting the embedded fonts (about 400 KB a PDF).

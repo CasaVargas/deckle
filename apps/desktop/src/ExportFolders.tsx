@@ -5,7 +5,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { hasFolder, iCloudDrive, newExport } from "./exportsView";
 import Icon from "./Icon";
 import { Switch } from "./settings/Row";
-import type { ExportConfig } from "./types";
+import { SCREEN_LABEL } from "./types";
+import type { ExportConfig, Screen } from "./types";
 
 /**
  * Export folders (other readers design §7): each edition also goes to these folders, plugged in
@@ -65,6 +66,25 @@ export default function ExportFolders({
                 </button>
               </div>
               <div className="export-row">
+                <label>
+                  <span className="label">As</span>
+                  <select value={e.format} onChange={(ev) => patch(i, { format: ev.target.value as ExportConfig["format"] })}>
+                    <option value="epub">EPUB (any reader)</option>
+                    <option value="pdf">PDF, laid out for a screen</option>
+                  </select>
+                </label>
+                {e.format === "pdf" && (
+                  <label>
+                    <span className="label">Screen</span>
+                    <select value={e.screen} onChange={(ev) => patch(i, { screen: ev.target.value as Screen })}>
+                      {(Object.keys(SCREEN_LABEL) as Screen[]).map((s) => (
+                        <option key={s} value={s}>
+                          {SCREEN_LABEL[s]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label>
                   <span className="label">Photos</span>
                   <select value={e.photos} onChange={(ev) => patch(i, { photos: ev.target.value as ExportConfig["photos"] })}>

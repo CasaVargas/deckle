@@ -16,7 +16,8 @@ import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
 import { TOPICS, toggleTopic, topicOn, topicTitle } from "./topics";
 import ExportFolders from "./ExportFolders";
-import { exportParts } from "./exportsView";
+import { exportParts, remarkablePart } from "./exportsView";
+import RemarkableCard from "./RemarkableCard";
 import YourDay from "./YourDay";
 import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PlaceRow, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL, SIGNS } from "./types";
@@ -35,6 +36,8 @@ function summary(r: RunResult, send: boolean): string {
     if (r.report?.emailed) parts.push(`Emailed to ${r.report.emailed}.`);
     if (r.report?.email_error) parts.push(`Email failed: ${r.report.email_error}. Sent over USB instead.`);
     parts.push(...exportParts(r.report?.exports));
+    const rm = remarkablePart(r.report);
+    if (rm) parts.push(rm);
     if (run?.error) parts.push(`Not converted: ${run.error}`);
     else if (outcome?.flush?.delivered?.length) parts.push("Sent to your Kindle.");
     else if (outcome?.queued) parts.push("Waiting for your Kindle: it goes over when you plug it in.");
@@ -687,6 +690,16 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         onSave={(exports) => {
           const c = structuredClone(draft);
           c.export = exports;
+          setDraft(c);
+          return save(c);
+        }}
+      />
+
+      <RemarkableCard
+        remarkable={draft.remarkable}
+        onSave={(remarkable) => {
+          const c = structuredClone(draft);
+          c.remarkable = remarkable;
           setDraft(c);
           return save(c);
         }}

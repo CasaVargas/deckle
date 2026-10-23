@@ -100,6 +100,9 @@ pub struct Config {
     /// readers design §7). Left out of a save while there are none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub export: Vec<ExportConfig>,
+    /// `[remarkable]`: the paper as a PDF to a reMarkable (other readers design §9).
+    #[serde(skip_serializing_if = "RemarkableConfig::is_default")]
+    pub remarkable: RemarkableConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
@@ -149,6 +152,7 @@ impl Default for Config {
             shelf: ShelfConfig::default(),
             morgue: MorgueConfig::default(),
             export: Vec::new(),
+            remarkable: RemarkableConfig::default(),
             almanac_path: None,
             press_path: None,
             puzzle_path: None,
@@ -723,6 +727,8 @@ pub struct ExportConfig {
     pub dir: String,
     pub format: ExportFormat,
     pub photos: Photos,
+    /// With `format = "pdf"`: the screen the PDF is laid out for (PDF edition design §5).
+    pub screen: crate::pdf::Screen,
     /// Editions kept in the folder; 0 keeps all.
     pub keep: usize,
     /// Also the long reads, not only the paper.
@@ -736,19 +742,45 @@ impl Default for ExportConfig {
             dir: String::new(),
             format: ExportFormat::Epub,
             photos: Photos::Color,
+            screen: crate::pdf::Screen::default(),
             keep: 7,
             books: false,
         }
     }
 }
 
-/// What an export folder takes. Only EPUB for now: KEPUB comes with Kobo and PDF with the PDF
-/// edition (other readers design §14).
+/// What an export folder takes: the EPUB, or the PDF edition laid out for its `screen`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     #[default]
     Epub,
+    Pdf,
+}
+
+/// `[remarkable]`: the paper as a PDF to a reMarkable over its USB web interface (other readers
+/// design §9). Left out of a save while it's untouched.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RemarkableConfig {
+    pub enabled: bool,
+    pub screen: crate::pdf::Screen,
+    /// The PDF's photos; the screen's own choice when unset (color on a Paper Pro).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photos: Option<Photos>,
+    /// Also the long reads, as EPUBs.
+    pub books: bool,
+}
+
+impl RemarkableConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// The photos its PDF gets.
+    pub fn photos(&self) -> Photos {
+        self.photos.unwrap_or(self.screen.photos())
+    }
 }
 
 /// The paper's photos: grayscale for e-ink, or as published for a color screen.
@@ -885,10 +917,19 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # [[export]]
 # name = "iPad"
 # dir = "~/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily"
-# format = "epub"
+# format = "epub"                 # or "pdf": the paper laid out for one screen
+# screen = "remarkable-2"         # for a PDF: remarkable-2, remarkable-paper-pro,
+#                                 # remarkable-paper-pro-move, ipad, a5
 # photos = "color"                # or "gray" for an e-ink reader
 # keep = 7                        # editions kept in the folder; 0 keeps all
 # books = false                   # also the long reads, not only the paper
+
+# A reMarkable gets the paper as a PDF over its USB web interface: plug it in with
+# Settings → Storage → USB web interface on. Deckle can't delete from it, so old papers stay.
+# [remarkable]
+# enabled = true
+# screen = "remarkable-2"         # or remarkable-paper-pro, remarkable-paper-pro-move
+# books = false                   # also the long reads, as EPUBs
 "#;
 
 impl Config {
@@ -1021,6 +1062,24 @@ impl Config {
     /// color edition beside the grayscale one.
     pub fn wants_color(&self) -> bool {
         self.export.iter().any(|e| e.photos == Photos::Color)
+            || (self.remarkable.enabled && self.remarkable.photos() == Photos::Color)
+    }
+
+    /// The PDF editions the build makes: one per screen and photos an export folder or the
+    /// reMarkable asks for.
+    pub fn pdfs_wanted(&self) -> Vec<(crate::pdf::Screen, Photos)> {
+        let mut out: Vec<_> = self
+            .export
+            .iter()
+            .filter(|e| e.format == ExportFormat::Pdf)
+            .map(|e| (e.screen, e.photos))
+            .collect();
+        if self.remarkable.enabled {
+            out.push((self.remarkable.screen, self.remarkable.photos()));
+        }
+        out.sort_by_key(|(s, p)| (format!("{s:?}"), *p == Photos::Color));
+        out.dedup();
+        out
     }
 
     /// Where the frost dates are cached.

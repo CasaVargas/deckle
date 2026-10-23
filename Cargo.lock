@@ -1084,6 +1084,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "deckle-highlights",
+ "deckle-pdf",
  "deunicode",
  "dom_query",
  "dom_smoothie",
@@ -1094,6 +1095,7 @@ dependencies = [
  "image",
  "keyring",
  "lettre",
+ "pdf-writer",
  "rand 0.9.5",
  "regex",
  "roxmltree",
@@ -3634,6 +3636,18 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "pdf-writer"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5e456864a7a304047bff84977dc6fb162bd956475d40ba50b2dcecaada7f753"
+dependencies = [
+ "bitflags 2.13.2",
+ "itoa",
+ "memchr",
+ "ryu",
 ]
 
 [[package]]
