@@ -348,6 +348,13 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 .map(deckle_core::cover_rule::manual_asin)
                 .transpose()?;
             let pages = cli::parse_pages(pages.as_deref())?;
+            // No Kindle but a Kobo: a Kobo needs no Previewer (other readers design §8).
+            if to == "device"
+                && detect_kindle().is_none()
+                && let Some(kobo) = detect_kobo()
+            {
+                return send_to_kobo(&epubs, &kobo, json);
+            }
             // Fail before any work (and before touching the target) when Previewer is missing.
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             let target = resolve_target(&to)?;
@@ -677,8 +684,20 @@ fn highlights_cmd(
     from: &str,
     action: cli::HighlightsCommand,
 ) -> Result<ExitCode, String> {
-    let target = resolve_target(from)?;
-    let read = deckle_core::clippings::read_on(&mut deckle_core::deliver::Conn::new(&target));
+    // No Kindle but a Kobo: its highlights, written as a Kindle's clippings (other readers §8.2).
+    let kobo = (from == "device" && detect_kindle().is_none())
+        .then(detect_kobo)
+        .flatten();
+    let read = match &kobo {
+        Some(k) => deckle_core::kobo::read(k)
+            .map(|r| r.clippings)
+            .map_err(|e| e.to_string()),
+        None => {
+            let target = resolve_target(from)?;
+            deckle_core::clippings::read_on(&mut deckle_core::deliver::Conn::new(&target))
+                .map_err(|e| e.to_string())
+        }
+    };
     let bytes = match read {
         Ok(Some(b)) => b,
         Ok(None) => {
@@ -1394,13 +1413,21 @@ fn digest(
             // paper still goes to them, and nothing is converted or queued for a Kindle.
             let located = match previewer::locate(pv.as_deref()) {
                 Ok(l) => Some(l),
-                Err(e) if to == "device" && !cfg.export.is_empty() => {
+                Err(e) if to == "device" && (!cfg.export.is_empty() || kobo_seen()) => {
+                    let to: Vec<&str> = [
+                        (!cfg.export.is_empty()).then_some("the export folders"),
+                        kobo_seen().then_some("the Kobo"),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
                     no_kindle = Some(format!(
-                        "no Kindle copy: {e}; the paper went to the export folders only"
+                        "no Kindle copy: {e}; the paper went to {} only",
+                        to.join(" and ")
                     ));
-                    // A long read with no book to become prints in the paper, unless an
-                    // export folder takes it as a book.
-                    if !cfg.export.iter().any(|x| x.books) {
+                    // A long read with no book to become prints in the paper, unless a Kobo or
+                    // an export folder takes it as a book.
+                    if !kobo_seen() && !cfg.export.iter().any(|x| x.books) {
                         cfg.reading.long_read_words = usize::MAX;
                     }
                     None
@@ -1460,6 +1487,17 @@ fn digest(
                 None => deckle_digest::export::export_all(&cfg.export, date, &built),
             };
             let exported = exports.iter().any(|x| x.error.is_none());
+            // The EPUB outbox, for a Kobo: when one has been seen, or there is no Previewer.
+            let kobo_queue = epub_queue();
+            let epub_queued = folder.is_none()
+                && epub_wanted(located.is_some())
+                && match queue_epubs(&kobo_queue, &built, date) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        built.notes.push(format!("not queued for a Kobo: {e}"));
+                        false
+                    }
+                };
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
             // design §7). A paper that went out by email skips the outbox unless `usb_too`.
             let (email, to_usb) = match &folder {
@@ -1495,8 +1533,9 @@ fn digest(
                 }
             }
             if located.is_none() {
-                // Nothing for a Kindle: the export folders (or the email) were the delivery.
-                if exported || !to_usb {
+                // Nothing for a Kindle: the export folders, the Kobo's outbox or the email were
+                // the delivery.
+                if exported || epub_queued || !to_usb {
                     reading_queue(&cfg)
                         .commit(date, &reading_outcomes)
                         .map_err(|e| format!("reading queue: {e}"))?;
@@ -1531,6 +1570,17 @@ fn digest(
                     .commit(date, &reading_outcomes)
                     .map_err(|e| format!("reading queue: {e}"))?;
             }
+            // A Kobo plugged in now takes its copy at once.
+            let kobo = match (&folder, epub_queued) {
+                (None, true) => match push_kobo(&kobo_queue, &cfg, detect_kobo().as_ref()) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        built.notes.push(format!("kobo: {e}"));
+                        None
+                    }
+                },
+                _ => None,
+            };
             #[derive(serde::Serialize)]
             struct DigestRun<'a> {
                 build: &'a deckle_digest::BuildReport,
@@ -1541,6 +1591,12 @@ fn digest(
                 email: &'a EmailRun,
                 #[serde(skip_serializing_if = "<[_]>::is_empty")]
                 exports: &'a [deckle_digest::export::ExportReport],
+                /// The paper queued for a Kobo (`outbox-epub`).
+                #[serde(skip_serializing_if = "std::ops::Not::not")]
+                kobo_queued: bool,
+                /// A Kobo was connected and took it.
+                #[serde(skip_serializing_if = "Option::is_none")]
+                kobo: Option<&'a DigestOutcome>,
             }
             let all = DigestRun {
                 build: &built,
@@ -1548,6 +1604,8 @@ fn digest(
                 outcome: &outcome,
                 email: &email,
                 exports: &exports,
+                kobo_queued: epub_queued,
+                kobo: kobo.as_ref(),
             };
             let failed = report.as_ref().and_then(|r| r.error.as_ref());
             emit(json, &all, || {
@@ -1561,7 +1619,14 @@ fn digest(
                     Some(_) => outcome.describe(&queue),
                     None => String::new(),
                 };
-                for part in [email.lines(), exported, usb] {
+                let kobo_lines = match &kobo {
+                    Some(k) => format!("      Kobo:\n{}", k.describe(&kobo_queue)),
+                    None if epub_queued => {
+                        "      queued for a Kobo: it goes over when one is plugged in".to_owned()
+                    }
+                    None => String::new(),
+                };
+                for part in [email.lines(), exported, usb, kobo_lines] {
                     if !part.is_empty() {
                         text.push_str(&format!("\n{part}"));
                     }
@@ -1696,6 +1761,22 @@ fn digest(
                 "device" => detect_kindle(),
                 folder => Some(resolve_target(folder)?),
             };
+            // A Kobo plugged in takes the EPUB outbox (other readers design §8).
+            let kobo_queue = epub_queue();
+            let kobo = match to.as_str() {
+                "device" => detect_kobo(),
+                _ => None,
+            };
+            if target.is_none()
+                && let Some(kobo) = &kobo
+            {
+                let outcome = push_kobo(&kobo_queue, &cfg, Some(kobo))?.unwrap_or_default();
+                emit(json, &outcome, || match &outcome.flush {
+                    Some(_) => outcome.describe(&kobo_queue),
+                    None => "      nothing queued for the Kobo".into(),
+                })?;
+                return Ok(ExitCode::SUCCESS);
+            }
             let outcome = push_queued(&queue, &cfg, target)?;
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
@@ -1704,7 +1785,7 @@ fn digest(
             let cfg = load_digest_config(&path)?;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             eprintln!(
-                "watching for a Kindle every {interval}s; outbox {}",
+                "watching for a Kindle or a Kobo every {interval}s; outbox {}",
                 queue.dir.display()
             );
             // The bookmarklet's listener (save-to-paper §4). A busy port only costs the
@@ -1737,6 +1818,9 @@ fn digest(
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
             let mut watcher = deckle_core::sync::Watcher::default();
+            // A Kobo has its own outbox and its own connection (other readers design §8).
+            let kobo_queue = epub_queue();
+            let mut kobo_watcher = deckle_core::sync::Watcher::default();
             loop {
                 scan_inbox(&cfg);
                 let pending = queue.pending();
@@ -1750,6 +1834,23 @@ fn digest(
                 if let (Some(target), false) = (&kindle, plan.is_empty()) {
                     match sync_to(&queue, &cfg, target, plan) {
                         Ok(o) => emit(json, &o, || o.describe(&queue))?,
+                        Err(e) => eprintln!("error: {e}"),
+                    }
+                }
+                let kobo = detect_kobo();
+                let kobo_id = kobo.as_ref().map(deckle_core::kobo::Kobo::id);
+                let kobo_actions = kobo_id
+                    .as_deref()
+                    .map(|id| deckle_core::sync::Actions {
+                        readership: false,
+                        ..sync_actions(&cfg, id)
+                    })
+                    .unwrap_or_default();
+                let plan =
+                    kobo_watcher.tick(kobo_id.as_deref(), &kobo_queue.pending(), kobo_actions);
+                if let (Some(k), false) = (&kobo, plan.is_empty()) {
+                    match kobo_sync(&kobo_queue, &cfg, k, plan) {
+                        Ok(o) => emit(json, &o, || o.describe(&kobo_queue))?,
                         Err(e) => eprintln!("error: {e}"),
                     }
                 }
@@ -2138,6 +2239,203 @@ fn record_morgue(flush: &deckle_core::queue::FlushReport) {
 /// The first connected Kindle, mass storage first; `None` when there is none.
 fn detect_kindle() -> Option<Target> {
     resolve_target("device").ok()
+}
+
+/// The first connected Kobo (other readers design §8).
+fn detect_kobo() -> Option<deckle_core::kobo::Kobo> {
+    deckle_core::kobo::detect().into_iter().next()
+}
+
+/// What waits for a Kobo: EPUBs, made KEPUBs as they go over.
+fn epub_queue() -> deckle_core::queue::Queue {
+    deckle_core::queue::Queue::new(deckle_core::queue::Queue::epub_dir())
+}
+
+/// Whether the paper is also queued as an EPUB: a Kobo has been seen, or there is no Previewer
+/// to make the Kindle's copy.
+fn epub_wanted(previewer_found: bool) -> bool {
+    !previewer_found || kobo_seen()
+}
+
+/// A Kobo has been plugged in here before, or is now.
+fn kobo_seen() -> bool {
+    deckle_core::kobo::any_seen(&deckle_core::kobo::seen_file()) || detect_kobo().is_some()
+}
+
+/// Puts the paper's EPUB and the long reads' in the EPUB outbox, for a Kobo.
+fn queue_epubs(
+    queue: &deckle_core::queue::Queue,
+    built: &deckle_digest::BuildReport,
+    date: deckle_digest::chrono::NaiveDate,
+) -> Result<(), String> {
+    let name = deckle_digest::export::export_filename(date);
+    queue
+        .add(&built.epub, &name, Some(deckle_digest::EDITION_PREFIX))
+        .map_err(|e| e.to_string())?;
+    for p in &built.long_reads {
+        let name = p
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        queue.add(p, &name, None).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Flushes the EPUB outbox to `kobo`, when one is connected, with its `[sync]` actions.
+fn push_kobo(
+    queue: &deckle_core::queue::Queue,
+    cfg: &deckle_digest::Config,
+    kobo: Option<&deckle_core::kobo::Kobo>,
+) -> Result<Option<DigestOutcome>, String> {
+    let Some(kobo) = kobo else {
+        return Ok(None);
+    };
+    let actions = sync_actions(cfg, &kobo.id());
+    let Some(plan) = push_plan(actions, queue.pending().is_empty()) else {
+        return Ok(None);
+    };
+    kobo_sync(queue, cfg, kobo, plan).map(Some)
+}
+
+/// [`sync_to`] for a Kobo: push the EPUB outbox as KEPUBs, prune, and read its database for the
+/// highlights and the shelf. A Kobo has no `.yjf`, so no readership; and the Morgue's notes on
+/// what's on the Kindle stay the Kindle's.
+fn kobo_sync(
+    queue: &deckle_core::queue::Queue,
+    cfg: &deckle_digest::Config,
+    kobo: &deckle_core::kobo::Kobo,
+    plan: deckle_core::sync::Plan,
+) -> Result<DigestOutcome, String> {
+    let id = kobo.id();
+    let now = deckle_digest::chrono::Utc::now();
+    let stamp = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
+    if let Err(e) = deckle_core::kobo::remember(&deckle_core::kobo::seen_file(), kobo, &stamp) {
+        eprintln!("kobo: {e}");
+    }
+    let flush =
+        deckle_core::sync::run_kobo(queue, kobo, plan, &digest_prune(cfg), &mut |i, n, name| {
+            eprintln!("push: {i}/{n} {name}")
+        })
+        .map_err(|e| e.to_string())?;
+    if plan.clippings && puzzle_on(cfg) && flush.clippings_error.is_none() {
+        let path = cfg.puzzle_store();
+        let mut store = deckle_digest::puzzle::store::Store::load(&path);
+        use deckle_digest::puzzle::check::Notes;
+        let notes = match flush.clippings.as_deref() {
+            Some(b) => Notes::Read(b),
+            None => Notes::NoFile,
+        };
+        deckle_digest::puzzle::check::record(
+            &mut store,
+            notes,
+            deckle_digest::chrono::Local::now().date_naive(),
+            deckle_digest::puzzle::words::Words::embedded(),
+        );
+        if let Err(e) = store.save(&path) {
+            eprintln!("puzzle: {}: {e}", path.display());
+        }
+    }
+    let export = cfg.sync.for_device(&id).clippings;
+    let highlights = match flush.clippings.as_deref().filter(|_| export) {
+        Some(bytes) => match highlights::export(bytes, &highlights::state_path(), None) {
+            Ok(o) => Some(o),
+            Err(e) => {
+                eprintln!("{e}");
+                None
+            }
+        },
+        None => None,
+    };
+    let shelf = flush.kobo_books.clone().and_then(|books| {
+        let path = cfg.shelf_store();
+        let previous = deckle_digest::shelf::store::Shelf::load(&path)
+            .kindles
+            .get(&id)
+            .cloned();
+        let name = cfg.sync.device_name(&id).unwrap_or_else(|| kobo.name());
+        let snap = deckle_shelf::kobo_snapshot(
+            books,
+            flush.clippings.clone(),
+            flush.clippings_error.is_some(),
+            &name,
+            previous,
+            now,
+        );
+        deckle_shelf::record(&path, &id, snap)
+            .inspect_err(|e| eprintln!("shelf: {e}"))
+            .ok()
+    });
+    Ok(DigestOutcome {
+        flush: Some(flush),
+        highlights,
+        shelf,
+        ..Default::default()
+    })
+}
+
+/// `deckle run … --to device` with no Kindle but a Kobo: each book cleaned and made a KEPUB
+/// (no Previewer), sent to the Kobo's `Deckle/` folder.
+fn send_to_kobo(
+    inputs: &[PathBuf],
+    kobo: &deckle_core::kobo::Kobo,
+    json: bool,
+) -> Result<ExitCode, String> {
+    #[derive(serde::Serialize)]
+    struct Sent {
+        input: PathBuf,
+        delivered: Option<PathBuf>,
+        error: Option<String>,
+    }
+    let sent: Vec<Sent> = inputs
+        .iter()
+        .map(|input| {
+            let arg = input.to_string_lossy();
+            let r = (|| {
+                let source = if deckle_digest::web_book::is_article(&arg) {
+                    import_article(&arg, &deckle_digest::Http, &articles_dir())?.path
+                } else {
+                    input.clone()
+                };
+                let bytes = deckle_core::kobo::book(&source)?;
+                let stem = source
+                    .file_stem()
+                    .map(|s| deckle_core::deliver::sanitize(&s.to_string_lossy()))
+                    .unwrap_or_else(|| "book".into());
+                deckle_core::kobo::deliver(kobo, &bytes, &deckle_core::kobo::kepub_name(&stem))
+                    .map_err(|e| e.to_string())
+            })();
+            match r {
+                Ok(p) => Sent {
+                    input: input.clone(),
+                    delivered: Some(p),
+                    error: None,
+                },
+                Err(e) => Sent {
+                    input: input.clone(),
+                    delivered: None,
+                    error: Some(e),
+                },
+            }
+        })
+        .collect();
+    let failed = sent.iter().filter(|s| s.error.is_some()).count();
+    emit(json, &sent, || {
+        sent.iter()
+            .map(|s| match (&s.error, &s.delivered) {
+                (Some(e), _) => format!("FAIL  {}\n      {e}", s.input.display()),
+                (None, Some(p)) => format!("OK    {}\n      -> {}", s.input.display(), p.display()),
+                _ => String::new(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    Ok(if failed > 0 {
+        ExitCode::from(EXIT_FAILURE)
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 /// Flushes the outbox to `target` (a connected Kindle, or a folder), or reports it queued.
@@ -2965,7 +3263,7 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
         &reading_queue(cfg),
         &outbox,
         std::time::SystemTime::now(),
-        &mut inbox::pipeline(),
+        &mut inbox::with_kobo(kobo_seen().then(epub_queue), inbox::pipeline()),
     );
     if r.queued > 0 {
         eprintln!(

@@ -118,6 +118,57 @@ pub fn snapshot(
     (snap, errors)
 }
 
+/// A Kobo's snapshot (other readers design §8.2): its books in progress, with the percent the
+/// Kobo keeps, and the highlights it shares. A Kobo has no `vocab.db`, so no words.
+pub fn kobo_snapshot(
+    books: Vec<deckle_core::kobo::Book>,
+    clippings: Option<Vec<u8>>,
+    clippings_failed: bool,
+    name: &str,
+    previous: Option<KindleSnapshot>,
+    now: DateTime<Utc>,
+) -> KindleSnapshot {
+    let (highlights_shared, highlights) = match (&clippings, &previous) {
+        (Some(bytes), _) => (true, highlights::build(bytes)),
+        (None, Some(k)) if clippings_failed => (k.highlights_shared, k.highlights.clone()),
+        // A Kobo always has its database: no highlights is an empty list, not "not shared".
+        (None, _) => (true, Vec::new()),
+    };
+    KindleSnapshot {
+        name: name.to_owned(),
+        seen: now.format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        books: books.into_iter().map(kobo_book).collect(),
+        skipped: 0,
+        highlights_shared,
+        highlights,
+        words_shared: false,
+        words: Vec::new(),
+    }
+}
+
+/// The percent stands in for a position: `last` of an `end` of 10,000.
+fn kobo_book(b: deckle_core::kobo::Book) -> deckle_digest::shelf::store::BookSnap {
+    let file = b
+        .content_id
+        .strip_prefix("file:///mnt/onboard/")
+        .unwrap_or(&b.content_id)
+        .to_owned();
+    let last = (b.percent * 100.0).round() as i64;
+    deckle_digest::shelf::store::BookSnap {
+        file,
+        title: b.title,
+        authors: b.authors,
+        asin: None,
+        last: Some(last),
+        furthest: Some(last),
+        last_read: b.last_read,
+        end: Some(10_000),
+        kindle_fraction: Some(b.percent / 100.0),
+        words_read: None,
+        wpm: Vec::new(),
+    }
+}
+
 /// What a recorded snapshot holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Summary {

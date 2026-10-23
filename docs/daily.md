@@ -424,3 +424,33 @@ Mac.
   anything else in the folder stay.
 - **A folder that's missing** is made when its parent exists. When the parent is missing too
   (iCloud Drive turned off), the run's report says so and the paper still ships everywhere else.
+
+## Kobo
+
+A Kobo gets the paper too, with no Kindle Previewer: plug it in once (or keep it plugged in for
+`digest run`, `digest push` or `digest watch`) and Deckle remembers it. From then on each
+morning's edition is also queued as an EPUB, and goes over the next time the Kobo is connected,
+as a KEPUB in a `Deckle/` folder of its own, so the Kobo shows page counts and reading
+statistics for it. Eject the Kobo to see the new paper: it only looks for books after an eject.
+(`docs/superpowers/specs/2026-10-23-other-readers-design.md` §8)
+
+- **Long reads and Inbox books** go along as KEPUBs too. An Inbox book is converted for the Kobo
+  first; when there is no Previewer for the Kindle's copy, the Kobo's is enough for it to leave
+  the Inbox.
+- **`keep`** prunes the Kobo the same way: only `Deckle/deckle-daily-*.kepub.epub` beyond the
+  newest `keep`; nothing outside `Deckle/` is touched.
+- **Highlights and From Your Shelf.** `[sync] clippings = true` exports the Kobo's highlights and
+  notes as Markdown, as for a Kindle (`deckle highlights export --to <dir>` works with a Kobo
+  plugged in and no Kindle). From Your Shelf prints the books you're reading on it with the
+  percent the Kobo keeps, and a past highlight. A Kobo has no looked-up words list, and no
+  readership report yet.
+- **The database** (`.kobo/KoboReader.sqlite`) is copied out and the copy read; the Kobo's own
+  file is never opened.
+- **Books by hand:** `deckle run book.epub` (or `.docx`, `.pdf`, `.txt`, a URL) with a Kobo and no
+  Kindle plugged in sends it to the Kobo, cleaned and as a KEPUB.
+- **Per device:** a Kobo's sync id is `kobo/<serial>` (`[sync.devices."kobo/N418…"]`).
+- **Other mount points:** `DECKLE_MOUNTS` (a path list, as `PATH` is written) replaces the places
+  Deckle looks for a drive.
+
+The Kobo support is built against Kobo's files as the e-reader community documents them and
+tested on a simulated drive; it hasn't been checked on a Kobo yet (`docs/devices.md`).

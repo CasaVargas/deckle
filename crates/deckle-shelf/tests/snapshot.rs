@@ -474,3 +474,48 @@ fn anki_csv_has_every_english_word_once_newest_first() {
     );
     drop(c);
 }
+
+// ---- a Kobo (other readers design §8.2) ----
+
+#[test]
+fn a_kobos_books_and_highlights_make_a_snapshot() {
+    let book = deckle_core::kobo::Book {
+        content_id: "file:///mnt/onboard/Books/mill.kepub.epub".into(),
+        title: "The Mill".into(),
+        authors: vec!["Ann Lee".into()],
+        percent: 42.0,
+        last_read: Some("2026-10-20T21:15:03Z".into()),
+    };
+    let clip = b"The Mill (Ann Lee)\n- Your Highlight | Added on Tuesday, October 20, 2026 \
+                 9:15:03 PM\n\nThe wheel turned.\n==========\n"
+        .to_vec();
+    let snap = deckle_shelf::kobo_snapshot(vec![book], Some(clip), false, "Kobo", None, now());
+    assert_eq!(snap.name, "Kobo");
+    assert_eq!(snap.books[0].file, "Books/mill.kepub.epub");
+    assert_eq!(
+        deckle_digest::shelf::select::percent(&snap.books[0], false),
+        Some((42, false))
+    );
+    assert!(snap.highlights_shared);
+    assert_eq!(snap.highlights.len(), 1);
+    assert!(!snap.words_shared);
+    assert_eq!(deckle_shelf::in_progress(&snap, now()), 1);
+}
+
+#[test]
+fn a_failed_kobo_read_keeps_the_last_highlights() {
+    let first = deckle_shelf::kobo_snapshot(
+        Vec::new(),
+        Some(
+            b"T (A)\n- Your Highlight | Added on Tuesday, October 20, 2026 9:15:03 PM\n\nx\n==========\n"
+                .to_vec(),
+        ),
+        false,
+        "Kobo",
+        None,
+        now(),
+    );
+    let again =
+        deckle_shelf::kobo_snapshot(Vec::new(), None, true, "Kobo", Some(first.clone()), now());
+    assert_eq!(again.highlights, first.highlights);
+}

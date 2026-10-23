@@ -57,6 +57,9 @@ pub struct FlushReport {
     /// The books' positions and the vocabulary, read in the same session (`[sync] shelf`).
     #[serde(skip)]
     pub shelf: Option<crate::sync::ShelfRead>,
+    /// A Kobo's books in progress, read in the same session (`[sync] shelf`).
+    #[serde(skip)]
+    pub kobo_books: Option<Vec<crate::kobo::Book>>,
     /// Why the shelf read failed; the delivery stands.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shelf_error: Option<String>,
@@ -135,7 +138,14 @@ impl Queue {
         Queue { dir }
     }
 
-    /// Queued entries (`<name>.kfx` files and `<name>.book` folders), oldest name first.
+    /// `<cache dir>/outbox-epub`: what waits for a reader that takes EPUB, a Kobo (other
+    /// readers design §6). The Kindle's outbox never holds an EPUB.
+    pub fn epub_dir() -> PathBuf {
+        crate::wordwise::default_cache_dir().join("outbox-epub")
+    }
+
+    /// Queued entries (`<name>.kfx` files, `<name>.book` folders and, in the EPUB outbox,
+    /// `<name>.epub` files), oldest name first.
     pub fn pending(&self) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
             return Vec::new();
@@ -143,7 +153,7 @@ impl Queue {
         let mut files: Vec<PathBuf> = entries
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "kfx") || is_prepared(p))
+            .filter(|p| p.extension().is_some_and(|x| x == "kfx" || x == "epub") || is_prepared(p))
             .collect();
         files.sort();
         files
