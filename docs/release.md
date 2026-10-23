@@ -17,6 +17,14 @@
 
 Rebuild an existing tag: *Actions → release → Run workflow* with the tag name.
 
+**Dry run.** *Actions → release → Run workflow* on a branch, with **dry_run** ticked and no tag:
+it builds, signs and notarizes every platform exactly as a release does, checks the bundled
+PDFium (the `.app` passes `codesign --verify --deep --strict` and `spctl`, the Windows installer
+puts `pdfium.dll` beside `Deckle.exe`, and each built app reads `fixtures/pdf/book.pdf` through
+its own copy), and keeps the `.dmg` and `-setup.exe` as workflow artifacts for a week. No release
+or `latest.json` is created, so nothing reaches installed copies. Use it before tagging whenever
+the bundle changes.
+
 ## Updater key (owner, one time)
 
 In-app updates (`docs/superpowers/specs/2026-10-22-auto-update-design.md`) are verified against

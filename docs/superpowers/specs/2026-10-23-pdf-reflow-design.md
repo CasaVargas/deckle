@@ -38,9 +38,7 @@ A reflowed PDF is never as good as a book made for reading. Deckle says so every
 - **Scans.** A PDF with no text layer (under 20 characters a page, with pictures) is refused:
   "this PDF has no text in it, only pictures of pages (a scan)…". OCR is #19.
 - **Fixed layout.** Comics and picture books are #20.
-- **The desktop app.** It takes EPUB and KFX (and web articles) today; `.docx` and `.txt` are
-  CLI and library only, and PDF joins them. Shipping PDFium inside the signed app (macOS
-  `Frameworks`, Windows beside the `.exe`) and accepting PDFs on drop is a follow-up.
+- **The desktop app** was a follow-up (#133); see §8.
 - **Bookmarks as the contents.** The contents come from the headings the layout finds.
 - **Language.** Like TXT, the book is tagged English.
 
@@ -137,3 +135,22 @@ and `scan.pdf` (a page that's only a picture).
 Checked by hand on two real papers (a one-column and a two-column one): reading order, sections
 and display equations came out right. Figure-heavy pages (text drawn inside charts) remain the
 weakest part.
+
+## 8. In the desktop app (#133)
+
+- **PDFium ships inside the app.** The release workflow fetches the pinned build for each target
+  (`tools/fetch-pdfium.sh mac-arm64 | mac-x64 | win-x64`) and adds it through a per-OS config
+  overlay: `pdfium.macos.conf.json` puts `libpdfium.dylib` in `Contents/Frameworks`, where the
+  bundler signs it with the app before notarization; `pdfium.windows.conf.json` installs
+  `pdfium.dll` beside `Deckle.exe`. `engine::candidates()` already looks in both places. The
+  overlays are passed only by the release workflow, so `pnpm tauri dev` needs no PDFium.
+- **Checked on every release and dry run.** Each built app runs `--json inspect
+  fixtures/pdf/book.pdf` with no `DECKLE_PDFIUM` and the fetched copy deleted, so the PDF can
+  only be read through the bundled library. The `.app` must pass `codesign --verify --deep
+  --strict` (and `spctl` when signed with a Developer ID). The x86_64 macOS build's read is
+  skipped when the runner has no Rosetta.
+- **The app takes PDFs** on drop, from **Choose files…** and in folders. A row shows the
+  reflowed title and author (`deckle_library::book_info`, off the main thread); a scan or a
+  missing PDFium is an error row with the importer's reason; the quality note arrives with the
+  run's warnings. `deckle inspect` (and the app binary's `inspect`) read PDFs, Word documents
+  and text files through their importers.

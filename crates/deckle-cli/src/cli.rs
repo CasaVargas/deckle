@@ -88,7 +88,8 @@ impl From<CdeArg> for deckle_kfx::convert::CdeType {
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
-    /// Read an EPUB's metadata, structure and problems.
+    /// Read an EPUB's metadata, structure and problems; a Word document, text file or PDF
+    /// reports the EPUB it imports as.
     Inspect { epub: PathBuf },
     /// Write a cleaned EPUB that Kindle Previewer converts well.
     Normalize {

@@ -6,14 +6,22 @@ name: release
 # Signing when the Azure secrets exist (docs/release.md); without them each platform builds
 # unsigned with a warning. Updater bundles are always signed with TAURI_SIGNING_PRIVATE_KEY, and
 # the release's latest.json is what installed copies read once the draft is published.
+#
+# A dry run (workflow_dispatch with dry_run, on any branch, no tag) builds, signs, notarizes and
+# checks exactly as a release does, but keeps the bundles as workflow artifacts and creates no
+# release, so nothing can reach installed copies (docs/release.md).
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Existing tag to build (e.g. v0.1.0)"
-        required: true
+        description: "Existing tag to build (e.g. v0.1.0); leave empty for a dry run"
+        required: false
+      dry_run:
+        description: "Build, sign and check the branch without creating a release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -26,10 +34,13 @@ jobs:
         include:
           - os: macos-latest
             target: aarch64-apple-darwin
+            pdfium: mac-arm64
           - os: macos-latest
             target: x86_64-apple-darwin
+            pdfium: mac-x64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+            pdfium: win-x64
     runs-on: ${{ matrix.os }}
     env:
       # the pushed tag, or the one given to a manual run
@@ -174,7 +185,29 @@ jobs:
           }
           Write-Host "Signing works. Signer: $($sig.SignerCertificate.Subject)"
           Add-Content $env:GITHUB_ENV "WINDOWS_SIGN_ARGS= --config src-tauri/windows/tauri.signing.conf.json"
+      # PDFium ships inside the app for PDF import: in Contents/Frameworks on macOS (signed with
+      # the app), beside Deckle.exe on Windows (PDF spec §8).
+      - name: PDFium
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$TAG" ] && [ "${{ github.event.inputs.dry_run }}" != "true" ]; then
+            echo "::error::Run by hand with no tag: set dry_run to build without a release."
+            exit 1
+          fi
+          tools/fetch-pdfium.sh ${{ matrix.pdfium }}
+          mkdir -p apps/desktop/src-tauri/pdfium
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/pdfium/bin/pdfium.dll apps/desktop/src-tauri/pdfium/
+            echo "PDFIUM_ARGS= --config src-tauri/pdfium.windows.conf.json" >> "$GITHUB_ENV"
+          else
+            cp target/pdfium/lib/libpdfium.dylib apps/desktop/src-tauri/pdfium/
+            echo "PDFIUM_ARGS= --config src-tauri/pdfium.macos.conf.json" >> "$GITHUB_ENV"
+          fi
+          # A release build must find the bundled copy, not this one.
+          rm -rf target/pdfium
       - uses: tauri-apps/tauri-action@v0
+        if: github.event.inputs.dry_run != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -186,7 +219,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
-          args: --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}
+          args: --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}${{ env.PDFIUM_ARGS }}
           tagName: ${{ env.TAG }}
           releaseName: ${{ env.TAG && format('Deckle {0}', env.TAG) || '' }}
           releaseBody: |
@@ -197,6 +230,73 @@ jobs:
             Requires Kindle Previewer 4 (free, from Amazon).
           releaseDraft: true
           prerelease: false
+      - name: Build (dry run, no release)
+        if: github.event.inputs.dry_run == 'true'
+        shell: bash
+        working-directory: apps/desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
+          AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
+          AZURE_CLIENT_SECRET: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
+        run: pnpm tauri build --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}${{ env.PDFIUM_ARGS }}
+      # The built app reads a PDF through its own PDFium: no DECKLE_PDFIUM, no copy elsewhere.
+      - name: Check PDFium in the macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          app=$(ls -d target/$TARGET/release/bundle/macos/*.app | head -1)
+          test -f "$app/Contents/Frameworks/libpdfium.dylib" || { echo "::error::libpdfium.dylib is not in $app/Contents/Frameworks"; exit 1; }
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app/Contents/Frameworks/libpdfium.dylib" 2>&1 | grep -E "Authority|TeamIdentifier|flags" || true
+          if [ "${APPLE_SIGNING_IDENTITY:-}" != "-" ]; then
+            spctl -a -vv "$app"
+          fi
+          bin="$app/Contents/MacOS/$(ls "$app/Contents/MacOS" | head -1)"
+          if [ "$TARGET" = "x86_64-apple-darwin" ] && ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            echo "::notice::No Rosetta on this runner: the x86_64 app's PDF read is checked on arm64 only."
+            exit 0
+          fi
+          out=$("$bin" --json inspect fixtures/pdf/book.pdf)
+          echo "$out"
+          echo "$out" | grep -q '"title": *"A Small Book"' || { echo "::error::the app couldn't read a PDF through its bundled PDFium"; exit 1; }
+      - name: Check PDFium in the Windows installer
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem "target\$env:TARGET\release\bundle\nsis" -Filter *-setup.exe | Select-Object -First 1
+          $out = Join-Path $env:RUNNER_TEMP 'pdfium-check'
+          $7z = (Get-Command 7z -ErrorAction SilentlyContinue).Source
+          if (-not $7z) { $7z = Join-Path $env:ProgramFiles '7-Zip\7z.exe' }
+          & $7z x $setup.FullName "-o$out" -y | Out-Null
+          $dll = Get-ChildItem $out -Recurse -Filter pdfium.dll | Select-Object -First 1
+          $app = Get-ChildItem $out -Recurse -Filter *.exe | Where-Object { $_.Name -in 'Deckle.exe', 'deckle-desktop.exe' } | Select-Object -First 1
+          if (-not $dll -or -not $app) { Write-Host "::error::pdfium.dll or the app exe is missing from $($setup.Name)"; exit 1 }
+          if ($dll.DirectoryName -ne $app.DirectoryName) { Write-Host "::error::pdfium.dll is in $($dll.DirectoryName), not beside $($app.Name)"; exit 1 }
+          Write-Host "(info) pdfium.dll signature: $((Get-AuthenticodeSignature $dll.FullName).Status)"
+          $json = Join-Path $env:RUNNER_TEMP 'inspect.json'
+          $p = Start-Process -FilePath $app.FullName -ArgumentList '--json', 'inspect', (Resolve-Path 'fixtures\pdf\book.pdf') -RedirectStandardOutput $json -RedirectStandardError "$json.err" -Wait -PassThru -NoNewWindow
+          Get-Content $json, "$json.err"
+          if ($p.ExitCode -ne 0 -or -not (Select-String -Path $json -Pattern '"title": *"A Small Book"' -Quiet)) {
+            Write-Host "::error::the app couldn't read a PDF through its bundled PDFium"
+            exit 1
+          }
+      - name: Keep the dry run's bundles
+        if: github.event.inputs.dry_run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deckle-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+          retention-days: 7
       # The installer, and the app exe packed inside it, must carry a valid,
       # timestamped signature. The loose target\...\release exe doesn't count: after each package
       # step the bundler puts the unsigned binary back, so only the packaged copies are signed.
@@ -256,7 +356,7 @@ jobs:
     env:
       TAG: ${{ github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    if: ${{ github.event.inputs.tag || startsWith(github.ref, 'refs/tags/') }}
+    if: ${{ (github.event.inputs.tag || startsWith(github.ref, 'refs/tags/')) && github.event.inputs.dry_run != 'true' }}
     steps:
       - name: Check latest.json
         run: |
