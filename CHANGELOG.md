@@ -23,6 +23,10 @@
   the Kindle. **Send again** puts an old edition back on the Kindle for a week, past the newest
   three. `deckle digest morgue list|search|show|send` does the same from the terminal. The
   editions already in the cache folder are brought in the first time.
+- **Two Kindles of one model keep their own send records and options** (#128). The library's
+  "on this Kindle" and update checks, and the per-Kindle choices (Cover first / Features first,
+  real-ASIN X-Ray), are now keyed by model and USB serial. What was recorded before still applies,
+  and a Kindle's first sighting inherits the model's old choices.
 
 ## 0.4.0 — a real front page, topic sections, From Your Shelf
 
