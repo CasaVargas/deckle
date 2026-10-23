@@ -72,6 +72,8 @@ pub fn powerball(json: &[u8]) -> Result<Article, String> {
         }
     }
     Ok(Article {
+        url: None,
+        outlet: None,
         teaser: None,
         photos: Vec::new(),
         title: "Powerball".into(),
@@ -90,6 +92,8 @@ pub fn mega_millions(json: &[u8]) -> Result<Article, String> {
         body.push_str(&format!("<p>Megaplier {}x</p>", esc(m)));
     }
     Ok(Article {
+        url: None,
+        outlet: None,
         teaser: None,
         photos: Vec::new(),
         title: "Mega Millions".into(),
@@ -123,6 +127,8 @@ pub fn section(cfg: &Config, net: &dyn Net) -> Section {
         );
     }
     Section {
+        weather: None,
+        puzzle: None,
         key: String::new(),
         title: TITLE.into(),
         kicker: Some("Always check results with the official lottery.".into()),

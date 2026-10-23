@@ -195,6 +195,8 @@ pub fn section(
         return None;
     }
     Some(Section {
+        weather: None,
+        puzzle: None,
         key: section_key(SectionKind::Shelf, None),
         title: "From Your Shelf".into(),
         kicker: Some(kicker(&primary_snap, date, tz)),

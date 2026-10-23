@@ -155,3 +155,30 @@ fn an_export_folder_that_cannot_be_reached_is_a_line_not_a_failure() {
             .contains("no such folder")
     );
 }
+
+#[test]
+fn digest_build_writes_a_bundle_beside_the_epub() {
+    let home = setup("");
+    let out = home.path().join("out");
+    let o = deckle(home.path())
+        .args([
+            "--json",
+            "digest",
+            "build",
+            "--bundle",
+            "--date",
+            "2026-10-23",
+            "-o",
+        ])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let bundle = out.join("deckle-daily-2026-10-23.deckle");
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(bundle.join("edition.json")).unwrap()).unwrap();
+    assert_eq!(json["format"], "deckle-edition");
+    assert_eq!(json["sections"][0]["kind"], "horoscope");
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["bundles"][0]["path"], bundle.display().to_string());
+}

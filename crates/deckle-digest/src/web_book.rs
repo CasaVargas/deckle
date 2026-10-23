@@ -129,7 +129,7 @@ pub fn build(
         id: id.clone(),
         title: title.clone(),
         byline: x.byline.clone(),
-        outlet,
+        outlet: outlet.clone(),
         words: x.words,
         article: Article {
             title: title.clone(),
@@ -137,6 +137,9 @@ pub fn build(
             body,
             teaser: x.teaser.clone(),
             photos,
+            // A saved page's base is a `file:` path, not a link.
+            url: base.starts_with("http").then(|| base.clone()),
+            outlet: Some(outlet.clone()),
         },
         file_stem: stem.clone(),
     };
