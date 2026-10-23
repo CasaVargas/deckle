@@ -244,7 +244,7 @@ pub(crate) fn story_body(
     net: &dyn Net,
 ) -> (String, Vec<Vec<u8>>) {
     let fetched = if cfg.photos {
-        article::fetch_photos(&x.photos, cfg.max_photos, net)
+        article::fetch_photos(&x.photos, x.lead, cfg.max_photos, net)
     } else {
         vec![None; x.photos.len()]
     };
