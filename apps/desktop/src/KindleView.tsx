@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import Highlights from "./Highlights";
 import Icon from "./Icon";
+import WordsAnki from "./WordsAnki";
 import type { DeviceBookRow, DeviceShelf, RunTarget } from "./types";
 
 interface Props {
@@ -264,6 +265,7 @@ export default function KindleView({ target, targetKey, busy, onResend, onNotice
       {shelf && target && (shelf.highlights.length > 0 || shelf.highlights_error) && (
         <Highlights target={target} rows={shelf.highlights} error={shelf.highlights_error} busy={busy || loading} onWritten={load} />
       )}
+      {shelf && target && <WordsAnki target={target} busy={busy || loading} />}
     </main>
   );
 }

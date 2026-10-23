@@ -41,6 +41,8 @@ export const api = {
   highlightsSet: (folder: string | null, clippings: boolean) => invoke<HighlightsStatus>("highlights_set", { folder, clippings }),
   /** Reads the Kindle again (its own session) and writes what's new into the folder. */
   highlightsWrite: (target: RunTarget) => invoke<HighlightsReport>("highlights_write", { target }),
+  /** Every looked-up word as an Anki CSV at `to`; resolves to how many words. */
+  wordsAnki: (target: RunTarget, to: string) => invoke<number>("words_anki", { target, to }),
   readershipReport: () => invoke<ReadershipView>("readership_report"),
   readershipApply: (id: string) => invoke<ReadershipView>("readership_apply", { id }),
   readershipDismiss: (id: string) => invoke<ReadershipView>("readership_dismiss", { id }),

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Looked-up words to Anki, in the app** (#135). The Kindle tab has a **Looked-up words** card:
+  **Export to Anki…** saves every English word you looked up on that Kindle as flashcards (the
+  word, a short definition, the sentence and the book), the same CSV as `deckle words anki`.
 - **PDFs in the app** (#133). Drop a PDF on the window (or a folder of them, or pick one with
   **Choose files…**) and it's reflowed, built and sent like any book; its row shows the title and
   author it reflows with, and a scan says why it can't be read. The app now carries PDFium, so
