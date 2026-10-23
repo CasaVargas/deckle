@@ -381,6 +381,17 @@ pub fn write_highlights_on(conn: &mut Conn<'_>, state: &Path) -> Result<Outcome,
     })
 }
 
+/// Every English word looked up on the Kindle, as a CSV Anki imports, written over `to` (#135).
+/// Reads `vocab.db` over `conn`, never writes to the Kindle, and defines words only from a Word
+/// Wise database already on this machine. Returns how many words went out.
+pub fn anki_on(conn: &mut Conn<'_>, to: &Path) -> Result<usize, String> {
+    let files = deckle_core::vocab::read_vocab_on(conn)
+        .map_err(|e| e.to_string())?
+        .ok_or("This Kindle has no looked-up words: its Vocabulary Builder is empty or off.")?;
+    let define = deckle_shelf::words::wordwise_definer();
+    deckle_shelf::anki::export(&files, to, &*define)
+}
+
 /// Removes `file` from `target` and forgets the library's record of sending it there.
 pub fn remove_from(conn: &mut Conn<'_>, config: &Path, file: &str) -> Result<Vec<String>, String> {
     let device = deckle_library::device_ref(conn.target);
@@ -455,6 +466,16 @@ pub async fn highlights_write(target: RunTarget) -> Result<Outcome, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Its own session, like Remove.
+#[tauri::command]
+pub async fn words_anki(target: RunTarget, to: String) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        with_target(target, move |conn, _| anki_on(conn, Path::new(&to)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn device_remove(target: RunTarget, file: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -523,6 +544,55 @@ mod tests {
         assert!(lib.list()[0].sidecar.sends.is_empty());
         assert!(remove_from(&mut conn, &config, "../x.kfx").is_err());
     }
+    #[test]
+    fn anki_export_reads_the_kindle_and_writes_nothing_to_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kindle = tmp.path().join("Kindle");
+        let vocab = kindle.join("system/vocabulary");
+        std::fs::create_dir_all(&vocab).unwrap();
+        let c = rusqlite::Connection::open(vocab.join("vocab.db")).unwrap();
+        c.execute_batch(
+            "CREATE TABLE WORDS (id TEXT PRIMARY KEY, word TEXT, stem TEXT, lang TEXT, category INTEGER, timestamp INTEGER, profileid TEXT);
+             CREATE TABLE LOOKUPS (id TEXT PRIMARY KEY, word_key TEXT, book_key TEXT, dict_key TEXT, pos TEXT, usage TEXT, timestamp INTEGER);
+             CREATE TABLE BOOK_INFO (id TEXT PRIMARY KEY, asin TEXT, guid TEXT, lang TEXT, title TEXT, authors TEXT);
+             INSERT INTO BOOK_INFO VALUES ('b1','B0','g','en','Walden','Thoreau');
+             INSERT INTO WORDS VALUES ('w1','sedulous','sedulous','en',0,1761000000000,'p');
+             INSERT INTO LOOKUPS VALUES ('l1','w1','b1','d','n','a sedulous reader',1761000000000);",
+        )
+        .unwrap();
+        drop(c);
+        let before = std::fs::read(vocab.join("vocab.db")).unwrap();
+        let target = Target::MassStorage(deckle_core::deliver::Device {
+            root: kindle.clone(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: None,
+        });
+        let out = tmp.path().join("words.csv");
+        let n = anki_on(&mut Conn::new(&target), &out).unwrap();
+        assert_eq!(n, 1);
+        let csv = std::fs::read_to_string(&out).unwrap();
+        assert!(csv.contains("\"sedulous\""), "{csv}");
+        assert_eq!(
+            std::fs::read(vocab.join("vocab.db")).unwrap(),
+            before,
+            "the Kindle's copy is untouched"
+        );
+
+        let empty = tmp.path().join("NoVocab");
+        std::fs::create_dir_all(&empty).unwrap();
+        let none = Target::MassStorage(deckle_core::deliver::Device {
+            root: empty,
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: None,
+        });
+        let e = anki_on(&mut Conn::new(&none), &out).unwrap_err();
+        assert!(e.contains("no looked-up words"), "{e}");
+    }
+
     fn clippings_fixture() -> Vec<u8> {
         std::fs::read(
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/clippings/variants.txt"),

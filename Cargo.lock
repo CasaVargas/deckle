@@ -1062,6 +1062,7 @@ dependencies = [
  "deckle-transport",
  "deckle-txt",
  "deckle-xray",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
