@@ -47,6 +47,7 @@ pub use chrono;
 pub use chrono_tz;
 pub use config::{Config, SectionKind};
 pub use fetch::{Http, Net};
+pub use url;
 pub use zeroize;
 
 /// The author stamped on every edition.
@@ -76,6 +77,28 @@ pub struct Article {
     pub url: Option<String>,
     /// Who published it: the feed's source, else the page's host.
     pub outlet: Option<String>,
+    /// What only a native reader uses: photo masters and captions, the byline, when it was
+    /// published (Books and Kindle design §9).
+    pub extra: Extra,
+}
+
+/// The parts of a story the edition bundle carries and the EPUB doesn't.
+#[derive(Clone, Debug, Default)]
+pub struct Extra {
+    /// One per photo, in [`Article::photos`] order (or empty: none known).
+    pub photos: Vec<PhotoExtra>,
+    pub byline: Option<String>,
+    /// RFC 3339.
+    pub published: Option<String>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PhotoExtra {
+    /// The photo in color at up to 2400 px, when a bundle wanted it.
+    pub master: Option<Vec<u8>>,
+    pub caption: Option<String>,
+    pub credit: Option<String>,
+    pub alt: Option<String>,
 }
 
 impl Article {
@@ -94,6 +117,9 @@ impl Article {
                 continue;
             }
             self.photos.remove(n);
+            if n < self.extra.photos.len() {
+                self.extra.photos.remove(n);
+            }
             let img = format!("<img src=\"{}\" alt=\"\"/>", photo_token(n));
             self.body = article::strip_empty_figures(&self.body.replace(&img, ""));
             for m in n + 1..=self.photos.len() {
