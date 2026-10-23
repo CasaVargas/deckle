@@ -138,7 +138,7 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         .unwrap_or_else(|| outlet.clone());
     let meta = format!("{saved} · {outlet} · about {} min", minutes(x.words));
     if x.words > cfg.reading.long_read_words && !inline {
-        let (body, photos) = story_body(&x, &outlet, cfg, net);
+        let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
         let lr = LongRead {
             id: e.id.clone(),
             title: title.clone(),
@@ -154,6 +154,7 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
                 photos,
                 url: e.url.clone(),
                 outlet: Some(outlet.clone()),
+                extra,
             },
         };
         let pointer = Article {
@@ -169,10 +170,11 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
             photos: Vec::new(),
             url: e.url.clone(),
             outlet: Some(outlet.clone()),
+            extra: Default::default(),
         };
         return Got::Long(Box::new(lr), pointer);
     }
-    let (body, photos) = story_body(&x, &outlet, cfg, net);
+    let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
     Got::Story(Article {
         title,
         meta: Some(match x.byline.as_deref() {
@@ -184,6 +186,7 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         photos,
         url: e.url.clone(),
         outlet: Some(outlet),
+        extra,
     })
 }
 

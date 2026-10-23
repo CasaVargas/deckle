@@ -11,6 +11,13 @@
   undoes it. Books you're partway through aren't ticked at first. Store books and anything with
   DRM are never touched. CLI: `deckle kindle upgrade [--dry-run]` and `deckle kindle put-back`;
   `deckle kindle books` names each book's class.
+- **The paper as data, version 1.1: fit for a 12.9-inch iPad** (Books and Kindle design,
+  phase 2). Bundles now carry each photo as a full-size color master (up to 2400 px, JPEG 85)
+  with its caption, credit, alt text, focus point and average color, and each story's byline,
+  publish time, reading time, prominence, a paywall flag and a pull quote. Moving pictures
+  stay the reader's job: parallax from the still. Every fetched story also loses boilerplate
+  (newsletter sign-ups, "Advertisement", share prompts) and gets curly quotes and dashes;
+  `deckle digest lint` shows what a page keeps and drops.
 - **The Daily tab, in rooms.** Its fourteen cards are grouped into five rooms in a rail down the
   left: Today (the press bar, tomorrow's paper, the page plan and the week), Editions, Reading,
   Delivery and The paper, each with a line on what's in it ("Press at 05:30", "Kindle and 2

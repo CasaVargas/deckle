@@ -37,6 +37,7 @@ pdf-writer = "0.15"
 roxmltree.workspace = true
 sha2.workspace = true
 deckle-highlights.workspace = true
+deckle-core.workspace = true
 
 # The SMTP password's keychain (email design §6): each OS's own store.
 [target.'cfg(target_os = "macos")'.dependencies]
