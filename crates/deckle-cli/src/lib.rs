@@ -2582,7 +2582,7 @@ fn digest_shelf(json: bool, path: &Path, forget: bool) -> Result<ExitCode, Strin
             highlight: cfg
                 .shelf
                 .highlights
-                .then(|| select::highlight(&shelf, date))
+                .then(|| select::highlight(&shelf, date, tz))
                 .flatten(),
             words: if cfg.shelf.words {
                 select::words(&shelf, date, tz)

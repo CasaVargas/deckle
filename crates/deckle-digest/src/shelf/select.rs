@@ -117,7 +117,8 @@ pub fn nightstand(
     // (read on, timestamp, key, percent, state, title, kindle): every book, so the latest read of
     // a book decides whether it is in progress, whichever Kindle it was on.
     let mut found: Vec<Read> = Vec::new();
-    for (_, k) in shelf.fresh(date) {
+    let labels = shelf.labels();
+    for (id, k) in shelf.fresh(date, tz) {
         for b in &k.books {
             let Some(raw) = b.last_read.as_deref() else {
                 continue;
@@ -131,14 +132,22 @@ pub fn nightstand(
             }
             let days = (date - read).num_days();
             let pct = percent(b, fraction_ok);
-            let key = b.asin.clone().unwrap_or_else(|| title_lc.clone());
+            // The same book on two Kindles may carry an ASIN on one and none on the other, so the
+            // key is the title and first author.
+            let key = format!(
+                "{title_lc}\u{1f}{}",
+                b.authors
+                    .first()
+                    .map(|a| a.to_lowercase())
+                    .unwrap_or_default()
+            );
             let line = Line {
                 title: b.title.clone(),
                 percent: pct.map(|(p, _)| p),
                 about: pct.is_some_and(|(_, a)| a),
                 state: state(days, pct.map(|(p, _)| p), read),
             };
-            found.push((read, raw.to_owned(), key, pct, line, k.name.clone()));
+            found.push((read, raw.to_owned(), key, pct, line, labels[id].clone()));
         }
     }
     // Newest read first (the timestamp breaks same-day ties), one entry per book, and only then
@@ -202,9 +211,10 @@ pub struct Pick {
 /// A highlight from the past, stable for a given date: 40–600 characters and 180+ days old
 /// (else 30+), one with your note first, none shown in the last 90 days. Entries in `shown`
 /// dated `date` itself are ignored, so a rebuild the same day prints the same one.
-pub fn highlight(shelf: &Shelf, date: NaiveDate) -> Option<Pick> {
+pub fn highlight(shelf: &Shelf, date: NaiveDate, tz: Tz) -> Option<Pick> {
+    let labels = shelf.labels();
     let mut all: Vec<(&HighlightSnap, &str, i64)> = Vec::new();
-    for (_, k) in shelf.fresh(date) {
+    for (id, k) in shelf.fresh(date, tz) {
         if !k.highlights_shared {
             continue;
         }
@@ -216,7 +226,7 @@ pub fn highlight(shelf: &Shelf, date: NaiveDate) -> Option<Pick> {
                 .get(&h.id)
                 .is_some_and(|d| *d != date && (date - *d).num_days() < NO_REPEAT_DAYS);
             if HIGHLIGHT_CHARS.contains(&h.text.chars().count()) && !recent {
-                all.push((h, k.name.as_str(), days));
+                all.push((h, labels[id].as_str(), days));
             }
         }
     }
@@ -252,7 +262,7 @@ pub fn highlight(shelf: &Shelf, date: NaiveDate) -> Option<Pick> {
 /// "<Book>, <Weekday>".
 pub fn words(shelf: &Shelf, date: NaiveDate, tz: Tz) -> Vec<(WordSnap, String)> {
     let mut all: Vec<(NaiveDate, &WordSnap)> = Vec::new();
-    for (_, k) in shelf.fresh(date) {
+    for (_, k) in shelf.fresh(date, tz) {
         if !k.words_shared {
             continue;
         }

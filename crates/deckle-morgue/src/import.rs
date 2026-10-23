@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Bringing the editions in the cache folder into the Morgue (design §3, goal 3). An EPUB has no
-//! weather line or teasers any more, so an imported sidecar has `weather` and `lead.teaser`
-//! unset; the rest is read back from the pages.
+//! Bringing the editions in the cache folder into the Morgue (design §3, goal 3). An EPUB keeps
+//! no story teasers, so an imported sidecar has them unset; the weather line and the lead are
+//! read back from the front page, and the rest from the section pages.
 
 use std::io::{self, Read};
 use std::path::Path;
@@ -9,7 +9,7 @@ use std::path::Path;
 use chrono::NaiveDate;
 
 use crate::folder::Morgue;
-use crate::sidecar::{Files, SectionText, Sidecar, Story, TEXT_CAP, plain_text};
+use crate::sidecar::{Files, Lead, SectionText, Sidecar, Story, TEXT_CAP, plain_text};
 use crate::state::MorgueState;
 
 fn has_class(n: roxmltree::Node, class: &str) -> bool {
@@ -25,8 +25,23 @@ fn text_of(n: roxmltree::Node) -> String {
         .join(" ")
 }
 
-/// Classes whose elements aren't story text: the byline, links, rules, the section's own list.
-const NOT_STORY: [&str; 6] = ["meta", "link", "rule", "back", "in-section", "toc"];
+/// Classes whose elements aren't story text: the byline, links, rules, the section's own list,
+/// the "unavailable" note.
+const NOT_STORY: [&str; 7] = [
+    "meta",
+    "link",
+    "rule",
+    "back",
+    "in-section",
+    "toc",
+    "unavailable",
+];
+
+/// `s3.xhtml#a2` → section index 2 (zero-based).
+fn section_of_href(href: &str) -> Option<usize> {
+    let n = href.strip_prefix('s')?.split_once(".xhtml")?.0;
+    n.parse::<usize>().ok()?.checked_sub(1)
+}
 
 fn read_entry(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
     let mut s = String::new();
@@ -63,11 +78,33 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
         String::new(),
         date.format("%j").to_string().parse().unwrap_or(1),
     );
+    let mut weather = None;
+    // The lead's title, the section page it links to and (when the page prints one) its teaser.
+    let mut lead: Option<(String, Option<usize>, Option<String>)> = None;
     if let Some(front) = read_entry(&mut zip, "OEBPS/front.xhtml")
         && let Ok(doc) = roxmltree::Document::parse(&front)
     {
         for n in doc.descendants().filter(|n| n.is_element()) {
-            if has_class(n, "paper") {
+            if has_class(n, "weather") && n.has_tag_name("p") {
+                weather = Some(text_of(n).trim().to_owned()).filter(|w| !w.is_empty());
+            } else if lead.is_none() && n.has_tag_name("h2") && has_class(n, "lead") {
+                let link = n.descendants().find(|d| d.has_tag_name("a"));
+                let title = text_of(n).trim().to_owned();
+                // The byline paragraph, then the teaser paragraph, follow the headline.
+                let teaser = n
+                    .next_siblings()
+                    .filter(|s| s.is_element())
+                    .nth(2)
+                    .filter(|p| p.has_tag_name("p"))
+                    .map(|p| text_of(p).trim().to_owned())
+                    .filter(|t| !t.is_empty());
+                let idx = link
+                    .and_then(|a| a.attribute("href"))
+                    .and_then(section_of_href);
+                if !title.is_empty() {
+                    lead = Some((title, idx, teaser));
+                }
+            } else if has_class(n, "paper") {
                 paper = text_of(n).trim().to_owned();
             } else if has_class(n, "ears") {
                 let ears = text_of(n);
@@ -126,13 +163,39 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
         flush(&mut current, &mut section);
         sections.push(section);
     }
+    // Older editions have no `h2.lead`: their first story link on the front page is the lead.
+    if lead.is_none()
+        && let Some(front) = read_entry(&mut zip, "OEBPS/front.xhtml")
+        && let Ok(doc) = roxmltree::Document::parse(&front)
+    {
+        lead = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("a"))
+            .find_map(|a| {
+                let idx = section_of_href(a.attribute("href")?)?;
+                let title = text_of(a).trim().to_owned();
+                (!title.is_empty() && a.attribute("href")?.contains("#a")).then_some((
+                    title,
+                    Some(idx),
+                    None,
+                ))
+            });
+    }
+    let lead = lead.map(|(title, idx, teaser)| Lead {
+        section: idx
+            .and_then(|i| sections.get(i))
+            .map(|s: &SectionText| s.title.clone())
+            .unwrap_or_default(),
+        title,
+        teaser,
+    });
     Ok(Sidecar {
         date,
         number,
         paper,
         place,
-        weather: None,
-        lead: None,
+        weather,
+        lead,
         sections,
         files: Files {
             epub: format!("{date}.epub"),
