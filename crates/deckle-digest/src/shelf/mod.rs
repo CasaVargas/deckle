@@ -6,7 +6,7 @@
 pub mod select;
 pub mod store;
 
-use chrono::{DateTime, NaiveDate};
+use chrono::NaiveDate;
 use chrono_tz::Tz;
 
 use crate::config::{Config, SectionKind, section_key};
@@ -26,17 +26,15 @@ fn italicize(s: &str) -> String {
     out
 }
 
-/// The day a snapshot was taken, in the paper's time zone.
-fn seen_day(k: &KindleSnapshot, tz: Tz) -> Option<NaiveDate> {
-    DateTime::parse_from_rfc3339(&k.seen)
-        .ok()
-        .map(|t| t.with_timezone(&tz).date_naive())
-        .or_else(|| store::seen_on(k))
-}
+use store::seen_day;
 
 fn kicker(k: &KindleSnapshot, date: NaiveDate, tz: Tz) -> String {
     let when = match seen_day(k, tz).map(|d| (date - d).num_days()) {
         Some(days) if (0..=6).contains(&days) => seen_day(k, tz)
+            .map(|d| d.format("%A").to_string())
+            .unwrap_or_default(),
+        // A build dated before the snapshot has no "days ago": name the day it was taken.
+        Some(days) if days < 0 => seen_day(k, tz)
             .map(|d| d.format("%A").to_string())
             .unwrap_or_default(),
         Some(days) => format!("{days} days ago"),
@@ -147,24 +145,30 @@ pub fn section(
     tz: Tz,
     fraction_ok: bool,
 ) -> Option<Section> {
-    let primary = shelf.fresh(date).first().map(|(_, k)| (*k).clone())?;
+    let labels = shelf.labels();
+    let (primary_id, primary_snap) = shelf
+        .fresh(date, tz)
+        .first()
+        .map(|(id, k)| ((*id).to_owned(), (*k).clone()))?;
+    let primary = labels[primary_id.as_str()].clone();
+    let primary_name = primary.as_str();
     let mut articles = Vec::new();
 
     if let Some(n) = select::nightstand(shelf, &cfg.shelf, date, tz, fraction_ok) {
         articles.push(Article {
-            title: format!("On your nightstand{}", from(&n.from, &primary.name)),
+            title: format!("On your nightstand{}", from(&n.from, primary_name)),
             body: nightstand_body(&n),
             ..Default::default()
         });
     }
     if cfg.shelf.highlights
-        && let Some(p) = select::highlight(shelf, date)
+        && let Some(p) = select::highlight(shelf, date, tz)
     {
         articles.push(Article {
             title: format!(
                 "You highlighted this {} ago{}",
                 p.age,
-                from(&p.from, &primary.name)
+                from(&p.from, primary_name)
             ),
             body: highlight_body(&p),
             ..Default::default()
@@ -175,16 +179,13 @@ pub fn section(
         let words = select::words(shelf, date, tz);
         if let Some((first, _)) = words.first() {
             let name = shelf
-                .fresh(date)
+                .fresh(date, tz)
                 .into_iter()
                 .find(|(_, k)| k.words_shared && k.words.contains(first))
-                .map(|(_, k)| k.name.clone())
+                .map(|(id, _)| labels[id].clone())
                 .unwrap_or_default();
             articles.push(Article {
-                title: format!(
-                    "Words you looked up this week{}",
-                    from(&name, &primary.name)
-                ),
+                title: format!("Words you looked up this week{}", from(&name, primary_name)),
                 body: words_body(&words),
                 ..Default::default()
             });
@@ -196,7 +197,7 @@ pub fn section(
     Some(Section {
         key: section_key(SectionKind::Shelf, None),
         title: "From Your Shelf".into(),
-        kicker: Some(kicker(&primary, date, tz)),
+        kicker: Some(kicker(&primary_snap, date, tz)),
         articles,
         unavailable: None,
     })

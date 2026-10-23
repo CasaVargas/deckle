@@ -84,11 +84,11 @@ pub fn build(
             .clone()
             .filter(|t| !t.is_empty())
             .or_else(|| title_from_file(&b.file));
-        let label = title.clone().unwrap_or_else(|| b.file.clone());
         let p = match deckle_readership::parse_yjf(bytes) {
             Ok(p) => p,
             Err(e) => {
-                errors.push(format!("{label}: {e}"));
+                // The file name, never the title: these lines reach `watch` and launchd logs.
+                errors.push(format!("{}: {e}", b.file));
                 continue;
             }
         };

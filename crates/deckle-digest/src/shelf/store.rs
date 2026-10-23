@@ -4,7 +4,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use chrono::{Days, NaiveDate};
+use chrono::{DateTime, Days, NaiveDate};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 
 /// Days a highlight is remembered as shown.
@@ -126,18 +127,50 @@ impl Shelf {
         self.shown.retain(|_, d| *d >= first);
     }
 
-    /// The snapshots taken within [`FRESH_DAYS`] days of `today`, newest first.
-    pub fn fresh(&self, today: NaiveDate) -> Vec<(&str, &KindleSnapshot)> {
+    /// The snapshots taken within [`FRESH_DAYS`] days of `today` (a day in the paper's time zone,
+    /// the same one the kicker counts in), newest first.
+    pub fn fresh(&self, today: NaiveDate, tz: Tz) -> Vec<(&str, &KindleSnapshot)> {
         let first = today - Days::new(FRESH_DAYS);
         let mut out: Vec<_> = self
             .kindles
             .iter()
-            .filter(|(_, k)| seen_on(k).is_some_and(|d| d >= first))
+            .filter(|(_, k)| seen_day(k, tz).is_some_and(|d| d >= first))
             .map(|(id, k)| (id.as_str(), k))
             .collect();
         out.sort_by(|a, b| b.1.seen.cmp(&a.1.seen));
         out
     }
+
+    /// What the page calls each Kindle: its name, and when two share one, the name with the tail
+    /// of its id (the USB serial) so the page can tell them apart.
+    pub fn labels(&self) -> BTreeMap<String, String> {
+        self.kindles
+            .iter()
+            .map(|(id, k)| {
+                let twins = self.kindles.values().filter(|o| o.name == k.name).count();
+                let label = if twins > 1 {
+                    let tail = id.rsplit_once('#').map_or(id.as_str(), |(_, s)| s);
+                    let skip = tail.chars().count().saturating_sub(4);
+                    format!(
+                        "{} ({})",
+                        k.name,
+                        tail.chars().skip(skip).collect::<String>()
+                    )
+                } else {
+                    k.name.clone()
+                };
+                (id.clone(), label)
+            })
+            .collect()
+    }
+}
+
+/// The day a snapshot was taken, in the paper's time zone.
+pub fn seen_day(k: &KindleSnapshot, tz: Tz) -> Option<NaiveDate> {
+    DateTime::parse_from_rfc3339(&k.seen)
+        .ok()
+        .map(|t| t.with_timezone(&tz).date_naive())
+        .or_else(|| seen_on(k))
 }
 
 /// The date a snapshot was taken.

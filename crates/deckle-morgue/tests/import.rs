@@ -110,10 +110,13 @@ fn imports_two_with_one_kfx() {
             s.number,
             date.format("%j").to_string().parse::<u32>().unwrap()
         );
-        assert!(
-            s.weather.is_none() && s.lead.is_none(),
-            "not recoverable from the EPUB"
-        );
+        assert_eq!(s.weather.as_deref(), Some("Clear"));
+        let lead = s
+            .lead
+            .as_ref()
+            .expect("the lead is read from the front page");
+        assert_eq!(lead.title, "Mill sold");
+        assert!(lead.teaser.is_none(), "teasers are not kept in the EPUB");
         assert!(m.paths(date).0.exists());
     }
     assert_eq!(
@@ -257,4 +260,20 @@ fn an_edition_with_no_readable_pages_is_still_kept() {
         "a minimal sidecar: the EPUB itself is what matters"
     );
     assert!(m.paths(d("2026-10-21")).0.exists());
+}
+
+#[test]
+fn an_imported_edition_keeps_its_weather_and_lead() {
+    let tmp = tempfile::tempdir().unwrap();
+    let epub = tmp.path().join("deckle-daily-2026-10-21.epub");
+    let mut g = gathered(d("2026-10-21"));
+    g.edition.sections[1].unavailable = Some("The draw wasn't posted.".into());
+    deckle_digest::write_edition(&g, &epub).unwrap();
+    let kept = deckle_morgue::from_gathered(&g);
+    let s = sidecar_from_epub(&epub, d("2026-10-21")).unwrap();
+    assert_eq!(s.weather.as_deref(), Some("Clear"));
+    let (got, want) = (s.lead.unwrap(), kept.lead.unwrap());
+    assert_eq!((got.section, got.title), (want.section, want.title));
+    // "Unavailable" is a note on the page, not the last story's text.
+    assert_eq!(s.sections[1].stories[0].text, "12 34 56");
 }

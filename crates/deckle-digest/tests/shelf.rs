@@ -121,7 +121,7 @@ fn fresh_ignores_old_snapshots() {
     shelf.put("edge", snap("Edge", today() - Days::new(30)));
     shelf.put("new", snap("New", today() - Days::new(1)));
     let names: Vec<&str> = shelf
-        .fresh(today())
+        .fresh(today(), chrono_tz::UTC)
         .into_iter()
         .map(|(_, k)| k.name.as_str())
         .collect();
@@ -182,6 +182,51 @@ mod select {
         select::nightstand(&shelf, &ShelfConfig::default(), date(), TZ, false)
             .map(|n| n.books.into_iter().map(|l| (l.title, l.state)).collect())
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn one_book_on_two_kindles_is_one_line_even_when_only_one_has_an_asin() {
+        let mut shelf = Shelf::default();
+        let mut with_asin = book("Walden", 1, 40, 100);
+        with_asin.asin = Some("B000".into());
+        with_asin.authors = vec!["Thoreau".into()];
+        let mut without = book("walden", 2, 30, 100);
+        without.authors = vec!["THOREAU".into()];
+        for (id, name, b) in [("A", "Scribe", with_asin), ("B", "Paperwhite", without)] {
+            let mut k = snap(name, date());
+            k.books = vec![b];
+            shelf.put(id, k);
+        }
+        let n = select::nightstand(&shelf, &ShelfConfig::default(), date(), TZ, false).unwrap();
+        assert_eq!(n.books.len(), 1);
+        assert_eq!(n.from, "Scribe");
+    }
+
+    #[test]
+    fn two_kindles_with_one_name_get_told_apart() {
+        let mut shelf = Shelf::default();
+        shelf.put("PW/Kindle#G0900001", snap("Kindle", date()));
+        shelf.put("PW/Kindle#G0900002", snap("Kindle", date()));
+        shelf.put("Scribe#S1", snap("Scribe", date()));
+        let labels = shelf.labels();
+        assert_eq!(labels["PW/Kindle#G0900001"], "Kindle (0001)");
+        assert_eq!(labels["PW/Kindle#G0900002"], "Kindle (0002)");
+        assert_eq!(labels["Scribe#S1"], "Scribe");
+    }
+
+    #[test]
+    fn freshness_counts_days_where_the_paper_does() {
+        // Taken at 23:30 Eastern on Sep 21 (Sep 22 in UTC): 31 days old by the paper's own count,
+        // which the kicker uses too, though its UTC date alone would keep it.
+        let mut shelf = Shelf::default();
+        let mut k = snap("Scribe", date());
+        k.seen = "2026-09-23T03:30:00Z".into();
+        shelf.put("A", k);
+        assert_eq!(shelf.fresh(date(), TZ).len(), 1);
+        let mut k = snap("Scribe", date());
+        k.seen = "2026-09-22T03:30:00Z".into();
+        shelf.put("A", k);
+        assert!(shelf.fresh(date(), TZ).is_empty());
     }
 
     #[test]
@@ -356,7 +401,7 @@ mod select {
 
     #[test]
     fn highlight_age_and_preference() {
-        let pick = |hs| select::highlight(&shelf_with(hs), date()).map(|p| p.highlight.id);
+        let pick = |hs| select::highlight(&shelf_with(hs), date(), TZ).map(|p| p.highlight.id);
         assert_eq!(
             pick(vec![
                 highlight("plain200", 100, 200, false),
@@ -385,9 +430,9 @@ mod select {
             highlight("c", 100, 200, false),
         ];
         let mut shelf = shelf_with(hs);
-        let first = select::highlight(&shelf, date()).unwrap();
+        let first = select::highlight(&shelf, date(), TZ).unwrap();
         assert_eq!(
-            select::highlight(&shelf, date()).unwrap().highlight,
+            select::highlight(&shelf, date(), TZ).unwrap().highlight,
             first.highlight
         );
         // Shown on the 1st: out. Shown today (a rebuild): still picked.
@@ -397,14 +442,20 @@ mod select {
         shelf
             .shown
             .insert("b".into(), NaiveDate::from_ymd_opt(2026, 9, 1).unwrap());
-        assert_eq!(select::highlight(&shelf, date()).unwrap().highlight.id, "c");
+        assert_eq!(
+            select::highlight(&shelf, date(), TZ).unwrap().highlight.id,
+            "c"
+        );
         shelf.shown.insert("c".into(), date());
-        assert_eq!(select::highlight(&shelf, date()).unwrap().highlight.id, "c");
+        assert_eq!(
+            select::highlight(&shelf, date(), TZ).unwrap().highlight.id,
+            "c"
+        );
         // Everything shown recently: nothing to print.
         shelf
             .shown
             .insert("c".into(), NaiveDate::from_ymd_opt(2026, 9, 1).unwrap());
-        assert!(select::highlight(&shelf, date()).is_none());
+        assert!(select::highlight(&shelf, date(), TZ).is_none());
         assert_eq!(first.from, "Paperwhite");
     }
 

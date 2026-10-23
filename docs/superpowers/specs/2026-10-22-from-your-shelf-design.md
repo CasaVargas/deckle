@@ -252,7 +252,7 @@ under 2 years, else years: "19 months", "3 years"), the passage as a blockquote,
 **Which:** lookups in the **7 days** before the edition date, one per stem, newest first, at
 most **three**.
 
-**Printed:** "**<word>**, <short definition>." when Deckle's Word Wise database is already
+**Printed:** "**<word>** — <short definition>" (a dictionary-style dash, as the page prints it) when Deckle's Word Wise database is already
 downloaded on the Mac (`deckle_core::wordwise`, looked up by stem at snapshot time; this feature
 never downloads it), then the sentence you met it in (`usage`, trimmed to 160 characters at a
 word boundary) and "<Book>, <Weekday>". No database: word, sentence, book and day.
