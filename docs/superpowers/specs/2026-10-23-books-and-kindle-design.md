@@ -1,6 +1,6 @@
 # Books, Kindle, and a paper fit for the iPad: design
 
-**Status:** draft. The owner's questions are in §12, each with a recommendation · **Date:**
+**Status:** accepted, 2026-10-23. The owner took the recommendations in §12 · **Date:**
 2026-10-23 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-21-library-and-device-view-design.md` (library, Kindle tab, Upgrade),
 `2026-10-21-kindle-updates-design.md` (freshness, `replaces`),
@@ -329,7 +329,9 @@ Spike, alongside phase 1: carrying the reading position (§11).
 - **Bundle size.** About 15 MB a day, 30 days kept: about 450 MB in iCloud Drive. Each export
   folder's `keep` setting applies.
 
-## 12. Questions for the owner, with recommendations
+## 12. Rulings
+
+The owner accepted each recommendation below (2026-10-23).
 
 1. **Books you're partway through, in Upgrade all?** Recommend **not ticked**. They're listed
    with "You're 48% in", and you tick them yourself. This changes if the position spike works.
