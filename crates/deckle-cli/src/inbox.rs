@@ -103,6 +103,34 @@ pub(crate) fn pipeline_with(
     }
 }
 
+/// `kindle` for each book, after a copy for a Kobo when `kobo` is its outbox (other readers
+/// design §8): imported, cleaned and made a KEPUB, which needs no Previewer. A book the Kobo
+/// took leaves the Inbox even when the Kindle's copy has to wait for Previewer.
+pub(crate) fn with_kobo(
+    kobo: Option<Queue>,
+    mut kindle: impl FnMut(&Path, &Queue) -> Result<(), Skip>,
+) -> impl FnMut(&Path, &Queue) -> Result<(), Skip> {
+    move |book, outbox| {
+        let Some(k) = &kobo else {
+            return kindle(book, outbox);
+        };
+        let bytes = deckle_core::kobo::book(book).map_err(Skip::Unreadable)?;
+        let stem = book.file_stem().unwrap_or_default().to_string_lossy();
+        let name = format!("{}.epub", deckle_core::deliver::sanitize(&stem));
+        let write = || -> std::io::Result<()> {
+            std::fs::create_dir_all(&k.dir)?;
+            let tmp = k.dir.join(format!("{name}.part"));
+            std::fs::write(&tmp, &bytes)?;
+            std::fs::rename(&tmp, k.dir.join(&name))
+        };
+        write().map_err(|e| Skip::Retry(format!("Kobo outbox: {e}")))?;
+        match kindle(book, outbox) {
+            Err(Skip::Retry(_)) => Ok(()),
+            other => other,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

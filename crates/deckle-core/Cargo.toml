@@ -29,6 +29,6 @@ tempfile.workspace = true
 deunicode.workspace = true
 regex.workspace = true
 ureq.workspace = true
+rusqlite.workspace = true
 
 [dev-dependencies]
-rusqlite.workspace = true

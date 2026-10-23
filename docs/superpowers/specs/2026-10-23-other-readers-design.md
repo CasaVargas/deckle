@@ -282,7 +282,7 @@ The owner delegated these; each is ruled as below and can be reopened on the PR.
 ## 14. Phasing and sizing
 
 1. **Export folder (M), built.** §6.1, §7 `[[export]]`, and the app's export-folder card. iPad and Boox work at the end of it. The `Target` refactor (§5) and outbox v2 (§6) moved to phase 2 (§15).
-2. **Kobo (M–L).** §5 and §6, then §8: detection, KEPUB, prune, the three reads, and the app tab. Spikes 1–2 come first.
+2. **Kobo (M–L), built** (§16). Detection, KEPUB, the EPUB outbox, prune, highlights and the shelf. Readership and the app tab moved on. Spikes 1–2 are still owed.
 3. **PocketBook (S).** Detection and prune. Its reads are left for later. Spike 3 comes first.
 4. **PDF edition and reMarkable (L).** Its own typesetting spec, then §9. Spike 4 comes first.
 
@@ -305,3 +305,34 @@ Other rulings:
 - **Folders:** a missing export folder is created only when its parent exists, so a turned-off iCloud Drive is reported, not recreated. Files are copied through a hidden `.<name>.tmp` and renamed, so a sync client never uploads half a book. Pruning removes only `deckle-daily-YYYY-MM-DD.epub` names beyond `keep`.
 - **App:** the **Export folders** card sits on the Daily tab, next to **Email to Kindle**, because `[[export]]` lives in `digest.toml` like the Daily's other cards. Settings → Readers and the tab renames in §10 wait for phase 2, when there is more than one kind of reader to list. On a Mac, **Add folder…** opens on iCloud Drive. Each change saves at once, as on the Your Day card.
 - **Not checked on an iPad yet.** The owner's check for phase 1: an export to iCloud Drive, then the paper opened from the Files app in Books, with color photos.
+
+## 16. Build notes, phase 2 (Kobo)
+
+Built without a Kobo: against Kobo's files as the e-reader community documents them, and tested on a simulated drive (a folder with `.kobo/version` and a `KoboReader.sqlite` built from the columns Deckle reads). Spikes 1 and 2 (§11) are still owed, and `docs/devices.md` has the Kobo row pending.
+
+- **A Kobo isn't a `Target`.** §5 planned new `Target` variants, but every consumer of `Target` is Kindle-specific (KFX, MTP, `.sdr` sidecars, `.yjf`, `vocab.db`). A variant would have meant a "not on a Kobo" arm in some 16 files. So a Kobo is its own type, `deckle_core::kobo::Kobo`, with its own sync, `sync::run_kobo`, and the CLI picks one or the other. The `Target` refactor is dropped, not deferred.
+- **Outbox v2 became a second outbox.** §6's single outbox with an EPUB inside each entry became `outbox-epub/`, beside the Kindle's untouched `outbox/`.
+  - It holds `<name>.epub` files, made KEPUBs as they go over.
+  - The Kindle's outbox never holds an EPUB, so a Kindle owner's pushes and outbox are exactly as before.
+  - An owner with both readers gets the paper on both, each from its own outbox.
+- **When the EPUB outbox is filled:** a Kobo has been seen (`kobos.json` beside the app's `devices.json`), or one is plugged in now, or there is no Previewer. `devices.json` itself isn't written: the app writes it too, and the CLI saving it could race the app.
+- **Previewer missing:** `digest run` fails, as before, only when nothing else can take the paper: no export folder and no Kobo seen. Otherwise it notes "no Kindle copy" and carries on (phase 1's rule, widened).
+- **Long reads without Previewer** print inside the paper only when neither a Kobo nor an export with `books = true` takes them.
+- **Inbox books** are converted for the Kobo first (imported, cleaned, KEPUB; no Previewer). A Kindle step that has to wait for Previewer doesn't hold the book in the Inbox once the Kobo has its copy. A `.kfx` dropped in the Inbox stays Kindle-only.
+- **`deckle run … --to device`** sends to a Kobo when no Kindle is plugged in, as `Deckle/<file stem>.kepub.epub`, cleaned like any book but without typography, Open Library or X-Ray. `deckle highlights` reads a Kobo the same way.
+- **KEPUB conversion** is Deckle's own (`deckle_core::kepub`), not kepubify's code. It makes one pass over each XHTML file, with no tree rewrite:
+  - each sentence of each text run goes in a `koboSpan`, numbered by paragraph (block element) and sentence;
+  - each `img` gets a span of its own;
+  - Kobo's `book-columns`/`book-inner` divs wrap the body;
+  - text in `pre`, `code`, `script`, `style`, `svg`, `math` and tables is left alone;
+  - a book that already has `koboSpan`s comes back unchanged.
+  
+  Spike 2 (side by side with kepubify on a device) is still owed.
+- **Kobo files:** books go to `<drive>/Deckle/`, flushed to the drive and renamed into place. The prune only removes `deckle-daily-*.kepub.epub` there, and a Morgue edition sent again is exempt by its stem.
+- **Reads** use a copy of `KoboReader.sqlite` (with its `-wal`/`-shm` when present), opened read-only. Books in progress are `content` rows with `ContentType = 6` and `ReadStatus = 1`, read for `___PercentRead` and `DateLastRead`. Highlights and notes are `Bookmark` rows with `Text` or `Annotation`, joined to their book. Both are written out as a Kindle's `My Clippings.txt`, so the highlights export, the puzzle's notes and From Your Shelf read them unchanged.
+- **Kept for later:**
+  - **Readership** needs spike 1 to show per-chapter `___PercentRead` on a KEPUB paper.
+  - **Looked-up words:** a Kobo's word list isn't read.
+  - **The Morgue's "on the Kindle" marks** stay Kindle-only.
+  - **The desktop app** sends books to a Kindle only. A Kobo gets the paper through the scheduled `digest run`/`watch`, which the app already sets up. The tab renames in §10 wait until the app sends to a Kobo too.
+- **`DECKLE_MOUNTS`** (a path list) replaces the places Deckle looks for a drive. It's for a reader mounted somewhere unusual, and for the CLI tests' simulated Kobo.

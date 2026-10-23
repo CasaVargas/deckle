@@ -211,6 +211,23 @@ pub fn detect_in(roots: &[PathBuf]) -> Vec<Device> {
 /// Connected mass-storage Kindles: `/Volumes/*` on macOS, drive letters on Windows,
 /// `/media/$USER/*` and `/run/media/$USER/*` on Linux.
 pub fn detect_mass_storage() -> Vec<Device> {
+    let mut devices = detect_in(&mount_roots());
+    for d in &mut devices {
+        d.serial = crate::usb_serial::serial_for_mount(&d.root);
+    }
+    devices
+}
+
+/// Where a USB drive may be mounted: `/Volumes/*` on macOS, drive letters on Windows,
+/// `/media/$USER/*` and `/run/media/$USER/*` on Linux. Every reader that mounts as a drive is
+/// looked for here (a Kindle, a Kobo).
+///
+/// `DECKLE_MOUNTS` (a path list, as `PATH` is written) replaces them: for a reader mounted
+/// somewhere else, and for tests.
+pub fn mount_roots() -> Vec<PathBuf> {
+    if let Some(list) = std::env::var_os("DECKLE_MOUNTS").filter(|v| !v.is_empty()) {
+        return std::env::split_paths(&list).collect();
+    }
     let mut roots: Vec<PathBuf> = Vec::new();
     #[cfg(target_os = "macos")]
     {
@@ -234,11 +251,7 @@ pub fn detect_mass_storage() -> Vec<Device> {
             }
         }
     }
-    let mut devices = detect_in(&roots);
-    for d in &mut devices {
-        d.serial = crate::usb_serial::serial_for_mount(&d.root);
-    }
-    devices
+    roots
 }
 
 /// Writes the KFX and returns its path. Mass storage gets `documents/<name>`, fsynced.

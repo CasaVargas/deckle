@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Kobo** (other readers design, phase 2). Plug a Kobo in once and every morning's paper is
+  also queued for it, and goes over as a KEPUB (page counts and reading statistics) in a `Deckle/`
+  folder the next time it's connected, pruned to `keep`. Long reads and Inbox books go too, and
+  `deckle run book.epub` sends to a Kobo when no Kindle is plugged in. No Kindle Previewer is
+  needed for any of it. `[sync] clippings` exports a Kobo's highlights as Markdown, and From Your
+  Shelf prints the books you're reading on it. Not yet checked on a real Kobo.
 - **The paper in a folder, for an iPad or any reader** (other readers design, phase 1). Add an
   `[[export]]` folder to `digest.toml`, or **Add folder…** on the Daily tab's **Export folders**
   card, and every morning's edition is also put there as an EPUB, plugged in or not, keeping the
