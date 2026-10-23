@@ -151,9 +151,17 @@ Each story:
   "words": 1840,
   "body": { "format": "xhtml", "text": "<p>…</p><div class=\"figure lead\"><img src=\"media/3f9a1c0e5b7d.jpg\" alt=\"\"/></div>…" },
   "photos": [
-    { "file": "media/3f9a1c0e5b7d.jpg", "width": 1000, "height": 640, "lead": true, "motion": null }
+    { "file": "media/3f9a1c0e5b7d.jpg", "width": 2400, "height": 1536, "lead": true, "motion": null,
+      "caption": "Stall holders at the freight shed on Saturday.", "credit": "Jane Doe / The Pilot",
+      "alt": "A crowd under a steel roof", "focus": { "x": 0.62, "y": 0.41 }, "color": "#8a6f52" }
   ],
-  "long_read": null
+  "long_read": null,
+  "byline": "By Ana Ruiz",
+  "published": "2026-10-22T18:29:00+00:00",
+  "minutes": 8,
+  "prominence": "front",
+  "partial": false,
+  "pull_quote": "“We have waited forty years for somebody to do something with that yard,” said one stall holder."
 }
 ```
 
@@ -163,8 +171,16 @@ Each story:
 - **`body.text`:** an XHTML fragment, the same one the EPUB prints, with each photo's `src` the bundle-relative path of its file.
   - Elements and classes are those of the EPUB edition (`render.rs`).
   - A reader may style them as it likes, and must not run anything in them. There are no scripts.
-- **`photos`:** in body order. `lead` marks the story's lead photo. Photos are color JPEGs at most 1000 px wide.
-- **`photos[].motion`:** reserved for version 1.1 (§7); always `null` in 1.0.
+- **`photos`:** in body order. `lead` marks the story's lead photo. Photos are color JPEGs. In 1.0 they were at most 1000 px wide. From 1.1 they're up to 2400 px on the long side, never enlarged, at JPEG quality 85.
+- **`photos[].motion`:** always `null`. A reader makes moving pictures from the still (§7).
+- **Added in 1.1** (Books and Kindle design §9). Each is optional, and `null` when it isn't known:
+  - `photos[].caption`, `credit` and `alt`, from the story's page;
+  - `photos[].focus`, where the subject is (0–1 from the top left), for crops and parallax;
+  - `photos[].color`, the photo's average color;
+  - `byline`, `published` (as the page or feed gives it, usually RFC 3339) and `minutes` (230 words a minute);
+  - `prominence`: `lead`, `front` or `inside`, as Deckle's front page placed the story;
+  - `partial`: the text looks cut off by a paywall;
+  - `pull_quote`: a sentence of 60–200 characters, on stories of 600 words or more.
 - **`long_read`:** for a piece printed as its own book, the path of its EPUB under `epub/`, when the export carries books. Otherwise `null`.
 
 ### 6.4 `front` and `files`
@@ -222,9 +238,11 @@ Each story:
 - **Answers are in the bundle**, so a reader can check a solve on the device. A reader shouldn't show them before the owner asks.
 - **`ladder`** and **`yesterday`** are optional.
 
-## 7. Moving pictures (version 1.1, reserved now)
+## 7. Moving pictures
 
-`photos[].motion` will name a short, silent, looping clip that shows the photo moving:
+**As built (1.1):** moving pictures are parallax, which the reader makes at view time from the still and its `focus`. `photos[].motion` stays `null`, and Deckle writes no clips. What follows is kept for a later version.
+
+`photos[].motion` could name a short, silent, looping clip that shows the photo moving:
 
 ```json
 "motion": { "file": "media/….mp4", "seconds": 3.5, "kind": "footage" }

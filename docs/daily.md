@@ -517,6 +517,17 @@ the cover and the EPUB. A native reader app draws the paper from it, with the fr
 each story's text and link, the weather as numbers and the crossword with its answers.
 `books = true` adds the long reads' EPUBs. `keep` prunes old bundles.
 
+From version 1.1 the bundle's photos are full size for a tablet: in color, up to 2400 px on the
+long side (the EPUB keeps its 1000-px e-ink copies). Each photo comes with its caption, credit
+and alt text from the story's page, and where its subject is, so a reader can crop around it or
+move it in parallax. Each story says who wrote it, when it was published, how long it takes to
+read, where the front page put it, whether a paywall cut it short, and a sentence to pull out.
+
+Every story the paper fetches, in any output, loses the page's furniture first: newsletter
+sign-ups, "Advertisement", share prompts, related-link lists and cookie notices. Then it gets the
+same typography pass as books (curly quotes, dashes). `deckle digest lint <url or saved page>`
+shows what a page keeps and what it drops.
+
 The format is documented in `docs/superpowers/specs/2026-10-23-edition-bundle-design.md` and
 `docs/formats/edition-bundle.schema.json`, offered under CC-BY-4.0 and MIT, so any reader app,
 open or not, can read it. `deckle digest build --bundle -o <dir>` writes one by hand.

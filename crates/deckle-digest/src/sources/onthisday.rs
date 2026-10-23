@@ -49,6 +49,7 @@ pub fn article(json: &[u8], date: NaiveDate) -> Result<Article, String> {
         })
         .collect();
     Ok(Article {
+        extra: Default::default(),
         url: None,
         outlet: None,
         teaser: None,

@@ -784,6 +784,72 @@ fn highlights_cmd(
     }
 }
 
+/// `digest lint`: the story as the paper would keep it, and what it drops.
+fn digest_lint(json: bool, page: &str, net: &dyn deckle_digest::Net) -> Result<ExitCode, String> {
+    let (html, base) = if page.starts_with("http://") || page.starts_with("https://") {
+        let bytes = net.get_page(page)?;
+        (
+            String::from_utf8_lossy(&bytes).into_owned(),
+            page.to_owned(),
+        )
+    } else {
+        let path = Path::new(page)
+            .canonicalize()
+            .map_err(|e| format!("{page}: {e}"))?;
+        let html =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let base = deckle_digest::url::Url::from_file_path(&path)
+            .map_err(|_| format!("{}: not an absolute path", path.display()))?
+            .to_string();
+        (html, base)
+    };
+    let (x, dropped) = deckle_digest::article::extract_linted(&html, &base, None)
+        .ok_or("no readable story here (a paywall, a sign-in page, or a video)")?;
+    let photos: Vec<_> = x
+        .photos
+        .iter()
+        .zip(&x.photo_meta)
+        .map(|(url, m)| serde_json::json!({ "url": url, "caption": m.caption, "credit": m.credit, "alt": m.alt }))
+        .collect();
+    emit(
+        json,
+        &serde_json::json!({
+            "title": x.title, "byline": x.byline, "published": x.published, "words": x.words,
+            "dropped": dropped, "photos": photos,
+        }),
+        || {
+            let mut lines = vec![format!(
+                "{} · {} words{}",
+                x.title.as_deref().unwrap_or("(no title)"),
+                x.words,
+                x.byline
+                    .as_deref()
+                    .map(|b| format!(" · {b}"))
+                    .unwrap_or_default()
+            )];
+            if dropped.is_empty() {
+                lines.push("nothing dropped".into());
+            }
+            lines.extend(dropped.iter().map(|d| format!("dropped: {d}")));
+            for (url, m) in x.photos.iter().zip(&x.photo_meta) {
+                lines.push(format!(
+                    "photo: {url}{}{}",
+                    m.caption
+                        .as_deref()
+                        .map(|c| format!("\n      caption: {c}"))
+                        .unwrap_or_default(),
+                    m.credit
+                        .as_deref()
+                        .map(|c| format!("\n      credit: {c}"))
+                        .unwrap_or_default()
+                ));
+            }
+            lines.join("\n")
+        },
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
 fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, String> {
     use deckle_core::deliver::Conn;
     use deckle_core::inventory::{list_on, remove_on};
@@ -2126,6 +2192,7 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
+        cli::DigestCommand::Lint { page } => digest_lint(json, &page, &deckle_digest::Http),
         cli::DigestCommand::Next { fetch } => {
             let cfg = load_digest_config(&path)?;
             let now =

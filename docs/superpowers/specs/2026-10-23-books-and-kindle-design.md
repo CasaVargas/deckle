@@ -403,6 +403,28 @@ The owner accepted each recommendation below (2026-10-23).
   An upgrade goes through the Books tab like Update, so the run shows its progress there. A
   send replaces the Kindle's copy only on the Kindle it was listed from.
 
+## 15. Build notes, phase 2
+
+- **Masters** are made from the same download as the edition's photo, only when some export
+  writes bundles (`Config::bundles_wanted`). EXIF orientation is applied, and the JPEG carries
+  no metadata. A story without a master (an old cached one, a template photo) falls back to its
+  edition JPEG.
+- **Captions** come from the `<figcaption>` of the photo's `<figure>`; when the lead image also
+  appears in a figure, that figure's caption is the lead's. **Credits** are split off a
+  caption's end: "Photo: …", "(Photo by …)", "Credit: …", or "Name/Agency". schema.org and IPTC
+  credits aren't read yet.
+- **Focus** is computed on the master, as the spec says, pulled a quarter of the way to the
+  center so a crop around it stays roomy. **Color** is the photo's mean on a 16 px copy.
+- **Pull quotes** come from the story's `<p>` paragraphs only, never a caption or the source
+  line, one sentence within one paragraph.
+- **`partial`** looks at the last 300 characters for subscribe and sign-in prompts. A story far
+  shorter than its feed summary isn't flagged: feeds rarely say how long a story is.
+- **Lint** runs in `article::extract_linted`, so every output gets it (paper, long reads, web
+  articles), before the typography pass. A story printed in two sections already keeps only the
+  first: later sections already drop titles an earlier one printed.
+- All new `edition.json` fields are always written, `null` when unknown. The schema marks them
+  optional, so a 1.0 bundle still validates.
+
 ## 16. Build notes, phase 3
 
 - **What's rebuilt:** KF8 only, an AZW3 or the KF8 half of a joint MOBI. Text records with

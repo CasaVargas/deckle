@@ -174,6 +174,7 @@ pub fn article(item: &Item, note: Option<&str>) -> Article {
         ));
     }
     Article {
+        extra: Default::default(),
         title: item.title.clone(),
         meta: (!meta.is_empty()).then_some(meta),
         body,
@@ -213,7 +214,10 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
         return article(item, Some(UNAVAILABLE));
     };
     let outlet = item.source.clone().unwrap_or_else(|| host(&url).to_owned());
-    let (body, photos) = story_body(&x, &outlet, cfg, net);
+    let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+    if let Some(p) = item.published {
+        extra.published = Some(p.to_rfc3339());
+    }
     let meta = [
         x.byline.as_deref().map(by_line),
         item.source.clone(),
@@ -231,6 +235,7 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
         photos,
         url: Some(url),
         outlet: Some(outlet),
+        extra,
     }
 }
 
@@ -243,23 +248,45 @@ pub(crate) fn by_line(b: &str) -> String {
     }
 }
 
-/// An extracted story's body with its photos fetched and placed, and a source line.
+/// An extracted story's body with its photos fetched and placed, and a source line; and what a
+/// bundle carries besides (photo masters and captions, the byline, the page's publish time).
 pub(crate) fn story_body(
     x: &article::Extracted,
     outlet: &str,
     cfg: &Config,
     net: &dyn Net,
-) -> (String, Vec<Vec<u8>>) {
+) -> (String, Vec<Vec<u8>>, crate::Extra) {
     let fetched = if cfg.photos {
         // Kept in color when an export wants it; each EPUB grays them for e-ink.
         let as_ = match cfg.wants_color() {
             true => crate::config::Photos::Color,
             false => crate::config::Photos::Gray,
         };
-        article::fetch_photos_as(&x.photos, x.lead, cfg.max_photos, net, as_)
+        let masters = !cfg.bundles_wanted().is_empty();
+        article::fetch_photos_with(&x.photos, x.lead, cfg.max_photos, net, as_, masters)
     } else {
         vec![None; x.photos.len()]
     };
+    let extra = crate::Extra {
+        photos: fetched
+            .iter()
+            .zip(&x.photos)
+            .enumerate()
+            .filter_map(|(k, (f, _))| {
+                let f = f.as_ref()?;
+                let meta = x.photo_meta.get(k).cloned().unwrap_or_default();
+                Some(crate::PhotoExtra {
+                    master: f.master.clone(),
+                    caption: meta.caption,
+                    credit: meta.credit,
+                    alt: meta.alt,
+                })
+            })
+            .collect(),
+        byline: x.byline.clone(),
+        published: x.published.clone(),
+    };
+    let fetched: Vec<Option<Vec<u8>>> = fetched.into_iter().map(|f| f.map(|f| f.jpeg)).collect();
     let kept: Vec<bool> = fetched.iter().map(Option::is_some).collect();
     // Placeholder k (all candidates) -> photo n (kept ones, in order).
     let mut rank = Vec::with_capacity(kept.len());
@@ -270,7 +297,7 @@ pub(crate) fn story_body(
     }
     let mut body = article::place_photos(&x.xhtml, &kept, |k| photo_token(rank[k]));
     body.push_str(&format!("<p class=\"source\">Source: {}</p>", esc(outlet)));
-    (body, fetched.into_iter().flatten().collect())
+    (body, fetched.into_iter().flatten().collect(), extra)
 }
 
 /// Stories tried, in order, for the whole one in a `Lead` section.
