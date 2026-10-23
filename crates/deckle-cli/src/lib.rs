@@ -359,6 +359,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             let target = resolve_target(&to)?;
             let opts = RunOptions {
+                cover: Default::default(),
                 cde_type: cde.into(),
                 cde_override: cde.to_override(),
                 amazon_match,
@@ -504,6 +505,7 @@ fn run_input(input: &Path, opts: &RunOptions, net: &dyn deckle_digest::Net) -> R
     // Kindle-updates design).
     let config = deckle_library::config::default_path();
     let opts = RunOptions {
+        cover: Default::default(),
         replaces: deckle_library::previous_copies(&config, &source, &opts.target),
         originals: None,
         ..opts.clone()
@@ -1269,6 +1271,7 @@ fn kindle_upgrade(
         let at = deckle_core::devices::now_iso();
         let kept = deckle_library::upgrade::originals_dir(&config, &device.key, file, &at);
         let opts = RunOptions {
+            cover: Default::default(),
             cde_type: deckle_kfx::convert::CdeType::Pdoc,
             // The cover rule picks the mode, as for any book.
             cde_override: None,
@@ -1441,6 +1444,7 @@ fn reprocess(
             _ => None,
         };
         let opts = RunOptions {
+            cover: Default::default(),
             cde_type: cde.unwrap_or(deckle_kfx::convert::CdeType::Pdoc),
             cde_override: cde,
             amazon_match: false,
@@ -2638,6 +2642,7 @@ fn queue_edition(
 /// must always show (design §5).
 fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Path) -> RunOptions {
     RunOptions {
+        cover: Default::default(),
         cde_type: deckle_kfx::convert::CdeType::Pdoc,
         cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
         amazon_match: false,
@@ -2672,6 +2677,7 @@ fn prepare_long_reads(
     paper: &RunOptions,
 ) -> (Vec<LongRead>, Vec<(String, String)>) {
     let opts = RunOptions {
+        cover: Default::default(),
         cde_override: None,
         xray: deckle_core::pipeline::XRayMode::Auto,
         word_wise: Some(Default::default()),

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Tauri shell: the one-window GUI over the pipeline.
 
+mod books;
 mod commands;
 mod daily;
 mod kindle;
@@ -77,6 +78,14 @@ pub fn run() {
             daily::email_set_password,
             daily::email_test,
             kindle::library_status,
+            books::library_catalog,
+            books::library_covers,
+            books::book_preflight,
+            books::cover_candidates,
+            books::cover_fetch,
+            books::library_fix_details,
+            books::library_watch_set,
+            books::library_watch_scan,
             kindle::library_set,
             kindle::device_books,
             kindle::device_remove,

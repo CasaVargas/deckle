@@ -110,6 +110,29 @@ pub struct RunRequest {
     /// The Kindle's copy this send upgrades (Books and Kindle design §6): replaced and kept.
     #[serde(default)]
     pub upgrade_of: Option<UpgradeOf>,
+    /// The cover picked for it (Books and Kindle design §8); none: the book's own.
+    #[serde(default)]
+    pub cover: Option<CoverChoice>,
+}
+
+/// A cover picked on the Books tab.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum CoverChoice {
+    Own,
+    Generated,
+    Image { path: String },
+}
+
+impl CoverChoice {
+    pub fn pick(&self) -> deckle_core::pipeline::CoverPick {
+        use deckle_core::pipeline::CoverPick;
+        match self {
+            CoverChoice::Own => CoverPick::Auto,
+            CoverChoice::Generated => CoverPick::Generated(None),
+            CoverChoice::Image { path } => CoverPick::Image(PathBuf::from(path)),
+        }
+    }
 }
 
 /// A book on a Kindle that a send replaces with Deckle's build of its original.
@@ -746,6 +769,7 @@ pub fn run_books_with(
             replaces.push(u.file.clone());
         }
         let opts = RunOptions {
+            cover: b.cover.as_ref().map(CoverChoice::pick).unwrap_or_default(),
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
             cde_override: override_str.map(cde_from),
             amazon_match: settings.amazon_match,
@@ -1451,6 +1475,7 @@ mod tests {
                 cde: Some("ebok".into()),
                 asin: None,
                 upgrade_of: None,
+                cover: None,
             }],
             &RunTarget::Folder {
                 path: out.path().to_string_lossy().into_owned(),
@@ -1495,6 +1520,7 @@ mod tests {
                 cde: None,
                 asin: None,
                 upgrade_of: None,
+                cover: None,
             }],
             &target,
             &settings,

@@ -50,6 +50,9 @@ pub struct SourcesStatus {
     /// The calibre library in use (the configured one, else `~/Calibre Library`), when found.
     pub calibre: Option<String>,
     pub folders: Vec<String>,
+    /// The folder whose new EPUBs are added to the library, when one is watched.
+    #[serde(default)]
+    pub watch: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -97,6 +100,7 @@ pub fn sources_status_at(config: &Path) -> SourcesStatus {
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect(),
+        watch: cfg.watch.map(|w| w.to_string_lossy().into_owned()),
     }
 }
 

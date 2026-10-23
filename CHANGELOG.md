@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **The Books tab, a library as well as a queue** (Books and Kindle design, phase 5).
+  - **Your library** sits beside **To send**: covers from Deckle's library, calibre and the
+    folders you named. You can search it, and group it by series with the gaps called out
+    ("The Expanse, 1–4 · 5 isn't in your library"). **Not on this Kindle** shows what that
+    Kindle doesn't have yet. Pick books and add them to To send. With no library, the queue is
+    the whole tab, as before.
+  - **Before you send**: click a queued book's title for:
+    - what Deckle will do: typography fixes counted, pop-up notes made, the cover, the mode and
+      why, X-Ray and Word Wise, contents, pictures and warnings, worked out by running the
+      stages before Kindle Previewer;
+    - the first page of chapter one as a Kindle sets it, **Before** and **After** the
+      typography pass;
+    - **Cover**: its own, Deckle's typographic cover, or one of Open Library's (with Open
+      Library on);
+    - **Fix details**: title, authors, series and number, written to the library's copy and
+      never to the original or calibre.
+  - **Watch a folder** (Settings → General, off by default): EPUBs that land in it are added to
+    the library.
 - **The Kindle tab, in rooms** (Books and Kindle design, phase 4). Like the Daily tab, a rail
   down the left: **Shelf**, every book with its cover, a progress bar and when it was last
   opened (from the Kindle's own position files, now read for AZW3 as well as KFX), filtered by

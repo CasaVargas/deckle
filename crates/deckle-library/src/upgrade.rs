@@ -365,6 +365,7 @@ mod tests {
             isbn: None,
             asin: None,
             calibre_id: None,
+            series: None,
         }
     }
 

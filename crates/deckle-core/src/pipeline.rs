@@ -23,6 +23,19 @@ pub use deckle_cover::Template as CoverTemplate;
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
 use deckle_kfx::metadata::{fix_language, generate_asin};
 
+/// Which cover a book goes out with (the Books tab's cover picker, Books and Kindle §8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CoverPick {
+    /// The book's own; a generated one only when it has none and `generated_cover` is on.
+    #[default]
+    Auto,
+    /// Deckle's typographic cover, in place of the book's own: `None` the template by the
+    /// book's hash.
+    Generated(Option<CoverTemplate>),
+    /// An image file (an Open Library cover, say), in place of the book's own.
+    Image(PathBuf),
+}
+
 #[derive(Clone, Debug)]
 pub struct RunOptions {
     /// Legacy default; the cover rule decides unless `cde_override` is set.
@@ -41,6 +54,8 @@ pub struct RunOptions {
     pub typography: bool,
     /// Footnotes and endnotes to Kindle pop-up notes in normalize (issue #31).
     pub popup_notes: bool,
+    /// The cover picked for this book.
+    pub cover: CoverPick,
     /// Spike 2 passed on this device: real ASINs keep our sidecars.
     pub verified_real_asin: bool,
     /// An ASIN the owner typed (design §3); replaces Match. `None`: Match, else generated.
@@ -344,24 +359,18 @@ pub fn prepare_with(
     report.info = info.clone();
     report.warnings.extend(info.warnings.iter().cloned());
 
-    let generated_cover = match (&info.cover_href, opts.generated_cover) {
-        (None, Some(style)) => match generated_cover(&info, style) {
-            Ok((cover, warnings)) => {
-                report.warnings.extend(warnings);
-                Some(cover)
-            }
-            Err(e) => {
-                report.warnings.push(format!("cover not generated: {e}"));
-                None
-            }
-        },
-        _ => None,
-    };
+    let (generated_cover, replace_cover) = cover_for(
+        &info,
+        &opts.cover,
+        opts.generated_cover,
+        &mut report.warnings,
+    );
     let normalized = work_path.join("normalized.epub");
     let normalize_opts = NormalizeOptions {
         fill,
         typography: opts.typography,
         generated_cover,
+        replace_cover,
         popup_notes: opts.popup_notes,
         ..Default::default()
     };
@@ -394,6 +403,45 @@ pub fn prepare_with(
         wishes: Wishes::of(opts),
         name: None,
         _work: work,
+    })
+}
+
+/// The cover normalize adds, and whether it replaces the book's own: what `pick` asks for,
+/// else a generated one for a coverless book when `auto` is on. A cover that can't be made is a
+/// warning, and the book keeps its own.
+pub(crate) fn cover_for(
+    info: &crate::inspect::BookInfo,
+    pick: &CoverPick,
+    auto: Option<Option<CoverTemplate>>,
+    warnings: &mut Vec<String>,
+) -> (Option<GeneratedCover>, bool) {
+    let made = match pick {
+        CoverPick::Auto => match (&info.cover_href, auto) {
+            (None, Some(style)) => generated_cover(info, style),
+            _ => return (None, false),
+        },
+        CoverPick::Generated(style) => generated_cover(info, *style),
+        CoverPick::Image(path) => picked_cover(path).map(|c| (c, Vec::new())),
+    };
+    match made {
+        Ok((cover, w)) => {
+            warnings.extend(w);
+            (Some(cover), *pick != CoverPick::Auto)
+        }
+        Err(e) => {
+            warnings.push(format!("cover not generated: {e}"));
+            (None, false)
+        }
+    }
+}
+
+/// An image file as a JPEG cover.
+fn picked_cover(path: &Path) -> Result<GeneratedCover, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let img = image::load_from_memory(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(GeneratedCover {
+        style: "picked".into(),
+        jpeg: crate::normalize::encode_jpeg(&img, 90)?,
     })
 }
 
@@ -733,6 +781,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
     let dir = tempfile::tempdir().map_err(|e| format!("workdir: {e}"))?;
     let target = Target::Folder(dir.path().to_path_buf());
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: Some(CdeType::Pdoc),
         amazon_match: false,

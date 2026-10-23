@@ -40,6 +40,72 @@ export interface BookState extends BookRow {
   replaced: string[];
   /** The Kindle's own copy this send upgrades: replaced, and kept for Put back. */
   upgradeOf: UpgradeOf | null;
+  /** The cover picked in Before you send; null: the book's own. */
+  coverPick: CoverChoice | null;
+}
+
+/** A cover picked on the Books tab (Books and Kindle design §8). */
+export type CoverChoice = { kind: "own" } | { kind: "generated" } | { kind: "image"; path: string; thumb: string };
+
+/** A book in the Books tab's library: Deckle's own, calibre's or a folder's. */
+export interface CatalogEntry {
+  path: string;
+  from: "library" | "calibre" | "folder";
+  title: string;
+  authors: string[];
+  series: { name: string; index: number | null } | null;
+  isbn: string | null;
+  /** Its folder in Deckle's library: its details can be fixed. */
+  library_dir: string | null;
+  sent_to: string[];
+  added: string | null;
+  /** On the Kindle picked in the footer. */
+  on_kindle: boolean;
+}
+
+export interface CatalogView {
+  entries: CatalogEntry[];
+  library: boolean;
+  watch: string | null;
+  warnings: string[];
+}
+
+/** The first page of chapter one, for the page preview. */
+export interface Chapter {
+  href: string;
+  title: string | null;
+  html: string;
+  css: string;
+}
+
+/** What Deckle will do to a book (Before you send). */
+export interface PreflightView {
+  typography: { quotes: number; dashes: number; ellipses: number; empty_paragraphs: number } | null;
+  notes: number | null;
+  notes_skipped: number;
+  cover: "own" | "generated" | "picked" | "none";
+  cover_url: string | null;
+  images_downscaled: number;
+  toc_synthesized: boolean;
+  warnings: string[];
+  before: Chapter | null;
+  after: Chapter | null;
+}
+
+export interface CoverOffer {
+  thumb: string;
+  large: string;
+}
+
+export interface Watched {
+  added: string[];
+  failed: [string, string][];
+}
+
+export interface BookDetails {
+  title: string;
+  authors: string[];
+  series: { name: string; index: number | null } | null;
 }
 
 /** A book on a Kindle that a send replaces with Deckle's build of its original (Books and Kindle design §6). */
@@ -651,6 +717,8 @@ export interface SourcesStatus {
   find_in_calibre: boolean;
   calibre: string | null;
   folders: string[];
+  /** The folder whose new EPUBs are added to the library. */
+  watch?: string | null;
 }
 
 export interface UpgradesView {
