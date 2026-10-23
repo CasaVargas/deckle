@@ -107,6 +107,8 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   which Amazon's own export leaves out, and later exports only add what's new, so your own edits
   stay. The Kindle Scribe (2024) doesn't keep that file, and keeps its highlights where they
   can't be read over USB ([#99](https://github.com/CasaVargas/deckle/issues/99)).
+- **Words to Anki.** The words you looked up on the Kindle, as a CSV of flashcards Anki imports:
+  the word, a short definition, the sentence you met it in and the book.
 - **The Deckle Daily (preview).** A morning newspaper built locally from weather, local news and
   your RSS feeds, with full article text and a generated front page as its cover, delivered when
   the Kindle connects. Details in [docs/daily.md](docs/daily.md).
@@ -195,6 +197,7 @@ deckle library reprocess --dry-run                # books Deckle could build bet
 deckle kindle books                               # what's on the Kindle, and free space
 deckle highlights list                            # books with highlights, and what's new
 deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (folder remembered)
+deckle words anki --to ~/Desktop/words.csv        # looked-up words as Anki cards (File → Import)
 deckle digest readership                          # how far you read the paper, per section
 deckle digest readership apply 1                  # make suggested edit 1 to digest.toml
 deckle digest shelf                               # what From Your Shelf would print now

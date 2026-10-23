@@ -1000,6 +1000,7 @@ dependencies = [
  "deckle-xray",
  "predicates",
  "rpassword",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

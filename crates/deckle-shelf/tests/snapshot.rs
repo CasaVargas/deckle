@@ -427,3 +427,50 @@ fn a_failed_read_keeps_what_the_last_plug_in_found() {
     let (snap, _) = snapshot(read, "Paperwhite", "ms:P", None, now());
     assert!(!snap.highlights_shared && snap.highlights.is_empty());
 }
+
+#[test]
+fn anki_csv_has_every_english_word_once_newest_first() {
+    use deckle_shelf::anki;
+    let dir = tempfile::tempdir().unwrap();
+    let c = make_vocab(dir.path());
+    lookup(&c, "1", "ephemeral", "en", 0, Duration::days(400));
+    lookup(&c, "2", "hund", "de", 0, Duration::days(2));
+    lookup(&c, "3", "mastered", "en", 100, Duration::days(2));
+    lookup(&c, "4", "Ephemeral", "en", 0, Duration::days(3));
+    c.execute_batch("PRAGMA wal_checkpoint(FULL);").unwrap();
+    lookup(&c, "5", "newest", "en", 0, Duration::hours(3));
+    c.execute(
+        "UPDATE LOOKUPS SET usage = 'She said \"go\",\nthen left.' WHERE id = '5'",
+        [],
+    )
+    .unwrap();
+    let files = VocabFiles {
+        db: std::fs::read(dir.path().join("vocab.db")).unwrap(),
+        wal: std::fs::read(dir.path().join("vocab.db-wal")).ok(),
+    };
+    let out = dir.path().join("cards/words.csv");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    std::fs::write(&out, "stale content that must not survive\n").unwrap();
+    // No Word Wise database: the definition column is empty and nothing is fetched.
+    let n = anki::export(&files, &out, &|_| None).unwrap();
+    assert_eq!(n, 2, "ephemeral once (both cases, newest kept) and newest");
+    let text = std::fs::read_to_string(&out).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "#separator:Comma");
+    assert_eq!(
+        lines[3],
+        format!(
+            "\"newest\",\"\",\"She said \"\"go\"\", then left.\",\"Walden\",\"{}\"",
+            (now() - Duration::hours(3)).format("%Y-%m-%d")
+        )
+    );
+    assert!(lines[4].starts_with("\"Ephemeral\","), "{}", lines[4]);
+    assert_eq!(lines.len(), 5);
+    anki::export(&files, &out, &|_| None).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&out).unwrap(),
+        text,
+        "byte-identical"
+    );
+    drop(c);
+}
