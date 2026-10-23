@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Looked-up words to Anki** (#60). `deckle words anki --to words.csv` writes every English word
+  you looked up on the Kindle, once each (its newest lookup), as a CSV Anki imports: word, short
+  definition (from a Word Wise database already on this machine, never downloaded), the sentence
+  you met it in, the book and the day. It reads `vocab.db` over the same single connection as a
+  send, writes nothing to the Kindle, and overwrites the file each time.
 - **Morgue and From Your Shelf hardening** (#127, #126). Two builds of one date no longer share
   a temp file, the Morgue's EPUB and sidecar are staged before either is replaced, and
   `morgue.json` is saved only when the first import ran. Shelf read errors name the file, not the

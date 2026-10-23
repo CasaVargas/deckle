@@ -290,6 +290,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
+        cli::Command::Words { from, action } => words_cmd(json, &from, action),
         cli::Command::Save {
             targets,
             title,
@@ -505,6 +506,46 @@ fn megabytes(bytes: u64) -> String {
 }
 
 /// `deckle highlights list|export` (highlights export design §6).
+/// `deckle words`: reads `vocab.db` over one connection (one MTP session), never writing to the
+/// Kindle, and defines words only from a Word Wise database already on this machine.
+fn words_cmd(json: bool, from: &str, action: cli::WordsCommand) -> Result<ExitCode, String> {
+    let target = resolve_target(from)?;
+    let read = match &target {
+        // A copy of a Kindle's drive (a backup, say) has the same layout.
+        Target::Folder(dir) => {
+            let at = dir.join("system/vocabulary");
+            Ok(std::fs::read(at.join("vocab.db"))
+                .ok()
+                .map(|db| deckle_core::vocab::VocabFiles {
+                    db,
+                    wal: std::fs::read(at.join("vocab.db-wal")).ok(),
+                }))
+        }
+        _ => deckle_core::vocab::read_vocab_on(&mut deckle_core::deliver::Conn::new(&target)),
+    };
+    let files = match read {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            eprintln!("error: this Kindle has no Vocabulary Builder (system/vocabulary/vocab.db)");
+            return Ok(ExitCode::from(1));
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Ok(ExitCode::from(1));
+        }
+    };
+    match action {
+        cli::WordsCommand::Anki { to } => {
+            let define = deckle_shelf::words::wordwise_definer();
+            let n = deckle_shelf::anki::export(&files, &to, &*define)?;
+            emit(json, &serde_json::json!({ "words": n, "file": to }), || {
+                format!("{n} words  -> {}", to.display())
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
 fn highlights_cmd(
     json: bool,
     from: &str,
