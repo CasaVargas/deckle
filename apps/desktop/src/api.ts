@@ -2,13 +2,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus } from "./types";
+import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
   path: string;
   cde: string | null;
   asin: string | null;
+  upgrade_of?: UpgradeOf | null;
 }
 
 export const api = {
@@ -27,6 +28,13 @@ export const api = {
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
   runBooks: (books: RunRequest[], target: RunTarget) =>
     invoke<void>("run_books", { books, target }),
+  /** Books Deckle didn't send, sorted, with their originals; reads every book once (slow over MTP the first time). */
+  deviceUpgrades: (target: RunTarget) => invoke<UpgradesView>("device_upgrades", { target }),
+  /** Undoes an upgrade: the kept copy goes back, Deckle's goes. */
+  devicePutBack: (target: RunTarget, file: string) => invoke<PutBack>("device_put_back", { target, file }),
+  librarySources: () => invoke<SourcesStatus>("library_sources"),
+  librarySourcesSet: (findInCalibre: boolean, calibre: string | null, folders: string[]) =>
+    invoke<SourcesStatus>("library_sources_set", { findInCalibre, calibre, folders }),
   planBooks: (books: RunRequest[], target: RunTarget) =>
     invoke<PlanRow[]>("plan_books", { books, target }),
   setDeviceOptions: (key: string, cdeOverride: "pdoc" | "ebok" | null, verifiedRealAsin: boolean) =>

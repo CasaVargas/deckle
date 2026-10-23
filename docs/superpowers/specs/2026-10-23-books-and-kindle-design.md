@@ -378,3 +378,27 @@ The owner accepted each recommendation below (2026-10-23).
   - lint drops the boilerplate in a fixture article and keeps its body.
 - **App:** the Upgrades list, the rooms and the Books library are checked against the fake
   Kindle image in light and dark.
+
+## 14. Build notes, phase 1
+
+- **`deckle-mobi`** reads record 0's MOBI header and EXTH records, and the cover record, with
+  a partial read on disk. Its `fixture` module builds small PalmDB books for tests in other
+  crates. The KF8 → EPUB rebuild (§5) comes in phase 3.
+- **The inventory** reads AZW3, AZW, MOBI and PRC details as well as KFX, cached as before.
+  DRM is a DRMION KFX, a `.voucher` in the `.sdr`, or a PalmDB encryption type. A cache entry
+  from an older Deckle is read again once. `list_detailed` reads details over MTP too (each
+  uncached book whole, once) and the reading positions; only the upgrade scan uses it, so the
+  Kindle tab's listing stays as fast as before.
+- **Where old copies are kept:** `kindle-originals/<device>/<when> <file stem>/` beside
+  `library.json`, not in the library book's folder. The upgrade can happen before the book is
+  in the library, and there may be no library at all. `upgrades.json` beside it records each
+  upgrade for Put back.
+- **Highlights first** runs the highlights export when there's a highlights folder. Either way,
+  the kept `.sdr` holds the Kindle's annotations, and `My Clippings.txt` stays on the Kindle.
+- **Your place:** the reading-position spike (§11) needs a Kindle, so it hasn't run. The row
+  says how far in you are, from the Kindle's own fraction in the `.yjf`, and that the new copy
+  opens at the start. A page number would need the old file's page map, which isn't read.
+- **Folders** are searched for EPUBs only. calibre's DOCX and TXT formats count as originals.
+- **The app:** the Upgrades panel sits in today's Kindle tab until its rooms come (phase 4).
+  An upgrade goes through the Books tab like Update, so the run shows its progress there. A
+  send replaces the Kindle's copy only on the Kindle it was listed from.

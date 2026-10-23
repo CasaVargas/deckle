@@ -289,6 +289,28 @@ pub enum KindleCommand {
         #[arg(long)]
         yes: bool,
     },
+    /// Upgrade books Deckle didn't send from their originals on this computer (a calibre
+    /// library, the folders in library.json's find_in): each comes back with Enhanced
+    /// Typesetting, page numbers, X-Ray and Word Wise. The old copy and its .sdr are kept, so
+    /// `put-back` undoes it. Books with DRM and store books are never touched.
+    Upgrade {
+        /// Only these books (as `books` names them); a book you're partway through has to be
+        /// named, or `--include-reading` given.
+        files: Vec<String>,
+        /// Show what would be upgraded and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Don't ask first.
+        #[arg(long)]
+        yes: bool,
+        /// Also books you're partway through (each opens at the start afterwards).
+        #[arg(long)]
+        include_reading: bool,
+        #[arg(long)]
+        previewer: Option<PathBuf>,
+    },
+    /// Undo an upgrade: the old copy goes back, Deckle's copy goes.
+    PutBack { file: String },
 }
 
 #[derive(Subcommand, Debug)]

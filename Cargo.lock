@@ -1019,6 +1019,7 @@ dependencies = [
  "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
+ "deckle-mobi",
  "deckle-morgue",
  "deckle-readership",
  "deckle-shelf",
@@ -1041,6 +1042,7 @@ dependencies = [
  "deckle-cover",
  "deckle-docx",
  "deckle-kfx",
+ "deckle-mobi",
  "deckle-pdf",
  "deckle-transport",
  "deckle-txt",
@@ -1082,6 +1084,7 @@ dependencies = [
  "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
+ "deckle-mobi",
  "deckle-morgue",
  "deckle-pdf",
  "deckle-readership",
@@ -1186,12 +1189,21 @@ dependencies = [
  "deckle-pdf",
  "deckle-txt",
  "deckle-xray",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.11.1",
  "tempfile",
  "unicode-normalization",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "deckle-mobi"
+version = "0.4.0"
+dependencies = [
+ "encoding_rs",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

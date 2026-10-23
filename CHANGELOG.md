@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Upgrade books Deckle didn't send** (Books and Kindle design, phase 1). The Kindle tab now
+  reads AZW3 and MOBI files too (title, author, cover, DRM) and lists the books whose originals
+  are on this computer: in your calibre library (read-only, matched by calibre's id, ASIN, ISBN,
+  then title and author) or in folders you name in Settings → General. **Upgrade** sends each
+  through the Books tab with Enhanced Typesetting, page numbers, X-Ray and Word Wise in place of
+  the Kindle's copy, which is kept with its `.sdr` (highlights, reading data); **Put back**
+  undoes it. Books you're partway through aren't ticked at first. Store books and anything with
+  DRM are never touched. CLI: `deckle kindle upgrade [--dry-run]` and `deckle kindle put-back`;
+  `deckle kindle books` names each book's class.
 - **The Daily tab, in rooms.** Its fourteen cards are grouped into five rooms in a rail down the
   left: Today (the press bar, tomorrow's paper, the page plan and the week), Editions, Reading,
   Delivery and The paper, each with a line on what's in it ("Press at 05:30", "Kindle and 2

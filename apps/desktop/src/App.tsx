@@ -15,7 +15,7 @@ import DailyView from "./DailyView";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
-import type { BookRow, BookState, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
+import type { BookRow, BookState, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
   previewer_path: null,
@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS: Settings = {
 /** Link files and saved pages become articles (web-article design); everything else is a book. */
 const ARTICLE_FILE = /\.(webloc|url|html?)$/i;
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false, upgradeOf: null };
 }
 
 export default function App() {
@@ -252,16 +252,17 @@ export default function App() {
 
   // Re-send, Upgrade and Update from the Kindle tab: the library copies go on the Books tab
   // for review, each with its chosen mode.
-  const resendFromLibrary = async (items: { source: string; cde: "pdoc" | "ebok" | null }[], what: string) => {
+  const resendFromLibrary = async (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf }[], what: string) => {
     const rows = await api.inspectBooks(items.map((i) => i.source));
     const cdeFor = new Map(items.map((i) => [i.source, i.cde]));
+    const upgradeFor = new Map(items.map((i) => [i.source, i.upgradeOf ?? null]));
     if (rows.length === 0) {
       setNotice("The app can't send these; send them with `deckle run`.");
       return;
     }
     setBooks((prev) => {
       const ids = new Set(rows.map((r) => r.id));
-      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cdeFor.get(r.path) ?? null }))];
+      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cdeFor.get(r.path) ?? null, upgradeOf: upgradeFor.get(r.path) ?? null }))];
     });
     setTab("books");
     const skipped = items.length - rows.length;
@@ -312,7 +313,7 @@ export default function App() {
     );
     try {
       await api.runBooks(
-        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin })),
+        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin, upgrade_of: b.upgradeOf })),
         target,
       );
     } catch (e) {

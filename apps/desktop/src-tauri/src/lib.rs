@@ -8,6 +8,7 @@ mod morgue;
 mod next;
 mod readership;
 mod shelf;
+mod upgrades;
 
 use std::sync::Mutex;
 
@@ -79,6 +80,10 @@ pub fn run() {
             kindle::library_set,
             kindle::device_books,
             kindle::device_remove,
+            upgrades::device_upgrades,
+            upgrades::device_put_back,
+            upgrades::library_sources,
+            upgrades::library_sources_set,
             kindle::highlights_status,
             kindle::highlights_set,
             kindle::highlights_write,

@@ -61,6 +61,9 @@ pub struct RunOptions {
     /// Older copies of this book under other names in `documents/` (the library's send
     /// records); removed after delivery, on the same connection (Kindle-updates design §4).
     pub replaces: Vec<String>,
+    /// Where each copy `replaces` removes is kept first, file and `.sdr` (an upgrade, Books and
+    /// Kindle design §6). A copy that can't be kept stays on the Kindle.
+    pub originals: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -445,6 +448,7 @@ fn replace_older_copies(
     report: &mut RunReport,
     asin: &str,
     named: &[String],
+    originals: Option<&Path>,
     delivered: &Path,
 ) {
     let new_name = delivered
@@ -463,6 +467,19 @@ fn replace_older_copies(
         }
     }
     for file in old {
+        if let Some(dir) = originals {
+            match crate::inventory::copy_out(conn, &file, dir) {
+                Ok(()) => {}
+                // Already gone: nothing to keep or remove.
+                Err(DeliverError::Refused(_)) => continue,
+                Err(e) => {
+                    report.warnings.push(format!(
+                        "{file} stays on the Kindle: its copy couldn't be kept: {e}"
+                    ));
+                    continue;
+                }
+            }
+        }
         match crate::inventory::remove_on(conn, &file) {
             Ok(_) => report.replaced.push(file),
             // Already gone (removed by hand since that send).
@@ -682,7 +699,14 @@ pub fn finish_with(
         },
         report
     );
-    replace_older_copies(conn, &mut report, &asin, &opts.replaces, &delivered);
+    replace_older_copies(
+        conn,
+        &mut report,
+        &asin,
+        &opts.replaces,
+        opts.originals.as_deref(),
+        &delivered,
+    );
     report.delivered = Some(delivered);
     // Known issues for this Kindle (design §6): warnings only, the book is already on it.
     let used = SendUse {
@@ -727,6 +751,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let r = finish(prepared, &mut Conn::new(&target), &opts, &mut |_| {});
     match (r.error, r.delivered) {

@@ -3,8 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import Highlights from "./Highlights";
 import Icon from "./Icon";
+import Upgrades from "./Upgrades";
 import WordsAnki from "./WordsAnki";
-import type { DeviceBookRow, DeviceShelf, RunTarget } from "./types";
+import type { DeviceBookRow, DeviceShelf, RunTarget, UpgradeOf } from "./types";
 
 interface Props {
   /** The Kindle picked in the footer; null when none is connected. */
@@ -13,7 +14,7 @@ interface Props {
   busy: boolean;
   /** Put library copies on the Books tab for this Kindle, each with its mode; `what` opens
    * the notice. */
-  onResend: (items: { source: string; cde: "pdoc" | "ebok" | null }[], what: string) => void;
+  onResend: (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf }[], what: string) => void;
   onNotice: (msg: string | null) => void;
 }
 
@@ -254,6 +255,7 @@ export default function KindleView({ target, targetKey, busy, onResend, onNotice
           </button>
         </div>
       )}
+      {shelf && <Upgrades target={target} targetKey={targetKey} busy={busy || loading} onUpgrade={onResend} onChanged={load} onNotice={onNotice} />}
       {shelf && shelf.books.length === 0 && <p className="muted">No books in documents/ yet.</p>}
       {shelf && (
         <ul className="books" aria-label="Books on this Kindle">
