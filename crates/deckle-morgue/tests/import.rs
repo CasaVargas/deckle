@@ -183,3 +183,78 @@ fn a_broken_epub_is_skipped_not_fatal() {
         .is_err()
     );
 }
+
+#[test]
+fn a_failed_import_is_retried_not_marked_done() {
+    let tmp = tempfile::tempdir().unwrap();
+    cache(&tmp.path().join("cache"), &["2026-10-21", "2026-10-20"]);
+    // The Morgue's root is a file: nothing can be archived.
+    let blocked = tmp.path().join("Morgue");
+    std::fs::write(&blocked, b"a file").unwrap();
+    let mut state = MorgueState::default();
+    let m = Morgue {
+        root: blocked.clone(),
+        keep_days: 0,
+    };
+    assert!(import_once(&m, &tmp.path().join("cache"), &mut state).is_empty());
+    assert!(
+        !state.imported,
+        "nothing was imported, so try again next time"
+    );
+    // Once the folder works, the same cache is imported.
+    std::fs::remove_file(&blocked).unwrap();
+    assert_eq!(
+        import_once(&m, &tmp.path().join("cache"), &mut state).len(),
+        2
+    );
+    assert!(state.imported);
+}
+
+/// A minimal edition EPUB: a front page and the given `(file, xhtml)` section pages.
+fn handmade(path: &Path, sections: &[(&str, &str)]) {
+    use std::io::Write;
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    let front = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><div class=\"masthead\"><p class=\"ears\">No. 294 · Linden Falls, NC</p><h1 class=\"paper\">The Deckle Daily</h1></div></body></html>";
+    zip.start_file("OEBPS/front.xhtml", opts).unwrap();
+    zip.write_all(front.as_bytes()).unwrap();
+    for (name, body) in sections {
+        zip.start_file(format!("OEBPS/{name}"), opts).unwrap();
+        zip.write_all(body.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+
+#[test]
+fn one_bad_section_page_costs_that_page_not_the_edition() {
+    let tmp = tempfile::tempdir().unwrap();
+    let epub = tmp.path().join("deckle-daily-2026-10-21.epub");
+    let good = "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><h1 class=\"section-head\">Local</h1><h2 class=\"headline\" id=\"a1\">Mill sold</h2><p>The mill.</p></body></html>";
+    handmade(&epub, &[("s1.xhtml", "<<< not xml"), ("s2.xhtml", good)]);
+    let s = sidecar_from_epub(&epub, d("2026-10-21")).unwrap();
+    assert_eq!(s.sections.len(), 1);
+    assert_eq!(s.sections[0].stories[0].title, "Mill sold");
+    assert_eq!((s.paper.as_str(), s.number), ("The Deckle Daily", 294));
+}
+
+#[test]
+fn an_edition_with_no_readable_pages_is_still_kept() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache_dir = tmp.path().join("cache");
+    std::fs::create_dir_all(&cache_dir).unwrap();
+    handmade(
+        &cache_dir.join("deckle-daily-2026-10-21.epub"),
+        &[("s1.xhtml", "garbage")],
+    );
+    let m = Morgue {
+        root: tmp.path().join("Morgue"),
+        keep_days: 0,
+    };
+    assert_eq!(import_cache(&m, &cache_dir), [d("2026-10-21")]);
+    let s = m.sidecar(d("2026-10-21")).unwrap();
+    assert!(
+        s.sections.is_empty(),
+        "a minimal sidecar: the EPUB itself is what matters"
+    );
+    assert!(m.paths(d("2026-10-21")).0.exists());
+}

@@ -99,6 +99,19 @@ fn sidecar_matches_the_edition() {
 }
 
 #[test]
+fn the_lead_is_the_one_the_front_page_makes() {
+    // The front page (and the cover) pick by tier and teaser, not simply the first story.
+    let mut g = gathered();
+    g.edition.sections[0].articles[0].teaser = None;
+    g.edition.sections[0].articles[1].teaser = Some("Rides and funnel cake".into());
+    let (s, a) = deckle_digest::cover::lead_of(&g).expect("a lead");
+    let want = &g.edition.sections[s].articles[a];
+    let got = from_gathered(&g).lead.expect("a lead");
+    assert_eq!(got.title, want.title);
+    assert_eq!(got.section, g.edition.sections[s].title);
+}
+
+#[test]
 fn an_edition_with_no_news_has_no_lead() {
     let mut g = gathered();
     g.news.clear();

@@ -81,7 +81,8 @@ pub fn plain_text(html: &str, cap: usize) -> String {
 /// The sidecar of a gathered edition.
 pub fn from_gathered(g: &Gathered) -> Sidecar {
     let e = &g.edition;
-    let lead = e.headlines(&g.news, 1).first().map(|&(s, a)| {
+    // The lead the front page and the cover make (by tier and teaser), not just the first story.
+    let lead = deckle_digest::cover::lead_of(g).map(|(s, a)| {
         let article = &e.sections[s].articles[a];
         Lead {
             section: e.sections[s].title.clone(),

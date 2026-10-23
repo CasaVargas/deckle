@@ -248,3 +248,29 @@ fn default_config_and_starter() {
     );
     assert!(toml::to_string(&cfg).unwrap().contains("[morgue]"));
 }
+
+#[test]
+fn an_edition_dated_in_the_future_prunes_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let m = morgue(tmp.path(), 365);
+    let today = d("2026-10-21");
+    let kept = [d("2026-10-21"), d("2026-06-01"), d("2026-01-05")];
+    for date in kept {
+        m.archive_edition_on(&epub(tmp.path(), b"E"), &sidecar(date, "x"), today)
+            .unwrap();
+        m.archive_kfx(date, &epub(tmp.path(), b"K")).unwrap();
+    }
+    // A build for a date far ahead is still judged by today's date, not its own.
+    m.archive_edition_on(
+        &epub(tmp.path(), b"E"),
+        &sidecar(d("2027-12-01"), "future"),
+        today,
+    )
+    .unwrap();
+    assert_eq!(m.editions().len(), 4, "{:?}", m.editions());
+    assert!(m.paths(d("2026-01-05")).0.exists());
+    assert!(
+        m.paths(d("2026-10-21")).2.exists(),
+        "today's KFX is two weeks from today, not from 2027"
+    );
+}

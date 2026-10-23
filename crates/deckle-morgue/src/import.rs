@@ -88,7 +88,10 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
         let Some(page) = read_entry(&mut zip, &format!("OEBPS/s{i}.xhtml")) else {
             break;
         };
-        let doc = roxmltree::Document::parse(&page).map_err(bad)?;
+        // A page that won't parse costs that page, not the edition.
+        let Ok(doc) = roxmltree::Document::parse(&page) else {
+            continue;
+        };
         let Some(body) = doc.descendants().find(|n| n.has_tag_name("body")) else {
             continue;
         };
@@ -123,9 +126,6 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
         flush(&mut current, &mut section);
         sections.push(section);
     }
-    if sections.is_empty() {
-        return Err(bad("no section pages in the EPUB"));
-    }
     Ok(Sidecar {
         date,
         number,
@@ -154,10 +154,18 @@ fn edition_date(name: &str) -> Option<NaiveDate> {
         .flatten()
 }
 
+/// What an import did: the dates brought in, and how many editions couldn't be.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Imported {
+    /// Newest first.
+    pub done: Vec<NaiveDate>,
+    pub failed: usize,
+}
+
 /// Imports every edition EPUB in `cache_dir` the Morgue doesn't have, with the matching KFX
-/// from `cache_dir/kfx` (named "… -- <long date>.kfx"). One that can't be read is skipped.
-/// Returns the dates imported, newest first.
-pub fn import_cache(morgue: &Morgue, cache_dir: &Path) -> Vec<NaiveDate> {
+/// from `cache_dir/kfx` (named "… -- <long date>.kfx"). An EPUB that can't be read or kept is
+/// counted in `failed`.
+pub fn import_cache_report(morgue: &Morgue, cache_dir: &Path) -> Imported {
     let have = morgue.editions();
     let mut found: Vec<(NaiveDate, std::path::PathBuf)> = std::fs::read_dir(cache_dir)
         .into_iter()
@@ -170,12 +178,12 @@ pub fn import_cache(morgue: &Morgue, cache_dir: &Path) -> Vec<NaiveDate> {
         .filter(|(d, _)| !have.contains(d))
         .collect();
     found.sort_by_key(|f| std::cmp::Reverse(f.0));
-    let mut done = Vec::new();
+    let mut out = Imported::default();
     for (date, path) in found {
-        let Ok(sidecar) = sidecar_from_epub(&path, date) else {
-            continue;
-        };
-        if morgue.archive_edition(&path, &sidecar).is_err() {
+        let kept = sidecar_from_epub(&path, date)
+            .and_then(|sidecar| morgue.archive_edition(&path, &sidecar));
+        if kept.is_err() {
+            out.failed += 1;
             continue;
         }
         let suffix = format!(" -- {}.kfx", deckle_digest::long_date(date));
@@ -187,16 +195,24 @@ pub fn import_cache(morgue: &Morgue, cache_dir: &Path) -> Vec<NaiveDate> {
         if let Some(k) = kfx {
             let _ = morgue.archive_kfx(date, &k.path());
         }
-        done.push(date);
+        out.done.push(date);
     }
-    done
+    out
 }
 
-/// [`import_cache`], once: it runs only while `state.imported` is false, then sets it.
+/// [`import_cache_report`]'s dates.
+pub fn import_cache(morgue: &Morgue, cache_dir: &Path) -> Vec<NaiveDate> {
+    import_cache_report(morgue, cache_dir).done
+}
+
+/// [`import_cache`], once: it runs only while `state.imported` is false. It sets the flag only
+/// when no edition failed, so one that couldn't be kept (the folder offline, say) is tried
+/// again at the next build instead of being forgotten.
 pub fn import_once(morgue: &Morgue, cache_dir: &Path, state: &mut MorgueState) -> Vec<NaiveDate> {
     if state.imported {
         return Vec::new();
     }
-    state.imported = true;
-    import_cache(morgue, cache_dir)
+    let report = import_cache_report(morgue, cache_dir);
+    state.imported = report.failed == 0;
+    report.done
 }

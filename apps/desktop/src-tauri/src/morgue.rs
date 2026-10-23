@@ -80,26 +80,39 @@ fn date_of(s: &str) -> Result<NaiveDate, String> {
 
 // ---- Tauri commands -----------------------------------------------------------------
 
+// The file reads below run off the main thread: a search folds every kept edition, and the
+// folder may sit on iCloud.
+
 #[tauri::command]
-pub fn morgue_month(year: i32, month: u32) -> MonthView {
-    let now = Local::now();
-    let next = deckle_digest::schedule::status()
-        .at
-        .and_then(|at| next_build(&at, now.date_naive(), now.time()));
-    month_view(&morgue(), year, month, next)
+pub async fn morgue_month(year: i32, month: u32) -> Result<MonthView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = Local::now();
+        let next = deckle_digest::schedule::status()
+            .at
+            .and_then(|at| next_build(&at, now.date_naive(), now.time()));
+        month_view(&morgue(), year, month, next)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn morgue_search(query: String) -> Vec<Hit> {
-    search(&morgue(), &query)
+pub async fn morgue_search(query: String) -> Result<Vec<Hit>, String> {
+    tauri::async_runtime::spawn_blocking(move || search(&morgue(), &query))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn morgue_show(date: String) -> Result<Option<Detail>, String> {
+pub async fn morgue_show(date: String) -> Result<Option<Detail>, String> {
     let date = date_of(&date)?;
-    let reads = deckle_readership::State::load(&deckle_readership::state_path());
-    let state = MorgueState::load(&deckle_morgue::state::state_path());
-    Ok(detail(&morgue(), date, &reads, &state))
+    tauri::async_runtime::spawn_blocking(move || {
+        let reads = deckle_readership::State::load(&deckle_readership::state_path());
+        let state = MorgueState::load(&deckle_morgue::state::state_path());
+        detail(&morgue(), date, &reads, &state)
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Queues the edition for the Kindle again, through the bundled CLI (as `daily_run` does), so

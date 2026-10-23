@@ -1175,7 +1175,7 @@ fn digest(
             )?;
             report
                 .notes
-                .extend(archive_to_morgue(&cfg, &report.epub, &gathered));
+                .extend(archive_to_morgue(&cfg, date, &report.epub, &gathered));
             emit(json, &report, || {
                 let mut text = format!(
                     "OK    {}\n      -> {}\n{}",
@@ -1260,7 +1260,7 @@ fn digest(
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
             // Keep the paper in the Morgue whatever happens to its conversion.
-            let note = archive_to_morgue(&cfg, &built.epub, &gathered);
+            let note = archive_to_morgue(&cfg, date, &built.epub, &gathered);
             built.notes.extend(note);
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
             // design §7). A paper that went out by email skips the outbox unless `usb_too`.
@@ -1291,8 +1291,10 @@ fn digest(
             let reading_outcomes = built.reading_outcomes.clone();
             if let Some(k) = kfx {
                 record_layout(k, date, &built);
-                let note = keep_kfx_in_morgue(&cfg, date, k);
-                built.notes.extend(note);
+                if is_today(date) {
+                    let note = keep_kfx_in_morgue(&cfg, date, k);
+                    built.notes.extend(note);
+                }
             }
             if kfx.is_some() || !to_usb {
                 let name = deckle_digest::edition_filename(date);
@@ -1300,7 +1302,7 @@ fn digest(
                     Some(target) => {
                         let one = deckle_core::queue::Queue::new(work.join("to-folder"));
                         let _ = std::fs::remove_dir_all(&one.dir);
-                        queue_edition(&one, kfx, &name, None, &long_reads)?;
+                        queue_edition(&one, kfx, &name, None, &long_reads, &[])?;
                         outcome.flush = Some(
                             one.flush(target, Some(&digest_prune(&cfg)))
                                 .map_err(|e| e.to_string())?,
@@ -1313,6 +1315,8 @@ fn digest(
                             &name,
                             Some(deckle_digest::EDITION_PREFIX),
                             &long_reads,
+                            // an edition sent again from the Morgue outlives the morning's paper
+                            &morgue_exempt(),
                         )?;
                         outcome = push_queued(&queue, &cfg, detect_kindle())?;
                     }
@@ -1742,9 +1746,12 @@ fn queue_edition(
     name: &str,
     replaces: Option<&str>,
     long_reads: &[LongRead],
+    keep: &[String],
 ) -> Result<(), String> {
     if let Some(kfx) = paper {
-        queue.add(kfx, name, replaces).map_err(|e| e.to_string())?;
+        queue
+            .add_keeping(kfx, name, replaces, keep)
+            .map_err(|e| e.to_string())?;
     }
     for (n, p, fallback) in long_reads {
         queue
@@ -1835,11 +1842,16 @@ fn morgue_exempt() -> Vec<String> {
     use deckle_digest::chrono::{DateTime, Utc};
     let state = deckle_morgue::MorgueState::load(&deckle_morgue::state::state_path());
     let now = Utc::now();
+    let outbox = deckle_core::queue::Queue::default_dir();
     state
         .resent
         .iter()
-        .filter(|(_, r)| match &r.delivered {
-            None => true,
+        .filter(|(date, r)| match &r.delivered {
+            // Waiting to go: exempt while it is still in the outbox. One that was superseded or
+            // deleted there is not waiting for anything, and must not stay exempt for ever.
+            None => outbox
+                .join(deckle_digest::edition_filename(**date))
+                .exists(),
             Some(t) => DateTime::parse_from_rfc3339(t)
                 .is_ok_and(|t| (now - t.with_timezone(&Utc)).num_days() < RESENT_DAYS),
         })
@@ -1889,6 +1901,19 @@ fn record_morgue(flush: &deckle_core::queue::FlushReport) {
         state
             .on_kindle
             .insert(stem.clone(), !matches!(on, OnDevice::Absent));
+    }
+    // The positions were read before this session pushed and pruned: what it removed is gone,
+    // and what it delivered is there.
+    let stem_of = |name: &str| name.strip_suffix(".kfx").unwrap_or(name).to_owned();
+    for name in &flush.pruned {
+        state.on_kindle.insert(stem_of(name), false);
+    }
+    for delivered in &flush.delivered {
+        if let Some(name) = delivered.file_name().and_then(|n| n.to_str())
+            && name.starts_with(deckle_digest::EDITION_PREFIX)
+        {
+            state.on_kindle.insert(stem_of(name), true);
+        }
     }
     if state != before
         && let Err(e) = state.save(&path)
@@ -2273,9 +2298,17 @@ fn puzzle_text(out: &PuzzleOut) -> String {
 /// returned as a run note: it never fails the build.
 fn archive_to_morgue(
     cfg: &deckle_digest::Config,
+    date: deckle_digest::chrono::NaiveDate,
     epub: &Path,
     gathered: &deckle_digest::Gathered,
 ) -> Option<String> {
+    // A build for another date gathers today's news under that date's name: keeping it would
+    // replace the day's real paper (or invent one for a day that never had it).
+    if !is_today(date) {
+        return Some(format!(
+            "Morgue: not kept (a build for {date}, not for today, would replace that day's paper)"
+        ));
+    }
     let morgue = deckle_morgue::Morgue::from_config(cfg);
     let state_path = deckle_morgue::state::state_path();
     let mut state = deckle_morgue::MorgueState::load(&state_path);
@@ -2290,6 +2323,10 @@ fn archive_to_morgue(
         .archive_edition(epub, &deckle_morgue::from_gathered(gathered))
         .err()
         .map(|e| format!("Morgue: couldn't save the edition ({e})"))
+}
+
+fn is_today(date: deckle_digest::chrono::NaiveDate) -> bool {
+    date == deckle_digest::chrono::Local::now().date_naive()
 }
 
 /// Keeps the converted KFX beside the edition in the Morgue; a problem is a run note.
@@ -2337,10 +2374,11 @@ fn morgue_send(
     };
     let name = deckle_digest::edition_filename(date);
     let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
-    queue.add(&kfx, &name, None).map_err(|e| e.to_string())?;
-    // Prune leaves it alone from now until a week after a Kindle takes it.
+    // Recorded first: a plug-in between the two steps must already know to leave it alone (it
+    // is only exempt while it is in the outbox, so this costs nothing if the add fails).
     let path = deckle_morgue::state::state_path();
     let mut state = deckle_morgue::MorgueState::load(&path);
+    let before = state.resent.get(&date).cloned();
     state.resent.insert(
         date,
         deckle_morgue::state::Resent {
@@ -2351,6 +2389,14 @@ fn morgue_send(
     state
         .save(&path)
         .map_err(|e| format!("{}: {e}", path.display()))?;
+    if let Err(e) = queue.add(&kfx, &name, None) {
+        match before {
+            Some(r) => state.resent.insert(date, r),
+            None => state.resent.remove(&date),
+        };
+        let _ = state.save(&path);
+        return Err(e.to_string());
+    }
     Ok(name)
 }
 
@@ -2950,11 +2996,42 @@ mod email_tests {
             &deckle_digest::edition_filename(date()),
             Some(deckle_digest::EDITION_PREFIX),
             &[],
+            &[],
         )
         .unwrap();
         EmailRun {
             email: email.unwrap_or_default(),
         }
+    }
+
+    #[test]
+    fn an_edition_sent_again_survives_the_days_paper_in_the_outbox() {
+        let run = built();
+        let old = "deckle-daily-2026-10-01.kfx";
+        run.queue.add(&run.kfx, old, None).unwrap();
+        run.queue
+            .add(&run.kfx, "deckle-daily-2026-10-19.kfx", None)
+            .unwrap();
+        queue_edition(
+            &run.queue,
+            Some(run.kfx.as_path()),
+            &deckle_digest::edition_filename(date()),
+            Some(deckle_digest::EDITION_PREFIX),
+            &[],
+            &[old.to_owned()],
+        )
+        .unwrap();
+        let names: Vec<String> = run
+            .queue
+            .pending()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
+        assert!(
+            names.contains(&old.to_owned()),
+            "the re-send waits: {names:?}"
+        );
     }
 
     #[test]

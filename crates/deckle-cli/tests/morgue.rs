@@ -48,6 +48,10 @@ fn setup(extra: &str) -> tempfile::TempDir {
     home
 }
 
+fn today() -> deckle_digest::chrono::NaiveDate {
+    deckle_digest::chrono::Local::now().date_naive()
+}
+
 fn build(home: &Path, date: &str) -> assert_cmd::assert::Assert {
     let out = home.join("out");
     deckle(home)
@@ -61,16 +65,91 @@ fn morgue(home: &Path) -> PathBuf {
     home.join("Deckle/Morgue")
 }
 
+/// Puts an edition for `date` in the Morgue the way an earlier build would have, with one story.
+fn seed(home: &Path, date: &str, paper: &str, story: &str) {
+    use deckle_digest::chrono::Datelike;
+    use deckle_morgue::sidecar::{Files, SectionText, Sidecar, Story};
+    let date: deckle_digest::chrono::NaiveDate = date.parse().unwrap();
+    let m = deckle_morgue::Morgue {
+        root: morgue(home),
+        keep_days: 0,
+    };
+    let epub = home.join("seed.epub");
+    std::fs::write(&epub, b"EPUB").unwrap();
+    let sidecar = Sidecar {
+        date,
+        number: date.ordinal(),
+        paper: paper.into(),
+        place: String::new(),
+        weather: None,
+        lead: None,
+        sections: vec![SectionText {
+            key: "local".into(),
+            title: "Local".into(),
+            stories: vec![Story {
+                title: story.into(),
+                teaser: None,
+                text: format!("{story} in full"),
+            }],
+        }],
+        files: Files {
+            epub: format!("{date}.epub"),
+            kfx: None,
+        },
+        stem: format!("deckle-daily-{date}"),
+    };
+    m.archive_edition_on(&epub, &sidecar, date).unwrap();
+}
+
 #[test]
 fn build_archives() {
     let home = setup("");
-    build(home.path(), "2026-10-21");
-    let year = morgue(home.path()).join("2026");
-    assert!(year.join("2026-10-21.epub").exists());
+    let date = today().to_string();
+    build(home.path(), &date);
+    let year = morgue(home.path()).join(&date[..4]);
+    assert!(year.join(format!("{date}.epub")).exists());
     let json: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(year.join("2026-10-21.json")).unwrap()).unwrap();
-    assert_eq!(json["date"], "2026-10-21");
+        serde_json::from_slice(&std::fs::read(year.join(format!("{date}.json"))).unwrap()).unwrap();
+    assert_eq!(json["date"], date.as_str());
     assert!(json["sections"][0]["stories"].is_array());
+}
+
+#[test]
+fn a_build_for_another_date_isnt_archived() {
+    // A preview for a past date gathers today's news: it must not replace that day's real paper.
+    let home = setup("");
+    seed(home.path(), "2026-10-01", "THE REAL ONE", "Original story");
+    let out = deckle(home.path())
+        .args(["--json", "digest", "build", "--date", "2026-10-01", "-o"])
+        .arg(home.path().join("out"))
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert!(
+        v["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|n| n.as_str().unwrap().contains("not kept")),
+        "{v}"
+    );
+    let json: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(morgue(home.path()).join("2026/2026-10-01.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(json["paper"], "THE REAL ONE");
+}
+
+#[test]
+fn a_build_for_a_future_date_leaves_the_archive_alone() {
+    let home = setup("");
+    seed(home.path(), "2026-01-05", "OLD", "Old story");
+    deckle(home.path())
+        .args(["digest", "build", "--date", "2031-12-01", "-o"])
+        .arg(home.path().join("out"))
+        .assert()
+        .success();
+    assert!(morgue(home.path()).join("2026/2026-01-05.json").exists());
 }
 
 #[test]
@@ -78,7 +157,14 @@ fn archive_failure_is_a_note() {
     let home = setup("[morgue]\nfolder = \"~/not-a-folder\"\n");
     std::fs::write(home.path().join("not-a-folder"), b"a file").unwrap();
     let out = deckle(home.path())
-        .args(["--json", "digest", "build", "--date", "2026-10-21", "-o"])
+        .args([
+            "--json",
+            "digest",
+            "build",
+            "--date",
+            &today().to_string(),
+            "-o",
+        ])
         .arg(home.path().join("out"))
         .assert()
         .success();
@@ -93,7 +179,7 @@ fn archive_failure_is_a_note() {
     );
     assert!(
         home.path()
-            .join("out/deckle-daily-2026-10-21.epub")
+            .join(format!("out/deckle-daily-{}.epub", today()))
             .exists(),
         "the build itself stands"
     );
@@ -101,27 +187,57 @@ fn archive_failure_is_a_note() {
 
 #[test]
 fn list_search_show() {
+    use deckle_digest::chrono::{Datelike, Days};
     let home = setup("");
-    build(home.path(), "2026-10-21");
-    build(home.path(), "2026-10-20");
+    let now = today();
+    let older = now - Days::new(40);
+    build(home.path(), &now.to_string());
+    seed(
+        home.path(),
+        &older.to_string(),
+        "The Deckle Daily",
+        "Mill sold to a brewer",
+    );
+    let month_of = |d: deckle_digest::chrono::NaiveDate| format!("{}-{:02}", d.year(), d.month());
+
     let list = deckle(home.path())
-        .args(["digest", "morgue", "list", "--month", "2026-10"])
+        .args(["digest", "morgue", "list", "--month", &month_of(now)])
         .assert()
         .success();
     let text = String::from_utf8(list.get_output().stdout.clone()).unwrap();
     assert!(
-        text.contains("2026-10-21") && text.contains("2026-10-20"),
+        text.contains(&now.to_string()) && text.contains("Morgue: 2 editions"),
         "{text}"
+    );
+    let list = deckle(home.path())
+        .args(["digest", "morgue", "list", "--month", &month_of(older)])
+        .assert()
+        .success();
+    assert!(
+        String::from_utf8(list.get_output().stdout.clone())
+            .unwrap()
+            .contains(&older.to_string())
     );
 
     let found = deckle(home.path())
-        .args(["digest", "morgue", "search", "leo"])
+        .args(["digest", "morgue", "search", "mill", "brewer"])
         .assert()
         .success();
     let text = String::from_utf8(found.get_output().stdout.clone()).unwrap();
     assert!(
-        text.contains("2026-10-21") && text.contains("Horoscope"),
+        text.contains(&older.to_string())
+            && text.contains("Local")
+            && !text.contains(&now.to_string()),
         "{text}"
+    );
+    let leo = deckle(home.path())
+        .args(["digest", "morgue", "search", "leo"])
+        .assert()
+        .success();
+    assert!(
+        String::from_utf8(leo.get_output().stdout.clone())
+            .unwrap()
+            .contains("Horoscope")
     );
     let none = deckle(home.path())
         .args(["digest", "morgue", "search", "zzzzqx"])
@@ -134,11 +250,14 @@ fn list_search_show() {
     );
 
     let show = deckle(home.path())
-        .args(["--json", "digest", "morgue", "show", "2026-10-21"])
+        .args(["--json", "digest", "morgue", "show", &now.to_string()])
         .assert()
         .success();
     let v: serde_json::Value = serde_json::from_slice(&show.get_output().stdout).unwrap();
-    assert_eq!(v["heading"], "Wednesday, October 21 · No. 294");
+    assert_eq!(
+        v["heading"],
+        format!("{} · No. {}", now.format("%A, %B %-d"), now.ordinal())
+    );
 }
 
 #[test]
@@ -154,12 +273,12 @@ fn show_of_a_missing_edition_says_so() {
 #[test]
 fn send_queues_kept_kfx() {
     let home = setup("");
-    build(home.path(), "2026-10-21");
-    // Keep a KFX for that date, as `digest run` would.
-    let kfx = home.path().join("paper.kfx");
-    std::fs::write(&kfx, b"KFX BYTES").unwrap();
-    let year = morgue(home.path()).join("2026");
-    std::fs::copy(&kfx, year.join("2026-10-21.kfx")).unwrap();
+    seed(home.path(), "2026-10-21", "The Deckle Daily", "A story");
+    std::fs::write(
+        morgue(home.path()).join("2026/2026-10-21.kfx"),
+        b"KFX BYTES",
+    )
+    .unwrap();
     let out = deckle(home.path())
         .args(["--json", "digest", "morgue", "send", "2026-10-21"])
         .assert()
@@ -194,7 +313,7 @@ fn kindle_with(home: &Path, days: &[&str]) -> PathBuf {
 
 /// An old edition archived with a kept KFX, then queued with `morgue send`.
 fn sent_again(home: &Path, date: &str) {
-    build(home, date);
+    seed(home, date, "The Deckle Daily", "An old story");
     std::fs::write(
         morgue(home).join(&date[..4]).join(format!("{date}.kfx")),
         b"OLD KFX",
@@ -338,4 +457,78 @@ fn connection_records_highlights_and_presence() {
         Some(&false),
         "read, and not on the Kindle"
     );
+}
+
+#[test]
+fn a_sent_again_edition_not_in_the_outbox_any_more_isnt_exempt() {
+    // Queued, then lost (the morning's paper superseded it, or the file was deleted): it must not
+    // stay exempt from prune for ever.
+    let home = setup("");
+    sent_again(home.path(), "2026-10-01");
+    std::fs::remove_file(cache_dir(home.path()).join("outbox/deckle-daily-2026-10-01.kfx"))
+        .unwrap();
+    let kindle = kindle_with(
+        home.path(),
+        &["2026-10-01", "2026-10-18", "2026-10-19", "2026-10-20"],
+    );
+    let outbox = cache_dir(home.path()).join("outbox");
+    std::fs::write(outbox.join("deckle-daily-2026-10-21.kfx"), b"NEW").unwrap();
+    push(home.path(), &kindle);
+    assert!(
+        !kindle.join("deckle-daily-2026-10-01.kfx").exists(),
+        "pruned like any old edition"
+    );
+}
+
+#[test]
+fn pruned_editions_are_no_longer_on_the_kindle() {
+    use deckle_readership::layout::{Layout, SectionStart};
+    use deckle_readership::state::{Read, State};
+    let home = setup("[sync]\nreadership = true\n");
+    let mut readership = State::default();
+    for day in ["2026-10-17", "2026-10-18", "2026-10-19", "2026-10-20"] {
+        let date: deckle_digest::chrono::NaiveDate = day.parse().unwrap();
+        readership.record_layout(Layout {
+            date,
+            title: "The Deckle Daily".into(),
+            file: format!("deckle-daily-{day}"),
+            end: 10_000,
+            sections: vec![SectionStart {
+                key: "front".into(),
+                name: "Front page".into(),
+                start: 0,
+                items: None,
+            }],
+        });
+        readership.reads.entry(date).or_default().insert(
+            "seed".into(),
+            Read {
+                opened: false,
+                furthest: None,
+                last: None,
+                last_read: None,
+                seen: "x".into(),
+            },
+        );
+    }
+    readership
+        .save(&config_dir(home.path()).join("readership.json"))
+        .unwrap();
+    // Four on the Kindle, keep = 3: the oldest is pruned in this very session, after the read.
+    let kindle = kindle_with(
+        home.path(),
+        &["2026-10-17", "2026-10-18", "2026-10-19", "2026-10-20"],
+    );
+    let outbox = cache_dir(home.path()).join("outbox");
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::write(outbox.join("deckle-daily-2026-10-21.kfx"), b"NEW").unwrap();
+    push(home.path(), &kindle);
+    assert!(!kindle.join("deckle-daily-2026-10-17.kfx").exists());
+    let state = load_state(home.path());
+    assert_eq!(
+        state.on_kindle.get("deckle-daily-2026-10-17"),
+        Some(&false),
+        "gone by the time we say"
+    );
+    assert_eq!(state.on_kindle.get("deckle-daily-2026-10-19"), Some(&true));
 }

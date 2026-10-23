@@ -74,7 +74,20 @@ impl Morgue {
     /// Keeps `epub` and its sidecar, EPUB first and JSON last, so a JSON never points at a
     /// missing EPUB. A second build of the same date replaces the first, KFX copy included:
     /// that was made from the older build.
+    ///
+    /// Old editions are pruned against today's date, never the edition's own: a build for a
+    /// date far ahead must not age the whole archive out.
     pub fn archive_edition(&self, epub: &Path, sidecar: &Sidecar) -> io::Result<()> {
+        self.archive_edition_on(epub, sidecar, chrono::Local::now().date_naive())
+    }
+
+    /// [`Morgue::archive_edition`] pruning as of `today`.
+    pub fn archive_edition_on(
+        &self,
+        epub: &Path,
+        sidecar: &Sidecar,
+        today: NaiveDate,
+    ) -> io::Result<()> {
         let (epub_to, json_to, kfx_to) = self.paths(sidecar.date);
         std::fs::create_dir_all(epub_to.parent().expect("a year folder"))?;
         copy_atomic(epub, &epub_to)?;
@@ -83,7 +96,7 @@ impl Morgue {
         let json = serde_json::to_vec_pretty(&sidecar).map_err(io::Error::other)?;
         write_atomic(&json_to, &json)?;
         let _ = std::fs::remove_file(kfx_to);
-        self.prune_old(sidecar.date);
+        self.prune_old(today);
         Ok(())
     }
 
