@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The Kindle tab, in rooms** (Books and Kindle design, phase 4). Like the Daily tab, a rail
+  down the left: **Shelf**, every book with its cover, a progress bar and when it was last
+  opened (from the Kindle's own position files, now read for AZW3 as well as KFX), filtered by
+  Reading, Not started, Finished, Amazon's own, Sideloaded or Deckle, sorted by recently read,
+  title, author or size, and searchable; **Upgrades**, grouped by where each new copy comes from;
+  **Highlights**; **Words**; and **This Kindle**: the space split by kind, **Make room** (finished
+  books over 10 MB, second copies of a book, papers past `keep`) and **Back up**, which copies
+  every DRM-free book and its `.sdr` (reading position, highlights) to this computer, Amazon's own
+  left out. **Restore** puts a backup on any Kindle, leaving the books already there alone. CLI:
+  `deckle kindle backup [--into DIR]` and `deckle kindle restore DIR`.
 - **Upgrade from the Kindle's own copy** (Books and Kindle design, phase 3). A DRM-free AZW3
   (or a MOBI with a KF8 part) with no original on this computer is rebuilt as an EPUB from the
   Kindle's copy: its text, pictures, fonts, styles, links and contents come back, and a quality

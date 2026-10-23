@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { defaultTicked, leftAsIs, partwayLine, sourceLine, sourcesLine, upgradeLabel } from "./upgradesView";
+import { byOrigin, defaultTicked, leftAsIs, partwayLine, sourceLine, sourcesLine, upgradeLabel } from "./upgradesView";
 import type { RunTarget, UpgradeOf, UpgradeRow, UpgradesView } from "./types";
 
 interface Props {
@@ -13,6 +13,8 @@ interface Props {
   /** After a Put back changed the Kindle. */
   onChanged: () => void;
   onNotice: (msg: string | null) => void;
+  /** How many books can be upgraded, once the room has looked. */
+  onCount?: (n: number) => void;
 }
 
 /**
@@ -20,7 +22,7 @@ interface Props {
  * ticked by default unless you're partway through, upgraded through the Books tab, with a
  * history to put any of them back.
  */
-export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged, onNotice }: Props) {
+export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged, onNotice, onCount }: Props) {
   const [view, setView] = useState<UpgradesView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +36,7 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
       const v = await api.deviceUpgrades(target);
       setView(v);
       setTicked(defaultTicked(v.rows));
+      onCount?.(v.rows.length);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -130,45 +133,50 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
         <p className="muted small">Every book on this Kindle that Deckle can upgrade is already current.</p>
       )}
 
-      {view.rows.length > 0 && (
-        <ul className="books upgrade-list" aria-label="Books that can be upgraded">
-          {view.rows.map((r) => {
-            const warn = partwayLine(r);
-            return (
-              <li key={r.file} className="row">
-                <label className="upgrade-tick">
-                  <input type="checkbox" checked={ticked.has(r.file)} onChange={(e) => toggle(r.file, e.target.checked)} aria-label={`Upgrade ${r.title}`} />
-                </label>
-                <div className="cover-thumb" aria-hidden="true">
-                  {r.cover ? <img src={r.cover} alt="" /> : <div className="cover-placeholder">{r.title.slice(0, 1)}</div>}
-                </div>
-                <div className="meta">
-                  <div className="title-line">
-                    <span className="title" title={r.file}>
-                      {r.title}
-                    </span>
+      {byOrigin(view.rows).map((g) => (
+        <div key={g.origin} className="upgrade-group">
+          <h4>
+            {g.title} <span className="muted small">· {g.rows.length}</span>
+          </h4>
+          <ul className="books upgrade-list" aria-label={g.title}>
+            {g.rows.map((r) => {
+              const warn = partwayLine(r);
+              return (
+                <li key={r.file} className="row">
+                  <label className="upgrade-tick">
+                    <input type="checkbox" checked={ticked.has(r.file)} onChange={(e) => toggle(r.file, e.target.checked)} aria-label={`Upgrade ${r.title}`} />
+                  </label>
+                  <div className="cover-thumb" aria-hidden="true">
+                    {r.cover ? <img src={r.cover} alt="" /> : <div className="cover-placeholder">{r.title.slice(0, 1)}</div>}
                   </div>
-                  <div className="byline">{r.authors.join(", ")}</div>
-                  <div className="shipped" title={r.source ?? undefined}>
-                    {sourceLine(r)}
-                  </div>
-                  <div className="gains">
-                    {r.gains.map((g) => (
-                      <span key={g} className="badge">
-                        {g}
+                  <div className="meta">
+                    <div className="title-line">
+                      <span className="title" title={r.file}>
+                        {r.title}
                       </span>
-                    ))}
+                    </div>
+                    <div className="byline">{r.authors.join(", ")}</div>
+                    <div className="shipped" title={r.source ?? undefined}>
+                      {sourceLine(r)}
+                    </div>
+                    <div className="gains">
+                      {r.gains.map((g) => (
+                        <span key={g} className="badge">
+                          {g}
+                        </span>
+                      ))}
+                    </div>
+                    {warn && <p className="warn small">{warn}</p>}
                   </div>
-                  {warn && <p className="warn small">{warn}</p>}
-                </div>
-                <button className="ghost" disabled={busy || rebuilding} onClick={() => upgrade([r])}>
-                  Upgrade
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+                  <button className="ghost" disabled={busy || rebuilding} onClick={() => upgrade([r])}>
+                    Upgrade
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
 
       {left && <p className="muted small">{left}</p>}
       <p className="muted small">{sourcesLine(view.sources)}</p>

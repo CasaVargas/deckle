@@ -21,7 +21,7 @@ pub struct Shelved {
 }
 
 /// What makes two books on a Kindle the same: the ASIN, else title and first author.
-fn identity(b: &DeviceBook) -> Option<String> {
+pub fn identity(b: &DeviceBook) -> Option<String> {
     if let Some(a) = &b.asin {
         return Some(format!("asin:{a}"));
     }

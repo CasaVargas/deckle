@@ -58,7 +58,8 @@ pub struct DeviceBook {
     /// The KFX's end position (`erl`), the denominator of a reading position.
     #[serde(skip)]
     pub end: Option<i64>,
-    /// The `.yjf` reading-position sidecar's bytes, when [`list_with_positions`] read it.
+    /// The reading-position sidecar's bytes (KFX `.yjf`, AZW3 `.azw3f`), when
+    /// [`list_with_positions`] read it.
     #[serde(skip)]
     pub yjf: Option<Vec<u8>>,
     /// The KFX's cover, JPEG.
@@ -113,6 +114,12 @@ impl Positions<'_> {
         format_of(name).is_some_and(|f| POSITION_FORMATS.contains(&f.as_str()))
             && !name.starts_with(self.skip_prefix)
     }
+}
+
+/// A reading-position file in a `.sdr`: KFX `.yjf`, AZW3 `.azw3f` (the same KRDS container; its
+/// positions aren't KFX ids, but the Kindle's own fraction is there).
+fn is_position_file(name: &str) -> bool {
+    crate::yjf::is_yjf(name) || name.to_ascii_lowercase().ends_with(".azw3f")
 }
 
 /// How many folders below `documents/` a walk looks into.
@@ -376,7 +383,7 @@ fn book_on_disk(
         details_cached(&mut book, path, cache);
     }
     if want.as_ref().is_some_and(|w| w.wanted(file))
-        && let Some(name) = names_in(&sdr).into_iter().find(|n| crate::yjf::is_yjf(n))
+        && let Some(name) = names_in(&sdr).into_iter().find(|n| is_position_file(n))
     {
         book.yjf = std::fs::read(sdr.join(name)).ok();
     }
@@ -398,7 +405,8 @@ fn mtp_err(e: MtpError) -> DeliverError {
 fn list_mtp(
     dev: &mut Mtp,
     want: &mut Option<Positions<'_>>,
-    deep: Option<Option<&Path>>,
+    cache: Option<&Path>,
+    deep: bool,
 ) -> Result<Inventory, DeliverError> {
     let storage = *dev
         .storages()
@@ -447,7 +455,7 @@ fn list_mtp(
                     && w.wanted(&book.file)
                     && let Some((fh, _)) = inside
                         .iter()
-                        .find(|(_, i)| !i.association && crate::yjf::is_yjf(&i.filename))
+                        .find(|(_, i)| !i.association && is_position_file(&i.filename))
                 {
                     if w.read < MAX_YJF {
                         w.read += 1;
@@ -460,11 +468,11 @@ fn list_mtp(
             }
             // MTP has no partial reads: a book is read whole once, then known by its name and
             // size.
-            if let Some(cache) = deep
-                && has_details(&book.format)
-            {
+            // A plain listing takes what an earlier detailed one cached, and reads nothing more.
+            if has_details(&book.format) && cache.is_some() {
                 let key = format!("mtp|{}|{}", book.file, book.size);
                 if !load_cached(&mut book, cache, &key)
+                    && deep
                     && let Ok(bytes) = dev.get_object(*h)
                 {
                     read_details(&mut book, &bytes);
@@ -535,7 +543,7 @@ fn walk(
             space: space_of(&dev.root),
         }),
         Target::Mtp(_) => match conn.mtp() {
-            Some(Ok(dev)) => list_mtp(dev, want, deep.then_some(cache)),
+            Some(Ok(dev)) => list_mtp(dev, want, cache, deep),
             Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
             None => unreachable!("an MTP target always has a connection"),
         },

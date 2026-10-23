@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { BackupReport, RestoreReport, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -49,6 +49,11 @@ export const api = {
   /** Slow over MTP (a few seconds). */
   deviceBooks: (target: RunTarget) => invoke<DeviceShelf>("device_books", { target }),
   deviceRemove: (target: RunTarget, file: string) => invoke<string[]>("device_remove", { target, file }),
+  /** Removes each file over one session; `[file, error]` for each that couldn't go. */
+  deviceRemoveMany: (target: RunTarget, files: string[]) => invoke<[string, string][]>("device_remove_many", { target, files }),
+  /** Every DRM-free book and its .sdr into a new folder under `into` (default: kindle-backups/). */
+  deviceBackup: (target: RunTarget, into: string | null) => invoke<BackupReport>("device_backup", { target, into }),
+  deviceRestore: (target: RunTarget, dir: string) => invoke<RestoreReport>("device_restore", { target, dir }),
   highlightsStatus: () => invoke<HighlightsStatus>("highlights_status"),
   highlightsSet: (folder: string | null, clippings: boolean) => invoke<HighlightsStatus>("highlights_set", { folder, clippings }),
   /** Reads the Kindle again (its own session) and writes what's new into the folder. */

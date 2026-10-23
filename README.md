@@ -217,6 +217,8 @@ deckle library reprocess --dry-run                # books Deckle could build bet
 deckle kindle books                               # what's on the Kindle, and free space
 deckle kindle upgrade --dry-run                   # books with an original here (calibre, folders)
 deckle kindle put-back "Middlemarch.azw3"         # undo an upgrade: the kept copy goes back
+deckle kindle backup                              # DRM-free books and their .sdr, to this computer
+deckle kindle restore "…/kindle-backups/Kindle Scribe 2026-10-23T22-30"  # onto any Kindle
 deckle highlights list                            # books with highlights, and what's new
 deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (folder remembered)
 deckle words anki --to ~/Desktop/words.csv        # looked-up words as Anki cards (File → Import)
