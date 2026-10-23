@@ -4,7 +4,9 @@
 mod commands;
 mod daily;
 mod kindle;
+mod next;
 mod readership;
+mod shelf;
 
 use std::sync::Mutex;
 
@@ -82,6 +84,12 @@ pub fn run() {
             readership::readership_apply,
             readership::readership_dismiss,
             readership::readership_set,
+            shelf::shelf_status,
+            shelf::shelf_forget,
+            shelf::shelf_set,
+            next::daily_next,
+            next::daily_next_refresh,
+            next::press_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deckle");

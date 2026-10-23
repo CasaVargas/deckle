@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Daily tab (Daily design §5c): today's paper, Your Reading, the schedule, and the paper's
-// settings, all backed by digest.toml and the CLI.
+// The Daily tab (Daily design §5c, tomorrow's paper design §8): the press, tomorrow's paper so
+// far with its page plan and week, Your Reading, and the paper's settings, all backed by
+// digest.toml and the CLI.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import Icon from "./Icon";
+import PagePlanCard from "./PagePlanCard";
+import { reorder, setBudget } from "./pagePlan";
+import PressBar from "./PressBar";
 import Readership from "./Readership";
+import Shelf from "./Shelf";
+import ThisWeek from "./ThisWeek";
+import TomorrowsPaper from "./TomorrowsPaper";
+import { TOPICS, toggleTopic, topicOn, topicTitle } from "./topics";
 import YourDay from "./YourDay";
-import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, PlaceRow, ReadingEntry, RunResult, ScheduleStatus, SectionKind } from "./types";
-import { ALL_SECTIONS, DEFAULT_EMAIL, SECTION_LABEL, SIGNS } from "./types";
+import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PlaceRow, ReadingEntry, RunResult } from "./types";
+import { DEFAULT_EMAIL, SIGNS } from "./types";
 
 /** Amazon's Manage Your Content and Devices: the approved-sender list and the emailed Docs. */
 const MYCD = "https://www.amazon.com/mycd";
@@ -57,7 +65,8 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [reading, setReading] = useState<ReadingEntry[]>([]);
   const [saveUrl, setSaveUrl] = useState("");
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
-  const [schedule, setSchedule] = useState<ScheduleStatus | null>(null);
+  const [next, setNext] = useState<NextPaper | null>(null);
+  const [planSaving, setPlanSaving] = useState(false);
   const [time, setTime] = useState("05:30");
   const [placeQuery, setPlaceQuery] = useState("");
   const [places, setPlaces] = useState<PlaceRow[] | null>(null);
@@ -75,18 +84,27 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     api.emailStatus().then(setEmailStatus).catch(() => {});
   }, []);
 
+  // Tomorrow's paper: recomputed from local files often; headlines fetched on open and focus only
+  const loadNext = useCallback(() => {
+    api.dailyNext().then(setNext).catch(() => {});
+  }, []);
+  const refreshNext = useCallback(() => {
+    api.dailyNextRefresh().then(setNext).catch(() => {});
+  }, []);
+
   const refreshSide = useCallback(() => {
     api.editionPreview().then(setPreview).catch(() => {});
     api.readingList().then(setReading).catch(() => {});
-  }, []);
+    loadNext();
+  }, [loadNext]);
 
   useEffect(() => {
     load();
     refreshSide();
+    refreshNext();
     api
       .scheduleGet()
       .then((s) => {
-        setSchedule(s);
         if (s.at) setTime(s.at);
       })
       .catch(() => {});
@@ -96,10 +114,17 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       setRunning(null);
       refreshSide();
     });
+    const onFocus = () => refreshNext();
+    window.addEventListener("focus", onFocus);
+    const tick = setInterval(() => {
+      if (document.visibilityState === "visible") loadNext();
+    }, 60_000);
     return () => {
       un.then((f) => f());
+      window.removeEventListener("focus", onFocus);
+      clearInterval(tick);
     };
-  }, [load, refreshSide]);
+  }, [load, refreshSide, refreshNext, loadNext]);
 
   const edit = (f: (c: DailyConfig) => void) => {
     setDraft((d) => {
@@ -115,6 +140,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     if (!c) return false;
     try {
       await load(await api.dailySave(c));
+      loadNext();
       return true;
     } catch (e) {
       onNotice(String(e));
@@ -191,7 +217,16 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
   const setScheduleOn = async (on: boolean, at = time) => {
     try {
-      setSchedule(await api.scheduleSet(on ? at : null));
+      await api.scheduleSet(on ? at : null);
+      loadNext();
+    } catch (e) {
+      onNotice(String(e));
+    }
+  };
+
+  const stopPresses = async (on: boolean) => {
+    try {
+      setNext(await api.pressStop(on));
     } catch (e) {
       onNotice(String(e));
     }
@@ -230,46 +265,38 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     );
   }
 
-  const enabled = draft.sections;
-  const disabled = ALL_SECTIONS.filter((s) => !enabled.includes(s));
-  const move = (s: SectionKind, by: number) =>
-    edit((c) => {
-      const i = c.sections.indexOf(s);
-      const j = i + by;
-      if (i < 0 || j < 0 || j >= c.sections.length) return;
-      [c.sections[i], c.sections[j]] = [c.sections[j], c.sections[i]];
-    });
-  const toggle = (s: SectionKind, on: boolean) =>
-    edit((c) => {
-      c.sections = on ? [...c.sections, s] : c.sections.filter((x) => x !== s);
-    });
-  const pending = reading.filter((e) => e.state === "pending").length;
+  // Page plan edits write digest.toml at once. They apply to the saved config the plan was
+  // made from, one at a time: with unsaved edits in The paper (a feed added or removed) the
+  // plan waits for them to be saved.
+  const planLocked = dirty || planSaving || !next;
+  const planSave = async (f: (c: DailyConfig) => DailyConfig) => {
+    if (planLocked || !state.config) return;
+    setPlanSaving(true);
+    try {
+      const c = f(structuredClone(state.config));
+      if (c !== state.config) await save(c);
+    } finally {
+      setPlanSaving(false);
+    }
+  };
+  const planMove = (from: number, to: number) => planSave((c) => (next ? reorder(c, next.plan, from, to) : c));
+  const planBudget = (row: PagePlanRow, n: number) => planSave((c) => setBudget(c, row, n));
+  const planToggle = (row: PagePlanRow, on: boolean) =>
+    planSave((c) => ({ ...c, sections: on ? [...c.sections, row.kind] : c.sections.filter((x) => x !== row.kind) }));
 
   return (
     <div className="daily">
-      <section className="card paper">
-        <div className="paper-cover">{preview?.cover ? <img src={preview.cover} alt="" /> : <div className="cover-placeholder">D</div>}</div>
-        <div className="paper-body">
-          <h2>{draft.title}</h2>
-          <p className="muted">
-            {preview ? `Last built: ${preview.title.replace(/^.*— /, "")}` : "No edition built yet."}
-            {preview && preview.outbox > 0 && ` · ${preview.outbox} waiting for your Kindle`}
-            {pending > 0 && ` · ${pending} saved for the next edition`}
-          </p>
-          <div className="paper-actions">
-            <button className="primary" disabled={!!running} onClick={() => run(true)}>
-              {running === "send" ? "Building and sending…" : "Send now"}
-            </button>
-            <button className="ghost" disabled={!!running} onClick={() => run(false)}>
-              {running === "preview" ? "Building preview…" : "Preview"}
-            </button>
-            {preview && (
-              <button className="link" onClick={() => api.reveal(preview.file)}>
-                Show file
-              </button>
-            )}
-          </div>
-          {running && <p className="muted small">Fetching every story and photo takes about a minute.</p>}
+      <PressBar press={next?.press ?? null} time={time} onTime={setTime} onSchedule={setScheduleOn} onRestart={() => stopPresses(false)} />
+
+      <div className="daily-columns">
+        <TomorrowsPaper
+          next={next}
+          preview={preview}
+          running={running}
+          onRun={run}
+          onStop={() => stopPresses(true)}
+          onShowFile={() => preview && api.reveal(preview.file)}
+        >
           {result && (
             <div className={`run-result ${result.r.ok ? "ok" : "fail"}`}>
               <div>{summary(result.r, result.send)}</div>
@@ -283,10 +310,23 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
               {result.r.log && <pre className="log">{result.r.log}</pre>}
             </div>
           )}
+        </TomorrowsPaper>
+        <div className="daily-side">
+          <PagePlanCard
+            next={next}
+            locked={planLocked}
+            lockedWhy={dirty ? "Save The paper's changes first." : undefined}
+            onMove={planMove}
+            onBudget={planBudget}
+            onToggle={planToggle}
+          />
+          {next && <ThisWeek week={next.week} />}
         </div>
-      </section>
+      </div>
 
-      <Readership />
+      <Readership onApplied={() => load().then(loadNext)} />
+
+      <Shelf inPaper={draft.sections.includes("shelf")} />
 
       <section className="card">
         <h3>Your Reading</h3>
@@ -361,29 +401,6 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
             {copied ? "Copied" : "Copy bookmarklet"}
           </button>
         </div>
-      </section>
-
-      <section className="card">
-        <h3>Every morning</h3>
-        <div className="row-pair">
-          <label className="check">
-            <input type="checkbox" checked={!!schedule?.at} onChange={(e) => setScheduleOn(e.target.checked)} />
-            Build the paper every day at
-          </label>
-          <input
-            type="time"
-            value={time}
-            onChange={(e) => {
-              setTime(e.target.value);
-              if (schedule?.at) setScheduleOn(true, e.target.value);
-            }}
-          />
-        </div>
-        <p className="muted small">
-          {schedule?.at
-            ? `On. Deckle also keeps watching for your Kindle and sends the paper the moment you plug it in. A Mac asleep at ${schedule.at} builds it when it wakes.`
-            : "Off. Turn it on and the paper waits for you every morning."}
-        </p>
       </section>
 
       <section className="card email-card">
@@ -538,45 +555,49 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           )}
         </div>
 
-        <div className="label">Sections, in order</div>
-        <ul className="sections">
-          {enabled.map((s, i) => (
-            <li key={s}>
-              <label className="check">
-                <input type="checkbox" checked onChange={() => toggle(s, false)} />
-                {SECTION_LABEL[s]}
-              </label>
-              <span>
-                <button className="icon small" aria-label="Move up" disabled={i === 0} onClick={() => move(s, -1)}>
-                  <Icon name="arrow-up" size={14} />
-                </button>
-                <button className="icon small" aria-label="Move down" disabled={i === enabled.length - 1} onClick={() => move(s, 1)}>
-                  <Icon name="arrow-down" size={14} />
-                </button>
-              </span>
-            </li>
-          ))}
-          {disabled.map((s) => (
-            <li key={s} className="off">
-              <label className="check">
-                <input type="checkbox" checked={false} onChange={() => toggle(s, true)} />
-                {SECTION_LABEL[s]}
-              </label>
-            </li>
-          ))}
-        </ul>
-
         <label>
           <span className="label">Local news search</span>
           <input value={draft.local.google_news} placeholder="e.g. Moore County NC" onChange={(e) => edit((c) => (c.local.google_news = e.target.value))} />
         </label>
+
+        <div className="label">Other places</div>
+        <p className="muted small">Local news for a relative's town or a trip, each its own section after Local. Weather stays on your place.</p>
+        <div className="feeds">
+          {(draft.local.places ?? []).map((p, i) => (
+            <div key={i} className="feed">
+              <input value={p.name} placeholder="Name (e.g. Asheville, NC)" onChange={(e) => edit((c) => (c.local.places![i].name = e.target.value))} />
+              <input value={p.google_news} placeholder="Google News search" onChange={(e) => edit((c) => (c.local.places![i].google_news = e.target.value))} />
+              <button className="icon small" aria-label="Remove place" onClick={() => edit((c) => c.local.places!.splice(i, 1))}>
+                <Icon name="x" size={14} />
+              </button>
+            </div>
+          ))}
+          <button className="ghost" onClick={() => edit((c) => (c.local.places = [...(c.local.places ?? []), { name: "", google_news: "", feeds: [] }]))}>
+            Add a place
+          </button>
+        </div>
+
+        <div className="label">Topics</div>
+        <p className="muted small">Each ticked topic becomes its own section, from Google News.</p>
+        <div className="topics">
+          {TOPICS.map((t) => (
+            <label key={t.slug} className="check">
+              <input type="checkbox" checked={topicOn(draft.feeds, t.slug)} onChange={() => edit((c) => (c.feeds = toggleTopic(c.feeds, t.slug)))} />
+              {t.title}
+            </label>
+          ))}
+        </div>
 
         <div className="label">Your feeds</div>
         <div className="feeds">
           {draft.feeds.map((f: FeedConfig, i: number) => (
             <div key={i} className="feed">
               <input value={f.name} placeholder="Section name" onChange={(e) => edit((c) => (c.feeds[i].name = e.target.value))} />
-              <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
+              {f.topic ? (
+                <span className="muted small">topic: {topicTitle(f.topic)}</span>
+              ) : (
+                <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
+              )}
               <button className="icon small" aria-label="Remove feed" onClick={() => edit((c) => c.feeds.splice(i, 1))}>
                 <Icon name="x" size={14} />
               </button>

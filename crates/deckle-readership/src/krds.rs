@@ -13,7 +13,7 @@ const SIGNATURE: [u8; 8] = [0, 0, 0, 0, 0, 0x1a, 0xb1, 0x26];
 const MAX_DEPTH: usize = 32;
 
 /// Where the reader is in a book, as the Kindle recorded it.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Positions {
     /// `fpr`: the furthest position reached (a contents jump counts).
     pub furthest: Option<i64>,
@@ -21,6 +21,12 @@ pub struct Positions {
     pub last: Option<i64>,
     /// When `last` was recorded, UTC as `YYYY-MM-DDTHH:MM:SSZ`.
     pub last_read: Option<String>,
+    /// `book.info.store`: words the Kindle counts as read.
+    pub words_read: Option<i64>,
+    /// `book.info.store`: the Kindle's own fraction through the book (0.0 to 1.0).
+    pub kindle_fraction: Option<f64>,
+    /// `timer.average.calculator`: the Kindle's reading-pace samples, words per minute.
+    pub wpm: Vec<f64>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -38,6 +44,7 @@ pub enum KrdsError {
 #[derive(Debug)]
 enum Value {
     Int(i64),
+    Double(f64),
     Str(String),
     Object(String, Vec<Value>),
     Other,
@@ -92,10 +99,7 @@ impl Reader<'_> {
             1 => Value::Int(i32::from_be_bytes(self.take(4)?.try_into().unwrap()) as i64),
             2 => Value::Int(i64::from_be_bytes(self.take(8)?.try_into().unwrap())),
             3 => Value::Str(self.utf()?),
-            4 => {
-                self.take(8)?;
-                Value::Other
-            }
+            4 => Value::Double(f64::from_be_bytes(self.take(8)?.try_into().unwrap())),
             5 => Value::Int(i16::from_be_bytes(self.take(2)?.try_into().unwrap()) as i64),
             6 => {
                 self.take(4)?;
@@ -129,6 +133,17 @@ fn utc_time(ms: i64) -> Option<String> {
     Some(t.format("%Y-%m-%dT%H:%M:%SZ").to_string())
 }
 
+/// Every double in a `timer.average.calculator`, wherever it is nested.
+fn collect_wpm(name: &str, values: &[Value], out: &mut Vec<f64>) {
+    for v in values {
+        match v {
+            Value::Double(d) if name == "timer.average.calculator" && d.is_finite() => out.push(*d),
+            Value::Object(inner, vs) => collect_wpm(inner, vs, out),
+            _ => {}
+        }
+    }
+}
+
 /// The reading positions in a `.yjf`.
 pub fn parse_yjf(bytes: &[u8]) -> Result<Positions, KrdsError> {
     let mut r = Reader { b: bytes, at: 0 };
@@ -155,7 +170,13 @@ pub fn parse_yjf(bytes: &[u8]) -> Result<Positions, KrdsError> {
                     p.last_read = utc_time(*ms);
                 }
             }
-            _ => {}
+            ("book.info.store", [Value::Int(words), Value::Double(fraction), ..]) => {
+                p.words_read = Some(*words);
+                // NaN and infinity can't be stored as JSON numbers.
+                p.kindle_fraction = Some(*fraction).filter(|f| f.is_finite());
+            }
+            // The pace samples sit inside `timer.model` in real files.
+            (_, values) => collect_wpm(&name, values, &mut p.wpm),
         }
     }
     Ok(p)

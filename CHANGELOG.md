@@ -1,7 +1,44 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — a real front page, topic sections, From Your Shelf
 
+- A site's default author picture (the same grey avatar in several stories, or any small square
+  image) is no longer printed inside stories.
+- **Two Kindles of one model no longer share a snapshot.** A USB-storage Kindle is now told apart
+  by its USB serial number (macOS, Windows and Linux), so a second Paperwhite keeps its own shelf
+  snapshot and per-Kindle settings. Settings written before keep working. `[sync.devices."<id>"]
+  name = "..."` names a Kindle on the From Your Shelf page, which no longer prints the firmware
+  line as the Kindle's name.
+- **A real front page, and topic sections**: the Daily opens on a front page (the lead, a
+  two-column table of headlines, "Inside today"), each section starts with "In this section" and
+  each story links back to its section and the front page. Tick Google News topics (World,
+  Sports, Science and more) in the Daily tab, or give a `[[feeds]]` entry `topic = "SPORTS"`,
+  several `urls` and `full_text = "lead"` (top story whole, the rest briefs). A story already
+  printed in an earlier news section is dropped from later ones. Tomorrow's paper sketch shows it
+  all.
+- **From Your Shelf**: a page in the Daily drawn from your own Kindle. **On your nightstand**
+  lists the books you're in the middle of, how far in and how long since you opened them, with a
+  nudge back into the newest one; it works on every Kindle, the Scribe included. A past highlight
+  (with your note) and **words you looked up this week** appear on Kindles that share them. It's
+  as of the Kindle's last plug-in, stays on this Mac, and **Forget what my Kindles shared** wipes
+  it. In the starter config; add `"shelf"` to `sections` for an existing paper. `deckle digest
+  shelf` prints it. Emailed papers include the page, so it passes through Amazon.
+- **Local news for more places** (#102): add a relative's town or a vacation spot under **The
+  paper → Other places** (or `[[local.places]]` in `digest.toml`), and each gets its own local
+  news section after yours. Weather stays on your place.
+- **Tomorrow's paper, so far**: the Daily tab now opens on the next edition. A press bar with
+  the countdown and **Stop the presses** (skip one morning; `deckle digest stop`), a live sketch
+  of the front page that fills in as you save articles and your feeds post (with a line saying
+  why the lead leads), a **page plan** you drag to reorder with story budgets and "about N Kindle
+  pages", and **This week**'s reads. `deckle digest next` prints the same. The cover's lead now
+  follows one rule everywhere: local news first, else the first section in your plan with a
+  story, so a saved article can lead the paper.
+- A **puzzle page** in the Daily: a 5×5 mini crossword whose theme answers are yesterday's
+  headlines with the word blanked, a word ladder, and yesterday's answers. Answer a clue as a
+  Kindle note and the next paper says "You solved N of M" (Kindles that keep `My Clippings.txt`).
+  Each day's puzzle is kept, so rebuilds print the same one. In the starter config; add
+  `"puzzle"` to `sections` (or use the Daily tab) for an existing paper. `deckle digest puzzle`
+  prints it; `deckle digest push --to <folder>` pushes to a folder standing in for a Kindle.
 - The Daily's weather section is now a **Weather & Almanac** page:
   - a five-day strip with pictures and short words;
   - sunrise, sunset and daylight, computed on your Mac;
@@ -13,7 +50,7 @@
   `digest.toml`). If the forecast is down, the rest of the page still prints.
 - No more Linux builds (`.deb`, `.AppImage`). Kindle Previewer doesn't run on Linux, so the
   main thing Deckle does, converting a book, never worked there. Existing Linux installs keep
-  working but get no further updates. The CLI still builds on Linux from source.
+  working but get no further updates. Linux is no longer tested in CI and is unsupported.
 - Highlights and notes out as Markdown: one file per book in a folder you choose, sideloaded
   books included. From the Kindle tab (**Write**), with `deckle highlights export`, or on every
   plug-in with the morning schedule (`[sync] clippings = true`, or **Settings → Kindles**). Later

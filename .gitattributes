@@ -2,3 +2,6 @@ fixtures/txt/* -text
 fixtures/clippings/* -text
 crates/deckle-digest/tests/fixtures/weather/* -text
 crates/deckle-digest/tests/fixtures/ics/* -text
+crates/deckle-digest/tests/fixtures/next/* -text
+crates/deckle-digest/tests/fixtures/puzzle/* -text
+crates/deckle-digest/tests/fixtures/shelf/* -text

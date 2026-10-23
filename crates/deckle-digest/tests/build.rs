@@ -45,6 +45,19 @@ fn config() -> Config {
     // Nor the owner's frost cache; the archive is offline here, so nothing is written.
     c.almanac_path =
         Some(std::env::temp_dir().join(format!("deckle-test-almanac-{}.json", std::process::id())));
+    // Nor the owner's puzzles: a fresh store per call, so parallel tests don't share one.
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    c.puzzle_path = Some(std::env::temp_dir().join(format!(
+        "deckle-test-puzzles-{}-{n}.json",
+        std::process::id()
+    )));
+    // Nor the owner's Kindle snapshots; no Kindle is plugged in here, so the page stays out.
+    c.shelf_path = Some(
+        std::env::temp_dir().join(format!("deckle-test-no-shelf-{}.json", std::process::id())),
+    );
+    c.sections
+        .retain(|k| *k != deckle_digest::SectionKind::Shelf);
     c.horoscope.signs = vec!["leo".into(), "virgo".into()];
     // The fixtures were saved on 2026-10-20; keep a week of stories.
     c.max_age_hours = 24 * 7;
@@ -80,6 +93,7 @@ fn every_section_fills_from_fixtures() {
             "Hacker News",
             "Lottery",
             "Horoscope",
+            "Puzzle",
             "On This Day"
         ]
     );
@@ -272,6 +286,7 @@ fn gathered_sections_carry_their_keys() {
             "feeds:Hacker News",
             "lottery",
             "horoscope",
+            "puzzle",
             "onthisday"
         ]
     );
@@ -333,5 +348,467 @@ fn icons_ship_in_the_epub() {
             opf.contains(&format!("href=\"{src}\"")),
             "{src} missing from the manifest"
         );
+    }
+}
+
+#[test]
+fn gather_records_headlines_for_tomorrows_puzzle() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    c.puzzle_path = Some(dir.path().join("puzzles.json"));
+    let g = gather(&c, date(), now(), &fake);
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(puzzle.unavailable.is_none());
+    let store = deckle_digest::puzzle::store::Store::load(c.puzzle_path.as_ref().unwrap());
+    let day = &store.days[&date()];
+    assert!(!day.headlines.is_empty());
+    assert!(
+        day.headlines
+            .iter()
+            .all(|t| t.section == "Local" || t.section == "Hacker News")
+    );
+    // a rebuild prints the same puzzle
+    let again = gather(&c, date(), now(), &fake);
+    let p2 = again
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert_eq!(puzzle.articles[0].body, p2.articles[0].body);
+}
+
+#[test]
+fn puzzle_store_write_error_is_a_note() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    // a directory where the file should be: the save fails, the paper doesn't
+    let path = dir.path().join("puzzles.json");
+    std::fs::create_dir(&path).unwrap();
+    c.puzzle_path = Some(path);
+    let g = gather(&c, date(), now(), &fake);
+    assert!(
+        g.notes.iter().any(|n| n.contains("puzzle")),
+        "{:?}",
+        g.notes
+    );
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(!puzzle.articles.is_empty());
+}
+
+#[test]
+fn building_another_date_leaves_the_puzzle_store_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = config();
+    c.puzzle_path = Some(dir.path().join("puzzles.json"));
+    gather(&c, date(), now(), &fake);
+    let before = std::fs::read(c.puzzle_path.as_ref().unwrap()).unwrap();
+    // a preview of next year's paper: printed, but neither kept nor pruning today's
+    let later = date() + chrono::Days::new(400);
+    let g = gather(&c, later, now(), &fake);
+    let puzzle = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "puzzle")
+        .unwrap();
+    assert!(!puzzle.articles.is_empty());
+    assert_eq!(
+        std::fs::read(c.puzzle_path.as_ref().unwrap()).unwrap(),
+        before
+    );
+}
+
+// --- local news for more places (#102) ---
+
+use deckle_digest::config::PlaceNews;
+
+fn place(name: &str, search: &str) -> PlaceNews {
+    PlaceNews {
+        name: name.into(),
+        google_news: search.into(),
+        feeds: Vec::new(),
+        max_items: None,
+    }
+}
+
+#[test]
+fn places_print_after_local_each_from_its_own_search() {
+    let mut c = config();
+    c.local.places = vec![
+        place("Asheville, NC", "Asheville NC"),
+        place("Boone, NC", ""),
+    ];
+    c.local.places[1].feeds = vec!["https://boone.example/rss".into()]; // offline in the fake
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        fake(url)
+    };
+    let g = gather(&c, date(), now(), &net);
+    let keys: Vec<&str> = g.edition.sections.iter().map(|s| s.key.as_str()).collect();
+    let at = keys.iter().position(|k| *k == "local").unwrap();
+    assert_eq!(
+        &keys[at..at + 3],
+        ["local", "local:Asheville, NC", "local:Boone, NC"]
+    );
+    let asheville = &g.edition.sections[at + 1];
+    assert_eq!(asheville.title, "Asheville, NC");
+    assert_eq!(
+        asheville.kicker.as_deref(),
+        Some("News from around Asheville, NC")
+    );
+    assert!(!asheville.articles.is_empty());
+    // its own search, and only Local and Asheville search Google News
+    let asked = asked.lock().unwrap();
+    assert!(
+        asked.iter().any(|u| u.contains("q=Asheville+NC")),
+        "{asked:?}"
+    );
+    let searches = asked
+        .iter()
+        .filter(|u| u.starts_with("https://news.google.com/rss/search"))
+        .count();
+    assert_eq!(searches, 2, "{asked:?}");
+    // Boone's feed is down: its section says so, and nothing else is touched
+    let boone = &g.edition.sections[at + 2];
+    assert!(
+        boone
+            .unavailable
+            .as_deref()
+            .unwrap()
+            .contains("boone.example"),
+        "{boone:?}"
+    );
+    assert!(g.edition.sections[at].unavailable.is_none());
+    // all three are news, but only Local is the local tier
+    assert!(g.news.contains(&(at + 1)) && g.news.contains(&(at + 2)));
+}
+
+#[test]
+fn a_place_with_nothing_to_read_says_so() {
+    let mut c = config();
+    c.local.places = vec![place("Nowhere", "")];
+    let g = gather(&c, date(), now(), &fake);
+    let s = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "local:Nowhere")
+        .unwrap();
+    assert!(s.unavailable.as_deref().unwrap().contains("for Nowhere"));
+}
+
+#[test]
+fn places_follow_local_off() {
+    let mut c = config();
+    c.sections
+        .retain(|k| *k != deckle_digest::SectionKind::Local);
+    c.local.places = vec![place("Asheville, NC", "Asheville NC")];
+    let g = gather(&c, date(), now(), &fake);
+    assert!(
+        g.edition
+            .sections
+            .iter()
+            .all(|s| !s.key.starts_with("local"))
+    );
+}
+
+#[test]
+fn place_budget_defaults_to_locals() {
+    let mut c = config();
+    c.local.max_items = 2;
+    c.local.places = vec![place("A", "Asheville NC"), place("B", "Boone NC")];
+    c.local.places[1].max_items = Some(1);
+    c.full_text = false;
+    let g = gather(&c, date(), now(), &fake);
+    let n = |k: &str| {
+        g.edition
+            .sections
+            .iter()
+            .find(|s| s.key == k)
+            .unwrap()
+            .articles
+            .len()
+    };
+    assert_eq!((n("local:A"), n("local:B")), (2, 1));
+}
+
+#[test]
+fn places_round_trip_and_stay_out_of_an_untouched_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut c = Config::parse(deckle_digest::config::STARTER).unwrap();
+    deckle_digest::config::save(&path, &c).unwrap();
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("places ="));
+    c.local.places = vec![place("Asheville, NC", "Asheville NC")];
+    deckle_digest::config::save(&path, &c).unwrap();
+    let back = Config::load(&path).unwrap();
+    assert_eq!(back.local.places, c.local.places);
+    // an old file without places still reads
+    assert!(
+        Config::parse("[local]\ngoogle_news = \"x\"\n")
+            .unwrap()
+            .local
+            .places
+            .is_empty()
+    );
+}
+
+// ---- The front page ----
+
+mod front {
+    use deckle_digest::chrono::NaiveDate;
+    use deckle_digest::front::front_plan;
+    use deckle_digest::{Article, Edition, Gathered, Section};
+
+    fn paper(sections: &[(&str, &[&str])]) -> Gathered {
+        let sections: Vec<Section> = sections
+            .iter()
+            .map(|(key, titles)| Section {
+                key: (*key).into(),
+                title: (*key).into(),
+                articles: titles
+                    .iter()
+                    .map(|t| Article {
+                        title: (*t).into(),
+                        meta: Some("meta".into()),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .collect();
+        Gathered {
+            news: (0..sections.len()).collect(),
+            reading: None,
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+            edition: Edition {
+                paper: "The Deckle Daily".into(),
+                date: NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+                place: String::new(),
+                weather_line: None,
+                sections,
+                assets: Vec::new(),
+            },
+        }
+    }
+
+    fn front_xhtml(g: &Gathered) -> String {
+        let files = deckle_digest::render::render(g, Vec::new());
+        let (_, bytes) = files
+            .iter()
+            .find(|(p, _)| p == "OEBPS/front.xhtml")
+            .unwrap();
+        String::from_utf8(bytes.clone()).unwrap()
+    }
+
+    fn named(n: usize, prefix: &str) -> Vec<String> {
+        (0..n).map(|i| format!("{prefix}{i}")).collect()
+    }
+
+    fn with(local: usize, feed: usize) -> Gathered {
+        let (l, f) = (named(local, "L"), named(feed, "F"));
+        let l: Vec<&str> = l.iter().map(String::as_str).collect();
+        let f: Vec<&str> = f.iter().map(String::as_str).collect();
+        paper(&[("local", &l), ("feeds:A", &f)])
+    }
+
+    #[test]
+    fn front_page_has_lead_table_and_inside_index() {
+        let g = with(4, 4);
+        let x = front_xhtml(&g);
+        roxmltree::Document::parse(&x).unwrap();
+        let plan = front_plan(&g);
+        let lead = x.find("class=\"lead\"").unwrap();
+        assert!(x.find("L0").unwrap() > lead - 40);
+        assert!(lead < x.find("table class=\"cols\"").unwrap());
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let tiles: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("td"))
+            .flat_map(|td| td.children().filter(|c| c.has_tag_name("a")))
+            .collect();
+        assert_eq!(tiles.len(), plan.tiles.len());
+        let mut ids: Vec<_> = doc
+            .descendants()
+            .filter_map(|n| n.attribute("id"))
+            .collect();
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "ids are unique");
+        assert!(x.contains("Inside today"));
+        assert!(!x.contains("Top stories"));
+    }
+
+    #[test]
+    fn tile_meta_leaves_out_the_section_name() {
+        let g = with(4, 4);
+        let x = front_xhtml(&g);
+        let plan = front_plan(&g);
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let metas: Vec<String> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("td"))
+            .flat_map(|td| {
+                td.descendants()
+                    .filter(|c| c.attribute("class") == Some("meta"))
+            })
+            .filter_map(|m| m.text().map(String::from))
+            .collect();
+        assert_eq!(metas.len(), plan.tiles.len());
+        assert!(metas.iter().all(|m| m == "meta"), "{metas:?}");
+        // the lead keeps the section name
+        assert!(x.contains("local · meta"));
+    }
+
+    #[test]
+    fn inside_today_tells_empty_from_unavailable() {
+        let mut g = paper(&[("local", &["One"]), ("feeds:A", &[]), ("feeds:B", &[])]);
+        g.edition.sections[1].unavailable = Some("No new stories today.".into());
+        g.edition.sections[2].unavailable = Some("Unavailable today (offline).".into());
+        let x = front_xhtml(&g);
+        assert!(x.contains("no new stories"), "{x}");
+        assert_eq!(x.matches(">unavailable<").count(), 1);
+    }
+
+    #[test]
+    fn odd_tiles_pad_the_last_row() {
+        // lead + 3 tiles
+        let x = front_xhtml(&with(2, 2));
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let tds: Vec<_> = doc.descendants().filter(|n| n.has_tag_name("td")).collect();
+        assert_eq!(tds.len(), 4);
+        assert!(tds[3].children().next().is_none());
+    }
+
+    #[test]
+    fn no_tiles_no_table() {
+        let x = front_xhtml(&with(1, 0));
+        assert!(x.contains("class=\"lead\""));
+        assert!(!x.contains("class=\"cols\""));
+    }
+
+    #[test]
+    fn headlines_are_escaped() {
+        let g = paper(&[("local", &["A & B <c>", "x"])]);
+        let x = front_xhtml(&g);
+        assert!(x.contains("A &amp; B &lt;c&gt;"));
+        roxmltree::Document::parse(&x).unwrap();
+    }
+
+    fn section_xhtml(g: &Gathered, n: usize) -> String {
+        let files = deckle_digest::render::render(g, Vec::new());
+        let want = format!("OEBPS/s{n}.xhtml");
+        let (_, bytes) = files.iter().find(|(p, _)| *p == want).unwrap();
+        String::from_utf8(bytes.clone()).unwrap()
+    }
+
+    fn hrefs(x: &str, class: &str) -> Vec<String> {
+        let doc = roxmltree::Document::parse(x).unwrap();
+        doc.descendants()
+            .filter(|n| n.attribute("class") == Some(class))
+            .flat_map(|n| n.descendants().filter(|c| c.has_tag_name("a")))
+            .filter_map(|a| a.attribute("href").map(String::from))
+            .collect()
+    }
+
+    #[test]
+    fn section_with_two_stories_has_headline_list() {
+        let g = paper(&[("local", &["One", "Two"])]);
+        let x = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("id=\"top\""));
+        assert!(x.contains("In this section"));
+        assert_eq!(hrefs(&x, "toc"), vec!["#a1", "#a2"]);
+    }
+
+    #[test]
+    fn one_story_section_has_no_list() {
+        let x = section_xhtml(&paper(&[("local", &["Only"])]), 1);
+        assert!(!x.contains("class=\"toc\""));
+        assert!(!x.contains("In this section"));
+        assert!(x.contains("class=\"back\""));
+    }
+
+    #[test]
+    fn back_links_target_the_tile_when_on_the_front_page() {
+        let g = with(4, 4);
+        let plan = front_plan(&g);
+        let x = section_xhtml(&g, 1);
+        let back = hrefs(&x, "back");
+        assert_eq!(back.len(), 8);
+        for j in 0..4 {
+            let want = if plan.contains(0, j) {
+                format!("front.xhtml#t0-{j}")
+            } else {
+                "front.xhtml".to_string()
+            };
+            assert_eq!(back[j * 2], "#top");
+            assert_eq!(back[j * 2 + 1], want);
+        }
+        assert!(back.iter().any(|h| h.starts_with("front.xhtml#t0-")));
+        assert!(x.contains("\u{21a9} local"));
+        assert!(x.contains("\u{21a9} Front page"));
+    }
+
+    #[test]
+    fn back_links_fall_back_to_front_xhtml() {
+        let g = with(1, 12);
+        let plan = front_plan(&g);
+        let j = (0..12)
+            .find(|&j| !plan.contains(1, j))
+            .expect("one is off the front");
+        let x = section_xhtml(&g, 2);
+        let back = hrefs(&x, "back");
+        assert_eq!(back[j * 2 + 1], "front.xhtml");
+    }
+
+    #[test]
+    fn unavailable_section_has_no_back_links() {
+        let mut g = paper(&[("local", &["One"]), ("feeds:A", &[])]);
+        g.edition.sections[1].unavailable = Some("Down".into());
+        let x = section_xhtml(&g, 2);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("Down"));
+        assert!(!x.contains("class=\"back\""));
+        assert!(!x.contains("class=\"toc\""));
+    }
+
+    #[test]
+    fn duplicate_titles_keep_anchors_unique() {
+        let g = paper(&[("local", &["Same", "Same", "Same"])]);
+        let x = section_xhtml(&g, 1);
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let mut ids: Vec<_> = doc
+            .descendants()
+            .filter_map(|n| n.attribute("id"))
+            .collect();
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n);
+        assert_eq!(hrefs(&x, "toc"), vec!["#a1", "#a2", "#a3"]);
+    }
+
+    #[test]
+    fn titles_are_escaped_in_the_list() {
+        let g = paper(&[("local", &["A & B <c>", "x"])]);
+        let x = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("A &amp; B &lt;c&gt;"));
     }
 }

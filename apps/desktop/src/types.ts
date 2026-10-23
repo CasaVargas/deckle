@@ -138,11 +138,14 @@ export const STAGE_LABEL: Record<string, string> = {
 
 // ---- The Daily tab (Daily design §5c) ----
 
-export type SectionKind = "reading" | "weather" | "local" | "feeds" | "lottery" | "horoscope" | "onthisday";
+export type SectionKind = "reading" | "weather" | "local" | "feeds" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
 
 export interface FeedConfig {
   name: string;
   url: string;
+  urls?: string[];
+  topic?: string;
+  full_text?: boolean | "lead";
   max_items: number;
 }
 
@@ -159,7 +162,7 @@ export interface DailyConfig {
   photos: boolean;
   max_photos: number;
   sections: SectionKind[];
-  local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number };
+  local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number; places?: PlaceNews[] };
   feeds: FeedConfig[];
   lottery: { games: string[] };
   horoscope: { signs: string[] };
@@ -168,6 +171,15 @@ export interface DailyConfig {
   email?: EmailConfig;
   /** `[day]`: Your Day on the weather page. Absent while untouched. */
   day?: DayConfig;
+}
+
+/** `[[local.places]]`: another place's local news, its own section after Local (#102). */
+export interface PlaceNews {
+  name: string;
+  google_news: string;
+  feeds: string[];
+  /** Stories; `[local] max_items` when absent. */
+  max_items?: number;
 }
 
 /** Calendars for Your Day (almanac design §5). Addresses are secrets: show `DayPreview.labels`. */
@@ -261,12 +273,14 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   weather: "Weather & almanac",
   local: "Local news",
   feeds: "Your feeds",
+  shelf: "From Your Shelf",
   lottery: "Lottery",
   horoscope: "Horoscope",
+  puzzle: "Puzzle",
   onthisday: "On This Day",
 };
 
-export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "lottery", "horoscope", "onthisday"];
+export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
 
 export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
 
@@ -361,4 +375,78 @@ export interface ReadershipView {
   /** `[sync] readership` in digest.toml. */
   enabled: boolean;
   report: ReadershipReport;
+}
+
+/** What the last Kindle shared with From Your Shelf (shelf design §7). */
+export interface ShelfStatus {
+  /** The Kindle plugged in last; null before any. */
+  kindle: string | null;
+  /** When, as an ISO instant. */
+  seen: string | null;
+  inProgress: number;
+  highlightsShared: boolean;
+  wordsShared: boolean;
+  /** Emailed papers pass through Amazon. */
+  emailOn: boolean;
+  /** `[sync] shelf` in digest.toml. */
+  enabled: boolean;
+}
+
+/** The press (tomorrow's paper design §4): `next` and `since` are ISO instants with offsets. */
+export interface Press {
+  at: string | null;
+  next: string | null;
+  /** YYYY-MM-DD of the paper the preview shows. */
+  edition: string;
+  stopped: string | null;
+  since: string;
+}
+
+export interface Tile {
+  key: string;
+  kicker: string;
+  title: string | null;
+  reason: string | null;
+  dashed: boolean;
+}
+
+export interface PagePlanRow {
+  key: string;
+  kind: SectionKind;
+  /** The `[[feeds]]` index of a feed row. */
+  feed: number | null;
+  /** The `[[local.places]]` index of another place's row. */
+  place: number | null;
+  name: string;
+  detail: string;
+  budget: string;
+  /** The editable budget (`max_items`); null for fixed sections. */
+  items: number | null;
+}
+
+export type WeekState =
+  | { state: "read"; percent: number }
+  | { state: "notOpened" }
+  | { state: "sent" }
+  | { state: "noPaper" };
+
+export interface WeekDay {
+  date: string;
+  state: WeekState;
+}
+
+export interface NextPaper {
+  press: Press;
+  paper: string;
+  place: string;
+  date: string;
+  number: number;
+  weather: boolean;
+  lead: Tile | null;
+  tiles: Tile[];
+  checked: string | null;
+  plan: PagePlanRow[];
+  off: PagePlanRow[];
+  pages: number;
+  week: WeekDay[];
 }

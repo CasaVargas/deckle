@@ -300,6 +300,7 @@ fn auto_add_records_a_send_only_with_a_library_and_a_delivery() {
         model_hint: "Kindle Paperwhite".into(),
         thumbnails_writable: true,
         firmware: None,
+        serial: None,
     });
     let report = RunReport {
         delivered: Some(
@@ -308,6 +309,7 @@ fn auto_add_records_a_send_only_with_a_library_and_a_delivery() {
         ),
         cde_type: Some("EBOK".into()),
         asin: Some("B0ABCDDECK".into()),
+        end_position: Some(1234),
         ..Default::default()
     };
     // No library: nothing happens.
@@ -326,6 +328,7 @@ fn auto_add_records_a_send_only_with_a_library_and_a_delivery() {
     assert_eq!(send.device_name, "Kindle Paperwhite");
     assert_eq!(send.file, "Testwright, Jane - Deckle Mini Fixture.kfx");
     assert_eq!(send.cde.as_deref(), Some("EBOK"));
+    assert_eq!(send.end, Some(1234), "send_record_carries_end");
     let lib = Library::new(&root);
     assert_eq!(
         lib.find_send("ms:Kindle Paperwhite", &send.file)
@@ -505,4 +508,12 @@ fn the_shelf_says_what_can_be_updated_and_what_is_duplicated() {
             .updates
             .is_empty()
     );
+}
+
+#[test]
+fn a_send_without_end_serialises_without_the_key() {
+    let old: deckle_library::sidecar::SendRecord =
+        serde_json::from_str(r#"{"device":"ms:K","file":"a.kfx"}"#).unwrap();
+    assert_eq!(old.end, None);
+    assert!(!serde_json::to_string(&old).unwrap().contains("\"end\""));
 }

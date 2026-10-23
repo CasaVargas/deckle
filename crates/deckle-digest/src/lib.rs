@@ -12,6 +12,7 @@ pub mod cover;
 pub mod day;
 pub mod epub;
 pub mod fetch;
+pub mod front;
 pub mod frost;
 pub mod geocode;
 pub mod horoscope;
@@ -19,11 +20,15 @@ pub mod inbox;
 pub mod longread;
 pub mod mail;
 pub mod moon;
+pub mod next;
+pub mod press;
+pub mod puzzle;
 pub mod reading;
 pub mod render;
 pub mod schedule;
 pub mod seasons;
 pub mod secret;
+pub mod shelf;
 pub mod showers;
 pub mod sources;
 pub mod sun;
@@ -65,6 +70,31 @@ pub struct Article {
     pub photos: Vec<Vec<u8>>,
 }
 
+impl Article {
+    /// Removes the photos `drop(n, jpeg, is_lead)` picks: their `<img>`, any figure left empty,
+    /// and renumbers the tokens of the photos after them.
+    fn drop_photos_where(&mut self, drop: impl Fn(usize, &[u8], bool) -> bool) {
+        use sources::feeds::photo_token;
+        let mut n = 0;
+        while n < self.photos.len() {
+            let lead = self.body.contains(&format!(
+                "<div class=\"figure lead\"><img src=\"{}\"",
+                photo_token(n)
+            ));
+            if !drop(n, &self.photos[n], lead) {
+                n += 1;
+                continue;
+            }
+            self.photos.remove(n);
+            let img = format!("<img src=\"{}\" alt=\"\"/>", photo_token(n));
+            self.body = article::strip_empty_figures(&self.body.replace(&img, ""));
+            for m in n + 1..=self.photos.len() {
+                self.body = self.body.replace(&photo_token(m), &photo_token(m - 1));
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Section {
     /// What the section is across editions: `config::section_key` (readership design §4).
@@ -98,6 +128,32 @@ impl Edition {
     /// The edition number: the day of the year.
     pub fn number(&self) -> u32 {
         self.date.ordinal()
+    }
+
+    /// Drops a site's template picture (a default author avatar, a logo) from the stories: a
+    /// photo whose bytes show up in two or more articles. A story's lead photo stays, and so
+    /// does a photo repeated only within one story.
+    pub fn drop_template_photos(&mut self) {
+        use std::collections::{HashMap, HashSet};
+        let mut stories: HashMap<&[u8], HashSet<(usize, usize)>> = HashMap::new();
+        for (i, s) in self.sections.iter().enumerate() {
+            for (j, a) in s.articles.iter().enumerate() {
+                for jpeg in &a.photos {
+                    stories.entry(jpeg).or_default().insert((i, j));
+                }
+            }
+        }
+        let template: HashSet<Vec<u8>> = stories
+            .into_iter()
+            .filter(|(_, at)| at.len() > 1)
+            .map(|(jpeg, _)| jpeg.to_vec())
+            .collect();
+        if template.is_empty() {
+            return;
+        }
+        for a in self.sections.iter_mut().flat_map(|s| &mut s.articles) {
+            a.drop_photos_where(|_, jpeg, lead| !lead && template.contains(jpeg));
+        }
     }
 
     /// Lead headlines: the first article of each news section, then the seconds, and so on.
@@ -156,9 +212,28 @@ pub struct Gathered {
     pub notes: Vec<String>,
 }
 
+/// What a caller knows that the config doesn't.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct GatherOptions {
+    /// The Kindle's own progress fraction may print as "about N%" on From Your Shelf (set from
+    /// `deckle_shelf::KINDLE_FRACTION_OK`, which this crate can't see).
+    pub shelf_fraction_ok: bool,
+}
+
 /// Fetches every configured source through `get`. Never fails: a source error becomes the
 /// section's `unavailable` note.
 pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) -> Gathered {
+    gather_with(cfg, date, now, net, &GatherOptions::default())
+}
+
+/// [`gather`] with the options a caller supplies.
+pub fn gather_with(
+    cfg: &Config,
+    date: NaiveDate,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    opts: &GatherOptions,
+) -> Gathered {
     let mut edition = Edition {
         paper: cfg.title.clone(),
         date,
@@ -168,10 +243,14 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
         assets: Vec::new(),
     };
     let mut news = Vec::new();
+    // Titles already printed by Local, places and earlier feed sections (Your Reading is neither).
+    let mut printed = std::collections::HashSet::<String>::new();
     let mut g_reading = None;
     let mut long_reads = Vec::new();
     let mut reading_outcomes = Vec::new();
     let mut notes = Vec::new();
+    // Loaded when the paper has a puzzle; saved with today's headlines once all is gathered.
+    let mut puzzles: Option<puzzle::store::Store> = None;
     let queue = reading::ReadingQueue::new(
         cfg.reading
             .queue_path
@@ -217,30 +296,112 @@ pub fn gather(cfg: &Config, date: NaiveDate, now: DateTime<Utc>, net: &dyn Net) 
             }
             SectionKind::Local => {
                 news.push(edition.sections.len());
-                edition
-                    .sections
-                    .push(sources::feeds::local_section(cfg, now, net));
+                let local = sources::feeds::local_section(cfg, now, net);
+                printed.extend(
+                    local
+                        .articles
+                        .iter()
+                        .map(|a| sources::feeds::title_key(&a.title)),
+                );
+                edition.sections.push(local);
+                // then other places' local news, each its own section (#102)
+                for p in &cfg.local.places {
+                    news.push(edition.sections.len());
+                    let place = sources::feeds::place_section(p, cfg, now, net);
+                    printed.extend(
+                        place
+                            .articles
+                            .iter()
+                            .map(|a| sources::feeds::title_key(&a.title)),
+                    );
+                    edition.sections.push(place);
+                }
             }
             SectionKind::Feeds => {
                 for feed in &cfg.feeds {
                     news.push(edition.sections.len());
-                    edition
-                        .sections
-                        .push(sources::feeds::feed_section(feed, cfg, now, net));
+                    edition.sections.push(sources::feeds::feed_section(
+                        feed,
+                        cfg,
+                        now,
+                        net,
+                        &mut printed,
+                    ));
                 }
             }
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
             SectionKind::Horoscope => edition.sections.push(horoscope::section(cfg, date)),
+            SectionKind::Puzzle => {
+                let store =
+                    puzzles.get_or_insert_with(|| puzzle::store::Store::load(&cfg.puzzle_store()));
+                edition.sections.push(puzzle::section(
+                    date,
+                    cfg,
+                    store,
+                    puzzle::words::Words::embedded(),
+                ));
+            }
+            SectionKind::Shelf => {
+                let path = cfg.shelf_store();
+                let mut store = shelf::store::Shelf::load(&path);
+                let before = store.clone();
+                match shelf::section(
+                    &mut store,
+                    cfg,
+                    date,
+                    tz::local_tz(),
+                    opts.shelf_fraction_ok,
+                ) {
+                    Some(section) => edition.sections.push(section),
+                    None if store.kindles.is_empty() => notes.push(
+                        "From Your Shelf left out: plug your Kindle in once to fill it".into(),
+                    ),
+                    None => {}
+                }
+                store.prune_shown(date);
+                if store != before
+                    && let Err(e) = store.save(&path)
+                {
+                    notes.push(format!(
+                        "From Your Shelf wasn't saved ({e}); a rebuild today prints the same page"
+                    ));
+                }
+            }
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
         }
-        // Each `[[feeds]]` entry is its own section, in file order.
+        // Each `[[feeds]]` entry is its own section, in file order; so is each place after Local.
         for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {
-            let feed = (*kind == SectionKind::Feeds).then(|| cfg.feeds[i].name.as_str());
-            s.key = config::section_key(*kind, feed);
+            let name = match kind {
+                SectionKind::Feeds => Some(cfg.feeds[i].name.as_str()),
+                SectionKind::Local if i > 0 => Some(cfg.local.places[i - 1].name.as_str()),
+                _ => None,
+            };
+            s.key = config::section_key(*kind, name);
         }
     }
+    // Only the paper of the day (or the next one, built late) is kept: a preview of another date
+    // prints a puzzle but neither stores it nor prunes the real ones.
+    let today = now.with_timezone(&tz::local_tz()).date_naive();
+    if let Some(mut store) = puzzles.filter(|_| (date - today).num_days().abs() <= 1) {
+        store.prune(today);
+        // tomorrow's theme: today's headlines from the news and Your Reading
+        let mut from = news.clone();
+        from.extend(g_reading);
+        let found = puzzle::theme::harvest(&edition, &from, puzzle::words::Words::embedded());
+        if let Some(day) = store.days.get_mut(&date) {
+            day.headlines = found;
+        }
+        let path = cfg.puzzle_store();
+        if let Err(e) = store.save(&path) {
+            notes.push(format!(
+                "The puzzle wasn't saved ({}: {e}); a rebuild today makes it again",
+                path.display()
+            ));
+        }
+    }
+    edition.drop_template_photos();
     Gathered {
         edition,
         news,
@@ -259,7 +420,19 @@ pub fn build(
     out_dir: &Path,
     net: &dyn Net,
 ) -> Result<BuildReport, String> {
-    let gathered = gather(cfg, date, now, net);
+    build_with(cfg, date, now, out_dir, net, &GatherOptions::default())
+}
+
+/// [`build`] with the options a caller supplies.
+pub fn build_with(
+    cfg: &Config,
+    date: NaiveDate,
+    now: DateTime<Utc>,
+    out_dir: &Path,
+    net: &dyn Net,
+    opts: &GatherOptions,
+) -> Result<BuildReport, String> {
+    let gathered = gather_with(cfg, date, now, net, opts);
     let path = out_dir.join(format!("deckle-daily-{date}.epub"));
     write_edition(&gathered, &path)?;
     let mut long_reads = Vec::new();

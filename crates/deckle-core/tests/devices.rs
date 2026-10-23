@@ -137,6 +137,7 @@ fn a_target_finds_the_profile_the_app_recorded() {
         model_hint: "Kindle 5.16.2.1.1 (4184940002)".into(),
         thumbnails_writable: true,
         firmware: Some("5.16.2.1.1".into()),
+        serial: None,
     };
     let mtp = MtpInfo {
         vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,

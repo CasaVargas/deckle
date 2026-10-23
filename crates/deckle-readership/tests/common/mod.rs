@@ -25,6 +25,12 @@ pub fn long(v: i64) -> Vec<u8> {
     b
 }
 
+pub fn dbl(v: f64) -> Vec<u8> {
+    let mut b = vec![4];
+    b.extend(v.to_be_bytes());
+    b
+}
+
 pub fn utf(s: &str) -> Vec<u8> {
     let mut b = vec![3, 0];
     b.extend((s.len() as u16).to_be_bytes());
@@ -88,6 +94,7 @@ pub fn layout(date: &str, starts: &[i64]) -> deckle_readership::layout::Layout {
                 },
                 name: format!("Section {i}"),
                 start,
+                items: None,
             })
             .collect(),
     }

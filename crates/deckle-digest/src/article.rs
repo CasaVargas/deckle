@@ -17,6 +17,9 @@ pub const MIN_WORDS: usize = 120;
 pub const MAX_WORDS: usize = 6000;
 /// Photos narrower or shorter than this are icons or trackers.
 const MIN_PHOTO_SIDE: u32 = 200;
+/// An inline photo's shortest side. Smaller ones (a site's default author avatar is typically
+/// ~280 px square) are icons, not news; the lead photo only has to clear [`MIN_PHOTO_SIDE`].
+const MIN_INLINE_PHOTO_SIDE: u32 = 300;
 const PHOTO_WIDTH: u32 = 1000;
 const PHOTO_QUALITY: u8 = 70;
 
@@ -35,6 +38,8 @@ pub struct Extracted {
     pub xhtml: String,
     /// Photo URLs in placeholder order (the lead image first, when there is one).
     pub photos: Vec<String>,
+    /// Photo 0 is the page's lead image, printed above the text.
+    pub lead: bool,
     pub words: usize,
     /// The first paragraph that reads like prose, for the cover.
     pub teaser: Option<String>,
@@ -270,6 +275,7 @@ pub fn extract(html: &str, url: &str) -> Option<Extracted> {
 pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<Extracted> {
     let mut readability = dom_smoothie::Readability::new(html, Some(url), None).ok()?;
     let article = readability.parse().ok()?;
+    let mut lead_kept = false;
     let mut w = Writer {
         base: url.to_owned(),
         out: String::new(),
@@ -283,6 +289,7 @@ pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<E
     if let Some(lead) = article.image.as_deref().and_then(|i| resolve(url, i))
         && let Some(k) = w.photo(lead)
     {
+        lead_kept = true;
         w.out.push_str(&format!(
             "<div class=\"figure lead\"><img src=\"{}\" alt=\"\"/></div>\n",
             placeholder(k)
@@ -305,6 +312,7 @@ pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<E
             .filter(|b| !b.is_empty() && b.len() < 120),
         xhtml: w.out,
         photos: w.photos,
+        lead: lead_kept,
         words: w.words,
         teaser: w.teaser,
     })
@@ -376,16 +384,26 @@ pub fn load_photo(url: &str, net: &dyn Net) -> Option<Vec<u8>> {
 }
 
 /// Fetches up to `max` of `photos`, in order, skipping repeats of a photo already kept; each
-/// slot is the JPEG or `None` (not kept).
-pub fn fetch_photos(photos: &[String], max: usize, net: &dyn Net) -> Vec<Option<Vec<u8>>> {
+/// slot is the JPEG or `None` (not kept). With `lead`, photo 0 is the lead image; every other
+/// photo is inline and must clear [`MIN_INLINE_PHOTO_SIDE`].
+pub fn fetch_photos(
+    photos: &[String],
+    lead: bool,
+    max: usize,
+    net: &dyn Net,
+) -> Vec<Option<Vec<u8>>> {
     let mut hashes: Vec<u64> = Vec::new();
     photos
         .iter()
-        .map(|url| {
+        .enumerate()
+        .map(|(k, url)| {
             if hashes.len() >= max {
                 return None;
             }
             let jpeg = load_photo(url, net).and_then(|b| eink_photo(&b))?;
+            if !(lead && k == 0) && !clears_inline_size(&jpeg) {
+                return None;
+            }
             let hash = photo_hash(&jpeg)?;
             if hashes
                 .iter()
@@ -397,6 +415,19 @@ pub fn fetch_photos(photos: &[String], max: usize, net: &dyn Net) -> Vec<Option<
             Some(jpeg)
         })
         .collect()
+}
+
+/// Whether an e-ink JPEG is big enough to sit inside the text. (Resizing only ever shrinks
+/// wide photos, so a small image's size here is its original size.)
+fn clears_inline_size(jpeg: &[u8]) -> bool {
+    image::load_from_memory(jpeg).is_ok_and(|i| i.width().min(i.height()) >= MIN_INLINE_PHOTO_SIDE)
+}
+
+/// Removes `<div class="figure">` wrappers left with nothing in them.
+pub fn strip_empty_figures(xhtml: &str) -> String {
+    static EMPTY_FIGURE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"<div class="figure( lead)?">\s*</div>\n?"#).unwrap());
+    EMPTY_FIGURE.replace_all(xhtml, "").into_owned()
 }
 
 /// Replaces each photo placeholder with `path(k)` for kept photos and removes the `<img>` of
@@ -414,10 +445,7 @@ pub fn place_photos(xhtml: &str, kept: &[bool], path: impl Fn(usize) -> String) 
     // Photos beyond the list (none expected) and figures emptied above.
     static LEFTOVER: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r#"<img src="__DECKLE_IMG_\d+__" alt=""/>"#).unwrap());
-    static EMPTY_FIGURE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"<div class="figure( lead)?">\s*</div>\n?"#).unwrap());
-    let out = LEFTOVER.replace_all(&out, "");
-    EMPTY_FIGURE.replace_all(&out, "").into_owned()
+    strip_empty_figures(&LEFTOVER.replace_all(&out, ""))
 }
 
 #[cfg(test)]

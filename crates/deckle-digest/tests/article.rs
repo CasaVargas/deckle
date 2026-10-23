@@ -124,7 +124,7 @@ fn saved_page_photos_from_files_folder_and_data_uri() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join("a_files")).unwrap();
     std::fs::write(dir.path().join("a_files/p.png"), png(400, 300)).unwrap();
-    let data = base64::engine::general_purpose::STANDARD.encode(png(500, 260));
+    let data = base64::engine::general_purpose::STANDARD.encode(png(500, 360));
     let words = "word ".repeat(200);
     let html = format!(
         "<html><body><article><p>{words}</p><img src=\"a_files/p.png\"><p>{words}</p><img src=\"data:image/png;base64,{data}\"></article></body></html>"
@@ -134,7 +134,7 @@ fn saved_page_photos_from_files_folder_and_data_uri() {
     let base = url::Url::from_file_path(&page).unwrap().to_string();
     let x = deckle_digest::article::extract_with(&html, &base, None).unwrap();
     let offline = |u: &str| -> Result<Vec<u8>, String> { Err(format!("offline: {u}")) };
-    let got = deckle_digest::article::fetch_photos(&x.photos, 4, &offline);
+    let got = deckle_digest::article::fetch_photos(&x.photos, x.lead, 4, &offline);
     assert_eq!(
         got.iter().flatten().count(),
         2,

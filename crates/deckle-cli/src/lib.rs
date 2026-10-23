@@ -1004,6 +1004,109 @@ fn library_line(b: &deckle_library::Book) -> String {
     )
 }
 
+/// `next.json`: the headlines fetched for tomorrow's front page (disposable).
+fn next_cache() -> PathBuf {
+    deckle_core::wordwise::default_cache_dir()
+        .join("digest")
+        .join("next.json")
+}
+
+/// Tomorrow's paper as of `now`, from local files.
+fn next_paper(
+    cfg: &deckle_digest::Config,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
+) -> deckle_digest::next::plan::NextPaper {
+    deckle_readership::sizes::next_paper(
+        cfg,
+        now,
+        schedule_at(),
+        &deckle_readership::state_path(),
+        &next_cache(),
+        &deckle_core::wordwise::default_cache_dir().join("digest"),
+    )
+}
+
+fn next_text(
+    p: &deckle_digest::next::plan::NextPaper,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono::Utc>,
+) -> String {
+    use deckle_digest::next::WeekState;
+    let mut lines = vec![
+        deckle_digest::press::bar_line(&p.press, now),
+        format!(
+            "{} · No. {} · {}",
+            p.paper,
+            p.number,
+            deckle_digest::long_date(p.date)
+        ),
+    ];
+    if p.weather {
+        lines.push("Weather · fills in at press time".into());
+    }
+    if let Some(l) = &p.lead {
+        lines.push(format!(
+            "Lead: {} — {}",
+            l.kicker,
+            l.title.as_deref().unwrap_or_default()
+        ));
+        if let Some(r) = &l.reason {
+            lines.push(format!("      {r}"));
+        }
+    }
+    for t in &p.tiles {
+        lines.push(match &t.title {
+            Some(title) => format!("  {} — {title}", t.kicker),
+            None => format!("  {}", t.kicker),
+        });
+    }
+    lines.push(match p.checked {
+        Some(c) => format!(
+            "Headlines checked {}",
+            c.with_timezone(&deckle_digest::tz::local_tz())
+                .format("%H:%M")
+        ),
+        None => "Headlines not checked yet".into(),
+    });
+    lines.push(String::new());
+    lines.push(format!("Page plan (about {} Kindle pages):", p.pages));
+    for (n, r) in p.plan.iter().enumerate() {
+        lines.push(format!(
+            "  {}. {} — {} [{}]",
+            n + 1,
+            r.name,
+            r.detail,
+            r.budget
+        ));
+    }
+    if !p.off.is_empty() {
+        let off: Vec<&str> = p.off.iter().map(|r| r.name.as_str()).collect();
+        lines.push(format!("  Off: {}", off.join(", ")));
+    }
+    let week: Vec<String> = p
+        .week
+        .iter()
+        .map(|d| {
+            let s = match d.state {
+                WeekState::Read(n) => format!("read {n}%"),
+                WeekState::NotOpened => "not opened".into(),
+                WeekState::Sent => "sent".into(),
+                WeekState::NoPaper => "no paper".into(),
+            };
+            format!("{} {s}", d.date.format("%a"))
+        })
+        .collect();
+    lines.push(String::new());
+    lines.push(format!("This week: {}", week.join(" · ")));
+    lines.join("\n")
+}
+
+/// The installed edition job's time, when there is one.
+fn schedule_at() -> Option<(u8, u8)> {
+    deckle_digest::schedule::status()
+        .at
+        .and_then(|a| deckle_digest::schedule::parse_at(&a).ok())
+}
+
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
     match arg {
         None => Ok(deckle_digest::chrono::Local::now().date_naive()),
@@ -1062,7 +1165,14 @@ fn digest(
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let report = deckle_digest::build(&cfg, date, now, &output, &deckle_digest::Http)?;
+            let report = deckle_digest::build_with(
+                &cfg,
+                date,
+                now,
+                &output,
+                &deckle_digest::Http,
+                &gather_options(),
+            )?;
             emit(json, &report, || {
                 let mut text = format!(
                     "OK    {}\n      -> {}\n{}",
@@ -1091,9 +1201,24 @@ fn digest(
             date,
             previewer: pv,
             keep_work_dir,
+            force,
         } => {
             let mut cfg = load_digest_config(&path)?;
             let date = parse_date(date.as_deref())?;
+            // Before anything is located or touched: a stopped morning builds nothing.
+            let today = deckle_digest::chrono::Local::now().date_naive();
+            let stop = deckle_digest::press::read_stop(&cfg.press_state(), today);
+            if !force && stop == Some(date) {
+                let out = serde_json::json!({ "stopped": date });
+                emit(json, &out, || {
+                    format!(
+                        "Presses stopped for {}: no paper today (deckle digest stop --undo \
+                         restarts them)",
+                        date.format("%A, %B %-d")
+                    )
+                })?;
+                return Ok(ExitCode::SUCCESS);
+            }
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             // A folder target must exist (and is created) before any work; `device` may be
             // absent: the edition then waits in the outbox.
@@ -1103,7 +1228,14 @@ fn digest(
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let mut built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+            let mut built = deckle_digest::build_with(
+                &cfg,
+                date,
+                now,
+                &work,
+                &deckle_digest::Http,
+                &gather_options(),
+            )?;
             let opts = paper_options(Some(located.path.clone()), keep_work_dir, &converted);
             let (mut long_reads, failed) = prepare_long_reads(&built, &opts);
             let mut notes: Vec<String> = Vec::new();
@@ -1114,7 +1246,14 @@ fn digest(
                     ));
                 }
                 cfg.reading.inline = failed.into_iter().map(|(id, _)| id).collect();
-                built = deckle_digest::build(&cfg, date, now, &work, &deckle_digest::Http)?;
+                built = deckle_digest::build_with(
+                    &cfg,
+                    date,
+                    now,
+                    &work,
+                    &deckle_digest::Http,
+                    &gather_options(),
+                )?;
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
@@ -1167,7 +1306,7 @@ fn digest(
                             Some(deckle_digest::EDITION_PREFIX),
                             &long_reads,
                         )?;
-                        outcome = push_queued(&queue, &cfg)?;
+                        outcome = push_queued(&queue, &cfg, detect_kindle())?;
                     }
                 }
                 // Only a run that shipped (or queued) the edition uses up the saved articles.
@@ -1273,14 +1412,65 @@ fn digest(
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
+        cli::DigestCommand::Next { fetch } => {
+            let cfg = load_digest_config(&path)?;
+            let now =
+                deckle_digest::chrono::Utc::now().with_timezone(&deckle_digest::tz::local_tz());
+            if fetch {
+                let path = next_cache();
+                let mut cache = deckle_digest::next::live::LiveCache::load(&path);
+                deckle_digest::next::live::refresh(
+                    &cfg,
+                    &mut cache,
+                    now.to_utc(),
+                    &deckle_digest::Http,
+                );
+                cache.save(&path)?;
+            }
+            let paper = next_paper(&cfg, now);
+            emit(json, &paper, || next_text(&paper, now.to_utc()))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Stop { undo, date } => {
+            let cfg = load_digest_config(&path)?;
+            let stop = if undo {
+                None
+            } else {
+                let date = match date {
+                    Some(d) => parse_date(Some(&d))?,
+                    None => {
+                        let now = deckle_digest::chrono::Utc::now()
+                            .with_timezone(&deckle_digest::tz::local_tz());
+                        deckle_digest::press::press(schedule_at(), None, now)
+                            .next
+                            .map(|n| n.date_naive())
+                            .ok_or("nothing is scheduled; there's no press to stop")?
+                    }
+                };
+                Some(date)
+            };
+            deckle_digest::press::write_stop(&cfg.press_state(), stop)?;
+            let out = serde_json::json!({ "stopped": stop });
+            emit(json, &out, || match stop {
+                Some(d) => format!("Presses stopped for {}.", deckle_digest::long_date(d)),
+                None => "Presses restarted.".to_owned(),
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Puzzle => digest_puzzle(json, &path),
+        cli::DigestCommand::Shelf { forget } => digest_shelf(json, &path, forget),
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
         }
-        cli::DigestCommand::Push => {
+        cli::DigestCommand::Push { to } => {
             let cfg = load_digest_config(&path)?;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
-            let outcome = push_queued(&queue, &cfg)?;
+            let target = match to.as_str() {
+                "device" => detect_kindle(),
+                folder => Some(resolve_target(folder)?),
+            };
+            let outcome = push_queued(&queue, &cfg, target)?;
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
         }
@@ -1355,6 +1545,9 @@ struct DigestOutcome {
     /// Reading positions recorded in the same session (`[sync] readership`).
     #[serde(skip_serializing_if = "Option::is_none")]
     readership: Option<deckle_readership::Recorded>,
+    /// The Kindle's shelf recorded in the same session (`[sync] shelf`).
+    #[serde(skip)]
+    shelf: Option<deckle_shelf::Summary>,
 }
 
 impl DigestOutcome {
@@ -1365,6 +1558,8 @@ impl DigestOutcome {
                     && f.pruned.is_empty()
                     && self.highlights.is_none()
                     && self.readership.is_none()
+                    && self.shelf.is_none()
+                    && f.shelf_error.is_none()
                     && f.positions_error.is_none() =>
             {
                 "      nothing queued".to_owned()
@@ -1396,6 +1591,12 @@ impl DigestOutcome {
                 }
                 if let Some(e) = &f.positions_error {
                     lines.push(format!("      readership: {e}"));
+                }
+                if let Some(s) = &self.shelf {
+                    lines.push(format!("      {}", s.describe()));
+                }
+                if let Some(e) = &f.shelf_error {
+                    lines.push(format!("      shelf: {e}"));
                 }
                 lines.join("\n")
             }
@@ -1620,13 +1821,14 @@ fn detect_kindle() -> Option<Target> {
     resolve_target("device").ok()
 }
 
-/// Flushes the outbox to a connected Kindle, or reports it queued.
+/// Flushes the outbox to `target` (a connected Kindle, or a folder), or reports it queued.
 fn push_queued(
     queue: &deckle_core::queue::Queue,
     cfg: &deckle_digest::Config,
+    target: Option<Target>,
 ) -> Result<DigestOutcome, String> {
     let empty = queue.pending().is_empty();
-    let Some(target) = detect_kindle() else {
+    let Some(target) = target else {
         return Ok(DigestOutcome {
             flush: empty.then(Default::default),
             queued: !empty,
@@ -1645,37 +1847,58 @@ fn push_queued(
 }
 
 /// What `digest push` runs: the outbox with the device's actions, or (empty outbox) just the
-/// reading positions when readership is on; `None` leaves the Kindle alone.
+/// reads (positions, clippings) that are on; `None` leaves the Kindle alone.
 fn push_plan(
     actions: deckle_core::sync::Actions,
     outbox_empty: bool,
 ) -> Option<deckle_core::sync::Plan> {
-    match (outbox_empty, actions.readership) {
-        (false, _) => Some(deckle_core::sync::Plan {
+    if !outbox_empty {
+        return Some(deckle_core::sync::Plan {
             push: true,
             prune: actions.prune,
             clippings: actions.clippings,
             readership: actions.readership,
-        }),
-        (true, true) => Some(deckle_core::sync::Plan {
-            push: false,
-            prune: false,
-            clippings: actions.clippings,
-            readership: true,
-        }),
-        (true, false) => None,
+            shelf: actions.shelf,
+        });
     }
+    (actions.readership || actions.clippings || actions.shelf).then_some(deckle_core::sync::Plan {
+        push: false,
+        prune: false,
+        clippings: actions.clippings,
+        readership: actions.readership,
+        shelf: actions.shelf,
+    })
 }
 
-/// The device's `[sync]` actions (auto-sync design §3).
+/// The device's `[sync]` actions (auto-sync design §3). The clippings are read whenever the
+/// paper has a puzzle (its answers are notes, puzzle design §5) or a shelf (its highlights).
 fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Actions {
     let a = cfg.sync.for_device(id);
+    let shelf = shelf_on(cfg, id);
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
-        clippings: a.clippings,
+        clippings: a.clippings || puzzle_on(cfg) || shelf,
         readership: a.readership,
+        shelf,
     }
+}
+
+/// The paper has a shelf page and this Kindle isn't left out of it.
+fn shelf_on(cfg: &deckle_digest::Config, id: &str) -> bool {
+    cfg.sections.contains(&deckle_digest::SectionKind::Shelf) && cfg.sync.for_device(id).shelf
+}
+
+/// What `gather` can't know: whether `deckle-shelf` trusts the Kindle's own progress fraction.
+fn gather_options() -> deckle_digest::GatherOptions {
+    deckle_digest::GatherOptions {
+        shelf_fraction_ok: deckle_shelf::KINDLE_FRACTION_OK,
+    }
+}
+
+/// The paper has a puzzle page.
+fn puzzle_on(cfg: &deckle_digest::Config) -> bool {
+    cfg.sections.contains(&deckle_digest::SectionKind::Puzzle)
 }
 
 /// Runs `plan` on `target` over one connection.
@@ -1708,10 +1931,36 @@ fn sync_to(
         &finishing,
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
         &stems,
+        deckle_digest::EDITION_PREFIX,
     )
     .map_err(|e| e.to_string())?;
-    // Read in the same session; written to the folder after it's closed.
-    let highlights = match flush.clippings.as_deref() {
+    // Read in the same session; written to the folder after it's closed. The puzzle may have
+    // read them alone: highlights are exported only when they're asked for.
+    let export = cfg
+        .sync
+        .for_device(&deckle_core::sync::device_id(target))
+        .clippings;
+    if plan.clippings && puzzle_on(cfg) && flush.clippings_error.is_none() {
+        let path = cfg.puzzle_store();
+        let mut store = deckle_digest::puzzle::store::Store::load(&path);
+        let today = deckle_digest::chrono::Local::now().date_naive();
+        use deckle_digest::puzzle::check::Notes;
+        let notes = match flush.clippings.as_deref() {
+            Some(b) => Notes::Read(b),
+            None if deckle_core::clippings::notes_unreachable(target) => Notes::Unreachable,
+            None => Notes::NoFile,
+        };
+        deckle_digest::puzzle::check::record(
+            &mut store,
+            notes,
+            today,
+            deckle_digest::puzzle::words::Words::embedded(),
+        );
+        if let Err(e) = store.save(&path) {
+            eprintln!("puzzle: {}: {e}", path.display());
+        }
+    }
+    let highlights = match flush.clippings.as_deref().filter(|_| export) {
         Some(bytes) => match highlights::export(bytes, &highlights::state_path(), None) {
             Ok(o) => Some(o),
             Err(e) => {
@@ -1736,12 +1985,60 @@ fn sync_to(
         }
         r
     });
+    let shelf = record_shelf(cfg, target, &flush);
     Ok(DigestOutcome {
         flush: Some(flush),
         highlights,
         readership: recorded,
+        shelf,
         ..Default::default()
     })
+}
+
+/// Turns what the session read into this Kindle's snapshot in `shelf.json`. A problem with one
+/// book is reported and the rest are kept; a problem with the file is reported and nothing is
+/// lost but this connection's snapshot.
+fn record_shelf(
+    cfg: &deckle_digest::Config,
+    target: &Target,
+    flush: &deckle_core::queue::FlushReport,
+) -> Option<deckle_shelf::Summary> {
+    let read = flush.shelf.as_ref()?;
+    let device = deckle_library::device_ref(target);
+    let id = deckle_core::sync::device_id(target);
+    let path = cfg.shelf_store();
+    // A read that failed (not "no file") must not blank what the last plug-in found.
+    let previous = deckle_digest::shelf::store::Shelf::load(&path)
+        .kindles
+        .get(&id)
+        .cloned();
+    let library = deckle_library::Library::configured(&deckle_library::config::default_path())
+        .map(|(lib, _)| lib);
+    let (snap, errors) = deckle_shelf::snapshot(
+        deckle_shelf::Read {
+            books: read.books.clone(),
+            skipped: read.skipped,
+            clippings: flush.clippings.clone(),
+            vocab: read.vocab.clone(),
+            clippings_failed: flush.clippings_error.is_some(),
+            vocab_failed: flush.shelf_error.is_some() && read.vocab.is_none(),
+            previous,
+        },
+        &cfg.sync.device_name(&id).unwrap_or(device.name),
+        &device.key,
+        library.as_ref(),
+        deckle_digest::chrono::Utc::now(),
+    );
+    for e in errors {
+        eprintln!("shelf: {e}");
+    }
+    match deckle_shelf::record(&path, &id, snap) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            eprintln!("shelf: {e}");
+            None
+        }
+    }
 }
 
 fn on_device(on: &deckle_core::yjf::OnDevice) -> deckle_readership::OnDevice {
@@ -1770,7 +2067,8 @@ fn record_layout(
         .map_err(|e| format!("{}: {e}", kfx.display()))
         .and_then(|bytes| {
             deckle_readership::layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)
-        });
+        })
+        .map(|l| with_items(l, built));
     let path = deckle_readership::state_path();
     let saved = layout.and_then(|l| {
         let mut state = deckle_readership::State::load(&path);
@@ -1780,6 +2078,255 @@ fn record_layout(
     if let Err(e) = saved {
         eprintln!("readership: {e}");
     }
+}
+
+/// Each section's item count from the build report, matched by key, so tomorrow's paper can
+/// estimate a story's length (tomorrow's paper design §6.3). The front page has none.
+fn with_items(
+    mut layout: deckle_readership::layout::Layout,
+    built: &deckle_digest::BuildReport,
+) -> deckle_readership::layout::Layout {
+    for s in &mut layout.sections {
+        s.items = built
+            .sections
+            .iter()
+            .find(|b| b.key == s.key)
+            .map(|b| b.items as u32);
+    }
+    layout
+}
+
+/// What `digest puzzle --json` prints: today's puzzle, and yesterday's day when there is one.
+#[derive(serde::Serialize)]
+struct PuzzleOut {
+    date: deckle_digest::chrono::NaiveDate,
+    #[serde(flatten)]
+    puzzle: deckle_digest::puzzle::store::Puzzle,
+    yesterday: Option<deckle_digest::puzzle::store::Day>,
+}
+
+/// `digest puzzle` (puzzle design goal 8): the same puzzle the paper prints today.
+fn digest_puzzle(json: bool, path: &Path) -> Result<ExitCode, String> {
+    use deckle_digest::puzzle;
+    let cfg = load_digest_config(path)?;
+    let date = deckle_digest::chrono::Local::now().date_naive();
+    let store_path = cfg.puzzle_store();
+    let mut store = puzzle::store::Store::load(&store_path);
+    let fresh = !store.days.contains_key(&date);
+    let p = puzzle::today(
+        date,
+        &cfg.puzzle,
+        puzzle::words::Words::embedded(),
+        &mut store,
+    )
+    .puzzle
+    .clone();
+    if fresh {
+        store.prune(date);
+        store
+            .save(&store_path)
+            .map_err(|e| format!("{}: {e}", store_path.display()))?;
+    }
+    let out = PuzzleOut {
+        date,
+        puzzle: p,
+        yesterday: store
+            .days
+            .get(&(date - deckle_digest::chrono::Days::new(1)))
+            .cloned(),
+    };
+    emit(json, &out, || puzzle_text(&out))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn puzzle_text(out: &PuzzleOut) -> String {
+    use deckle_digest::puzzle::grid::Dir;
+    let p = &out.puzzle;
+    let mut lines = Vec::new();
+    match &p.rows {
+        Some(rows) => {
+            lines.push(format!("The Mini · No. {}", p.number));
+            lines.extend(
+                rows.iter()
+                    .map(|r| format!("  {}", r.replace(|c: char| c != '#', "."))),
+            );
+            for (dir, name) in [(Dir::Across, "Across"), (Dir::Down, "Down")] {
+                lines.push(name.to_owned());
+                lines.extend(
+                    p.clues
+                        .iter()
+                        .filter(|c| c.dir == dir)
+                        .map(|c| format!("  {:>2}  {}", c.number, c.clue)),
+                );
+            }
+        }
+        None => lines.push("No mini today.".to_owned()),
+    }
+    if let Some(l) = &p.ladder {
+        lines.push(format!(
+            "Word ladder: {} to {} in {} steps",
+            l.from.to_uppercase(),
+            l.to.to_uppercase(),
+            l.path.len() - 1
+        ));
+    }
+    if let Some(y) = &out.yesterday {
+        lines.push(String::new());
+        lines.push("Yesterday:".to_owned());
+        if let Some(rows) = &y.puzzle.rows {
+            lines.extend(rows.iter().map(|r| format!("  {r}")));
+        }
+        if let Some(l) = &y.puzzle.ladder {
+            let path: Vec<String> = l.path.iter().map(|w| w.to_uppercase()).collect();
+            lines.push(format!("  Ladder: {}", path.join(", ")));
+        }
+        if let Some(s) = &y.solve {
+            lines.push(format!("  You solved {} of {}", s.solved, s.of));
+        }
+    }
+    lines.join("\n")
+}
+
+/// What `digest shelf --json` prints: each Kindle's snapshot in brief, and the page as of today.
+#[derive(serde::Serialize)]
+struct ShelfOut {
+    kindles: Vec<ShelfKindle>,
+    page: ShelfPage,
+}
+
+#[derive(serde::Serialize)]
+struct ShelfKindle {
+    id: String,
+    name: String,
+    seen: String,
+    books: usize,
+    highlights_shared: bool,
+    highlights: usize,
+    words_shared: bool,
+    words: usize,
+}
+
+#[derive(serde::Serialize)]
+struct ShelfPage {
+    nightstand: Option<deckle_digest::shelf::select::Nightstand>,
+    highlight: Option<deckle_digest::shelf::select::Pick>,
+    /// Each word with its "<Book>, <Weekday>" line.
+    words: Vec<(deckle_digest::shelf::store::WordSnap, String)>,
+}
+
+/// `digest shelf [--forget]`: the page From Your Shelf would print today, from the snapshots.
+fn digest_shelf(json: bool, path: &Path, forget: bool) -> Result<ExitCode, String> {
+    use deckle_digest::shelf::{select, store::Shelf};
+    let cfg = load_digest_config(path)?;
+    let store = cfg.shelf_store();
+    if forget {
+        Shelf::forget(&store)?;
+        println!("Forgot the shelf snapshot.");
+        return Ok(ExitCode::SUCCESS);
+    }
+    let shelf = Shelf::load(&store);
+    let date = deckle_digest::chrono::Local::now().date_naive();
+    let tz = deckle_digest::tz::local_tz();
+    let out = ShelfOut {
+        kindles: shelf
+            .kindles
+            .iter()
+            .map(|(id, k)| ShelfKindle {
+                id: id.clone(),
+                name: k.name.clone(),
+                seen: k.seen.clone(),
+                books: k.books.len(),
+                highlights_shared: k.highlights_shared,
+                highlights: k.highlights.len(),
+                words_shared: k.words_shared,
+                words: k.words.len(),
+            })
+            .collect(),
+        page: ShelfPage {
+            nightstand: select::nightstand(
+                &shelf,
+                &cfg.shelf,
+                date,
+                tz,
+                deckle_shelf::KINDLE_FRACTION_OK,
+            ),
+            highlight: cfg
+                .shelf
+                .highlights
+                .then(|| select::highlight(&shelf, date))
+                .flatten(),
+            words: if cfg.shelf.words {
+                select::words(&shelf, date, tz)
+            } else {
+                Vec::new()
+            },
+        },
+    };
+    emit(json, &out, || shelf_text(&out))?;
+    Ok(ExitCode::SUCCESS)
+}
+
+fn shelf_text(out: &ShelfOut) -> String {
+    if out.kindles.is_empty() {
+        return "Nothing on the shelf yet: add \"shelf\" to sections in digest.toml and plug \
+                your Kindle in (or run `deckle digest push`)."
+            .to_owned();
+    }
+    let mut lines = Vec::new();
+    for k in &out.kindles {
+        let shares = |shared: bool, n: usize, what: &str| match shared {
+            true => format!("{n} {what}"),
+            false => format!("no {what} shared"),
+        };
+        lines.push(format!(
+            "{} · seen {} · {} books · {} · {}",
+            k.name,
+            k.seen,
+            k.books,
+            shares(k.highlights_shared, k.highlights, "highlights"),
+            shares(k.words_shared, k.words, "words"),
+        ));
+    }
+    let page = &out.page;
+    if let Some(n) = &page.nightstand {
+        lines.push(String::new());
+        lines.push("On your nightstand".to_owned());
+        for b in &n.books {
+            let pct = b
+                .percent
+                .map(|p| format!("{}{p}% · ", if b.about { "about " } else { "" }))
+                .unwrap_or_default();
+            lines.push(format!("  {} — {pct}{}", b.title, b.state));
+        }
+        if let Some(nudge) = &n.nudge {
+            lines.push(format!("  {}", nudge.replace('*', "")));
+        }
+    }
+    if let Some(p) = &page.highlight {
+        lines.push(String::new());
+        lines.push(format!("You highlighted this {} ago", p.age));
+        lines.push(format!("  \u{201C}{}\u{201D}", p.highlight.text));
+        lines.push(format!("  {}, {}", p.highlight.title, p.highlight.author));
+        lines.extend(
+            p.highlight
+                .notes
+                .iter()
+                .map(|n| format!("  Your note: {n}")),
+        );
+    }
+    if !page.words.is_empty() {
+        lines.push(String::new());
+        lines.push("Words you looked up this week".to_owned());
+        for (w, from) in &page.words {
+            let def = w
+                .definition
+                .as_deref()
+                .map(|d| format!(" — {d}"))
+                .unwrap_or_default();
+            lines.push(format!("  {}{def} ({from})", w.word));
+        }
+    }
+    lines.join("\n")
 }
 
 /// `digest readership [apply|dismiss N]` (readership design §7).
@@ -2256,6 +2803,7 @@ mod push_tests {
             prune: true,
             clippings: false,
             readership: true,
+            shelf: false,
         };
         assert_eq!(
             push_plan(on, true).map(|p| (p.push, p.readership)),
@@ -2271,6 +2819,76 @@ mod push_tests {
             ),
             None
         );
+        // the puzzle's notes alone are reason enough to read the Kindle
+        assert_eq!(
+            push_plan(
+                Actions {
+                    readership: false,
+                    clippings: true,
+                    ..on
+                },
+                true
+            )
+            .map(|p| (p.push, p.clippings, p.readership)),
+            Some((false, true, false))
+        );
+        // the shelf alone is too
+        assert_eq!(
+            push_plan(
+                Actions {
+                    readership: false,
+                    shelf: true,
+                    ..on
+                },
+                true
+            )
+            .map(|p| (p.push, p.shelf)),
+            Some((false, true))
+        );
         assert_eq!(push_plan(on, false).map(|p| p.push), Some(true));
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+    use deckle_readership::layout::{Layout, SectionStart};
+
+    #[test]
+    fn layout_records_items() {
+        let sec = |key: &str| SectionStart {
+            key: key.into(),
+            name: key.into(),
+            start: 0,
+            items: None,
+        };
+        let layout = Layout {
+            date: "2026-10-22".parse().unwrap(),
+            title: "T".into(),
+            file: "f".into(),
+            end: 10,
+            sections: vec![sec("front"), sec("local"), sec("feeds:Science")],
+        };
+        let summary = |key: &str, items| deckle_digest::SectionSummary {
+            key: key.into(),
+            title: key.into(),
+            items,
+            unavailable: None,
+        };
+        let built = deckle_digest::BuildReport {
+            epub: PathBuf::new(),
+            title: "T".into(),
+            sections: vec![summary("feeds:Science", 7), summary("local", 3)],
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+        };
+        let items: Vec<Option<u32>> = with_items(layout, &built)
+            .sections
+            .iter()
+            .map(|s| s.items)
+            .collect();
+        // matched by key; the front page has none
+        assert_eq!(items, [None, Some(3), Some(7)]);
     }
 }

@@ -17,7 +17,7 @@ pub enum OnDevice {
     Opened(Vec<u8>),
 }
 
-fn is_yjf(name: &str) -> bool {
+pub(crate) fn is_yjf(name: &str) -> bool {
     name.to_ascii_lowercase().ends_with(".yjf")
 }
 
@@ -157,6 +157,7 @@ mod tests {
             model_hint: "Kindle".into(),
             thumbnails_writable: true,
             firmware: None,
+            serial: None,
         });
         assert_eq!(
             read_on(&mut Conn::new(&ms), &stems()).unwrap()[0].1,

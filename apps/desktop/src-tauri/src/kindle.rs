@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use deckle_core::clippings::read_on;
 use deckle_core::deliver::{Conn, Target};
-use deckle_core::inventory::{Space, list_on, remove_on};
+use deckle_core::inventory::{Space, list_on, list_with_positions, remove_on};
 use deckle_highlights::{Outcome, Pending, State};
 use deckle_library::freshness::Reason;
 use deckle_library::shelf::{Shelved, shelve, source_cover};
@@ -169,8 +169,21 @@ pub fn shelf_on(
     cache: Option<&Path>,
 ) -> Result<DeviceShelf, String> {
     let device = deckle_library::device_ref(conn.target);
-    let inv = list_on(conn, cache).map_err(|e| e.to_string())?;
+    // The shelf page wants each book's position too: read in this one walk, when it's due.
+    let digest = config.with_file_name("digest.toml");
+    let shelf_due = deckle_digest::Config::load(&digest).is_ok_and(|c| {
+        c.sections.contains(&deckle_digest::SectionKind::Shelf)
+            && c.sync
+                .for_device(&deckle_core::sync::device_id(conn.target))
+                .shelf
+    });
+    let (inv, skipped) = match shelf_due {
+        true => list_with_positions(conn, cache, deckle_digest::EDITION_PREFIX),
+        false => list_on(conn, cache).map(|inv| (inv, 0)),
+    }
+    .map_err(|e| e.to_string())?;
     let library = Library::configured(config).map(|(l, _)| l);
+    let shelf_books = shelf_due.then(|| inv.books.clone());
     let current = deckle_library::freshness::Current::now(&Default::default());
     let mut books: Vec<DeviceBookRow> = shelve(inv.books, library.as_ref(), &device.key, &current)
         .into_iter()
@@ -186,13 +199,24 @@ pub fn shelf_on(
                 .to_lowercase(),
         )
     });
-    let (highlights, highlights_error) = highlights_on(conn, &highlights_state(config));
+    let clippings = read_on(conn);
+    let (highlights, highlights_error) = highlights_from(&clippings, &highlights_state(config));
+    // The puzzle's answers are notes: scored whenever the paper has a puzzle (puzzle design §5).
+    puzzle_on(
+        &clippings,
+        deckle_core::clippings::notes_unreachable(conn.target),
+        &config.with_file_name("digest.toml"),
+        &config.with_file_name("puzzles.json"),
+    );
     // Reading positions ride in the same session (readership design §3).
     crate::readership::record_on(
         conn,
         &config.with_file_name("readership.json"),
         &config.with_file_name("digest.toml"),
     );
+    if let Some(books) = shelf_books {
+        record_shelf(conn, config, books, skipped, library.as_ref(), &clippings);
+    }
     Ok(DeviceShelf {
         device: device.name,
         space: inv.space,
@@ -202,14 +226,96 @@ pub fn shelf_on(
     })
 }
 
+/// Turns what this session read into the Kindle's snapshot in `shelf.json`. Errors are logged:
+/// they never fail the listing.
+fn record_shelf(
+    conn: &mut Conn<'_>,
+    config: &Path,
+    books: Vec<deckle_core::inventory::DeviceBook>,
+    skipped: usize,
+    library: Option<&Library>,
+    clippings: &ClippingsRead,
+) {
+    let device = deckle_library::device_ref(conn.target);
+    let (vocab, vocab_failed) = match deckle_core::vocab::read_vocab_on(conn) {
+        Ok(v) => (v, false),
+        Err(e) => {
+            eprintln!("shelf: vocabulary: {e}");
+            (None, true)
+        }
+    };
+    let id = deckle_core::sync::device_id(conn.target);
+    let named = deckle_digest::Config::load(&config.with_file_name("digest.toml"))
+        .ok()
+        .and_then(|c| c.sync.device_name(&id));
+    let store = config.with_file_name("shelf.json");
+    let previous = deckle_digest::shelf::store::Shelf::load(&store)
+        .kindles
+        .get(&id)
+        .cloned();
+    let (snap, errors) = deckle_shelf::snapshot(
+        deckle_shelf::Read {
+            books,
+            skipped,
+            clippings: clippings.as_ref().ok().cloned().flatten(),
+            vocab,
+            clippings_failed: clippings.is_err(),
+            vocab_failed,
+            previous,
+        },
+        &named.unwrap_or(device.name),
+        &device.key,
+        library,
+        deckle_digest::chrono::Utc::now(),
+    );
+    for e in errors {
+        eprintln!("shelf: {e}");
+    }
+    if let Err(e) = deckle_shelf::record(&store, &id, snap) {
+        eprintln!("shelf: {e}");
+    }
+}
+
+type ClippingsRead = Result<Option<Vec<u8>>, deckle_core::deliver::DeliverError>;
+
+/// Scores the stored puzzles from the clippings the shelf read, when the paper has a puzzle and
+/// the read worked. Errors are logged: they never fail the listing.
+fn puzzle_on(clippings: &ClippingsRead, unreachable: bool, digest: &Path, store_path: &Path) {
+    let on = deckle_digest::Config::load(digest)
+        .is_ok_and(|c| c.sections.contains(&deckle_digest::SectionKind::Puzzle));
+    let Ok(bytes) = clippings else {
+        return;
+    };
+    if !on {
+        return;
+    }
+    use deckle_digest::puzzle::check::Notes;
+    let notes = match bytes {
+        Some(b) => Notes::Read(b),
+        None if unreachable => Notes::Unreachable,
+        None => Notes::NoFile,
+    };
+    let mut store = deckle_digest::puzzle::store::Store::load(store_path);
+    let today = deckle_digest::chrono::Local::now().date_naive();
+    deckle_digest::puzzle::check::record(
+        &mut store,
+        notes,
+        today,
+        deckle_digest::puzzle::words::Words::embedded(),
+    );
+    if let Err(e) = store.save(store_path) {
+        eprintln!("puzzle: {}: {e}", store_path.display());
+    }
+}
+
 /// The clippings in the shelf's own session: never fails the listing.
-fn highlights_on(conn: &mut Conn<'_>, state: &Path) -> (Vec<Pending>, Option<String>) {
-    let bytes = match read_on(conn) {
+fn highlights_from(clippings: &ClippingsRead, state: &Path) -> (Vec<Pending>, Option<String>) {
+    let bytes = match clippings {
         Ok(Some(b)) => b,
         Ok(None) => return (Vec::new(), None),
         Err(e) => return (Vec::new(), Some(e.to_string())),
     };
-    let parsed = deckle_highlights::parse(&bytes);
+    let parsed = deckle_highlights::parse(bytes);
     let state = State::load(state);
     let rows = deckle_highlights::pending(
         &deckle_highlights::group(parsed.entries),
@@ -425,6 +531,70 @@ mod tests {
     }
 
     #[test]
+    fn a_shelf_scores_the_puzzle_when_the_paper_has_one() {
+        use deckle_digest::puzzle::store::{Day, Store};
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("library.json");
+        let store_path = tmp.path().join("puzzles.json");
+        let out = tmp.path().join("Kindle");
+        std::fs::create_dir_all(&out).unwrap();
+        let target = Target::Folder(out.clone());
+        let yesterday =
+            deckle_digest::chrono::Local::now().date_naive() - deckle_digest::chrono::Days::new(1);
+        let mut store = Store::default();
+        let puzzle = deckle_digest::puzzle::make(
+            yesterday,
+            &Default::default(),
+            deckle_digest::puzzle::words::Words::embedded(),
+            &store,
+        );
+        let c = puzzle.clues[0].clone();
+        store.days.insert(
+            yesterday,
+            Day {
+                puzzle,
+                headlines: Vec::new(),
+                solve: None,
+            },
+        );
+        store.save(&store_path).unwrap();
+        let title = format!(
+            "The Deckle Daily — {} (Deckle)",
+            deckle_digest::long_date(yesterday)
+        );
+        std::fs::write(
+            out.join("My Clippings.txt"),
+            format!(
+                "{title}\r\n- Your Highlight on Location 10-11 | Added on Monday, October 19, \
+                 2026 8:00:00 AM\r\n\r\n{} {}\r\n==========\r\n{title}\r\n- Your Note on \
+                 Location 11 | Added on Monday, October 19, 2026 8:01:00 AM\r\n\r\n{}\r\n\
+                 ==========\r\n",
+                c.number, c.clue, c.answer
+            ),
+        )
+        .unwrap();
+
+        // no puzzle in the paper: left alone
+        std::fs::write(tmp.path().join("digest.toml"), "sections = [\"weather\"]\n").unwrap();
+        shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert_eq!(Store::load(&store_path), store);
+
+        std::fs::write(tmp.path().join("digest.toml"), "sections = [\"puzzle\"]\n").unwrap();
+        shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        let after = Store::load(&store_path);
+        assert_eq!(
+            after.days[&yesterday].solve.as_ref().map(|s| s.solved),
+            Some(1)
+        );
+        assert_eq!(after.notes_readable, Some(true));
+
+        // a Kindle with no file yet (no highlights) keeps the hint
+        std::fs::remove_file(out.join("My Clippings.txt")).unwrap();
+        shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert_eq!(Store::load(&store_path).notes_readable, Some(true));
+    }
+
+    #[test]
     fn a_shelf_carries_the_kindles_highlights() {
         let tmp = tempfile::tempdir().unwrap();
         let config = tmp.path().join("library.json");
@@ -459,6 +629,55 @@ mod tests {
                 .unwrap()
                 .starts_with("line 54: ")
         );
+    }
+
+    #[test]
+    fn a_shelf_records_the_kindles_shelf_when_the_paper_has_one() {
+        use deckle_digest::shelf::store::Shelf;
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("library.json");
+        let out = tmp.path().join("Kindle");
+        std::fs::create_dir_all(out.join("Walden.sdr")).unwrap();
+        std::fs::write(out.join("Walden.kfx"), b"not a real kfx").unwrap();
+        std::fs::write(
+            out.join("Walden.sdr/Walden9d6e.yjf"),
+            std::fs::read(
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/yjf/book.yjf"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(out.join("My Clippings.txt"), clippings_fixture()).unwrap();
+        let target = Target::Folder(out.clone());
+        let store = tmp.path().join("shelf.json");
+
+        // no shelf in the paper: nothing recorded
+        std::fs::write(tmp.path().join("digest.toml"), "sections = [\"weather\"]\n").unwrap();
+        shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert!(!store.exists());
+
+        std::fs::write(tmp.path().join("digest.toml"), "sections = [\"shelf\"]\n").unwrap();
+        let listed = shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert!(
+            listed.books.iter().any(|b| b.file == "Walden.kfx"),
+            "the tab still lists the books"
+        );
+        let snap = Shelf::load(&store);
+        let k = snap.kindles.values().next().expect("a snapshot");
+        assert_eq!(k.books.len(), 1);
+        assert_eq!(k.books[0].title, "Walden");
+        assert!(k.highlights_shared);
+
+        // left out for this Kindle: not read again
+        std::fs::remove_file(&store).unwrap();
+        let id = deckle_core::sync::device_id(&target);
+        std::fs::write(
+            tmp.path().join("digest.toml"),
+            format!("sections = [\"shelf\"]\n\n[sync.devices.'{id}']\nshelf = false\n"),
+        )
+        .unwrap();
+        shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert!(!store.exists());
     }
 
     #[test]

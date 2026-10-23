@@ -82,6 +82,8 @@ pub struct RunReport {
     pub delivered: Option<PathBuf>,
     pub pages: Option<u32>,
     pub asin: Option<String>,
+    /// The KFX's end position (`erl`), recorded so a later reading position can be a percent.
+    pub end_position: Option<i64>,
     pub cde_type: Option<String>,
     pub decision: Option<Decision>,
     pub matched: Option<String>,
@@ -594,6 +596,9 @@ pub fn finish_with(
         report
     );
     report.pages = out.pages;
+    report.end_position = deckle_kfx::text::content_runs(&out.bytes)
+        .ok()
+        .map(|(_, e)| e);
     report.asin = Some(asin.clone());
     report.cde_type = Some(cde_type.as_str().to_owned());
     report.warnings.extend(
@@ -917,6 +922,7 @@ mod tests {
             model_hint: "Kindle 5.16.2.1.1 (4184940002)".into(),
             thumbnails_writable: false,
             firmware: Some("5.16.2.1.1".into()),
+            serial: None,
         });
         let used = SendUse {
             ebok_without_cover_source: true,

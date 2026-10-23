@@ -964,7 +964,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-cli"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -974,6 +974,7 @@ dependencies = [
  "deckle-kfx",
  "deckle-library",
  "deckle-readership",
+ "deckle-shelf",
  "deckle-transport",
  "deckle-xray",
  "predicates",
@@ -985,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "csv",
  "deckle-cover",
@@ -1013,7 +1014,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-cover"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "image",
@@ -1021,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-desktop"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "base64 0.23.1",
  "deckle-cli",
@@ -1031,6 +1032,7 @@ dependencies = [
  "deckle-kfx",
  "deckle-library",
  "deckle-readership",
+ "deckle-shelf",
  "deckle-transport",
  "deckle-xray",
  "serde",
@@ -1046,16 +1048,18 @@ dependencies = [
 
 [[package]]
 name = "deckle-digest"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
+ "deckle-highlights",
  "deunicode",
  "dom_query",
  "dom_smoothie",
  "feed-rs",
+ "flate2",
  "html-escape",
  "iana-time-zone",
  "image",
@@ -1078,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-docx"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "roxmltree",
  "sha2 0.11.1",
@@ -1089,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-highlights"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1099,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-kfx"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "rand 0.9.5",
  "roxmltree",
@@ -1115,7 +1119,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-library"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "deckle-core",
  "deckle-docx",
@@ -1132,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-readership"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "deckle-digest",
@@ -1145,8 +1149,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-shelf"
+version = "0.4.0"
+dependencies = [
+ "chrono",
+ "deckle-core",
+ "deckle-digest",
+ "deckle-highlights",
+ "deckle-library",
+ "deckle-readership",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "deckle-transport"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "rusb",
  "serde",
@@ -1155,7 +1174,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-txt"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "encoding_rs",
  "roxmltree",
@@ -1167,7 +1186,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-wordwise"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "base64 0.22.1",
  "deckle-kfx",
@@ -1179,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-wordwise-build"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "deckle-wordwise",
@@ -1193,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-xray"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "deckle-kfx",
  "regex",

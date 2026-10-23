@@ -133,7 +133,13 @@ pub struct RunResult {
 pub fn run_args(send: bool, preview_dir: &Path) -> Vec<String> {
     let mut a = vec!["digest".to_owned(), "--json".to_owned()];
     if send {
-        a.extend(["run".into(), "--to".into(), "device".into()]);
+        // Send now is an explicit ask: it runs past a stopped press
+        a.extend([
+            "run".into(),
+            "--to".into(),
+            "device".into(),
+            "--force".into(),
+        ]);
     } else {
         a.extend([
             "build".into(),
@@ -476,7 +482,8 @@ mod tests {
     #[test]
     fn runs_use_the_cli_with_json_and_read_its_report() {
         let a = run_args(true, Path::new("/p"));
-        assert_eq!(a, ["digest", "--json", "run", "--to", "device"]);
+        // Send now is an explicit ask: it runs past a stopped press
+        assert_eq!(a, ["digest", "--json", "run", "--to", "device", "--force"]);
         let b = run_args(false, Path::new("/p"));
         assert_eq!(b, ["digest", "--json", "build", "-o", "/p"]);
         let r = parse_run(true, br#"{"title":"T"}"#, b"inbox: saved 1\n\nlast\n");
