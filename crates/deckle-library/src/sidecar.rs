@@ -2,6 +2,7 @@
 //! `deckle.json`, schema 1 (library design §3). `metadata` caches the source; `id`, `added`,
 //! `asin` and `sends` belong to the sidecar. Fields Deckle doesn't know are kept on rewrite.
 
+use deckle_core::devices::same_device;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -87,11 +88,14 @@ impl Sidecar {
     pub fn forget(&mut self, device: &str, file: &str) -> bool {
         let before = self.sends.len();
         self.sends
-            .retain(|s| !(s.device == device && s.file == file));
+            .retain(|s| !(same_device(&s.device, device) && s.file == file));
         self.sends.len() != before
     }
 
     pub fn send_to(&self, device: &str) -> Option<&SendRecord> {
-        self.sends.iter().find(|s| s.device == device)
+        self.sends
+            .iter()
+            .find(|s| s.device == device)
+            .or_else(|| self.sends.iter().find(|s| same_device(&s.device, device)))
     }
 }
