@@ -39,6 +39,10 @@ fn kicker(k: &KindleSnapshot, date: NaiveDate, tz: Tz) -> String {
         Some(days) if (0..=6).contains(&days) => seen_day(k, tz)
             .map(|d| d.format("%A").to_string())
             .unwrap_or_default(),
+        // A build dated before the snapshot has no "days ago": name the day it was taken.
+        Some(days) if days < 0 => seen_day(k, tz)
+            .map(|d| d.format("%A").to_string())
+            .unwrap_or_default(),
         Some(days) => format!("{days} days ago"),
         None => "earlier".to_owned(),
     };

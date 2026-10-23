@@ -47,11 +47,15 @@ impl MorgueState {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(
+        let tmp = crate::folder::unique_tmp(path);
+        let result = std::fs::write(
             &tmp,
             serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?,
-        )?;
-        std::fs::rename(&tmp, path)
+        )
+        .and_then(|()| std::fs::rename(&tmp, path));
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
     }
 }

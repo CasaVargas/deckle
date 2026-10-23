@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Morgue and From Your Shelf hardening** (#127, #126). Two builds of one date no longer share
+  a temp file, the Morgue's EPUB and sidecar are staged before either is replaced, and
+  `morgue.json` is saved only when the first import ran. Shelf read errors name the file, not the
+  book's title; a back-dated build no longer prints "-1 days ago"; "From Your Shelf" sits after
+  Feeds in the off-sections list; Windows **Open** uses Explorer.
 - **The Morgue** (#109): every edition is kept in a folder you can see, `~/Deckle/Morgue` (change
   it under `[morgue]` or on the Daily tab), for a year, with the stories' text so you can search
   it. **Every edition** on the Daily tab shows a month of front pages, search with the matching

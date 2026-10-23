@@ -142,10 +142,8 @@ pub fn morgue_open(date: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("open").arg(&epub).spawn();
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd")
-        .args(["/C", "start", ""])
-        .arg(&epub)
-        .spawn();
+    // Not `cmd /C start`: it misreads a path with `&` or `^` in it.
+    let r = std::process::Command::new("explorer").arg(&epub).spawn();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let r = std::process::Command::new("xdg-open").arg(&epub).spawn();
     r.map(|_| ()).map_err(|e| e.to_string())

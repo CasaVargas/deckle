@@ -2313,10 +2313,15 @@ fn archive_to_morgue(
     let state_path = deckle_morgue::state::state_path();
     let mut state = deckle_morgue::MorgueState::load(&state_path);
     let cache = deckle_core::wordwise::default_cache_dir().join("digest");
+    let was_imported = state.imported;
     if !deckle_morgue::import::import_once(&morgue, &cache, &mut state).is_empty() {
         eprintln!("morgue: imported the editions in {}", cache.display());
     }
-    if let Err(e) = state.save(&state_path) {
+    // Only a first import changes the state; saving on every build widens the window in which
+    // another writer's update is lost.
+    if state.imported != was_imported
+        && let Err(e) = state.save(&state_path)
+    {
         eprintln!("morgue: {}: {e}", state_path.display());
     }
     morgue
