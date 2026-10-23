@@ -48,6 +48,7 @@ pub fn run() {
             commands::take_preloaded_books,
             commands::take_preloaded_target,
             commands::inspect_books,
+            commands::bind_books,
             commands::import_articles,
             commands::list_devices,
             commands::set_device_options,

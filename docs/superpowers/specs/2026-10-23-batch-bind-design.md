@@ -23,7 +23,7 @@ split across documents — and get one book with a contents page, in the order g
 
 ## 2. Out of scope
 
-- Reordering or retitling parts from the CLI beyond argument order (the app's list will).
+- Retitling parts (each keeps its own title).
 - A generated cover from the parts: the bound book has no cover, so `run` generates the usual
   typographic one from its title.
 - Merging styles or fonts across parts.
@@ -70,3 +70,19 @@ hint. `--json` gives the file, title, author, parts and warnings.
   refused.
 - The pipeline's import stage now goes through `deckle_core::import`, shared with bind; its
   existing tests pass unchanged.
+
+## 6. In the app
+
+- **Where.** The Send button's menu has **Bind into one book…** (next to Export to folder),
+  enabled once the list has two rows that can be parts: anything but an error row or a finished
+  `.kfx`. Web articles are already EPUBs by the time they're rows, so they bind like any book.
+- **The panel** opens above the list: every part in list order, each with a box to leave it out
+  and ↑/↓ to move it, then Title (required) and Author (optional), and **Bind N**.
+- **The result** takes the parts' place in the list as one row, built in Deckle's cache folder
+  (`…/bound/<title>.epub`) and carrying the bind's warnings; a notice says it's ready to check and
+  send. Binding again with the same title replaces that file.
+- **Shared code.** `deckle_cli::bind_files` does the importing and binding for both `deckle bind`
+  and the app's `bind_books` command (off the main thread).
+- **Tests.** `rows_bind_into_one_book_row` (a Word document and a text file bind into a row with
+  the given title; an empty title and a single file are refused); vitest covers the panel's
+  reorder and which rows can be parts.
