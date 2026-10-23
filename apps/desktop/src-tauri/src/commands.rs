@@ -316,13 +316,13 @@ pub fn is_kfx(p: &Path) -> bool {
 
 /// A Word document or a text file: imported to an EPUB first, as `deckle run` does.
 fn is_imported(p: &Path) -> bool {
-    deckle_docx::is_word(p) || deckle_txt::is_text(p)
+    deckle_docx::is_word(p) || deckle_txt::is_text(p) || deckle_pdf::is_pdf(p)
 }
 
-/// What a folder walk takes: EPUB, KFX and Word documents. A `.txt` in a folder is far more
+/// What a folder walk takes: EPUB, KFX, Word documents and PDFs. A `.txt` in a folder is far more
 /// often a note or a README than a book, so text files are taken only when named directly.
 fn is_book(p: &Path) -> bool {
-    has_extension(p, "epub") || is_kfx(p) || deckle_docx::is_word(p)
+    has_extension(p, "epub") || is_kfx(p) || deckle_docx::is_word(p) || deckle_pdf::is_pdf(p)
 }
 
 /// EPUB, KFX and Word files from a mix of file and folder paths (folders are walked, sorted by
@@ -1162,6 +1162,26 @@ mod tests {
         let row = book_row(&bad);
         assert_eq!(row.mode, "error");
         assert!(row.reason.contains("not a Word document"), "{}", row.reason);
+    }
+
+    #[test]
+    fn a_pdf_row_shows_the_reflowed_metadata_and_a_scan_says_why_not() {
+        // Needs PDFium: tools/fetch-pdfium.sh, or DECKLE_PDFIUM.
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/pdf");
+        let pdf = book_row(&fixtures.join("book.pdf"));
+        assert_eq!(pdf.error, None, "{}", pdf.reason);
+        assert_eq!(
+            (pdf.title.as_str(), pdf.authors.as_str()),
+            ("A Small Book", "B. Writer")
+        );
+        let scan = book_row(&fixtures.join("scan.pdf"));
+        assert_eq!(scan.mode, "error");
+        assert!(scan.reason.contains("no text in it"), "{}", scan.reason);
+        let found = expand_book_paths(&[fixtures.to_string_lossy().into_owned()]);
+        assert!(
+            found.iter().any(|p| p.ends_with("book.pdf")),
+            "a folder drop takes PDFs"
+        );
     }
 
     #[test]

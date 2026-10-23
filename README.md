@@ -94,10 +94,11 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   dictionary when it has one.
 - **Other inputs.** `.docx`, `.txt`, web articles (a URL, `.webloc`/`.url`, or a saved `.html`)
   go through the same pipeline. A finished `.kfx` is sent as is.
-- **PDFs, reflowed (CLI).** A text PDF becomes a book that reflows: columns read in order,
-  running heads and page numbers dropped, broken words joined, and tables, equations and figures
-  kept as pictures. It's never as good as a real ebook, and the run says so. Needs the free
-  PDFium library (`tools/fetch-pdfium.sh`, or set `DECKLE_PDFIUM`); scans aren't supported.
+- **PDFs, reflowed.** A text PDF becomes a book that reflows: columns read in order, running
+  heads and page numbers dropped, broken words joined, and tables, equations and figures kept as
+  pictures. It's never as good as a real ebook, and the run says so. The app ships with the
+  PDFium library it needs; a source build of the CLI gets it with `tools/fetch-pdfium.sh` (or
+  `DECKLE_PDFIUM`). Scans aren't supported.
 - **Optional cleanups.** Fill missing metadata from Open Library, fix typography, turn footnotes
   into pop-up notes.
 - **Library.** A plain folder (`Author/Title/` plus a `deckle.json`), no database. Deckle can

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **PDFs in the app** (#133). Drop a PDF on the window (or a folder of them, or pick one with
+  **Choose files…**) and it's reflowed, built and sent like any book; its row shows the title and
+  author it reflows with, and a scan says why it can't be read. The app now carries PDFium, so
+  nothing extra needs installing. `deckle inspect` reads PDFs, Word documents and text files too.
 - **Word documents and text files in the app** (#134). Drop a `.docx` or `.txt` on the window,
   or pick one with **Choose files…**, and it's built and sent like an EPUB, its row showing the
   title and author it imports with. A folder drop takes Word documents too, but leaves `.txt`

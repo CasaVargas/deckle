@@ -110,7 +110,16 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
     let json = cli.json;
     match cli.command {
         cli::Command::Inspect { epub } => {
-            let info = inspect(&epub).map_err(|e| e.to_string())?;
+            // A Word document, text file or PDF reports the EPUB it imports as.
+            let info = if deckle_library::is_source(&epub)
+                && !epub
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
+            {
+                deckle_library::book_info(&epub)?
+            } else {
+                inspect(&epub).map_err(|e| e.to_string())?
+            };
             emit(json, &info, || {
                 let authors: Vec<&str> = info.creators.iter().map(|c| c.name.as_str()).collect();
                 let series = info
