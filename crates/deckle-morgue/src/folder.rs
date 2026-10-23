@@ -1,0 +1,177 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! The Morgue folder: `YYYY/YYYY-MM-DD.{epub,json,kfx}` (design §3). Only files named exactly
+//! so, inside a `YYYY` folder, are ever listed or deleted; whatever else you put there is yours.
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+use chrono::NaiveDate;
+use deckle_digest::Config;
+
+use crate::sidecar::Sidecar;
+
+/// KFX copies are kept this many days: they only make a re-send fast.
+const KFX_DAYS: i64 = 14;
+
+#[derive(Clone, Debug)]
+pub struct Morgue {
+    pub root: PathBuf,
+    /// Editions older than this are removed on archive; `0` keeps them all.
+    pub keep_days: u32,
+}
+
+/// `<path>.tmp`, written then renamed over `path`, so a crash never leaves half a file.
+fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let tmp = path.with_extension(format!(
+        "{}.tmp",
+        path.extension().and_then(|e| e.to_str()).unwrap_or("")
+    ));
+    let result = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+fn copy_atomic(from: &Path, to: &Path) -> io::Result<()> {
+    let tmp = to.with_extension(format!(
+        "{}.tmp",
+        to.extension().and_then(|e| e.to_str()).unwrap_or("")
+    ));
+    let result = std::fs::copy(from, &tmp).and_then(|_| std::fs::rename(&tmp, to));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// `YYYY-MM-DD` as a date, only when that is the whole name.
+fn strict_date(name: &str) -> Option<NaiveDate> {
+    (name.len() == 10)
+        .then(|| NaiveDate::parse_from_str(name, "%Y-%m-%d").ok())
+        .flatten()
+}
+
+impl Morgue {
+    pub fn from_config(cfg: &Config) -> Morgue {
+        Morgue {
+            root: deckle_digest::inbox::expand_home(&cfg.morgue.folder),
+            keep_days: cfg.morgue.keep_days,
+        }
+    }
+
+    /// The EPUB, JSON and KFX paths of an edition.
+    pub fn paths(&self, date: NaiveDate) -> (PathBuf, PathBuf, PathBuf) {
+        let dir = self.root.join(date.format("%Y").to_string());
+        let name = date.to_string();
+        (
+            dir.join(format!("{name}.epub")),
+            dir.join(format!("{name}.json")),
+            dir.join(format!("{name}.kfx")),
+        )
+    }
+
+    /// Keeps `epub` and its sidecar, EPUB first and JSON last, so a JSON never points at a
+    /// missing EPUB. A second build of the same date replaces the first, KFX copy included:
+    /// that was made from the older build.
+    pub fn archive_edition(&self, epub: &Path, sidecar: &Sidecar) -> io::Result<()> {
+        let (epub_to, json_to, kfx_to) = self.paths(sidecar.date);
+        std::fs::create_dir_all(epub_to.parent().expect("a year folder"))?;
+        copy_atomic(epub, &epub_to)?;
+        let mut sidecar = sidecar.clone();
+        sidecar.files.kfx = None;
+        let json = serde_json::to_vec_pretty(&sidecar).map_err(io::Error::other)?;
+        write_atomic(&json_to, &json)?;
+        let _ = std::fs::remove_file(kfx_to);
+        self.prune_old(sidecar.date);
+        Ok(())
+    }
+
+    /// Keeps the converted KFX beside the edition and says so in its sidecar.
+    pub fn archive_kfx(&self, date: NaiveDate, kfx: &Path) -> io::Result<()> {
+        let (_, json_to, kfx_to) = self.paths(date);
+        let mut sidecar = self.sidecar(date).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "that edition isn't archived")
+        })?;
+        copy_atomic(kfx, &kfx_to)?;
+        sidecar.files.kfx = Some(format!("{date}.kfx"));
+        let json = serde_json::to_vec_pretty(&sidecar).map_err(io::Error::other)?;
+        write_atomic(&json_to, &json)
+    }
+
+    /// Every archived edition, newest first.
+    pub fn editions(&self) -> Vec<NaiveDate> {
+        let mut out = Vec::new();
+        let Ok(years) = std::fs::read_dir(&self.root) else {
+            return out;
+        };
+        for year in years.flatten() {
+            let Some(y) = year.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if y.len() != 4 || !y.bytes().all(|b| b.is_ascii_digit()) || !year.path().is_dir() {
+                continue;
+            }
+            let Ok(files) = std::fs::read_dir(year.path()) else {
+                continue;
+            };
+            for f in files.flatten() {
+                let name = f.file_name().to_string_lossy().into_owned();
+                let Some(date) = name.strip_suffix(".json").and_then(strict_date) else {
+                    continue;
+                };
+                if date.format("%Y").to_string() == y {
+                    out.push(date);
+                }
+            }
+        }
+        out.sort_by(|a, b| b.cmp(a));
+        out
+    }
+
+    pub fn sidecar(&self, date: NaiveDate) -> Option<Sidecar> {
+        let bytes = std::fs::read(self.paths(date).1).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    /// Removes editions past `keep_days` (when it isn't 0) and KFX copies past two weeks,
+    /// relative to `today`. Returns what it removed.
+    pub fn prune_old(&self, today: NaiveDate) -> Vec<PathBuf> {
+        let mut removed = Vec::new();
+        for date in self.editions() {
+            let age = (today - date).num_days();
+            let (epub, json, kfx) = self.paths(date);
+            if self.keep_days > 0 && age > i64::from(self.keep_days) {
+                for p in [epub, json, kfx] {
+                    if std::fs::remove_file(&p).is_ok() {
+                        removed.push(p);
+                    }
+                }
+            } else if age > KFX_DAYS && kfx.exists() && std::fs::remove_file(&kfx).is_ok() {
+                removed.push(kfx);
+                if let Some(mut s) = self.sidecar(date) {
+                    s.files.kfx = None;
+                    if let Ok(json_bytes) = serde_json::to_vec_pretty(&s) {
+                        let _ = write_atomic(&json, &json_bytes);
+                    }
+                }
+            }
+        }
+        removed
+    }
+
+    /// The editions kept and the bytes they take.
+    pub fn usage(&self) -> (usize, u64) {
+        let dates = self.editions();
+        let bytes = dates
+            .iter()
+            .flat_map(|d| {
+                let (a, b, c) = self.paths(*d);
+                [a, b, c]
+            })
+            .filter_map(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len())
+            .sum();
+        (dates.len(), bytes)
+    }
+}
