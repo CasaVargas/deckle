@@ -90,7 +90,7 @@ fn the_morning_paper_goes_to_a_kobo_with_no_previewer() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(v["run"], serde_json::Value::Null);
-    assert_eq!(v["kobo_queued"], true);
+    assert_eq!(v["epub_queued"], true);
     let notes = v["build"]["notes"].to_string();
     assert!(notes.contains("no Kindle copy"), "{notes}");
     assert_eq!(
@@ -113,13 +113,13 @@ fn the_morning_paper_goes_to_a_kobo_with_no_previewer() {
     }
     assert!(any_span, "the paper went over as a KEPUB");
     // Remembered: the next run queues the paper for it even when it's unplugged.
-    let seen = std::fs::read_to_string(home.join(".config/com.casavargas.deckle/kobos.json"))
+    let seen = std::fs::read_to_string(home.join(".config/com.casavargas.deckle/readers.json"))
         .or_else(|_| {
             std::fs::read_to_string(
-                home.join("Library/Application Support/com.casavargas.deckle/kobos.json"),
+                home.join("Library/Application Support/com.casavargas.deckle/readers.json"),
             )
         })
-        .or_else(|_| std::fs::read_to_string(home.join("com.casavargas.deckle/kobos.json")))
+        .or_else(|_| std::fs::read_to_string(home.join("com.casavargas.deckle/readers.json")))
         .unwrap();
     assert!(seen.contains("kobo/N4181"), "{seen}");
 }

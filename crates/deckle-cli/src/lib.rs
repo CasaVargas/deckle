@@ -348,12 +348,12 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 .map(deckle_core::cover_rule::manual_asin)
                 .transpose()?;
             let pages = cli::parse_pages(pages.as_deref())?;
-            // No Kindle but a Kobo: a Kobo needs no Previewer (other readers design §8).
+            // No Kindle but a Kobo or a PocketBook: neither needs Previewer (other readers §8).
             if to == "device"
                 && detect_kindle().is_none()
-                && let Some(kobo) = detect_kobo()
+                && let Some(reader) = detect_reader()
             {
-                return send_to_kobo(&epubs, &kobo, json);
+                return send_to_reader(&epubs, &reader, json);
             }
             // Fail before any work (and before touching the target) when Previewer is missing.
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
@@ -686,8 +686,12 @@ fn highlights_cmd(
 ) -> Result<ExitCode, String> {
     // No Kindle but a Kobo: its highlights, written as a Kindle's clippings (other readers §8.2).
     let kobo = (from == "device" && detect_kindle().is_none())
-        .then(detect_kobo)
-        .flatten();
+        .then(detect_reader)
+        .flatten()
+        .and_then(|r| match r {
+            deckle_core::reader::Reader::Kobo(k) => Some(k),
+            _ => None,
+        });
     let read = match &kobo {
         Some(k) => deckle_core::kobo::read(k)
             .map(|r| r.clippings)
@@ -1413,10 +1417,14 @@ fn digest(
             // paper still goes to them, and nothing is converted or queued for a Kindle.
             let located = match previewer::locate(pv.as_deref()) {
                 Ok(l) => Some(l),
-                Err(e) if to == "device" && (!cfg.export.is_empty() || kobo_seen()) => {
+                Err(e)
+                    if to == "device"
+                        && (!cfg.export.is_empty() || reader_seen() || cfg.remarkable.enabled) =>
+                {
                     let to: Vec<&str> = [
                         (!cfg.export.is_empty()).then_some("the export folders"),
-                        kobo_seen().then_some("the Kobo"),
+                        reader_seen().then_some("the e-reader outbox"),
+                        cfg.remarkable.enabled.then_some("the reMarkable"),
                     ]
                     .into_iter()
                     .flatten()
@@ -1425,9 +1433,12 @@ fn digest(
                         "no Kindle copy: {e}; the paper went to {} only",
                         to.join(" and ")
                     ));
-                    // A long read with no book to become prints in the paper, unless a Kobo or
-                    // an export folder takes it as a book.
-                    if !kobo_seen() && !cfg.export.iter().any(|x| x.books) {
+                    // A long read with no book to become prints in the paper, unless an
+                    // e-reader or an export folder takes it as a book.
+                    if !reader_seen()
+                        && !cfg.export.iter().any(|x| x.books)
+                        && !(cfg.remarkable.enabled && cfg.remarkable.books)
+                    {
                         cfg.reading.long_read_words = usize::MAX;
                     }
                     None
@@ -1487,14 +1498,15 @@ fn digest(
                 None => deckle_digest::export::export_all(&cfg.export, date, &built),
             };
             let exported = exports.iter().any(|x| x.error.is_none());
-            // The EPUB outbox, for a Kobo: when one has been seen, or there is no Previewer.
+            // The EPUB outbox, for a Kobo or a PocketBook: when one has been seen, or there is
+            // no Previewer.
             let kobo_queue = epub_queue();
             let epub_queued = folder.is_none()
                 && epub_wanted(located.is_some())
                 && match queue_epubs(&kobo_queue, &built, date) {
                     Ok(()) => true,
                     Err(e) => {
-                        built.notes.push(format!("not queued for a Kobo: {e}"));
+                        built.notes.push(format!("not queued for an e-reader: {e}"));
                         false
                     }
                 };
@@ -1532,10 +1544,23 @@ fn digest(
                     built.notes.extend(note);
                 }
             }
+            // The reMarkable's PDF, from its own outbox.
+            let rm_queue = remarkable_queue();
+            let rm_queued = folder.is_none()
+                && cfg.remarkable.enabled
+                && match queue_remarkable(&rm_queue, &cfg, &built, date) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        built
+                            .notes
+                            .push(format!("not queued for the reMarkable: {e}"));
+                        false
+                    }
+                };
             if located.is_none() {
-                // Nothing for a Kindle: the export folders, the Kobo's outbox or the email were
-                // the delivery.
-                if exported || epub_queued || !to_usb {
+                // Nothing for a Kindle: the export folders, the e-reader or reMarkable outbox or
+                // the email were the delivery.
+                if exported || epub_queued || rm_queued || !to_usb {
                     reading_queue(&cfg)
                         .commit(date, &reading_outcomes)
                         .map_err(|e| format!("reading queue: {e}"))?;
@@ -1570,16 +1595,16 @@ fn digest(
                     .commit(date, &reading_outcomes)
                     .map_err(|e| format!("reading queue: {e}"))?;
             }
-            // A Kobo plugged in now takes its copy at once.
-            let kobo = match (&folder, epub_queued) {
-                (None, true) => match push_kobo(&kobo_queue, &cfg, detect_kobo().as_ref()) {
-                    Ok(o) => o,
-                    Err(e) => {
-                        built.notes.push(format!("kobo: {e}"));
-                        None
-                    }
-                },
-                _ => None,
+            // A reMarkable plugged in now takes the PDF at once.
+            let remarkable = rm_queued.then(|| push_remarkable(&cfg)).flatten();
+            // A Kobo or a PocketBook plugged in now takes its copy at once.
+            let device = detect_reader().filter(|_| folder.is_none() && epub_queued);
+            let reader = match push_reader(&kobo_queue, &cfg, device.as_ref()) {
+                Ok(o) => o,
+                Err(e) => {
+                    built.notes.push(format!("e-reader: {e}"));
+                    None
+                }
             };
             #[derive(serde::Serialize)]
             struct DigestRun<'a> {
@@ -1591,12 +1616,18 @@ fn digest(
                 email: &'a EmailRun,
                 #[serde(skip_serializing_if = "<[_]>::is_empty")]
                 exports: &'a [deckle_digest::export::ExportReport],
-                /// The paper queued for a Kobo (`outbox-epub`).
+                /// The paper queued for a Kobo or a PocketBook (`outbox-epub`).
                 #[serde(skip_serializing_if = "std::ops::Not::not")]
-                kobo_queued: bool,
-                /// A Kobo was connected and took it.
+                epub_queued: bool,
+                /// A Kobo or a PocketBook was connected and took it.
                 #[serde(skip_serializing_if = "Option::is_none")]
-                kobo: Option<&'a DigestOutcome>,
+                reader: Option<&'a DigestOutcome>,
+                /// The paper's PDF queued for a reMarkable (`outbox-remarkable`).
+                #[serde(skip_serializing_if = "std::ops::Not::not")]
+                remarkable_queued: bool,
+                /// A reMarkable answered and took it.
+                #[serde(skip_serializing_if = "Option::is_none")]
+                remarkable: Option<&'a deckle_core::sync::RemarkablePush>,
             }
             let all = DigestRun {
                 build: &built,
@@ -1604,8 +1635,10 @@ fn digest(
                 outcome: &outcome,
                 email: &email,
                 exports: &exports,
-                kobo_queued: epub_queued,
-                kobo: kobo.as_ref(),
+                epub_queued,
+                reader: reader.as_ref(),
+                remarkable_queued: rm_queued,
+                remarkable: remarkable.as_ref(),
             };
             let failed = report.as_ref().and_then(|r| r.error.as_ref());
             emit(json, &all, || {
@@ -1619,14 +1652,23 @@ fn digest(
                     Some(_) => outcome.describe(&queue),
                     None => String::new(),
                 };
-                let kobo_lines = match &kobo {
-                    Some(k) => format!("      Kobo:\n{}", k.describe(&kobo_queue)),
-                    None if epub_queued => {
-                        "      queued for a Kobo: it goes over when one is plugged in".to_owned()
+                let reader_lines = match (&reader, &device) {
+                    (Some(o), Some(d)) => {
+                        format!("      {}:\n{}", d.name(), o.describe(&kobo_queue))
                     }
+                    _ if epub_queued => "      queued for a Kobo or PocketBook: it goes over when \
+                                         one is plugged in"
+                        .to_owned(),
+                    _ => String::new(),
+                };
+                let rm_lines = match &remarkable {
+                    Some(p) => remarkable_lines(p),
+                    None if rm_queued => "      queued for the reMarkable: it goes over when it's \
+                                          plugged in with its USB web interface on"
+                        .to_owned(),
                     None => String::new(),
                 };
-                for part in [email.lines(), exported, usb, kobo_lines] {
+                for part in [email.lines(), exported, usb, reader_lines, rm_lines] {
                     if !part.is_empty() {
                         text.push_str(&format!("\n{part}"));
                     }
@@ -1761,23 +1803,36 @@ fn digest(
                 "device" => detect_kindle(),
                 folder => Some(resolve_target(folder)?),
             };
-            // A Kobo plugged in takes the EPUB outbox (other readers design §8).
+            // A Kobo or a PocketBook plugged in takes the EPUB outbox (other readers design §8).
             let kobo_queue = epub_queue();
-            let kobo = match to.as_str() {
-                "device" => detect_kobo(),
+            let reader = match to.as_str() {
+                "device" => detect_reader(),
+                _ => None,
+            };
+            // A reMarkable that answers takes its outbox too (other readers design §9).
+            let remarkable = match to.as_str() {
+                "device" => push_remarkable(&cfg),
                 _ => None,
             };
             if target.is_none()
-                && let Some(kobo) = &kobo
+                && let Some(reader) = &reader
             {
-                let outcome = push_kobo(&kobo_queue, &cfg, Some(kobo))?.unwrap_or_default();
+                let mut outcome = push_reader(&kobo_queue, &cfg, Some(reader))?.unwrap_or_default();
+                outcome.remarkable = remarkable;
                 emit(json, &outcome, || match &outcome.flush {
                     Some(_) => outcome.describe(&kobo_queue),
-                    None => "      nothing queued for the Kobo".into(),
+                    None => {
+                        let none = format!("      nothing queued for the {}", reader.name());
+                        match &outcome.remarkable {
+                            Some(p) => format!("{none}\n{}", remarkable_lines(p)),
+                            None => none,
+                        }
+                    }
                 })?;
                 return Ok(ExitCode::SUCCESS);
             }
-            let outcome = push_queued(&queue, &cfg, target)?;
+            let mut outcome = push_queued(&queue, &cfg, target)?;
+            outcome.remarkable = remarkable;
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
         }
@@ -1785,7 +1840,8 @@ fn digest(
             let cfg = load_digest_config(&path)?;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             eprintln!(
-                "watching for a Kindle or a Kobo every {interval}s; outbox {}",
+                "watching for a Kindle, a Kobo, a PocketBook or a reMarkable every {interval}s; \
+                 outbox {}",
                 queue.dir.display()
             );
             // The bookmarklet's listener (save-to-paper §4). A busy port only costs the
@@ -1818,9 +1874,12 @@ fn digest(
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
             let mut watcher = deckle_core::sync::Watcher::default();
-            // A Kobo has its own outbox and its own connection (other readers design §8).
+            // A Kobo or a PocketBook has its own outbox and connection (other readers design §8).
             let kobo_queue = epub_queue();
-            let mut kobo_watcher = deckle_core::sync::Watcher::default();
+            let mut reader_watcher = deckle_core::sync::Watcher::default();
+            // A reMarkable answers on its USB link; one push per connection, as for the others.
+            let rm_queue = remarkable_queue();
+            let mut rm_watcher = deckle_core::sync::Watcher::default();
             loop {
                 scan_inbox(&cfg);
                 let pending = queue.pending();
@@ -1837,21 +1896,44 @@ fn digest(
                         Err(e) => eprintln!("error: {e}"),
                     }
                 }
-                let kobo = detect_kobo();
-                let kobo_id = kobo.as_ref().map(deckle_core::kobo::Kobo::id);
-                let kobo_actions = kobo_id
+                let reader = detect_reader();
+                let reader_id = reader.as_ref().map(deckle_core::reader::Reader::id);
+                let reader_actions = reader_id
                     .as_deref()
                     .map(|id| deckle_core::sync::Actions {
                         readership: false,
                         ..sync_actions(&cfg, id)
                     })
                     .unwrap_or_default();
-                let plan =
-                    kobo_watcher.tick(kobo_id.as_deref(), &kobo_queue.pending(), kobo_actions);
-                if let (Some(k), false) = (&kobo, plan.is_empty()) {
-                    match kobo_sync(&kobo_queue, &cfg, k, plan) {
+                let plan = reader_watcher.tick(
+                    reader_id.as_deref(),
+                    &kobo_queue.pending(),
+                    reader_actions,
+                );
+                if let (Some(k), false) = (&reader, plan.is_empty()) {
+                    match reader_sync(&kobo_queue, &cfg, k, plan) {
                         Ok(o) => emit(json, &o, || o.describe(&kobo_queue))?,
                         Err(e) => eprintln!("error: {e}"),
+                    }
+                }
+                if cfg.remarkable.enabled {
+                    let pending = rm_queue.pending();
+                    // Asked only while something waits: an absent tablet costs a second a tick.
+                    let tablet = (!pending.is_empty())
+                        .then(deckle_core::remarkable::detect)
+                        .flatten();
+                    let id = tablet.as_ref().map(deckle_core::remarkable::Remarkable::id);
+                    let push_only = deckle_core::sync::Actions {
+                        push: true,
+                        prune: false,
+                        clippings: false,
+                        readership: false,
+                        shelf: false,
+                    };
+                    let plan = rm_watcher.tick(id.as_deref(), &pending, push_only);
+                    if let (Some(r), true) = (&tablet, plan.push) {
+                        let p = deckle_core::sync::run_remarkable(&rm_queue, r);
+                        emit(json, &p, || remarkable_lines(&p))?;
                     }
                 }
                 std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
@@ -1875,10 +1957,38 @@ struct DigestOutcome {
     /// The Kindle's shelf recorded in the same session (`[sync] shelf`).
     #[serde(skip)]
     shelf: Option<deckle_shelf::Summary>,
+    /// What went to a reMarkable in the same run (`[remarkable]`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remarkable: Option<deckle_core::sync::RemarkablePush>,
+}
+
+/// One push to a reMarkable, as lines of the run's report.
+fn remarkable_lines(p: &deckle_core::sync::RemarkablePush) -> String {
+    let mut lines: Vec<String> = p
+        .uploaded
+        .iter()
+        .map(|f| format!("      reMarkable -> {f}"))
+        .collect();
+    lines.extend(
+        p.already
+            .iter()
+            .map(|f| format!("      reMarkable already has {f}")),
+    );
+    lines.extend(p.errors.iter().map(|e| format!("      reMarkable: {e}")));
+    lines.join("\n")
 }
 
 impl DigestOutcome {
     fn describe(&self, queue: &deckle_core::queue::Queue) -> String {
+        let main = self.describe_device(queue);
+        match &self.remarkable {
+            Some(p) if !main.is_empty() => format!("{main}\n{}", remarkable_lines(p)),
+            Some(p) => remarkable_lines(p),
+            None => main,
+        }
+    }
+
+    fn describe_device(&self, queue: &deckle_core::queue::Queue) -> String {
         match &self.flush {
             Some(f)
                 if f.delivered.is_empty()
@@ -2241,28 +2351,76 @@ fn detect_kindle() -> Option<Target> {
     resolve_target("device").ok()
 }
 
-/// The first connected Kobo (other readers design §8).
-fn detect_kobo() -> Option<deckle_core::kobo::Kobo> {
-    deckle_core::kobo::detect().into_iter().next()
+/// The first connected e-reader on a drive that isn't a Kindle: a Kobo, else a PocketBook
+/// (other readers design §8).
+fn detect_reader() -> Option<deckle_core::reader::Reader> {
+    deckle_core::reader::detect().into_iter().next()
 }
 
-/// What waits for a Kobo: EPUBs, made KEPUBs as they go over.
+/// What waits for a reMarkable: the paper's PDF and the long reads' EPUBs.
+fn remarkable_queue() -> deckle_core::queue::Queue {
+    deckle_core::queue::Queue::new(deckle_core::queue::Queue::remarkable_dir())
+}
+
+/// Puts the paper's PDF for the reMarkable's screen (and, with `books`, the long reads) in its
+/// outbox.
+fn queue_remarkable(
+    queue: &deckle_core::queue::Queue,
+    cfg: &deckle_digest::Config,
+    built: &deckle_digest::BuildReport,
+    date: deckle_digest::chrono::NaiveDate,
+) -> Result<(), String> {
+    let rm = &cfg.remarkable;
+    let pdf = built
+        .pdf(rm.screen, rm.photos())
+        .ok_or("the PDF edition wasn't built")?;
+    let name = format!("{}{date}.pdf", deckle_digest::EDITION_PREFIX);
+    queue
+        .add(pdf, &name, Some(deckle_digest::EDITION_PREFIX))
+        .map_err(|e| e.to_string())?;
+    if rm.books {
+        for p in &built.long_reads {
+            let name = p
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            queue.add(p, &name, None).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Uploads the reMarkable outbox when `[remarkable]` is on and the tablet answers.
+fn push_remarkable(cfg: &deckle_digest::Config) -> Option<deckle_core::sync::RemarkablePush> {
+    if !cfg.remarkable.enabled {
+        return None;
+    }
+    let queue = remarkable_queue();
+    if queue.pending().is_empty() {
+        return None;
+    }
+    let r = deckle_core::remarkable::detect()?;
+    Some(deckle_core::sync::run_remarkable(&queue, &r))
+}
+
+/// What waits for a Kobo or a PocketBook: EPUBs, made KEPUBs for a Kobo as they go over.
 fn epub_queue() -> deckle_core::queue::Queue {
     deckle_core::queue::Queue::new(deckle_core::queue::Queue::epub_dir())
 }
 
-/// Whether the paper is also queued as an EPUB: a Kobo has been seen, or there is no Previewer
-/// to make the Kindle's copy.
+/// Whether the paper is also queued as an EPUB: a Kobo or a PocketBook has been seen, or there
+/// is no Previewer to make the Kindle's copy.
 fn epub_wanted(previewer_found: bool) -> bool {
-    !previewer_found || kobo_seen()
+    !previewer_found || reader_seen()
 }
 
-/// A Kobo has been plugged in here before, or is now.
-fn kobo_seen() -> bool {
-    deckle_core::kobo::any_seen(&deckle_core::kobo::seen_file()) || detect_kobo().is_some()
+/// A Kobo or a PocketBook has been plugged in here before, or is now.
+fn reader_seen() -> bool {
+    deckle_core::reader::any_seen(&deckle_core::reader::seen_file()) || detect_reader().is_some()
 }
 
-/// Puts the paper's EPUB and the long reads' in the EPUB outbox, for a Kobo.
+/// Puts the paper's EPUB and the long reads' in the EPUB outbox, for a Kobo or a PocketBook.
 fn queue_epubs(
     queue: &deckle_core::queue::Queue,
     built: &deckle_digest::BuildReport,
@@ -2283,42 +2441,48 @@ fn queue_epubs(
     Ok(())
 }
 
-/// Flushes the EPUB outbox to `kobo`, when one is connected, with its `[sync]` actions.
-fn push_kobo(
+/// Flushes the EPUB outbox to `reader` (a Kobo or a PocketBook), when one is connected, with its
+/// `[sync]` actions.
+fn push_reader(
     queue: &deckle_core::queue::Queue,
     cfg: &deckle_digest::Config,
-    kobo: Option<&deckle_core::kobo::Kobo>,
+    reader: Option<&deckle_core::reader::Reader>,
 ) -> Result<Option<DigestOutcome>, String> {
-    let Some(kobo) = kobo else {
+    let Some(reader) = reader else {
         return Ok(None);
     };
-    let actions = sync_actions(cfg, &kobo.id());
+    let actions = sync_actions(cfg, &reader.id());
     let Some(plan) = push_plan(actions, queue.pending().is_empty()) else {
         return Ok(None);
     };
-    kobo_sync(queue, cfg, kobo, plan).map(Some)
+    reader_sync(queue, cfg, reader, plan).map(Some)
 }
 
-/// [`sync_to`] for a Kobo: push the EPUB outbox as KEPUBs, prune, and read its database for the
-/// highlights and the shelf. A Kobo has no `.yjf`, so no readership; and the Morgue's notes on
+/// [`sync_to`] for a Kobo or a PocketBook: push the EPUB outbox, prune, and on a Kobo read its
+/// database for the highlights and the shelf. Neither has a `.yjf`, so no readership; and the
+/// Morgue's notes on
 /// what's on the Kindle stay the Kindle's.
-fn kobo_sync(
+fn reader_sync(
     queue: &deckle_core::queue::Queue,
     cfg: &deckle_digest::Config,
-    kobo: &deckle_core::kobo::Kobo,
+    reader: &deckle_core::reader::Reader,
     plan: deckle_core::sync::Plan,
 ) -> Result<DigestOutcome, String> {
-    let id = kobo.id();
+    let id = reader.id();
     let now = deckle_digest::chrono::Utc::now();
     let stamp = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-    if let Err(e) = deckle_core::kobo::remember(&deckle_core::kobo::seen_file(), kobo, &stamp) {
-        eprintln!("kobo: {e}");
+    if let Err(e) = deckle_core::reader::remember(&deckle_core::reader::seen_file(), reader, &stamp)
+    {
+        eprintln!("{}: {e}", reader.name());
     }
-    let flush =
-        deckle_core::sync::run_kobo(queue, kobo, plan, &digest_prune(cfg), &mut |i, n, name| {
-            eprintln!("push: {i}/{n} {name}")
-        })
-        .map_err(|e| e.to_string())?;
+    let flush = deckle_core::sync::run_reader(
+        queue,
+        reader,
+        plan,
+        &digest_prune(cfg),
+        &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
+    )
+    .map_err(|e| e.to_string())?;
     if plan.clippings && puzzle_on(cfg) && flush.clippings_error.is_none() {
         let path = cfg.puzzle_store();
         let mut store = deckle_digest::puzzle::store::Store::load(&path);
@@ -2354,7 +2518,7 @@ fn kobo_sync(
             .kindles
             .get(&id)
             .cloned();
-        let name = cfg.sync.device_name(&id).unwrap_or_else(|| kobo.name());
+        let name = cfg.sync.device_name(&id).unwrap_or_else(|| reader.name());
         let snap = deckle_shelf::kobo_snapshot(
             books,
             flush.clippings.clone(),
@@ -2375,11 +2539,11 @@ fn kobo_sync(
     })
 }
 
-/// `deckle run … --to device` with no Kindle but a Kobo: each book cleaned and made a KEPUB
-/// (no Previewer), sent to the Kobo's `Deckle/` folder.
-fn send_to_kobo(
+/// `deckle run … --to device` with no Kindle but a Kobo or a PocketBook: each book cleaned
+/// (and made a KEPUB for a Kobo; no Previewer), sent to its `Deckle/` folder.
+fn send_to_reader(
     inputs: &[PathBuf],
-    kobo: &deckle_core::kobo::Kobo,
+    reader: &deckle_core::reader::Reader,
     json: bool,
 ) -> Result<ExitCode, String> {
     #[derive(serde::Serialize)]
@@ -2398,12 +2562,12 @@ fn send_to_kobo(
                 } else {
                     input.clone()
                 };
-                let bytes = deckle_core::kobo::book(&source)?;
+                let bytes = deckle_core::reader::book(reader, &source)?;
                 let stem = source
                     .file_stem()
                     .map(|s| deckle_core::deliver::sanitize(&s.to_string_lossy()))
                     .unwrap_or_else(|| "book".into());
-                deckle_core::kobo::deliver(kobo, &bytes, &deckle_core::kobo::kepub_name(&stem))
+                deckle_core::reader::deliver(reader, &bytes, &reader.file_name(&stem))
                     .map_err(|e| e.to_string())
             })();
             match r {
@@ -3263,7 +3427,7 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
         &reading_queue(cfg),
         &outbox,
         std::time::SystemTime::now(),
-        &mut inbox::with_kobo(kobo_seen().then(epub_queue), inbox::pipeline()),
+        &mut inbox::with_readers(reader_seen().then(epub_queue), inbox::pipeline()),
     );
     if r.queued > 0 {
         eprintln!(
@@ -3401,6 +3565,7 @@ mod tests {
             long_reads: vec![mini, broken],
             color_epub: None,
             color_long_reads: Vec::new(),
+            pdfs: Vec::new(),
             reading_outcomes: vec![
                 ("a1".into(), Outcome::Printed),
                 ("b2".into(), Outcome::Book),
@@ -3755,6 +3920,7 @@ mod layout_tests {
             long_reads: Vec::new(),
             color_epub: None,
             color_long_reads: Vec::new(),
+            pdfs: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
         };

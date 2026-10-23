@@ -144,6 +144,12 @@ impl Queue {
         crate::wordwise::default_cache_dir().join("outbox-epub")
     }
 
+    /// `<cache dir>/outbox-remarkable`: the paper's PDF (and long reads' EPUBs) waiting for a
+    /// reMarkable (other readers design §9).
+    pub fn remarkable_dir() -> PathBuf {
+        crate::wordwise::default_cache_dir().join("outbox-remarkable")
+    }
+
     /// Queued entries (`<name>.kfx` files, `<name>.book` folders and, in the EPUB outbox,
     /// `<name>.epub` files), oldest name first.
     pub fn pending(&self) -> Vec<PathBuf> {
@@ -153,7 +159,11 @@ impl Queue {
         let mut files: Vec<PathBuf> = entries
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "kfx" || x == "epub") || is_prepared(p))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|x| x == "kfx" || x == "epub" || x == "pdf")
+                    || is_prepared(p)
+            })
             .collect();
         files.sort();
         files

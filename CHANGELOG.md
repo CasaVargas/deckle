@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The PDF edition and reMarkable** (other readers design, phase 4). The paper can be a PDF
+  laid out for one screen (reMarkable 2, Paper Pro, Paper Pro Move, iPad, A5), with the masthead,
+  weather strip, photos and crossword grid in place, an outline, front-page links and searchable
+  text. `format = "pdf"` puts it in an export folder; `[remarkable]` (or the Daily tab's
+  reMarkable card) uploads it to a reMarkable over its USB web interface when it's plugged in, no
+  account needed. A reMarkable can't be pruned. Not yet checked on a real tablet.
+- **PocketBook** (other readers design, phase 3). Plugged in once, a PocketBook gets the paper,
+  long reads and Inbox books as EPUBs in a `Deckle/` folder, pruned to `keep`, and `deckle run`
+  sends to it when no Kindle is plugged in. No Previewer needed. Its highlights and shelf aren't
+  read yet, and it hasn't been checked on a real PocketBook.
 - **Kobo** (other readers design, phase 2). Plug a Kobo in once and every morning's paper is
   also queued for it, and goes over as a KEPUB (page counts and reading statistics) in a `Deckle/`
   folder the next time it's connected, pruned to `keep`. Long reads and Inbox books go too, and

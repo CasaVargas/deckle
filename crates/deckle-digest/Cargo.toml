@@ -32,6 +32,9 @@ chrono-tz = "0.10"
 iana-time-zone = "0.1"
 rrule = "0.14.0"
 flate2 = "1"
+# The PDF edition (pdf edition design): a low-level writer; Deckle lays the pages out itself.
+pdf-writer = "0.15"
+roxmltree.workspace = true
 deckle-highlights.workspace = true
 
 # The SMTP password's keychain (email design §6): each OS's own store.
@@ -46,7 +49,8 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile.workspace = true
-roxmltree.workspace = true
+# The PDF edition's tests read it back through PDFium.
+deckle-pdf.workspace = true
 zip.workspace = true
 image.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }

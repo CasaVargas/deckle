@@ -22,6 +22,7 @@ pub mod longread;
 pub mod mail;
 pub mod moon;
 pub mod next;
+pub mod pdf;
 pub mod press;
 pub mod puzzle;
 pub mod reading;
@@ -203,8 +204,29 @@ pub struct BuildReport {
     /// The long reads in color, in the same order as `long_reads`, beside `color_epub`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub color_long_reads: Vec<PathBuf>,
+    /// The PDF editions, one per screen and photos asked for (PDF edition design §7).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub pdfs: Vec<PdfBuild>,
     pub reading_outcomes: Vec<(String, reading::Outcome)>,
     pub notes: Vec<String>,
+}
+
+/// One PDF edition: the paper laid out for `screen`, its photos `photos`.
+#[derive(Clone, Debug, Serialize)]
+pub struct PdfBuild {
+    pub screen: pdf::Screen,
+    pub photos: config::Photos,
+    pub path: PathBuf,
+}
+
+impl BuildReport {
+    /// The PDF edition for `screen` and `photos`, when the build made one.
+    pub fn pdf(&self, screen: pdf::Screen, photos: config::Photos) -> Option<&Path> {
+        self.pdfs
+            .iter()
+            .find(|p| p.screen == screen && p.photos == photos)
+            .map(|p| p.path.as_path())
+    }
 }
 
 /// A gathered edition plus which of its sections carry news stories (for the headlines).
@@ -475,6 +497,22 @@ pub fn build_gathered(
             r.color_long_reads.push(p);
         }
     }
+    for (screen, photos) in cfg.pdfs_wanted() {
+        let p = out_dir
+            .join("pdf")
+            .join(format!("{screen:?}-{photos:?}").to_lowercase())
+            .join(format!("deckle-daily-{date}.pdf"));
+        if let Some(dir) = p.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&p, pdf::render(&gathered, screen, photos))
+            .map_err(|e| format!("{}: {e}", p.display()))?;
+        r.pdfs.push(PdfBuild {
+            screen,
+            photos,
+            path: p,
+        });
+    }
     r.reading_outcomes = gathered.reading_outcomes.clone();
     r.notes = gathered.notes.clone();
     Ok((r, gathered))
@@ -516,6 +554,7 @@ fn report(edition: &Edition, epub: PathBuf) -> BuildReport {
         long_reads: Vec::new(),
         color_epub: None,
         color_long_reads: Vec::new(),
+        pdfs: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
     }

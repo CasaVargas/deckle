@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use chrono::NaiveDate;
 use serde::Serialize;
 
-use crate::config::{ExportConfig, Photos};
+use crate::config::{ExportConfig, ExportFormat, Photos};
 use crate::{BuildReport, EDITION_PREFIX};
 
 /// What one export folder got.
@@ -31,6 +31,14 @@ pub struct ExportReport {
 /// The edition's name in an export folder: `deckle-daily-YYYY-MM-DD.epub`.
 pub fn export_filename(date: NaiveDate) -> String {
     format!("{EDITION_PREFIX}{date}.epub")
+}
+
+/// The extension an export's editions have.
+fn extension(format: ExportFormat) -> &'static str {
+    match format {
+        ExportFormat::Epub => "epub",
+        ExportFormat::Pdf => "pdf",
+    }
 }
 
 /// Every export in turn.
@@ -55,11 +63,19 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
         return report;
     }
     let color = e.photos == Photos::Color;
-    let paper = match (&built.color_epub, color) {
-        (Some(c), true) => c,
-        _ => &built.epub,
+    let paper = match (e.format, &built.color_epub, color) {
+        (ExportFormat::Pdf, ..) => match built.pdf(e.screen, e.photos) {
+            Some(p) => p.to_path_buf(),
+            None => {
+                report.error = Some("the PDF edition wasn't built".into());
+                return report;
+            }
+        },
+        (_, Some(c), true) => c.clone(),
+        _ => built.epub.clone(),
     };
-    let mut files = vec![(paper.clone(), export_filename(date))];
+    let name = format!("{EDITION_PREFIX}{date}.{}", extension(e.format));
+    let mut files = vec![(paper, name)];
     if e.books {
         let reads = match color && built.color_long_reads.len() == built.long_reads.len() {
             true => &built.color_long_reads,
@@ -83,7 +99,7 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
             }
         }
     }
-    match prune(&dir, e.keep) {
+    match prune_ext(&dir, e.keep, extension(e.format)) {
         Ok(gone) => report.pruned = gone,
         Err(why) => report.error = Some(why),
     }
@@ -120,6 +136,11 @@ fn copy_into(from: &Path, dir: &Path, name: &str) -> Result<PathBuf, String> {
 /// Removes all but the newest `keep` editions in `dir`; 0 keeps all. Only names Deckle writes
 /// (`deckle-daily-YYYY-MM-DD.epub`) count, so long reads and the owner's own files stay.
 pub fn prune(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
+    prune_ext(dir, keep, "epub")
+}
+
+/// [`prune`] for editions with extension `ext` (`deckle-daily-YYYY-MM-DD.<ext>`).
+pub fn prune_ext(dir: &Path, keep: usize, ext: &str) -> Result<Vec<PathBuf>, String> {
     if keep == 0 {
         return Ok(Vec::new());
     }
@@ -128,7 +149,10 @@ pub fn prune(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
         .flatten()
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let date = name.strip_prefix(EDITION_PREFIX)?.strip_suffix(".epub")?;
+            let date = name
+                .strip_prefix(EDITION_PREFIX)?
+                .strip_suffix(ext)?
+                .strip_suffix('.')?;
             let date = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
             Some((date, entry.path()))
         })
@@ -193,6 +217,7 @@ mod tests {
             long_reads,
             color_epub,
             color_long_reads,
+            pdfs: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
         }
@@ -298,6 +323,47 @@ mod tests {
                 "notes.epub"
             ]
         );
+    }
+
+    #[test]
+    fn a_pdf_export_gets_the_pdf_for_its_screen_and_prunes_pdfs() {
+        use crate::pdf::Screen;
+        let tmp = tempfile::tempdir().unwrap();
+        let mut b = built(tmp.path(), false, &[]);
+        let pdf = tmp.path().join("p.pdf");
+        std::fs::write(&pdf, b"%PDF-paper").unwrap();
+        b.pdfs.push(crate::PdfBuild {
+            screen: Screen::Remarkable2,
+            photos: Photos::Gray,
+            path: pdf,
+        });
+        let out = tmp.path().join("boox");
+        std::fs::create_dir(&out).unwrap();
+        for d in ["2026-10-20", "2026-10-21"] {
+            std::fs::write(out.join(format!("deckle-daily-{d}.pdf")), b"old").unwrap();
+            std::fs::write(out.join(format!("deckle-daily-{d}.epub")), b"old").unwrap();
+        }
+        let e = ExportConfig {
+            format: ExportFormat::Pdf,
+            photos: Photos::Gray,
+            keep: 2,
+            ..cfg(&out)
+        };
+        let r = export(&e, day(), &b);
+        assert_eq!(r.error, None);
+        assert_eq!(r.written, [out.join("deckle-daily-2026-10-23.pdf")]);
+        assert_eq!(std::fs::read(&r.written[0]).unwrap(), b"%PDF-paper");
+        assert_eq!(r.pruned, [out.join("deckle-daily-2026-10-20.pdf")]);
+        assert!(
+            out.join("deckle-daily-2026-10-20.epub").is_file(),
+            "EPUBs aren't its"
+        );
+        // Another screen's PDF wasn't built: said so, nothing written.
+        let other = ExportConfig {
+            screen: Screen::Ipad,
+            ..e
+        };
+        assert!(export(&other, day(), &b).error.is_some());
     }
 
     #[test]

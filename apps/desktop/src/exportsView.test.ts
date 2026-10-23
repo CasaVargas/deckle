@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { exportParts, folderName, hasFolder, iCloudDrive, newExport } from "./exportsView";
+import { exportParts, folderName, hasFolder, iCloudDrive, newExport, remarkablePart } from "./exportsView";
 
 const icloud = "/Users/me/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily";
 
 test("a new export is named after its folder, in color, keeping a week", () => {
-  expect(newExport(icloud, [])).toEqual({ name: "Deckle Daily", dir: icloud, format: "epub", photos: "color", keep: 7, books: false });
+  expect(newExport(icloud, [])).toEqual({ name: "Deckle Daily", dir: icloud, format: "epub", photos: "color", screen: "remarkable-2", keep: 7, books: false });
 });
 
 test("a taken name gets a number", () => {
@@ -39,4 +39,11 @@ test("each export is one sentence of the result", () => {
 
 test("iCloud Drive is under the home folder", () => {
   expect(iCloudDrive("/Users/me/")).toBe("/Users/me/Library/Mobile Documents/com~apple~CloudDocs");
+});
+
+test("a reMarkable's part of the result", () => {
+  expect(remarkablePart(undefined)).toBeNull();
+  expect(remarkablePart({ remarkable_queued: true })).toMatch(/Waiting for your reMarkable/);
+  expect(remarkablePart({ remarkable_queued: true, remarkable: { uploaded: ["a.pdf"], errors: [] } })).toBe("Sent to your reMarkable.");
+  expect(remarkablePart({ remarkable: { uploaded: [], errors: ["no answer"] } })).toBe("reMarkable: no answer");
 });

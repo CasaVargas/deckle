@@ -1,11 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { ExportConfig, ExportReport } from "./types";
+import type { ExportConfig, ExportReport, RemarkableConfig } from "./types";
 
 /** A new export's settings: color photos for a tablet, a week of papers. */
 export const DEFAULT_EXPORT: Omit<ExportConfig, "name" | "dir"> = {
   format: "epub",
   photos: "color",
+  screen: "remarkable-2",
   keep: 7,
+  books: false,
+};
+
+/** `[remarkable]` before it's turned on. */
+export const DEFAULT_REMARKABLE: RemarkableConfig = {
+  enabled: false,
+  screen: "remarkable-2",
   books: false,
 };
 
@@ -33,6 +41,15 @@ export function hasFolder(existing: ExportConfig[], dir: string): boolean {
 /** A run's export folders, one sentence each, for the Daily tab's result line. */
 export function exportParts(reports: ExportReport[] | undefined): string[] {
   return (reports ?? []).map((r) => (r.error ? `Not put in ${r.name}: ${r.error}.` : `Put in ${r.name}.`));
+}
+
+/** What a run did for a reMarkable, as a sentence (none when it isn't on). */
+export function remarkablePart(report: { remarkable_queued?: boolean; remarkable?: { uploaded: string[]; errors: string[] } } | undefined): string | null {
+  const r = report?.remarkable;
+  if (r?.uploaded.length) return "Sent to your reMarkable.";
+  if (r?.errors.length) return `reMarkable: ${r.errors[0]}`;
+  if (report?.remarkable_queued) return "Waiting for your reMarkable: plug it in with its USB web interface on.";
+  return null;
 }
 
 /** The iCloud Drive folder on a Mac, under `home`. */

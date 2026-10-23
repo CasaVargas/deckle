@@ -901,8 +901,10 @@ fn exports_need_a_unique_name_and_a_folder() {
     assert!(validate_exports(&[one("iPad", "~/a"), one("iPad", "~/b")]).is_err());
     let err = Config::parse("[[export]]\nname = \"iPad\"\ndir = \"\"\n").unwrap_err();
     assert!(err.contains("dir is empty"), "{err}");
-    // PDF and KEPUB come in later phases.
-    assert!(Config::parse("[[export]]\nname = \"x\"\ndir = \"~/x\"\nformat = \"pdf\"\n").is_err());
+    // A Kobo's KEPUB isn't an export format: a Kobo takes it from the outbox.
+    assert!(
+        Config::parse("[[export]]\nname = \"x\"\ndir = \"~/x\"\nformat = \"kepub\"\n").is_err()
+    );
 }
 
 #[test]
@@ -928,4 +930,102 @@ fn a_save_writes_exports_only_when_there_are_some() {
     exporting(&mut bad, Photos::Gray);
     bad.export[0].name.clear();
     assert!(save(&path, &bad).is_err());
+}
+
+// ---- The PDF edition (pdf edition design §8) ----
+
+#[test]
+fn the_pdf_edition_reads_back_with_its_titles_and_outline() {
+    use deckle_digest::config::Photos;
+    use deckle_digest::pdf::{Screen, render};
+    let g = gather(&config(), date(), now(), &fake);
+    let bytes = render(&g, Screen::Remarkable2, Photos::Gray);
+    assert!(bytes.starts_with(b"%PDF-"));
+    assert!(bytes.trim_ascii_end().ends_with(b"%%EOF"));
+    let pdfium = deckle_pdf::engine::pdfium().expect("PDFium (tools/fetch-pdfium.sh)");
+    let doc = pdfium.load_pdf_from_byte_slice(&bytes, None).unwrap();
+    let pages = doc.pages();
+    assert!(
+        pages.len() as usize > g.edition.sections.len(),
+        "a front page and a page per section at least"
+    );
+    let page_w = pages.get(0).unwrap().width().value;
+    assert!((page_w - 447.3).abs() < 1.0, "{page_w}");
+    let text: String = pages
+        .iter()
+        .map(|p| p.text().unwrap().all())
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Ligatures and line breaks aside, the words come back.
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("Inside today"), "{flat}");
+    for s in &g.edition.sections {
+        assert!(flat.contains(&s.title), "{} missing", s.title);
+    }
+    let story = &g.edition.sections[2].articles[0].title;
+    let first_words: String = story
+        .split_whitespace()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(flat.contains(&first_words), "{first_words}");
+    // The outline: the front page, each section, and each story under its section.
+    let marks = doc.bookmarks().iter().count();
+    let stories: usize = g.edition.sections.iter().map(|s| s.articles.len()).sum();
+    assert_eq!(marks, 1 + g.edition.sections.len() + stories);
+}
+
+#[test]
+fn every_screen_lays_the_paper_out() {
+    use deckle_digest::config::Photos;
+    use deckle_digest::pdf::{Screen, render};
+    let g = gather(&config(), date(), now(), &fake);
+    for screen in [
+        Screen::Remarkable2,
+        Screen::RemarkablePaperPro,
+        Screen::RemarkablePaperProMove,
+        Screen::Ipad,
+        Screen::A5,
+    ] {
+        let bytes = render(&g, screen, Photos::Color);
+        let doc = deckle_pdf::engine::pdfium()
+            .unwrap()
+            .load_pdf_from_byte_slice(&bytes, None)
+            .unwrap();
+        let p = doc.pages().get(0).unwrap();
+        let (w, h) = screen.page();
+        assert!((p.width().value - w).abs() < 1.0 && (p.height().value - h).abs() < 1.0);
+    }
+}
+
+#[test]
+fn a_pdf_export_or_a_remarkable_builds_its_pdf_edition() {
+    use deckle_digest::pdf::Screen;
+    let mut c = config();
+    exporting(&mut c, Photos::Gray);
+    c.export[0].format = deckle_digest::config::ExportFormat::Pdf;
+    c.remarkable.enabled = true;
+    c.remarkable.screen = Screen::RemarkablePaperPro;
+    let out = tempfile::tempdir().unwrap();
+    let r = build(&c, date(), now(), out.path(), &fake).unwrap();
+    assert_eq!(r.pdfs.len(), 2);
+    let rm2 = r.pdf(Screen::Remarkable2, Photos::Gray).unwrap();
+    assert!(std::fs::read(rm2).unwrap().starts_with(b"%PDF-"));
+    // A Paper Pro's PDF is in color, so the photos were kept in color.
+    assert!(r.pdf(Screen::RemarkablePaperPro, Photos::Color).is_some());
+    assert!(c.wants_color());
+}
+
+#[test]
+fn the_starter_remarkable_block_parses_once_uncommented() {
+    let start = STARTER.find("# [remarkable]").unwrap();
+    let block: String = STARTER[start..]
+        .lines()
+        .take_while(|l| l.starts_with("# "))
+        .map(|l| format!("{}\n", &l[2..]))
+        .collect();
+    let c = Config::parse(&format!("{STARTER}\n{block}")).unwrap();
+    assert!(c.remarkable.enabled);
+    assert_eq!(c.remarkable.photos(), Photos::Gray);
+    assert_eq!(c.pdfs_wanted().len(), 1);
 }
