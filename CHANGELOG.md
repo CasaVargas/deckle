@@ -7,6 +7,20 @@
   definition (from a Word Wise database already on this machine, never downloaded), the sentence
   you met it in, the book and the day. It reads `vocab.db` over the same single connection as a
   send, writes nothing to the Kindle, and overwrites the file each time.
+- **Morgue and From Your Shelf hardening** (#127, #126). Two builds of one date no longer share
+  a temp file, the Morgue's EPUB and sidecar are staged before either is replaced, and
+  `morgue.json` is saved only when the first import ran. Shelf read errors name the file, not the
+  book's title; a back-dated build no longer prints "-1 days ago"; "From Your Shelf" sits after
+  Feeds in the off-sections list; Windows **Open** uses Explorer.
+- **From Your Shelf, smaller fixes** (#126). A snapshot's freshness and the "plugged in" line now
+  count days the same way (in the paper's time zone). The same book on two Kindles is one line
+  even when only one copy has an ASIN (it is matched by title and author). Two Kindles with the
+  same name are told apart by the end of their serial, e.g. "Kindle (0001)".
+- **The Morgue, smaller fixes** (#127). Editions brought in from the cache keep their weather
+  line and lead on the calendar; an "unavailable" note no longer ends up in a story's text. The
+  Every edition card reloads when a build finishes or a send is queued, drops a slow earlier
+  search, says where the earlier editions stayed after you change the folder, and shows a
+  `digest.toml` that won't parse instead of quietly using the default folder.
 - **The Morgue** (#109): every edition is kept in a folder you can see, `~/Deckle/Morgue` (change
   it under `[morgue]` or on the Daily tab), for a year, with the stories' text so you can search
   it. **Every edition** on the Daily tab shows a month of front pages, search with the matching

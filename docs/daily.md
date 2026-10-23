@@ -268,6 +268,9 @@ of place a cleaner empties.
   put in the folder are left alone and never listed. A folder that can't be written (iCloud
   offline, a full disk) doesn't fail the paper: the run says "Morgue: couldn't save the edition
   (…)".
+- **What's in the files.** The sidecars and EPUBs hold the full text of the "Your Reading"
+  articles you saved, not just headlines. If you point the folder at iCloud Drive or another
+  synced folder, that text syncs with it.
 - **Every edition, on the Daily tab.** A month of front pages, each with the paper's name and its
   lead headline; days with no paper are blank, and the next one says "Tomorrow, 05:30". Type a
   word and the days with a match light up, with the matching stories listed. Click a day for its
@@ -298,7 +301,8 @@ keep_days = 365
 
 A page drawn from your own Kindle, after your feeds: **On your nightstand** (the books you're in the
 middle of, how far in, how long since you opened them, and a nudge back into the newest one),
-**You highlighted this … ago** (a passage from at least six months back, with your note under it)
+**You highlighted this … ago** (a passage from at least six months back, with your note under it; when nothing that old
+qualifies, one at least 30 days old is used instead)
 and **Words you looked up this week**.
 
 - **It's as of the last plug-in.** The page says which Kindle and when ("Taken from your Kindle

@@ -329,6 +329,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
       <EveryEdition
         disabled={planLocked}
+        building={running !== null}
         onFolder={(folder) => planSave((c) => ({ ...c, morgue: { keep_days: c.morgue?.keep_days ?? 365, folder } }))}
       />
 

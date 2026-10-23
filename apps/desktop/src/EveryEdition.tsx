@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { monthGrid, sizeLine } from "./morgueView";
 import type { MorgueDay, MorgueDetail, MorgueHit, MorgueMonth } from "./types";
@@ -9,7 +9,7 @@ const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /** Every edition kept: a month of front pages, search, and sending one to the Kindle again (Morgue design §6). */
-export default function EveryEdition({ onFolder, disabled }: { onFolder: (folder: string) => Promise<void> | void; disabled?: boolean }) {
+export default function EveryEdition({ onFolder, disabled, building }: { onFolder: (folder: string) => Promise<void> | void; disabled?: boolean; building?: boolean }) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -21,11 +21,30 @@ export default function EveryEdition({ onFolder, disabled }: { onFolder: (folder
   const [note, setNote] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [moved, setMoved] = useState<string | null>(null);
+  // Only the newest request may set the month or the hits: a slow earlier one is dropped.
+  const monthToken = useRef(0);
+  const searchToken = useRef(0);
 
-  const load = () => api.morgueMonth(year, month).then(setView).catch((e) => setError(String(e)));
+  const load = () => {
+    const token = ++monthToken.current;
+    return api
+      .morgueMonth(year, month)
+      .then((v) => {
+        if (token !== monthToken.current) return null;
+        setView(v);
+        return v;
+      })
+      .catch((e) => {
+        if (token === monthToken.current) setError(String(e));
+        return null;
+      });
+  };
+  // A new edition after a build, a size line after Send again: reload when a build ends too.
   useEffect(() => {
+    setError(null);
     load();
-  }, [year, month]);
+  }, [year, month, building]);
 
   // Debounced: a search scans every kept edition.
   useEffect(() => {
@@ -33,7 +52,14 @@ export default function EveryEdition({ onFolder, disabled }: { onFolder: (folder
       setHits([]);
       return;
     }
-    const t = setTimeout(() => api.morgueSearch(query).then(setHits).catch((e) => setError(String(e))), 250);
+    const t = setTimeout(() => {
+      const token = ++searchToken.current;
+      setError(null);
+      api
+        .morgueSearch(query)
+        .then((h) => token === searchToken.current && setHits(h))
+        .catch((e) => token === searchToken.current && setError(String(e)));
+    }, 250);
     return () => clearTimeout(t);
   }, [query]);
 
@@ -70,6 +96,8 @@ export default function EveryEdition({ onFolder, disabled }: { onFolder: (folder
     try {
       const name = await api.morgueSend(selected);
       setNote(`Queued ${name}. It goes over the next time a Kindle connects and stays a week.`);
+      load();
+      api.morgueShow(selected).then(setDetail).catch(() => {});
     } catch (e) {
       setError(String(e));
     } finally {
@@ -79,8 +107,11 @@ export default function EveryEdition({ onFolder, disabled }: { onFolder: (folder
   const changeFolder = async () => {
     const dir = await openDialog({ directory: true, multiple: false });
     if (typeof dir === "string") {
+      const before = view;
       await onFolder(dir);
-      await load();
+      const after = await load();
+      // Editions are not moved: say where the earlier ones stayed.
+      setMoved(before && before.editions > 0 && after && after.folder !== before.folder ? `Your ${before.editions} earlier ${before.editions === 1 ? "edition stays" : "editions stay"} in ${before.folder}. Move them to the new folder to see them here.` : null);
     }
   };
 
@@ -182,6 +213,7 @@ export default function EveryEdition({ onFolder, disabled }: { onFolder: (folder
         </div>
       )}
       {error && <p className="warn small">{error}</p>}
+      {moved && <p className="muted small">{moved}</p>}
       <div className="morgue-foot muted small">
         <span>{view ? sizeLine(view.editions, view.bytes) : ""}</span>
         <span className="morgue-folder" title={view?.folder}>

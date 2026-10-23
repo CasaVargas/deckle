@@ -20,29 +20,69 @@ pub struct Morgue {
     pub keep_days: u32,
 }
 
-/// `<path>.tmp`, written then renamed over `path`, so a crash never leaves half a file.
-fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let tmp = path.with_extension(format!(
-        "{}.tmp",
-        path.extension().and_then(|e| e.to_str()).unwrap_or("")
+/// A temp name beside `path` no other process or call shares, so two writers of one date never
+/// trade bytes mid-write.
+pub fn unique_tmp(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(
+        ".{}-{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
     ));
-    let result = std::fs::write(&tmp, bytes).and_then(|()| std::fs::rename(&tmp, path));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
+    path.with_file_name(name)
+}
+
+/// A file written beside its destination, not yet in place.
+struct Staged {
+    tmp: PathBuf,
+    to: PathBuf,
+}
+
+impl Staged {
+    fn write(to: &Path, bytes: &[u8]) -> io::Result<Staged> {
+        let tmp = unique_tmp(to);
+        std::fs::write(&tmp, bytes).inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })?;
+        Ok(Staged {
+            tmp,
+            to: to.to_owned(),
+        })
     }
-    result
+
+    fn copy(from: &Path, to: &Path) -> io::Result<Staged> {
+        let tmp = unique_tmp(to);
+        std::fs::copy(from, &tmp).inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })?;
+        Ok(Staged {
+            tmp,
+            to: to.to_owned(),
+        })
+    }
+
+    fn commit(self) -> io::Result<()> {
+        std::fs::rename(&self.tmp, &self.to).inspect_err(|_| {
+            let _ = std::fs::remove_file(&self.tmp);
+        })
+    }
+}
+
+impl Drop for Staged {
+    /// A staged file that was never committed (or already renamed away) leaves nothing behind.
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.tmp);
+    }
+}
+
+fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    Staged::write(path, bytes)?.commit()
 }
 
 fn copy_atomic(from: &Path, to: &Path) -> io::Result<()> {
-    let tmp = to.with_extension(format!(
-        "{}.tmp",
-        to.extension().and_then(|e| e.to_str()).unwrap_or("")
-    ));
-    let result = std::fs::copy(from, &tmp).and_then(|_| std::fs::rename(&tmp, to));
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp);
-    }
-    result
+    Staged::copy(from, to)?.commit()
 }
 
 /// `YYYY-MM-DD` as a date, only when that is the whole name.
@@ -90,11 +130,16 @@ impl Morgue {
     ) -> io::Result<()> {
         let (epub_to, json_to, kfx_to) = self.paths(sidecar.date);
         std::fs::create_dir_all(epub_to.parent().expect("a year folder"))?;
-        copy_atomic(epub, &epub_to)?;
+        // Stage both files before replacing either, so a failure copying the EPUB or writing the
+        // JSON leaves the previous EPUB and sidecar as they were. Only a failed rename (the two
+        // are in one folder, so it is rare) can still leave the new EPUB beside the old JSON.
+        let staged_epub = Staged::copy(epub, &epub_to)?;
         let mut sidecar = sidecar.clone();
         sidecar.files.kfx = None;
         let json = serde_json::to_vec_pretty(&sidecar).map_err(io::Error::other)?;
-        write_atomic(&json_to, &json)?;
+        let staged_json = Staged::write(&json_to, &json)?;
+        staged_epub.commit()?;
+        staged_json.commit()?;
         let _ = std::fs::remove_file(kfx_to);
         self.prune_old(today);
         Ok(())
@@ -104,7 +149,14 @@ impl Morgue {
     pub fn archive_kfx(&self, date: NaiveDate, kfx: &Path) -> io::Result<()> {
         let (_, json_to, kfx_to) = self.paths(date);
         let mut sidecar = self.sidecar(date).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "that edition isn't archived")
+            if json_to.is_file() {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("{} can't be read", json_to.display()),
+                )
+            } else {
+                io::Error::new(io::ErrorKind::NotFound, "that edition isn't archived")
+            }
         })?;
         copy_atomic(kfx, &kfx_to)?;
         sidecar.files.kfx = Some(format!("{date}.kfx"));
