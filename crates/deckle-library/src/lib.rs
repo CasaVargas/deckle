@@ -77,21 +77,28 @@ pub struct Library {
     pub root: PathBuf,
 }
 
-/// EPUB, Word document or plain text: what the library keeps.
+/// EPUB, Word document, plain text or PDF: what the library keeps.
 pub fn is_source(path: &Path) -> bool {
     deckle_docx::is_word(path)
         || deckle_txt::is_text(path)
+        || deckle_pdf::is_pdf(path)
         || path
             .extension()
             .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
 }
 
-/// The book's metadata: the EPUB's, or the EPUB a Word document or text file imports as.
+/// The book's metadata: the EPUB's, or the EPUB a Word document, text file or PDF imports as.
 pub fn book_info(path: &Path) -> Result<BookInfo, String> {
     if deckle_docx::is_word(path) {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let epub = dir.path().join("imported.epub");
         deckle_docx::convert(path, &epub).map_err(|e| e.to_string())?;
+        return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
+    }
+    if deckle_pdf::is_pdf(path) {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let epub = dir.path().join("imported.epub");
+        deckle_pdf::convert(path, &epub).map_err(|e| e.to_string())?;
         return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
     }
     if deckle_txt::is_text(path) {
@@ -439,6 +446,10 @@ impl Library {
         let source = book.source_path();
         let bytes = std::fs::read(&source).map_err(|e| e.to_string())?;
         let sha = sha256_hex(&bytes);
+        // Reading a PDF's metadata means reflowing all of it: an unchanged one is left be.
+        if sha == book.sidecar.sha256 && deckle_pdf::is_pdf(&source) {
+            return Ok(false);
+        }
         let info = book_info(&source)?;
         let metadata = Metadata {
             extra: book.sidecar.metadata.extra.clone(),

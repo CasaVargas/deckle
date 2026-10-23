@@ -277,6 +277,52 @@ fn a_plain_text_file_runs_through_the_whole_pipeline() {
 
 #[test]
 #[cfg(unix)] // the fake Previewer is a shell script
+fn a_text_pdf_runs_through_the_whole_pipeline_with_a_quality_note() {
+    // Needs PDFium: tools/fetch-pdfium.sh, or DECKLE_PDFIUM.
+    let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf/book.pdf");
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: true,
+        cde_override: None,
+        amazon_match: false,
+        generated_cover: Some(None),
+        metadata_fill: false,
+        typography: false,
+        popup_notes: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+        replaces: Vec::new(),
+    };
+    let report = run(&pdf, &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    // The imported EPUB passed inspect: metadata and contents came through it.
+    assert_eq!(report.info.title, "A Small Book");
+    assert_eq!(report.info.creators[0].name, "B. Writer");
+    assert_eq!(report.info.toc.len(), 2);
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("reflowed from a PDF")),
+        "{:?}",
+        report.warnings
+    );
+    assert!(report.delivered.is_some());
+    let work = report.work_dir.clone().expect("kept work dir");
+    assert!(work.join("imported.epub").is_file());
+    std::fs::remove_dir_all(work).ok();
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn an_empty_text_file_fails_at_import() {
     let dir = tempfile::tempdir().unwrap();
     let empty = dir.path().join("empty.txt");

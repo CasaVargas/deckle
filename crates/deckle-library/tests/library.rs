@@ -209,6 +209,18 @@ fn a_text_file_is_kept_as_it_is() {
 }
 
 #[test]
+fn a_pdf_is_kept_as_it_is() {
+    // Needs PDFium: tools/fetch-pdfium.sh, or DECKLE_PDFIUM.
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::new(tmp.path().join("Library"));
+    let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf/book.pdf");
+    assert!(deckle_library::is_source(&pdf));
+    let book = lib.add(&pdf).unwrap().book;
+    assert_eq!(book.sidecar.source, "book.pdf");
+    assert_eq!(book.sidecar.metadata.title, "A Small Book");
+}
+
+#[test]
 fn scan_adopts_bare_and_loose_books_and_reports_problems() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("Library");
