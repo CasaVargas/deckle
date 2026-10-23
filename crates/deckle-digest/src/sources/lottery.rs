@@ -72,6 +72,7 @@ pub fn powerball(json: &[u8]) -> Result<Article, String> {
         }
     }
     Ok(Article {
+        extra: Default::default(),
         url: None,
         outlet: None,
         teaser: None,
@@ -92,6 +93,7 @@ pub fn mega_millions(json: &[u8]) -> Result<Article, String> {
         body.push_str(&format!("<p>Megaplier {}x</p>", esc(m)));
     }
     Ok(Article {
+        extra: Default::default(),
         url: None,
         outlet: None,
         teaser: None,
