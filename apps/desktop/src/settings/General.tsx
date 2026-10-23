@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { api } from "../api";
 import type { LibraryStatus, PreviewerStatus, Settings } from "../types";
+import Originals from "./Originals";
 import { Link, Row, Switch } from "./Row";
 
 interface Props {
@@ -67,6 +68,7 @@ export default function General({ settings, set, previewer, onPickPreviewer, lib
           <Switch label="Add every book I send" checked={library.auto_add} onChange={(on) => onLibrary(library.root, on)} />
         </Row>
       )}
+      <Originals />
 
       <Row label="Default mode" note="Automatic lets the cover rule decide per Kindle">
         <select value={settings.cde} onChange={(e) => set("cde", e.target.value as Settings["cde"])} aria-label="Default mode">

@@ -88,6 +88,7 @@ pub(crate) fn pipeline_with(
             wikipedia: false,
             word_wise: Some(Default::default()),
             replaces: Vec::new(),
+            originals: None,
         };
         let prepared = prepare(book, &opts, &mut |_| {})
             .map_err(|r| Skip::Unreadable(r.error.unwrap_or_else(|| "not converted".into())))?;

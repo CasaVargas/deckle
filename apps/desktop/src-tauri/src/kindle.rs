@@ -78,7 +78,7 @@ fn highlights_state(config: &Path) -> PathBuf {
     config.with_file_name("highlights.json")
 }
 
-fn data_url(bytes: &[u8]) -> String {
+pub fn data_url(bytes: &[u8]) -> String {
     let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         "image/png"
     } else if bytes.starts_with(b"GIF8") {
@@ -381,6 +381,19 @@ pub fn write_highlights_on(conn: &mut Conn<'_>, state: &Path) -> Result<Outcome,
     })
 }
 
+/// Before an upgrade replaces anything (Books and Kindle design §6): when there's a folder for
+/// highlights, what's new goes there, over its own session. A failure is logged; the old copy's
+/// `.sdr` is kept either way.
+pub fn highlights_first(target: &Target, config: &Path) {
+    let state = highlights_state(config);
+    if State::load(&state).folder.is_none() {
+        return;
+    }
+    if let Err(e) = write_highlights_on(&mut Conn::new(target), &state) {
+        eprintln!("upgrade: highlights weren't saved first: {e}");
+    }
+}
+
 /// Every English word looked up on the Kindle, as a CSV Anki imports, written over `to` (#135).
 /// Reads `vocab.db` over `conn`, never writes to the Kindle, and defines words only from a Word
 /// Wise database already on this machine. Returns how many words went out.
@@ -402,7 +415,7 @@ pub fn remove_from(conn: &mut Conn<'_>, config: &Path, file: &str) -> Result<Vec
     Ok(removed)
 }
 
-fn with_target<T: Send + 'static>(
+pub fn with_target<T: Send + 'static>(
     target: RunTarget,
     f: impl FnOnce(&mut Conn<'_>, &Path) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {

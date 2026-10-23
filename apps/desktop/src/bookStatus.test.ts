@@ -13,7 +13,7 @@ function done(overrides: Partial<BookState> = {}): BookState {
   return {
     id: "a", path: "/b.epub", title: "T", authors: "A", series: null, cover: null, mode: "full", reason: "", warnings: [], error: null,
     status: "done", stage: null, delivered: "/k/b.kfx", pages: 496, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null,
-    cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false,
+    cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false, upgradeOf: null,
     ...overrides,
   };
 }

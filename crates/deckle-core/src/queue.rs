@@ -371,6 +371,7 @@ fn push_options(wishes: &Wishes, finishing: &Finishing, target: &Target) -> RunO
             ..finishing.word_wise.clone()
         }),
         replaces: Vec::new(),
+        originals: None,
     }
 }
 
@@ -527,6 +528,7 @@ mod tests {
                 wikipedia: false,
                 word_wise: Some(WordWiseOptions::default()),
                 replaces: Vec::new(),
+                originals: None,
             };
             prepare(
                 &deckle_kfx::fixtures::path("deckle-mini.epub"),

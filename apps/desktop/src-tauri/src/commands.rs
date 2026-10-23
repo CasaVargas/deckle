@@ -107,6 +107,21 @@ pub struct RunRequest {
     /// The book's Amazon ASIN, typed by the owner (design §3).
     #[serde(default)]
     pub asin: Option<String>,
+    /// The Kindle's copy this send upgrades (Books and Kindle design §6): replaced and kept.
+    #[serde(default)]
+    pub upgrade_of: Option<UpgradeOf>,
+}
+
+/// A book on a Kindle that a send replaces with Deckle's build of its original.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpgradeOf {
+    /// The Kindle's profile key; the send replaces nothing on another Kindle.
+    pub device: String,
+    /// Under `documents/`.
+    pub file: String,
+    pub title: String,
+    #[serde(default)]
+    pub origin: Option<deckle_library::sources::Origin>,
 }
 
 /// Emitted as `book-progress` once per stage and once at the end of each book.
@@ -689,6 +704,11 @@ pub fn run_books_with(
         }
     };
     let mut firmware = None;
+    let library = deckle_library::config::default_path();
+    let device = deckle_library::device_ref(&target).key;
+    if books.iter().any(|b| b.upgrade_of.is_some()) {
+        crate::kindle::highlights_first(&target, &library);
+    }
     for b in books {
         if is_kfx(Path::new(&b.path)) {
             emit(ProgressEvent {
@@ -711,7 +731,20 @@ pub fn run_books_with(
             continue;
         }
         let override_str = effective_override(b.cde.as_deref(), device_override, settings);
-        let library = deckle_library::config::default_path();
+        // An upgrade replaces the Kindle's own copy, kept first; only on the Kindle it's on.
+        let upgrade = b
+            .upgrade_of
+            .as_ref()
+            .filter(|u| deckle_core::devices::same_device(&u.device, &device));
+        let at = deckle_core::devices::now_iso();
+        let kept = upgrade
+            .map(|u| deckle_library::upgrade::originals_dir(&library, &device, &u.file, &at));
+        let mut replaces = deckle_library::previous_copies(&library, Path::new(&b.path), &target);
+        if let Some(u) = upgrade
+            && !replaces.contains(&u.file)
+        {
+            replaces.push(u.file.clone());
+        }
         let opts = RunOptions {
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
             cde_override: override_str.map(cde_from),
@@ -742,7 +775,8 @@ pub fn run_books_with(
                 ..Default::default()
             }),
             // Kindle-updates design §4: the library's older copy under another name goes.
-            replaces: deckle_library::previous_copies(&library, Path::new(&b.path), &target),
+            replaces,
+            originals: kept.clone(),
         };
         let id = b.id.clone();
         let report = run_with_progress(Path::new(&b.path), &opts, &mut |stage| {
@@ -770,6 +804,29 @@ pub fn run_books_with(
         // Every book sent goes into the library, when there is one (library design §3).
         if let Err(e) = deckle_library::auto_add(&library, Path::new(&b.path), &report, &target) {
             report.warnings.push(deckle_library::auto_add_warning(&e));
+        }
+        if let (Some(u), Some(kept)) = (upgrade, &kept)
+            && let Err(e) = deckle_library::upgrade::record(
+                &library,
+                &device,
+                &u.file,
+                &u.title,
+                Path::new(&b.path),
+                u.origin,
+                kept,
+                &report,
+                &at,
+            )
+        {
+            report.warnings.push(format!(
+                "the upgrade wasn't recorded, so Put back can't undo it: {e}"
+            ));
+        }
+        if b.upgrade_of.is_some() && upgrade.is_none() {
+            report.warnings.push(
+                "sent as a new book: the upgrade was for another Kindle, so nothing was replaced"
+                    .into(),
+            );
         }
         emit(ProgressEvent {
             id: b.id.clone(),
@@ -1393,6 +1450,7 @@ mod tests {
                 path: kfx.to_string_lossy().into_owned(),
                 cde: Some("ebok".into()),
                 asin: None,
+                upgrade_of: None,
             }],
             &RunTarget::Folder {
                 path: out.path().to_string_lossy().into_owned(),
@@ -1436,6 +1494,7 @@ mod tests {
                     .into_owned(),
                 cde: None,
                 asin: None,
+                upgrade_of: None,
             }],
             &target,
             &settings,

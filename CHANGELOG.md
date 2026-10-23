@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Upgrade books Deckle didn't send** (Books and Kindle design, phase 1). The Kindle tab now
+  reads AZW3 and MOBI files too (title, author, cover, DRM) and lists the books whose originals
+  are on this computer: in your calibre library (read-only, matched by calibre's id, ASIN, ISBN,
+  then title and author) or in folders you name in Settings → General. **Upgrade** sends each
+  through the Books tab with Enhanced Typesetting, page numbers, X-Ray and Word Wise in place of
+  the Kindle's copy, which is kept with its `.sdr` (highlights, reading data); **Put back**
+  undoes it. Books you're partway through aren't ticked at first. Store books and anything with
+  DRM are never touched. CLI: `deckle kindle upgrade [--dry-run]` and `deckle kindle put-back`;
+  `deckle kindle books` names each book's class.
 - **The paper as data, version 1.1: fit for a 12.9-inch iPad** (Books and Kindle design,
   phase 2). Bundles now carry each photo as a full-size color master (up to 2400 px, JPEG 85)
   with its caption, credit, alt text, focus point and average color, and each story's byline,

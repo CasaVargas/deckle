@@ -38,6 +38,17 @@ export interface BookState extends BookRow {
   exported: boolean;
   /** Older copies this send removed from the Kindle. */
   replaced: string[];
+  /** The Kindle's own copy this send upgrades: replaced, and kept for Put back. */
+  upgradeOf: UpgradeOf | null;
+}
+
+/** A book on a Kindle that a send replaces with Deckle's build of its original (Books and Kindle design §6). */
+export interface UpgradeOf {
+  /** The Kindle's profile key. */
+  device: string;
+  file: string;
+  title: string;
+  origin: "calibre" | "folder" | null;
 }
 
 export interface WordWiseSummary {
@@ -533,4 +544,62 @@ export interface NextPaper {
   off: PagePlanRow[];
   pages: number;
   week: WeekDay[];
+}
+
+/** What a book on a Kindle is, for upgrading (Books and Kindle design §3). */
+export type UpgradeClass =
+  | "current"
+  | "older"
+  | "has-source"
+  | "kindle-copy"
+  | "no-source"
+  | "amazon-own"
+  | "locked"
+  | "fixed-layout"
+  | "pdf"
+  | "other"
+  | "unread";
+
+/** A book the Kindle tab can upgrade from its original on this computer. */
+export interface UpgradeRow {
+  file: string;
+  title: string;
+  authors: string[];
+  format: string;
+  class: UpgradeClass;
+  source: string;
+  origin: "calibre" | "folder";
+  fraction: number | null;
+  partway: boolean;
+  gains: string[];
+  cover: string | null;
+}
+
+export interface UpgradeHistoryRow {
+  old_file: string;
+  new_file: string | null;
+  title: string;
+  origin: "calibre" | "folder" | null;
+  at: string;
+}
+
+/** Where originals are looked for (Settings → General → Library). */
+export interface SourcesStatus {
+  find_in_calibre: boolean;
+  calibre: string | null;
+  folders: string[];
+}
+
+export interface UpgradesView {
+  device: string;
+  rows: UpgradeRow[];
+  counts: Partial<Record<UpgradeClass, number>>;
+  history: UpgradeHistoryRow[];
+  sources: SourcesStatus;
+  warnings: string[];
+}
+
+export interface PutBack {
+  restored: string;
+  removed: string[];
 }

@@ -214,6 +214,21 @@ input[type=checkbox] { padding: 0; }
 .badge.dup { color: var(--fail); border-color: var(--fail); }
 .update-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line)); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); font-size: 13px; }
 
+/* Kindle tab: upgrades from originals on this computer (Books and Kindle design §7) */
+.upgrades { display: flex; flex-direction: column; gap: 8px; margin: 0 0 16px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+.upgrades-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.upgrades-head h3 { font-family: ui-serif, Georgia, serif; font-size: 17px; margin: 0 0 2px; }
+.upgrades-head p { margin: 0; max-width: 620px; }
+.upgrades p { margin: 0; }
+.upgrade-list .row { grid-template-columns: 24px 56px minmax(0, 1fr) auto; background: var(--bg); }
+.upgrade-tick { display: grid; place-items: center; min-height: 44px; }
+.gains { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.upgrade-history summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.upgrade-history ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.upgrade-history li { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.upgrades-loading { margin: 0 0 12px; }
+.originals-folder { padding: 6px 0 6px 12px; }
+
 /* Settings: full window, pages in a sidebar */
 .settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px minmax(0, 1fr); }
 .settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; border-right: 1px solid var(--line); background: var(--panel); }

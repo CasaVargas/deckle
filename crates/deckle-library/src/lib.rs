@@ -14,6 +14,8 @@ pub mod freshness;
 pub mod series;
 pub mod shelf;
 pub mod sidecar;
+pub mod sources;
+pub mod upgrade;
 
 use std::path::{Path, PathBuf};
 

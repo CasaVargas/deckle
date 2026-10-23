@@ -32,6 +32,7 @@ tempfile.workspace = true
 rpassword = "7"
 
 [dev-dependencies]
+deckle-mobi.workspace = true
 zip.workspace = true
 rusqlite.workspace = true
 assert_cmd.workspace = true
