@@ -11,6 +11,7 @@ pub mod config;
 pub mod cover;
 pub mod day;
 pub mod epub;
+pub mod export;
 pub mod fetch;
 pub mod front;
 pub mod frost;
@@ -195,6 +196,13 @@ pub struct BuildReport {
     pub sections: Vec<SectionSummary>,
     /// Long-read EPUBs written beside the paper.
     pub long_reads: Vec<PathBuf>,
+    /// The paper with its photos in color, in `color/` beside the paper, when an export wants
+    /// it (other readers design §6.1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_epub: Option<PathBuf>,
+    /// The long reads in color, in the same order as `long_reads`, beside `color_epub`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub color_long_reads: Vec<PathBuf>,
     pub reading_outcomes: Vec<(String, reading::Outcome)>,
     pub notes: Vec<String>,
 }
@@ -455,6 +463,18 @@ pub fn build_gathered(
     }
     let mut r = report(&gathered.edition, path);
     r.long_reads = long_reads;
+    // The fetch kept the photos in color for an export; the paper above grayed them.
+    if cfg.wants_color() {
+        let dir = out_dir.join("color");
+        let color = dir.join(format!("deckle-daily-{date}.epub"));
+        write_edition_as(&gathered, &color, config::Photos::Color)?;
+        r.color_epub = Some(color);
+        for lr in &gathered.long_reads {
+            let p = dir.join(format!("{}.epub", lr.file_stem));
+            longread::write_long_read_as(lr, date, &p, config::Photos::Color)?;
+            r.color_long_reads.push(p);
+        }
+    }
     r.reading_outcomes = gathered.reading_outcomes.clone();
     r.notes = gathered.notes.clone();
     Ok((r, gathered))
@@ -462,8 +482,17 @@ pub fn build_gathered(
 
 /// Renders and writes one gathered edition as an EPUB.
 pub fn write_edition(gathered: &Gathered, path: &Path) -> Result<(), String> {
+    write_edition_as(gathered, path, config::Photos::Gray)
+}
+
+/// [`write_edition`] with the photos grayscale for e-ink, or as they were fetched.
+pub fn write_edition_as(
+    gathered: &Gathered,
+    path: &Path,
+    photos: config::Photos,
+) -> Result<(), String> {
     let cover = cover::render(gathered).map_err(|e| format!("cover: {e}"))?;
-    let files = render::render(gathered, cover);
+    let files = render::render_as(gathered, cover, photos);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
@@ -485,6 +514,8 @@ fn report(edition: &Edition, epub: PathBuf) -> BuildReport {
             })
             .collect(),
         long_reads: Vec::new(),
+        color_epub: None,
+        color_long_reads: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
     }

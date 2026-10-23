@@ -112,3 +112,62 @@ fn a_small_inline_image_is_dropped_but_a_small_lead_and_big_inline_stay() {
     assert!(got[1].is_none(), "277 px square inline is an avatar");
     assert!(got[2].is_some());
 }
+
+// --- color for export folders (other readers design §6.1) ---
+
+fn color_type(jpeg: &[u8]) -> image::ColorType {
+    image::load_from_memory(jpeg).unwrap().color()
+}
+
+#[test]
+fn a_color_photo_stays_in_color_and_an_eink_one_is_gray() {
+    use deckle_digest::article::photo;
+    use deckle_digest::config::Photos;
+    let src = png(800, 500, 9);
+    let color = photo(&src, Photos::Color).unwrap();
+    assert_eq!(color_type(&color), image::ColorType::Rgb8);
+    assert_eq!(color_type(&eink_photo(&src).unwrap()), image::ColorType::L8);
+    assert_eq!(photo(&src, Photos::Gray), eink_photo(&src));
+}
+
+#[test]
+fn each_epub_grays_color_photos_unless_it_is_for_color() {
+    use deckle_digest::config::Photos;
+    use deckle_digest::render::page_photo;
+    let color = deckle_digest::article::photo(&png(800, 500, 10), Photos::Color).unwrap();
+    assert_eq!(page_photo(&color, Photos::Color), color);
+    assert_eq!(
+        color_type(&page_photo(&color, Photos::Gray)),
+        image::ColorType::L8
+    );
+    // An e-ink photo goes in untouched: the Kindle's paper is what it always was.
+    let gray = eink_photo(&png(800, 500, 11)).unwrap();
+    assert_eq!(page_photo(&gray, Photos::Gray), gray);
+}
+
+#[test]
+fn the_rendered_paper_grays_its_photos_and_the_color_edition_keeps_them() {
+    use deckle_digest::config::Photos;
+    use deckle_digest::render::{render, render_as};
+    let color = deckle_digest::article::photo(&png(800, 500, 12), Photos::Color).unwrap();
+    let g = deckle_digest::Gathered {
+        edition: edition(vec![story(vec![color.clone()], true)]),
+        news: Vec::new(),
+        reading: None,
+        long_reads: Vec::new(),
+        reading_outcomes: Vec::new(),
+        notes: Vec::new(),
+    };
+    let photo_of = |files: Vec<(String, Vec<u8>)>| {
+        files
+            .into_iter()
+            .find(|(n, _)| n.starts_with("OEBPS/") && n.ends_with(".jpg") && !n.contains("cover"))
+            .unwrap()
+            .1
+    };
+    assert_eq!(
+        color_type(&photo_of(render(&g, Vec::new()))),
+        image::ColorType::L8
+    );
+    assert_eq!(photo_of(render_as(&g, Vec::new(), Photos::Color)), color);
+}

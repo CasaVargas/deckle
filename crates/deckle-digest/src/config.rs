@@ -96,6 +96,10 @@ pub struct Config {
     /// The Morgue, every edition kept (Morgue design §3). Left out of a save while untouched.
     #[serde(skip_serializing_if = "MorgueConfig::is_default")]
     pub morgue: MorgueConfig,
+    /// `[[export]]`: folders each edition is also put in, e.g. iCloud Drive for an iPad (other
+    /// readers design §7). Left out of a save while there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub export: Vec<ExportConfig>,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
@@ -144,6 +148,7 @@ impl Default for Config {
             puzzle: PuzzleConfig::default(),
             shelf: ShelfConfig::default(),
             morgue: MorgueConfig::default(),
+            export: Vec::new(),
             almanac_path: None,
             press_path: None,
             puzzle_path: None,
@@ -707,6 +712,71 @@ impl EmailConfig {
     }
 }
 
+/// One `[[export]]` folder: each edition (and, with `books`, each long read) is written there
+/// after the build, plugged in or not (other readers design §7).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ExportConfig {
+    /// What the app and the report call it; unique among the exports.
+    pub name: String,
+    /// The folder; `~` is the home folder, as in `[reading] inbox`.
+    pub dir: String,
+    pub format: ExportFormat,
+    pub photos: Photos,
+    /// Editions kept in the folder; 0 keeps all.
+    pub keep: usize,
+    /// Also the long reads, not only the paper.
+    pub books: bool,
+}
+
+impl Default for ExportConfig {
+    fn default() -> Self {
+        ExportConfig {
+            name: String::new(),
+            dir: String::new(),
+            format: ExportFormat::Epub,
+            photos: Photos::Color,
+            keep: 7,
+            books: false,
+        }
+    }
+}
+
+/// What an export folder takes. Only EPUB for now: KEPUB comes with Kobo and PDF with the PDF
+/// edition (other readers design §14).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportFormat {
+    #[default]
+    Epub,
+}
+
+/// The paper's photos: grayscale for e-ink, or as published for a color screen.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Photos {
+    #[default]
+    Gray,
+    Color,
+}
+
+/// Each export has a name, unique, and a folder.
+pub fn validate_exports(exports: &[ExportConfig]) -> Result<(), String> {
+    for (i, e) in exports.iter().enumerate() {
+        let name = e.name.trim();
+        if name.is_empty() {
+            return Err(format!("[[export]] #{}: give it a name", i + 1));
+        }
+        if e.dir.trim().is_empty() {
+            return Err(format!("[[export]] {name:?}: dir is empty"));
+        }
+        if exports[..i].iter().any(|o| o.name.trim() == name) {
+            return Err(format!("[[export]] {name:?}: two exports have this name"));
+        }
+    }
+    Ok(())
+}
+
 /// The starter file `deckle digest init` writes.
 pub const STARTER: &str = r#"# Deckle Daily — your morning paper, built on this machine.
 # Edit freely; `deckle digest build` shows what a change does.
@@ -809,6 +879,16 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # smtp_port = 587            # 587 = STARTTLS, 465 = implicit TLS; anything else is refused
 # username = "you@example.com"
 # usb_too = false            # also queue the paper for USB when the email succeeds
+
+# Also put each edition in a folder, plugged in or not: an iCloud Drive folder reaches an
+# iPad's Files app (open it in Books), Dropbox reaches a Boox. Add one block per folder.
+# [[export]]
+# name = "iPad"
+# dir = "~/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily"
+# format = "epub"
+# photos = "color"                # or "gray" for an e-ink reader
+# keep = 7                        # editions kept in the folder; 0 keeps all
+# books = false                   # also the long reads, not only the paper
 "#;
 
 impl Config {
@@ -816,6 +896,7 @@ impl Config {
         let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
         cfg.normalize();
         cfg.email.validate()?;
+        validate_exports(&cfg.export)?;
         Ok(cfg)
     }
 
@@ -840,6 +921,7 @@ impl Config {
 /// [`STARTER`] (Daily design §5c).
 pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     cfg.email.validate()?;
+    validate_exports(&cfg.export)?;
     let mut cfg = cfg.clone();
     cfg.normalize();
     let cfg = &cfg;
@@ -935,6 +1017,12 @@ fn tables_of(item: &toml_edit::Item) -> Option<Vec<toml_edit::Table>> {
 /// `~/Library/Application Support/deckle/digest.toml`, `%APPDATA%\deckle\digest.toml`, or
 /// `$XDG_CONFIG_HOME/deckle/digest.toml` (`~/.config`).
 impl Config {
+    /// Some export wants the photos in color, so the build keeps them that way and makes a
+    /// color edition beside the grayscale one.
+    pub fn wants_color(&self) -> bool {
+        self.export.iter().any(|e| e.photos == Photos::Color)
+    }
+
     /// Where the frost dates are cached.
     pub fn almanac_cache(&self) -> PathBuf {
         self.almanac_path

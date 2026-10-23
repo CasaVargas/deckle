@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The paper in a folder, for an iPad or any reader** (other readers design, phase 1). Add an
+  `[[export]]` folder to `digest.toml`, or **Add folder…** on the Daily tab's **Export folders**
+  card, and every morning's edition is also put there as an EPUB, plugged in or not, keeping the
+  newest `keep`. An iCloud Drive folder reaches an iPad's Files app. With `photos = "color"` the
+  stories' photos stay in color for that folder (the Kindle's paper is still grayscale), and
+  `books = true` brings the long reads along. Kindle Previewer isn't needed for it: without
+  Previewer, `digest run` sends the paper to the export folders only, instead of failing.
 - **Bind several files into one book** (#22). `deckle bind a.epub b.docx c.pdf https://… --title
   "Course Packet"` makes one EPUB of them, in that order: each part keeps its own styles and
   pictures, and the contents list every part with its chapters under it. EPUBs, Word documents,

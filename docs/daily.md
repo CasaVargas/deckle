@@ -390,3 +390,37 @@ for USB as before and the run's report says why. `--to <folder>` and `digest pus
   the app wrote with no prompt. A separately built and signed `deckle` (e.g. `cargo install`)
   makes macOS ask once whether "deckle wants to use your confidential information": choose
   **Always Allow**, or the 5:30 run waits on that dialog.
+
+## Export folders: an iPad, a Boox, any folder
+
+The paper doesn't have to go to a Kindle. Each `[[export]]` folder gets every morning's edition
+as an EPUB, plugged in or not, and keeps the newest few. An iCloud Drive folder puts it in an
+iPad's Files app (tap it to open it in Books); a Dropbox or Google Drive folder reaches a Boox.
+(`docs/superpowers/specs/2026-10-23-other-readers-design.md`)
+
+```toml
+[[export]]
+name = "iPad"
+dir = "~/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily"
+format = "epub"                  # only EPUB for now; Kobo's KEPUB and a PDF edition come later
+photos = "color"                 # or "gray" for an e-ink reader
+keep = 7                         # editions kept in the folder; 0 keeps all
+books = false                    # also the long reads, not only the paper
+```
+
+Or use the **Export folders** card on the Daily tab: **Add folder…** opens on iCloud Drive on a
+Mac.
+
+- **Color.** With any `photos = "color"` export, the stories' photos are kept in color and the
+  run also writes a color edition beside the paper (`color/` in the build folder). The Kindle's
+  paper, the Morgue and email still get the grayscale one.
+- **No Kindle Previewer needed.** Without Previewer, `digest run` still builds the paper and puts
+  it in the export folders, says "no Kindle copy" in its notes, and queues nothing for a Kindle.
+  Long reads then print inside the paper, unless an export takes them (`books = true`). With
+  Previewer installed, the Kindle gets its copy as before.
+- **Only the morning run exports.** `digest run` does, like email; `digest build` and
+  `--to <folder>` don't.
+- **Pruning** only removes `deckle-daily-YYYY-MM-DD.epub` files beyond `keep`; long reads and
+  anything else in the folder stay.
+- **A folder that's missing** is made when its parent exists. When the parent is missing too
+  (iCloud Drive turned off), the run's report says so and the paper still ships everywhere else.
