@@ -22,8 +22,9 @@ pub struct UpgradeRow {
     pub authors: Vec<String>,
     pub format: String,
     pub class: Class,
-    /// The original's path.
-    pub source: String,
+    /// The original's path; `None` for a book rebuilt from the Kindle's copy when it's
+    /// upgraded ([`device_rebuild`]).
+    pub source: Option<String>,
     pub origin: Origin,
     /// How far in, 0–1, from the Kindle's own count.
     pub fraction: Option<f64>,
@@ -147,27 +148,30 @@ pub fn upgrades_on(
     }
     let mut rows: Vec<UpgradeRow> = sorted
         .iter()
-        .filter(|s| s.class == Class::HasSource)
-        .filter_map(|s| {
-            let src = s.source.as_ref()?;
+        .filter(|s| matches!(s.class, Class::HasSource | Class::KindleCopy))
+        .map(|s| {
+            let src = s.source.as_ref();
             let b = &s.shelved.book;
-            Some(UpgradeRow {
+            UpgradeRow {
                 file: b.file.clone(),
-                title: b.title.clone().unwrap_or_else(|| src.title.clone()),
-                authors: if b.authors.is_empty() {
-                    src.authors.clone()
-                } else {
-                    b.authors.clone()
+                title: b
+                    .title
+                    .clone()
+                    .or_else(|| src.map(|x| x.title.clone()))
+                    .unwrap_or_else(|| b.file.clone()),
+                authors: match (b.authors.is_empty(), src) {
+                    (true, Some(x)) => x.authors.clone(),
+                    _ => b.authors.clone(),
                 },
                 format: b.format.clone(),
                 class: s.class,
-                source: src.path.to_string_lossy().into_owned(),
-                origin: src.origin,
+                source: src.map(|x| x.path.to_string_lossy().into_owned()),
+                origin: src.map_or(Origin::KindleCopy, |x| x.origin),
                 fraction: s.fraction,
                 partway: s.partway(),
                 gains: gains(s),
                 cover: b.cover.as_deref().map(crate::kindle::data_url),
-            })
+            }
         })
         .collect();
     rows.sort_by_cached_key(|r| r.title.to_lowercase());
@@ -198,6 +202,46 @@ pub async fn device_upgrades(target: RunTarget) -> Result<UpgradesView, String> 
         crate::kindle::with_target(target, |conn, config| {
             let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
             upgrades_on(conn, config, Some(&cache), home().as_deref())
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// One book [`device_rebuild`] tried: the rebuilt EPUB, or why it couldn't be rebuilt.
+#[derive(Clone, Debug, Serialize)]
+pub struct Rebuild {
+    pub file: String,
+    pub source: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Rebuilds the Kindle's copies of `files` as EPUBs, over one session (Books and Kindle §5).
+pub fn rebuild_on(conn: &mut Conn<'_>, config: &Path, files: &[String]) -> Vec<Rebuild> {
+    files
+        .iter()
+        .map(
+            |f| match deckle_library::upgrade::rebuild_from_kindle(conn, config, f) {
+                Ok(p) => Rebuild {
+                    file: f.clone(),
+                    source: Some(p.to_string_lossy().into_owned()),
+                    error: None,
+                },
+                Err(e) => Rebuild {
+                    file: f.clone(),
+                    source: None,
+                    error: Some(e),
+                },
+            },
+        )
+        .collect()
+}
+
+#[tauri::command]
+pub async fn device_rebuild(target: RunTarget, files: Vec<String>) -> Result<Vec<Rebuild>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::kindle::with_target(target, move |conn, config| {
+            Ok(rebuild_on(conn, config, &files))
         })
     })
     .await
@@ -282,6 +326,7 @@ mod tests {
         let view = upgrades_on(&mut Conn::new(&target), &config, None, None).unwrap();
         assert_eq!(view.rows.len(), 1);
         let row = &view.rows[0];
+        assert!(row.source.is_some());
         assert_eq!(row.file, "Mini.azw3");
         assert_eq!(row.origin, Origin::Folder);
         assert_eq!(
@@ -292,5 +337,48 @@ mod tests {
         assert_eq!(view.counts.get("has-source"), Some(&1));
         assert_eq!(view.counts.get("amazon-own"), Some(&1));
         assert!(view.history.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod rebuild_tests {
+    use super::*;
+    use deckle_core::deliver::Target;
+
+    #[test]
+    fn a_kindle_copy_is_listed_without_a_source_and_rebuilt_on_demand() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("library.json");
+        sources_set_at(&config, false, None, Vec::new()).unwrap();
+        let kindle = tmp.path().join("Kindle");
+        std::fs::create_dir_all(&kindle).unwrap();
+        let part = format!(
+            "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>A</title></head><body><h2 id=\"a\">A</h2>{}</body></html>",
+            "<p>Words enough to make a page of a book here.</p>".repeat(40)
+        );
+        std::fs::write(
+            kindle.join("Voyage.azw3"),
+            deckle_mobi::fixture::build_kf8(&deckle_mobi::fixture::Kf8 {
+                title: "Voyage",
+                parts: &[part.as_str()],
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        let target = Target::Folder(kindle);
+        let view = upgrades_on(&mut Conn::new(&target), &config, None, None).unwrap();
+        let row = &view.rows[0];
+        assert_eq!(
+            (row.class, row.origin, row.source.as_deref()),
+            (Class::KindleCopy, Origin::KindleCopy, None)
+        );
+        let done = rebuild_on(
+            &mut Conn::new(&target),
+            &config,
+            &["Voyage.azw3".into(), "Gone.azw3".into()],
+        );
+        assert!(done[0].error.is_none(), "{:?}", done[0].error);
+        assert!(std::path::Path::new(done[0].source.as_deref().unwrap()).is_file());
+        assert!(done[1].source.is_none() && done[1].error.is_some());
     }
 }

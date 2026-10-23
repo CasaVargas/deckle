@@ -38,9 +38,9 @@ pub enum Class {
 }
 
 impl Class {
-    /// Deckle can upgrade it now (a rebuild from the Kindle's copy is [`Class::KindleCopy`]).
+    /// Deckle can upgrade it: from its original, its library copy, or the Kindle's own copy.
     pub fn upgradable(self) -> bool {
-        matches!(self, Class::HasSource | Class::Older)
+        matches!(self, Class::HasSource | Class::Older | Class::KindleCopy)
     }
 
     /// A short label for listings.
@@ -168,6 +168,38 @@ pub fn originals_dir(config: &Path, device: &str, old_file: &str, stamp: &str) -
         .with_file_name("kindle-originals")
         .join(sanitize(device))
         .join(format!("{stamp} {}", sanitize(&stem)))
+}
+
+/// Rebuilds the Kindle's DRM-free copy of `file` (an AZW3, or a MOBI with a KF8 part) as an
+/// EPUB under `kindle-rebuilt/` beside `library.json`, over the caller's connection (design
+/// §5). A book that doesn't come back whole is an error, and nothing is written for it.
+pub fn rebuild_from_kindle(
+    conn: &mut Conn<'_>,
+    config: &Path,
+    file: &str,
+) -> Result<PathBuf, String> {
+    let device = crate::device_ref(conn.target).key;
+    let files = deckle_core::inventory::read_book_on(conn, file).map_err(|e| e.to_string())?;
+    let stem = Path::new(file.rsplit('/').next().unwrap_or(file))
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "book".into());
+    let dir = config
+        .with_file_name("kindle-rebuilt")
+        .join(sanitize(&device));
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let out = dir.join(format!("{}.epub", sanitize(&stem)));
+    let partial = dir.join(format!(".{}.epub.tmp", sanitize(&stem)));
+    match deckle_mobi::kf8::rebuild(&files.book, &partial) {
+        Ok(_) => {
+            std::fs::rename(&partial, &out).map_err(|e| format!("{}: {e}", out.display()))?;
+            Ok(out)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&partial);
+            Err(format!("couldn't rebuild it cleanly: {e}"))
+        }
+    }
 }
 
 /// What a Put back did.
@@ -384,7 +416,8 @@ mod tests {
         assert_eq!(classify(&shelved(doc.clone()), None), Class::Locked);
         assert_eq!(classify(&shelved(doc), Some(&s)), Class::HasSource);
         assert!(!Class::AmazonOwn.upgradable() && !Class::Locked.upgradable());
-        assert!(Class::HasSource.upgradable());
+        assert!(Class::HasSource.upgradable() && Class::KindleCopy.upgradable());
+        assert!(!Class::NoSource.upgradable() && !Class::FixedLayout.upgradable());
     }
 
     #[test]

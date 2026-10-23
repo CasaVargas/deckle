@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -30,6 +30,8 @@ export const api = {
     invoke<void>("run_books", { books, target }),
   /** Books Deckle didn't send, sorted, with their originals; reads every book once (slow over MTP the first time). */
   deviceUpgrades: (target: RunTarget) => invoke<UpgradesView>("device_upgrades", { target }),
+  /** Rebuilds the Kindle's own DRM-free copies of these books as EPUBs, for books with no original here. */
+  deviceRebuild: (target: RunTarget, files: string[]) => invoke<Rebuild[]>("device_rebuild", { target, files }),
   /** Undoes an upgrade: the kept copy goes back, Deckle's goes. */
   devicePutBack: (target: RunTarget, file: string) => invoke<PutBack>("device_put_back", { target, file }),
   librarySources: () => invoke<SourcesStatus>("library_sources"),

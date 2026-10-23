@@ -82,6 +82,7 @@ pub fn run() {
             kindle::device_remove,
             upgrades::device_upgrades,
             upgrades::device_put_back,
+            upgrades::device_rebuild,
             upgrades::library_sources,
             upgrades::library_sources_set,
             kindle::highlights_status,

@@ -25,6 +25,12 @@ test("books you're partway through aren't ticked at first", () => {
   expect(partwayLine(rows[0])).toBeNull();
 });
 
+test("a book rebuilt from the Kindle's copy says so", () => {
+  expect(sourceLine(row({ source: null, origin: "kindle-copy" }))).toBe(
+    "No original here: rebuilt from the Kindle's own AZW3, checked before it replaces anything",
+  );
+});
+
 test("where the original is", () => {
   expect(sourceLine(row({}))).toBe("calibre · EPUB · on the Kindle as AZW3");
   expect(sourceLine(row({ origin: "folder", source: "/Books/x.epub", format: "mobi" }))).toBe("a folder · EPUB · on the Kindle as MOBI");
@@ -34,7 +40,7 @@ test("what's left alone, in one line", () => {
   expect(leftAsIs({})).toBeNull();
   expect(leftAsIs({ "has-source": 3, current: 2 })).toBeNull();
   expect(leftAsIs({ "amazon-own": 158, locked: 2, "fixed-layout": 1, "kindle-copy": 7, "no-source": 2, pdf: 4 })).toBe(
-    "Left as they are: 158 store books, which already have all of this · 2 locked by DRM, which Deckle never opens · 1 fixed-layout book · 9 with no original on this computer · 4 PDFs.",
+    "Left as they are: 158 store books, which already have all of this · 2 locked by DRM, which Deckle never opens · 1 fixed-layout book · 2 KFX with no original on this computer · 4 PDFs.",
   );
 });
 

@@ -10,6 +10,7 @@ export function defaultTicked(rows: UpgradeRow[]): Set<string> {
 
 /** Where the original is and what's on the Kindle now: "calibre · EPUB · on the Kindle as AZW3". */
 export function sourceLine(r: UpgradeRow): string {
+  if (r.source == null) return `No original here: rebuilt from the Kindle's own ${r.format.toUpperCase()}, checked before it replaces anything`;
   const ext = r.source.split(".").pop()?.toUpperCase() ?? "";
   return [r.origin === "calibre" ? "calibre" : "a folder", ext, `on the Kindle as ${r.format.toUpperCase()}`].filter(Boolean).join(" · ");
 }
@@ -27,8 +28,7 @@ export function leftAsIs(counts: Partial<Record<UpgradeClass, number>>): string 
   if (n("amazon-own")) parts.push(`${plural(n("amazon-own"), "store book")}, which already have all of this`);
   if (n("locked")) parts.push(`${n("locked")} locked by DRM, which Deckle never opens`);
   if (n("fixed-layout")) parts.push(`${plural(n("fixed-layout"), "fixed-layout book")}`);
-  const noOriginal = n("kindle-copy") + n("no-source");
-  if (noOriginal) parts.push(`${noOriginal} with no original on this computer`);
+  if (n("no-source")) parts.push(`${n("no-source")} KFX with no original on this computer`);
   if (n("pdf")) parts.push(`${plural(n("pdf"), "PDF")}`);
   if (n("unread")) parts.push(`${n("unread")} not read yet`);
   return parts.length ? `Left as they are: ${parts.join(" · ")}.` : null;

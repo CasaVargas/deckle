@@ -402,3 +402,34 @@ The owner accepted each recommendation below (2026-10-23).
 - **The app:** the Upgrades panel sits in today's Kindle tab until its rooms come (phase 4).
   An upgrade goes through the Books tab like Update, so the run shows its progress there. A
   send replaces the Kindle's copy only on the Kindle it was listed from.
+
+## 16. Build notes, phase 3
+
+- **What's rebuilt:** KF8 only, an AZW3 or the KF8 half of a joint MOBI. Text records with
+  PalmDOC or no compression, trailing entries stripped. The FDST flows. The XHTML parts from
+  the skeleton and fragment indexes, with KindleUnpack's fix for a fragment whose insert point
+  falls inside a tag. `kindle:pos` links become `partNNNN.xhtml#anchor`: the nearest `id` or
+  `name` before the position, else the element's `aid` as `aid-…`. Images and fonts (XOR and
+  zlib undone) come back as files, CSS and SVG flows too. The NCX becomes `nav.xhtml` and
+  `toc.ncx`, and EXTH becomes the OPF (cover from EXTH 201).
+- **Not rebuilt:** MOBI 6-only files (their HTML isn't XHTML and needs a real HTML-to-XHTML
+  pass), HUFF/CDIC compression (rare outside store books), and fixed layout. Each says why and
+  stays as it is. The class is still "rebuild from the Kindle's copy", and the attempt is what
+  fails.
+- **The quality gate** is stricter than the spec's text-length rule:
+  - the text must decompress to at least 98% of the PalmDOC header's length;
+  - the parts must cover 98% of the main flow;
+  - every `kindle:embed` a part or stylesheet uses must resolve;
+  - every part must be well-formed XML.
+
+  Failing any of these writes nothing.
+- **Checked on real files:** Project Gutenberg's AZW3s of *Frankenstein* (34 parts, 2 images)
+  and *Pride and Prejudice* (76 parts, 165 images, the cover found by EXTH 201) rebuilt and
+  passed EPUBCheck 5.1.0 with 0 errors and 0 warnings. That took two fixes: the NCX's
+  `playOrder` is shared by entries with one target, and the Kindle's `cid` attributes are
+  dropped like unlinked `aid`s. CI tests use `fixture::build_kf8`, a small KF8 writer with real
+  skeleton, fragment and NCX indexes. `cargo run -p deckle-mobi --example rebuild -- in.azw3
+  out.epub` tries a file by hand.
+- **Rebuilt EPUBs** live in `kindle-rebuilt/<device>/` beside `library.json` and are what the
+  upgrade sends, with `origin: "kindle-copy"`. The app rebuilds when you press Upgrade, not when
+  it lists the books.

@@ -232,7 +232,85 @@ fn a_book_partway_through_waits_to_be_named() {
         .output()
         .unwrap();
     assert!(
-        String::from_utf8_lossy(&other.stderr).contains("Other.azw3: not a book with an original")
+        String::from_utf8_lossy(&other.stderr)
+            .contains("Other.azw3: not a book Deckle can upgrade")
     );
     assert!(String::from_utf8_lossy(&other.stdout).contains("nothing to upgrade"));
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn an_azw3_with_no_original_is_rebuilt_from_the_kindles_copy() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let out = tmp.path().join("Kindle");
+    std::fs::create_dir_all(&out).unwrap();
+    let doc = |t: &str, body: &str| {
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>{t}</title></head><body>{body}</body></html>"
+        )
+    };
+    let one = doc(
+        "One",
+        &format!(
+            "<h2 id=\"c1\">Chapter One</h2>{}",
+            "<p>The ship left the harbour at dawn and did not come back for a year.</p>".repeat(60)
+        ),
+    );
+    let two = doc(
+        "Two",
+        &format!(
+            "<h2 id=\"c2\">Chapter Two</h2>{}",
+            "<p>When it did, nobody on the quay knew the men on its deck.</p>".repeat(60)
+        ),
+    );
+    let azw3 = deckle_mobi::fixture::build_kf8(&deckle_mobi::fixture::Kf8 {
+        title: "The Long Voyage",
+        authors: &["Jane Testwright"],
+        parts: &[one.as_str(), two.as_str()],
+        toc: &[("Chapter One", 0, 0, "<h2"), ("Chapter Two", 0, 1, "<h2")],
+        ..Default::default()
+    });
+    std::fs::write(out.join("The Long Voyage.azw3"), &azw3).unwrap();
+
+    let dry = deckle_at(&home)
+        .args(["kindle", "upgrade", "--dry-run", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&dry.stdout).into_owned();
+    assert!(
+        text.contains("rebuilt from the Kindle's own copy"),
+        "{text}"
+    );
+    assert!(text.contains("1 can be upgraded"), "{text}");
+
+    let done = deckle_at(&home)
+        .args(["kindle", "upgrade", "--yes", "--previewer"])
+        .arg(fake_previewer())
+        .args(["--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&done.stdout),
+        String::from_utf8_lossy(&done.stderr)
+    );
+    assert!(done.status.success(), "{text}");
+    assert!(text.contains("replaced The Long Voyage.azw3"), "{text}");
+    let now = names(&out);
+    assert!(now.iter().any(|n| n.ends_with(".kfx")), "{now:?}");
+    assert!(!now.contains(&"The Long Voyage.azw3".to_owned()));
+    let config = config_dir(&home);
+    let record: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(config.join("upgrades.json")).unwrap()).unwrap();
+    assert_eq!(record["upgrades"][0]["origin"], "kindle-copy");
+    let rebuilt = std::path::PathBuf::from(record["upgrades"][0]["source"].as_str().unwrap());
+    assert!(rebuilt.starts_with(config.join("kindle-rebuilt")) && rebuilt.is_file());
+    let kept = std::path::PathBuf::from(record["upgrades"][0]["kept"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read(kept.join("The Long Voyage.azw3")).unwrap(),
+        azw3
+    );
 }

@@ -48,8 +48,11 @@ export interface UpgradeOf {
   device: string;
   file: string;
   title: string;
-  origin: "calibre" | "folder" | null;
+  origin: Origin | null;
 }
+
+/** Where an upgrade's EPUB came from. */
+export type Origin = "calibre" | "folder" | "kindle-copy";
 
 export interface WordWiseSummary {
   hints: number;
@@ -567,8 +570,9 @@ export interface UpgradeRow {
   authors: string[];
   format: string;
   class: UpgradeClass;
-  source: string;
-  origin: "calibre" | "folder";
+  /** The original; null for a book rebuilt from the Kindle's copy when it's upgraded. */
+  source: string | null;
+  origin: Origin;
   fraction: number | null;
   partway: boolean;
   gains: string[];
@@ -579,8 +583,15 @@ export interface UpgradeHistoryRow {
   old_file: string;
   new_file: string | null;
   title: string;
-  origin: "calibre" | "folder" | null;
+  origin: Origin | null;
   at: string;
+}
+
+/** One book the rebuild tried: its EPUB, or why not. */
+export interface Rebuild {
+  file: string;
+  source: string | null;
+  error: string | null;
 }
 
 /** Where originals are looked for (Settings → General → Library). */
