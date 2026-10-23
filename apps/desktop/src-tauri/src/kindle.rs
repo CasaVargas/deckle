@@ -245,6 +245,9 @@ fn record_shelf(
         }
     };
     let id = deckle_core::sync::device_id(conn.target);
+    let named = deckle_digest::Config::load(&config.with_file_name("digest.toml"))
+        .ok()
+        .and_then(|c| c.sync.device_name(&id));
     let store = config.with_file_name("shelf.json");
     let previous = deckle_digest::shelf::store::Shelf::load(&store)
         .kindles
@@ -260,7 +263,7 @@ fn record_shelf(
             vocab_failed,
             previous,
         },
-        &device.name,
+        &named.unwrap_or(device.name),
         &device.key,
         library,
         deckle_digest::chrono::Utc::now(),

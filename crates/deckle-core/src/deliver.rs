@@ -20,6 +20,9 @@ pub struct Device {
     pub thumbnails_writable: bool,
     /// Firmware version from `system/version.txt` (`Kindle 5.16.2.1.1 (…)` → `5.16.2.1.1`).
     pub firmware: Option<String>,
+    /// The USB serial number, when the OS says (see [`crate::usb_serial`]): what tells two
+    /// Kindles of one model apart.
+    pub serial: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -199,6 +202,7 @@ pub fn detect_in(roots: &[PathBuf]) -> Vec<Device> {
             model_hint,
             thumbnails_writable,
             firmware,
+            serial: None,
         });
     }
     out
@@ -230,7 +234,11 @@ pub fn detect_mass_storage() -> Vec<Device> {
             }
         }
     }
-    detect_in(&roots)
+    let mut devices = detect_in(&roots);
+    for d in &mut devices {
+        d.serial = crate::usb_serial::serial_for_mount(&d.root);
+    }
+    devices
 }
 
 /// Writes the KFX and returns its path. Mass storage gets `documents/<name>`, fsynced.

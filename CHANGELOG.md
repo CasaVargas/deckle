@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Two Kindles of one model no longer share a snapshot.** A USB-storage Kindle is now told apart
+  by its USB serial number (macOS, Windows and Linux), so a second Paperwhite keeps its own shelf
+  snapshot and per-Kindle settings. Settings written before keep working. `[sync.devices."<id>"]
+  name = "..."` names a Kindle on the From Your Shelf page, which no longer prints the firmware
+  line as the Kindle's name.
 - **A real front page, and topic sections**: the Daily opens on a front page (the lead, a
   two-column table of headlines, "Inside today"), each section starts with "In this section" and
   each story links back to its section and the front page. Tick Google News topics (World,

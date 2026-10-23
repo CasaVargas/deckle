@@ -83,6 +83,7 @@ mod tests {
             model_hint: "Kindle Paperwhite".into(),
             thumbnails_writable: true,
             firmware: None,
+            serial: None,
         })
     }
 

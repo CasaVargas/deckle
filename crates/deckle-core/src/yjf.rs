@@ -157,6 +157,7 @@ mod tests {
             model_hint: "Kindle".into(),
             thumbnails_writable: true,
             firmware: None,
+            serial: None,
         });
         assert_eq!(
             read_on(&mut Conn::new(&ms), &stems()).unwrap()[0].1,

@@ -270,6 +270,13 @@ and **Words you looked up this week**.
   Daily tab says "Highlights and words aren't shared by this Kindle." instead of failing.
 - **Percent.** Exact for books Deckle sent and for any KFX on a USB-storage Kindle; a book with
   no known end shows its last-read day without a percent.
+- **More than one Kindle.** Each is told apart by its USB serial number, so two Paperwhites keep
+  separate snapshots (`deckle devices` shows each one's sync id, `<model>/<volume>#<serial>`).
+  If the serial can't be read (an unusual OS setup), a Kindle is known by its model and volume
+  name, as before, and two of one model would share a snapshot. Settings written for the older
+  id (`[sync.devices."Kindle/Kindle"]`) still apply to every serial-id Kindle of that model.
+  Give each Kindle the name the page should use with `[sync.devices."<id>"] name = "Mom's Kindle"`;
+  without one the page says "Kindle", or the Scribe's model.
 - **What it shares.** The page reads only books, never the Kindle's account. Turn it off for
   one Kindle with `[sync.devices."<id>"] shelf = false`, for all of them under Settings →
   Kindles, or leave `"shelf"` out of `sections`. **Forget what my Kindles shared** on the Daily

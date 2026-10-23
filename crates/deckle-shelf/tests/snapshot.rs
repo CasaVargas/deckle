@@ -194,7 +194,9 @@ fn a_kindle_is_named_without_its_serial() {
         ("Kindle Scribe G6G3X308536500ME", "Kindle Scribe"),
         ("Kindle Scribe", "Kindle Scribe"),
         ("Kindle Paperwhite", "Kindle Paperwhite"),
-        ("Kindle 5.19.2 (467076 040)", "Kindle 5.19.2 (467076 040)"),
+        ("Kindle 5.19.2 (467076 040)", "Kindle"),
+        ("Kindle 5.16.2.1.1", "Kindle"),
+        ("Kindle Paperwhite 5.19.2", "Kindle Paperwhite"),
         ("Kindle", "Kindle"),
     ] {
         assert_eq!(deckle_shelf::friendly_name(raw), want, "{raw}");

@@ -81,7 +81,10 @@ pub fn device_id(target: &Target) -> String {
         },
         Target::MassStorage(d) => {
             let volume = d.root.file_name().unwrap_or_default().to_string_lossy();
-            format!("{}/{volume}", d.model_hint)
+            match d.serial.as_deref().filter(|s| !s.is_empty()) {
+                Some(serial) => format!("{}/{volume}#{serial}", d.model_hint),
+                None => format!("{}/{volume}", d.model_hint),
+            }
         }
         Target::Folder(dir) => dir.display().to_string(),
     }
@@ -291,8 +294,18 @@ mod tests {
             model_hint: "Kindle Paperwhite".into(),
             thumbnails_writable: true,
             firmware: None,
+            serial: None,
         });
         assert_eq!(device_id(&ms), "Kindle Paperwhite/Kindle");
+        // Two Paperwhites on the same volume name are told apart by their USB serial.
+        let Target::MassStorage(mut d) = ms else {
+            unreachable!()
+        };
+        d.serial = Some("G0B0AAAA11112222".into());
+        assert_eq!(
+            device_id(&Target::MassStorage(d)),
+            "Kindle Paperwhite/Kindle#G0B0AAAA11112222"
+        );
     }
 
     fn files(names: &[&str]) -> Vec<PathBuf> {
