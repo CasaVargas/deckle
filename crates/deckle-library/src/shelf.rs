@@ -2,6 +2,7 @@
 //! A Kindle's books next to the library (library design §4): which library book each one is,
 //! and on MTP (where books aren't read) the details the library's send record knows.
 
+use deckle_core::devices::same_device;
 use deckle_core::inventory::DeviceBook;
 
 use crate::freshness::{Current, Reason, freshness};
@@ -69,7 +70,7 @@ pub fn shelve(
                 b.sidecar
                     .sends
                     .iter()
-                    .any(|s| s.device == device && s.file == book.file)
+                    .any(|s| same_device(&s.device, device) && s.file == book.file)
             });
             let found = by_asin.or(by_send).cloned();
             if let Some(lib) = &found {

@@ -143,8 +143,13 @@ impl DeviceRegistry {
         let idx = match self.profiles.iter().position(|p| p.key == seen.key) {
             Some(i) => i,
             None => {
-                self.profiles
-                    .push(DeviceProfile::new(&seen.key, &seen.model_hint));
+                let mut fresh = DeviceProfile::new(&seen.key, &seen.model_hint);
+                // The owner's choices for the model carry over to its first serial-keyed sighting.
+                if let Some(old) = self.get(&seen.key) {
+                    fresh.cde_override = old.cde_override.clone();
+                    fresh.verified_real_asin = old.verified_real_asin;
+                }
+                self.profiles.push(fresh);
                 self.profiles.len() - 1
             }
         };
@@ -161,8 +166,13 @@ impl DeviceRegistry {
         p.clone()
     }
 
+    /// The profile for `key`; a serial-keyed mass-storage Kindle (`ms:<model>#<serial>`) falls
+    /// back to the one recorded before serials (`ms:<model>`).
     pub fn get(&self, key: &str) -> Option<&DeviceProfile> {
-        self.profiles.iter().find(|p| p.key == key)
+        self.profiles
+            .iter()
+            .find(|p| p.key == key)
+            .or_else(|| legacy_key(key).and_then(|old| self.profiles.iter().find(|p| p.key == old)))
     }
 
     pub fn set_override(&mut self, key: &str, cde: Option<&str>) {
@@ -237,10 +247,28 @@ pub fn seen_mtp(m: &deckle_transport::usb::MtpInfo) -> Seen {
     }
 }
 
-/// The `Seen` record for a mass-storage device.
+/// The key a mass-storage Kindle had before serials (`ms:<model>`), for a key that has one
+/// (`ms:<model>#<serial>`). Two Kindles of one model share it.
+pub fn legacy_key(key: &str) -> Option<&str> {
+    key.strip_prefix("ms:")?;
+    key.rsplit_once('#').map(|(base, _)| base)
+}
+
+/// True when a record kept under `recorded` belongs to the device `key`: the same key, or the
+/// model-only key it was filed under before serials.
+pub fn same_device(recorded: &str, key: &str) -> bool {
+    recorded == key || legacy_key(key) == Some(recorded)
+}
+
+/// The `Seen` record for a mass-storage device: keyed by model and, when the OS gave one, USB
+/// serial, so two Kindles of one model stay apart.
 pub fn seen_mass_storage(d: &crate::deliver::Device) -> Seen {
+    let key = match d.serial.as_deref().filter(|s| !s.is_empty()) {
+        Some(serial) => format!("ms:{}#{serial}", d.model_hint),
+        None => format!("ms:{}", d.model_hint),
+    };
     Seen {
-        key: format!("ms:{}", d.model_hint),
+        key,
         root: Some(d.root.to_string_lossy().into_owned()),
         model_hint: d.model_hint.clone(),
         transport: TransportKind::MassStorage,
