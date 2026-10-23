@@ -81,6 +81,7 @@ pub fn run() {
             kindle::highlights_status,
             kindle::highlights_set,
             kindle::highlights_write,
+            kindle::words_anki,
             readership::readership_report,
             readership::readership_apply,
             readership::readership_dismiss,

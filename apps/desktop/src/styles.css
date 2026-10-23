@@ -124,6 +124,7 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .card h3 { font-size: 17px; }
 .card p { margin: 4px 0 10px; line-height: 1.45; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.words-anki { margin-top: 16px; }
 .setup { text-align: center; padding: 40px 32px; }
 .setup p { color: var(--muted); max-width: 520px; margin: 8px auto 18px; }
 .small { font-size: 12px; }
