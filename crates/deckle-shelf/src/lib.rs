@@ -4,6 +4,7 @@
 //! highlights from `My Clippings.txt` and the words looked up from `vocab.db`. The page itself
 //! is chosen from the snapshot in `deckle_digest::shelf`.
 
+pub mod anki;
 pub mod books;
 pub mod highlights;
 pub mod words;

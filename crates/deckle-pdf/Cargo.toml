@@ -1,0 +1,20 @@
+[package]
+name = "deckle-pdf"
+description = "Deckle import: a text PDF reflowed into a clean EPUB 3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+zip.workspace = true
+sha2.workspace = true
+image.workspace = true
+pdfium-render = { version = "0.9.4", default-features = false, features = ["thread_safe", "image_025", "pdfium_latest"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+image.workspace = true
+roxmltree.workspace = true
+zip.workspace = true

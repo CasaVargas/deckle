@@ -274,3 +274,57 @@ fn an_edition_dated_in_the_future_prunes_nothing() {
         "today's KFX is two weeks from today, not from 2027"
     );
 }
+
+#[test]
+fn temp_names_are_not_shared_between_writers() {
+    let p = Path::new("/x/2026-10-21.json");
+    let (a, b) = (
+        deckle_morgue::folder::unique_tmp(p),
+        deckle_morgue::folder::unique_tmp(p),
+    );
+    assert_ne!(a, b);
+    assert!(a.to_string_lossy().ends_with(".tmp"));
+    assert_eq!(a.parent(), p.parent());
+}
+
+#[test]
+fn a_failed_archive_leaves_no_temp_files() {
+    let tmp = tempfile::tempdir().unwrap();
+    let m = morgue(tmp.path(), 365);
+    let first = sidecar(d("2026-10-21"), "A");
+    m.archive_edition(&epub(tmp.path(), b"OLD"), &first)
+        .unwrap();
+    // A directory where the sidecar belongs makes the JSON write fail.
+    let (epub_to, json_to, _) = m.paths(d("2026-10-21"));
+    std::fs::remove_file(&json_to).unwrap();
+    std::fs::create_dir(&json_to).unwrap();
+    let second = sidecar(d("2026-10-21"), "B");
+    assert!(
+        m.archive_edition(&epub(tmp.path(), b"NEW"), &second)
+            .is_err()
+    );
+    let leftovers = std::fs::read_dir(epub_to.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .filter(|f| f.file_name().to_string_lossy().ends_with(".tmp"))
+        .count();
+    assert_eq!(leftovers, 0);
+}
+
+#[test]
+fn a_corrupt_sidecar_is_not_called_unarchived() {
+    let tmp = tempfile::tempdir().unwrap();
+    let m = morgue(tmp.path(), 365);
+    m.archive_edition(&epub(tmp.path(), b"E"), &sidecar(d("2026-10-21"), "A"))
+        .unwrap();
+    let (_, json_to, _) = m.paths(d("2026-10-21"));
+    std::fs::write(&json_to, b"{").unwrap();
+    let e = m
+        .archive_kfx(d("2026-10-21"), &epub(tmp.path(), b"K"))
+        .unwrap_err();
+    assert!(!e.to_string().contains("isn't archived"), "{e}");
+    let e = m
+        .archive_kfx(d("2026-10-22"), &epub(tmp.path(), b"K"))
+        .unwrap_err();
+    assert!(e.to_string().contains("isn't archived"), "{e}");
+}

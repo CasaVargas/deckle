@@ -94,6 +94,10 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   dictionary when it has one.
 - **Other inputs.** `.docx`, `.txt`, web articles (a URL, `.webloc`/`.url`, or a saved `.html`)
   go through the same pipeline. A finished `.kfx` is sent as is.
+- **PDFs, reflowed (CLI).** A text PDF becomes a book that reflows: columns read in order,
+  running heads and page numbers dropped, broken words joined, and tables, equations and figures
+  kept as pictures. It's never as good as a real ebook, and the run says so. Needs the free
+  PDFium library (`tools/fetch-pdfium.sh`, or set `DECKLE_PDFIUM`); scans aren't supported.
 - **Optional cleanups.** Fill missing metadata from Open Library, fix typography, turn footnotes
   into pop-up notes.
 - **Library.** A plain folder (`Author/Title/` plus a `deckle.json`), no database. Deckle can
@@ -103,6 +107,8 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   which Amazon's own export leaves out, and later exports only add what's new, so your own edits
   stay. The Kindle Scribe (2024) doesn't keep that file, and keeps its highlights where they
   can't be read over USB ([#99](https://github.com/CasaVargas/deckle/issues/99)).
+- **Words to Anki.** The words you looked up on the Kindle, as a CSV of flashcards Anki imports:
+  the word, a short definition, the sentence you met it in and the book.
 - **The Deckle Daily (preview).** A morning newspaper built locally from weather, local news and
   your RSS feeds, with full article text and a generated front page as its cover, delivered when
   the Kindle connects. Details in [docs/daily.md](docs/daily.md).
@@ -181,7 +187,7 @@ deckle run book.epub --to device --cde ebok --llm anthropic     # X-Ray descript
 deckle run book.epub --to device --cde ebok --llm openai \
   --llm-endpoint http://localhost:11434/v1 --llm-model llama3   # or a local model
 deckle run book.epub --to device --word-wise-level 3            # hints for rarer words only
-deckle run notes.docx --to device                 # also .txt, a URL, .webloc/.url/.html
+deckle run notes.docx --to device                 # also .txt, .pdf, a URL, .webloc/.url/.html
 deckle inspect book.epub --json                   # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF
 
@@ -191,6 +197,7 @@ deckle library reprocess --dry-run                # books Deckle could build bet
 deckle kindle books                               # what's on the Kindle, and free space
 deckle highlights list                            # books with highlights, and what's new
 deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (folder remembered)
+deckle words anki --to ~/Desktop/words.csv        # looked-up words as Anki cards (File → Import)
 deckle digest readership                          # how far you read the paper, per section
 deckle digest readership apply 1                  # make suggested edit 1 to digest.toml
 deckle digest shelf                               # what From Your Shelf would print now
@@ -227,7 +234,8 @@ fixtures and real Kindles, before it merges.
 Deckle builds on research and code from the MobileRead community: jhowell's KFX Input/Output and
 kfxlib, jloutsch's kfxgen, xxyzz's WordDumb and Proficiency, seapy's kindle-cli, and calibre's
 Kindle driver. Word Wise definitions come from Wiktionary via kaikki.org (CC BY-SA 4.0), word
-frequencies from wordfreq (CC BY-SA 4.0).
+frequencies from wordfreq (CC BY-SA 4.0). PDFs are read with PDFium (BSD-3-Clause), built by
+bblanchon/pdfium-binaries.
 
 Kindle Previewer is Amazon's and is never bundled. Kindle is a trademark of Amazon.com, Inc.
 Deckle is not affiliated with Amazon.

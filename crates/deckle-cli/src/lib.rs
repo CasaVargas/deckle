@@ -290,6 +290,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
+        cli::Command::Words { from, action } => words_cmd(json, &from, action),
         cli::Command::Save {
             targets,
             title,
@@ -505,6 +506,46 @@ fn megabytes(bytes: u64) -> String {
 }
 
 /// `deckle highlights list|export` (highlights export design §6).
+/// `deckle words`: reads `vocab.db` over one connection (one MTP session), never writing to the
+/// Kindle, and defines words only from a Word Wise database already on this machine.
+fn words_cmd(json: bool, from: &str, action: cli::WordsCommand) -> Result<ExitCode, String> {
+    let target = resolve_target(from)?;
+    let read = match &target {
+        // A copy of a Kindle's drive (a backup, say) has the same layout.
+        Target::Folder(dir) => {
+            let at = dir.join("system/vocabulary");
+            Ok(std::fs::read(at.join("vocab.db"))
+                .ok()
+                .map(|db| deckle_core::vocab::VocabFiles {
+                    db,
+                    wal: std::fs::read(at.join("vocab.db-wal")).ok(),
+                }))
+        }
+        _ => deckle_core::vocab::read_vocab_on(&mut deckle_core::deliver::Conn::new(&target)),
+    };
+    let files = match read {
+        Ok(Some(f)) => f,
+        Ok(None) => {
+            eprintln!("error: this Kindle has no Vocabulary Builder (system/vocabulary/vocab.db)");
+            return Ok(ExitCode::from(1));
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            return Ok(ExitCode::from(1));
+        }
+    };
+    match action {
+        cli::WordsCommand::Anki { to } => {
+            let define = deckle_shelf::words::wordwise_definer();
+            let n = deckle_shelf::anki::export(&files, &to, &*define)?;
+            emit(json, &serde_json::json!({ "words": n, "file": to }), || {
+                format!("{n} words  -> {}", to.display())
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
 fn highlights_cmd(
     json: bool,
     from: &str,
@@ -2313,10 +2354,15 @@ fn archive_to_morgue(
     let state_path = deckle_morgue::state::state_path();
     let mut state = deckle_morgue::MorgueState::load(&state_path);
     let cache = deckle_core::wordwise::default_cache_dir().join("digest");
+    let was_imported = state.imported;
     if !deckle_morgue::import::import_once(&morgue, &cache, &mut state).is_empty() {
         eprintln!("morgue: imported the editions in {}", cache.display());
     }
-    if let Err(e) = state.save(&state_path) {
+    // Only a first import changes the state; saving on every build widens the window in which
+    // another writer's update is lost.
+    if state.imported != was_imported
+        && let Err(e) = state.save(&state_path)
+    {
         eprintln!("morgue: {}: {e}", state_path.display());
     }
     morgue
@@ -2577,7 +2623,7 @@ fn digest_shelf(json: bool, path: &Path, forget: bool) -> Result<ExitCode, Strin
             highlight: cfg
                 .shelf
                 .highlights
-                .then(|| select::highlight(&shelf, date))
+                .then(|| select::highlight(&shelf, date, tz))
                 .flatten(),
             words: if cfg.shelf.words {
                 select::words(&shelf, date, tz)

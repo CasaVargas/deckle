@@ -127,11 +127,12 @@ pub enum Command {
     },
     /// List connected Kindles.
     Devices,
-    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), text files (.txt) or
-    /// web articles.
+    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), text files (.txt),
+    /// text PDFs (.pdf, reflowed; needs PDFium) or web articles.
     Run {
-        /// EPUBs; Word documents (.docx); text files (.txt); or web articles: an address, a
-        /// .webloc/.url link file or a saved .html page, each built into its own book first.
+        /// EPUBs; Word documents (.docx); text files (.txt); text PDFs (.pdf); or web articles:
+        /// an address, a .webloc/.url link file or a saved .html page, each built into its own
+        /// book first.
         epubs: Vec<PathBuf>,
         /// A folder path, or `device` for the first connected Kindle.
         #[arg(long, default_value = "device")]
@@ -234,6 +235,14 @@ pub enum Command {
         #[command(subcommand)]
         action: HighlightsCommand,
     },
+    /// The words looked up on a Kindle (its Vocabulary Builder).
+    Words {
+        /// `device` for the first connected Kindle, or a copy of a Kindle's drive.
+        #[arg(long, default_value = "device", global = true)]
+        from: String,
+        #[command(subcommand)]
+        action: WordsCommand,
+    },
     /// Your library: one folder per book, with a deckle.json beside it. Every book `run` sends
     /// is added once the library is set up.
     Library {
@@ -272,6 +281,16 @@ pub enum HighlightsCommand {
     Export {
         #[arg(long)]
         to: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WordsCommand {
+    /// Every English word looked up, once each, as a CSV Anki imports (File → Import):
+    /// word, short definition, the sentence, the book and the day. Overwrites FILE.
+    Anki {
+        #[arg(long)]
+        to: PathBuf,
     },
 }
 

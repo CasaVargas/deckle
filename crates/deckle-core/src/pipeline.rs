@@ -309,6 +309,18 @@ pub fn prepare_with(
         );
         report.warnings.extend(ireport.warnings);
         imported
+    } else if deckle_pdf::is_pdf(epub) {
+        // A text PDF reflowed; the report carries the quality note (PDF spec §6).
+        let imported = work_path.join("imported.epub");
+        let ireport = stage!(
+            report,
+            on_stage,
+            "import",
+            deckle_pdf::convert(epub, &imported),
+            Err(Box::new(report))
+        );
+        report.warnings.extend(ireport.warnings);
+        imported
     } else if deckle_txt::is_text(epub) {
         // Plain text the same way (TXT spec §3).
         let imported = work_path.join("imported.epub");
