@@ -405,10 +405,40 @@ pub enum DigestCommand {
         #[arg(long)]
         forget: bool,
     },
+    /// The Morgue: every edition kept in a folder (`[morgue]` in digest.toml), searchable.
+    Morgue {
+        #[command(subcommand)]
+        action: MorgueCommand,
+    },
     /// How far you read the last editions, per section, with suggested edits to the paper.
     Readership {
         #[command(subcommand)]
         action: Option<ReadershipCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MorgueCommand {
+    /// The editions kept in a month (default: this month).
+    List {
+        /// `YYYY-MM`.
+        #[arg(long)]
+        month: Option<String>,
+    },
+    /// Stories matching every word, newest edition first.
+    Search {
+        #[arg(required = true)]
+        words: Vec<String>,
+    },
+    /// One edition: its weather, lead, how far you read, highlights and whether it's on the Kindle.
+    Show {
+        /// `YYYY-MM-DD`.
+        date: String,
+    },
+    /// Send an edition to the Kindle again (queued for the next plug-in; kept a week there).
+    Send {
+        /// `YYYY-MM-DD`.
+        date: String,
     },
 }
 

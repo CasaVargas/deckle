@@ -1165,7 +1165,7 @@ fn digest(
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let report = deckle_digest::build_with(
+            let (mut report, gathered) = deckle_digest::build_gathered(
                 &cfg,
                 date,
                 now,
@@ -1173,6 +1173,9 @@ fn digest(
                 &deckle_digest::Http,
                 &gather_options(),
             )?;
+            report
+                .notes
+                .extend(archive_to_morgue(&cfg, &report.epub, &gathered));
             emit(json, &report, || {
                 let mut text = format!(
                     "OK    {}\n      -> {}\n{}",
@@ -1228,7 +1231,7 @@ fn digest(
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let mut built = deckle_digest::build_with(
+            let (mut built, mut gathered) = deckle_digest::build_gathered(
                 &cfg,
                 date,
                 now,
@@ -1246,7 +1249,7 @@ fn digest(
                     ));
                 }
                 cfg.reading.inline = failed.into_iter().map(|(id, _)| id).collect();
-                built = deckle_digest::build_with(
+                (built, gathered) = deckle_digest::build_gathered(
                     &cfg,
                     date,
                     now,
@@ -1256,6 +1259,9 @@ fn digest(
                 )?;
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
+            // Keep the paper in the Morgue whatever happens to its conversion.
+            let note = archive_to_morgue(&cfg, &built.epub, &gathered);
+            built.notes.extend(note);
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
             // design §7). A paper that went out by email skips the outbox unless `usb_too`.
             let (email, to_usb) = match &folder {
@@ -1285,6 +1291,8 @@ fn digest(
             let reading_outcomes = built.reading_outcomes.clone();
             if let Some(k) = kfx {
                 record_layout(k, date, &built);
+                let note = keep_kfx_in_morgue(&cfg, date, k);
+                built.notes.extend(note);
             }
             if kfx.is_some() || !to_usb {
                 let name = deckle_digest::edition_filename(date);
@@ -1459,6 +1467,7 @@ fn digest(
         }
         cli::DigestCommand::Puzzle => digest_puzzle(json, &path),
         cli::DigestCommand::Shelf { forget } => digest_shelf(json, &path, forget),
+        cli::DigestCommand::Morgue { action } => digest_morgue(json, &path, action),
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
@@ -2185,6 +2194,189 @@ fn puzzle_text(out: &PuzzleOut) -> String {
         }
     }
     lines.join("\n")
+}
+
+/// Keeps a built edition in the Morgue (importing the cached ones first, once). A problem is
+/// returned as a run note: it never fails the build.
+fn archive_to_morgue(
+    cfg: &deckle_digest::Config,
+    epub: &Path,
+    gathered: &deckle_digest::Gathered,
+) -> Option<String> {
+    let morgue = deckle_morgue::Morgue::from_config(cfg);
+    let state_path = deckle_morgue::state::state_path();
+    let mut state = deckle_morgue::MorgueState::load(&state_path);
+    let cache = deckle_core::wordwise::default_cache_dir().join("digest");
+    if !deckle_morgue::import::import_once(&morgue, &cache, &mut state).is_empty() {
+        eprintln!("morgue: imported the editions in {}", cache.display());
+    }
+    if let Err(e) = state.save(&state_path) {
+        eprintln!("morgue: {}: {e}", state_path.display());
+    }
+    morgue
+        .archive_edition(epub, &deckle_morgue::from_gathered(gathered))
+        .err()
+        .map(|e| format!("Morgue: couldn't save the edition ({e})"))
+}
+
+/// Keeps the converted KFX beside the edition in the Morgue; a problem is a run note.
+fn keep_kfx_in_morgue(
+    cfg: &deckle_digest::Config,
+    date: deckle_digest::chrono::NaiveDate,
+    kfx: &Path,
+) -> Option<String> {
+    deckle_morgue::Morgue::from_config(cfg)
+        .archive_kfx(date, kfx)
+        .err()
+        .map(|e| format!("Morgue: couldn't keep the converted paper ({e})"))
+}
+
+/// Queues the kept edition for the Kindle again, as `deckle-daily-YYYY-MM-DD.kfx`: its kept
+/// KFX, or one converted from the kept EPUB when that is gone. Returns the queued name.
+fn morgue_send(
+    cfg: &deckle_digest::Config,
+    date: deckle_digest::chrono::NaiveDate,
+) -> Result<String, String> {
+    let morgue = deckle_morgue::Morgue::from_config(cfg);
+    if morgue.sidecar(date).is_none() {
+        return Err(format!("no edition kept for {date}"));
+    }
+    let (epub, _, kept) = morgue.paths(date);
+    let kfx = if kept.is_file() {
+        kept
+    } else {
+        let located = previewer::locate(None).map_err(|e| e.to_string())?;
+        let converted = deckle_core::wordwise::default_cache_dir()
+            .join("digest")
+            .join("kfx");
+        std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
+        let report = run(&epub, &paper_options(Some(located.path), false, &converted));
+        if let Some(e) = &report.error {
+            return Err(format!("converting {}: {e}", epub.display()));
+        }
+        let made = report
+            .delivered
+            .ok_or_else(|| "the conversion made no file".to_owned())?;
+        if let Err(e) = morgue.archive_kfx(date, &made) {
+            eprintln!("morgue: couldn't keep the converted paper ({e})");
+        }
+        made
+    };
+    let name = deckle_digest::edition_filename(date);
+    let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+    queue.add(&kfx, &name, None).map_err(|e| e.to_string())?;
+    Ok(name)
+}
+
+/// "Morgue: 214 editions, 590 MB".
+fn morgue_size_line(editions: usize, bytes: u64) -> String {
+    let mb = (bytes as f64 / (1024.0 * 1024.0)).round() as u64;
+    format!(
+        "Morgue: {editions} edition{}, {mb} MB",
+        if editions == 1 { "" } else { "s" }
+    )
+}
+
+/// `digest morgue list|search|show|send` (Morgue design §5).
+fn digest_morgue(json: bool, path: &Path, action: cli::MorgueCommand) -> Result<ExitCode, String> {
+    use deckle_digest::chrono::{Datelike, Local, NaiveDate};
+    let cfg = load_digest_config(path)?;
+    let morgue = deckle_morgue::Morgue::from_config(&cfg);
+    let day = |s: &str| {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .map_err(|_| format!("expected a date as YYYY-MM-DD, got {s:?}"))
+    };
+    match action {
+        cli::MorgueCommand::List { month } => {
+            let (year, month) = match month {
+                Some(m) => {
+                    let first = NaiveDate::parse_from_str(&format!("{m}-01"), "%Y-%m-%d")
+                        .map_err(|_| format!("--month expects YYYY-MM, got {m:?}"))?;
+                    (first.year(), first.month())
+                }
+                None => {
+                    let today = Local::now().date_naive();
+                    (today.year(), today.month())
+                }
+            };
+            let days = deckle_morgue::search::month(&morgue, year, month);
+            let (editions, bytes) = morgue.usage();
+            #[derive(serde::Serialize)]
+            struct ListOut<'a> {
+                days: &'a [deckle_morgue::search::DaySummary],
+                editions: usize,
+                bytes: u64,
+                folder: String,
+            }
+            let out = ListOut {
+                days: &days,
+                editions,
+                bytes,
+                folder: morgue.root.display().to_string(),
+            };
+            emit(json, &out, || {
+                let mut lines: Vec<String> = days
+                    .iter()
+                    .map(|d| match &d.lead {
+                        Some(l) => format!("{}  {} · {l}", d.date, d.paper),
+                        None => format!("{}  {}", d.date, d.paper),
+                    })
+                    .collect();
+                if lines.is_empty() {
+                    lines.push(format!("No editions kept for {year}-{month:02}."));
+                }
+                lines.push(morgue_size_line(editions, bytes));
+                lines.join("\n")
+            })?;
+        }
+        cli::MorgueCommand::Search { words } => {
+            let hits = deckle_morgue::search::search(&morgue, &words.join(" "));
+            emit(json, &hits, || {
+                if hits.is_empty() {
+                    return "Nothing found.".to_owned();
+                }
+                hits.iter()
+                    .flat_map(|h| {
+                        h.stories.iter().map(move |(section, title)| {
+                            format!("{} · {section} · {title}", h.date)
+                        })
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+        }
+        cli::MorgueCommand::Show { date } => {
+            let date = day(&date)?;
+            let reads = deckle_readership::State::load(&deckle_readership::state_path());
+            let state = deckle_morgue::MorgueState::load(&deckle_morgue::state::state_path());
+            let detail = deckle_morgue::detail::detail(&morgue, date, &reads, &state)
+                .ok_or_else(|| format!("no edition kept for {date}"))?;
+            emit(json, &detail, || {
+                let mut lines = vec![detail.heading.clone()];
+                lines.extend(detail.weather.clone());
+                if let Some(l) = &detail.lead {
+                    lines.push(format!("Lead: {} ({})", l.title, l.section));
+                }
+                lines.extend(detail.read.clone());
+                lines.extend(detail.highlights.clone());
+                lines.extend(detail.on_kindle.clone());
+                lines.push(detail.epub.display().to_string());
+                lines.join("\n")
+            })?;
+        }
+        cli::MorgueCommand::Send { date } => {
+            let date = day(&date)?;
+            let name = morgue_send(&cfg, date)?;
+            let out = serde_json::json!({ "queued": name });
+            emit(json, &out, || {
+                format!(
+                    "queued {name}: it goes over the next time a Kindle connects \
+                     (`deckle digest push`, or `watch`)"
+                )
+            })?;
+        }
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// What `digest shelf --json` prints: each Kindle's snapshot in brief, and the page as of today.

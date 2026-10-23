@@ -432,6 +432,18 @@ pub fn build_with(
     net: &dyn Net,
     opts: &GatherOptions,
 ) -> Result<BuildReport, String> {
+    build_gathered(cfg, date, now, out_dir, net, opts).map(|(report, _)| report)
+}
+
+/// [`build_with`], also handing back what was gathered (the Morgue keeps its text).
+pub fn build_gathered(
+    cfg: &Config,
+    date: NaiveDate,
+    now: DateTime<Utc>,
+    out_dir: &Path,
+    net: &dyn Net,
+    opts: &GatherOptions,
+) -> Result<(BuildReport, Gathered), String> {
     let gathered = gather_with(cfg, date, now, net, opts);
     let path = out_dir.join(format!("deckle-daily-{date}.epub"));
     write_edition(&gathered, &path)?;
@@ -443,9 +455,9 @@ pub fn build_with(
     }
     let mut r = report(&gathered.edition, path);
     r.long_reads = long_reads;
-    r.reading_outcomes = gathered.reading_outcomes;
-    r.notes = gathered.notes;
-    Ok(r)
+    r.reading_outcomes = gathered.reading_outcomes.clone();
+    r.notes = gathered.notes.clone();
+    Ok((r, gathered))
 }
 
 /// Renders and writes one gathered edition as an EPUB.
