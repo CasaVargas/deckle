@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The Daily tab, in rooms.** Its fourteen cards are grouped into five rooms in a rail down the
+  left: Today (the press bar, tomorrow's paper, the page plan and the week), Editions, Reading,
+  Delivery and The paper, each with a line on what's in it ("Press at 05:30", "Kindle and 2
+  more"). Delivery lists every place the paper goes, the Kindle, Email to Kindle, reMarkable,
+  export folders, Kobo and PocketBook, one row each with its state, and opens a row's settings
+  beneath it. This week's **All editions** now opens the Editions room.
 - **The edition bundle, for reader apps** (edition bundle design, phase 1). `format = "bundle"`
   on an export folder writes each edition as data: `edition.json` with the front page plan, every
   story's text, link and photos, the weather as numbers and the crossword with its answers, beside

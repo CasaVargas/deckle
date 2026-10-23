@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Daily tab (Daily design §5c, tomorrow's paper design §8): the press, tomorrow's paper so
-// far with its page plan and week, Your Reading, and the paper's settings, all backed by
-// digest.toml and the CLI.
+// The Daily tab (Daily design §5c, tomorrow's paper design §8), in rooms: Today (the press and
+// tomorrow's paper so far, with its page plan and week), Editions, Reading, Delivery (where the
+// paper goes) and The paper's settings, all backed by digest.toml and the CLI.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
+import { ROOMS, destinations, roomNotes } from "./dailyRooms";
+import type { Place, Room } from "./dailyRooms";
 import Icon from "./Icon";
 import PagePlanCard from "./PagePlanCard";
 import { reorder, setBudget } from "./pagePlan";
@@ -82,6 +84,8 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [password, setPassword] = useState("");
   const [emailMsg, setEmailMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [testing, setTesting] = useState(false);
+  const [room, setRoom] = useState<Room>("today");
+  const [openPlace, setOpenPlace] = useState<Place["key"] | null>(null);
 
   const load = useCallback(async (s?: DailyState) => {
     const st = s ?? (await api.dailyState());
@@ -291,419 +295,497 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const planToggle = (row: PagePlanRow, on: boolean) =>
     planSave((c) => ({ ...c, sections: on ? [...c.sections, row.kind] : c.sections.filter((x) => x !== row.kind) }));
 
-  return (
-    <div className="daily">
-      <PressBar press={next?.press ?? null} time={time} onTime={setTime} onSchedule={setScheduleOn} onRestart={() => stopPresses(false)} />
+  const notes = roomNotes(draft, next, reading, dirty);
 
-      <div className="daily-columns">
-        <TomorrowsPaper
-          next={next}
-          preview={preview}
-          running={running}
-          onRun={run}
-          onStop={() => stopPresses(true)}
-          onShowFile={() => preview && api.reveal(preview.file)}
-        >
-          {result && (
-            <div className={`run-result ${result.r.ok ? "ok" : "fail"}`}>
-              <div>{summary(result.r, result.send)}</div>
-              <div className="section-counts">
-                {counts(result.r, result.send).map((s) => (
-                  <span key={s.title} className={s.unavailable && s.items === 0 ? "warn" : ""} title={s.unavailable ?? ""}>
-                    {s.title} {s.items}
-                  </span>
-                ))}
-              </div>
-              {result.r.log && <pre className="log">{result.r.log}</pre>}
-            </div>
-          )}
-        </TomorrowsPaper>
-        <div className="daily-side">
-          <PagePlanCard
-            next={next}
-            locked={planLocked}
-            lockedWhy={dirty ? "Save The paper's changes first." : undefined}
-            onMove={planMove}
-            onBudget={planBudget}
-            onToggle={planToggle}
-          />
-          {next && <ThisWeek week={next.week} />}
-        </div>
-      </div>
-
-      <Readership onApplied={() => load().then(loadNext)} />
-
-      <EveryEdition
-        disabled={planLocked}
-        building={running !== null}
-        onFolder={(folder) => planSave((c) => ({ ...c, morgue: { keep_days: c.morgue?.keep_days ?? 365, folder } }))}
-      />
-
-      <Shelf inPaper={draft.sections.includes("shelf")} />
-
-      <section className="card">
-        <h3>Your Reading</h3>
-        <p className="muted small">Save an article now; it's in tomorrow's paper, whole. Over {draft.reading.long_read_words.toLocaleString()} words, it comes as its own book.</p>
-        <form
-          className="save-row"
-          onSubmit={(e) => {
-            e.preventDefault();
-            addReading();
-          }}
-        >
-          <input type="url" placeholder="Paste a link (https://…)" value={saveUrl} onChange={(e) => setSaveUrl(e.target.value)} spellCheck={false} />
-          <button className="ghost" type="submit" disabled={!saveUrl.trim()}>
+  const emailCard = (
+    <section className="card email-card">
+      <div className="card-head">
+        <h3>Email to Kindle</h3>
+        {dirty && (
+          <button className="primary" onClick={() => save()}>
             Save
           </button>
-        </form>
-        {saveMsg && <p className="muted small">{saveMsg}</p>}
-        {reading.length > 0 && (
-          <ul className="reading">
-            {reading.map((e) => (
-              <li key={e.id}>
-                <span className={`state ${e.state}`}>{e.state === "book" ? "own book" : e.state}</span>
-                <span className="what" title={e.url ?? e.file ?? ""}>
-                  {e.title ?? host(e.url) ?? e.file}
-                  {e.title && <span className="muted"> · {host(e.url)}</span>}
-                  {e.note && e.state !== "printed" && <span className="muted"> · {e.note}</span>}
-                </span>
-                <button className="icon small" aria-label="Remove" onClick={() => api.readingRemove(e.id).then(refreshSide)}>
-                  <Icon name="x" size={14} />
-                </button>
-              </li>
-            ))}
-          </ul>
         )}
-        <div className="row-pair">
-          <div>
-            <div className="label">Inbox folder</div>
-            <div className="mono">{draft.reading.inbox}</div>
-            <p className="muted small">Drop links or saved pages here. Point it at iCloud Drive to save from your phone.</p>
-          </div>
-          <button
-            className="ghost"
-            onClick={async () => {
-              const dir = await openDialog({ directory: true, multiple: false });
-              if (typeof dir === "string") {
-                const c = structuredClone(draft);
-                c.reading.inbox = dir;
-                save(c);
-              }
-            }}
-          >
-            Change…
-          </button>
-        </div>
-        <div className="row-pair">
-          <div>
-            <div className="label">Bookmarklet</div>
-            <p className="muted small">Copy it, then add a bookmark in your browser and paste it as the address. Clicking it saves the page you're on (while Deckle's morning schedule is on).</p>
-          </div>
-          <button
-            className="ghost"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(await api.bookmarklet());
-                setCopied(true);
-                setTimeout(() => setCopied(false), 2000);
-              } catch (e) {
-                onNotice(String(e));
-              }
-            }}
-          >
-            {copied ? "Copied" : "Copy bookmarklet"}
-          </button>
-        </div>
-      </section>
-
-      <section className="card email-card">
-        <div className="card-head">
-          <h3>Email to Kindle</h3>
-          {dirty && (
-            <button className="primary" onClick={() => save()}>
-              Save
-            </button>
-          )}
-        </div>
-        <p className="muted small">
-          The morning paper arrives over Wi-Fi with no cable: Deckle emails it to your Kindle's Send-to-Kindle address from your
-          own mail account. If an email fails, the paper waits for USB as before.
-        </p>
-        <label className="check">
-          <input type="checkbox" checked={!!draft.email?.enabled} onChange={(e) => editEmail((m) => (m.enabled = e.target.checked))} />
-          Email the paper to my Kindle
+      </div>
+      <p className="muted small">
+        The morning paper arrives over Wi-Fi with no cable: Deckle emails it to your Kindle's Send-to-Kindle address from your
+        own mail account. If an email fails, the paper waits for USB as before.
+      </p>
+      <label className="check">
+        <input type="checkbox" checked={!!draft.email?.enabled} onChange={(e) => editEmail((m) => (m.enabled = e.target.checked))} />
+        Email the paper to my Kindle
+      </label>
+      <div className="grid2">
+        <label>
+          <span className="label">Kindle address</span>
+          <input value={draft.email?.to ?? ""} placeholder="you_ABC123@kindle.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.to = e.target.value))} />
         </label>
-        <div className="grid2">
-          <label>
-            <span className="label">Kindle address</span>
-            <input value={draft.email?.to ?? ""} placeholder="you_ABC123@kindle.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.to = e.target.value))} />
-          </label>
-          <label>
-            <span className="label">From</span>
-            <input value={draft.email?.from ?? ""} placeholder="you@example.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.from = e.target.value))} />
-          </label>
-          <label>
-            <span className="label">SMTP server</span>
-            <input value={draft.email?.smtp_host ?? ""} placeholder="smtp.gmail.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.smtp_host = e.target.value))} />
-          </label>
-          <label>
-            <span className="label">Port</span>
-            <select value={draft.email?.smtp_port ?? 587} onChange={(e) => editEmail((m) => (m.smtp_port = Number(e.target.value)))}>
-              <option value={587}>587 (STARTTLS)</option>
-              <option value={465}>465 (TLS)</option>
-            </select>
-          </label>
-          <label>
-            <span className="label">Username</span>
-            <input value={draft.email?.username ?? ""} placeholder="you@example.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.username = e.target.value))} />
-          </label>
-          <div>
-            <span className="label">Password</span>
-            <form
-              className="save-row"
-              onSubmit={(e) => {
-                e.preventDefault();
-                savePassword();
-              }}
-            >
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={password}
-                placeholder={emailStatus?.has_password ? "Saved in the keychain" : "App password"}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <button className="ghost" type="submit" disabled={!password}>
-                {emailStatus?.has_password ? "Replace" : "Save"}
-              </button>
-            </form>
-          </div>
-        </div>
-        <label className="check">
-          <input type="checkbox" checked={!!draft.email?.usb_too} onChange={(e) => editEmail((m) => (m.usb_too = e.target.checked))} />
-          Also send it over USB when the email goes out (two copies on the Kindle)
+        <label>
+          <span className="label">From</span>
+          <input value={draft.email?.from ?? ""} placeholder="you@example.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.from = e.target.value))} />
         </label>
-        <div className="paper-actions">
-          <button className="ghost" disabled={testing || !emailStatus?.configured || !emailStatus?.has_password} onClick={sendTest}>
-            {testing ? "Sending…" : "Send a test"}
-          </button>
-          {emailStatus && !emailStatus.configured && <span className="muted small">Fill in the addresses and server first.</span>}
-        </div>
-        {emailMsg && <p className={`small ${emailMsg.ok ? "" : "fail"}`}>{emailMsg.text}</p>}
-        <p className="muted small">
-          Add the From address to Amazon's Approved Personal Document E-mail List (Manage Your Content and Devices → Preferences →
-          Personal Document Settings), or Amazon drops the email. Gmail and iCloud need an app password. The password is kept in the
-          system keychain, never in digest.toml.
-        </p>
-        <p className="muted small">
-          Emailed papers collect in your Kindle's Docs: Deckle can't remove them, so the "keep" setting only applies over USB. Clear
-          old ones in{" "}
-          <button className="link" onClick={() => api.openLink(MYCD).catch(() => {})}>
-            Manage Your Content and Devices
-          </button>
-        </p>
-      </section>
-
-      <section className="card settings-card">
-        <div className="card-head">
-          <h3>The paper</h3>
-          <button className="primary" disabled={!dirty} onClick={() => save()}>
-            {dirty ? "Save" : "Saved"}
-          </button>
-        </div>
-
-        <div className="grid2">
-          <label>
-            <span className="label">Name</span>
-            <input value={draft.title} onChange={(e) => edit((c) => (c.title = e.target.value))} />
-          </label>
-          <label>
-            <span className="label">Units</span>
-            <select value={draft.units} onChange={(e) => edit((c) => (c.units = e.target.value as DailyConfig["units"]))}>
-              <option value="imperial">°F, mph</option>
-              <option value="metric">°C, km/h</option>
-            </select>
-          </label>
-        </div>
-
-        <div className="label">Place</div>
-        <div className="place">
-          <span>
-            {draft.place || <em>Not set</em>}
-            {draft.latitude != null && <span className="muted small"> · {draft.latitude.toFixed(2)}, {draft.longitude?.toFixed(2)}</span>}
-          </span>
+        <label>
+          <span className="label">SMTP server</span>
+          <input value={draft.email?.smtp_host ?? ""} placeholder="smtp.gmail.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.smtp_host = e.target.value))} />
+        </label>
+        <label>
+          <span className="label">Port</span>
+          <select value={draft.email?.smtp_port ?? 587} onChange={(e) => editEmail((m) => (m.smtp_port = Number(e.target.value)))}>
+            <option value={587}>587 (STARTTLS)</option>
+            <option value={465}>465 (TLS)</option>
+          </select>
+        </label>
+        <label>
+          <span className="label">Username</span>
+          <input value={draft.email?.username ?? ""} placeholder="you@example.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.username = e.target.value))} />
+        </label>
+        <div>
+          <span className="label">Password</span>
           <form
             className="save-row"
             onSubmit={(e) => {
               e.preventDefault();
-              findPlace();
+              savePassword();
             }}
           >
-            <input placeholder="Town, state (e.g. Carthage, NC)" value={placeQuery} onChange={(e) => setPlaceQuery(e.target.value)} />
-            <button className="ghost" type="submit">
-              Find
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={password}
+              placeholder={emailStatus?.has_password ? "Saved in the keychain" : "App password"}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <button className="ghost" type="submit" disabled={!password}>
+              {emailStatus?.has_password ? "Replace" : "Save"}
             </button>
           </form>
-          {places && (
-            <div className="places">
-              {places.length === 0 && <span className="muted small">No matches.</span>}
-              {places.map((p) => (
+        </div>
+      </div>
+      <label className="check">
+        <input type="checkbox" checked={!!draft.email?.usb_too} onChange={(e) => editEmail((m) => (m.usb_too = e.target.checked))} />
+        Also send it over USB when the email goes out (two copies on the Kindle)
+      </label>
+      <div className="paper-actions">
+        <button className="ghost" disabled={testing || !emailStatus?.configured || !emailStatus?.has_password} onClick={sendTest}>
+          {testing ? "Sending…" : "Send a test"}
+        </button>
+        {emailStatus && !emailStatus.configured && <span className="muted small">Fill in the addresses and server first.</span>}
+      </div>
+      {emailMsg && <p className={`small ${emailMsg.ok ? "" : "fail"}`}>{emailMsg.text}</p>}
+      <p className="muted small">
+        Add the From address to Amazon's Approved Personal Document E-mail List (Manage Your Content and Devices → Preferences →
+        Personal Document Settings), or Amazon drops the email. Gmail and iCloud need an app password. The password is kept in the
+        system keychain, never in digest.toml.
+      </p>
+      <p className="muted small">
+        Emailed papers collect in your Kindle's Docs: Deckle can't remove them, so the "keep" setting only applies over USB. Clear
+        old ones in{" "}
+        <button className="link" onClick={() => api.openLink(MYCD).catch(() => {})}>
+          Manage Your Content and Devices
+        </button>
+      </p>
+    </section>
+  );
+  const exportFolders = (
+    <ExportFolders
+      exports={draft.export}
+      onSave={(exports) => {
+        const c = structuredClone(draft);
+        c.export = exports;
+        setDraft(c);
+        return save(c);
+      }}
+    />
+  );
+  const remarkableCard = (
+    <RemarkableCard
+      remarkable={draft.remarkable}
+      onSave={(remarkable) => {
+        const c = structuredClone(draft);
+        c.remarkable = remarkable;
+        setDraft(c);
+        return save(c);
+      }}
+    />
+  );
+
+  // A place's settings, opened beneath its row in Delivery
+  const placeSettings = (key: Place["key"]) => {
+    if (key === "email") return emailCard;
+    if (key === "exports") return exportFolders;
+    if (key === "remarkable") return remarkableCard;
+    return null;
+  };
+
+  return (
+    <div className="daily-rooms">
+      <nav className="rooms" aria-label="Daily">
+        {ROOMS.map((r) => (
+          <button key={r.key} className={room === r.key ? "on" : ""} aria-current={room === r.key ? "page" : undefined} onClick={() => setRoom(r.key)}>
+            <span className="room-title">{r.title}</span>
+            {notes[r.key] && <span className="room-note">{notes[r.key]}</span>}
+          </button>
+        ))}
+      </nav>
+
+      <div className="daily">
+        {room === "today" && (
+          <>
+            <PressBar press={next?.press ?? null} time={time} onTime={setTime} onSchedule={setScheduleOn} onRestart={() => stopPresses(false)} />
+
+            <div className="daily-columns">
+              <TomorrowsPaper
+                next={next}
+                preview={preview}
+                running={running}
+                onRun={run}
+                onStop={() => stopPresses(true)}
+                onShowFile={() => preview && api.reveal(preview.file)}
+              >
+                {result && (
+                  <div className={`run-result ${result.r.ok ? "ok" : "fail"}`}>
+                    <div>{summary(result.r, result.send)}</div>
+                    <div className="section-counts">
+                      {counts(result.r, result.send).map((s) => (
+                        <span key={s.title} className={s.unavailable && s.items === 0 ? "warn" : ""} title={s.unavailable ?? ""}>
+                          {s.title} {s.items}
+                        </span>
+                      ))}
+                    </div>
+                    {result.r.log && <pre className="log">{result.r.log}</pre>}
+                  </div>
+                )}
+              </TomorrowsPaper>
+              <div className="daily-side">
+                <PagePlanCard
+                  next={next}
+                  locked={planLocked}
+                  lockedWhy={dirty ? "Save your changes first, in The paper or Email to Kindle." : undefined}
+                  onMove={planMove}
+                  onBudget={planBudget}
+                  onToggle={planToggle}
+                />
+                {next && <ThisWeek week={next.week} onAllEditions={() => setRoom("editions")} />}
+              </div>
+            </div>
+          </>
+        )}
+
+        {room === "editions" && (
+          <>
+            <Readership onApplied={() => load().then(loadNext)} />
+
+            <EveryEdition
+              disabled={planLocked}
+              building={running !== null}
+              onFolder={(folder) => planSave((c) => ({ ...c, morgue: { keep_days: c.morgue?.keep_days ?? 365, folder } }))}
+            />
+          </>
+        )}
+
+        {room === "reading" && (
+          <>
+            <section className="card">
+              <h3>Your Reading</h3>
+              <p className="muted small">Save an article now; it's in tomorrow's paper, whole. Over {draft.reading.long_read_words.toLocaleString()} words, it comes as its own book.</p>
+              <form
+                className="save-row"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  addReading();
+                }}
+              >
+                <input type="url" placeholder="Paste a link (https://…)" value={saveUrl} onChange={(e) => setSaveUrl(e.target.value)} spellCheck={false} />
+                <button className="ghost" type="submit" disabled={!saveUrl.trim()}>
+                  Save
+                </button>
+              </form>
+              {saveMsg && <p className="muted small">{saveMsg}</p>}
+              {reading.length > 0 && (
+                <ul className="reading">
+                  {reading.map((e) => (
+                    <li key={e.id}>
+                      <span className={`state ${e.state}`}>{e.state === "book" ? "own book" : e.state}</span>
+                      <span className="what" title={e.url ?? e.file ?? ""}>
+                        {e.title ?? host(e.url) ?? e.file}
+                        {e.title && <span className="muted"> · {host(e.url)}</span>}
+                        {e.note && e.state !== "printed" && <span className="muted"> · {e.note}</span>}
+                      </span>
+                      <button className="icon small" aria-label="Remove" onClick={() => api.readingRemove(e.id).then(refreshSide)}>
+                        <Icon name="x" size={14} />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="row-pair">
+                <div>
+                  <div className="label">Inbox folder</div>
+                  <div className="mono">{draft.reading.inbox}</div>
+                  <p className="muted small">Drop links or saved pages here. Point it at iCloud Drive to save from your phone.</p>
+                </div>
                 <button
-                  key={`${p.latitude},${p.longitude}`}
-                  className="chip"
-                  onClick={() => {
-                    edit((c) => {
-                      c.place = p.label;
-                      c.latitude = Math.round(p.latitude * 100) / 100;
-                      c.longitude = Math.round(p.longitude * 100) / 100;
-                    });
-                    setPlaces(null);
-                    setPlaceQuery("");
+                  className="ghost"
+                  onClick={async () => {
+                    const dir = await openDialog({ directory: true, multiple: false });
+                    if (typeof dir === "string") {
+                      const c = structuredClone(draft);
+                      c.reading.inbox = dir;
+                      save(c);
+                    }
                   }}
                 >
-                  {p.label}
+                  Change…
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
+              </div>
+              <div className="row-pair">
+                <div>
+                  <div className="label">Bookmarklet</div>
+                  <p className="muted small">Copy it, then add a bookmark in your browser and paste it as the address. Clicking it saves the page you're on (while Deckle's morning schedule is on).</p>
+                </div>
+                <button
+                  className="ghost"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(await api.bookmarklet());
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 2000);
+                    } catch (e) {
+                      onNotice(String(e));
+                    }
+                  }}
+                >
+                  {copied ? "Copied" : "Copy bookmarklet"}
+                </button>
+              </div>
+            </section>
 
-        <label>
-          <span className="label">Local news search</span>
-          <input value={draft.local.google_news} placeholder="e.g. Moore County NC" onChange={(e) => edit((c) => (c.local.google_news = e.target.value))} />
-        </label>
+            <Shelf inPaper={draft.sections.includes("shelf")} />
+          </>
+        )}
 
-        <div className="label">Other places</div>
-        <p className="muted small">Local news for a relative's town or a trip, each its own section after Local. Weather stays on your place.</p>
-        <div className="feeds">
-          {(draft.local.places ?? []).map((p, i) => (
-            <div key={i} className="feed">
-              <input value={p.name} placeholder="Name (e.g. Asheville, NC)" onChange={(e) => edit((c) => (c.local.places![i].name = e.target.value))} />
-              <input value={p.google_news} placeholder="Google News search" onChange={(e) => edit((c) => (c.local.places![i].google_news = e.target.value))} />
-              <button className="icon small" aria-label="Remove place" onClick={() => edit((c) => c.local.places!.splice(i, 1))}>
-                <Icon name="x" size={14} />
-              </button>
-            </div>
-          ))}
-          <button className="ghost" onClick={() => edit((c) => (c.local.places = [...(c.local.places ?? []), { name: "", google_news: "", feeds: [] }]))}>
-            Add a place
-          </button>
-        </div>
+        {room === "delivery" && (
+          <section className="card delivery" aria-label="Where the paper goes">
+            <h3>Where the paper goes</h3>
+            <p className="muted small">
+              Each morning's paper goes to every place that's on. A reader that isn't plugged in keeps its copy waiting and gets it
+              the next time.
+            </p>
+            <ul className="place-list">
+              {destinations(draft).map((p) => {
+                const head = (
+                  <>
+                    <span className={`press-dot ${p.on ? "on" : ""}`} aria-hidden="true" />
+                    <span className="place-name">
+                      <strong>{p.name}</strong>
+                      <span className="muted small">{p.how}</span>
+                    </span>
+                    <span className="place-status">{p.status}</span>
+                  </>
+                );
+                return (
+                  <li key={p.key}>
+                    {p.open ? (
+                      <button className="place-head" aria-expanded={openPlace === p.key} onClick={() => setOpenPlace(openPlace === p.key ? null : p.key)}>
+                        {head}
+                        <Icon name="chevron-down" />
+                      </button>
+                    ) : (
+                      <div className="place-head">{head}</div>
+                    )}
+                    {openPlace === p.key && <div className="place-body">{placeSettings(p.key)}</div>}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
 
-        <div className="label">Topics</div>
-        <p className="muted small">Each ticked topic becomes its own section, from Google News.</p>
-        <div className="topics">
-          {TOPICS.map((t) => (
-            <label key={t.slug} className="check">
-              <input type="checkbox" checked={topicOn(draft.feeds, t.slug)} onChange={() => edit((c) => (c.feeds = toggleTopic(c.feeds, t.slug)))} />
-              {t.title}
-            </label>
-          ))}
-        </div>
+        {room === "paper" && (
+          <>
+            <section className="card settings-card">
+              <div className="card-head">
+                <h3>The paper</h3>
+                <button className="primary" disabled={!dirty} onClick={() => save()}>
+                  {dirty ? "Save" : "Saved"}
+                </button>
+              </div>
 
-        <div className="label">Your feeds</div>
-        <div className="feeds">
-          {draft.feeds.map((f: FeedConfig, i: number) => (
-            <div key={i} className="feed">
-              <input value={f.name} placeholder="Section name" onChange={(e) => edit((c) => (c.feeds[i].name = e.target.value))} />
-              {f.topic ? (
-                <span className="muted small">topic: {topicTitle(f.topic)}</span>
-              ) : (
-                <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
-              )}
-              <button className="icon small" aria-label="Remove feed" onClick={() => edit((c) => c.feeds.splice(i, 1))}>
-                <Icon name="x" size={14} />
-              </button>
-            </div>
-          ))}
-          <button className="ghost" onClick={() => edit((c) => c.feeds.push({ name: "", url: "", max_items: 8 }))}>
-            Add a feed
-          </button>
-        </div>
+              <div className="grid2">
+                <label>
+                  <span className="label">Name</span>
+                  <input value={draft.title} onChange={(e) => edit((c) => (c.title = e.target.value))} />
+                </label>
+                <label>
+                  <span className="label">Units</span>
+                  <select value={draft.units} onChange={(e) => edit((c) => (c.units = e.target.value as DailyConfig["units"]))}>
+                    <option value="imperial">°F, mph</option>
+                    <option value="metric">°C, km/h</option>
+                  </select>
+                </label>
+              </div>
 
-        <div className="grid2">
-          <div>
-            <div className="label">Lottery</div>
-            {[
-              ["powerball", "Powerball"],
-              ["megamillions", "Mega Millions"],
-            ].map(([k, label]) => (
-              <label key={k} className="check">
-                <input
-                  type="checkbox"
-                  checked={draft.lottery.games.includes(k)}
-                  onChange={(e) => edit((c) => (c.lottery.games = e.target.checked ? [...c.lottery.games, k] : c.lottery.games.filter((g) => g !== k)))}
-                />
-                {label}
+              <div className="label">Place</div>
+              <div className="place">
+                <span>
+                  {draft.place || <em>Not set</em>}
+                  {draft.latitude != null && <span className="muted small"> · {draft.latitude.toFixed(2)}, {draft.longitude?.toFixed(2)}</span>}
+                </span>
+                <form
+                  className="save-row"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    findPlace();
+                  }}
+                >
+                  <input placeholder="Town, state (e.g. Carthage, NC)" value={placeQuery} onChange={(e) => setPlaceQuery(e.target.value)} />
+                  <button className="ghost" type="submit">
+                    Find
+                  </button>
+                </form>
+                {places && (
+                  <div className="places">
+                    {places.length === 0 && <span className="muted small">No matches.</span>}
+                    {places.map((p) => (
+                      <button
+                        key={`${p.latitude},${p.longitude}`}
+                        className="chip"
+                        onClick={() => {
+                          edit((c) => {
+                            c.place = p.label;
+                            c.latitude = Math.round(p.latitude * 100) / 100;
+                            c.longitude = Math.round(p.longitude * 100) / 100;
+                          });
+                          setPlaces(null);
+                          setPlaceQuery("");
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <label>
+                <span className="label">Local news search</span>
+                <input value={draft.local.google_news} placeholder="e.g. Moore County NC" onChange={(e) => edit((c) => (c.local.google_news = e.target.value))} />
               </label>
-            ))}
-          </div>
-          <div>
-            <div className="label">Stories</div>
-            <label className="check">
-              <input type="checkbox" checked={draft.full_text} onChange={(e) => edit((c) => (c.full_text = e.target.checked))} />
-              Whole stories, not summaries
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={draft.photos} disabled={!draft.full_text} onChange={(e) => edit((c) => (c.photos = e.target.checked))} />
-              With their photos
-            </label>
-            <label className="inline">
-              Keep the last
-              <input type="number" min={1} max={14} value={draft.keep} onChange={(e) => edit((c) => (c.keep = Math.max(1, Number(e.target.value) || 1)))} />
-              editions on the Kindle
-            </label>
-          </div>
-        </div>
 
-        <div className="label">Horoscope {draft.horoscope.signs.length === 0 && <span className="muted small">(none chosen: all twelve)</span>}</div>
-        <div className="places">
-          {SIGNS.map((s) => (
-            <button
-              key={s}
-              className={`chip ${draft.horoscope.signs.includes(s) ? "on" : ""}`}
-              onClick={() => edit((c) => (c.horoscope.signs = c.horoscope.signs.includes(s) ? c.horoscope.signs.filter((x) => x !== s) : [...c.horoscope.signs, s]))}
-            >
-              {s[0].toUpperCase() + s.slice(1)}
-            </button>
-          ))}
-        </div>
+              <div className="label">Other places</div>
+              <p className="muted small">Local news for a relative's town or a trip, each its own section after Local. Weather stays on your place.</p>
+              <div className="feeds">
+                {(draft.local.places ?? []).map((p, i) => (
+                  <div key={i} className="feed">
+                    <input value={p.name} placeholder="Name (e.g. Asheville, NC)" onChange={(e) => edit((c) => (c.local.places![i].name = e.target.value))} />
+                    <input value={p.google_news} placeholder="Google News search" onChange={(e) => edit((c) => (c.local.places![i].google_news = e.target.value))} />
+                    <button className="icon small" aria-label="Remove place" onClick={() => edit((c) => c.local.places!.splice(i, 1))}>
+                      <Icon name="x" size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button className="ghost" onClick={() => edit((c) => (c.local.places = [...(c.local.places ?? []), { name: "", google_news: "", feeds: [] }]))}>
+                  Add a place
+                </button>
+              </div>
 
-        <p className="muted small">
-          Saved to <span className="mono">{state.config_path}</span>; your own comments in that file are kept.
-        </p>
-      </section>
+              <div className="label">Topics</div>
+              <p className="muted small">Each ticked topic becomes its own section, from Google News.</p>
+              <div className="topics">
+                {TOPICS.map((t) => (
+                  <label key={t.slug} className="check">
+                    <input type="checkbox" checked={topicOn(draft.feeds, t.slug)} onChange={() => edit((c) => (c.feeds = toggleTopic(c.feeds, t.slug)))} />
+                    {t.title}
+                  </label>
+                ))}
+              </div>
 
-      <YourDay
-        day={draft.day}
-        emailOn={draft.email?.enabled ?? false}
-        onSave={(day) => {
-          const c = structuredClone(draft);
-          c.day = day;
-          setDraft(c);
-          return save(c);
-        }}
-      />
+              <div className="label">Your feeds</div>
+              <div className="feeds">
+                {draft.feeds.map((f: FeedConfig, i: number) => (
+                  <div key={i} className="feed">
+                    <input value={f.name} placeholder="Section name" onChange={(e) => edit((c) => (c.feeds[i].name = e.target.value))} />
+                    {f.topic ? (
+                      <span className="muted small">topic: {topicTitle(f.topic)}</span>
+                    ) : (
+                      <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
+                    )}
+                    <button className="icon small" aria-label="Remove feed" onClick={() => edit((c) => c.feeds.splice(i, 1))}>
+                      <Icon name="x" size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button className="ghost" onClick={() => edit((c) => c.feeds.push({ name: "", url: "", max_items: 8 }))}>
+                  Add a feed
+                </button>
+              </div>
 
-      <ExportFolders
-        exports={draft.export}
-        onSave={(exports) => {
-          const c = structuredClone(draft);
-          c.export = exports;
-          setDraft(c);
-          return save(c);
-        }}
-      />
+              <div className="grid2">
+                <div>
+                  <div className="label">Lottery</div>
+                  {[
+                    ["powerball", "Powerball"],
+                    ["megamillions", "Mega Millions"],
+                  ].map(([k, label]) => (
+                    <label key={k} className="check">
+                      <input
+                        type="checkbox"
+                        checked={draft.lottery.games.includes(k)}
+                        onChange={(e) => edit((c) => (c.lottery.games = e.target.checked ? [...c.lottery.games, k] : c.lottery.games.filter((g) => g !== k)))}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <div className="label">Stories</div>
+                  <label className="check">
+                    <input type="checkbox" checked={draft.full_text} onChange={(e) => edit((c) => (c.full_text = e.target.checked))} />
+                    Whole stories, not summaries
+                  </label>
+                  <label className="check">
+                    <input type="checkbox" checked={draft.photos} disabled={!draft.full_text} onChange={(e) => edit((c) => (c.photos = e.target.checked))} />
+                    With their photos
+                  </label>
+                  <label className="inline">
+                    Keep the last
+                    <input type="number" min={1} max={14} value={draft.keep} onChange={(e) => edit((c) => (c.keep = Math.max(1, Number(e.target.value) || 1)))} />
+                    editions on the Kindle
+                  </label>
+                </div>
+              </div>
 
-      <RemarkableCard
-        remarkable={draft.remarkable}
-        onSave={(remarkable) => {
-          const c = structuredClone(draft);
-          c.remarkable = remarkable;
-          setDraft(c);
-          return save(c);
-        }}
-      />
+              <div className="label">Horoscope {draft.horoscope.signs.length === 0 && <span className="muted small">(none chosen: all twelve)</span>}</div>
+              <div className="places">
+                {SIGNS.map((s) => (
+                  <button
+                    key={s}
+                    className={`chip ${draft.horoscope.signs.includes(s) ? "on" : ""}`}
+                    onClick={() => edit((c) => (c.horoscope.signs = c.horoscope.signs.includes(s) ? c.horoscope.signs.filter((x) => x !== s) : [...c.horoscope.signs, s]))}
+                  >
+                    {s[0].toUpperCase() + s.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              <p className="muted small">
+                Saved to <span className="mono">{state.config_path}</span>; your own comments in that file are kept.
+              </p>
+            </section>
+
+            <YourDay
+              day={draft.day}
+              emailOn={draft.email?.enabled ?? false}
+              onSave={(day) => {
+                const c = structuredClone(draft);
+                c.day = day;
+                setDraft(c);
+                return save(c);
+              }}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
