@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **PDFs, reflowed** (#18). `deckle run paper.pdf` turns a text PDF into a Kindle book that
+  reflows: two-column pages read column by column, running heads and page numbers are dropped,
+  words broken at line ends are joined again (compounds like "well-known" keep their hyphen), and
+  tables, displayed equations and figures come through as pictures cut from the page. Chapters
+  and contents come from the headings. Every PDF run carries a note that the layout was rebuilt.
+  Reading PDFs needs PDFium (free, from bblanchon/pdfium-binaries): `tools/fetch-pdfium.sh`
+  fetches it for a source build, or set `DECKLE_PDFIUM`. Scans (no text layer) are refused; OCR
+  is #19. The desktop app doesn't take PDFs yet.
 - **Looked-up words to Anki** (#60). `deckle words anki --to words.csv` writes every English word
   you looked up on the Kindle, once each (its newest lookup), as a CSV Anki imports: word, short
   definition (from a Word Wise database already on this machine, never downloaded), the sentence

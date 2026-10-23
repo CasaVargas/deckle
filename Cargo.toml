@@ -19,6 +19,7 @@ deckle-digest = { path = "crates/deckle-digest" }
 deckle-cli = { path = "crates/deckle-cli" }
 deckle-docx = { path = "crates/deckle-docx" }
 deckle-txt = { path = "crates/deckle-txt" }
+deckle-pdf = { path = "crates/deckle-pdf" }
 deckle-library = { path = "crates/deckle-library" }
 deckle-readership = { path = "crates/deckle-readership" }
 deckle-cover = { path = "crates/deckle-cover" }

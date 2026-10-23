@@ -46,7 +46,8 @@ so the research that went into it stops being re-derived on MobileRead every yea
 - DRM removal of any kind. Input is DRM-free EPUB only.
 - Send-to-Kindle email or Amazon cloud delivery. Deckle is USB/MTP only.
 - Comics, manga, fixed-layout, PDFs, dictionaries. (Word documents came later as an import
-  stage in front of the pipeline: `2026-10-21-docx-import-design.md`.)
+  stage in front of the pipeline: `2026-10-21-docx-import-design.md`; text PDFs, reflowed, the
+  same way: `2026-10-23-pdf-reflow-design.md`. Scanned and fixed-layout PDFs are still out.)
 - Producing AZW3/MOBI. If KFX conversion fails the book is reported, not downgraded (AZW3
   fallback is a candidate for v1.1).
 - Linux as a first-class target. It builds and runs every stage except KFX conversion, and
