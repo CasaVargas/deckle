@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! An [`Edition`] → the EPUB's files: front page, one XHTML per section, nav, NCX, OPF.
 
+use crate::config::Photos;
 use crate::{Edition, Gathered, esc, long_date};
 
 /// `(path inside the EPUB, bytes)`. `mimetype` and `META-INF/container.xml` included.
@@ -373,8 +374,21 @@ fn opf(e: &Edition, uid: &str) -> Vec<u8> {
     .into_bytes()
 }
 
+/// A fetched photo as it goes in an EPUB with `photos`.
+pub fn page_photo(jpeg: &[u8], photos: Photos) -> Vec<u8> {
+    match photos {
+        Photos::Gray => crate::article::gray_jpeg(jpeg),
+        Photos::Color => jpeg.to_vec(),
+    }
+}
+
 /// Every file of the edition's EPUB. `cover` is the JPEG from [`crate::cover::render`].
 pub fn render(g: &Gathered, cover: Vec<u8>) -> Files {
+    render_as(g, cover, Photos::Gray)
+}
+
+/// [`render`] with the photos grayscale for e-ink, or as they were fetched.
+pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
     let e = &g.edition;
     let uid = format!("urn:deckle:digest:{}", e.date);
     let mut files: Files = vec![
@@ -405,7 +419,10 @@ pub fn render(g: &Gathered, cover: Vec<u8>) -> Files {
         ));
         for (j, a) in e.sections[i].articles.iter().enumerate() {
             for (n, jpeg) in a.photos.iter().enumerate() {
-                files.push((format!("OEBPS/{}", photo_file(i, j, n)), jpeg.clone()));
+                files.push((
+                    format!("OEBPS/{}", photo_file(i, j, n)),
+                    page_photo(jpeg, photos),
+                ));
             }
         }
     }

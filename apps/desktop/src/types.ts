@@ -173,6 +173,29 @@ export interface DailyConfig {
   day?: DayConfig;
   /** `[morgue]`: where every edition is kept. Absent while untouched. */
   morgue?: { folder: string; keep_days: number };
+  /** `[[export]]`: folders each edition also goes to (other readers design §7). Absent while empty. */
+  export?: ExportConfig[];
+}
+
+/** One `[[export]]` folder: an iCloud Drive folder for an iPad, a Dropbox one for a Boox. */
+export interface ExportConfig {
+  name: string;
+  dir: string;
+  format: "epub";
+  photos: "color" | "gray";
+  /** Editions kept in the folder; 0 keeps all. */
+  keep: number;
+  /** Also the long reads, not only the paper. */
+  books: boolean;
+}
+
+/** What one export folder got in a run (`deckle_digest::export::ExportReport`). */
+export interface ExportReport {
+  name: string;
+  dir: string;
+  written: string[];
+  pruned: string[];
+  error?: string;
 }
 
 /** `[[local.places]]`: another place's local news, its own section after Local (#102). */

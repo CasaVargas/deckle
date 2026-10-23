@@ -8,6 +8,7 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::config::Photos;
 use crate::esc;
 use crate::fetch::{Net, encode};
 
@@ -321,6 +322,11 @@ pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<E
 /// A photo as an e-ink JPEG: grayscale, at most 1000 px wide. `None` for tiny images (icons,
 /// trackers) and formats the decoder does not know.
 pub fn eink_photo(bytes: &[u8]) -> Option<Vec<u8>> {
+    photo(bytes, Photos::Gray)
+}
+
+/// A photo as a JPEG at most 1000 px wide, grayscale or in color. `None` as for [`eink_photo`].
+pub fn photo(bytes: &[u8], photos: Photos) -> Option<Vec<u8>> {
     let img = image::load_from_memory(bytes).ok()?;
     if img.width().min(img.height()) < MIN_PHOTO_SIDE {
         return None;
@@ -331,14 +337,34 @@ pub fn eink_photo(bytes: &[u8]) -> Option<Vec<u8>> {
         img
     };
     let mut out = Vec::new();
-    img.grayscale()
-        .to_luma8()
-        .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
-            &mut out,
-            PHOTO_QUALITY,
-        ))
-        .ok()?;
+    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, PHOTO_QUALITY);
+    match photos {
+        Photos::Gray => img.grayscale().to_luma8().write_with_encoder(encoder),
+        Photos::Color => img.to_rgb8().write_with_encoder(encoder),
+    }
+    .ok()?;
     Some(out)
+}
+
+/// `jpeg` for an e-ink page: as it is when it's already grayscale (only its header is read),
+/// else turned gray. A JPEG that won't decode is kept as it is.
+pub fn gray_jpeg(jpeg: &[u8]) -> Vec<u8> {
+    use image::ImageDecoder;
+    let gray = image::codecs::jpeg::JpegDecoder::new(std::io::Cursor::new(jpeg))
+        .is_ok_and(|d| d.color_type() == image::ColorType::L8);
+    if gray {
+        return jpeg.to_vec();
+    }
+    let Ok(img) = image::load_from_memory(jpeg) else {
+        return jpeg.to_vec();
+    };
+    let mut out = Vec::new();
+    match img.grayscale().to_luma8().write_with_encoder(
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, PHOTO_QUALITY),
+    ) {
+        Ok(()) => out,
+        Err(_) => jpeg.to_vec(),
+    }
 }
 
 /// A 64-bit difference hash: the picture's gradient at 9×8. Copies of one photo from a CDN
@@ -392,6 +418,17 @@ pub fn fetch_photos(
     max: usize,
     net: &dyn Net,
 ) -> Vec<Option<Vec<u8>>> {
+    fetch_photos_as(photos, lead, max, net, Photos::Gray)
+}
+
+/// [`fetch_photos`], keeping the photos in color when `as_` says so.
+pub fn fetch_photos_as(
+    photos: &[String],
+    lead: bool,
+    max: usize,
+    net: &dyn Net,
+    as_: Photos,
+) -> Vec<Option<Vec<u8>>> {
     let mut hashes: Vec<u64> = Vec::new();
     photos
         .iter()
@@ -400,7 +437,7 @@ pub fn fetch_photos(
             if hashes.len() >= max {
                 return None;
             }
-            let jpeg = load_photo(url, net).and_then(|b| eink_photo(&b))?;
+            let jpeg = load_photo(url, net).and_then(|b| photo(&b, as_))?;
             if !(lead && k == 0) && !clears_inline_size(&jpeg) {
                 return None;
             }

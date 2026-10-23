@@ -812,3 +812,120 @@ mod front {
         assert!(x.contains("A &amp; B &lt;c&gt;"));
     }
 }
+
+// ---- Export folders (other readers design §7) ----
+
+use deckle_digest::config::{ExportConfig, Photos, STARTER, save, validate_exports};
+
+fn exporting(c: &mut Config, photos: Photos) {
+    c.export = vec![ExportConfig {
+        name: "iPad".into(),
+        dir: "~/Deckle/iPad".into(),
+        photos,
+        ..Default::default()
+    }];
+}
+
+#[test]
+fn a_color_export_builds_a_color_edition_beside_the_paper() {
+    let (_d, mut c, _q, _) = reading_setup(&["https://ex.com/long"]);
+    exporting(&mut c, Photos::Color);
+    let out = tempfile::tempdir().unwrap();
+    let r = build(&c, date(), now(), out.path(), &net_with_pages).unwrap();
+    let color = r.color_epub.as_ref().unwrap();
+    assert_eq!(
+        color,
+        &out.path().join("color/deckle-daily-2026-10-20.epub")
+    );
+    assert_eq!(r.color_long_reads.len(), r.long_reads.len());
+    assert_eq!(
+        r.color_long_reads[0].file_name(),
+        r.long_reads[0].file_name()
+    );
+    // Same pages, same files: only the photos may differ.
+    let names = |p: &PathBuf| {
+        let mut z = read_zip(p);
+        let mut n: Vec<String> = z.file_names().map(|n| n.unwrap().into_owned()).collect();
+        n.sort();
+        let mut text = String::new();
+        z.by_name("OEBPS/section-1.xhtml")
+            .map(|mut f| f.read_to_string(&mut text).unwrap())
+            .ok();
+        (n, text)
+    };
+    assert_eq!(names(&r.epub), names(color));
+}
+
+#[test]
+fn a_gray_export_or_none_builds_only_the_paper() {
+    for photos in [None, Some(Photos::Gray)] {
+        let mut c = config();
+        if let Some(p) = photos {
+            exporting(&mut c, p);
+        }
+        let out = tempfile::tempdir().unwrap();
+        let r = build(&c, date(), now(), out.path(), &fake).unwrap();
+        assert_eq!(r.color_epub, None);
+        assert!(!out.path().join("color").exists());
+    }
+}
+
+#[test]
+fn the_starter_export_block_parses_once_uncommented() {
+    let start = STARTER.find("# [[export]]").unwrap();
+    let block: String = STARTER[start..]
+        .lines()
+        .take_while(|l| l.starts_with("# "))
+        .map(|l| format!("{}\n", &l[2..]))
+        .collect();
+    let c = Config::parse(&format!("{STARTER}\n{block}")).unwrap();
+    assert_eq!(c.export.len(), 1);
+    let e = &c.export[0];
+    assert_eq!(e.name, "iPad");
+    assert!(e.dir.ends_with("Deckle Daily"));
+    assert_eq!((e.photos, e.keep, e.books), (Photos::Color, 7, false));
+    assert!(c.wants_color());
+    assert!(Config::parse(STARTER).unwrap().export.is_empty());
+}
+
+#[test]
+fn exports_need_a_unique_name_and_a_folder() {
+    let one = |name: &str, dir: &str| ExportConfig {
+        name: name.into(),
+        dir: dir.into(),
+        ..Default::default()
+    };
+    assert!(validate_exports(&[one("iPad", "~/a"), one("Boox", "~/b")]).is_ok());
+    assert!(validate_exports(&[one("", "~/a")]).is_err());
+    assert!(validate_exports(&[one("iPad", " ")]).is_err());
+    assert!(validate_exports(&[one("iPad", "~/a"), one("iPad", "~/b")]).is_err());
+    let err = Config::parse("[[export]]\nname = \"iPad\"\ndir = \"\"\n").unwrap_err();
+    assert!(err.contains("dir is empty"), "{err}");
+    // PDF and KEPUB come in later phases.
+    assert!(Config::parse("[[export]]\nname = \"x\"\ndir = \"~/x\"\nformat = \"pdf\"\n").is_err());
+}
+
+#[test]
+fn a_save_writes_exports_only_when_there_are_some() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut c = Config::parse(STARTER).unwrap();
+    save(&path, &c).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        !text
+            .lines()
+            .any(|l| l.starts_with("[[export]]") || l.starts_with("export"))
+    );
+    exporting(&mut c, Photos::Color);
+    save(&path, &c).unwrap();
+    let back = Config::load(&path).unwrap();
+    assert_eq!(back.export, c.export);
+    c.export.clear();
+    save(&path, &c).unwrap();
+    assert!(Config::load(&path).unwrap().export.is_empty());
+    let mut bad = c.clone();
+    exporting(&mut bad, Photos::Gray);
+    bad.export[0].name.clear();
+    assert!(save(&path, &bad).is_err());
+}

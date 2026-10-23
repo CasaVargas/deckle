@@ -76,6 +76,10 @@ the screenshot above.
   looked up this week, drawn from your own Kindle.
 - **The Morgue:** every edition kept in a plain folder, searchable, shown on the Daily tab as a
   month of front pages, and sendable to the Kindle again.
+- **The paper on an iPad, or in any folder:** each morning's edition also goes to the folders you
+  choose, as an EPUB with color photos if you like. An iCloud Drive folder reaches an iPad's
+  Files app. No Kindle Previewer needed for it. Kobo and reMarkable come next
+  ([other readers design](docs/superpowers/specs/2026-10-23-other-readers-design.md)).
 
 Designed, with a written plan, and waiting for code: **One Mac, many papers**
 ([#110](https://github.com/CasaVargas/deckle/issues/110)). The rest is on the

@@ -1389,7 +1389,24 @@ fn digest(
                 })?;
                 return Ok(ExitCode::SUCCESS);
             }
-            let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
+            let mut no_kindle = None;
+            // Export folders need no Previewer (other readers design §6): without one, the
+            // paper still goes to them, and nothing is converted or queued for a Kindle.
+            let located = match previewer::locate(pv.as_deref()) {
+                Ok(l) => Some(l),
+                Err(e) if to == "device" && !cfg.export.is_empty() => {
+                    no_kindle = Some(format!(
+                        "no Kindle copy: {e}; the paper went to the export folders only"
+                    ));
+                    // A long read with no book to become prints in the paper, unless an
+                    // export folder takes it as a book.
+                    if !cfg.export.iter().any(|x| x.books) {
+                        cfg.reading.long_read_words = usize::MAX;
+                    }
+                    None
+                }
+                Err(e) => return Err(e.to_string()),
+            };
             // A folder target must exist (and is created) before any work; `device` may be
             // absent: the edition then waits in the outbox.
             let folder = (to != "device").then(|| resolve_target(&to)).transpose()?;
@@ -1406,8 +1423,15 @@ fn digest(
                 &deckle_digest::Http,
                 &gather_options(),
             )?;
-            let opts = paper_options(Some(located.path.clone()), keep_work_dir, &converted);
-            let (mut long_reads, failed) = prepare_long_reads(&built, &opts);
+            let opts = paper_options(
+                located.as_ref().map(|l| l.path.clone()),
+                keep_work_dir,
+                &converted,
+            );
+            let (mut long_reads, failed) = match located {
+                Some(_) => prepare_long_reads(&built, &opts),
+                None => Default::default(),
+            };
             let mut notes: Vec<String> = Vec::new();
             if !failed.is_empty() {
                 for (id, why) in &failed {
@@ -1429,6 +1453,13 @@ fn digest(
             // Keep the paper in the Morgue whatever happens to its conversion.
             let note = archive_to_morgue(&cfg, date, &built.epub, &gathered);
             built.notes.extend(note);
+            built.notes.extend(no_kindle);
+            // Export folders, like email, belong to the morning run, not to `--to <folder>`.
+            let exports = match &folder {
+                Some(_) => Vec::new(),
+                None => deckle_digest::export::export_all(&cfg.export, date, &built),
+            };
+            let exported = exports.iter().any(|x| x.error.is_none());
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
             // design §7). A paper that went out by email skips the outbox unless `usb_too`.
             let (email, to_usb) = match &folder {
@@ -1445,8 +1476,8 @@ fn digest(
             let email = EmailRun {
                 email: email.unwrap_or_default(),
             };
-            // Converted only when it goes by USB.
-            let report = to_usb.then(|| run(&built.epub, &opts));
+            // Converted only when it goes by USB, to a Kindle there is a Previewer for.
+            let report = (to_usb && located.is_some()).then(|| run(&built.epub, &opts));
             let kfx = report.as_ref().and_then(|r| {
                 r.error
                     .is_none()
@@ -1463,7 +1494,14 @@ fn digest(
                     built.notes.extend(note);
                 }
             }
-            if kfx.is_some() || !to_usb {
+            if located.is_none() {
+                // Nothing for a Kindle: the export folders (or the email) were the delivery.
+                if exported || !to_usb {
+                    reading_queue(&cfg)
+                        .commit(date, &reading_outcomes)
+                        .map_err(|e| format!("reading queue: {e}"))?;
+                }
+            } else if kfx.is_some() || !to_usb {
                 let name = deckle_digest::edition_filename(date);
                 match &folder {
                     Some(target) => {
@@ -1501,12 +1539,15 @@ fn digest(
                 outcome: &'a DigestOutcome,
                 #[serde(flatten)]
                 email: &'a EmailRun,
+                #[serde(skip_serializing_if = "<[_]>::is_empty")]
+                exports: &'a [deckle_digest::export::ExportReport],
             }
             let all = DigestRun {
                 build: &built,
                 run: report.as_ref(),
                 outcome: &outcome,
                 email: &email,
+                exports: &exports,
             };
             let failed = report.as_ref().and_then(|r| r.error.as_ref());
             emit(json, &all, || {
@@ -1515,7 +1556,12 @@ fn digest(
                     None => format!("OK    {}", built.title),
                 };
                 let mut text = format!("{head}\n{}", section_lines(&built));
-                for part in [email.lines(), outcome.describe(&queue)] {
+                let exported = deckle_digest::export::lines(&exports);
+                let usb = match located {
+                    Some(_) => outcome.describe(&queue),
+                    None => String::new(),
+                };
+                for part in [email.lines(), exported, usb] {
                     if !part.is_empty() {
                         text.push_str(&format!("\n{part}"));
                     }
@@ -3055,6 +3101,8 @@ mod tests {
             title: "Paper".into(),
             sections: Vec::new(),
             long_reads: vec![mini, broken],
+            color_epub: None,
+            color_long_reads: Vec::new(),
             reading_outcomes: vec![
                 ("a1".into(), Outcome::Printed),
                 ("b2".into(), Outcome::Book),
@@ -3407,6 +3455,8 @@ mod layout_tests {
             title: "T".into(),
             sections: vec![summary("feeds:Science", 7), summary("local", 3)],
             long_reads: Vec::new(),
+            color_epub: None,
+            color_long_reads: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
         };

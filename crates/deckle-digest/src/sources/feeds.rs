@@ -244,7 +244,12 @@ pub(crate) fn story_body(
     net: &dyn Net,
 ) -> (String, Vec<Vec<u8>>) {
     let fetched = if cfg.photos {
-        article::fetch_photos(&x.photos, x.lead, cfg.max_photos, net)
+        // Kept in color when an export wants it; each EPUB grays them for e-ink.
+        let as_ = match cfg.wants_color() {
+            true => crate::config::Photos::Color,
+            false => crate::config::Photos::Gray,
+        };
+        article::fetch_photos_as(&x.photos, x.lead, cfg.max_photos, net, as_)
     } else {
         vec![None; x.photos.len()]
     };

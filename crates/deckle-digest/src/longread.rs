@@ -6,6 +6,7 @@ use std::path::Path;
 
 use chrono::NaiveDate;
 
+use crate::config::Photos;
 use crate::render::{STYLE, page};
 use crate::sources::feeds::photo_token;
 use crate::sources::reading::{LongRead, minutes};
@@ -16,12 +17,23 @@ fn photo_file(n: usize) -> String {
 }
 
 pub fn write_long_read(lr: &LongRead, date: NaiveDate, path: &Path) -> Result<(), String> {
-    write_article(
+    write_long_read_as(lr, date, path, Photos::Gray)
+}
+
+/// [`write_long_read`] with the photos grayscale for e-ink, or as they were fetched.
+pub fn write_long_read_as(
+    lr: &LongRead,
+    date: NaiveDate,
+    path: &Path,
+    photos: Photos,
+) -> Result<(), String> {
+    write_article_as(
         lr,
         &format!("urn:deckle:reads:{date}:{}", lr.id),
         Some("saved to your Deckle Daily"),
         date,
         path,
+        photos,
     )
 }
 
@@ -33,6 +45,18 @@ pub fn write_article(
     via: Option<&str>,
     date: NaiveDate,
     path: &Path,
+) -> Result<(), String> {
+    write_article_as(lr, uid, via, date, path, Photos::Gray)
+}
+
+/// [`write_article`] with the photos grayscale for e-ink, or as they were fetched.
+pub fn write_article_as(
+    lr: &LongRead,
+    uid: &str,
+    via: Option<&str>,
+    date: NaiveDate,
+    path: &Path,
+    photos: Photos,
 ) -> Result<(), String> {
     let cover = crate::cover::render_reads(
         &lr.title,
@@ -132,7 +156,10 @@ pub fn write_article(
         ("OEBPS/text.xhtml".into(), text),
     ];
     for (n, jpeg) in a.photos.iter().enumerate() {
-        files.push((format!("OEBPS/{}", photo_file(n)), jpeg.clone()));
+        files.push((
+            format!("OEBPS/{}", photo_file(n)),
+            crate::render::page_photo(jpeg, photos),
+        ));
     }
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
