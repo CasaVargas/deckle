@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A real front page, and topic sections**: the Daily opens on a front page (the lead, a
+  two-column table of headlines, "Inside today"), each section starts with "In this section" and
+  each story links back to its section and the front page. Tick Google News topics (World,
+  Sports, Science and more) in the Daily tab, or give a `[[feeds]]` entry `topic = "SPORTS"`,
+  several `urls` and `full_text = "lead"` (top story whole, the rest briefs). A story already
+  printed in an earlier news section is dropped from later ones. Tomorrow's paper sketch shows it
+  all.
 - **From Your Shelf**: a page in the Daily drawn from your own Kindle. **On your nightstand**
   lists the books you're in the middle of, how far in and how long since you opened them, with a
   nudge back into the newest one; it works on every Kindle, the Scribe included. A past highlight

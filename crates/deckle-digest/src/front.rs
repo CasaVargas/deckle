@@ -70,6 +70,36 @@ pub fn candidates(g: &Gathered) -> Vec<Candidate> {
     out
 }
 
+/// What the front page prints: the lead, and the headline tiles under it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrontPlan {
+    pub lead: Option<(usize, usize)>,
+    pub tiles: Vec<(usize, usize)>,
+}
+
+impl FrontPlan {
+    /// Whether the front page already prints this story (as the lead or a tile).
+    pub fn contains(&self, s: usize, a: usize) -> bool {
+        self.lead == Some((s, a)) || self.tiles.contains(&(s, a))
+    }
+}
+
+/// Tiles under the lead.
+const TILES: usize = 10;
+
+/// The lead by [`lead`], then the round-robin headlines of the news sections, minus the lead.
+pub fn front_plan(g: &Gathered) -> FrontPlan {
+    let lead = crate::cover::lead_of(g);
+    let tiles = g
+        .edition
+        .headlines(&g.news, TILES + 1)
+        .into_iter()
+        .filter(|&t| Some(t) != lead)
+        .take(TILES)
+        .collect();
+    FrontPlan { lead, tiles }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,5 +213,57 @@ mod tests {
             crate::cover::lead_of(&gathered(vec![story("Fire", false)])),
             Some((1, 0))
         );
+    }
+
+    fn many(key: &str, n: usize) -> Section {
+        Section {
+            key: key.into(),
+            title: key.into(),
+            articles: (0..n).map(|i| story(&format!("{key}{i}"), false)).collect(),
+            ..Default::default()
+        }
+    }
+
+    fn big(sections: Vec<Section>) -> Gathered {
+        let mut g = gathered(Vec::new());
+        g.news = (0..sections.len()).collect();
+        g.reading = None;
+        g.edition.sections = sections;
+        g
+    }
+
+    #[test]
+    fn front_plan_excludes_lead_from_tiles() {
+        let g = big(vec![many("local", 3), many("feeds:A", 3)]);
+        let p = front_plan(&g);
+        assert_eq!(p.lead, Some((0, 0)));
+        assert!(!p.tiles.contains(&(0, 0)));
+        assert_eq!(p.tiles.len(), 5);
+        assert!(p.contains(0, 0) && p.contains(1, 2) && !p.contains(5, 5));
+    }
+
+    #[test]
+    fn front_plan_caps_tiles_at_ten() {
+        let g = big(vec![many("local", 20), many("feeds:A", 20)]);
+        assert_eq!(front_plan(&g).tiles.len(), 10);
+    }
+
+    #[test]
+    fn front_plan_round_robins_sections() {
+        let g = big(vec![
+            many("local", 3),
+            many("feeds:A", 3),
+            many("feeds:B", 3),
+        ]);
+        let p = front_plan(&g);
+        assert_eq!(&p.tiles[..2], &[(1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn front_plan_with_no_news_is_empty() {
+        let g = big(vec![many("local", 0), many("feeds:A", 0)]);
+        let p = front_plan(&g);
+        assert_eq!(p.lead, None);
+        assert!(p.tiles.is_empty());
     }
 }

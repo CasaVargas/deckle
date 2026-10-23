@@ -98,6 +98,43 @@ The Daily tab opens on the **next** edition, not the last one:
 `deckle digest next` prints the same view (`--json` for data). It only reads files; `--fetch`
 checks the feeds first, under the same twice-an-hour limit.
 
+### Topics and feeds
+
+Each `[[feeds]]` entry is its own section, in order. Besides a plain RSS/Atom `url`, an entry
+can take a Google News **topic** (`WORLD`, `NATION`, `BUSINESS`, `TECHNOLOGY`, `ENTERTAINMENT`,
+`SPORTS`, `SCIENCE`, `HEALTH`), more feeds in `urls`, and a `full_text` setting. Tick topics in
+the Daily tab (**Topics**) or write them in `digest.toml`:
+
+```toml
+[[feeds]]
+name = "Sports"
+topic = "SPORTS"
+urls = ["https://example.com/more.rss"]   # optional extra feeds, merged in
+full_text = "lead"              # true, false or "lead"
+# max_items = 5                 # stories; default 5 for a topic, 10 for a plain feed
+```
+
+- Every source of an entry (the topic, `url`, `urls`) is merged, newest first, and a story that
+  appears in several is printed once (matched by title).
+- `full_text = "lead"` is the default for a topic: the top story prints whole, the rest as short
+  briefs. `true` prints every story whole, `false` none. A plain `url` entry follows the global
+  full-text setting unless you set it.
+- **No repeats across sections:** a `[[feeds]]` section drops a story whose title an earlier news
+  section already printed (Local, other places, and earlier feed sections). Local and other places only
+  record their titles and are never trimmed themselves; Your Reading is never trimmed or recorded.
+
+### The front page and section fronts
+
+The first page is laid out like a paper's front: the lead story, then a two-column table of
+headlines from the sections, then **Inside today** linking to each section. A section with two or
+more stories opens with **In this section**, a list of its stories. Every story ends with
+**↩ <Section> · ↩ Front page** links back to the section's front and the paper's front page.
+
+Caveats: the ↩ glyph may not render in every Kindle font (it needs a fallback; check on yours).
+The look on e-ink hasn't been checked on a device yet (see `docs/devices.md`). And since the
+Kindle records the furthest position you reached, jumping from the front page to a late section
+counts every earlier section as reached in *How far you read* (see below).
+
 ### Other places
 
 Keep up with a relative's town or a trip: each extra place gets its own local news section,

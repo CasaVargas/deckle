@@ -168,6 +168,7 @@ input[type=checkbox] { padding: 0; }
 .sections li.off { color: var(--muted); }
 .feeds { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
 .feed { display: grid; grid-template-columns: 160px 1fr 28px; gap: 6px; width: 100%; }
+.topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; width: 100%; }
 
 /* Kindle tab (library design §5) */
 .shelf-head { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }

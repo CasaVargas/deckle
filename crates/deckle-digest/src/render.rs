@@ -54,6 +54,11 @@ blockquote { margin: 0.6em 1.2em; font-style: italic; }
 .shelf-book { font-weight: bold; margin-bottom: 0.2em; }
 .source { font-size: 0.8em; font-style: italic; margin-top: 0.8em; }
 .note { font-style: italic; }
+table.cols { width: 100%; border-collapse: collapse; margin: 0.6em 0; }
+table.cols td { width: 50%; vertical-align: top; padding: 0.4em 0.5em; border-top: 1px solid black; }
+table.cols .label { font-variant: small-caps; text-transform: none; letter-spacing: 0.06em; margin: 0 0 0.1em 0; }
+h2.lead { font-size: 1.6em; margin: 0.6em 0 0.1em 0; }
+h2.lead a { text-decoration: none; color: black; }
 ul.index { list-style-type: none; padding-left: 0; }
 ul.index li { border-bottom: 1px solid black; padding: 0.3em 0; }
 table.grid { border-collapse: collapse; margin: 0.6em auto; }
@@ -66,6 +71,9 @@ table.grid.small td { width: 1.1em; height: 1.1em; font-size: 0.85em; vertical-a
 p.clue { margin: 0 0 0.25em 0; }
 p.ladder { text-align: center; font-weight: bold; letter-spacing: 0.05em; }
 p.score { font-weight: bold; }
+p.back { font-size: 0.8em; margin: 0.8em 0 1.2em 0; }
+p.in-section { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; margin: 0.6em 0 0.2em 0; }
+ul.toc { margin: 0 0 1em 0; padding-left: 1.2em; }
 "#;
 
 pub(crate) fn page(title: &str, body: &str) -> Vec<u8> {
@@ -104,28 +112,65 @@ fn front_page(g: &Gathered) -> Vec<u8> {
     if let Some(w) = &e.weather_line {
         body.push_str(&format!("<p class=\"weather\">{}</p>\n", esc(w)));
     }
-    let heads = e.headlines(&g.news, 8);
-    if !heads.is_empty() {
-        body.push_str("<h2>Top stories</h2>\n<ul class=\"index\">\n");
-        for (s, a) in heads {
-            let art = &e.sections[s].articles[a];
-            let meta = match &art.meta {
-                Some(m) => format!("{} · {m}", e.sections[s].title),
-                None => e.sections[s].title.clone(),
-            };
-            let meta = format!(" <span class=\"meta\">{}</span>", esc(&meta));
-            body.push_str(&format!(
-                "<li><a href=\"{}#a{}\">{}</a>{meta}</li>\n",
-                section_file(s),
-                a + 1,
-                esc(&art.title)
-            ));
+    let plan = crate::front::front_plan(g);
+    let meta_of = |s: usize, a: usize| {
+        let art = &e.sections[s].articles[a];
+        let meta = match &art.meta {
+            Some(m) => format!("{} · {m}", e.sections[s].title),
+            None => e.sections[s].title.clone(),
+        };
+        format!("<span class=\"meta\">{}</span>", esc(&meta))
+    };
+    // A tile sits under its section's label already, so its meta leaves the section name out.
+    let tile_meta = |s: usize, a: usize| match &e.sections[s].articles[a].meta {
+        Some(m) => format!("<br/><span class=\"meta\">{}</span>", esc(m)),
+        None => String::new(),
+    };
+    let link = |s: usize, a: usize| {
+        format!(
+            "<a href=\"{}#a{}\">{}</a>",
+            section_file(s),
+            a + 1,
+            esc(&e.sections[s].articles[a].title)
+        )
+    };
+    if let Some((s, a)) = plan.lead {
+        body.push_str(&format!(
+            "<h2 class=\"lead\" id=\"t{s}-{a}\">{}</h2>\n<p>{}</p>\n",
+            link(s, a),
+            meta_of(s, a)
+        ));
+        if let Some(t) = &e.sections[s].articles[a].teaser {
+            body.push_str(&format!("<p>{}</p>\n", esc(t)));
         }
-        body.push_str("</ul>\n");
+    }
+    if !plan.tiles.is_empty() {
+        body.push_str("<table class=\"cols\">\n");
+        for row in plan.tiles.chunks(2) {
+            body.push_str("<tr>");
+            for &(s, a) in row {
+                body.push_str(&format!(
+                    "<td><p class=\"label\">{}</p><a id=\"t{s}-{a}\" href=\"{}#a{}\">{}</a>{}</td>",
+                    esc(&e.sections[s].title),
+                    section_file(s),
+                    a + 1,
+                    esc(&e.sections[s].articles[a].title),
+                    tile_meta(s, a)
+                ));
+            }
+            if row.len() == 1 {
+                body.push_str("<td></td>");
+            }
+            body.push_str("</tr>\n");
+        }
+        body.push_str("</table>\n");
     }
     body.push_str("<h2>Inside today</h2>\n<ul class=\"index\">\n");
     for (i, s) in e.sections.iter().enumerate() {
         let count = match (s.articles.len(), &s.unavailable) {
+            (0, Some(u)) if u == crate::sources::feeds::NO_NEW_STORIES => {
+                "no new stories".to_owned()
+            }
             (0, Some(_)) => "unavailable".to_owned(),
             (1, _) => "1 item".to_owned(),
             (n, _) => format!("{n} items"),
@@ -140,11 +185,25 @@ fn front_page(g: &Gathered) -> Vec<u8> {
     page(&e.full_title(), &body)
 }
 
-fn section_page(e: &Edition, i: usize) -> Vec<u8> {
+fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8> {
     let s = &e.sections[i];
-    let mut body = format!("<h1 class=\"section-head\">{}</h1>\n", esc(&s.title));
+    let mut body = format!(
+        "<h1 class=\"section-head\" id=\"top\">{}</h1>\n",
+        esc(&s.title)
+    );
     if let Some(k) = &s.kicker {
         body.push_str(&format!("<p class=\"kicker\">{}</p>\n", esc(k)));
+    }
+    if s.articles.len() >= 2 {
+        body.push_str("<p class=\"in-section\">In this section</p>\n<ul class=\"toc\">\n");
+        for (j, a) in s.articles.iter().enumerate() {
+            body.push_str(&format!(
+                "<li><a href=\"#a{}\">{}</a></li>\n",
+                j + 1,
+                esc(&a.title)
+            ));
+        }
+        body.push_str("</ul>\n");
     }
     for (j, a) in s.articles.iter().enumerate() {
         if j > 0 {
@@ -164,6 +223,15 @@ fn section_page(e: &Edition, i: usize) -> Vec<u8> {
         }
         body.push_str(&story);
         body.push('\n');
+        let front = if plan.contains(i, j) {
+            format!("front.xhtml#t{i}-{j}")
+        } else {
+            "front.xhtml".to_string()
+        };
+        body.push_str(&format!(
+            "<p class=\"back\"><a href=\"#top\">\u{21a9} {}</a> · <a href=\"{front}\">\u{21a9} Front page</a></p>\n",
+            esc(&s.title)
+        ));
     }
     if let Some(u) = &s.unavailable {
         body.push_str(&format!("<p class=\"unavailable\">{}</p>\n", esc(u)));
@@ -328,8 +396,12 @@ pub fn render(g: &Gathered, cover: Vec<u8>) -> Files {
     for (href, png) in &e.assets {
         files.push((format!("OEBPS/{href}"), png.clone()));
     }
+    let plan = crate::front::front_plan(g);
     for i in 0..e.sections.len() {
-        files.push((format!("OEBPS/{}", section_file(i)), section_page(e, i)));
+        files.push((
+            format!("OEBPS/{}", section_file(i)),
+            section_page(e, i, &plan),
+        ));
         for (j, a) in e.sections[i].articles.iter().enumerate() {
             for (n, jpeg) in a.photos.iter().enumerate() {
                 files.push((format!("OEBPS/{}", photo_file(i, j, n)), jpeg.clone()));

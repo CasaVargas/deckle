@@ -14,7 +14,7 @@ use crate::config::{Config, SectionKind, Units, section_key};
 use crate::front::{Candidate, Tier, lead};
 use crate::press::{Press, press};
 use crate::reading::{Entry, State};
-use crate::sources::feeds::google_news_url;
+use crate::sources::feeds::{google_news_url, title_key};
 
 /// KFX positions on one Paperwhite page at the default font.
 pub const POSITIONS_PER_PAGE: f64 = 1800.0;
@@ -293,11 +293,30 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             .iter()
             .enumerate()
             .map(|(n, f)| {
-                let fetched = i.live.feeds.get(&f.url).filter(|x| x.error.is_none());
-                let detail = fetched
-                    .and_then(|x| x.title.clone())
-                    .or_else(|| host(&f.url))
-                    .unwrap_or_else(|| f.url.clone());
+                let sources = f.sources();
+                let got: Vec<&super::live::Fetched> = sources
+                    .iter()
+                    .filter_map(|u| i.live.feeds.get(u))
+                    .filter(|x| x.error.is_none())
+                    .collect();
+                let detail = got
+                    .iter()
+                    .find_map(|x| x.title.clone())
+                    .or_else(|| f.topic.map(|t| t.title().to_owned()))
+                    .or_else(|| sources.first().and_then(|u| host(u)))
+                    .unwrap_or_else(|| "No sources yet".to_owned());
+                // merged, newest first, one copy of a repeated story; `plan` drops what earlier
+                // rows show and cuts to the budget
+                let stories = if got.is_empty() {
+                    None
+                } else {
+                    let mut items: Vec<LiveItem> =
+                        got.iter().flat_map(|x| x.items.iter().cloned()).collect();
+                    items.sort_by_key(|i| std::cmp::Reverse(i.published));
+                    let mut seen = HashSet::new();
+                    items.retain(|i| seen.insert(title_key(&i.title)));
+                    Some(items)
+                };
                 stories_row(
                     section_key(kind, Some(&f.name)),
                     Some(n),
@@ -305,7 +324,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     &f.name,
                     detail,
                     f.max_items,
-                    fetched.map(|x| x.items.clone()),
+                    stories,
                 )
             })
             .collect(),
@@ -464,6 +483,21 @@ pub fn plan(i: &Inputs) -> NextPaper {
         .flat_map(|k| rows(i, *k, date))
         .map(|r| r.row)
         .collect();
+    // As the press does: Local and places only record their titles; a feed row drops the titles
+    // an earlier news row shows, before its cut, and records what it keeps.
+    let mut taken: HashSet<String> = HashSet::new();
+    for r in &mut on {
+        match (r.row.kind, r.stories.as_mut()) {
+            (SectionKind::Local, Some(s)) => taken.extend(s.iter().map(|i| title_key(&i.title))),
+            (SectionKind::Feeds, Some(s)) => {
+                s.retain(|i| !taken.contains(&title_key(&i.title)));
+                s.truncate(r.row.items.unwrap_or(usize::MAX));
+                taken.extend(s.iter().map(|i| title_key(&i.title)));
+                r.planned = s.len();
+            }
+            _ => {}
+        }
+    }
     for r in &mut on {
         if let Some(share) = i.shares.get(&r.row.key).filter(|s| **s <= RARELY) {
             r.row

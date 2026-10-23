@@ -9,7 +9,7 @@ use std::sync::{LazyLock, Mutex};
 use chrono::{DateTime, Local, Utc};
 use regex::Regex;
 
-use crate::config::{Config, FeedConfig};
+use crate::config::{Config, FeedConfig, FullText, Topic};
 use crate::fetch::{Net, encode};
 use crate::{Article, Section, article, esc};
 
@@ -128,7 +128,7 @@ fn clean_line(s: &str) -> String {
         .to_owned()
 }
 
-fn key(title: &str) -> String {
+pub(crate) fn title_key(title: &str) -> String {
     title
         .chars()
         .filter(|c| c.is_alphanumeric())
@@ -261,6 +261,10 @@ pub(crate) fn story_body(
     (body, fetched.into_iter().flatten().collect())
 }
 
+/// Stories tried, in order, for the whole one in a `Lead` section.
+const LEAD_TRIES: usize = 3;
+/// A section's note when every story it found was already printed or too old.
+pub const NO_NEW_STORIES: &str = "No new stories today.";
 const UNAVAILABLE: &str = "Full story unavailable offline.";
 /// Article pages fetched at once.
 const WORKERS: usize = 8;
@@ -304,11 +308,39 @@ fn section_of(
     errors: &[String],
     cfg: &Config,
     net: &dyn Net,
+    mode: FullText,
 ) -> Section {
     if items.is_empty() && !errors.is_empty() {
         return super::unavailable(title, errors.join("; "));
     }
-    let articles = if cfg.full_text {
+    let articles = if mode == FullText::Lead {
+        // Only the top story is printed whole: the first of the leading few that can be read.
+        let mut whole = None;
+        for (n, item) in items.iter().take(LEAD_TRIES).enumerate() {
+            let a = full_article(item, cfg, net);
+            if !a.body.contains(UNAVAILABLE) {
+                whole = Some((n, a));
+                break;
+            }
+        }
+        let brief = |i: &Item| {
+            let mut i = i.clone();
+            i.paragraphs.clear();
+            article(&i, None)
+        };
+        match whole {
+            Some((n, a)) => std::iter::once(a)
+                .chain(
+                    items
+                        .iter()
+                        .enumerate()
+                        .filter(|(k, _)| *k != n)
+                        .map(|(_, i)| brief(i)),
+                )
+                .collect(),
+            None => items.iter().map(brief).collect(),
+        }
+    } else if mode == FullText::Yes {
         // Whole stories lead; ones only the feed could give run after them, like briefs.
         let (mut full, briefs): (Vec<_>, Vec<_>) = par_map(items, |i| full_article(i, cfg, net))
             .into_iter()
@@ -326,7 +358,7 @@ fn section_of(
         unavailable: None,
     };
     if items.is_empty() {
-        section.unavailable = Some("No new stories today.".into());
+        section.unavailable = Some(NO_NEW_STORIES.into());
     }
     section
 }
@@ -408,24 +440,71 @@ fn local_news(
         }
     }
     let mut seen = HashSet::new();
-    items.retain(|i| seen.insert(key(&i.title)));
+    items.retain(|i| seen.insert(title_key(&i.title)));
     items.sort_by_key(|i| std::cmp::Reverse(i.published));
     items.truncate(max_items);
-    section_of(title, kicker, &items, &errors, cfg, net)
+    let mode = if cfg.full_text {
+        FullText::Yes
+    } else {
+        FullText::No
+    };
+    section_of(title, kicker, &items, &errors, cfg, net, mode)
 }
 
-/// One `[[feeds]]` entry as its own section.
-pub fn feed_section(feed: &FeedConfig, cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section {
-    match net
-        .get(&feed.url)
-        .and_then(|b| parse(&b, now, cfg.max_age_hours))
-    {
-        Ok((_, mut items)) => {
-            items.truncate(feed.max_items);
-            section_of(&feed.name, None, &items, &[], cfg, net)
-        }
-        Err(e) => super::unavailable(&feed.name, e),
+/// One `[[feeds]]` entry as its own section: its topic and every feed merged, deduplicated,
+/// newest first. `taken` holds the titles other sections already printed.
+pub fn feed_section(
+    feed: &FeedConfig,
+    cfg: &Config,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    taken: &mut HashSet<String>,
+) -> Section {
+    let sources = feed.sources();
+    if sources.is_empty() {
+        return super::unavailable(&feed.name, "give a url, urls or topic");
     }
+    let topic_url = feed.topic.map(Topic::url);
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    for url in &sources {
+        match net.get(url).and_then(|b| parse(&b, now, cfg.max_age_hours)) {
+            Ok((_, found)) if topic_url.as_ref() == Some(url) => items.extend(as_briefs(found)),
+            Ok((name, found)) => items.extend(found.into_iter().map(|mut i| {
+                // Several sources: name the channel so a reader can tell them apart.
+                if sources.len() > 1 {
+                    i.source = i.source.or(name.clone());
+                }
+                i
+            })),
+            Err(e) => {
+                let what = if topic_url.as_ref() == Some(url) {
+                    "Google News"
+                } else {
+                    host(url)
+                };
+                errors.push(format!("{what}: {e}"));
+            }
+        }
+    }
+    // Newest first, so the newest copy of a repeated story is the one kept.
+    items.sort_by_key(|i| std::cmp::Reverse(i.published));
+    let mut seen = HashSet::new();
+    items.retain(|i| seen.insert(title_key(&i.title)));
+    // Stories an earlier section printed are dropped before the cut, so this section refills
+    // from its own next-newest items; what it keeps is recorded for the sections after it.
+    items.retain(|i| !taken.contains(&title_key(&i.title)));
+    items.truncate(feed.max_items);
+    taken.extend(items.iter().map(|i| title_key(&i.title)));
+    section_of(
+        &feed.name,
+        None,
+        &items,
+        &errors,
+        cfg,
+        net,
+        feed.full(cfg.full_text),
+    )
 }
 
 #[cfg(test)]

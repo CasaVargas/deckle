@@ -564,3 +564,251 @@ fn places_round_trip_and_stay_out_of_an_untouched_save() {
             .is_empty()
     );
 }
+
+// ---- The front page ----
+
+mod front {
+    use deckle_digest::chrono::NaiveDate;
+    use deckle_digest::front::front_plan;
+    use deckle_digest::{Article, Edition, Gathered, Section};
+
+    fn paper(sections: &[(&str, &[&str])]) -> Gathered {
+        let sections: Vec<Section> = sections
+            .iter()
+            .map(|(key, titles)| Section {
+                key: (*key).into(),
+                title: (*key).into(),
+                articles: titles
+                    .iter()
+                    .map(|t| Article {
+                        title: (*t).into(),
+                        meta: Some("meta".into()),
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..Default::default()
+            })
+            .collect();
+        Gathered {
+            news: (0..sections.len()).collect(),
+            reading: None,
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+            edition: Edition {
+                paper: "The Deckle Daily".into(),
+                date: NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
+                place: String::new(),
+                weather_line: None,
+                sections,
+                assets: Vec::new(),
+            },
+        }
+    }
+
+    fn front_xhtml(g: &Gathered) -> String {
+        let files = deckle_digest::render::render(g, Vec::new());
+        let (_, bytes) = files
+            .iter()
+            .find(|(p, _)| p == "OEBPS/front.xhtml")
+            .unwrap();
+        String::from_utf8(bytes.clone()).unwrap()
+    }
+
+    fn named(n: usize, prefix: &str) -> Vec<String> {
+        (0..n).map(|i| format!("{prefix}{i}")).collect()
+    }
+
+    fn with(local: usize, feed: usize) -> Gathered {
+        let (l, f) = (named(local, "L"), named(feed, "F"));
+        let l: Vec<&str> = l.iter().map(String::as_str).collect();
+        let f: Vec<&str> = f.iter().map(String::as_str).collect();
+        paper(&[("local", &l), ("feeds:A", &f)])
+    }
+
+    #[test]
+    fn front_page_has_lead_table_and_inside_index() {
+        let g = with(4, 4);
+        let x = front_xhtml(&g);
+        roxmltree::Document::parse(&x).unwrap();
+        let plan = front_plan(&g);
+        let lead = x.find("class=\"lead\"").unwrap();
+        assert!(x.find("L0").unwrap() > lead - 40);
+        assert!(lead < x.find("table class=\"cols\"").unwrap());
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let tiles: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("td"))
+            .flat_map(|td| td.children().filter(|c| c.has_tag_name("a")))
+            .collect();
+        assert_eq!(tiles.len(), plan.tiles.len());
+        let mut ids: Vec<_> = doc
+            .descendants()
+            .filter_map(|n| n.attribute("id"))
+            .collect();
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n, "ids are unique");
+        assert!(x.contains("Inside today"));
+        assert!(!x.contains("Top stories"));
+    }
+
+    #[test]
+    fn tile_meta_leaves_out_the_section_name() {
+        let g = with(4, 4);
+        let x = front_xhtml(&g);
+        let plan = front_plan(&g);
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let metas: Vec<String> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("td"))
+            .flat_map(|td| {
+                td.descendants()
+                    .filter(|c| c.attribute("class") == Some("meta"))
+            })
+            .filter_map(|m| m.text().map(String::from))
+            .collect();
+        assert_eq!(metas.len(), plan.tiles.len());
+        assert!(metas.iter().all(|m| m == "meta"), "{metas:?}");
+        // the lead keeps the section name
+        assert!(x.contains("local · meta"));
+    }
+
+    #[test]
+    fn inside_today_tells_empty_from_unavailable() {
+        let mut g = paper(&[("local", &["One"]), ("feeds:A", &[]), ("feeds:B", &[])]);
+        g.edition.sections[1].unavailable = Some("No new stories today.".into());
+        g.edition.sections[2].unavailable = Some("Unavailable today (offline).".into());
+        let x = front_xhtml(&g);
+        assert!(x.contains("no new stories"), "{x}");
+        assert_eq!(x.matches(">unavailable<").count(), 1);
+    }
+
+    #[test]
+    fn odd_tiles_pad_the_last_row() {
+        // lead + 3 tiles
+        let x = front_xhtml(&with(2, 2));
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let tds: Vec<_> = doc.descendants().filter(|n| n.has_tag_name("td")).collect();
+        assert_eq!(tds.len(), 4);
+        assert!(tds[3].children().next().is_none());
+    }
+
+    #[test]
+    fn no_tiles_no_table() {
+        let x = front_xhtml(&with(1, 0));
+        assert!(x.contains("class=\"lead\""));
+        assert!(!x.contains("class=\"cols\""));
+    }
+
+    #[test]
+    fn headlines_are_escaped() {
+        let g = paper(&[("local", &["A & B <c>", "x"])]);
+        let x = front_xhtml(&g);
+        assert!(x.contains("A &amp; B &lt;c&gt;"));
+        roxmltree::Document::parse(&x).unwrap();
+    }
+
+    fn section_xhtml(g: &Gathered, n: usize) -> String {
+        let files = deckle_digest::render::render(g, Vec::new());
+        let want = format!("OEBPS/s{n}.xhtml");
+        let (_, bytes) = files.iter().find(|(p, _)| *p == want).unwrap();
+        String::from_utf8(bytes.clone()).unwrap()
+    }
+
+    fn hrefs(x: &str, class: &str) -> Vec<String> {
+        let doc = roxmltree::Document::parse(x).unwrap();
+        doc.descendants()
+            .filter(|n| n.attribute("class") == Some(class))
+            .flat_map(|n| n.descendants().filter(|c| c.has_tag_name("a")))
+            .filter_map(|a| a.attribute("href").map(String::from))
+            .collect()
+    }
+
+    #[test]
+    fn section_with_two_stories_has_headline_list() {
+        let g = paper(&[("local", &["One", "Two"])]);
+        let x = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("id=\"top\""));
+        assert!(x.contains("In this section"));
+        assert_eq!(hrefs(&x, "toc"), vec!["#a1", "#a2"]);
+    }
+
+    #[test]
+    fn one_story_section_has_no_list() {
+        let x = section_xhtml(&paper(&[("local", &["Only"])]), 1);
+        assert!(!x.contains("class=\"toc\""));
+        assert!(!x.contains("In this section"));
+        assert!(x.contains("class=\"back\""));
+    }
+
+    #[test]
+    fn back_links_target_the_tile_when_on_the_front_page() {
+        let g = with(4, 4);
+        let plan = front_plan(&g);
+        let x = section_xhtml(&g, 1);
+        let back = hrefs(&x, "back");
+        assert_eq!(back.len(), 8);
+        for j in 0..4 {
+            let want = if plan.contains(0, j) {
+                format!("front.xhtml#t0-{j}")
+            } else {
+                "front.xhtml".to_string()
+            };
+            assert_eq!(back[j * 2], "#top");
+            assert_eq!(back[j * 2 + 1], want);
+        }
+        assert!(back.iter().any(|h| h.starts_with("front.xhtml#t0-")));
+        assert!(x.contains("\u{21a9} local"));
+        assert!(x.contains("\u{21a9} Front page"));
+    }
+
+    #[test]
+    fn back_links_fall_back_to_front_xhtml() {
+        let g = with(1, 12);
+        let plan = front_plan(&g);
+        let j = (0..12)
+            .find(|&j| !plan.contains(1, j))
+            .expect("one is off the front");
+        let x = section_xhtml(&g, 2);
+        let back = hrefs(&x, "back");
+        assert_eq!(back[j * 2 + 1], "front.xhtml");
+    }
+
+    #[test]
+    fn unavailable_section_has_no_back_links() {
+        let mut g = paper(&[("local", &["One"]), ("feeds:A", &[])]);
+        g.edition.sections[1].unavailable = Some("Down".into());
+        let x = section_xhtml(&g, 2);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("Down"));
+        assert!(!x.contains("class=\"back\""));
+        assert!(!x.contains("class=\"toc\""));
+    }
+
+    #[test]
+    fn duplicate_titles_keep_anchors_unique() {
+        let g = paper(&[("local", &["Same", "Same", "Same"])]);
+        let x = section_xhtml(&g, 1);
+        let doc = roxmltree::Document::parse(&x).unwrap();
+        let mut ids: Vec<_> = doc
+            .descendants()
+            .filter_map(|n| n.attribute("id"))
+            .collect();
+        let n = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), n);
+        assert_eq!(hrefs(&x, "toc"), vec!["#a1", "#a2", "#a3"]);
+    }
+
+    #[test]
+    fn titles_are_escaped_in_the_list() {
+        let g = paper(&[("local", &["A & B <c>", "x"])]);
+        let x = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&x).unwrap();
+        assert!(x.contains("A &amp; B &lt;c&gt;"));
+    }
+}

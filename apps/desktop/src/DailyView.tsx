@@ -13,6 +13,7 @@ import Readership from "./Readership";
 import Shelf from "./Shelf";
 import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
+import { TOPICS, toggleTopic, topicOn, topicTitle } from "./topics";
 import YourDay from "./YourDay";
 import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PlaceRow, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL, SIGNS } from "./types";
@@ -576,12 +577,27 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           </button>
         </div>
 
+        <div className="label">Topics</div>
+        <p className="muted small">Each ticked topic becomes its own section, from Google News.</p>
+        <div className="topics">
+          {TOPICS.map((t) => (
+            <label key={t.slug} className="check">
+              <input type="checkbox" checked={topicOn(draft.feeds, t.slug)} onChange={() => edit((c) => (c.feeds = toggleTopic(c.feeds, t.slug)))} />
+              {t.title}
+            </label>
+          ))}
+        </div>
+
         <div className="label">Your feeds</div>
         <div className="feeds">
           {draft.feeds.map((f: FeedConfig, i: number) => (
             <div key={i} className="feed">
               <input value={f.name} placeholder="Section name" onChange={(e) => edit((c) => (c.feeds[i].name = e.target.value))} />
-              <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
+              {f.topic ? (
+                <span className="muted small">topic: {topicTitle(f.topic)}</span>
+              ) : (
+                <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
+              )}
               <button className="icon small" aria-label="Remove feed" onClick={() => edit((c) => c.feeds.splice(i, 1))}>
                 <Icon name="x" size={14} />
               </button>
