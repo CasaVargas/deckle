@@ -1070,7 +1070,7 @@ fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
     assert!(errors.is_empty(), "{errors:#?}");
 
     assert_eq!(v["format"], "deckle-edition");
-    assert_eq!(v["version"], "1.0");
+    assert_eq!(v["version"], "1.1");
     assert_eq!(v["edition"]["date"], "2026-10-20");
     let sections = v["sections"].as_array().unwrap();
     assert_eq!(sections.len(), g.edition.sections.len());
@@ -1111,6 +1111,128 @@ fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
     // No icon path is left pointing into the EPUB.
     let text = std::fs::read_to_string(bundle.join("edition.json")).unwrap();
     assert!(!text.contains("images/wx-"), "icons point at media/");
+}
+
+/// [`fake`], plus every story page as a long article with a captioned photo, and every photo
+/// as a 1600 × 1000 JPEG.
+fn fake_with_articles(url: &str) -> Result<Vec<u8>, String> {
+    if url.ends_with(".jpg") {
+        // A different picture per story: the paper drops a photo it sees in many stories.
+        let seed = url
+            .bytes()
+            .fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(u32::from(b)));
+        let img = image::RgbImage::from_fn(1600, 1000, |x, y| {
+            let v = (x / (8 + seed % 40)) ^ (y / (6 + seed % 30));
+            image::Rgb([
+                (v * 37 % 256) as u8,
+                (v * 91 % 256) as u8,
+                ((v * 13 + seed) % 256) as u8,
+            ])
+        });
+        let mut out = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut out),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        return Ok(out);
+    }
+    if let Ok(b) = fake(url) {
+        return Ok(b);
+    }
+    if !url.starts_with("http") || url.starts_with("https://news.google.com/") {
+        return Err(format!("offline: {url}"));
+    }
+    let para = "The council met on Tuesday night to talk about the old rail yard and what it could become. ".repeat(12);
+    let html = format!(
+        "<html lang=\"en\"><head><title>A Story</title></head><body><article><h1>A Story</h1>\
+         <p>{para}</p><figure><img src=\"https://cdn.example/{}.jpg\" alt=\"The rail yard at dusk\"/>\
+         <figcaption>The yard on Saturday. (Photo: Jane Doe / The Pilot)</figcaption></figure>\
+         <p>“We have waited forty years for somebody to do something with that yard,” said one stall holder.</p>\
+         <p>Advertisement</p>{}</article></body></html>",
+        url.len() * 7919 % 100_000,
+        format!("<p>{para}</p>").repeat(5)
+    );
+    Ok(html.into_bytes())
+}
+
+#[test]
+fn a_bundle_carries_full_size_photos_with_captions_and_story_details() {
+    let out = tempfile::tempdir().unwrap();
+    let mut c = config();
+    bundle_export(&mut c, out.path(), false);
+    let r = build(&c, date(), now(), out.path(), &fake_with_articles).unwrap();
+    let bundle = r.bundle(false).unwrap();
+    let v = edition_json(bundle);
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../docs/formats/edition-bundle.schema.json"
+    ))
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let errors: Vec<String> = validator.iter_errors(&v).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    let stories: Vec<&serde_json::Value> = v["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["stories"].as_array().unwrap())
+        .collect();
+    let with_photo = stories
+        .iter()
+        .find(|s| !s["photos"].as_array().unwrap().is_empty())
+        .unwrap_or_else(|| {
+            panic!(
+                "a story with its photo: {:#?}",
+                stories
+                    .iter()
+                    .map(|s| s["body"]["text"]
+                        .as_str()
+                        .unwrap()
+                        .chars()
+                        .take(300)
+                        .collect::<String>())
+                    .collect::<Vec<_>>()
+            )
+        });
+    let photo = &with_photo["photos"][0];
+    // The master, not the 1000-px e-ink copy.
+    assert_eq!(
+        (photo["width"].as_u64(), photo["height"].as_u64()),
+        (Some(1600), Some(1000))
+    );
+    assert_eq!(photo["caption"], "The yard on Saturday.");
+    assert_eq!(photo["credit"], "Jane Doe / The Pilot");
+    assert_eq!(photo["alt"], "The rail yard at dusk");
+    assert!(photo["focus"]["x"].as_f64().is_some());
+    assert!(photo["color"].as_str().unwrap().starts_with('#'));
+    let media = bundle.join(photo["file"].as_str().unwrap());
+    let img = image::load_from_memory(&std::fs::read(media).unwrap()).unwrap();
+    assert_eq!(img.color(), image::ColorType::Rgb8);
+    assert_eq!(
+        with_photo["pull_quote"].as_str().unwrap(),
+        "\u{201c}We have waited forty years for somebody to do something with that yard,\u{201d} said one stall holder."
+    );
+    assert!(with_photo["minutes"].as_u64().unwrap() >= 3);
+    assert_eq!(with_photo["partial"], false);
+    assert!(
+        !with_photo["body"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Advertisement")
+    );
+    // Every story says where the front page put it, and the lead is the front's lead.
+    let lead = v["front"]["lead"].as_str();
+    for s in &stories {
+        let p = s["prominence"].as_str().unwrap();
+        assert!(["lead", "front", "inside"].contains(&p));
+        assert_eq!(
+            p == "lead",
+            Some(s["id"].as_str().unwrap()) == lead,
+            "{}",
+            s["id"]
+        );
+    }
 }
 
 #[test]

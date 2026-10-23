@@ -1109,6 +1109,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
+ "deckle-core",
  "deckle-highlights",
  "deckle-pdf",
  "deunicode",
