@@ -38,6 +38,7 @@ fn extension(format: ExportFormat) -> &'static str {
     match format {
         ExportFormat::Epub => "epub",
         ExportFormat::Pdf => "pdf",
+        ExportFormat::Bundle => "deckle",
     }
 }
 
@@ -61,6 +62,9 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
     if let Err(why) = ready(&dir) {
         report.error = Some(why);
         return report;
+    }
+    if e.format == ExportFormat::Bundle {
+        return export_bundle(e, date, built, report);
     }
     let color = e.photos == Photos::Color;
     let paper = match (e.format, &built.color_epub, color) {
@@ -104,6 +108,84 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
         Err(why) => report.error = Some(why),
     }
     report
+}
+
+/// A bundle export: the build's bundle copied in whole, through a hidden folder renamed into
+/// place, then the prune (edition bundle design §4, §5).
+fn export_bundle(
+    e: &ExportConfig,
+    date: NaiveDate,
+    built: &BuildReport,
+    mut report: ExportReport,
+) -> ExportReport {
+    let dir = report.dir.clone();
+    let Some(src) = built.bundle(e.books) else {
+        report.error = Some("the edition bundle wasn't built".into());
+        return report;
+    };
+    let name = crate::bundle::bundle_name(date);
+    let tmp = dir.join(format!(".{name}.tmp"));
+    let to = dir.join(&name);
+    let copied = (|| -> std::io::Result<()> {
+        let _ = std::fs::remove_dir_all(&tmp);
+        copy_dir(src, &tmp)?;
+        if to.exists() {
+            std::fs::remove_dir_all(&to)?;
+        }
+        std::fs::rename(&tmp, &to)
+    })();
+    if let Err(err) = copied {
+        let _ = std::fs::remove_dir_all(&tmp);
+        report.error = Some(format!("{}: {err}", to.display()));
+        return report;
+    }
+    report.written.push(to);
+    match prune_dirs(&dir, e.keep) {
+        Ok(gone) => report.pruned = gone,
+        Err(why) => report.error = Some(why),
+    }
+    report
+}
+
+/// Copies the folder `from` to `to`, files and subfolders.
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let dest = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(())
+}
+
+/// Removes all but the newest `keep` bundles (`deckle-daily-YYYY-MM-DD.deckle` folders) in
+/// `dir`; 0 keeps all. A bundle still being written has a hidden name and never counts.
+fn prune_dirs(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
+    if keep == 0 {
+        return Ok(Vec::new());
+    }
+    let rd = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut editions: Vec<(NaiveDate, PathBuf)> = rd
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let date = name.strip_prefix(EDITION_PREFIX)?.strip_suffix(".deckle")?;
+            let date = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
+            Some((date, entry.path()))
+        })
+        .collect();
+    editions.sort_unstable_by_key(|e| std::cmp::Reverse(e.0));
+    let mut gone = Vec::new();
+    for (_, p) in editions.into_iter().skip(keep) {
+        std::fs::remove_dir_all(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        gone.push(p);
+    }
+    Ok(gone)
 }
 
 /// The folder exists, or is made when its parent does: a missing iCloud Drive or Dropbox is
@@ -218,6 +300,7 @@ mod tests {
             color_epub,
             color_long_reads,
             pdfs: Vec::new(),
+            bundles: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
         }

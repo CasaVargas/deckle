@@ -1029,3 +1029,201 @@ fn the_starter_remarkable_block_parses_once_uncommented() {
     assert_eq!(c.remarkable.photos(), Photos::Gray);
     assert_eq!(c.pdfs_wanted().len(), 1);
 }
+
+// ---- The edition bundle (edition bundle design §13) ----
+
+fn bundle_export(c: &mut Config, dir: &Path, books: bool) {
+    c.export = vec![ExportConfig {
+        name: "iPad app".into(),
+        dir: dir.display().to_string(),
+        format: deckle_digest::config::ExportFormat::Bundle,
+        books,
+        keep: 2,
+        ..Default::default()
+    }];
+}
+
+fn edition_json(bundle: &Path) -> serde_json::Value {
+    serde_json::from_slice(&std::fs::read(bundle.join("edition.json")).unwrap()).unwrap()
+}
+
+#[test]
+fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
+    let out = tempfile::tempdir().unwrap();
+    let mut c = config();
+    bundle_export(&mut c, out.path(), false);
+    let g = gather(&c, date(), now(), &fake);
+    let r = build(&c, date(), now(), out.path(), &fake).unwrap();
+    let bundle = r.bundle(false).unwrap();
+    assert_eq!(
+        bundle.file_name().unwrap(),
+        "deckle-daily-2026-10-20.deckle"
+    );
+    let v = edition_json(bundle);
+
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../docs/formats/edition-bundle.schema.json"
+    ))
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let errors: Vec<String> = validator.iter_errors(&v).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+
+    assert_eq!(v["format"], "deckle-edition");
+    assert_eq!(v["version"], "1.0");
+    assert_eq!(v["edition"]["date"], "2026-10-20");
+    let sections = v["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), g.edition.sections.len());
+    for (s, js) in g.edition.sections.iter().zip(sections) {
+        assert_eq!(js["title"], s.title.as_str());
+        assert_eq!(js["stories"].as_array().unwrap().len(), s.articles.len());
+    }
+    // Every story id the front page names exists.
+    let ids: Vec<&str> = sections
+        .iter()
+        .flat_map(|s| s["stories"].as_array().unwrap())
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    for t in v["front"]["tiles"].as_array().unwrap() {
+        assert!(ids.contains(&t.as_str().unwrap()), "{t}");
+    }
+    // Feeds carry their links.
+    let hn = sections.iter().find(|s| s["kind"] == "feeds").unwrap();
+    assert!(
+        hn["stories"][0]["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("http")
+    );
+    // Every file is listed at its size and hash, and the bundle reads as whole.
+    for f in v["files"].as_array().unwrap() {
+        let bytes = std::fs::read(bundle.join(f["path"].as_str().unwrap())).unwrap();
+        assert_eq!(bytes.len() as u64, f["size"].as_u64().unwrap());
+        use sha2::Digest;
+        let hash: String = sha2::Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(hash, f["sha256"].as_str().unwrap());
+    }
+    assert!(deckle_digest::bundle::is_complete(bundle));
+    assert!(bundle.join("epub/deckle-daily-2026-10-20.epub").is_file());
+    // No icon path is left pointing into the EPUB.
+    let text = std::fs::read_to_string(bundle.join("edition.json")).unwrap();
+    assert!(!text.contains("images/wx-"), "icons point at media/");
+}
+
+#[test]
+fn weather_and_puzzle_data_match_what_the_page_prints() {
+    let out = tempfile::tempdir().unwrap();
+    let mut c = config();
+    bundle_export(&mut c, out.path(), false);
+    let r = build(&c, date(), now(), out.path(), &fake).unwrap();
+    let v = edition_json(r.bundle(false).unwrap());
+    let sections = v["sections"].as_array().unwrap();
+    let w = sections.iter().find(|s| s["kind"] == "weather").unwrap();
+    let days = w["weather"]["days"].as_array().unwrap();
+    assert_eq!(days.len(), 5);
+    let page = w["stories"][0]["body"]["text"].as_str().unwrap();
+    for d in days {
+        let high = format!("<b>{}°</b>", d["high"]);
+        assert!(page.contains(&high), "{high} in {page}");
+        let icon = d["icon"].as_str().unwrap();
+        assert!(page.contains(icon), "the strip shows {icon}");
+    }
+    let p = sections.iter().find(|s| s["kind"] == "puzzle").unwrap();
+    let puzzle = &p["puzzle"];
+    let grid: Vec<&str> = puzzle["grid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    assert_eq!(grid.len(), 5);
+    let mini = p["stories"][0]["body"]["text"].as_str().unwrap();
+    for clue in puzzle["clues"].as_array().unwrap() {
+        let text = clue["clue"].as_str().unwrap();
+        assert!(mini.contains(&deckle_digest::esc(text)), "{text}");
+        // Each answer is in the grid, across or down.
+        let answer = clue["answer"].as_str().unwrap();
+        let down: Vec<String> = (0..5)
+            .map(|c| grid.iter().map(|r| r.as_bytes()[c] as char).collect())
+            .collect();
+        assert!(
+            grid.iter().any(|r| r.contains(answer)) || down.iter().any(|d| d.contains(answer)),
+            "{answer}"
+        );
+    }
+}
+
+#[test]
+fn a_bundle_export_copies_it_in_whole_and_keeps_only_the_newest() {
+    let out = tempfile::tempdir().unwrap();
+    let ipad = out.path().join("ipad");
+    std::fs::create_dir(&ipad).unwrap();
+    for d in ["2026-10-17", "2026-10-18", "2026-10-19"] {
+        std::fs::create_dir(ipad.join(format!("deckle-daily-{d}.deckle"))).unwrap();
+    }
+    // One being written, and a file of the owner's: neither is an edition.
+    std::fs::create_dir(ipad.join(".deckle-daily-2026-10-16.deckle.tmp")).unwrap();
+    std::fs::write(ipad.join("notes.txt"), b"mine").unwrap();
+    let mut c = config();
+    bundle_export(&mut c, &ipad, false);
+    let built = out.path().join("build");
+    let r = build(&c, date(), now(), &built, &fake).unwrap();
+    let reports = deckle_digest::export::export_all(&c.export, date(), &r);
+    assert_eq!(reports[0].error, None);
+    let copied = ipad.join("deckle-daily-2026-10-20.deckle");
+    assert_eq!(reports[0].written, std::slice::from_ref(&copied));
+    assert!(deckle_digest::bundle::is_complete(&copied));
+    let mut left: Vec<String> = std::fs::read_dir(&ipad)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            ".deckle-daily-2026-10-16.deckle.tmp",
+            "deckle-daily-2026-10-19.deckle",
+            "deckle-daily-2026-10-20.deckle",
+            "notes.txt"
+        ]
+    );
+}
+
+#[test]
+fn a_partly_synced_bundle_never_reads_as_whole() {
+    let out = tempfile::tempdir().unwrap();
+    let mut c = config();
+    bundle_export(&mut c, out.path(), false);
+    let r = build(&c, date(), now(), out.path(), &fake).unwrap();
+    let bundle = r.bundle(false).unwrap();
+    assert!(deckle_digest::bundle::is_complete(bundle));
+    std::fs::remove_file(bundle.join("cover.jpg")).unwrap();
+    assert!(!deckle_digest::bundle::is_complete(bundle));
+    std::fs::remove_file(bundle.join("edition.json")).unwrap();
+    assert!(!deckle_digest::bundle::is_complete(bundle));
+}
+
+#[test]
+fn long_reads_ride_inside_a_bundle_only_with_books() {
+    let (_d, mut c, _q, _) = reading_setup(&["https://ex.com/long"]);
+    let out = tempfile::tempdir().unwrap();
+    bundle_export(&mut c, out.path(), true);
+    let r = build(&c, date(), now(), out.path(), &net_with_pages).unwrap();
+    let v = edition_json(r.bundle(true).unwrap());
+    let read = v["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["stories"].as_array().unwrap())
+        .find_map(|s| s["long_read"].as_str())
+        .expect("the long read is named");
+    assert!(read.starts_with("epub/deckle-reads-"));
+    assert!(r.bundle(true).unwrap().join(read).is_file());
+    assert!(
+        r.bundle(false).is_none(),
+        "only the bundle asked for is built"
+    );
+}

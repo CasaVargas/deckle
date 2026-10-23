@@ -71,6 +71,7 @@ export default function ExportFolders({
                   <select value={e.format} onChange={(ev) => patch(i, { format: ev.target.value as ExportConfig["format"] })}>
                     <option value="epub">EPUB (any reader)</option>
                     <option value="pdf">PDF, laid out for a screen</option>
+                    <option value="bundle">Bundle, for a reader app</option>
                   </select>
                 </label>
                 {e.format === "pdf" && (

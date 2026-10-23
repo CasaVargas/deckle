@@ -203,7 +203,7 @@ export interface RemarkableConfig {
 export interface ExportConfig {
   name: string;
   dir: string;
-  format: "epub" | "pdf";
+  format: "epub" | "pdf" | "bundle";
   photos: "color" | "gray";
   /** With a PDF: the screen it's laid out for. */
   screen: Screen;

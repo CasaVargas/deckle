@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The edition bundle, for reader apps** (edition bundle design, phase 1). `format = "bundle"`
+  on an export folder writes each edition as data: `edition.json` with the front page plan, every
+  story's text, link and photos, the weather as numbers and the crossword with its answers, beside
+  the photos, cover and EPUB. It's a documented, versioned format (CC-BY-4.0 spec, MIT JSON
+  Schema) that a native app reads; `digest build --bundle` writes one by hand.
 - **The PDF edition and reMarkable** (other readers design, phase 4). The paper can be a PDF
   laid out for one screen (reMarkable 2, Paper Pro, Paper Pro Move, iPad, A5), with the masthead,
   weather strip, photos and crossword grid in place, an outline, front-page links and searchable

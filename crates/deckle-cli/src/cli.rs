@@ -373,6 +373,10 @@ pub enum DigestCommand {
         /// Edition date, YYYY-MM-DD (default: today). Sources still return today's data.
         #[arg(long)]
         date: Option<String>,
+        /// Also write the edition bundle (`deckle-daily-YYYY-MM-DD.deckle`), the paper as data
+        /// for a native reader, beside the EPUB.
+        #[arg(long)]
+        bundle: bool,
     },
     /// Build today's edition and convert it (forced Cover/PDOC). With `--to device` it goes to
     /// the outbox and on to a connected Kindle now, or to the next one that connects (`push`,

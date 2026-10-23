@@ -112,6 +112,9 @@ pub struct Config {
     /// Each day's puzzle (tests); the default is `puzzles.json` beside `digest.toml`.
     #[serde(skip)]
     pub puzzle_path: Option<PathBuf>,
+    /// Keep the photos in color whatever the exports say (`digest build --bundle`).
+    #[serde(skip)]
+    pub force_color: bool,
     /// What the Kindles shared (tests); the default is `shelf.json` beside `digest.toml`.
     #[serde(skip)]
     pub shelf_path: Option<PathBuf>,
@@ -156,6 +159,7 @@ impl Default for Config {
             almanac_path: None,
             press_path: None,
             puzzle_path: None,
+            force_color: false,
             shelf_path: None,
         }
     }
@@ -749,13 +753,15 @@ impl Default for ExportConfig {
     }
 }
 
-/// What an export folder takes: the EPUB, or the PDF edition laid out for its `screen`.
+/// What an export folder takes: the EPUB, the PDF edition laid out for its `screen`, or the
+/// edition bundle for a native reader (edition bundle design §4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     #[default]
     Epub,
     Pdf,
+    Bundle,
 }
 
 /// `[remarkable]`: the paper as a PDF to a reMarkable over its USB web interface (other readers
@@ -917,7 +923,8 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # [[export]]
 # name = "iPad"
 # dir = "~/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily"
-# format = "epub"                 # or "pdf": the paper laid out for one screen
+# format = "epub"                 # or "pdf": the paper laid out for one screen; or "bundle":
+#                                 # the paper as data, for a native reader app
 # screen = "remarkable-2"         # for a PDF: remarkable-2, remarkable-paper-pro,
 #                                 # remarkable-paper-pro-move, ipad, a5
 # photos = "color"                # or "gray" for an e-ink reader
@@ -1061,8 +1068,27 @@ impl Config {
     /// Some export wants the photos in color, so the build keeps them that way and makes a
     /// color edition beside the grayscale one.
     pub fn wants_color(&self) -> bool {
-        self.export.iter().any(|e| e.photos == Photos::Color)
+        // A bundle always carries color: graying is the reader's choice.
+        self.force_color
+            || self
+                .export
+                .iter()
+                .any(|e| e.photos == Photos::Color || e.format == ExportFormat::Bundle)
             || (self.remarkable.enabled && self.remarkable.photos() == Photos::Color)
+    }
+
+    /// The edition bundles the build makes: one with the long reads, one without, as the
+    /// `format = "bundle"` exports ask.
+    pub fn bundles_wanted(&self) -> Vec<bool> {
+        let mut out: Vec<bool> = self
+            .export
+            .iter()
+            .filter(|e| e.format == ExportFormat::Bundle)
+            .map(|e| e.books)
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
     }
 
     /// The PDF editions the build makes: one per screen and photos an export folder or the

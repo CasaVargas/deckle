@@ -106,6 +106,14 @@ pub fn today<'s>(
     &store.days[&date]
 }
 
+/// The puzzle page as data, for a native reader (edition bundle design §6.6): today's, with
+/// its answers, and yesterday's when there was one.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct PuzzleData {
+    pub today: store::Puzzle,
+    pub yesterday: Option<store::Puzzle>,
+}
+
 const KICKER: &str = "Answers in tomorrow's paper";
 const HINT: &str = "Highlight a clue and add your answer as a note; tomorrow's paper checks it.";
 const CREDIT: &str = "Words and definitions from Wiktionary and wordfreq (CC BY-SA 4.0)";
@@ -201,6 +209,14 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
         kicker: Some(KICKER.into()),
         articles,
         unavailable: None,
+        weather: None,
+        puzzle: Some(PuzzleData {
+            today: p,
+            yesterday: store
+                .days
+                .get(&(date - Days::new(1)))
+                .map(|y| y.puzzle.clone()),
+        }),
     }
 }
 

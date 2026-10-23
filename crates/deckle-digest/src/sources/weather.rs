@@ -4,7 +4,7 @@
 
 use chrono::{Duration, NaiveDate};
 use chrono_tz::Tz;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::config::{Config, Units};
 use crate::fetch::Net;
@@ -217,6 +217,47 @@ fn deg(v: f64) -> String {
 /// The page's footer credit (almanac design §4).
 const CREDIT: &str = "Forecast: Open-Meteo · Sky and moon worked out on your Mac";
 
+/// The weather page as numbers, for a native reader (edition bundle design §6.5). Temperatures
+/// are in the paper's units; times are local RFC 3339.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct WeatherData {
+    pub units: Units,
+    pub current: Option<WeatherNow>,
+    pub days: Vec<WeatherDay>,
+    pub sunrise: Option<String>,
+    pub sunset: Option<String>,
+    pub moon: MoonData,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WeatherNow {
+    pub temperature: i64,
+    pub feels_like: i64,
+    pub humidity: i64,
+    pub wind: i64,
+    pub condition: String,
+    /// The icon's path among the edition's assets.
+    pub icon: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct WeatherDay {
+    pub date: String,
+    pub high: i64,
+    pub low: i64,
+    /// The day's highest chance of rain, 0–100.
+    pub rain: i64,
+    pub condition: String,
+    pub icon: String,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct MoonData {
+    pub phase: String,
+    /// Percent of the disc lit, 0–100.
+    pub illumination: u32,
+}
+
 /// Everything the page is built from; [`section`] fetches it, [`page`] lays it out.
 pub struct PageInputs<'a> {
     pub cfg: &'a Config,
@@ -244,6 +285,10 @@ pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
     let mut articles = Vec::new();
     let mut assets: Assets = Vec::new();
     let mut line = None;
+    let mut data = WeatherData {
+        units,
+        ..Default::default()
+    };
 
     // 1. Today and the strip.
     match &i.forecast {
@@ -260,12 +305,32 @@ pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
                 deg(d.temperature_2m_max[0]),
                 deg(d.temperature_2m_min[0]),
             ));
+            let now_icon = Icon::from_code(f.current.weather_code);
+            if !assets.iter().any(|(h, _)| h == now_icon.href()) {
+                assets.push((now_icon.href().to_owned(), now_icon.png().to_vec()));
+            }
+            data.current = Some(WeatherNow {
+                temperature: f.current.temperature_2m.round() as i64,
+                feels_like: f.current.apparent_temperature.round() as i64,
+                humidity: f.current.relative_humidity_2m.round() as i64,
+                wind: f.current.wind_speed_10m.round() as i64,
+                condition: describe(f.current.weather_code).to_owned(),
+                icon: now_icon.href().to_owned(),
+            });
             let mut cells = String::new();
             for n in 0..d.time.len().min(5) {
                 let icon = Icon::from_code(d.weather_code[n]);
                 if !assets.iter().any(|(h, _)| h == icon.href()) {
                     assets.push((icon.href().to_owned(), icon.png().to_vec()));
                 }
+                data.days.push(WeatherDay {
+                    date: d.time[n].clone(),
+                    high: d.temperature_2m_max[n].round() as i64,
+                    low: d.temperature_2m_min[n].round() as i64,
+                    rain: d.precipitation_probability_max[n].unwrap_or(0.0).round() as i64,
+                    condition: strip_word(f, n, units),
+                    icon: icon.href().to_owned(),
+                });
                 let day = NaiveDate::parse_from_str(&d.time[n], "%Y-%m-%d")
                     .map(|x| x.format("%a").to_string().to_uppercase())
                     .unwrap_or_else(|_| d.time[n].clone());
@@ -303,6 +368,8 @@ pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
     let yesterday = sun::sun_day(i.date - Duration::days(1), lat, lon, i.tz);
     let mut almanac = String::new();
     if let sun::SunDay::Normal { rise, set } = today {
+        data.sunrise = Some(rise.to_rfc3339());
+        data.sunset = Some(set.to_rfc3339());
         almanac.push_str(&format!(
             "<p>Sunrise {} · Sunset {}</p>",
             clock(rise.time(), units),
@@ -317,6 +384,10 @@ pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
         almanac.push_str(&format!("<p>{}</p>", esc(&frost)));
     }
     let moon = moon::phase(i.date);
+    data.moon = MoonData {
+        phase: moon.name.to_owned(),
+        illumination: moon.illumination,
+    };
     almanac.push_str(&format!(
         "<p>{}, {}% lit · {}</p>",
         moon.name,
@@ -365,6 +436,7 @@ pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
         title: TITLE.into(),
         kicker: (!cfg.place.is_empty()).then(|| cfg.place.clone()),
         articles,
+        weather: Some(data),
         ..Default::default()
     };
     (section, line, assets)

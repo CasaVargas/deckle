@@ -35,6 +35,7 @@ flate2 = "1"
 # The PDF edition (pdf edition design): a low-level writer; Deckle lays the pages out itself.
 pdf-writer = "0.15"
 roxmltree.workspace = true
+sha2.workspace = true
 deckle-highlights.workspace = true
 
 # The SMTP password's keychain (email design §6): each OS's own store.
@@ -51,6 +52,8 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 tempfile.workspace = true
 # The PDF edition's tests read it back through PDFium.
 deckle-pdf.workspace = true
+# The edition bundle's tests validate it against its JSON Schema, offline.
+jsonschema = { version = "0.33", default-features = false }
 zip.workspace = true
 image.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }

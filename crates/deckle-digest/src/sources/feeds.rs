@@ -179,6 +179,11 @@ pub fn article(item: &Item, note: Option<&str>) -> Article {
         body,
         teaser: teaser(&item.paragraphs),
         photos: Vec::new(),
+        url: item.link.clone(),
+        outlet: item
+            .source
+            .clone()
+            .or_else(|| item.link.as_deref().map(|l| host(l).to_owned())),
     }
 }
 
@@ -224,6 +229,8 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
         body,
         teaser: x.teaser.or_else(|| teaser(&item.paragraphs)),
         photos,
+        url: Some(url),
+        outlet: Some(outlet),
     }
 }
 
@@ -356,6 +363,8 @@ fn section_of(
         items.iter().map(|i| article(i, None)).collect()
     };
     let mut section = Section {
+        weather: None,
+        puzzle: None,
         key: String::new(),
         title: title.into(),
         kicker,

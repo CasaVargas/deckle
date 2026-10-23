@@ -99,6 +99,8 @@ pub fn reading(sign: &str, date: NaiveDate) -> Option<Article> {
     let lucky = (h.rotate_left(29) % 99) + 1;
     let match_sign = SIGNS[(h.rotate_left(41) % 12) as usize].1;
     Some(Article {
+        url: None,
+        outlet: None,
         teaser: None,
         photos: Vec::new(),
         title: (*name).into(),
@@ -133,6 +135,8 @@ pub fn section(cfg: &Config, date: NaiveDate) -> Section {
         }
     }
     Section {
+        weather: None,
+        puzzle: None,
         key: String::new(),
         title: "Horoscope".into(),
         kicker: Some("Written by Deckle, for fun.".into()),

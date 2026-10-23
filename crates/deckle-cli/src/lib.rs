@@ -1349,8 +1349,13 @@ fn digest(
             emit(json, &path, || format!("wrote {}", path.display()))?;
             Ok(ExitCode::SUCCESS)
         }
-        cli::DigestCommand::Build { output, date } => {
-            let cfg = load_digest_config(&path)?;
+        cli::DigestCommand::Build {
+            output,
+            date,
+            bundle,
+        } => {
+            let mut cfg = load_digest_config(&path)?;
+            cfg.force_color = bundle;
             let date = parse_date(date.as_deref())?;
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
@@ -1366,6 +1371,12 @@ fn digest(
             report
                 .notes
                 .extend(archive_to_morgue(&cfg, date, &report.epub, &gathered));
+            if bundle {
+                let path = deckle_digest::bundle::write(&gathered, &report, &output, true, now)?;
+                report
+                    .bundles
+                    .push(deckle_digest::BundleBuild { books: true, path });
+            }
             emit(json, &report, || {
                 let mut text = format!(
                     "OK    {}\n      -> {}\n{}",
@@ -1375,6 +1386,9 @@ fn digest(
                 );
                 for p in &report.long_reads {
                     text.push_str(&format!("\n      long read -> {}", p.display()));
+                }
+                for b in &report.bundles {
+                    text.push_str(&format!("\n      bundle -> {}", b.path.display()));
                 }
                 for n in &report.notes {
                     text.push_str(&format!("\n      note: {n}"));
@@ -3566,6 +3580,7 @@ mod tests {
             color_epub: None,
             color_long_reads: Vec::new(),
             pdfs: Vec::new(),
+            bundles: Vec::new(),
             reading_outcomes: vec![
                 ("a1".into(), Outcome::Printed),
                 ("b2".into(), Outcome::Book),
@@ -3921,6 +3936,7 @@ mod layout_tests {
             color_epub: None,
             color_long_reads: Vec::new(),
             pdfs: Vec::new(),
+            bundles: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
         };

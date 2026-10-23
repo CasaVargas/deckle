@@ -504,3 +504,20 @@ The reMarkable side is built from how its USB web interface is known to work (`G
 /documents/`, `POST /upload` at `10.11.99.1`) and tested against a stand-in; it hasn't been
 checked on a tablet yet (`docs/devices.md`). The page sizes for each screen are checked there
 too.
+
+## The edition bundle, for reader apps
+
+`format = "bundle"` in an `[[export]]` block (or **As: Bundle** on the Daily tab) puts each
+morning's edition in the folder as data rather than a finished file: a
+`deckle-daily-YYYY-MM-DD.deckle` folder with `edition.json`, the photos (in color) and icons,
+the cover and the EPUB. A native reader app draws the paper from it, with the front page plan,
+each story's text and link, the weather as numbers and the crossword with its answers.
+`books = true` adds the long reads' EPUBs. `keep` prunes old bundles.
+
+The format is documented in `docs/superpowers/specs/2026-10-23-edition-bundle-design.md` and
+`docs/formats/edition-bundle.schema.json`, offered under CC-BY-4.0 and MIT, so any reader app,
+open or not, can read it. `deckle digest build --bundle -o <dir>` writes one by hand.
+
+A bundle is written into a hidden `.….deckle.tmp` folder and renamed into place, and its
+`edition.json` lists every file with its size and SHA-256: a reader waits until every listed
+file has arrived, so a half-synced iCloud Drive folder is never read as a whole paper.

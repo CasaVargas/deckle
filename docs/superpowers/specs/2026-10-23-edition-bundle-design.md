@@ -292,7 +292,7 @@ Deckle Daily/
 
 ## 11. Phasing
 
-1. **The bundle (M):**
+1. **The bundle (M), built** (§14):
    - `Article.url`/`outlet`;
    - structured weather and puzzle on their sections;
    - the writer, `format = "bundle"` and `digest build --bundle`;
@@ -334,3 +334,23 @@ The owner delegated these; each is ruled as below and can be reopened on the PR.
   - a return file merges into readership by section key and into the puzzle's solve;
   - two readers' returns merge as §12 says;
   - a malformed return is ignored with a note, never a failed build.
+
+## 14. Build notes, phase 1
+
+- **Where it's written:** the build writes one bundle per `books` value its exports ask for, under `bundle/paper/` or `bundle/books/` beside the EPUB (`BuildReport.bundles`). An export copies it in whole through a hidden `.….deckle.tmp` folder and renames it into place.
+- **`Article.url` and `Article.outlet`** are set where stories are fetched:
+  - a feed item: its link and source;
+  - a full story: the resolved page and its outlet;
+  - a saved article: the saved address;
+  - a web article sent as a book: its address, never a saved page's `file:` path.
+  
+  Sections Deckle writes itself (horoscope, lottery, On This Day, the puzzle and weather pages) have none.
+- **Structured data rides on the section.** `Section.weather` is filled by the weather page as it lays out the strip, and `Section.puzzle` by the puzzle page, with today's puzzle and yesterday's. The bundle writer never parses HTML back.
+- **Color:** any `format = "bundle"` export makes the build keep photos in color (`Config::wants_color`), so the bundle's photos are always color. `digest build --bundle` sets `force_color` for the same reason.
+- **Icons:** the weather icons' EPUB paths (`images/wx-*.png`) are rewritten to their `media/` names in each story's XHTML and in the `weather` data.
+- **Clue numbers** are worked out from the grid by crossword rules: a square starts a word across or down.
+- **Story words** are counted from the XHTML's text, outside its tags.
+- **Moon:** `illumination` is the fraction lit, 0–1. The almanac's own line prints the percent.
+- **The schema** (`docs/formats/edition-bundle.schema.json`, JSON Schema 2020-12) is validated in the tests with `jsonschema` 0.33, a dev-dependency with default features off, so nothing is fetched.
+- **The app:** export folders gain **As: Bundle, for a reader app**. The photos setting is ignored for a bundle.
+- **Kept for phase 2:** reading `.deckle-returns/`.

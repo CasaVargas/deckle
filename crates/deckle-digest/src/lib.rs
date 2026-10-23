@@ -7,6 +7,7 @@
 
 pub mod article;
 pub mod bookmarklet;
+pub mod bundle;
 pub mod config;
 pub mod cover;
 pub mod day;
@@ -70,6 +71,11 @@ pub struct Article {
     pub teaser: Option<String>,
     /// E-ink JPEGs; the body refers to photo `n` as [`sources::feeds::photo_token`]`(n)`.
     pub photos: Vec<Vec<u8>>,
+    /// The story's own page, when it has one (edition bundle design §9). The EPUB doesn't
+    /// link out; a native reader may.
+    pub url: Option<String>,
+    /// Who published it: the feed's source, else the page's host.
+    pub outlet: Option<String>,
 }
 
 impl Article {
@@ -107,6 +113,10 @@ pub struct Section {
     pub articles: Vec<Article>,
     /// Why the section is empty today, when a source failed.
     pub unavailable: Option<String>,
+    /// The weather page's numbers, beside the XHTML they print (edition bundle design §6.5).
+    pub weather: Option<sources::weather::WeatherData>,
+    /// Today's puzzle and yesterday's, beside the XHTML they print (edition bundle §6.6).
+    pub puzzle: Option<puzzle::PuzzleData>,
 }
 
 #[derive(Clone, Debug)]
@@ -207,8 +217,18 @@ pub struct BuildReport {
     /// The PDF editions, one per screen and photos asked for (PDF edition design §7).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub pdfs: Vec<PdfBuild>,
+    /// The edition bundles, with and without the long reads, as asked for (edition bundle §4).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bundles: Vec<BundleBuild>,
     pub reading_outcomes: Vec<(String, reading::Outcome)>,
     pub notes: Vec<String>,
+}
+
+/// One edition bundle, `books` saying whether it carries the long reads.
+#[derive(Clone, Debug, Serialize)]
+pub struct BundleBuild {
+    pub books: bool,
+    pub path: PathBuf,
 }
 
 /// One PDF edition: the paper laid out for `screen`, its photos `photos`.
@@ -220,6 +240,14 @@ pub struct PdfBuild {
 }
 
 impl BuildReport {
+    /// The edition bundle with (or without) the long reads, when the build made one.
+    pub fn bundle(&self, books: bool) -> Option<&Path> {
+        self.bundles
+            .iter()
+            .find(|b| b.books == books)
+            .map(|b| b.path.as_path())
+    }
+
     /// The PDF edition for `screen` and `photos`, when the build made one.
     pub fn pdf(&self, screen: pdf::Screen, photos: config::Photos) -> Option<&Path> {
         self.pdfs
@@ -513,6 +541,13 @@ pub fn build_gathered(
             path: p,
         });
     }
+    for books in cfg.bundles_wanted() {
+        let dir = out_dir
+            .join("bundle")
+            .join(if books { "books" } else { "paper" });
+        let path = bundle::write(&gathered, &r, &dir, books, now)?;
+        r.bundles.push(BundleBuild { books, path });
+    }
     r.reading_outcomes = gathered.reading_outcomes.clone();
     r.notes = gathered.notes.clone();
     Ok((r, gathered))
@@ -555,6 +590,7 @@ fn report(edition: &Edition, epub: PathBuf) -> BuildReport {
         color_epub: None,
         color_long_reads: Vec::new(),
         pdfs: Vec::new(),
+        bundles: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
     }

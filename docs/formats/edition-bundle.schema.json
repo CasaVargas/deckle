@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CasaVargas/deckle/docs/formats/edition-bundle.schema.json",
+  "title": "Deckle edition bundle, edition.json, version 1.x",
+  "description": "The paper as data for native readers (docs/superpowers/specs/2026-10-23-edition-bundle-design.md). This schema is offered under the MIT license, beside the repository's GPL-3.0. Readers ignore fields they don't know; a minor version only adds.",
+  "type": "object",
+  "required": ["format", "version", "generator", "edition", "front", "sections", "files"],
+  "properties": {
+    "format": { "const": "deckle-edition" },
+    "version": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "generator": { "type": "string" },
+    "edition": {
+      "type": "object",
+      "required": ["paper", "date", "number", "place", "timezone", "built_at", "cover"],
+      "properties": {
+        "paper": { "type": "string" },
+        "date": { "$ref": "#/$defs/date" },
+        "number": { "type": "integer", "minimum": 1 },
+        "place": { "type": "string" },
+        "timezone": { "type": "string" },
+        "built_at": { "type": "string", "format": "date-time" },
+        "weather_line": { "type": "string" },
+        "cover": { "$ref": "#/$defs/path" }
+      }
+    },
+    "front": {
+      "type": "object",
+      "required": ["lead", "tiles"],
+      "properties": {
+        "lead": { "type": ["string", "null"] },
+        "tiles": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "sections": { "type": "array", "items": { "$ref": "#/$defs/section" } },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "size", "sha256"],
+        "properties": {
+          "path": { "$ref": "#/$defs/path" },
+          "size": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "path": {
+      "type": "string",
+      "description": "A path inside the bundle, '/'-separated, never absolute and never with '..'.",
+      "pattern": "^(?!/)(?!.*\\.\\.)[^\\\\]+$"
+    },
+    "section": {
+      "type": "object",
+      "required": ["key", "kind", "title", "kicker", "unavailable", "stories", "weather", "puzzle"],
+      "properties": {
+        "key": { "type": "string" },
+        "kind": { "type": "string", "description": "reading, weather, local, feeds, shelf, lottery, horoscope, puzzle, onthisday; a reader draws a kind it doesn't know from its stories' bodies." },
+        "title": { "type": "string" },
+        "kicker": { "type": ["string", "null"] },
+        "unavailable": { "type": ["string", "null"] },
+        "stories": { "type": "array", "items": { "$ref": "#/$defs/story" } },
+        "weather": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/weather" }] },
+        "puzzle": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/puzzle" }] }
+      }
+    },
+    "story": {
+      "type": "object",
+      "required": ["id", "title", "meta", "teaser", "url", "outlet", "words", "body", "photos", "long_read"],
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "meta": { "type": ["string", "null"] },
+        "teaser": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "outlet": { "type": ["string", "null"] },
+        "words": { "type": "integer", "minimum": 0 },
+        "body": {
+          "type": "object",
+          "required": ["format", "text"],
+          "properties": {
+            "format": { "const": "xhtml" },
+            "text": { "type": "string" }
+          }
+        },
+        "photos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["file", "width", "height", "lead", "motion"],
+            "properties": {
+              "file": { "$ref": "#/$defs/path" },
+              "width": { "type": "integer", "minimum": 0 },
+              "height": { "type": "integer", "minimum": 0 },
+              "lead": { "type": "boolean" },
+              "motion": { "description": "Reserved for version 1.1; null in 1.0." }
+            }
+          }
+        },
+        "long_read": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/path" }] }
+      }
+    },
+    "weather": {
+      "type": "object",
+      "required": ["units", "current", "days", "sun", "moon", "source"],
+      "properties": {
+        "units": { "enum": ["imperial", "metric"] },
+        "current": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["temperature", "feels_like", "humidity", "wind", "condition", "icon"],
+              "properties": {
+                "temperature": { "type": "integer" },
+                "feels_like": { "type": "integer" },
+                "humidity": { "type": "integer" },
+                "wind": { "type": "integer" },
+                "condition": { "type": "string" },
+                "icon": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/path" }] }
+              }
+            }
+          ]
+        },
+        "days": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["date", "high", "low", "rain", "condition", "icon"],
+            "properties": {
+              "date": { "$ref": "#/$defs/date" },
+              "high": { "type": "integer" },
+              "low": { "type": "integer" },
+              "rain": { "type": "integer", "minimum": 0, "maximum": 100 },
+              "condition": { "type": "string" },
+              "icon": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/path" }] }
+            }
+          }
+        },
+        "sun": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["rise", "set"],
+              "properties": {
+                "rise": { "type": "string", "format": "date-time" },
+                "set": { "type": "string", "format": "date-time" }
+              }
+            }
+          ]
+        },
+        "moon": {
+          "type": "object",
+          "required": ["phase", "illumination"],
+          "properties": {
+            "phase": { "type": "string" },
+            "illumination": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "source": { "type": "string" }
+      }
+    },
+    "puzzle": {
+      "type": "object",
+      "required": ["number", "grid", "numbers", "clues", "ladder", "yesterday"],
+      "properties": {
+        "number": { "type": "integer", "minimum": 1 },
+        "grid": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "array", "items": { "type": "string", "pattern": "^[A-Z#]+$" } }
+          ]
+        },
+        "numbers": {
+          "type": "array",
+          "items": { "type": "array", "items": { "type": "integer", "minimum": 0 }, "minItems": 3, "maxItems": 3 }
+        },
+        "clues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["number", "dir", "clue", "answer", "theme"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "dir": { "enum": ["across", "down"] },
+              "clue": { "type": "string" },
+              "answer": { "type": "string", "pattern": "^[A-Z]+$" },
+              "theme": { "type": "boolean" }
+            }
+          }
+        },
+        "ladder": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["from", "to", "steps", "answer"],
+              "properties": {
+                "from": { "type": "string" },
+                "to": { "type": "string" },
+                "steps": { "type": "integer", "minimum": 0 },
+                "answer": { "type": "array", "items": { "type": "string" } }
+              }
+            }
+          ]
+        },
+        "yesterday": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["grid", "ladder"],
+              "properties": {
+                "grid": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "type": "string" } }] },
+                "ladder": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "type": "string" } }] }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -152,6 +152,8 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
                 body,
                 teaser: x.teaser.clone(),
                 photos,
+                url: e.url.clone(),
+                outlet: Some(outlet.clone()),
             },
         };
         let pointer = Article {
@@ -165,6 +167,8 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
             ),
             teaser: x.teaser.clone(),
             photos: Vec::new(),
+            url: e.url.clone(),
+            outlet: Some(outlet.clone()),
         };
         return Got::Long(Box::new(lr), pointer);
     }
@@ -178,6 +182,8 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         body,
         teaser: x.teaser,
         photos,
+        url: e.url.clone(),
+        outlet: Some(outlet),
     })
 }
 
@@ -216,6 +222,8 @@ pub fn section(
         n => format!("{n} articles you saved"),
     };
     let section = Section {
+        weather: None,
+        puzzle: None,
         key: String::new(),
         title: TITLE.into(),
         kicker: Some(kicker),
