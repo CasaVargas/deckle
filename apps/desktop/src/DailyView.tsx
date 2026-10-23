@@ -10,6 +10,7 @@ import PagePlanCard from "./PagePlanCard";
 import { reorder, setBudget } from "./pagePlan";
 import PressBar from "./PressBar";
 import Readership from "./Readership";
+import EveryEdition from "./EveryEdition";
 import Shelf from "./Shelf";
 import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
@@ -325,6 +326,11 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       </div>
 
       <Readership onApplied={() => load().then(loadNext)} />
+
+      <EveryEdition
+        disabled={planLocked}
+        onFolder={(folder) => planSave((c) => ({ ...c, morgue: { keep_days: c.morgue?.keep_days ?? 365, folder } }))}
+      />
 
       <Shelf inPaper={draft.sections.includes("shelf")} />
 

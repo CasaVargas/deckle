@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **The Morgue** (#109): every edition is kept in a folder you can see, `~/Deckle/Morgue` (change
+  it under `[morgue]` or on the Daily tab), for a year, with the stories' text so you can search
+  it. **Every edition** on the Daily tab shows a month of front pages, search with the matching
+  days lit up, and a day's detail: how far you read, passages highlighted, whether it's still on
+  the Kindle. **Send again** puts an old edition back on the Kindle for a week, past the newest
+  three. `deckle digest morgue list|search|show|send` does the same from the terminal. The
+  editions already in the cache folder are brought in the first time.
+
 ## 0.4.0 — a real front page, topic sections, From Your Shelf
 
 - A site's default author picture (the same grey avatar in several stories, or any small square

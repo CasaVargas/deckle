@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus } from "./types";
+import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -45,6 +45,12 @@ export const api = {
   readershipApply: (id: string) => invoke<ReadershipView>("readership_apply", { id }),
   readershipDismiss: (id: string) => invoke<ReadershipView>("readership_dismiss", { id }),
   readershipSet: (on: boolean) => invoke<ReadershipView>("readership_set", { on }),
+  morgueMonth: (year: number, month: number) => invoke<MorgueMonth>("morgue_month", { year, month }),
+  morgueSearch: (query: string) => invoke<MorgueHit[]>("morgue_search", { query }),
+  morgueShow: (date: string) => invoke<MorgueDetail | null>("morgue_show", { date }),
+  /** Queues the edition for the Kindle again; resolves to the queued file name. */
+  morgueSend: (date: string) => invoke<string>("morgue_send", { date }),
+  morgueOpen: (date: string) => invoke<void>("morgue_open", { date }),
   shelfStatus: () => invoke<ShelfStatus>("shelf_status"),
   shelfForget: () => invoke<ShelfStatus>("shelf_forget"),
   shelfSet: (on: boolean) => invoke<ShelfStatus>("shelf_set", { on }),

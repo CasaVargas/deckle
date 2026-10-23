@@ -4,6 +4,7 @@
 mod commands;
 mod daily;
 mod kindle;
+mod morgue;
 mod next;
 mod readership;
 mod shelf;
@@ -84,6 +85,11 @@ pub fn run() {
             readership::readership_apply,
             readership::readership_dismiss,
             readership::readership_set,
+            morgue::morgue_month,
+            morgue::morgue_search,
+            morgue::morgue_show,
+            morgue::morgue_send,
+            morgue::morgue_open,
             shelf::shelf_status,
             shelf::shelf_forget,
             shelf::shelf_set,

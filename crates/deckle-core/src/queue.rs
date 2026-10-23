@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::deliver::{
-    Conn, DeliverError, DeliverOptions, Target, deliver_named_on, prune_named_on,
+    Conn, DeliverError, DeliverOptions, Target, deliver_named_on, prune_named_on_except,
 };
 use crate::devices::DeviceProfile;
 use crate::inspect::BookInfo;
@@ -63,10 +63,13 @@ pub struct FlushReport {
 }
 
 /// After a flush, editions named `<prefix>…` beyond the newest `keep` are removed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Prune {
     pub prefix: String,
     pub keep: usize,
+    /// File names left alone, and not counted toward `keep`: editions sent again from the
+    /// Morgue, for a week after they arrive.
+    pub exempt: Vec<String>,
 }
 
 /// How a flush finishes prepared books for the Kindle on the connection.
@@ -148,14 +151,20 @@ impl Queue {
 
     /// Drops queued entries whose name starts with `prefix` (an edition supersedes yesterday's
     /// undelivered one), and any entry of either kind already called `name`.
-    fn make_room(&self, name: &str, replaces: Option<&str>) -> std::io::Result<()> {
+    fn make_room(
+        &self,
+        name: &str,
+        replaces: Option<&str>,
+        keep: &[String],
+    ) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.dir)?;
         for old in self.pending() {
             let file = old
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            if replaces.is_some_and(|p| file.starts_with(p)) || queue_name(&old) == name {
+            let superseded = replaces.is_some_and(|p| file.starts_with(p)) && !keep.contains(&file);
+            if superseded || queue_name(&old) == name {
                 remove_entry(&old)?;
             }
         }
@@ -164,7 +173,19 @@ impl Queue {
 
     /// Copies `kfx` into the queue as `name`, first dropping queued entries that `replaces`.
     pub fn add(&self, kfx: &Path, name: &str, replaces: Option<&str>) -> std::io::Result<PathBuf> {
-        self.make_room(name, replaces)?;
+        self.add_keeping(kfx, name, replaces, &[])
+    }
+
+    /// [`Queue::add`], sparing the queued entries named in `keep` from `replaces`: an edition
+    /// sent again from the Morgue must survive the morning's paper.
+    pub fn add_keeping(
+        &self,
+        kfx: &Path,
+        name: &str,
+        replaces: Option<&str>,
+        keep: &[String],
+    ) -> std::io::Result<PathBuf> {
+        self.make_room(name, replaces, keep)?;
         let dest = self.dir.join(name);
         std::fs::copy(kfx, &dest)?;
         Ok(dest)
@@ -192,7 +213,7 @@ impl Queue {
         name: &str,
         replaces: Option<&str>,
     ) -> std::io::Result<PathBuf> {
-        self.make_room(name, replaces)?;
+        self.make_room(name, replaces, &[])?;
         let stem = name.strip_suffix(".kfx").unwrap_or(name);
         // Written aside and renamed, so a `watch` never sees half an entry.
         let part = self.dir.join(format!("{stem}.{PREPARED_EXT}.part"));
@@ -266,7 +287,7 @@ impl Queue {
             remove_entry(entry).map_err(io)?;
         }
         if let Some(p) = prune {
-            report.pruned = prune_named_on(conn, &p.prefix, p.keep)?;
+            report.pruned = prune_named_on_except(conn, &p.prefix, p.keep, &p.exempt)?;
         }
         Ok(report)
     }
@@ -374,6 +395,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn add_keeping_spares_the_named_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("p.kfx");
+        std::fs::write(&src, b"KFX").unwrap();
+        q.add(&src, "deckle-daily-2026-10-01.kfx", None).unwrap();
+        q.add(&src, "deckle-daily-2026-10-19.kfx", None).unwrap();
+        let spared = vec!["deckle-daily-2026-10-01.kfx".to_owned()];
+        // Today's paper supersedes yesterday's undelivered one, but not an edition sent again.
+        q.add_keeping(
+            &src,
+            "deckle-daily-2026-10-22.kfx",
+            Some("deckle-daily-"),
+            &spared,
+        )
+        .unwrap();
+        let names: Vec<String> = q
+            .pending()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            ["deckle-daily-2026-10-01.kfx", "deckle-daily-2026-10-22.kfx"]
+        );
+        // Without the list, the prefix takes every one of them, as before.
+        q.add(&src, "deckle-daily-2026-10-23.kfx", Some("deckle-daily-"))
+            .unwrap();
+        assert_eq!(q.pending().len(), 1);
+    }
+
+    #[test]
     fn a_new_edition_replaces_the_undelivered_one_and_flush_prunes() {
         let tmp = tempfile::tempdir().unwrap();
         let src = tmp.path().join("book.kfx");
@@ -399,6 +452,7 @@ mod tests {
         let prune = Prune {
             prefix: "deckle-daily-".into(),
             keep: 2,
+            ..Default::default()
         };
         let r = q
             .flush(&Target::Folder(kindle.clone()), Some(&prune))
@@ -625,6 +679,7 @@ mod tests {
             let prune = Prune {
                 prefix: "deckle-daily-".into(),
                 keep: 1,
+                ..Default::default()
             };
             let r = {
                 let mut conn = Conn::with_opener(&target, fake::open);

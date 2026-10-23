@@ -72,10 +72,13 @@ the screenshot above.
   the moon and meteor showers; today's calendar events on the page; and which sections of the
   paper you actually reach.
 
-Designed, with a written plan, and waiting for code: **The Morgue**
-([#109](https://github.com/CasaVargas/deckle/issues/109)), **One Mac, many papers**
-([#110](https://github.com/CasaVargas/deckle/issues/110)) and **From Your Shelf**
-([#112](https://github.com/CasaVargas/deckle/issues/112)). The rest is on the
+- **From Your Shelf:** the books you're in the middle of, a past highlight and the words you
+  looked up this week, drawn from your own Kindle.
+- **The Morgue:** every edition kept in a plain folder, searchable, shown on the Daily tab as a
+  month of front pages, and sendable to the Kindle again.
+
+Designed, with a written plan, and waiting for code: **One Mac, many papers**
+([#110](https://github.com/CasaVargas/deckle/issues/110)). The rest is on the
 [roadmap](https://github.com/CasaVargas/deckle/issues?q=is%3Aopen+label%3Aroadmap).
 
 ## What it does
@@ -191,6 +194,7 @@ deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (
 deckle digest readership                          # how far you read the paper, per section
 deckle digest readership apply 1                  # make suggested edit 1 to digest.toml
 deckle digest shelf                               # what From Your Shelf would print now
+deckle digest morgue search mill                  # every kept edition: list, search, show, send again
 deckle digest next                                # tomorrow's paper so far: lead, page plan, this week
 deckle digest stop                                # stop the presses: skip the next scheduled paper
 ```

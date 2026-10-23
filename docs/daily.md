@@ -23,6 +23,7 @@ deckle digest run --to device       # build, convert, send (cover first), keep t
 deckle digest push                  # deliver a queued edition to the Kindle now connected
 deckle digest puzzle                # today's puzzle, and yesterday's answers
 deckle digest shelf                 # what From Your Shelf would print now (--forget deletes it)
+deckle digest morgue search mill    # every kept edition: list, search, show, send again
 deckle digest watch                 # keep running; deliver whenever a Kindle connects
 deckle digest schedule --at 05:30   # both, automatically: the paper daily, the watcher from login
 deckle digest schedule --off        # and gone again
@@ -248,6 +249,49 @@ to `sections`, or switch it on in the Daily tab. Optional settings:
 [puzzle]
 ladder = true
 theme = true      # clues from yesterday's headlines
+```
+
+### The Morgue
+
+Every edition you've had, kept on purpose. A newspaper's morgue is its archive of back issues;
+Deckle's is a plain folder, `~/Deckle/Morgue` (next to the Inbox), that you can see, back up or
+point at iCloud Drive. The Kindle keeps only the newest three, and the cache folder is the kind
+of place a cleaner empties.
+
+- **What's kept.** Each build (`digest build`, `run`, the schedule, the app's Build) copies its
+  EPUB into `YYYY/YYYY-MM-DD.epub` with a small `YYYY-MM-DD.json` beside it holding the
+  headlines, teasers and each story's text. After conversion the KFX is kept too, for fast
+  re-sending, for two weeks. The first time it runs, Deckle also brings in the editions still in
+  the cache folder.
+- **A year by default.** `[morgue] keep_days = 365` (`0` keeps everything). Only files named
+  exactly `YYYY/YYYY-MM-DD.epub`, `.json` or `.kfx` are ever deleted; notes or renamed copies you
+  put in the folder are left alone and never listed. A folder that can't be written (iCloud
+  offline, a full disk) doesn't fail the paper: the run says "Morgue: couldn't save the edition
+  (…)".
+- **Every edition, on the Daily tab.** A month of front pages, each with the paper's name and its
+  lead headline; days with no paper are blank, and the next one says "Tomorrow, 05:30". Type a
+  word and the days with a match light up, with the matching stories listed. Click a day for its
+  weather and lead, how far you read ("You read about 91%, to Local"), how many passages you
+  highlighted, and whether it's still on the Kindle, with **Send again**, **Open** and **Show in
+  Finder**. The card's footer shows the folder and its size and lets you change the folder.
+- **Search.** Every word has to match, ignoring case and accents, in a story's headline, teaser or
+  full text: `mill brewery` finds the stories with both, `cafe` finds "Café". From the terminal:
+  `deckle digest morgue search mill brewery`, `deckle digest morgue list --month 2026-10`,
+  `deckle digest morgue show 2026-10-21`. Add `--json` for data.
+- **Send again.** `deckle digest morgue send 2026-10-21` (or the button) queues the kept KFX, or
+  converts the kept EPUB first, as `deckle-daily-2026-10-21.kfx`. It goes over the next time a
+  Kindle connects and then stays for a week, even though it's older than the newest three; after
+  that it's pruned like any other.
+- **What the counts are.** "Passages highlighted" counts that edition's highlights in the last
+  `My Clippings.txt` read (so it needs the highlights, puzzle or shelf reads on, and a Kindle that
+  keeps the file; a Scribe doesn't). "On the Kindle" comes from the reading positions read at the
+  last connection. Both live in `morgue.json` next to `digest.toml`, and an edition with no
+  record shows no such line.
+
+```toml
+[morgue]
+folder = "~/Deckle/Morgue"
+keep_days = 365
 ```
 
 ### From Your Shelf

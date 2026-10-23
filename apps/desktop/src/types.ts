@@ -171,6 +171,8 @@ export interface DailyConfig {
   email?: EmailConfig;
   /** `[day]`: Your Day on the weather page. Absent while untouched. */
   day?: DayConfig;
+  /** `[morgue]`: where every edition is kept. Absent while untouched. */
+  morgue?: { folder: string; keep_days: number };
 }
 
 /** `[[local.places]]`: another place's local news, its own section after Local (#102). */
@@ -375,6 +377,41 @@ export interface ReadershipView {
   /** `[sync] readership` in digest.toml. */
   enabled: boolean;
   report: ReadershipReport;
+}
+
+/** A day with a kept edition (Morgue design §4). `date` is YYYY-MM-DD. */
+export interface MorgueDay {
+  date: string;
+  paper: string;
+  lead: string | null;
+}
+
+export interface MorgueMonth {
+  days: MorgueDay[];
+  editions: number;
+  bytes: number;
+  folder: string;
+  /** "Tomorrow, 05:30": when the next paper is made, if a schedule is installed. */
+  nextBuild: string | null;
+  /** The date that label is for, YYYY-MM-DD. */
+  nextBuildDate: string | null;
+}
+
+/** An edition with stories matching a search: (section title, story title) each. */
+export interface MorgueHit {
+  date: string;
+  paper: string;
+  stories: [string, string][];
+}
+
+export interface MorgueDetail {
+  heading: string;
+  weather: string | null;
+  lead: { section: string; title: string; teaser: string | null } | null;
+  read: string | null;
+  highlights: string | null;
+  onKindle: string | null;
+  epub: string;
 }
 
 /** What the last Kindle shared with From Your Shelf (shelf design §7). */

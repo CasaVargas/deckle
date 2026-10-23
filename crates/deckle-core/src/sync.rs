@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 
 use crate::clippings::read_on;
-use crate::deliver::{Conn, DeliverError, Target, prune_named_on};
+use crate::deliver::{Conn, DeliverError, Target, prune_named_on_except};
 use crate::inventory::{DeviceBook, list_with_positions};
 use crate::queue::{Finishing, FlushReport, Progress, Prune, Queue};
 use crate::vocab::{VocabFiles, read_vocab_on};
@@ -226,7 +226,7 @@ pub fn run_with(
         FlushReport::default()
     };
     if plan.prune && !plan.push {
-        report.pruned = prune_named_on(conn, &prune.prefix, prune.keep)?;
+        report.pruned = prune_named_on_except(conn, &prune.prefix, prune.keep, &prune.exempt)?;
     }
     // A failed read doesn't undo a delivery: it's reported beside it.
     if plan.shelf {
@@ -456,6 +456,7 @@ mod tests {
         Prune {
             prefix: "deckle-daily-".into(),
             keep: 2,
+            ..Default::default()
         }
     }
 

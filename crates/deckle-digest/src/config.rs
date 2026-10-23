@@ -93,6 +93,9 @@ pub struct Config {
     /// From Your Shelf (shelf design §6). Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "ShelfConfig::is_default")]
     pub shelf: ShelfConfig,
+    /// The Morgue, every edition kept (Morgue design §3). Left out of a save while untouched.
+    #[serde(skip_serializing_if = "MorgueConfig::is_default")]
+    pub morgue: MorgueConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
@@ -140,6 +143,7 @@ impl Default for Config {
             day: DayConfig::default(),
             puzzle: PuzzleConfig::default(),
             shelf: ShelfConfig::default(),
+            morgue: MorgueConfig::default(),
             almanac_path: None,
             press_path: None,
             puzzle_path: None,
@@ -432,6 +436,31 @@ impl Default for PuzzleConfig {
 impl PuzzleConfig {
     pub fn is_default(&self) -> bool {
         *self == PuzzleConfig::default()
+    }
+}
+
+/// `[morgue]`: where every edition is kept, and for how long.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MorgueConfig {
+    /// A folder; `~` is the home folder, as in `[reading] inbox`.
+    pub folder: String,
+    /// Editions older than this many days are removed; `0` keeps everything.
+    pub keep_days: u32,
+}
+
+impl Default for MorgueConfig {
+    fn default() -> Self {
+        MorgueConfig {
+            folder: "~/Deckle/Morgue".into(),
+            keep_days: 365,
+        }
+    }
+}
+
+impl MorgueConfig {
+    pub fn is_default(&self) -> bool {
+        *self == MorgueConfig::default()
     }
 }
 
@@ -736,6 +765,11 @@ signs = []                        # e.g. ["leo", "virgo"]; empty prints all twel
 # [puzzle]
 # ladder = true
 # theme = true                    # clues from yesterday's headlines, the word blanked
+
+# The Morgue: every edition kept in a folder you can see, search and back up.
+# [morgue]
+# folder = "~/Deckle/Morgue"      # point at iCloud Drive to keep it there
+# keep_days = 365                 # 0 keeps everything
 
 # From Your Shelf: the books in progress on your Kindle, a past highlight and the words you
 # looked up this week (the last two only on Kindles that share them).

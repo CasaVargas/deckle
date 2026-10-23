@@ -437,9 +437,20 @@ pub fn prunable<I: IntoIterator<Item = String>>(
     prefix: &str,
     keep: usize,
 ) -> Vec<String> {
+    prunable_except(names, prefix, keep, &[])
+}
+
+/// [`prunable`], leaving `exempt` names alone: they don't count toward `keep` either (an
+/// edition sent again must not push a newer one out).
+pub fn prunable_except<I: IntoIterator<Item = String>>(
+    names: I,
+    prefix: &str,
+    keep: usize,
+    exempt: &[String],
+) -> Vec<String> {
     let mut matching: Vec<String> = names
         .into_iter()
-        .filter(|n| n.starts_with(prefix) && n.ends_with(".kfx"))
+        .filter(|n| n.starts_with(prefix) && n.ends_with(".kfx") && !exempt.contains(n))
         .collect();
     matching.sort_unstable_by(|a, b| b.cmp(a));
     matching.into_iter().skip(keep).collect()
@@ -453,12 +464,22 @@ pub fn prune_named_on(
     prefix: &str,
     keep: usize,
 ) -> Result<Vec<String>, DeliverError> {
+    prune_named_on_except(conn, prefix, keep, &[])
+}
+
+/// [`prune_named_on`], leaving the `exempt` file names (and their `.sdr` folders) alone.
+pub fn prune_named_on_except(
+    conn: &mut Conn<'_>,
+    prefix: &str,
+    keep: usize,
+    exempt: &[String],
+) -> Result<Vec<String>, DeliverError> {
     let dir = match conn.target {
         Target::Folder(dir) => dir.clone(),
         Target::MassStorage(dev) => dev.root.join("documents"),
         Target::Mtp(_) => {
             return match conn.mtp() {
-                Some(Ok(dev)) => prune_mtp(dev, prefix, keep),
+                Some(Ok(dev)) => prune_mtp(dev, prefix, keep, exempt),
                 Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
                 None => unreachable!("an MTP target always has a connection"),
             };
@@ -472,7 +493,7 @@ pub fn prune_named_on(
         .map_err(io(&dir))?
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned());
-    let removed = prunable(names, prefix, keep);
+    let removed = prunable_except(names, prefix, keep, exempt);
     for name in &removed {
         let path = dir.join(name);
         std::fs::remove_file(&path).map_err(io(&path))?;
@@ -484,7 +505,12 @@ pub fn prune_named_on(
     Ok(removed)
 }
 
-fn prune_mtp(dev: &mut Mtp, prefix: &str, keep: usize) -> Result<Vec<String>, DeliverError> {
+fn prune_mtp(
+    dev: &mut Mtp,
+    prefix: &str,
+    keep: usize,
+    exempt: &[String],
+) -> Result<Vec<String>, DeliverError> {
     let m = |e: MtpError| DeliverError::Mtp(e.to_string());
     let storage = *dev
         .storages()
@@ -493,10 +519,11 @@ fn prune_mtp(dev: &mut Mtp, prefix: &str, keep: usize) -> Result<Vec<String>, De
         .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
     let docs = dev.find_documents(storage).map_err(m)?;
     let children = dev.list(storage, docs).map_err(m)?;
-    let removed = prunable(
+    let removed = prunable_except(
         children.iter().map(|(_, info)| info.filename.clone()),
         prefix,
         keep,
+        exempt,
     );
     for name in &removed {
         let sdr_name = Path::new(name)

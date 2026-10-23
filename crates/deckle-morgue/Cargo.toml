@@ -1,0 +1,22 @@
+[package]
+name = "deckle-morgue"
+description = "Deckle morgue: every Daily edition kept in a plain folder, searchable"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+deckle-digest.workspace = true
+deckle-readership.workspace = true
+deunicode.workspace = true
+html-escape = "0.2"
+roxmltree.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+toml = "1"
