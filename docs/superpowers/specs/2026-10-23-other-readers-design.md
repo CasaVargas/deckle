@@ -283,7 +283,7 @@ The owner delegated these; each is ruled as below and can be reopened on the PR.
 
 1. **Export folder (M), built.** §6.1, §7 `[[export]]`, and the app's export-folder card. iPad and Boox work at the end of it. The `Target` refactor (§5) and outbox v2 (§6) moved to phase 2 (§15).
 2. **Kobo (M–L), built** (§16). Detection, KEPUB, the EPUB outbox, prune, highlights and the shelf. Readership and the app tab moved on. Spikes 1–2 are still owed.
-3. **PocketBook (S).** Detection and prune. Its reads are left for later. Spike 3 comes first.
+3. **PocketBook (S), built** (§17). Detection, delivery and prune. Its reads are left for later. Spike 3 is still owed.
 4. **PDF edition and reMarkable (L).** Its own typesetting spec, then §9. Spike 4 comes first.
 
 None of this can be tested in CI against a real Kobo, PocketBook or reMarkable. Each phase ends with the owner's hardware check, recorded in `docs/devices.md`.
@@ -336,3 +336,17 @@ Built without a Kobo: against Kobo's files as the e-reader community documents t
   - **The Morgue's "on the Kindle" marks** stay Kindle-only.
   - **The desktop app** sends books to a Kindle only. A Kobo gets the paper through the scheduled `digest run`/`watch`, which the app already sets up. The tab renames in §10 wait until the app sends to a Kobo too.
 - **`DECKLE_MOUNTS`** (a path list) replaces the places Deckle looks for a drive. It's for a reader mounted somewhere unusual, and for the CLI tests' simulated Kobo.
+
+## 17. Build notes, phase 3 (PocketBook)
+
+Built without a PocketBook: tested on a simulated drive, so spike 3 (§11) is still owed.
+
+- **One type for both.** Phase 2's Kobo-only code became `deckle_core::reader`, whose `Reader` is a Kobo or a PocketBook. Everything that doesn't depend on the device kind now lives there: delivery into `Deckle/`, the prune, `readers.json`, and the book made for the EPUB outbox. `sync::run_kobo` became `sync::run_reader`. Kobo-specific code stays in `deckle_core::kobo`: detection, the version file and the database reads.
+- **`kobos.json` is `readers.json`.** It was renamed before any release, so nothing needs migrating.
+- **Detection:** a PocketBook is a drive with `system/explorer-3/`, or with both `system/config/` and `system/profiles/`, and in either case no `documents/`. That rules out a Kindle, which has `documents/` and `system/`. A Kobo is checked for first.
+- **Format:** a PocketBook gets the EPUB as it is, as `Deckle/<stem>.epub`, once it opens as a zip.
+  - The EPUB outbox now holds cleaned, plain EPUBs for both kinds. An Inbox book is no longer queued as a KEPUB.
+  - The Kobo's KEPUB is made at push, as the paper's always was.
+  - A PocketBook's prune counts `deckle-daily-*.epub` and never a `.kepub.epub`.
+- **Not read:** a PocketBook has no highlights export and no shelf, and `deckle highlights` with only a PocketBook plugged in says there's no reader to read from. Its library database (`system/explorer-3/explorer-3.db`) is the obvious source when this is picked up.
+- **JSON:** `digest run`'s `kobo_queued` and `kobo` fields became `epub_queued` and `reader`, also before any release.

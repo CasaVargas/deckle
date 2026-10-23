@@ -79,8 +79,9 @@ the screenshot above.
 - **The paper on an iPad, or in any folder:** each morning's edition also goes to the folders you
   choose, as an EPUB with color photos if you like. An iCloud Drive folder reaches an iPad's
   Files app. No Kindle Previewer needed for it.
-- **Kobo:** the paper, long reads and Inbox books go to a Kobo as KEPUBs, its highlights export
-  as Markdown, and From Your Shelf reads it. No Previewer needed. Not yet checked on a real Kobo
+- **Kobo and PocketBook:** the paper, long reads and Inbox books go to a Kobo as KEPUBs and to a
+  PocketBook as EPUBs; a Kobo's highlights export as Markdown, and From Your Shelf reads it. No
+  Previewer needed. Not yet checked on real devices
   ([other readers design](docs/superpowers/specs/2026-10-23-other-readers-design.md)).
 
 Designed, with a written plan, and waiting for code: **One Mac, many papers**

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Kobo e-readers (docs/superpowers/specs/2026-10-23-other-readers-design.md §8): found as a USB
-//! drive with a `.kobo/` folder, sent KEPUBs in a `Deckle/` folder of their own, and read for
-//! highlights and books in progress from `.kobo/KoboReader.sqlite`.
+//! drive with a `.kobo/` folder, sent KEPUBs (through [`crate::reader`], which delivers and
+//! prunes), and read for highlights and books in progress from `.kobo/KoboReader.sqlite`.
 //!
 //! The database is never opened where it lies: it is copied out first and the copy opened
 //! read-only, so the Kobo's own file is never locked or changed. Its tables are Kobo's, not
@@ -12,9 +12,6 @@
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-
-/// The folder on the Kobo that Deckle writes to and prunes: nothing outside it is touched.
-pub const FOLDER: &str = "Deckle";
 
 /// A Kobo mounted as a drive.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -44,10 +41,6 @@ impl Kobo {
     /// What the reports call it.
     pub fn name(&self) -> String {
         "Kobo".to_owned()
-    }
-
-    fn folder(&self) -> PathBuf {
-        self.root.join(FOLDER)
     }
 }
 
@@ -91,99 +84,6 @@ pub fn parse_version(text: &str) -> (Option<String>, Option<String>, Option<Stri
         .then(|| field(fields.len() - 1))
         .flatten();
     (field(0), field(2), model)
-}
-
-/// `kobos.json` beside the app's `devices.json`: the Kobos Deckle has seen, by id, with when.
-/// While it names one, `digest run` also queues the paper as an EPUB for it.
-pub fn seen_file() -> PathBuf {
-    crate::devices::default_registry_file().with_file_name("kobos.json")
-}
-
-/// Records a sighting of `kobo` in `file`, at `now`.
-pub fn remember(file: &Path, kobo: &Kobo, now: &str) -> Result<(), String> {
-    let mut seen: std::collections::BTreeMap<String, String> = std::fs::read(file)
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default();
-    seen.insert(kobo.id(), now.to_owned());
-    if let Some(dir) = file.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    }
-    let tmp = file.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(&seen).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, json).map_err(|e| format!("{}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, file).map_err(|e| format!("{}: {e}", file.display()))
-}
-
-/// Whether `file` names any Kobo.
-pub fn any_seen(file: &Path) -> bool {
-    std::fs::read(file)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<std::collections::BTreeMap<String, String>>(&b).ok())
-        .is_some_and(|m| !m.is_empty())
-}
-
-/// A book's file name on a Kobo: the extension a Kobo needs to read it as a KEPUB.
-pub fn kepub_name(stem: &str) -> String {
-    format!("{stem}.kepub.epub")
-}
-
-/// Writes `bytes` to `Deckle/<name>` through a hidden temporary file, flushed to the drive
-/// before it's renamed, so an unplugged Kobo never holds half a book.
-pub fn deliver(kobo: &Kobo, bytes: &[u8], name: &str) -> std::io::Result<PathBuf> {
-    use std::io::Write;
-    let dir = kobo.folder();
-    std::fs::create_dir_all(&dir)?;
-    let to = dir.join(name);
-    let tmp = dir.join(format!(".{name}.tmp"));
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
-    }
-    std::fs::rename(&tmp, &to).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })?;
-    Ok(to)
-}
-
-/// Removes all but the newest `keep` books in `Deckle/` whose name starts with `prefix` (the
-/// editions, named by date so the name sorts them), sparing `exempt`. Returns the names removed.
-pub fn prune(
-    kobo: &Kobo,
-    prefix: &str,
-    keep: usize,
-    exempt: &[String],
-) -> std::io::Result<Vec<String>> {
-    let Ok(rd) = std::fs::read_dir(kobo.folder()) else {
-        return Ok(Vec::new());
-    };
-    let mut names: Vec<String> = rd
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with(prefix) && n.ends_with(".kepub.epub"))
-        .filter(|n| !exempt.iter().any(|x| same_stem(x, n)))
-        .collect();
-    names.sort_unstable_by(|a, b| b.cmp(a));
-    let mut gone = Vec::new();
-    for n in names.into_iter().skip(keep) {
-        std::fs::remove_file(kobo.folder().join(&n))?;
-        gone.push(n);
-    }
-    Ok(gone)
-}
-
-/// `deckle-daily-2026-10-01.kfx` and `deckle-daily-2026-10-01.kepub.epub` are one edition.
-fn same_stem(a: &str, b: &str) -> bool {
-    stem(a) == stem(b)
-}
-
-/// A file name without `.kepub.epub`, `.epub` or `.kfx`.
-pub fn stem(name: &str) -> &str {
-    [".kepub.epub", ".epub", ".kfx"]
-        .iter()
-        .find_map(|x| name.strip_suffix(x))
-        .unwrap_or(name)
 }
 
 /// A book in progress on the Kobo.
@@ -379,28 +279,6 @@ fn weekday(y: u32, m: u32, d: u32) -> usize {
     ((y + y / 4 - y / 100 + y / 400 + T[m as usize - 1] + d) % 7) as usize
 }
 
-/// A book made ready for a Kobo: a Word document, PDF or text file imported first, then
-/// cleaned as for a Kindle (no Previewer), then made a KEPUB.
-pub fn book(source: &Path) -> Result<Vec<u8>, String> {
-    let work = tempfile::tempdir().map_err(|e| e.to_string())?;
-    let epub = if crate::import::needs_import(source) {
-        crate::import::import(source, work.path(), "imported.epub")
-            .ok_or("not a book Deckle can import")??
-            .epub
-    } else {
-        source.to_path_buf()
-    };
-    let normalized = work.path().join("normalized.epub");
-    crate::normalize::normalize(
-        &epub,
-        &normalized,
-        &crate::normalize::NormalizeOptions::default(),
-    )
-    .map_err(|e| e.to_string())?;
-    let bytes = std::fs::read(&normalized).map_err(|e| e.to_string())?;
-    crate::kepub::convert(&bytes)
-}
-
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -454,45 +332,6 @@ pub mod tests {
         let k = detect_in(std::slice::from_ref(&root)).remove(0);
         assert_eq!(k.serial, None);
         assert_eq!(k.id(), "kobo/KOBOeReader");
-    }
-
-    #[test]
-    fn delivery_writes_into_deckles_folder_and_prune_keeps_the_newest() {
-        let tmp = tempfile::tempdir().unwrap();
-        let k = fake_kobo(tmp.path(), "");
-        for d in ["01", "02", "03", "04"] {
-            let name = kepub_name(&format!("deckle-daily-2026-10-{d}"));
-            deliver(&k, b"KEPUB", &name).unwrap();
-        }
-        deliver(&k, b"KEPUB", "deckle-reads-a.kepub.epub").unwrap();
-        std::fs::write(
-            tmp.path().join("deckle-daily-2026-09-01.kepub.epub"),
-            b"mine",
-        )
-        .unwrap();
-        let exempt = vec!["deckle-daily-2026-10-01.kfx".to_owned()];
-        let gone = prune(&k, "deckle-daily-", 2, &exempt).unwrap();
-        assert_eq!(gone, ["deckle-daily-2026-10-02.kepub.epub"]);
-        let mut left: Vec<String> = std::fs::read_dir(tmp.path().join(FOLDER))
-            .unwrap()
-            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        left.sort();
-        assert_eq!(
-            left,
-            [
-                "deckle-daily-2026-10-01.kepub.epub",
-                "deckle-daily-2026-10-03.kepub.epub",
-                "deckle-daily-2026-10-04.kepub.epub",
-                "deckle-reads-a.kepub.epub"
-            ]
-        );
-        // Outside Deckle's folder nothing is touched.
-        assert!(
-            tmp.path()
-                .join("deckle-daily-2026-09-01.kepub.epub")
-                .is_file()
-        );
     }
 
     const BOOKS: &str = "INSERT INTO content VALUES \
@@ -580,26 +419,6 @@ pub mod tests {
             Some("Thursday, February 29, 2024 12:00:00 PM".into())
         );
         assert_eq!(english_date("yesterday"), None);
-        assert_eq!(
-            stem("deckle-daily-2026-10-01.kepub.epub"),
-            "deckle-daily-2026-10-01"
-        );
-        assert_eq!(
-            stem("deckle-daily-2026-10-01.kfx"),
-            "deckle-daily-2026-10-01"
-        );
-    }
-
-    #[test]
-    fn a_kobo_once_seen_is_remembered() {
-        let tmp = tempfile::tempdir().unwrap();
-        let file = tmp.path().join("cfg/kobos.json");
-        assert!(!any_seen(&file));
-        let k = fake_kobo(&tmp.path().join("KOBOeReader"), "");
-        remember(&file, &k, "2026-10-23T05:30:00Z").unwrap();
-        assert!(any_seen(&file));
-        let text = std::fs::read_to_string(&file).unwrap();
-        assert!(text.contains("kobo/N418170012345"), "{text}");
     }
 
     #[test]

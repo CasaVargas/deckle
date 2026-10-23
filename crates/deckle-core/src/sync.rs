@@ -261,18 +261,18 @@ pub fn run_with(
     Ok(report)
 }
 
-/// [`run`] for a Kobo, over its drive: each queued `.epub` goes over as a KEPUB in `Deckle/`
-/// (a book that won't convert stays queued, with a warning), then the prune, then one read of
-/// its database for the highlights and the shelf (other readers design §8). A Kobo has no
-/// `.yjf`: `plan.readership` is ignored.
-pub fn run_kobo(
+/// [`run`] for a reader on a drive (other readers design §8): each queued `.epub` goes over
+/// into `Deckle/`, a KEPUB for a Kobo and as it is for a PocketBook (a book that won't convert
+/// stays queued, with a warning), then the prune, then, on a Kobo, one read of its database for
+/// the highlights and the shelf. Neither has a `.yjf`: `plan.readership` is ignored.
+pub fn run_reader(
     queue: &Queue,
-    kobo: &crate::kobo::Kobo,
+    reader: &crate::reader::Reader,
     plan: Plan,
     prune: &Prune,
     progress: &mut Progress<'_>,
 ) -> Result<FlushReport, DeliverError> {
-    use crate::kobo;
+    use crate::reader::{self, Reader};
     let mut report = FlushReport::default();
     if plan.push {
         let pending: Vec<PathBuf> = queue
@@ -286,12 +286,12 @@ pub fn run_kobo(
                 source,
             };
             let file = entry.file_name().unwrap_or_default().to_string_lossy();
-            let name = kobo::kepub_name(kobo::stem(&file));
+            let name = reader.file_name(reader::stem(&file));
             progress(i + 1, pending.len(), &name);
             let bytes = std::fs::read(entry).map_err(io)?;
-            match crate::kepub::convert(&bytes) {
-                Ok(kepub) => {
-                    let path = kobo::deliver(kobo, &kepub, &name).map_err(io)?;
+            match reader.prepare(&bytes) {
+                Ok(ready) => {
+                    let path = reader::deliver(reader, &ready, &name).map_err(io)?;
                     report.delivered.push(path);
                     std::fs::remove_file(entry).map_err(io)?;
                 }
@@ -303,16 +303,16 @@ pub fn run_kobo(
     }
     if plan.prune {
         report.pruned =
-            kobo::prune(kobo, &prune.prefix, prune.keep, &prune.exempt).map_err(|source| {
+            reader::prune(reader, &prune.prefix, prune.keep, &prune.exempt).map_err(|source| {
                 DeliverError::Io {
-                    path: kobo.root.join(kobo::FOLDER),
+                    path: reader.root().join(reader::FOLDER),
                     source,
                 }
             })?;
     }
-    // One read serves both; a failed read doesn't undo a delivery.
-    if plan.clippings || plan.shelf {
-        match kobo::read(kobo) {
+    // One read serves both; a failed read doesn't undo a delivery. A PocketBook isn't read.
+    if let (Reader::Kobo(kobo), true) = (reader, plan.clippings || plan.shelf) {
+        match crate::kobo::read(kobo) {
             Ok(r) => {
                 // The shelf prints a highlight too, so it brings the clippings, as on a Kindle.
                 report.clippings = r.clippings;
@@ -992,6 +992,7 @@ mod tests {
 mod kobo_tests {
     use super::*;
     use crate::kobo::tests::fake_kobo;
+    use crate::reader::Reader;
 
     fn epub(text: &str) -> Vec<u8> {
         use std::io::Write;
@@ -1033,11 +1034,11 @@ mod kobo_tests {
     #[test]
     fn a_kobo_gets_the_epub_outbox_as_kepubs_then_the_prune_and_its_reads() {
         let tmp = tempfile::tempdir().unwrap();
-        let kobo = fake_kobo(
+        let kobo = Reader::Kobo(fake_kobo(
             &tmp.path().join("KOBOeReader"),
             "INSERT INTO content VALUES ('file:///mnt/onboard/x.epub', '6', 'X', 'A', 10, \
              '2026-10-20T08:00:00Z', 1, NULL);",
-        );
+        ));
         std::fs::create_dir_all(tmp.path().join("KOBOeReader/Deckle")).unwrap();
         for d in ["2026-10-01", "2026-10-02"] {
             std::fs::write(
@@ -1056,7 +1057,7 @@ mod kobo_tests {
             keep: 2,
             exempt: Vec::new(),
         };
-        let r = run_kobo(&q, &kobo, ALL, &prune, &mut |_, _, _| {}).unwrap();
+        let r = run_reader(&q, &kobo, ALL, &prune, &mut |_, _, _| {}).unwrap();
         assert_eq!(
             r.delivered,
             [tmp.path()
@@ -1084,10 +1085,52 @@ mod kobo_tests {
     #[test]
     fn a_failed_read_is_reported_beside_the_delivery() {
         let tmp = tempfile::tempdir().unwrap();
-        let kobo = fake_kobo(tmp.path(), "");
+        let kobo = Reader::Kobo(fake_kobo(tmp.path(), ""));
         std::fs::write(tmp.path().join(".kobo/KoboReader.sqlite"), b"garbage").unwrap();
         let q = Queue::new(tmp.path().join("outbox-epub"));
-        let r = run_kobo(&q, &kobo, ALL, &Prune::default(), &mut |_, _, _| {}).unwrap();
+        let r = run_reader(&q, &kobo, ALL, &Prune::default(), &mut |_, _, _| {}).unwrap();
         assert!(r.clippings_error.is_some() && r.shelf_error.is_some());
+    }
+}
+
+#[cfg(test)]
+mod pocketbook_tests {
+    use super::*;
+    use crate::reader::{PocketBook, Reader};
+
+    #[test]
+    fn a_pocketbook_gets_the_epub_as_it_is_and_is_not_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("PB");
+        std::fs::create_dir_all(&root).unwrap();
+        let pb = Reader::PocketBook(PocketBook { root: root.clone() });
+        let q = Queue::new(tmp.path().join("outbox-epub"));
+        std::fs::create_dir_all(&q.dir).unwrap();
+        let epub = {
+            use std::io::Write;
+            let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            z.start_file("mimetype", zip::write::SimpleFileOptions::default())
+                .unwrap();
+            z.write_all(b"application/epub+zip").unwrap();
+            z.finish().unwrap().into_inner()
+        };
+        std::fs::write(q.dir.join("deckle-daily-2026-10-03.epub"), &epub).unwrap();
+        let plan = Plan {
+            push: true,
+            prune: true,
+            clippings: true,
+            readership: false,
+            shelf: true,
+        };
+        let prune = Prune {
+            prefix: "deckle-daily-".into(),
+            keep: 3,
+            exempt: Vec::new(),
+        };
+        let r = run_reader(&q, &pb, plan, &prune, &mut |_, _, _| {}).unwrap();
+        let sent = root.join("Deckle/deckle-daily-2026-10-03.epub");
+        assert_eq!(r.delivered, std::slice::from_ref(&sent));
+        assert_eq!(std::fs::read(sent).unwrap(), epub);
+        assert!(r.kobo_books.is_none() && r.clippings.is_none() && r.clippings_error.is_none());
     }
 }

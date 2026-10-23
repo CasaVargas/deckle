@@ -103,10 +103,10 @@ pub(crate) fn pipeline_with(
     }
 }
 
-/// `kindle` for each book, after a copy for a Kobo when `kobo` is its outbox (other readers
-/// design §8): imported, cleaned and made a KEPUB, which needs no Previewer. A book the Kobo
-/// took leaves the Inbox even when the Kindle's copy has to wait for Previewer.
-pub(crate) fn with_kobo(
+/// `kindle` for each book, after a copy for a Kobo or a PocketBook when `kobo` is their outbox
+/// (other readers design §8): imported and cleaned, which needs no Previewer. A book the
+/// e-reader outbox took leaves the Inbox even when the Kindle's copy has to wait for Previewer.
+pub(crate) fn with_readers(
     kobo: Option<Queue>,
     mut kindle: impl FnMut(&Path, &Queue) -> Result<(), Skip>,
 ) -> impl FnMut(&Path, &Queue) -> Result<(), Skip> {
@@ -114,7 +114,7 @@ pub(crate) fn with_kobo(
         let Some(k) = &kobo else {
             return kindle(book, outbox);
         };
-        let bytes = deckle_core::kobo::book(book).map_err(Skip::Unreadable)?;
+        let bytes = deckle_core::reader::book_epub(book).map_err(Skip::Unreadable)?;
         let stem = book.file_stem().unwrap_or_default().to_string_lossy();
         let name = format!("{}.epub", deckle_core::deliver::sanitize(&stem));
         let write = || -> std::io::Result<()> {
@@ -123,7 +123,7 @@ pub(crate) fn with_kobo(
             std::fs::write(&tmp, &bytes)?;
             std::fs::rename(&tmp, k.dir.join(&name))
         };
-        write().map_err(|e| Skip::Retry(format!("Kobo outbox: {e}")))?;
+        write().map_err(|e| Skip::Retry(format!("e-reader outbox: {e}")))?;
         match kindle(book, outbox) {
             Err(Skip::Retry(_)) => Ok(()),
             other => other,

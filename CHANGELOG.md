@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **PocketBook** (other readers design, phase 3). Plugged in once, a PocketBook gets the paper,
+  long reads and Inbox books as EPUBs in a `Deckle/` folder, pruned to `keep`, and `deckle run`
+  sends to it when no Kindle is plugged in. No Previewer needed. Its highlights and shelf aren't
+  read yet, and it hasn't been checked on a real PocketBook.
 - **Kobo** (other readers design, phase 2). Plug a Kobo in once and every morning's paper is
   also queued for it, and goes over as a KEPUB (page counts and reading statistics) in a `Deckle/`
   folder the next time it's connected, pruned to `keep`. Long reads and Inbox books go too, and

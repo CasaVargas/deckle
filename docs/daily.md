@@ -454,3 +454,17 @@ statistics for it. Eject the Kobo to see the new paper: it only looks for books 
 
 The Kobo support is built against Kobo's files as the e-reader community documents them and
 tested on a simulated drive; it hasn't been checked on a Kobo yet (`docs/devices.md`).
+
+## PocketBook
+
+A PocketBook works like a Kobo, with plain EPUB: plug it in once and each morning's edition, the
+long reads and Inbox books go over as EPUBs into its `Deckle/` folder, pruned to `keep`
+(`Deckle/deckle-daily-*.epub` only). `deckle run book.epub` with a PocketBook and no Kindle
+plugged in sends it there. No Kindle Previewer is needed. Its sync id is `pocketbook/<volume>`.
+
+Highlights and From Your Shelf don't read a PocketBook yet. Deckle knows one by its `system/`
+folders (`system/explorer-3/`, or `system/config/` with `system/profiles/`, and no `documents/`);
+like the Kobo, it hasn't been checked on a real one (`docs/devices.md`).
+
+Deckle remembers every Kobo and PocketBook it has seen in `readers.json` beside the app's
+`devices.json`; while that names one, `digest run` queues the paper for it, plugged in or not.
