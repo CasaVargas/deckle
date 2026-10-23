@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Bind several files into one book** (#22). `deckle bind a.epub b.docx c.pdf https://… --title
+  "Course Packet"` makes one EPUB of them, in that order: each part keeps its own styles and
+  pictures, and the contents list every part with its chapters under it. EPUBs, Word documents,
+  text files, PDFs and web articles all work; a finished `.kfx` doesn't. Send the result with
+  `deckle run`. (The app gets a **Bind into one book** action next.)
 - **PDFs in the app** (#133). Drop a PDF on the window (or a folder of them, or pick one with
   **Choose files…**) and it's reflowed, built and sent like any book; its row shows the title and
   author it reflows with, and a scan says why it can't be read. The app now carries PDFium, so

@@ -1208,3 +1208,61 @@ fn an_epub_with_a_cover_normalizes_the_same_with_generated_covers_on_or_off() {
     };
     assert_eq!(normalized(Some(None)), normalized(None));
 }
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_bound_book_runs_through_the_whole_pipeline() {
+    use deckle_core::bind::{BindOptions, Part, bind};
+    let tmp = tempfile::tempdir().unwrap();
+    let txt = deckle_core::import::import(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/txt/gutenberg-mini.txt"),
+        tmp.path(),
+        "txt.epub",
+    )
+    .unwrap()
+    .unwrap();
+    let bound = tmp.path().join("bound.epub");
+    bind(
+        &[
+            Part {
+                epub: deckle_kfx::fixtures::path("deckle-mini.epub"),
+                title: None,
+            },
+            Part {
+                epub: txt.epub,
+                title: None,
+            },
+        ],
+        &BindOptions {
+            title: "Two in One".into(),
+            author: None,
+        },
+        &bound,
+    )
+    .unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let opts = RunOptions {
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.path().to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: false,
+        cde_override: None,
+        amazon_match: false,
+        generated_cover: Some(None),
+        metadata_fill: false,
+        typography: false,
+        popup_notes: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm: None,
+        wikipedia: false,
+        word_wise: None,
+        replaces: Vec::new(),
+    };
+    let report = run(&bound, &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    assert_eq!(report.info.title, "Two in One");
+    assert!(report.delivered.is_some());
+}

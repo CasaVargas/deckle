@@ -94,6 +94,9 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   dictionary when it has one.
 - **Other inputs.** `.docx`, `.txt`, web articles (a URL, `.webloc`/`.url`, or a saved `.html`)
   go through the same pipeline. A finished `.kfx` is sent as is.
+- **Bind several files into one book (CLI).** EPUBs, Word documents, text files, PDFs and web
+  articles become one book, in your order, each with its own entry in the contents: a course
+  packet, a week of saved long reads, a report in pieces.
 - **PDFs, reflowed.** A text PDF becomes a book that reflows: columns read in order, running
   heads and page numbers dropped, broken words joined, and tables, equations and figures kept as
   pictures. It's never as good as a real ebook, and the run says so. The app ships with the
@@ -199,6 +202,7 @@ deckle kindle books                               # what's on the Kindle, and fr
 deckle highlights list                            # books with highlights, and what's new
 deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (folder remembered)
 deckle words anki --to ~/Desktop/words.csv        # looked-up words as Anki cards (File → Import)
+deckle bind a.pdf b.docx https://… --title "Pack"  # several files into one book, then `deckle run` it
 deckle digest readership                          # how far you read the paper, per section
 deckle digest readership apply 1                  # make suggested edit 1 to digest.toml
 deckle digest shelf                               # what From Your Shelf would print now

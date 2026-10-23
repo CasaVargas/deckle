@@ -300,6 +300,12 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
         cli::Command::Words { from, action } => words_cmd(json, &from, action),
+        cli::Command::Bind {
+            inputs,
+            title,
+            author,
+            out,
+        } => bind_cmd(json, &inputs, title, author, out, &deckle_digest::Http),
         cli::Command::Save {
             targets,
             title,
@@ -515,6 +521,100 @@ fn megabytes(bytes: u64) -> String {
 }
 
 /// `deckle highlights list|export` (highlights export design §6).
+/// `deckle bind`: each input made an EPUB (imported, or fetched for a web article), then bound
+/// in order (batch-bind design §4).
+fn bind_cmd(
+    json: bool,
+    inputs: &[PathBuf],
+    title: String,
+    author: Option<String>,
+    out: Option<PathBuf>,
+    net: &dyn deckle_digest::Net,
+) -> Result<ExitCode, String> {
+    use deckle_core::bind::{BindOptions, Part, bind};
+    if inputs.len() < 2 {
+        return Err("bind takes at least two files".into());
+    }
+    let work = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let mut parts = Vec::new();
+    let mut warnings = Vec::new();
+    for (n, input) in inputs.iter().enumerate() {
+        let arg = input.to_string_lossy();
+        let shown = input.display().to_string();
+        if deckle_digest::web_book::is_article(&arg) {
+            let book =
+                import_article(&arg, net, &articles_dir()).map_err(|e| format!("{shown}: {e}"))?;
+            parts.push(Part {
+                epub: book.path,
+                title: None,
+            });
+            continue;
+        }
+        if input
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("kfx"))
+        {
+            return Err(format!(
+                "{shown}: a finished Kindle book can't be bound; use its EPUB or source"
+            ));
+        }
+        if !input.is_file() {
+            return Err(format!("{shown}: no such file"));
+        }
+        let epub = match deckle_core::import::import(input, work.path(), &format!("part-{n}.epub"))
+        {
+            Some(Ok(imported)) => {
+                for w in imported.warnings {
+                    if !warnings.contains(&w) {
+                        warnings.push(w);
+                    }
+                }
+                imported.epub
+            }
+            Some(Err(e)) => return Err(format!("{shown}: {e}")),
+            None => input.clone(),
+        };
+        parts.push(Part { epub, title: None });
+    }
+    let out = out.unwrap_or_else(|| {
+        PathBuf::from(format!("{}.epub", deckle_core::deliver::sanitize(&title)))
+    });
+    let mut report =
+        bind(&parts, &BindOptions { title, author }, &out).map_err(|e| e.to_string())?;
+    warnings.append(&mut report.warnings);
+    report.warnings = warnings;
+    for w in &report.warnings {
+        eprintln!("warning: {w}");
+    }
+    emit(
+        json,
+        &serde_json::json!({
+            "file": out,
+            "title": report.title,
+            "author": report.author,
+            "parts": report.parts,
+            "warnings": report.warnings,
+        }),
+        || {
+            let mut lines: Vec<String> = report
+                .parts
+                .iter()
+                .enumerate()
+                .map(|(i, p)| format!("{:>3}. {p}", i + 1))
+                .collect();
+            let shown = out.display().to_string();
+            let arg = if shown.contains(char::is_whitespace) {
+                format!("\"{shown}\"")
+            } else {
+                shown.clone()
+            };
+            lines.push(format!("-> {shown}  (send it with `deckle run {arg}`)"));
+            lines.join("\n")
+        },
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
 /// `deckle words`: reads `vocab.db` over one connection (one MTP session), never writing to the
 /// Kindle, and defines words only from a Word Wise database already on this machine.
 fn words_cmd(json: bool, from: &str, action: cli::WordsCommand) -> Result<ExitCode, String> {
