@@ -521,16 +521,16 @@ fn megabytes(bytes: u64) -> String {
 }
 
 /// `deckle highlights list|export` (highlights export design §6).
-/// `deckle bind`: each input made an EPUB (imported, or fetched for a web article), then bound
-/// in order (batch-bind design §4).
-fn bind_cmd(
-    json: bool,
+/// Binds `inputs`, in order, into one EPUB at `out`: each made an EPUB first (imported, or
+/// fetched for a web article; an EPUB as it is). The importers' warnings come first in the
+/// report, each once. Shared by `deckle bind` and the app (batch-bind design §4, §6).
+pub fn bind_files(
     inputs: &[PathBuf],
     title: String,
     author: Option<String>,
-    out: Option<PathBuf>,
+    out: &Path,
     net: &dyn deckle_digest::Net,
-) -> Result<ExitCode, String> {
+) -> Result<deckle_core::bind::BindReport, String> {
     use deckle_core::bind::{BindOptions, Part, bind};
     if inputs.len() < 2 {
         return Err("bind takes at least two files".into());
@@ -576,13 +576,30 @@ fn bind_cmd(
         };
         parts.push(Part { epub, title: None });
     }
+    if let Some(dir) = out.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let mut report =
+        bind(&parts, &BindOptions { title, author }, out).map_err(|e| e.to_string())?;
+    warnings.append(&mut report.warnings);
+    report.warnings = warnings;
+    Ok(report)
+}
+
+/// `deckle bind`: each input made an EPUB (imported, or fetched for a web article), then bound
+/// in order (batch-bind design §4).
+fn bind_cmd(
+    json: bool,
+    inputs: &[PathBuf],
+    title: String,
+    author: Option<String>,
+    out: Option<PathBuf>,
+    net: &dyn deckle_digest::Net,
+) -> Result<ExitCode, String> {
     let out = out.unwrap_or_else(|| {
         PathBuf::from(format!("{}.epub", deckle_core::deliver::sanitize(&title)))
     });
-    let mut report =
-        bind(&parts, &BindOptions { title, author }, &out).map_err(|e| e.to_string())?;
-    warnings.append(&mut report.warnings);
-    report.warnings = warnings;
+    let report = bind_files(inputs, title, author, &out, net)?;
     for w in &report.warnings {
         eprintln!("warning: {w}");
     }

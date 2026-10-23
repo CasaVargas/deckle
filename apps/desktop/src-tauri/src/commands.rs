@@ -830,6 +830,45 @@ pub async fn inspect_books(paths: Vec<String>) -> Result<Vec<BookRow>, String> {
     .map_err(|e| e.to_string())
 }
 
+/// The rows' files bound, in order, into one book in `dir` named after `title` (#22): its row,
+/// carrying the bind's warnings (a PDF part's quality note, a left-out font).
+pub fn bind_row(
+    paths: &[String],
+    title: &str,
+    author: Option<String>,
+    dir: &Path,
+    net: &dyn deckle_digest::Net,
+) -> Result<BookRow, String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Err("Give the book a title.".into());
+    }
+    let out = dir.join(format!("{}.epub", deckle_core::deliver::sanitize(title)));
+    let inputs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let author = author
+        .map(|a| a.trim().to_owned())
+        .filter(|a| !a.is_empty());
+    let report = deckle_cli::bind_files(&inputs, title.to_owned(), author, &out, net)?;
+    let mut row = book_row(&out);
+    row.warnings.extend(report.warnings);
+    Ok(row)
+}
+
+/// Binds off the main thread: Word documents, text files and PDFs are imported first.
+#[tauri::command]
+pub async fn bind_books(
+    paths: Vec<String>,
+    title: String,
+    author: Option<String>,
+) -> Result<BookRow, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = deckle_core::wordwise::default_cache_dir().join("bound");
+        bind_row(&paths, &title, author, &dir, &deckle_digest::Http)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Fetches and builds web articles off the main thread; see [`article_rows`].
 #[tauri::command]
 pub async fn import_articles(targets: Vec<String>) -> Result<Vec<BookRow>, String> {
@@ -1143,6 +1182,33 @@ mod tests {
             names,
             ["B.EPUB", "c.epub", "d.kfx", "e.docx", "a.epub", "story.txt"]
         );
+    }
+
+    #[test]
+    fn rows_bind_into_one_book_row() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures");
+        let dir = tempfile::tempdir().unwrap();
+        let paths = [
+            fixtures.join("docx/deckle-mini.docx"),
+            fixtures.join("txt/gutenberg-mini.txt"),
+        ]
+        .map(|p| p.to_string_lossy().into_owned());
+        let row = bind_row(
+            &paths,
+            " Weekend Reading ",
+            Some(" ".into()),
+            dir.path(),
+            &deckle_digest::Http,
+        )
+        .unwrap();
+        assert_eq!(row.error, None, "{}", row.reason);
+        assert_eq!(row.title, "Weekend Reading");
+        assert!(row.path.ends_with("Weekend Reading.epub"), "{}", row.path);
+        assert!(Path::new(&row.path).is_file());
+        let e = bind_row(&paths, "  ", None, dir.path(), &deckle_digest::Http).unwrap_err();
+        assert!(e.contains("title"), "{e}");
+        let e = bind_row(&paths[..1], "One", None, dir.path(), &deckle_digest::Http).unwrap_err();
+        assert!(e.contains("at least two"), "{e}");
     }
 
     #[test]

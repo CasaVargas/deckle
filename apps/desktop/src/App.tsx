@@ -6,6 +6,8 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
+import BindPanel from "./BindPanel";
+import { bindable } from "./bindList";
 import ArticleField from "./ArticleField";
 import { parseAddresses } from "./articles";
 import { runSummary } from "./bookStatus";
@@ -55,6 +57,8 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [bindOpen, setBindOpen] = useState(false);
+  const [binding, setBinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState<string | null>(null);
   const [tab, setTab] = useState<"books" | "daily" | "kindle">("books");
@@ -270,6 +274,28 @@ export default function App() {
   };
 
   const runnable = books.filter((b) => b.mode !== "error");
+  const parts = books.filter((b) => bindable(b.path, b.mode));
+
+  // The bound book takes the parts' place in the list (#22).
+  const bindBooks = async (chosen: BookState[], title: string, author: string) => {
+    setBinding(true);
+    setNotice(null);
+    try {
+      const row = await api.bindBooks(
+        chosen.map((b) => b.path),
+        title,
+        author.trim() || null,
+      );
+      const used = new Set(chosen.map((b) => b.id));
+      setBooks((prev) => [...prev.filter((b) => !used.has(b.id) && b.id !== row.id), toState(row)]);
+      setBindOpen(false);
+      setNotice(`Bound ${chosen.length} files into “${row.title}”. Check it, then Send to Kindle.`);
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setBinding(false);
+    }
+  };
 
   const start = async (target: RunTarget) => {
     if (runnable.length === 0 || busy) return;
@@ -429,6 +455,9 @@ export default function App() {
             onCancel={() => setArticleOpen(false)}
           />
         )}
+        {tab === "books" && bindOpen && (
+          <BindPanel books={parts} busy={binding || busy} onBind={bindBooks} onCancel={() => setBindOpen(false)} />
+        )}
         {tab === "books" && (
         <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
           {books.length === 0 ? (
@@ -502,6 +531,16 @@ export default function App() {
               {exportOpen && (
                 <div className="menu up" onMouseLeave={() => setExportOpen(false)}>
                   <button onClick={exportToFolder}>Export to folder…</button>
+                  <button
+                    disabled={parts.length < 2}
+                    title={parts.length < 2 ? "Add at least two files to bind them." : undefined}
+                    onClick={() => {
+                      setExportOpen(false);
+                      setBindOpen(true);
+                    }}
+                  >
+                    Bind into one book…
+                  </button>
                 </div>
               )}
             </div>

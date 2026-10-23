@@ -6,7 +6,8 @@
   "Course Packet"` makes one EPUB of them, in that order: each part keeps its own styles and
   pictures, and the contents list every part with its chapters under it. EPUBs, Word documents,
   text files, PDFs and web articles all work; a finished `.kfx` doesn't. Send the result with
-  `deckle run`. (The app gets a **Bind into one book** action next.)
+  `deckle run`. In the app, drop the files, then **Bind into one book…** in the Send button's
+  menu: tick and order the parts, name the book, and it takes their place in the list.
 - **Looked-up words to Anki, in the app** (#135). The Kindle tab has a **Looked-up words** card:
   **Export to Anki…** saves every English word you looked up on that Kindle as flashcards (the
   word, a short definition, the sentence and the book), the same CSV as `deckle words anki`.

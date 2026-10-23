@@ -94,7 +94,7 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   dictionary when it has one.
 - **Other inputs.** `.docx`, `.txt`, web articles (a URL, `.webloc`/`.url`, or a saved `.html`)
   go through the same pipeline. A finished `.kfx` is sent as is.
-- **Bind several files into one book (CLI).** EPUBs, Word documents, text files, PDFs and web
+- **Bind several files into one book.** EPUBs, Word documents, text files, PDFs and web
   articles become one book, in your order, each with its own entry in the contents: a course
   packet, a week of saved long reads, a report in pieces.
 - **PDFs, reflowed.** A text PDF becomes a book that reflows: columns read in order, running

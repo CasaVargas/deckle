@@ -245,6 +245,17 @@ input[type=checkbox] { padding: 0; }
 
 /* Add article */
 .article-field { padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.bind-panel { padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.bind-head h3 { margin: 0 0 2px 0; }
+.bind-parts { list-style: none; margin: 10px 0; padding: 0; max-height: 220px; overflow-y: auto; }
+.bind-parts li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.bind-parts li.off .bind-title { opacity: .5; text-decoration: line-through; }
+.bind-parts label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bind-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bind-move { display: flex; gap: 2px; flex-shrink: 0; }
+.bind-move button { padding: 2px 8px; }
+.bind-fields { display: flex; gap: 8px; flex-wrap: wrap; }
+.bind-fields input { flex: 1 1 180px; }
 .article-row { display: flex; gap: 8px; }
 .article-row input { flex: 1; min-width: 0; }
 .article-error { color: var(--fail); font-size: 12px; margin-top: 6px; }
