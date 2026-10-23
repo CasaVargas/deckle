@@ -281,9 +281,27 @@ The owner delegated these; each is ruled as below and can be reopened on the PR.
 
 ## 14. Phasing and sizing
 
-1. **Targets and export folder (M).** §5, §6 without Kobo, §6.1, §7 `[[export]]`, and the app's export-folder button. iPad and Boox work at the end of it.
-2. **Kobo (M–L).** §8: detection, KEPUB, prune, the three reads, and the app tab. Spikes 1–2 come first.
+1. **Export folder (M), built.** §6.1, §7 `[[export]]`, and the app's export-folder card. iPad and Boox work at the end of it. The `Target` refactor (§5) and outbox v2 (§6) moved to phase 2 (§15).
+2. **Kobo (M–L).** §5 and §6, then §8: detection, KEPUB, prune, the three reads, and the app tab. Spikes 1–2 come first.
 3. **PocketBook (S).** Detection and prune. Its reads are left for later. Spike 3 comes first.
 4. **PDF edition and reMarkable (L).** Its own typesetting spec, then §9. Spike 4 comes first.
 
 None of this can be tested in CI against a real Kobo, PocketBook or reMarkable. Each phase ends with the owner's hardware check, recorded in `docs/devices.md`.
+
+## 15. Build notes, phase 1 (rulings made while building)
+
+Phase 1 shipped the export folder, color photos and the Daily tab's card. Two parts of §14's phase 1 moved to phase 2, where Kobo is the first thing that needs them:
+
+- **No `Target` refactor yet (§5).** An export folder has no outbox and nothing to detect, so it runs as a step of `digest run` after the build (`deckle-digest::export`), not as a `Target`. `Target` gains its kinds in phase 2, with Kobo detection. `[[export]]` still gets its `folder/<name>` id there.
+- **No outbox v2 yet (§6).** The rule "Previewer only when a Kindle is known" depended on `devices.json`, which only the app writes: a Kindle owner who only uses the CLI would have lost the paper. Phase 1 uses a narrower rule instead. **When Previewer can't be found and an `[[export]]` is set, `digest run` sends the paper to the export folders only.** It notes "no Kindle copy" in the build notes and queues nothing for a Kindle. With no export set, a missing Previewer fails the run as before. Phase 2 revisits this together with the EPUB in the outbox.
+
+Other rulings:
+
+- **Color is opt-in at fetch.** Photos are fetched in color only when some export has `photos = "color"` (`Config::wants_color`). Every EPUB writer (the paper, long reads, articles sent on their own) grays photos unless told otherwise. `gray_jpeg` reads only the header of a JPEG that's already grayscale and passes it through untouched. So with no color export, the Kindle's paper is the same as before, photo bytes included.
+- **The color edition** is written to `color/` beside the paper, under the same file names (`BuildReport.color_epub`, `color_long_reads`). The Morgue, email and the Kindle keep the grayscale paper.
+- **Only the morning run exports:** `digest run` without `--to <folder>`, as with email. `digest build` writes no exports.
+- **Long reads without Previewer** print inside the paper (`long_read_words` is lifted for that run), unless an export has `books = true`. Then they go to that folder as books.
+- **`format`** accepts only `"epub"` until KEPUB (phase 2) and PDF (phase 4) arrive. Any other value is a config error.
+- **Folders:** a missing export folder is created only when its parent exists, so a turned-off iCloud Drive is reported, not recreated. Files are copied through a hidden `.<name>.tmp` and renamed, so a sync client never uploads half a book. Pruning removes only `deckle-daily-YYYY-MM-DD.epub` names beyond `keep`.
+- **App:** the **Export folders** card sits on the Daily tab, next to **Email to Kindle**, because `[[export]]` lives in `digest.toml` like the Daily's other cards. Settings → Readers and the tab renames in §10 wait for phase 2, when there is more than one kind of reader to list. On a Mac, **Add folder…** opens on iCloud Drive. Each change saves at once, as on the Your Day card.
+- **Not checked on an iPad yet.** The owner's check for phase 1: an export to iCloud Drive, then the paper opened from the Files app in Books, with color photos.
