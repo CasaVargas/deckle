@@ -98,7 +98,7 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
             stories: Vec::new(),
         };
         let mut current: Option<(String, Vec<String>)> = None;
-        let mut flush = |current: &mut Option<(String, Vec<String>)>, section: &mut SectionText| {
+        let flush = |current: &mut Option<(String, Vec<String>)>, section: &mut SectionText| {
             if let Some((title, parts)) = current.take() {
                 section.stories.push(Story {
                     title,
@@ -169,7 +169,7 @@ pub fn import_cache(morgue: &Morgue, cache_dir: &Path) -> Vec<NaiveDate> {
         })
         .filter(|(d, _)| !have.contains(d))
         .collect();
-    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.sort_by_key(|f| std::cmp::Reverse(f.0));
     let mut done = Vec::new();
     for (date, path) in found {
         let Ok(sidecar) = sidecar_from_epub(&path, date) else {
