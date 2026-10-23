@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::deliver::{
-    Conn, DeliverError, DeliverOptions, Target, deliver_named_on, prune_named_on,
+    Conn, DeliverError, DeliverOptions, Target, deliver_named_on, prune_named_on_except,
 };
 use crate::devices::DeviceProfile;
 use crate::inspect::BookInfo;
@@ -63,10 +63,13 @@ pub struct FlushReport {
 }
 
 /// After a flush, editions named `<prefix>…` beyond the newest `keep` are removed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Prune {
     pub prefix: String,
     pub keep: usize,
+    /// File names left alone, and not counted toward `keep`: editions sent again from the
+    /// Morgue, for a week after they arrive.
+    pub exempt: Vec<String>,
 }
 
 /// How a flush finishes prepared books for the Kindle on the connection.
@@ -266,7 +269,7 @@ impl Queue {
             remove_entry(entry).map_err(io)?;
         }
         if let Some(p) = prune {
-            report.pruned = prune_named_on(conn, &p.prefix, p.keep)?;
+            report.pruned = prune_named_on_except(conn, &p.prefix, p.keep, &p.exempt)?;
         }
         Ok(report)
     }
@@ -399,6 +402,7 @@ mod tests {
         let prune = Prune {
             prefix: "deckle-daily-".into(),
             keep: 2,
+            ..Default::default()
         };
         let r = q
             .flush(&Target::Folder(kindle.clone()), Some(&prune))
@@ -625,6 +629,7 @@ mod tests {
             let prune = Prune {
                 prefix: "deckle-daily-".into(),
                 keep: 1,
+                ..Default::default()
             };
             let r = {
                 let mut conn = Conn::with_opener(&target, fake::open);

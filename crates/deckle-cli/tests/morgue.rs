@@ -169,3 +169,173 @@ fn send_queues_kept_kfx() {
     let queued = cache_dir(home.path()).join("outbox/deckle-daily-2026-10-21.kfx");
     assert_eq!(std::fs::read(queued).unwrap(), b"KFX BYTES");
 }
+
+// ---- sent again, and what a connection teaches the Morgue (Task 6) ----
+
+use deckle_morgue::state::{MorgueState, Resent};
+
+fn state_file(home: &Path) -> PathBuf {
+    config_dir(home).join("morgue.json")
+}
+
+fn load_state(home: &Path) -> MorgueState {
+    MorgueState::load(&state_file(home))
+}
+
+/// A Kindle folder holding the given editions.
+fn kindle_with(home: &Path, days: &[&str]) -> PathBuf {
+    let k = home.join("kindle");
+    std::fs::create_dir_all(&k).unwrap();
+    for d in days {
+        std::fs::write(k.join(format!("deckle-daily-{d}.kfx")), b"K").unwrap();
+    }
+    k
+}
+
+/// An old edition archived with a kept KFX, then queued with `morgue send`.
+fn sent_again(home: &Path, date: &str) {
+    build(home, date);
+    std::fs::write(
+        morgue(home).join(&date[..4]).join(format!("{date}.kfx")),
+        b"OLD KFX",
+    )
+    .unwrap();
+    deckle(home)
+        .args(["digest", "morgue", "send", date])
+        .assert()
+        .success();
+}
+
+fn push(home: &Path, to: &Path) {
+    deckle(home)
+        .args(["digest", "push", "--to"])
+        .arg(to)
+        .assert()
+        .success();
+}
+
+#[test]
+fn resent_survives_seven_days() {
+    let home = setup("");
+    sent_again(home.path(), "2026-10-01");
+    let kindle = kindle_with(home.path(), &["2026-10-18", "2026-10-19", "2026-10-20"]);
+    push(home.path(), &kindle);
+    assert!(
+        kindle.join("deckle-daily-2026-10-01.kfx").exists(),
+        "delivered and kept past keep = 3"
+    );
+    assert!(
+        load_state(home.path()).resent[&"2026-10-01".parse().unwrap()]
+            .delivered
+            .is_some()
+    );
+
+    // Eight days after delivery it is just an old edition again.
+    let mut state = load_state(home.path());
+    let long_ago =
+        (deckle_digest::chrono::Utc::now() - deckle_digest::chrono::Duration::days(8)).to_rfc3339();
+    state
+        .resent
+        .get_mut(&"2026-10-01".parse().unwrap())
+        .unwrap()
+        .delivered = Some(long_ago);
+    state.save(&state_file(home.path())).unwrap();
+    let outbox = cache_dir(home.path()).join("outbox");
+    std::fs::create_dir_all(&outbox).unwrap();
+    std::fs::write(outbox.join("deckle-daily-2026-10-21.kfx"), b"NEW").unwrap();
+    push(home.path(), &kindle);
+    assert!(
+        !kindle.join("deckle-daily-2026-10-01.kfx").exists(),
+        "pruned after a week"
+    );
+    assert!(kindle.join("deckle-daily-2026-10-21.kfx").exists());
+}
+
+#[test]
+fn send_without_kindle_waits() {
+    let home = setup("");
+    sent_again(home.path(), "2026-10-01");
+    let key: deckle_digest::chrono::NaiveDate = "2026-10-01".parse().unwrap();
+    // Queued, and no Kindle has taken it: the clock hasn't started. (Never `--to device` in a
+    // test: a real Kindle may be plugged in.)
+    let r: &Resent = &load_state(home.path()).resent[&key];
+    assert!(r.delivered.is_none() && !r.queued.is_empty());
+    assert!(
+        cache_dir(home.path())
+            .join("outbox/deckle-daily-2026-10-01.kfx")
+            .exists()
+    );
+    // It was queued a month ago; the week counts from delivery, not from then.
+    let mut state = load_state(home.path());
+    let month_ago = (deckle_digest::chrono::Utc::now() - deckle_digest::chrono::Duration::days(30))
+        .to_rfc3339();
+    state.resent.get_mut(&key).unwrap().queued = month_ago;
+    state.save(&state_file(home.path())).unwrap();
+    // A Kindle with three newer editions would prune it; it arrives, survives, and starts its week.
+    let kindle = kindle_with(home.path(), &["2026-10-18", "2026-10-19", "2026-10-20"]);
+    push(home.path(), &kindle);
+    assert!(kindle.join("deckle-daily-2026-10-01.kfx").exists());
+    let delivered = load_state(home.path()).resent[&key]
+        .delivered
+        .clone()
+        .expect("stamped on delivery");
+    let at = deckle_digest::chrono::DateTime::parse_from_rfc3339(&delivered).unwrap();
+    assert!(
+        (deckle_digest::chrono::Utc::now() - at.with_timezone(&deckle_digest::chrono::Utc))
+            .num_minutes()
+            < 5
+    );
+}
+
+#[test]
+fn connection_records_highlights_and_presence() {
+    use deckle_readership::layout::{Layout, SectionStart};
+    use deckle_readership::state::{Read, State};
+    let home = setup("[sync]\nclippings = true\nreadership = true\n");
+    let date: deckle_digest::chrono::NaiveDate = "2026-10-21".parse().unwrap();
+    let mut readership = State::default();
+    readership.record_layout(Layout {
+        date,
+        title: "The Deckle Daily".into(),
+        file: "deckle-daily-2026-10-21".into(),
+        end: 10_000,
+        sections: vec![SectionStart {
+            key: "front".into(),
+            name: "Front page".into(),
+            start: 0,
+            items: None,
+        }],
+    });
+    readership.reads.entry(date).or_default().insert(
+        "seed".into(),
+        Read {
+            opened: false,
+            furthest: None,
+            last: None,
+            last_read: None,
+            seen: "x".into(),
+        },
+    );
+    readership
+        .save(&config_dir(home.path()).join("readership.json"))
+        .unwrap();
+
+    let kindle = kindle_with(home.path(), &[]);
+    let title = format!(
+        "The Deckle Daily \u{2014} {} (Deckle)",
+        deckle_digest::long_date(date)
+    );
+    let clippings = format!(
+        "{title}\r\n- Your Highlight on Location 10-11 | Added on Wednesday, October 21, 2026 8:00:00 AM\r\n\r\nOne.\r\n==========\r\n\
+         {title}\r\n- Your Highlight on Location 30-31 | Added on Wednesday, October 21, 2026 8:05:00 AM\r\n\r\nTwo.\r\n==========\r\n"
+    );
+    std::fs::write(kindle.join("My Clippings.txt"), clippings).unwrap();
+    push(home.path(), &kindle);
+    let state = load_state(home.path());
+    assert_eq!(state.highlights[&date], 2);
+    assert_eq!(
+        state.on_kindle.get("deckle-daily-2026-10-21"),
+        Some(&false),
+        "read, and not on the Kindle"
+    );
+}

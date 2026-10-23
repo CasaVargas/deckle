@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 use deckle_core::deliver::{
-    Conn, Target, deliver, detect_in, device_filename, prunable, prune_named_on,
+    Conn, Target, deliver, detect_in, device_filename, prunable, prunable_except, prune_named_on,
+    prune_named_on_except,
 };
 use deckle_core::inspect::{BookInfo, Creator};
 
@@ -270,4 +271,37 @@ fn a_kindle_without_a_readable_version_has_no_firmware() {
     std::fs::write(root.path().join("system/version.txt"), "Kindle (unknown)\n").unwrap();
     let d = detect_in(&[root.path().to_path_buf()]).remove(0);
     assert_eq!(d.firmware, None);
+}
+
+#[test]
+fn prune_keeps_exempt() {
+    let names: Vec<String> = (17..=21)
+        .map(|d| format!("deckle-daily-2026-10-{d}.kfx"))
+        .collect();
+    // keep = 3 would remove 10-17 and 10-18; 10-17 is exempt, and doesn't count toward the 3.
+    let exempt = vec!["deckle-daily-2026-10-17.kfx".to_owned()];
+    assert_eq!(
+        prunable_except(names.clone(), "deckle-daily-", 3, &exempt),
+        ["deckle-daily-2026-10-18.kfx"]
+    );
+    assert_eq!(prunable_except(names, "deckle-daily-", 3, &[]).len(), 2);
+
+    let tmp = tempfile::tempdir().unwrap();
+    for d in 17..=21 {
+        std::fs::write(
+            tmp.path().join(format!("deckle-daily-2026-10-{d}.kfx")),
+            b"K",
+        )
+        .unwrap();
+    }
+    std::fs::create_dir_all(tmp.path().join("deckle-daily-2026-10-17.sdr")).unwrap();
+    let target = Target::Folder(tmp.path().to_path_buf());
+    let removed =
+        prune_named_on_except(&mut Conn::new(&target), "deckle-daily-", 3, &exempt).unwrap();
+    assert_eq!(removed, ["deckle-daily-2026-10-18.kfx"]);
+    assert!(tmp.path().join("deckle-daily-2026-10-17.kfx").exists());
+    assert!(
+        tmp.path().join("deckle-daily-2026-10-17.sdr").exists(),
+        "its position file stays too"
+    );
 }

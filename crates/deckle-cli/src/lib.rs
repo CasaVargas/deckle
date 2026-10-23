@@ -1822,6 +1822,78 @@ fn digest_prune(cfg: &deckle_digest::Config) -> deckle_core::queue::Prune {
     deckle_core::queue::Prune {
         prefix: deckle_digest::EDITION_PREFIX.into(),
         keep: cfg.keep.max(1),
+        exempt: morgue_exempt(),
+    }
+}
+
+/// How long an edition sent again from the Morgue stays on the Kindle past `keep`.
+const RESENT_DAYS: i64 = 7;
+
+/// The editions prune must leave alone: sent again and still waiting, or delivered within the
+/// last week.
+fn morgue_exempt() -> Vec<String> {
+    use deckle_digest::chrono::{DateTime, Utc};
+    let state = deckle_morgue::MorgueState::load(&deckle_morgue::state::state_path());
+    let now = Utc::now();
+    state
+        .resent
+        .iter()
+        .filter(|(_, r)| match &r.delivered {
+            None => true,
+            Some(t) => DateTime::parse_from_rfc3339(t)
+                .is_ok_and(|t| (now - t.with_timezone(&Utc)).num_days() < RESENT_DAYS),
+        })
+        .map(|(date, _)| deckle_digest::edition_filename(*date))
+        .collect()
+}
+
+/// What a connection taught the Morgue: sent-again editions that arrived, passages highlighted
+/// per edition (from `My Clippings.txt`, when it was read) and which editions are on the
+/// Kindle (from the readership read). Problems are logged; they never fail the sync.
+fn record_morgue(flush: &deckle_core::queue::FlushReport) {
+    use deckle_core::yjf::OnDevice;
+    let path = deckle_morgue::state::state_path();
+    let mut state = deckle_morgue::MorgueState::load(&path);
+    let before = state.clone();
+    let now = deckle_digest::chrono::Utc::now().to_rfc3339();
+    for delivered in &flush.delivered {
+        let Some(name) = delivered.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        for (date, resent) in state.resent.iter_mut() {
+            if resent.delivered.is_none() && name == deckle_digest::edition_filename(*date) {
+                resent.delivered = Some(now.clone());
+            }
+        }
+    }
+    if let Some(bytes) = &flush.clippings {
+        let mut counts = std::collections::BTreeMap::new();
+        for book in deckle_highlights::group(deckle_highlights::parse(bytes).entries) {
+            if !book.editions {
+                continue;
+            }
+            for item in &book.items {
+                let deckle_highlights::Item::Highlight { entry, .. } = item else {
+                    continue;
+                };
+                if let Some(date) = deckle_highlights::edition_date(entry).and_then(|d| {
+                    deckle_digest::chrono::NaiveDate::parse_from_str(d, "%A, %B %d, %Y").ok()
+                }) {
+                    *counts.entry(date).or_insert(0usize) += 1;
+                }
+            }
+        }
+        state.highlights = counts;
+    }
+    for (stem, on) in &flush.positions {
+        state
+            .on_kindle
+            .insert(stem.clone(), !matches!(on, OnDevice::Absent));
+    }
+    if state != before
+        && let Err(e) = state.save(&path)
+    {
+        eprintln!("morgue: {}: {e}", path.display());
     }
 }
 
@@ -1994,6 +2066,7 @@ fn sync_to(
         }
         r
     });
+    record_morgue(&flush);
     let shelf = record_shelf(cfg, target, &flush);
     Ok(DigestOutcome {
         flush: Some(flush),
@@ -2265,6 +2338,19 @@ fn morgue_send(
     let name = deckle_digest::edition_filename(date);
     let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
     queue.add(&kfx, &name, None).map_err(|e| e.to_string())?;
+    // Prune leaves it alone from now until a week after a Kindle takes it.
+    let path = deckle_morgue::state::state_path();
+    let mut state = deckle_morgue::MorgueState::load(&path);
+    state.resent.insert(
+        date,
+        deckle_morgue::state::Resent {
+            queued: deckle_digest::chrono::Utc::now().to_rfc3339(),
+            delivered: None,
+        },
+    );
+    state
+        .save(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(name)
 }
 
