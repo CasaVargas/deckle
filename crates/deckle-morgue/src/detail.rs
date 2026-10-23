@@ -13,6 +13,7 @@ use crate::sidecar::Lead;
 use crate::state::MorgueState;
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Detail {
     /// "Wednesday, October 21 · No. 294".
     pub heading: String,

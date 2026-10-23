@@ -1032,6 +1032,7 @@ dependencies = [
  "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
+ "deckle-morgue",
  "deckle-readership",
  "deckle-shelf",
  "deckle-transport",

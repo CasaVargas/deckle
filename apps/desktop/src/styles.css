@@ -349,3 +349,33 @@ input[type=checkbox] { padding: 0; }
 
 /* From Your Shelf (shelf design §7) */
 .shelf button.link { margin-top: 4px; }
+
+/* Every edition (Morgue design §6) */
+.morgue-nav { display: flex; align-items: center; gap: 8px; }
+.morgue-month { min-width: 120px; text-align: center; font-weight: 600; }
+.morgue-search { width: 100%; margin: 4px 0 10px; box-sizing: border-box; }
+.morgue-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.morgue-wd { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); text-align: center; }
+.morgue-cell { min-height: 84px; border: 1px solid var(--line); border-radius: 8px; padding: 5px 6px; display: flex; flex-direction: column; gap: 2px; text-align: left; background: transparent; color: inherit; font: inherit; overflow: hidden; }
+.morgue-cell.blank { border-color: transparent; }
+.morgue-cell.empty { opacity: 0.55; }
+.morgue-cell.has { cursor: pointer; background: var(--panel); }
+.morgue-cell.has.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.morgue-cell.has.hit { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.morgue-cell.has.dim { opacity: 0.35; }
+.morgue-day { font-size: 11px; color: var(--muted); }
+.morgue-paper { font-family: ui-serif, Georgia, serif; font-size: 11px; font-weight: 600; }
+.morgue-lead { font-size: 11px; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.morgue-next { font-size: 11px; font-style: italic; }
+.morgue-hits { margin-top: 10px; display: grid; gap: 8px; }
+.morgue-hit ul { margin: 2px 0 0; padding-left: 18px; }
+.morgue-detail { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.morgue-detail h4 { font-family: ui-serif, Georgia, serif; margin: 0 0 4px; font-size: 16px; }
+.morgue-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.morgue-foot { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.morgue-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+@media (max-width: 640px) {
+  .morgue-grid { display: block; }
+  .morgue-wd, .morgue-cell.blank, .morgue-cell.empty { display: none; }
+  .morgue-cell.has { width: 100%; min-height: 0; margin-bottom: 6px; flex-direction: row; gap: 8px; align-items: baseline; }
+}
