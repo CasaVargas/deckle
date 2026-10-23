@@ -2,8 +2,10 @@
 //! The Morgue (docs/superpowers/specs/2026-10-22-morgue-design.md): every Deckle Daily edition
 //! kept in a plain folder, with a small JSON sidecar to search.
 
+pub mod detail;
 pub mod folder;
 pub mod import;
+pub mod search;
 pub mod sidecar;
 pub mod state;
 
