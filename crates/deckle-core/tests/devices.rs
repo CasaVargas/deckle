@@ -165,3 +165,36 @@ fn a_target_finds_the_profile_the_app_recorded() {
     };
     assert!(profile_for(&Target::Mtp(unknown), &reg).is_none());
 }
+
+#[test]
+fn two_kindles_of_one_model_keep_their_own_profiles() {
+    use deckle_core::devices::{legacy_key, same_device};
+    let mut reg = DeviceRegistry::default();
+    let old = reg.remember(&seen_mass("/Volumes/Kindle", "Paperwhite", true));
+    reg.set_override(&old.key, Some("pdoc"));
+    reg.set_verified_real_asin(&old.key, true);
+    let serial = |s: &str| Seen {
+        key: format!("ms:Paperwhite#{s}"),
+        serial: Some(s.into()),
+        ..seen_mass("/Volumes/Kindle", "Paperwhite", true)
+    };
+    // Before it is seen again, the serial key reads the model-only profile.
+    assert_eq!(
+        reg.get("ms:Paperwhite#A").unwrap().cde_override.as_deref(),
+        Some("pdoc")
+    );
+    let a = reg.remember(&serial("A"));
+    let b = reg.remember(&serial("B"));
+    assert_eq!(a.cde_override.as_deref(), Some("pdoc"));
+    assert!(b.verified_real_asin);
+    reg.set_override("ms:Paperwhite#A", Some("ebok"));
+    assert_eq!(
+        reg.get("ms:Paperwhite#B").unwrap().cde_override.as_deref(),
+        Some("pdoc")
+    );
+    assert_eq!(legacy_key("ms:Paperwhite#A"), Some("ms:Paperwhite"));
+    assert_eq!(legacy_key("ms:Paperwhite"), None);
+    assert_eq!(legacy_key("mtp:abc#d"), None);
+    assert!(same_device("ms:Paperwhite", "ms:Paperwhite#A"));
+    assert!(!same_device("ms:Paperwhite#B", "ms:Paperwhite#A"));
+}

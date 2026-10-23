@@ -18,7 +18,7 @@ pub mod sidecar;
 use std::path::{Path, PathBuf};
 
 use deckle_core::deliver::{Target, author_sort, sanitize};
-use deckle_core::devices::{now_iso, seen_mass_storage, seen_mtp};
+use deckle_core::devices::{now_iso, same_device, seen_mass_storage, seen_mtp};
 use deckle_core::inspect::BookInfo;
 use deckle_core::pipeline::{RunReport, asin_seed};
 use sha2::{Digest, Sha256};
@@ -254,7 +254,7 @@ impl Library {
             b.sidecar
                 .sends
                 .iter()
-                .any(|s| s.device == device && s.file == file)
+                .any(|s| same_device(&s.device, device) && s.file == file)
         })
     }
 
