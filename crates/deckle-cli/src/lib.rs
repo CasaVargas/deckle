@@ -942,6 +942,79 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
             })?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::KindleCommand::Backup { into } => {
+            let root = into.unwrap_or_else(|| {
+                deckle_library::care::backups_root(&deckle_library::config::default_path())
+            });
+            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+            // Every book's details: an AZW whose record 0 says DRM is left out over MTP too.
+            let (inv, _) = deckle_core::inventory::list_detailed(
+                &mut conn,
+                Some(&cache),
+                deckle_digest::EDITION_PREFIX,
+            )
+            .map_err(|e| e.to_string())?;
+            let current = deckle_library::freshness::Current::now(&Default::default());
+            let shelf =
+                deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key, &current);
+            let at = deckle_digest::chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string();
+            let done = deckle_library::care::backup_on(
+                &mut conn,
+                &shelf,
+                &root,
+                &deckle_shelf::friendly_name(&device.name),
+                deckle_digest::EDITION_PREFIX,
+                &at,
+            )?;
+            emit(json, &done, || {
+                let mut lines: Vec<String> =
+                    done.copied.iter().map(|f| format!("copied {f}")).collect();
+                lines.extend(done.failed.iter().map(|(f, e)| format!("failed {f}: {e}")));
+                lines.push(format!(
+                    "{} backed up to {}; {} left out (Amazon's own, the paper)",
+                    done.copied.len(),
+                    done.dir.display(),
+                    done.skipped.len()
+                ));
+                lines.join("\n")
+            })?;
+            Ok(if done.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        cli::KindleCommand::Restore { dir } => {
+            let present: Vec<String> = list_on(&mut conn, None)
+                .map_err(|e| e.to_string())?
+                .books
+                .into_iter()
+                .map(|b| b.file)
+                .collect();
+            let done = deckle_library::care::restore_on(&mut conn, &dir, &present)?;
+            emit(json, &done, || {
+                let mut lines: Vec<String> = done
+                    .restored
+                    .iter()
+                    .map(|f| format!("restored {f}"))
+                    .collect();
+                lines.extend(done.already.iter().map(|f| format!("already there: {f}")));
+                lines.extend(done.failed.iter().map(|(f, e)| format!("failed {f}: {e}")));
+                lines.push(format!(
+                    "{} restored to {}",
+                    done.restored.len(),
+                    device.name
+                ));
+                lines.join("\n")
+            })?;
+            Ok(if done.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
     }
 }
 

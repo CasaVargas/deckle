@@ -9,6 +9,7 @@
 //! No database, index or lock file: folders can be moved, synced or deleted with anything.
 //! A book's identity is in its sidecar (the generated ASIN's seed), not its path.
 
+pub mod care;
 pub mod config;
 pub mod freshness;
 pub mod series;

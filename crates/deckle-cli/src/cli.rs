@@ -311,6 +311,15 @@ pub enum KindleCommand {
     },
     /// Undo an upgrade: the old copy goes back, Deckle's copy goes.
     PutBack { file: String },
+    /// Copy every DRM-free book and its .sdr (reading position, highlights) into a new folder.
+    /// Amazon's own books are left out: Amazon downloads them again. So is the paper.
+    Backup {
+        /// Where the backup's folder goes (default: kindle-backups/ beside library.json).
+        #[arg(long)]
+        into: Option<PathBuf>,
+    },
+    /// Put a backup's books on this Kindle. Books already there are left as they are.
+    Restore { dir: PathBuf },
 }
 
 #[derive(Subcommand, Debug)]

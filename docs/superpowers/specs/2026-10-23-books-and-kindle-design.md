@@ -433,3 +433,45 @@ The owner accepted each recommendation below (2026-10-23).
 - **Rebuilt EPUBs** live in `kindle-rebuilt/<device>/` beside `library.json` and are what the
   upgrade sends, with `origin: "kindle-copy"`. The app rebuilds when you press Upgrade, not when
   it lists the books.
+
+## 17. Build notes, phase 4
+
+- **Progress for every book.** The Kindle tab's listing now always reads each book's position
+  file. It reads AZW3's `.azw3f` as well as KFX's `.yjf`: it's the same KRDS container, and the
+  Kindle's own fraction (`book.info.store`) is in it. A KFX with a known end uses its last
+  position over its end instead. From Your Shelf still takes KFX only (its design §2), since an
+  AZW3's positions aren't KFX ids. Under 2% counts as not started, and 97% or more as finished:
+  the same lines as "partway" in §12.
+- **Class badges over MTP** come from the details cache. A plain listing now takes what an
+  earlier detailed one cached, but reads no book whole. So the Shelf shows "Can be upgraded" once
+  the Upgrades room has looked. The Upgrades room loads only when it's opened.
+- **Kinds** for the space and the filters:
+  - DRM means Amazon's own, from the Store or Send to Kindle;
+  - then the paper (a Deckle file named like an edition);
+  - then Deckle's books (from Deckle or in the library);
+  - everything else is sideloaded.
+
+  "System and other" is the used space that isn't a book `documents/` lists.
+- **Make room** offers:
+  - finished books over 10 MB, not ticked at first;
+  - second copies of a book (same ASIN, or same title and first author). It keeps Deckle's or
+    Amazon's copy, then a KFX, then the one being read, then the largest;
+  - papers past the Daily's `keep`, using the same rule as the paper's own prune.
+
+  A row says when a reading position goes with the book. Removing goes through the existing
+  remove, so library send records are forgotten too.
+- **Back up** goes to `kindle-backups/<Kindle> <time>/` beside `library.json`, or a folder you
+  pick:
+  - it keeps the Kindle's folder layout, with a `deckle-backup.json` manifest;
+  - Amazon's own and the paper are left out;
+  - a book that won't copy costs that book, not the backup;
+  - it lists with a detailed read, so an AZW whose record 0 says DRM is left out over MTP too.
+    The first backup of a big MTP Kindle reads each book twice: once for its details, which are
+    cached, and once to copy it.
+- **Restore** reads the manifest and puts each book and its `.sdr` back through the same
+  `copy_in` Put back uses. A file already on the Kindle is never overwritten.
+- **Not checked on hardware yet:**
+  - `.azw3f` fractions against what a Paperwhite shows;
+  - a backup and restore over MTP;
+  - whether a restored `.sdr` brings the reading position back on a different Kindle.
+

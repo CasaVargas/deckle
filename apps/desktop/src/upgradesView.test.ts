@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { defaultTicked, leftAsIs, partwayLine, sourceLine, sourcesLine, upgradeLabel } from "./upgradesView";
+import { byOrigin, defaultTicked, leftAsIs, partwayLine, sourceLine, sourcesLine, upgradeLabel } from "./upgradesView";
 import type { UpgradeRow } from "./types";
 
 const row = (p: Partial<UpgradeRow>): UpgradeRow => ({
@@ -52,4 +52,13 @@ test("where Deckle looks", () => {
   expect(upgradeLabel(0)).toBe("Upgrade");
   expect(upgradeLabel(1)).toBe("Upgrade 1 book");
   expect(upgradeLabel(28)).toBe("Upgrade 28 books");
+});
+
+test("rows are grouped by where the new copy comes from, calibre first", () => {
+  const groups = byOrigin([row({ file: "k", origin: "kindle-copy" }), row({ file: "c", origin: "calibre" }), row({ file: "c2", origin: "calibre" })]);
+  expect(groups.map((g) => [g.origin, g.rows.length])).toEqual([
+    ["calibre", 2],
+    ["kindle-copy", 1],
+  ]);
+  expect(groups[1].title).toBe("Rebuilt from the Kindle's own copy");
 });

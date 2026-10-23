@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { SourcesStatus, UpgradeClass, UpgradeRow } from "./types";
+import type { Origin, SourcesStatus, UpgradeClass, UpgradeRow } from "./types";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -46,4 +46,17 @@ export function sourcesLine(s: SourcesStatus): string {
 /** "Upgrade 3 books". */
 export function upgradeLabel(n: number): string {
   return n === 0 ? "Upgrade" : `Upgrade ${plural(n, "book")}`;
+}
+
+const ORIGIN_TITLE: Record<Origin, string> = {
+  calibre: "From your calibre library",
+  folder: "From your folders",
+  "kindle-copy": "Rebuilt from the Kindle's own copy",
+};
+
+/** The rows grouped by where the new copy comes from (Books and Kindle design §7), in that order; empty groups left out. */
+export function byOrigin(rows: UpgradeRow[]): { origin: Origin; title: string; rows: UpgradeRow[] }[] {
+  return (["calibre", "folder", "kindle-copy"] as Origin[])
+    .map((origin) => ({ origin, title: ORIGIN_TITLE[origin], rows: rows.filter((r) => r.origin === origin) }))
+    .filter((g) => g.rows.length > 0);
 }

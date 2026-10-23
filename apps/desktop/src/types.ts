@@ -371,6 +371,52 @@ export interface DeviceBookRow {
   /** Why Deckle could build it better now (Kindle-updates design §5). */
   updates: { older: boolean; feature: "X-Ray" | "Word Wise" | null; text: string }[];
   duplicate: boolean;
+  /** Its upgrade class (Books and Kindle design §3). */
+  class: UpgradeClass;
+  kind: BookKind;
+  /** How far in, 0–1. */
+  fraction: number | null;
+  reading: ReadingState;
+  /** When it was last read, UTC. */
+  last_read: string | null;
+}
+
+/** What a book on a Kindle is, for the space it takes and the Shelf's filters. */
+export type BookKind = "amazon-own" | "deckle" | "paper" | "sideloaded";
+export type ReadingState = "not-started" | "reading" | "finished";
+
+/** The space on a Kindle by kind; `other` is the system, dictionaries and fonts. */
+export interface SpaceSplit {
+  total: number;
+  free: number;
+  /** `[kind, bytes, books]`, largest first. */
+  kinds: [BookKind, number, number][];
+  other: number;
+}
+
+/** A book that could go to make room. */
+export type Spare = { file: string; title: string; size: number; has_sdr: boolean } & ({ why: "finished" } | { why: "duplicate"; keeping: string } | { why: "old-paper" });
+
+export interface Backup {
+  dir: string;
+  device: string;
+  at: string;
+  books: number;
+  size: number;
+}
+
+export interface BackupReport {
+  dir: string;
+  copied: string[];
+  /** `[file, why]` */
+  skipped: [string, string][];
+  failed: [string, string][];
+}
+
+export interface RestoreReport {
+  restored: string[];
+  already: string[];
+  failed: [string, string][];
 }
 
 export interface DeviceShelf {
@@ -380,6 +426,12 @@ export interface DeviceShelf {
   /** The Kindle's highlights by book, as the next export would write them. */
   highlights: HighlightRow[];
   highlights_error: string | null;
+  /** This Kindle's room (design §7). */
+  split: SpaceSplit | null;
+  spare: Spare[];
+  backups: Backup[];
+  /** Reading positions left unread past the per-connection cap. */
+  unread_positions: number;
 }
 
 /** One book's highlights (highlights export design §6). */
