@@ -75,7 +75,10 @@ runs once per plug-in, in the same connection as a push or a prune when there is
 
 ### Tomorrow's paper, so far
 
-The Daily tab opens on the **next** edition, not the last one:
+The Daily tab is in rooms, listed down its left side, each with a line on what's in it: **Today**
+(tonight's paper), **Editions** (every edition and how far you read), **Reading** (Your Reading and
+From Your Shelf), **Delivery** (where the paper goes) and **The paper** (its settings and Your
+Day). It opens on Today, the **next** edition, not the last one:
 
 - **The press bar** says when the paper goes to press ("Goes to press at 05:30 · in 14 h 22 m"),
   with the time and the switch for the morning schedule.
@@ -104,7 +107,7 @@ checks the feeds first, under the same twice-an-hour limit.
 Each `[[feeds]]` entry is its own section, in order. Besides a plain RSS/Atom `url`, an entry
 can take a Google News **topic** (`WORLD`, `NATION`, `BUSINESS`, `TECHNOLOGY`, `ENTERTAINMENT`,
 `SPORTS`, `SCIENCE`, `HEALTH`), more feeds in `urls`, and a `full_text` setting. Tick topics in
-the Daily tab (**Topics**) or write them in `digest.toml`:
+the Daily tab (**The paper → Topics**) or write them in `digest.toml`:
 
 ```toml
 [[feeds]]
@@ -160,11 +163,11 @@ with it.
 Each time a Kindle connects (`watch`, `push`, or the Kindle tab), Deckle reads the reading
 position the Kindle keeps for every edition still on it: the `.yjf` file in the edition's `.sdr`
 folder. It does this first in the connection, before prune removes old editions. When an edition
-is built, Deckle notes where each of its sections starts. Put together, the Daily tab's **How
-far you read** panel and `deckle digest readership` show, over the last 14 editions, how many
-you opened, how far in you usually get, and per section how often you got to it. With 7 opened
-editions it suggests up to three edits: **Drop it** for a section near the end you rarely
-reach, **Move up** for a feed you rarely reach. One click (or `deckle digest readership apply
+is built, Deckle notes where each of its sections starts. Put together, the Daily tab's
+**Editions → How far you read** panel and `deckle digest readership` show, over the last 14
+editions, how many you opened, how far in you usually get, and per section how often you got to
+it. With 7 opened editions it suggests up to three edits: **Drop it** for a section near the end
+you rarely reach, **Move up** for a feed you rarely reach. One click (or `deckle digest readership apply
 <n>`) changes `digest.toml`, keeping its comments; **Dismiss** (`… dismiss <n>`) hides one for
 14 editions.
 
@@ -198,7 +201,7 @@ where frost is rare (under 15 years in 30) gets no frost line.
 
 **Your Day** adds today's events from your calendars, plus one line when rain or snow is likely
 during one of them ("Rain likely around 4 PM, during School pickup."). Private and confidential
-events print as "Busy". Add calendars in the Daily tab's **Your Day** card, or in `digest.toml`:
+events print as "Busy". Add calendars in the Daily tab's **The paper → Your Day**, or in `digest.toml`:
 
 ```toml
 [day]
@@ -271,7 +274,7 @@ of place a cleaner empties.
 - **What's in the files.** The sidecars and EPUBs hold the full text of the "Your Reading"
   articles you saved, not just headlines. If you point the folder at iCloud Drive or another
   synced folder, that text syncs with it.
-- **Every edition, on the Daily tab.** A month of front pages, each with the paper's name and its
+- **Every edition, in the Daily tab's Editions room.** A month of front pages, each with the paper's name and its
   lead headline; days with no paper are blank, and the next one says "Tomorrow, 05:30". Type a
   word and the days with a match light up, with the matching stories listed. Click a day for its
   weather and lead, how far you read ("You read about 91%, to Local"), how many passages you
@@ -357,7 +360,7 @@ because the paper then goes through Amazon, which converts it with its own types
 and Inbox books stay on USB, where they get X-Ray and Word Wise.
 (`docs/superpowers/specs/2026-10-21-send-to-kindle-email-design.md`)
 
-1. Uncomment `[email]` in `digest.toml` (or fill in the **Email to Kindle** card on the Daily tab):
+1. Uncomment `[email]` in `digest.toml` (or fill in the **Delivery → Email to Kindle** on the Daily tab):
    `to`, `from`, `smtp_host`, `smtp_port` (587 STARTTLS or 465 TLS; plain-text SMTP is refused),
    `username`. `to` must end in `@kindle.com` or `@free.kindle.com`.
 2. Save the password in the system keychain: `deckle digest email password` (asks without echo;
@@ -408,7 +411,7 @@ keep = 7                         # editions kept in the folder; 0 keeps all
 books = false                    # also the long reads, not only the paper
 ```
 
-Or use the **Export folders** card on the Daily tab: **Add folder…** opens on iCloud Drive on a
+Or use **Delivery → Export folders** on the Daily tab: **Add folder…** opens on iCloud Drive on a
 Mac.
 
 - **Color.** With any `photos = "color"` export, the stories' photos are kept in color and the
@@ -481,7 +484,7 @@ Screens: `remarkable-2` (the default), `remarkable-paper-pro`, `remarkable-paper
 `ipad`, `a5`.
 
 - **In an export folder:** `format = "pdf"` and `screen = "…"` in an `[[export]]` block, or **As:
-  PDF** on the Daily tab's Export folders card. Pruning counts `deckle-daily-*.pdf` there.
+  PDF** on the Daily tab's Delivery → Export folders. Pruning counts `deckle-daily-*.pdf` there.
 - **To a reMarkable**, over its USB web interface (no account, no cloud): turn on *Settings →
   Storage → USB web interface* on the tablet, then
 
@@ -492,7 +495,7 @@ Screens: `remarkable-2` (the default), `remarkable-paper-pro`, `remarkable-paper
   books = false                    # also the long reads, as EPUBs
   ```
 
-  or the **reMarkable** card on the Daily tab. Each morning's PDF waits in its own outbox and is
+  or **Delivery → reMarkable** on the Daily tab. Each morning's PDF waits in its own outbox and is
   uploaded the next time the tablet is plugged in and answers (`digest run`, `push` or `watch`).
   The photos are gray on a reMarkable 2 and in color on a Paper Pro (`photos = "gray"` or
   `"color"` overrides it). A file the tablet already shows is not sent twice.

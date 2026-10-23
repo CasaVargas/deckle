@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useState } from "react";
 import { weekLabel } from "./pagePlan";
 import type { WeekDay } from "./types";
 
@@ -8,20 +7,15 @@ function day(date: string): string {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
 }
 
-/** The last six papers, read or not (tomorrow's paper design §7). */
-export default function ThisWeek({ week }: { week: WeekDay[] }) {
-  // "All editions" links to the Morgue's card once it exists (#109), never to nothing
-  const [morgue, setMorgue] = useState(false);
-  useEffect(() => setMorgue(!!document.getElementById("every-edition")), [week]);
+/** The last six papers, read or not (tomorrow's paper design §7). "All editions" opens the Editions room. */
+export default function ThisWeek({ week, onAllEditions }: { week: WeekDay[]; onAllEditions: () => void }) {
   return (
     <section className="card this-week">
       <div className="card-head">
         <h3>This week</h3>
-        {morgue && (
-          <button className="link" onClick={() => document.getElementById("every-edition")?.scrollIntoView({ behavior: "smooth" })}>
-            All editions
-          </button>
-        )}
+        <button className="link" onClick={onAllEditions}>
+          All editions
+        </button>
       </div>
       <ol className="week">
         {week.map((d) => (
