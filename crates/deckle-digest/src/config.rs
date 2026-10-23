@@ -192,17 +192,182 @@ impl Default for LocalConfig {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A Google News topic, the source of a newspaper topic section.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum Topic {
+    World,
+    Nation,
+    Business,
+    Technology,
+    Entertainment,
+    Sports,
+    Science,
+    Health,
+}
+
+impl Topic {
+    pub const ALL: [Topic; 8] = [
+        Topic::World,
+        Topic::Nation,
+        Topic::Business,
+        Topic::Technology,
+        Topic::Entertainment,
+        Topic::Sports,
+        Topic::Science,
+        Topic::Health,
+    ];
+
+    /// Case-insensitive, whitespace-trimmed lookup by slug.
+    pub fn parse(s: &str) -> Option<Topic> {
+        let s = s.trim();
+        Topic::ALL
+            .into_iter()
+            .find(|t| t.slug().eq_ignore_ascii_case(s))
+    }
+
+    pub fn slug(self) -> &'static str {
+        match self {
+            Topic::World => "WORLD",
+            Topic::Nation => "NATION",
+            Topic::Business => "BUSINESS",
+            Topic::Technology => "TECHNOLOGY",
+            Topic::Entertainment => "ENTERTAINMENT",
+            Topic::Sports => "SPORTS",
+            Topic::Science => "SCIENCE",
+            Topic::Health => "HEALTH",
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Topic::World => "World",
+            Topic::Nation => "Nation",
+            Topic::Business => "Business",
+            Topic::Technology => "Technology",
+            Topic::Entertainment => "Entertainment",
+            Topic::Sports => "Sports",
+            Topic::Science => "Science",
+            Topic::Health => "Health",
+        }
+    }
+
+    /// The Google News topic feed. Google answers this with a 302 to a `/rss/topics/<id>`
+    /// feed; the fetcher (ureq) follows redirects.
+    pub fn url(self) -> String {
+        format!(
+            "https://news.google.com/rss/headlines/section/topic/{}?hl=en-US&gl=US&ceid=US:en",
+            self.slug()
+        )
+    }
+}
+
+impl TryFrom<String> for Topic {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, String> {
+        Topic::parse(&s).ok_or_else(|| {
+            let all: Vec<&str> = Topic::ALL.iter().map(|t| t.slug()).collect();
+            format!("unknown topic \"{s}\"; use one of {}", all.join(", "))
+        })
+    }
+}
+
+impl From<Topic> for String {
+    fn from(t: Topic) -> String {
+        t.slug().to_string()
+    }
+}
+
+/// Whether a feed's stories are fetched whole: `true`, `false`, or `"lead"` (only the top story).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "FullTextRepr", into = "FullTextRepr")]
+pub enum FullText {
+    Yes,
+    No,
+    Lead,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum FullTextRepr {
+    Bool(bool),
+    Word(String),
+}
+
+impl TryFrom<FullTextRepr> for FullText {
+    type Error = String;
+    fn try_from(r: FullTextRepr) -> Result<Self, String> {
+        match r {
+            FullTextRepr::Bool(true) => Ok(FullText::Yes),
+            FullTextRepr::Bool(false) => Ok(FullText::No),
+            FullTextRepr::Word(w) if w.trim().eq_ignore_ascii_case("lead") => Ok(FullText::Lead),
+            FullTextRepr::Word(w) => Err(format!(
+                "unknown full_text \"{w}\"; use true, false or \"lead\""
+            )),
+        }
+    }
+}
+
+impl From<FullText> for FullTextRepr {
+    fn from(f: FullText) -> Self {
+        match f {
+            FullText::Yes => FullTextRepr::Bool(true),
+            FullText::No => FullTextRepr::Bool(false),
+            FullText::Lead => FullTextRepr::Word("lead".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FeedConfig {
     pub name: String,
+    #[serde(default)]
     pub url: String,
+    /// More feeds merged into the same section.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub urls: Vec<String>,
+    /// A Google News topic, merged in ahead of `url` and `urls`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub topic: Option<Topic>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_text: Option<FullText>,
+    /// 0 means unset: [`Config::parse`] makes it 5 for a topic entry, else 10.
     #[serde(default = "default_feed_items")]
     pub max_items: usize,
 }
 
+impl FeedConfig {
+    /// Every feed URL for this section: the topic's, then `url`, then `urls`, without repeats.
+    pub fn sources(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let first = self.topic.map(Topic::url);
+        let one = Some(self.url.trim().to_owned()).filter(|u| !u.is_empty());
+        for u in first
+            .into_iter()
+            .chain(one)
+            .chain(self.urls.iter().map(|u| u.trim().to_owned()))
+        {
+            if !u.is_empty() && !out.contains(&u) {
+                out.push(u);
+            }
+        }
+        out
+    }
+
+    /// How this entry fetches whole stories: its own setting, else `Lead` for a topic entry,
+    /// else the global `full_text`.
+    pub fn full(&self, global: bool) -> FullText {
+        self.full_text.unwrap_or(match (self.topic, global) {
+            (Some(_), _) => FullText::Lead,
+            (None, true) => FullText::Yes,
+            (None, false) => FullText::No,
+        })
+    }
+}
+
 fn default_feed_items() -> usize {
-    10
+    0
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -549,6 +714,13 @@ max_age_hours = 72                # local news moves slower
 # feeds = []
 
 # Each [[feeds]] entry becomes its own section, in this order.
+# A Google News topic (WORLD NATION BUSINESS TECHNOLOGY ENTERTAINMENT SPORTS SCIENCE HEALTH)
+# prints its top story whole and the rest as briefs:
+# [[feeds]]
+# name = "Sports"
+# topic = "SPORTS"
+# urls = ["https://example.com/more.rss"]   # optional extra feeds, merged in
+# full_text = "lead"              # true, false or "lead" (top story only)
 [[feeds]]
 name = "Hacker News"
 url = "https://hnrss.org/frontpage"
@@ -607,9 +779,20 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+        let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+        cfg.normalize();
         cfg.email.validate()?;
         Ok(cfg)
+    }
+
+    /// Fills in what a person (or the app's "Add feed") left unset: a feed's `max_items` of 0
+    /// becomes 5 for a topic entry, else 10. A feed with no source is kept; its section says so.
+    pub fn normalize(&mut self) {
+        for f in &mut self.feeds {
+            if f.max_items == 0 {
+                f.max_items = if f.topic.is_some() { 5 } else { 10 };
+            }
+        }
     }
 
     pub fn load(path: &Path) -> Result<Self, String> {
@@ -623,6 +806,9 @@ impl Config {
 /// [`STARTER`] (Daily design §5c).
 pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     cfg.email.validate()?;
+    let mut cfg = cfg.clone();
+    cfg.normalize();
+    let cfg = &cfg;
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => STARTER.to_owned(),
@@ -814,6 +1000,137 @@ mod tests {
         );
     }
 
+    fn feed(toml: &str) -> Result<FeedConfig, String> {
+        Config::parse(toml).map(|c| c.feeds[0].clone())
+    }
+
+    #[test]
+    fn old_feed_parses_unchanged() {
+        let f = feed("[[feeds]]\nname = \"A\"\nurl = \"https://a.example/f\"\n").unwrap();
+        assert_eq!(f.sources(), ["https://a.example/f"]);
+        assert_eq!(f.max_items, 10);
+        assert_eq!(f.full(true), FullText::Yes);
+        assert_eq!(f.full(false), FullText::No);
+    }
+
+    #[test]
+    fn topic_only_feed() {
+        let f = feed("[[feeds]]\nname = \"Sports\"\ntopic = \"SPORTS\"\n").unwrap();
+        assert_eq!(f.max_items, 5);
+        assert_eq!(f.full(false), FullText::Lead);
+        assert_eq!(f.sources(), [Topic::Sports.url()]);
+    }
+
+    #[test]
+    fn all_three_sources_in_order() {
+        let f = feed(
+            "[[feeds]]\nname = \"S\"\ntopic = \"world\"\nurl = \"https://a.example/f\"\n\
+             urls = [\"https://b.example/f\", \"https://a.example/f\"]\nmax_items = 7\n",
+        )
+        .unwrap();
+        assert_eq!(
+            f.sources(),
+            [
+                Topic::World.url(),
+                "https://a.example/f".into(),
+                "https://b.example/f".into()
+            ]
+        );
+        assert_eq!(f.max_items, 7);
+    }
+
+    #[test]
+    fn a_feed_with_no_source_still_loads() {
+        let f = feed("[[feeds]]\nname = \"Empty\"\nurl = \" \"\nmax_items = 0\n").unwrap();
+        assert!(f.sources().is_empty());
+        assert_eq!(f.max_items, 10);
+    }
+
+    #[test]
+    fn save_normalizes_a_zero_max_items() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("digest.toml");
+        let mut cfg = Config::parse("").unwrap();
+        cfg.feeds.push(FeedConfig {
+            name: "New".into(),
+            max_items: 0,
+            ..Default::default()
+        });
+        save(&path, &cfg).unwrap();
+        let back = Config::load(&path).unwrap();
+        assert_eq!(back.feeds[0].max_items, 10);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("max_items = 10")
+        );
+    }
+
+    #[test]
+    fn full_text_values() {
+        let f = |v: &str| {
+            feed(&format!(
+                "[[feeds]]\nname = \"A\"\nurl = \"u\"\nfull_text = {v}\n"
+            ))
+        };
+        assert_eq!(f("true").unwrap().full_text, Some(FullText::Yes));
+        assert_eq!(f("false").unwrap().full_text, Some(FullText::No));
+        assert_eq!(f("\"lead\"").unwrap().full_text, Some(FullText::Lead));
+        assert!(f("\"sometimes\"").is_err());
+    }
+
+    #[test]
+    fn save_round_trip_keeps_comments_and_new_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("digest.toml");
+        std::fs::write(
+            &path,
+            "sections = [\"feeds\"]\n\n[[feeds]]\n# my sports\nname = \"Sports\" # desk\ntopic = \"SPORTS\"\n\
+             urls = [\"https://b.example/f\"]\nfull_text = \"lead\"\n",
+        )
+        .unwrap();
+        let mut cfg = Config::load(&path).unwrap();
+        cfg.title = "Edited".into();
+        save(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("# my sports") && text.contains("# desk"),
+            "{text}"
+        );
+        assert!(text.contains("topic = \"SPORTS\""), "{text}");
+        assert!(text.contains("https://b.example/f"), "{text}");
+        assert!(text.contains("full_text = \"lead\""), "{text}");
+        let back = Config::load(&path).unwrap();
+        assert_eq!(back.feeds, cfg.feeds);
+        assert_eq!(back.title, "Edited");
+    }
+
+    #[test]
+    fn desktop_topic_save_round_trip() {
+        // What the desktop app sends for a ticked topic (daily_save): a whole Config as JSON.
+        let mut json = serde_json::to_value(Config::parse(STARTER).unwrap()).unwrap();
+        json["feeds"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!(
+                {"name": "Sports", "url": "", "topic": "SPORTS", "max_items": 5}
+            ));
+        let cfg: Config = serde_json::from_value(json).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, STARTER).unwrap();
+        save(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("# Deckle Daily"), "comments kept:\n{text}");
+        assert!(text.contains("topic = \"SPORTS\""), "{text}");
+        let back = Config::load(&path).unwrap();
+        let f = back.feeds.iter().find(|f| f.name == "Sports").unwrap();
+        assert_eq!(f.sources(), vec![Topic::Sports.url()]);
+        assert_eq!(f.max_items, 5);
+        assert_eq!(f.full(true), FullText::Lead);
+        assert_eq!(back, cfg);
+    }
+
     #[test]
     fn starter_parses() {
         let c = Config::parse(STARTER).unwrap();
@@ -840,6 +1157,7 @@ mod tests {
             name: "NPR".into(),
             url: "https://feeds.npr.org/1001/rss.xml".into(),
             max_items: 8,
+            ..Default::default()
         });
         c.latitude = None;
         save(&path, &c).unwrap();
@@ -1037,5 +1355,39 @@ mod tests {
     fn typo_is_an_error() {
         assert!(Config::parse("titel = \"x\"").is_err());
         assert!(Config::parse("sections = [\"wether\"]").is_err());
+    }
+
+    #[test]
+    fn topic_parse_is_case_insensitive() {
+        assert_eq!(Topic::parse(" sports "), Some(Topic::Sports));
+        assert_eq!(Topic::parse("golf"), None);
+    }
+
+    #[test]
+    fn topic_urls() {
+        assert_eq!(
+            Topic::Technology.url(),
+            "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
+        );
+        let urls: std::collections::BTreeSet<String> = Topic::ALL.iter().map(|t| t.url()).collect();
+        assert_eq!(urls.len(), 8);
+    }
+
+    #[test]
+    fn topic_serde_round_trip() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Holder {
+            topic: Topic,
+        }
+        let h: Holder = toml::from_str("topic = \"sports\"").unwrap();
+        assert_eq!(h.topic, Topic::Sports);
+        assert_eq!(toml::to_string(&h).unwrap().trim(), "topic = \"SPORTS\"");
+        let err = toml::from_str::<Holder>("topic = \"nonsense\"")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("unknown topic \"nonsense\""), "{err}");
+        for t in Topic::ALL {
+            assert!(err.contains(t.slug()), "{err}");
+        }
     }
 }

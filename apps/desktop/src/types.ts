@@ -143,6 +143,9 @@ export type SectionKind = "reading" | "weather" | "local" | "feeds" | "shelf" | 
 export interface FeedConfig {
   name: string;
   url: string;
+  urls?: string[];
+  topic?: string;
+  full_text?: boolean | "lead";
   max_items: number;
 }
 

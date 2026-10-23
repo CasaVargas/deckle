@@ -192,6 +192,8 @@ pub fn gather_with(
         assets: Vec::new(),
     };
     let mut news = Vec::new();
+    // Titles already printed by Local, places and earlier feed sections (Your Reading is neither).
+    let mut printed = std::collections::HashSet::<String>::new();
     let mut g_reading = None;
     let mut long_reads = Vec::new();
     let mut reading_outcomes = Vec::new();
@@ -243,23 +245,37 @@ pub fn gather_with(
             }
             SectionKind::Local => {
                 news.push(edition.sections.len());
-                edition
-                    .sections
-                    .push(sources::feeds::local_section(cfg, now, net));
+                let local = sources::feeds::local_section(cfg, now, net);
+                printed.extend(
+                    local
+                        .articles
+                        .iter()
+                        .map(|a| sources::feeds::title_key(&a.title)),
+                );
+                edition.sections.push(local);
                 // then other places' local news, each its own section (#102)
                 for p in &cfg.local.places {
                     news.push(edition.sections.len());
-                    edition
-                        .sections
-                        .push(sources::feeds::place_section(p, cfg, now, net));
+                    let place = sources::feeds::place_section(p, cfg, now, net);
+                    printed.extend(
+                        place
+                            .articles
+                            .iter()
+                            .map(|a| sources::feeds::title_key(&a.title)),
+                    );
+                    edition.sections.push(place);
                 }
             }
             SectionKind::Feeds => {
                 for feed in &cfg.feeds {
                     news.push(edition.sections.len());
-                    edition
-                        .sections
-                        .push(sources::feeds::feed_section(feed, cfg, now, net));
+                    edition.sections.push(sources::feeds::feed_section(
+                        feed,
+                        cfg,
+                        now,
+                        net,
+                        &mut printed,
+                    ));
                 }
             }
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),

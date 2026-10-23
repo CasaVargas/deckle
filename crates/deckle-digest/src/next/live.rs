@@ -8,7 +8,7 @@ use std::path::Path;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
+use crate::config::{Config, Topic};
 use crate::fetch::Net;
 use crate::sources::feeds::{as_briefs, google_news_url, parse};
 
@@ -57,6 +57,9 @@ impl LiveCache {
         std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
     }
 }
+
+/// Items a feed row keeps beyond its budget, to refill from after earlier rows' stories go.
+const SPARE: usize = 30;
 
 /// What a URL is for: how old an item may be, how many are kept, and whether it's a Google
 /// News search (whose titles carry the outlet).
@@ -111,12 +114,17 @@ fn sources(cfg: &Config) -> Vec<Source> {
         }
     }
     for f in &cfg.feeds {
-        push(Source {
-            url: f.url.clone(),
-            max_age_hours: cfg.max_age_hours,
-            max_items: f.max_items,
-            briefs: false,
-        });
+        // every source of a section: its topic's search (titles carry the outlet), `url`, `urls`;
+        // a few spare items beyond the budget, since stories an earlier row has are dropped first
+        let topic = f.topic.map(Topic::url);
+        for url in f.sources() {
+            push(Source {
+                briefs: topic.as_ref() == Some(&url),
+                url,
+                max_age_hours: cfg.max_age_hours,
+                max_items: f.max_items.saturating_add(SPARE),
+            });
+        }
     }
     out
 }
