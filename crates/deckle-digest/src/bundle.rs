@@ -20,7 +20,7 @@ use crate::{BuildReport, EDITION_PREFIX, Gathered};
 
 /// The format's name and the version this writer writes (§6.1, §10).
 pub const FORMAT: &str = "deckle-edition";
-pub const VERSION: &str = "1.0";
+pub const VERSION: &str = "1.1";
 
 /// The bundle's folder name for `date`.
 pub fn bundle_name(date: NaiveDate) -> String {
@@ -81,6 +81,13 @@ struct StoryJson {
     body: Body,
     photos: Vec<PhotoJson>,
     long_read: Option<String>,
+    // 1.1 (Books and Kindle design §9):
+    byline: Option<String>,
+    published: Option<String>,
+    minutes: usize,
+    prominence: &'static str,
+    partial: bool,
+    pull_quote: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -95,8 +102,21 @@ struct PhotoJson {
     width: u32,
     height: u32,
     lead: bool,
-    /// Reserved for version 1.1 (§7).
+    /// Moving pictures are made by the reader from the still (parallax): always null.
     motion: Option<()>,
+    // 1.1 (Books and Kindle design §9):
+    caption: Option<String>,
+    credit: Option<String>,
+    alt: Option<String>,
+    focus: Option<Focus>,
+    color: Option<String>,
+}
+
+/// Where the photo's subject is, 0–1 from the top left: crops keep it in frame.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq)]
+struct Focus {
+    x: f64,
+    y: f64,
 }
 
 #[derive(Serialize)]
@@ -224,6 +244,14 @@ fn kind_name(key: &str) -> &'static str {
 
 /// Words in an XHTML fragment's text: what's outside its tags, split on whitespace.
 fn words(xhtml: &str) -> usize {
+    plain(xhtml).split_whitespace().count()
+}
+
+/// Reading pace for a story's minutes (Books and Kindle design §9).
+const WORDS_A_MINUTE: usize = 230;
+
+/// An XHTML fragment's text: what's outside its tags, entities decoded, whitespace collapsed.
+fn plain(xhtml: &str) -> String {
     let mut text = String::with_capacity(xhtml.len());
     let mut in_tag = false;
     for c in xhtml.chars() {
@@ -237,7 +265,79 @@ fn words(xhtml: &str) -> usize {
             _ => {}
         }
     }
-    text.split_whitespace().count()
+    let text = html_escape::decode_html_entities(&text);
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The story's own paragraphs, one a line: not its captions, notes or source line.
+fn paragraphs(xhtml: &str) -> String {
+    static PARA: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"(?s)<p>(.*?)</p>").unwrap());
+    PARA.captures_iter(xhtml)
+        .map(|c| plain(&c[1]))
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Where a photo's subject is: the weighted middle of its detail, skin tones and saturation,
+/// on a small copy, pulled a quarter of the way back to the center (smartcrop's idea, without
+/// a model). A reader may refine it with its own vision API.
+fn focus(img: &image::DynamicImage) -> Focus {
+    let small = img.thumbnail(64, 64).to_rgb8();
+    let (w, h) = small.dimensions();
+    let luma = |x: u32, y: u32| {
+        let p = small.get_pixel(x, y).0;
+        0.299 * f64::from(p[0]) + 0.587 * f64::from(p[1]) + 0.114 * f64::from(p[2])
+    };
+    let (mut sx, mut sy, mut total) = (0.0, 0.0, 0.0);
+    for y in 1..h.saturating_sub(1) {
+        for x in 1..w.saturating_sub(1) {
+            let edge = (4.0 * luma(x, y)
+                - luma(x - 1, y)
+                - luma(x + 1, y)
+                - luma(x, y - 1)
+                - luma(x, y + 1))
+            .abs()
+                / 255.0;
+            let [r, g, b] = small.get_pixel(x, y).0.map(f64::from);
+            let max = r.max(g).max(b);
+            let sat = if max > 0.0 {
+                (max - r.min(g).min(b)) / max
+            } else {
+                0.0
+            };
+            let skin = r > 95.0 && g > 40.0 && b > 20.0 && r > g && r > b && r - g > 15.0;
+            let score = edge + 0.4 * sat + if skin { 0.8 } else { 0.0 };
+            let wgt = score * score;
+            sx += wgt * f64::from(x);
+            sy += wgt * f64::from(y);
+            total += wgt;
+        }
+    }
+    let round = |v: f64| (v.clamp(0.0, 1.0) * 100.0).round() / 100.0;
+    if total <= f64::EPSILON || w < 3 || h < 3 {
+        return Focus { x: 0.5, y: 0.5 };
+    }
+    let cx = (sx / total + 0.5) / f64::from(w);
+    let cy = (sy / total + 0.5) / f64::from(h);
+    Focus {
+        x: round(0.5 + (cx - 0.5) * 0.75),
+        y: round(0.5 + (cy - 0.5) * 0.75),
+    }
+}
+
+/// A photo's average color, `#rrggbb`: the page behind it while it loads.
+fn dominant_color(img: &image::DynamicImage) -> String {
+    let small = img.thumbnail(16, 16).to_rgb8();
+    let n = u64::from(small.width() * small.height()).max(1);
+    let mut sum = [0u64; 3];
+    for p in small.pixels() {
+        for (s, v) in sum.iter_mut().zip(p.0) {
+            *s += u64::from(v);
+        }
+    }
+    format!("#{:02x}{:02x}{:02x}", sum[0] / n, sum[1] / n, sum[2] / n)
 }
 
 /// `[row, column, number]` for each numbered square of a 5×5 grid, numbered as crosswords are:
@@ -321,10 +421,12 @@ pub fn write(
             let mut body = a.body.clone();
             let mut photos = Vec::new();
             for (n, jpeg) in a.photos.iter().enumerate() {
-                let path = files.media(jpeg, "jpg");
-                let (width, height) = image::load_from_memory(jpeg)
-                    .map(|img| (img.width(), img.height()))
-                    .unwrap_or((0, 0));
+                let extra = a.extra.photos.get(n);
+                // The master in color at full size, when the story has one.
+                let bytes = extra.and_then(|x| x.master.as_deref()).unwrap_or(jpeg);
+                let path = files.media(bytes, "jpg");
+                let img = image::load_from_memory(bytes).ok();
+                let (width, height) = img.as_ref().map_or((0, 0), |i| (i.width(), i.height()));
                 let token = photo_token(n);
                 let lead =
                     body.contains(&format!("<div class=\"figure lead\"><img src=\"{token}\""));
@@ -335,11 +437,25 @@ pub fn write(
                     height,
                     lead,
                     motion: None,
+                    caption: extra.and_then(|x| x.caption.clone()),
+                    credit: extra.and_then(|x| x.credit.clone()),
+                    alt: extra.and_then(|x| x.alt.clone()),
+                    focus: img.as_ref().map(focus),
+                    color: img.as_ref().map(dominant_color),
                 });
             }
             for (href, path) in &assets {
                 body = body.replace(&format!("src=\"{href}\""), &format!("src=\"{path}\""));
             }
+            let n_words = words(&body);
+            let text = plain(&body);
+            let prominence = if plan.lead == Some((i, j)) {
+                "lead"
+            } else if plan.tiles.contains(&(i, j)) {
+                "front"
+            } else {
+                "inside"
+            };
             stories.push(StoryJson {
                 id: id(i, j),
                 title: a.title.clone(),
@@ -347,7 +463,13 @@ pub fn write(
                 teaser: a.teaser.clone(),
                 url: a.url.clone(),
                 outlet: a.outlet.clone(),
-                words: words(&body),
+                byline: a.extra.byline.clone(),
+                published: a.extra.published.clone(),
+                minutes: n_words.div_ceil(WORDS_A_MINUTE).max(1),
+                prominence,
+                partial: crate::article::looks_cut_off(&text),
+                pull_quote: crate::article::pull_quote(&paragraphs(&body), n_words),
+                words: n_words,
                 body: Body {
                     format: "xhtml",
                     text: body,
@@ -541,6 +663,46 @@ mod tests {
                 [4, 1, 8]
             ]
         );
+    }
+
+    fn picture(w: u32, h: u32, f: impl Fn(u32, u32) -> [u8; 3]) -> image::DynamicImage {
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(w, h, |x, y| image::Rgb(f(x, y))))
+    }
+
+    #[test]
+    fn the_focus_follows_the_detail_and_a_flat_photo_centers() {
+        let flat = picture(400, 300, |_, _| [90, 90, 90]);
+        assert_eq!(focus(&flat), Focus { x: 0.5, y: 0.5 });
+        // A busy, colorful patch in the top right of a gray field.
+        let busy = picture(400, 300, |x, y| {
+            if x > 280 && y < 90 {
+                if (x / 4 + y / 4) % 2 == 0 {
+                    [230, 40, 40]
+                } else {
+                    [20, 20, 200]
+                }
+            } else {
+                [120, 120, 120]
+            }
+        });
+        let f = focus(&busy);
+        assert!(f.x > 0.65 && f.y < 0.35, "{f:?}");
+        assert_eq!(dominant_color(&flat), "#5a5a5a");
+    }
+
+    #[test]
+    fn a_pull_quote_comes_from_paragraphs_only() {
+        let body = "<p>One.</p><div class=\"figure\"><span class=\"caption\">The yard (Photo: Jane)</span></div><p class=\"source\">Source: x</p><p>Two &amp; three.</p>";
+        assert_eq!(paragraphs(body), "One.\nTwo & three.");
+    }
+
+    #[test]
+    fn plain_text_decodes_and_collapses() {
+        assert_eq!(
+            plain("<p>Fish &amp; chips</p>\n<p>  at   six</p>"),
+            "Fish & chips at six"
+        );
+        assert_eq!(words("<p>Fish &amp; chips</p>"), 3);
     }
 
     #[test]

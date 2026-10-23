@@ -122,7 +122,7 @@ pub fn build(
         )
     })?;
     let title = x.title.clone().unwrap_or_else(|| outlet.clone());
-    let (body, photos) = story_body(&x, &outlet, cfg, net);
+    let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
     let id = format!("{:016x}", fnv(&normalize_url(&base)));
     let stem = format!("{}-{}", slug(&title), &id[..8]);
     let lr = LongRead {
@@ -140,6 +140,7 @@ pub fn build(
             // A saved page's base is a `file:` path, not a link.
             url: base.starts_with("http").then(|| base.clone()),
             outlet: Some(outlet.clone()),
+            extra,
         },
         file_stem: stem.clone(),
     };

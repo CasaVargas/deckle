@@ -23,11 +23,22 @@ const MIN_PHOTO_SIDE: u32 = 200;
 const MIN_INLINE_PHOTO_SIDE: u32 = 300;
 const PHOTO_WIDTH: u32 = 1000;
 const PHOTO_QUALITY: u8 = 70;
+/// A photo master's long side and quality: sharp on a 12.9-inch iPad (Books and Kindle design §9).
+const MASTER_SIDE: u32 = 2400;
+const MASTER_QUALITY: u8 = 85;
 
 /// The placeholder `src` for photo `k` in [`Extracted::xhtml`]; the renderer swaps in a file
 /// path, or drops the `<img>` when the photo was not kept.
 pub fn placeholder(k: usize) -> String {
     format!("__DECKLE_IMG_{k}__")
+}
+
+/// What the page says about one photo: its caption, the credit split from it, its alt text.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PhotoMeta {
+    pub caption: Option<String>,
+    pub credit: Option<String>,
+    pub alt: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -39,8 +50,12 @@ pub struct Extracted {
     pub xhtml: String,
     /// Photo URLs in placeholder order (the lead image first, when there is one).
     pub photos: Vec<String>,
+    /// One per photo, in the same order.
+    pub photo_meta: Vec<PhotoMeta>,
     /// Photo 0 is the page's lead image, printed above the text.
     pub lead: bool,
+    /// When the page says it was published, as written there (usually RFC 3339).
+    pub published: Option<String>,
     pub words: usize,
     /// The first paragraph that reads like prose, for the cover.
     pub teaser: Option<String>,
@@ -113,6 +128,12 @@ struct Writer {
     base: String,
     out: String,
     photos: Vec<String>,
+    /// Each photo's dedup key, alt text and caption, by index.
+    keys: Vec<String>,
+    alts: Vec<Option<String>>,
+    captions: Vec<Option<String>>,
+    /// The photos in each open `<figure>`, innermost last: a `<figcaption>` names them.
+    figures: Vec<Vec<usize>>,
     seen: HashSet<String>,
     words: usize,
     max_words: Option<usize>,
@@ -125,12 +146,29 @@ const SKIP: &[&str] = &[
 ];
 
 impl Writer {
-    fn photo(&mut self, url: String) -> Option<usize> {
-        if !self.seen.insert(photo_key(&url)) {
+    /// A new photo's index; `None` for one already placed (its alt text and figure still count).
+    fn photo(&mut self, url: String, alt: Option<String>) -> Option<usize> {
+        let key = photo_key(&url);
+        if !self.seen.insert(key.clone()) {
+            if let Some(i) = self.keys.iter().position(|k| *k == key) {
+                if self.alts[i].is_none() {
+                    self.alts[i] = alt;
+                }
+                if let Some(f) = self.figures.last_mut() {
+                    f.push(i);
+                }
+            }
             return None;
         }
         self.photos.push(url);
-        Some(self.photos.len() - 1)
+        self.keys.push(key);
+        self.alts.push(alt);
+        self.captions.push(None);
+        let i = self.photos.len() - 1;
+        if let Some(f) = self.figures.last_mut() {
+            f.push(i);
+        }
+        Some(i)
     }
 
     fn img_src(&self, node: &dom_query::NodeRef) -> Option<String> {
@@ -247,14 +285,36 @@ impl Writer {
             "li" => self.wrapped(node, "<li>", "</li>"),
             "em" | "i" => self.wrapped(node, "<em>", "</em>"),
             "strong" | "b" => self.wrapped(node, "<strong>", "</strong>"),
-            "figcaption" => self.wrapped(node, "<span class=\"caption\">", "</span>"),
-            "figure" => self.wrapped(node, "<div class=\"figure\">", "</div>\n"),
+            "figcaption" => {
+                let text = self.wrapped(node, "<span class=\"caption\">", "</span>");
+                let caption = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                if !caption.is_empty()
+                    && let Some(f) = self.figures.last()
+                {
+                    for &i in f {
+                        if self.captions[i].is_none() {
+                            self.captions[i] = Some(caption.clone());
+                        }
+                    }
+                }
+                text
+            }
+            "figure" => {
+                self.figures.push(Vec::new());
+                let text = self.wrapped(node, "<div class=\"figure\">", "</div>\n");
+                self.figures.pop();
+                text
+            }
             "br" => {
                 self.out.push_str("<br/>");
                 String::new()
             }
             "img" => {
-                if let Some(k) = self.img_src(node).and_then(|u| self.photo(u)) {
+                let alt = node
+                    .attr("alt")
+                    .map(|a| a.split_whitespace().collect::<Vec<_>>().join(" "))
+                    .filter(|a| !a.is_empty());
+                if let Some(k) = self.img_src(node).and_then(|u| self.photo(u, alt)) {
                     self.out
                         .push_str(&format!("<img src=\"{}\" alt=\"\"/>", placeholder(k)));
                 }
@@ -274,6 +334,16 @@ pub fn extract(html: &str, url: &str) -> Option<Extracted> {
 /// [`extract`] with a chosen cap; `None` keeps every word (long reads, save-to-paper §5).
 /// `url` may be `file://…` for a saved page: its photos then load from beside it.
 pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<Extracted> {
+    extract_linted(html, url, max_words).map(|(x, _)| x)
+}
+
+/// [`extract_with`], also returning the boilerplate paragraphs [`lint`] dropped
+/// (`deckle digest lint`).
+pub fn extract_linted(
+    html: &str,
+    url: &str,
+    max_words: Option<usize>,
+) -> Option<(Extracted, Vec<String>)> {
     let mut readability = dom_smoothie::Readability::new(html, Some(url), None).ok()?;
     let article = readability.parse().ok()?;
     let mut lead_kept = false;
@@ -281,6 +351,10 @@ pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<E
         base: url.to_owned(),
         out: String::new(),
         photos: Vec::new(),
+        keys: Vec::new(),
+        alts: Vec::new(),
+        captions: Vec::new(),
+        figures: Vec::new(),
         seen: HashSet::new(),
         words: 0,
         max_words,
@@ -288,7 +362,7 @@ pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<E
     };
     // The lead image goes first, above the text.
     if let Some(lead) = article.image.as_deref().and_then(|i| resolve(url, i))
-        && let Some(k) = w.photo(lead)
+        && let Some(k) = w.photo(lead, None)
     {
         lead_kept = true;
         w.out.push_str(&format!(
@@ -304,19 +378,41 @@ pub fn extract_with(html: &str, url: &str, max_words: Option<usize>) -> Option<E
         return None;
     }
     let title = article.title.trim().to_owned();
-    Some(Extracted {
+    let photo_meta = w
+        .captions
+        .iter()
+        .zip(&w.alts)
+        .map(|(caption, alt)| {
+            let (caption, credit) = caption.as_deref().map(split_credit).unwrap_or((None, None));
+            PhotoMeta {
+                caption,
+                credit,
+                alt: alt.clone(),
+            }
+        })
+        .collect();
+    let curl = deckle_core::typography::curls_quotes(article.lang.as_deref());
+    let (linted, dropped) = lint(&w.out);
+    let xhtml = tidy(&linted, curl);
+    let x = Extracted {
         title: (!title.is_empty()).then_some(title),
         byline: article
             .byline
             .map(|b| b.to_string())
             .map(|b| b.trim().to_owned())
             .filter(|b| !b.is_empty() && b.len() < 120),
-        xhtml: w.out,
+        xhtml,
         photos: w.photos,
+        photo_meta,
         lead: lead_kept,
+        published: article
+            .published_time
+            .map(|t| t.trim().to_owned())
+            .filter(|t| !t.is_empty()),
         words: w.words,
         teaser: w.teaser,
-    })
+    };
+    Some((x, dropped))
 }
 
 /// A photo as an e-ink JPEG: grayscale, at most 1000 px wide. `None` for tiny images (icons,
@@ -343,6 +439,41 @@ pub fn photo(bytes: &[u8], photos: Photos) -> Option<Vec<u8>> {
         Photos::Color => img.to_rgb8().write_with_encoder(encoder),
     }
     .ok()?;
+    Some(out)
+}
+
+/// A photo master for a native reader (Books and Kindle design §9): in color, turned upright,
+/// at most [`MASTER_SIDE`] on its long side and never enlarged, as a JPEG with no metadata.
+/// `None` as for [`photo`].
+pub fn master_photo(bytes: &[u8]) -> Option<Vec<u8>> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .into_decoder()
+        .ok()?;
+    let orientation = decoder.orientation().ok();
+    let mut img = image::DynamicImage::from_decoder(decoder).ok()?;
+    if let Some(o) = orientation {
+        img.apply_orientation(o);
+    }
+    if img.width().min(img.height()) < MIN_PHOTO_SIDE {
+        return None;
+    }
+    if img.width().max(img.height()) > MASTER_SIDE {
+        img = img.resize(
+            MASTER_SIDE,
+            MASTER_SIDE,
+            image::imageops::FilterType::Lanczos3,
+        );
+    }
+    let mut out = Vec::new();
+    img.to_rgb8()
+        .write_with_encoder(image::codecs::jpeg::JpegEncoder::new_with_quality(
+            &mut out,
+            MASTER_QUALITY,
+        ))
+        .ok()?;
     Some(out)
 }
 
@@ -429,6 +560,29 @@ pub fn fetch_photos_as(
     net: &dyn Net,
     as_: Photos,
 ) -> Vec<Option<Vec<u8>>> {
+    fetch_photos_with(photos, lead, max, net, as_, false)
+        .into_iter()
+        .map(|f| f.map(|f| f.jpeg))
+        .collect()
+}
+
+/// A fetched photo: the edition's JPEG, and its master when one was asked for.
+#[derive(Clone, Debug)]
+pub struct Fetched {
+    pub jpeg: Vec<u8>,
+    pub master: Option<Vec<u8>>,
+}
+
+/// [`fetch_photos_as`], also making each kept photo's master (for an edition bundle) from the
+/// same download.
+pub fn fetch_photos_with(
+    photos: &[String],
+    lead: bool,
+    max: usize,
+    net: &dyn Net,
+    as_: Photos,
+    masters: bool,
+) -> Vec<Option<Fetched>> {
     let mut hashes: Vec<u64> = Vec::new();
     photos
         .iter()
@@ -437,7 +591,8 @@ pub fn fetch_photos_as(
             if hashes.len() >= max {
                 return None;
             }
-            let jpeg = load_photo(url, net).and_then(|b| photo(&b, as_))?;
+            let bytes = load_photo(url, net)?;
+            let jpeg = photo(&bytes, as_)?;
             if !(lead && k == 0) && !clears_inline_size(&jpeg) {
                 return None;
             }
@@ -449,7 +604,10 @@ pub fn fetch_photos_as(
                 return None;
             }
             hashes.push(hash);
-            Some(jpeg)
+            Some(Fetched {
+                master: masters.then(|| master_photo(&bytes)).flatten(),
+                jpeg,
+            })
         })
         .collect()
 }
@@ -485,9 +643,267 @@ pub fn place_photos(xhtml: &str, kept: &[bool], path: impl Fn(usize) -> String) 
     strip_empty_figures(&LEFTOVER.replace_all(&out, ""))
 }
 
+/// Paragraphs that are a site's furniture, not the story (Books and Kindle design §9). Matched
+/// against a paragraph's whole text, case-insensitively.
+static BOILERPLATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"(?i)^\s*(",
+        r"advertisement|advertisements|sponsored( content)?|story continues below( advertisement)?",
+        r"|(sign up|subscribe) (for|to) (our|the) [^.]{0,60}newsletters?[^.]{0,80}",
+        r"|get (our|the) [^.]{0,40}newsletter[^.]{0,80}",
+        r"|(read|see) (more|also|next)\s*:.{0,160}",
+        r"|related( stories| articles| coverage)?\s*:.{0,160}",
+        r"|(share|follow us) on (facebook|twitter|x|instagram|linkedin|threads|bluesky)[^.]{0,80}",
+        r"|share this (article|story)[^.]{0,40}",
+        r"|click here to [^.]{0,80}",
+        r"|we use cookies[^.]{0,200}",
+        r"|this (site|website) uses cookies[^.]{0,200}",
+        r")\.?\s*$",
+    ))
+    .unwrap()
+});
+
+/// Drops boilerplate paragraphs from extracted XHTML; returns the rest and the text of what
+/// went, for `deckle digest lint`.
+pub fn lint(xhtml: &str) -> (String, Vec<String>) {
+    static PARA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<p>(.*?)</p>\n?").unwrap());
+    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
+    let mut dropped = Vec::new();
+    let out = PARA.replace_all(xhtml, |c: &regex::Captures| {
+        let text = html_escape::decode_html_entities(&TAG.replace_all(&c[1], "")).into_owned();
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if BOILERPLATE.is_match(&text) && !c[1].contains("<img") {
+            dropped.push(text);
+            String::new()
+        } else {
+            c[0].to_owned()
+        }
+    });
+    (out.into_owned(), dropped)
+}
+
+/// The book typography pass (curly quotes, dashes, ellipses) over an XHTML fragment.
+fn tidy(fragment: &str, curl_quotes: bool) -> String {
+    let mut report = deckle_core::typography::TypographyReport::default();
+    let doc = format!("<body>{fragment}</body>");
+    let out = deckle_core::typography::tidy_xhtml(&doc, curl_quotes, &mut report);
+    out.strip_prefix("<body>")
+        .and_then(|o| o.strip_suffix("</body>"))
+        .unwrap_or(fragment)
+        .to_owned()
+}
+
+/// A caption split from the credit it ends with: "Stalls at the shed. (Jane Doe / The Pilot)",
+/// "… Photo: Jane Doe", "… Jane Doe/AP".
+pub fn split_credit(caption: &str) -> (Option<String>, Option<String>) {
+    static MARKED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(.*?)[\s;,–—-]*\(?\b(?:photo(?:graph)?s?|image|picture|credit|illustration)(?:\s+by|\s*:)\s*([^()]{2,80}?)\)?\s*$").unwrap()
+    });
+    static AGENCY: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(.*?[.!?”\)])\s*\(?([^.()]{2,60}?\s*/\s*(?:AP|AFP|Reuters|Getty Images|EPA|Shutterstock|Bloomberg|[A-Z][\w .&]{1,40}))\)?\s*$").unwrap()
+    });
+    let clean = |s: &str| {
+        let t = s
+            .trim()
+            .trim_end_matches([' ', ',', ';', '–', '—', '-'])
+            .trim();
+        (!t.is_empty()).then(|| t.to_owned())
+    };
+    if let Some(c) = MARKED.captures(caption) {
+        return (clean(&c[1]), clean(&c[2]));
+    }
+    if let Some(c) = AGENCY.captures(caption) {
+        return (clean(&c[1]), clean(&c[2]));
+    }
+    (clean(caption), None)
+}
+
+/// Whether a story's text reads as cut off by a paywall: it ends asking you to subscribe or
+/// sign in.
+pub fn looks_cut_off(text: &str) -> bool {
+    static WALL: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(subscribe (now |today )?to (continue|read|keep)|for subscribers only|this (article|story) is (only )?(available )?(to|for) (subscribers|members)|sign in to (continue|read)|log in to (continue|read)|already a subscriber|to continue reading)").unwrap()
+    });
+    let tail: String = {
+        let chars: Vec<char> = text.trim_end().chars().collect();
+        chars[chars.len().saturating_sub(300)..].iter().collect()
+    };
+    WALL.is_match(&tail)
+}
+
+/// A sentence to pull out of a long story (60 to 200 characters): a quotation if the story has
+/// one, else the one that best stands alone. `None` for stories under 600 words. `text` is the
+/// story's paragraphs, one a line: a sentence never runs across two.
+pub fn pull_quote(text: &str, words: usize) -> Option<String> {
+    if words < 600 {
+        return None;
+    }
+    static SENTENCE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r#"[^.!?\n]+[.!?]+["”’]?"#).unwrap());
+    let sentences: Vec<String> = SENTENCE
+        .find_iter(text)
+        .map(|m| m.as_str().split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect();
+    let fits = |s: &str| (60..=200).contains(&s.chars().count());
+    // The first sentence is the lede the reader just read; skip it.
+    let candidates: Vec<&String> = sentences.iter().skip(1).filter(|s| fits(s)).collect();
+    let quoted = |s: &str| {
+        let t = s.trim();
+        (t.starts_with('“') || t.starts_with('"'))
+            && (t.contains('”') || t.matches('"').count() >= 2)
+    };
+    if let Some(q) = candidates.iter().find(|s| quoted(s)) {
+        return Some((*q).clone());
+    }
+    let score = |s: &str| {
+        let len = s.chars().count() as i64;
+        let digits = s.chars().filter(char::is_ascii_digit).count() as i64;
+        let starts_weak = [
+            "But ", "And ", "So ", "It ", "This ", "That ", "He ", "She ", "They ",
+        ]
+        .iter()
+        .any(|w| s.starts_with(w));
+        -(len - 120).abs() - digits * 8 - if starts_weak { 40 } else { 0 }
+    };
+    candidates.into_iter().max_by_key(|s| score(s)).cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn page(body: &str) -> String {
+        let words = "The council met on Tuesday night to talk about the old rail yard and what it could become for the town. ".repeat(20);
+        format!(
+            "<html lang=\"en\"><head><title>Market</title></head><body><article><h1>Market</h1><p>{words}</p>{body}<p>{words}</p></article></body></html>"
+        )
+    }
+
+    #[test]
+    fn captions_credits_and_alt_text_ride_with_their_photos() {
+        let html = page(concat!(
+            "<figure><img src=\"https://cdn.example/a.jpg\" alt=\"A crowd under a steel roof\"/>",
+            "<figcaption>Stall holders at the freight shed on Saturday. (Photo: Jane Doe / The Pilot)</figcaption></figure>",
+            "<p>More words about the shed and the market, the stalls and the people who will run them.</p>",
+            "<figure><img src=\"https://cdn.example/b.jpg\"/><figcaption>The yard in 1952.</figcaption></figure>",
+        ));
+        let x = extract(&html, "https://news.example/market").unwrap();
+        let a = x.photos.iter().position(|p| p.ends_with("a.jpg")).unwrap();
+        let b = x.photos.iter().position(|p| p.ends_with("b.jpg")).unwrap();
+        assert_eq!(
+            x.photo_meta[a],
+            PhotoMeta {
+                caption: Some("Stall holders at the freight shed on Saturday.".into()),
+                credit: Some("Jane Doe / The Pilot".into()),
+                alt: Some("A crowd under a steel roof".into()),
+            }
+        );
+        assert_eq!(
+            x.photo_meta[b].caption.as_deref(),
+            Some("The yard in 1952.")
+        );
+        assert_eq!(x.photo_meta[b].credit, None);
+        assert_eq!(x.photo_meta.len(), x.photos.len());
+    }
+
+    #[test]
+    fn credits_split_off_in_their_usual_forms() {
+        assert_eq!(
+            split_credit("Crowds on Main Street. Photo by Sam Lee"),
+            (
+                Some("Crowds on Main Street.".into()),
+                Some("Sam Lee".into())
+            )
+        );
+        assert_eq!(
+            split_credit("The mayor speaks on Friday. Ana Ruiz/AP"),
+            (
+                Some("The mayor speaks on Friday.".into()),
+                Some("Ana Ruiz/AP".into())
+            )
+        );
+        assert_eq!(
+            split_credit("Credit: Getty Images"),
+            (None, Some("Getty Images".into()))
+        );
+        assert_eq!(
+            split_credit("Just a caption."),
+            (Some("Just a caption.".into()), None)
+        );
+    }
+
+    #[test]
+    fn lint_drops_furniture_and_keeps_the_story() {
+        let x = "<p>The vote was close.</p>\n<p>Advertisement</p>\n<p>Sign up for our daily newsletter to get the news first.</p>\n<p>Read more: Ten things about the yard</p>\n<p>She said the newsletter was late again.</p>\n";
+        let (out, dropped) = lint(x);
+        assert_eq!(
+            out,
+            "<p>The vote was close.</p>\n<p>She said the newsletter was late again.</p>\n"
+        );
+        assert_eq!(dropped.len(), 3);
+        assert_eq!(dropped[0], "Advertisement");
+    }
+
+    #[test]
+    fn extracted_stories_get_curly_quotes_and_lose_boilerplate() {
+        let html = page("<p>\"It is time,\" she said -- and it was.</p><p>Advertisement</p>");
+        let x = extract(&html, "https://news.example/market").unwrap();
+        assert!(
+            x.xhtml
+                .contains("\u{201c}It is time,\u{201d} she said \u{2014} and it was."),
+            "{}",
+            x.xhtml
+        );
+        assert!(!x.xhtml.contains("Advertisement"));
+    }
+
+    #[test]
+    fn paywalls_and_pull_quotes() {
+        assert!(looks_cut_off(
+            "The council voted. Subscribe now to continue reading."
+        ));
+        assert!(looks_cut_off(
+            "Part of it. This article is only available to subscribers."
+        ));
+        assert!(!looks_cut_off(
+            "The council voted and the market opens in spring."
+        ));
+        let body = "The council met on Tuesday. ".repeat(10)
+            + "\u{201c}We have waited forty years for somebody to do something with that yard,\u{201d} said one stall holder. "
+            + &"More of the story follows here. ".repeat(150);
+        let words = body.split_whitespace().count();
+        assert_eq!(
+            pull_quote(&body, words).as_deref(),
+            Some(
+                "\u{201c}We have waited forty years for somebody to do something with that yard,\u{201d} said one stall holder."
+            )
+        );
+        assert_eq!(pull_quote(&body, 300), None, "short stories get none");
+    }
+
+    #[test]
+    fn a_master_keeps_color_and_size_up_to_2400() {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            3000,
+            1500,
+            image::Rgb([200, 30, 30]),
+        ))
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .unwrap();
+        let m = image::load_from_memory(&master_photo(&png).unwrap()).unwrap();
+        assert_eq!((m.width(), m.height()), (2400, 1200));
+        assert_eq!(m.color(), image::ColorType::Rgb8);
+        let mut small = Vec::new();
+        image::DynamicImage::new_rgb8(800, 600)
+            .write_to(
+                &mut std::io::Cursor::new(&mut small),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        let m = image::load_from_memory(&master_photo(&small).unwrap()).unwrap();
+        assert_eq!((m.width(), m.height()), (800, 600), "never enlarged");
+    }
 
     #[test]
     fn placing_drops_photos_not_kept_and_empty_figures() {

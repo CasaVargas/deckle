@@ -395,6 +395,12 @@ pub enum DigestCommand {
         #[arg(long)]
         force: bool,
     },
+    /// What the paper keeps of one story page and the boilerplate it drops (newsletter
+    /// sign-ups, "Advertisement", share prompts…), to tune the rules.
+    Lint {
+        /// A story's address, or a saved `.html` page.
+        page: String,
+    },
     /// Tomorrow's paper, so far: the press, the front page as it stands, the page plan and
     /// this week's reads.
     Next {
