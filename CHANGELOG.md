@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Word documents and text files in the app** (#134). Drop a `.docx` or `.txt` on the window,
+  or pick one with **Choose files…**, and it's built and sent like an EPUB, its row showing the
+  title and author it imports with. A folder drop takes Word documents too, but leaves `.txt`
+  files alone (in a folder they're usually notes); name a text file directly to send it.
 - **The Morgue** (#109): every edition is kept in a folder you can see, `~/Deckle/Morgue` (change
   it under `[morgue]` or on the Daily tab), for a year, with the stories' text so you can search
   it. **Every edition** on the Daily tab shows a month of front pages, search with the matching
