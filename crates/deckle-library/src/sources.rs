@@ -21,7 +21,7 @@ pub enum Origin {
 }
 
 /// An original found on this computer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Source {
     pub path: PathBuf,
     pub origin: Origin,
@@ -32,6 +32,9 @@ pub struct Source {
     pub asin: Option<String>,
     /// calibre's book id (its `uuid`).
     pub calibre_id: Option<String>,
+    /// Its series and number, when calibre or the OPF says.
+    #[serde(default)]
+    pub series: Option<crate::SeriesRef>,
 }
 
 /// Formats a calibre book counts as an original, best first.
@@ -230,6 +233,16 @@ pub fn calibre_books(root: &Path) -> Result<Vec<Source>, String> {
     )?;
     let ids = pairs("SELECT book, type, val FROM identifiers")?;
     let files = pairs("SELECT book, format, name FROM data")?;
+    // Series are optional: a library made before calibre had them has no such tables.
+    let series: Vec<(i64, String, f64)> = db
+        .prepare(
+            "SELECT l.book, s.name, b.series_index FROM books_series_link l JOIN series s ON s.id = l.series JOIN books b ON b.id = l.book",
+        )
+        .and_then(|mut q| {
+            q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+                .map(|rows| rows.filter_map(Result::ok).collect())
+        })
+        .unwrap_or_default();
     let mut out = Vec::new();
     for b in books {
         let Some((format, name)) = CALIBRE_FORMATS.iter().find_map(|f| {
@@ -258,6 +271,13 @@ pub fn calibre_books(root: &Path) -> Result<Vec<Source>, String> {
             isbn: id_of(&["isbn"]),
             asin: id_of(&["mobi-asin", "amazon"]),
             calibre_id: b.uuid,
+            series: series
+                .iter()
+                .find(|(id, _, _)| *id == b.id)
+                .map(|(_, name, index)| crate::SeriesRef {
+                    name: name.clone(),
+                    index: Some(*index as f32),
+                }),
         });
     }
     Ok(out)
@@ -294,6 +314,10 @@ pub fn folder_books(dir: &Path) -> Vec<Source> {
                     isbn: info.isbn.clone(),
                     asin: None,
                     calibre_id: None,
+                    series: info.series.as_ref().map(|s| crate::SeriesRef {
+                        name: s.name.clone(),
+                        index: s.index,
+                    }),
                     origin: Origin::Folder,
                     path,
                 });
@@ -316,6 +340,7 @@ mod tests {
             isbn: None,
             asin: None,
             calibre_id: None,
+            series: None,
         }
     }
 

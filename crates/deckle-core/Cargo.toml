@@ -29,6 +29,7 @@ csv.workspace = true
 tempfile.workspace = true
 deunicode.workspace = true
 regex.workspace = true
+base64.workspace = true
 ureq.workspace = true
 rusqlite.workspace = true
 

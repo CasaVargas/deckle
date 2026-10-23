@@ -33,6 +33,19 @@ export default function Originals() {
     const dir = await openDialog({ directory: true, multiple: false });
     if (typeof dir === "string" && !status.folders.includes(dir)) save(status.find_in_calibre, status.calibre, [...status.folders, dir]);
   };
+  const setWatch = async (dir: string | null) => {
+    try {
+      const watch = await api.libraryWatchSet(dir);
+      setStatus({ ...status, watch });
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+  const watchFolder = async () => {
+    const dir = await openDialog({ directory: true, multiple: false });
+    if (typeof dir === "string") setWatch(dir);
+  };
   return (
     <>
       <Row
@@ -65,6 +78,17 @@ export default function Originals() {
           </button>
         </div>
       ))}
+      <Row
+        label="Watch a folder"
+        note={status.watch ? `New EPUBs in ${status.watch} are added to your library` : "EPUBs that land in a folder, Downloads say, are added to your library"}
+      >
+        {status.watch && (
+          <button className="ghost" onClick={watchFolder}>
+            Change…
+          </button>
+        )}
+        <Switch label="Watch a folder" checked={!!status.watch} onChange={(on) => (on ? watchFolder() : setWatch(null))} />
+      </Row>
       {error && <p className="warn small">{error}</p>}
     </>
   );

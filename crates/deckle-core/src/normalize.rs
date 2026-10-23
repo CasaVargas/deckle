@@ -29,8 +29,11 @@ pub struct NormalizeOptions {
     pub typography: bool,
     /// Footnotes and endnotes to Kindle pop-up notes (issue #31).
     pub popup_notes: bool,
-    /// A cover to add when the book has none (issue #27); ignored when it has one.
+    /// A cover to add when the book has none (issue #27); ignored when it has one, unless
+    /// `replace_cover` is set.
     pub generated_cover: Option<GeneratedCover>,
+    /// `generated_cover` takes the place of the book's own cover (the Books tab's cover picker).
+    pub replace_cover: bool,
 }
 
 /// A cover made for a coverless book (`deckle_cover`).
@@ -49,6 +52,7 @@ impl Default for NormalizeOptions {
             fill: Default::default(),
             typography: false,
             generated_cover: None,
+            replace_cover: false,
             popup_notes: false,
         }
     }
@@ -134,7 +138,7 @@ pub fn ensure_jfif(jpeg: Vec<u8>) -> Vec<u8> {
     }
 }
 
-fn encode_jpeg(img: &image::DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
+pub(crate) fn encode_jpeg(img: &image::DynamicImage, quality: u8) -> Result<Vec<u8>, String> {
     let mut buf = Cursor::new(Vec::new());
     let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, quality);
     img.to_rgb8()
@@ -206,6 +210,18 @@ pub fn normalize(
                 .as_ref()
                 .and_then(|cid| items.iter().position(|it| &it.id == cid))
         });
+
+    // A picked cover takes the old one's place: the image pass below re-encodes and renames
+    // it when the old one wasn't a JPEG.
+    if let (true, Some(idx), Some(cover)) = (opts.replace_cover, cover_idx, &opts.generated_cover) {
+        let name = join(&opf_dir, &crate::epub::percent_decode(&items[idx].href));
+        let raster =
+            items[idx].media_type.starts_with("image/") && !items[idx].media_type.contains("svg");
+        if raster && files.contains_key(&name) {
+            files.insert(name, cover.jpeg.clone());
+            report.cover_generated = Some(cover.style.clone());
+        }
+    }
 
     let xhtml_names: Vec<String> = items
         .iter()

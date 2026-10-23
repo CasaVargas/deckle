@@ -475,3 +475,50 @@ The owner accepted each recommendation below (2026-10-23).
   - a backup and restore over MTP;
   - whether a restored `.sdr` brings the reading position back on a different Kindle.
 
+## 18. Build notes, phase 5
+
+- **The library** (`deckle_library::catalog`) lists, one entry a book:
+  - Deckle's library first;
+  - then calibre's and your folders' books that aren't already in it (same ISBN, or same title
+    and first author).
+
+  calibre's series come from `books_series_link`; a library without that table has none. A
+  folder EPUB's series comes from its OPF. "On this Kindle" means the library has sent the book
+  there, or an upgrade used it on that Kindle (`upgrades.json`), matched with `same_device`, so
+  older profile keys still count.
+- **Covers in the grid** load as cards scroll into view, 24 at a time:
+  - calibre's `cover.jpg` when the book sits in a calibre folder, else the EPUB's own;
+  - made 360 px tall by the thumbnail renderer.
+- **Before you send** runs `deckle_core::preflight` in a scratch folder: import, inspect, the
+  cover, and normalize with the book's settings. It needs no Previewer and no network. The
+  Open Library metadata fill is left out, since it fetches. The mode and its reason come from
+  the cover rule's plan the queue already shows.
+- **Chapter one** is the contents entry that names it ("Chapter 1", "One", "I.", "Prologue"),
+  from its anchor on. Otherwise it's the first spine item past the front matter with a page of
+  text. Its images are inlined as `data:` URLs. Its stylesheets come without `@font-face`,
+  `@import` or `url()`. The frame is `sandbox=""` with `default-src 'none'`, so a book's markup
+  can't run or load anything.
+- **The cover picker** is a new `RunOptions::cover`:
+  - `Auto` (as before);
+  - `Generated`: the typographic cover, even for a book that has its own;
+  - `Image(path)`: a picked file, made a JPEG.
+
+  normalize's `replace_cover` puts the new image in the old cover's place, so the cover page
+  and the `cover-image` item both follow. Open Library's covers (`deckle_core::covers`) are the
+  ISBN's, then those of its editions by title and author. The 1×1 "no cover" placeholder and
+  repeats are dropped. Only offered when Open Library is on. A picked cover is kept in Deckle's
+  cache under `covers/`.
+- **Fix details** (`deckle_library::details`) rewrites the library copy's OPF:
+  - the first `dc:title`'s text;
+  - every `dc:creator`, with the EPUB 3 metas that refine them;
+  - calibre's series metas, and EPUB 3's `belongs-to-collection` with its refines.
+
+  Then it updates the sidecar. The book keeps its `id` and ASIN, so earlier sends still match
+  it. Only an EPUB copy can be fixed.
+- **Watch a folder** (`deckle_library::watch`, `library.json` → `watch`): the app looks every
+  two minutes. It adds each EPUB in the folder (not its subfolders) once, keyed by path, size
+  and time in `watched.json`. It skips a file changed in the last five seconds, which may
+  still be downloading.
+- **Not checked yet:** a large calibre library's grid (hundreds of covers) on a real Mac, and
+  Open Library's covers over the real network.
+

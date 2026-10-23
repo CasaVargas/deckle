@@ -17,6 +17,8 @@ interface Props {
   onToggleReport: (id: string) => void;
   onRemove: (id: string) => void;
   onReveal: (path: string) => void;
+  /** Opens Before you send. */
+  onOpen?: (id: string) => void;
 }
 
 function Chips({ chips }: { chips: Chip[] }) {
@@ -35,7 +37,7 @@ const SOURCE = { llm: "AI model", wikipedia: "Wikipedia", basic: "basic" } as co
 
 const ASIN = /^[A-Z0-9]{10}$/;
 
-export default function BookRowView({ book, busy, plan, settings, onOverride, onAsin, onToggleReport, onRemove, onReveal }: Props) {
+export default function BookRowView({ book, busy, plan, settings, onOverride, onAsin, onToggleReport, onRemove, onReveal, onOpen }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   /** The ASIN field's text while it is open; `null` when closed. */
   const [asinDraft, setAsinDraft] = useState<string | null>(null);
@@ -112,9 +114,20 @@ export default function BookRowView({ book, busy, plan, settings, onOverride, on
       </div>
       <div className="meta">
         <div className="title-line">
-          <span className="title" title={book.path}>
-            {book.title}
-          </span>
+          {onOpen && book.mode !== "error" && book.mode !== "ready" ? (
+            <button className="title link-title" title={`Before you send: what Deckle will do to ${book.title}`} onClick={() => onOpen(book.id)}>
+              {book.title}
+            </button>
+          ) : (
+            <span className="title" title={book.path}>
+              {book.title}
+            </span>
+          )}
+          {book.coverPick && book.coverPick.kind !== "own" && (
+            <span className="chip" title="The cover picked in Before you send">
+              {book.coverPick.kind === "generated" ? "Typographic cover" : "Open Library cover"}
+            </span>
+          )}
         </div>
         <div className="byline">
           {book.authors || <em>Unknown author</em>}
@@ -225,6 +238,11 @@ export default function BookRowView({ book, busy, plan, settings, onOverride, on
             </button>
             {book.asin && (
               <button onClick={() => { onAsin(book.id, null); setMenuOpen(false); }}>Clear ASIN</button>
+            )}
+            {onOpen && (
+              <button onClick={() => { onOpen(book.id); setMenuOpen(false); }} disabled={book.mode === "error" || book.mode === "ready"}>
+                Before you send…
+              </button>
             )}
             <button onClick={() => { onToggleReport(book.id); setMenuOpen(false); }}>
               {book.showReport ? "Hide details" : "Details"}

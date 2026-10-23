@@ -1038,6 +1038,7 @@ dependencies = [
 name = "deckle-core"
 version = "0.4.0"
 dependencies = [
+ "base64 0.22.1",
  "csv",
  "deckle-cover",
  "deckle-docx",
@@ -1190,6 +1191,8 @@ dependencies = [
  "deckle-pdf",
  "deckle-txt",
  "deckle-xray",
+ "regex",
+ "roxmltree",
  "rusqlite",
  "serde",
  "serde_json",

@@ -10,13 +10,16 @@
 //! A book's identity is in its sidecar (the generated ASIN's seed), not its path.
 
 pub mod care;
+pub mod catalog;
 pub mod config;
+pub mod details;
 pub mod freshness;
 pub mod series;
 pub mod shelf;
 pub mod sidecar;
 pub mod sources;
 pub mod upgrade;
+pub mod watch;
 
 use std::path::{Path, PathBuf};
 
@@ -126,7 +129,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))

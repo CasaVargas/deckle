@@ -19,6 +19,9 @@ pub struct LibraryConfig {
     pub calibre: Option<PathBuf>,
     /// Folders to look for originals in (EPUBs), searched a few levels deep.
     pub find_in: Vec<PathBuf>,
+    /// A folder whose new EPUBs are added to the library (Books and Kindle design §8): off
+    /// unless set.
+    pub watch: Option<PathBuf>,
 }
 
 impl Default for LibraryConfig {
@@ -30,6 +33,7 @@ impl Default for LibraryConfig {
             find_in_calibre: true,
             calibre: None,
             find_in: Vec::new(),
+            watch: None,
         }
     }
 }
