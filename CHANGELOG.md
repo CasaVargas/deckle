@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Looked-up words to Anki** (#60). `deckle words anki --to words.csv` writes every English word
+  you looked up on the Kindle, once each (its newest lookup), as a CSV Anki imports: word, short
+  definition (from a Word Wise database already on this machine, never downloaded), the sentence
+  you met it in, the book and the day. It reads `vocab.db` over the same single connection as a
+  send, writes nothing to the Kindle, and overwrites the file each time.
 - **The Morgue** (#109): every edition is kept in a folder you can see, `~/Deckle/Morgue` (change
   it under `[morgue]` or on the Daily tab), for a year, with the stories' text so you can search
   it. **Every edition** on the Daily tab shows a month of front pages, search with the matching
