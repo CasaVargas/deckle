@@ -297,42 +297,19 @@ pub fn prepare_with(
     };
     report.work_dir = opts.keep_work_dir.then(|| work_path.clone());
 
-    // A Word document becomes an EPUB first; every later stage is the same (DOCX spec §3).
-    let source = if deckle_docx::is_word(epub) {
-        let imported = work_path.join("imported.epub");
-        let ireport = stage!(
+    // A Word document, PDF or text file becomes an EPUB first; every later stage is the same
+    // (DOCX spec §3, PDF spec §6, TXT spec §3). The import's warnings (a PDF's quality note
+    // first) become the run's.
+    let source = if crate::import::needs_import(epub) {
+        let imported = stage!(
             report,
             on_stage,
             "import",
-            deckle_docx::convert(epub, &imported),
+            crate::import::import(epub, &work_path, "imported.epub").expect("an importable source"),
             Err(Box::new(report))
         );
-        report.warnings.extend(ireport.warnings);
-        imported
-    } else if deckle_pdf::is_pdf(epub) {
-        // A text PDF reflowed; the report carries the quality note (PDF spec §6).
-        let imported = work_path.join("imported.epub");
-        let ireport = stage!(
-            report,
-            on_stage,
-            "import",
-            deckle_pdf::convert(epub, &imported),
-            Err(Box::new(report))
-        );
-        report.warnings.extend(ireport.warnings);
-        imported
-    } else if deckle_txt::is_text(epub) {
-        // Plain text the same way (TXT spec §3).
-        let imported = work_path.join("imported.epub");
-        let ireport = stage!(
-            report,
-            on_stage,
-            "import",
-            deckle_txt::convert(epub, &imported),
-            Err(Box::new(report))
-        );
-        report.warnings.extend(ireport.warnings);
-        imported
+        report.warnings.extend(imported.warnings);
+        imported.epub
     } else {
         epub.to_path_buf()
     };

@@ -220,6 +220,23 @@ pub enum Command {
         #[arg(long)]
         bookmarklet: bool,
     },
+    /// Bind several files into one book, in the order given: EPUBs, Word documents, text files,
+    /// text PDFs and web articles (an address, a .webloc/.url link file or a saved .html page).
+    /// Each becomes a part with its own entry in the contents. Writes an EPUB; send it with
+    /// `deckle run`.
+    Bind {
+        /// The files, in reading order (at least two).
+        inputs: Vec<PathBuf>,
+        /// The book's title.
+        #[arg(long)]
+        title: String,
+        /// The book's author (default: the author every part shares, if they share one).
+        #[arg(long)]
+        author: Option<String>,
+        /// Where to write the EPUB (default: "<title>.epub" here).
+        #[arg(long, short)]
+        out: Option<PathBuf>,
+    },
     /// What's on a Kindle: list its books, or remove one.
     Kindle {
         /// `device` for the first connected Kindle, or a folder (an export).
