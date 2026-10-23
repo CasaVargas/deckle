@@ -1,6 +1,6 @@
 # Other readers: Kobo, PocketBook, Boox, reMarkable and an iPad folder
 
-Status: draft, 2026-10-23. No issue yet. The owner hasn't answered §13. Everything below about devices other than Kindle has to be checked on real hardware first (§11, spikes 1–4) before code depends on it.
+Status: accepted, 2026-10-23. No issue yet. The owner delegated the §13 answers; they are ruled there. Everything below about devices other than Kindle has to be checked on real hardware first (§11, spikes 1–4) before code depends on it.
 
 ## 1. Why
 
@@ -42,7 +42,7 @@ People with a Kobo, a reMarkable or an iPad can't use Deckle today, even though 
 | | Kindle | Kobo | PocketBook | Boox | reMarkable | Folder (iPad…) |
 |---|---|---|---|---|---|---|
 | Connection | USB storage / MTP | USB storage | USB storage | folder | USB web interface | folder |
-| Book format | KFX | KEPUB (`.kepub.epub`) | EPUB | EPUB | PDF (and EPUB, §13) | EPUB, optional PDF |
+| Book format | KFX | KEPUB (`.kepub.epub`) | EPUB | EPUB | the paper as PDF, books as EPUB | EPUB, optional PDF |
 | Paper photos | gray | gray (color on Libra/Clara Colour) | gray | per setting | gray (color on Paper Pro) | color |
 | X-Ray, Word Wise | yes | – | – | – | – | – |
 | Prune old editions | yes | yes | yes | yes | yes (spike 4) | yes |
@@ -132,7 +132,7 @@ The paper is queued the same way: `<edition>.book/` with `book.epub`, plus the P
 - **Kobo:** `kepub::convert(book.epub)` (§8.1), named `<name>.kepub.epub`.
 - **PocketBook, Boox, folder with `Epub`:** `book.epub` as is.
 - **Folder with color photos:** the color build (§6.1).
-- **reMarkable, folder with `Pdf`:** the PDF edition for that screen (§9). A book that isn't the paper goes out as EPUB.
+- **reMarkable, folder with `Pdf`:** the PDF edition for that screen (§9). A book that isn't the paper goes out as EPUB: books reflow, and only the paper gets a PDF layout.
 
 **Prune** compares names by stem and ignores the extension, so `deckle-daily-2026-10-20.kepub.epub` counts as an edition the way `.kfx` does now. The rule that only prunes names Deckle wrote (`is_deckle_sidecar`, `prunable`) stays.
 
@@ -163,8 +163,7 @@ books = false                      # also long reads and Inbox books, not only t
 
 # reMarkable over its USB web interface (Settings → Storage → USB web interface).
 [remarkable]
-enabled = false
-format = "pdf"                     # pdf | epub
+enabled = false                    # the paper goes as PDF, books as EPUB (§13)
 ```
 
 - An export runs after every build, plugged in or not. A folder is always reachable, and it has no outbox.
@@ -270,13 +269,15 @@ Results go in `docs/devices.md`, as for Kindles.
   - a 1 s timeout when the tablet isn't there.
 - **Config:** the starter file's commented `[[export]]` and `[remarkable]` parse once uncommented.
 
-## 13. Open questions for the owner
+## 13. Rulings (the owner's open questions)
 
-- **Which first after the refactor:** Kobo or the iPad folder? This draft says folder first (it's smaller and unblocks iPad), then Kobo.
-- **reMarkable EPUB:** offer it as well as PDF, or PDF only? It depends on spike 4.
-- **reMarkable cloud:** a later experimental increment, or never? This draft says later, behind a clearly labelled opt-in, if owners ask.
-- **Email to any address:** open `mail.rs` beyond `@kindle.com` (Kobo has no email delivery; an iPad user could email themselves a PDF)? This draft says not now: the folder covers it.
-- **Naming:** keep "Kindle" in the UI and README headline, or say "e-reader"? This draft keeps the Kindle pitch and adds one line: "Kindle gets the full treatment; Kobo, PocketBook, reMarkable and iPad get the paper and clean books."
+The owner delegated these; each is ruled as below and can be reopened on the PR.
+
+- **Folder first, then Kobo.** The export folder is the smallest piece that exercises the new `Target` and the outbox v2, and it unblocks iPad and Boox at once. Kobo then builds on a refactor already proven in use.
+- **reMarkable: the paper as PDF only, books as EPUB.** A newspaper layout is what reMarkable's EPUB reader handles worst, and books reflow fine there; typesetting whole books as PDF isn't planned. So `[remarkable]` has no `format` key. If spike 4 finds EPUB books unusable too, reMarkable takes the paper only.
+- **reMarkable cloud: not in this spec.** It's revisited only after the USB path ships, and only if owners ask. If it comes, it's an experimental opt-in with its own spec and the token in the keychain (as the SMTP password).
+- **Email stays Kindle-only.** The `@kindle.com` check is a guard against sending the paper to the wrong place, and the export folder already covers iPad. Kobo, PocketBook and reMarkable have no email delivery of their own.
+- **Keep the Kindle pitch.** The README headline and app copy still lead with Kindle, where Deckle does the most. One line is added: "Kindle gets the full treatment; Kobo, PocketBook, reMarkable and iPad get the paper and clean books." The tab renames in §10 stand.
 
 ## 14. Phasing and sizing
 
