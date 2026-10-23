@@ -1135,6 +1135,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-morgue"
+version = "0.4.0"
+dependencies = [
+ "chrono",
+ "deckle-digest",
+ "deckle-readership",
+ "deunicode",
+ "html-escape",
+ "roxmltree",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "zip 9.0.5",
+]
+
+[[package]]
 name = "deckle-readership"
 version = "0.4.0"
 dependencies = [

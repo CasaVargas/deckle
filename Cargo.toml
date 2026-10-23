@@ -24,6 +24,7 @@ deckle-readership = { path = "crates/deckle-readership" }
 deckle-cover = { path = "crates/deckle-cover" }
 deckle-highlights = { path = "crates/deckle-highlights" }
 deckle-shelf = { path = "crates/deckle-shelf" }
+deckle-morgue = { path = "crates/deckle-morgue" }
 anyhow = "1"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
