@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — your library, a smarter Kindle tab, and other readers
 
 - **The Books tab, a library as well as a queue** (Books and Kindle design, phase 5).
   - **Your library** sits beside **To send**: covers from Deckle's library, calibre and the
