@@ -70,6 +70,31 @@ pub struct Article {
     pub photos: Vec<Vec<u8>>,
 }
 
+impl Article {
+    /// Removes the photos `drop(n, jpeg, is_lead)` picks: their `<img>`, any figure left empty,
+    /// and renumbers the tokens of the photos after them.
+    fn drop_photos_where(&mut self, drop: impl Fn(usize, &[u8], bool) -> bool) {
+        use sources::feeds::photo_token;
+        let mut n = 0;
+        while n < self.photos.len() {
+            let lead = self.body.contains(&format!(
+                "<div class=\"figure lead\"><img src=\"{}\"",
+                photo_token(n)
+            ));
+            if !drop(n, &self.photos[n], lead) {
+                n += 1;
+                continue;
+            }
+            self.photos.remove(n);
+            let img = format!("<img src=\"{}\" alt=\"\"/>", photo_token(n));
+            self.body = article::strip_empty_figures(&self.body.replace(&img, ""));
+            for m in n + 1..=self.photos.len() {
+                self.body = self.body.replace(&photo_token(m), &photo_token(m - 1));
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Section {
     /// What the section is across editions: `config::section_key` (readership design §4).
@@ -103,6 +128,32 @@ impl Edition {
     /// The edition number: the day of the year.
     pub fn number(&self) -> u32 {
         self.date.ordinal()
+    }
+
+    /// Drops a site's template picture (a default author avatar, a logo) from the stories: a
+    /// photo whose bytes show up in two or more articles. A story's lead photo stays, and so
+    /// does a photo repeated only within one story.
+    pub fn drop_template_photos(&mut self) {
+        use std::collections::{HashMap, HashSet};
+        let mut stories: HashMap<&[u8], HashSet<(usize, usize)>> = HashMap::new();
+        for (i, s) in self.sections.iter().enumerate() {
+            for (j, a) in s.articles.iter().enumerate() {
+                for jpeg in &a.photos {
+                    stories.entry(jpeg).or_default().insert((i, j));
+                }
+            }
+        }
+        let template: HashSet<Vec<u8>> = stories
+            .into_iter()
+            .filter(|(_, at)| at.len() > 1)
+            .map(|(jpeg, _)| jpeg.to_vec())
+            .collect();
+        if template.is_empty() {
+            return;
+        }
+        for a in self.sections.iter_mut().flat_map(|s| &mut s.articles) {
+            a.drop_photos_where(|_, jpeg, lead| !lead && template.contains(jpeg));
+        }
     }
 
     /// Lead headlines: the first article of each news section, then the seconds, and so on.
@@ -350,6 +401,7 @@ pub fn gather_with(
             ));
         }
     }
+    edition.drop_template_photos();
     Gathered {
         edition,
         news,

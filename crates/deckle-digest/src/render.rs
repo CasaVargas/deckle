@@ -43,7 +43,8 @@ td.day { font-weight: bold; }
 .event .year { font-weight: bold; }
 .small { font-size: 0.85em; }
 .figure { text-align: center; margin: 0.6em 0 0.8em 0; }
-.figure img, p img { width: 100%; }
+.figure img { width: 100%; }
+p img { max-width: 100%; }
 .caption { display: block; font-size: 0.8em; font-style: italic; text-align: left; margin-top: 0.2em; }
 h3.subhead { font-size: 1.05em; margin: 1em 0 0.3em 0; }
 blockquote { margin: 0.6em 1.2em; font-style: italic; }
