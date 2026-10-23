@@ -66,12 +66,18 @@ pub fn parse_send(ok: bool, stdout: &[u8], stderr: &[u8]) -> Result<String, Stri
     Err(line.trim().trim_start_matches("error: ").to_owned())
 }
 
-fn config() -> deckle_digest::Config {
-    deckle_digest::Config::load(&deckle_digest::config::default_path()).unwrap_or_default()
+/// `digest.toml`, or the defaults when there is none. One that won't parse is an error here as
+/// it is for the CLI, not a quiet fall back to `~/Deckle/Morgue`.
+fn config() -> Result<deckle_digest::Config, String> {
+    let path = deckle_digest::config::default_path();
+    if !path.exists() {
+        return Ok(deckle_digest::Config::default());
+    }
+    deckle_digest::Config::load(&path)
 }
 
-fn morgue() -> Morgue {
-    Morgue::from_config(&config())
+fn morgue() -> Result<Morgue, String> {
+    config().map(|c| Morgue::from_config(&c))
 }
 
 fn date_of(s: &str) -> Result<NaiveDate, String> {
@@ -90,17 +96,17 @@ pub async fn morgue_month(year: i32, month: u32) -> Result<MonthView, String> {
         let next = deckle_digest::schedule::status()
             .at
             .and_then(|at| next_build(&at, now.date_naive(), now.time()));
-        month_view(&morgue(), year, month, next)
+        Ok::<_, String>(month_view(&morgue()?, year, month, next))
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn morgue_search(query: String) -> Result<Vec<Hit>, String> {
-    tauri::async_runtime::spawn_blocking(move || search(&morgue(), &query))
+    tauri::async_runtime::spawn_blocking(move || Ok::<_, String>(search(&morgue()?, &query)))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -109,10 +115,10 @@ pub async fn morgue_show(date: String) -> Result<Option<Detail>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let reads = deckle_readership::State::load(&deckle_readership::state_path());
         let state = MorgueState::load(&deckle_morgue::state::state_path());
-        detail(&morgue(), date, &reads, &state)
+        Ok::<_, String>(detail(&morgue()?, date, &reads, &state))
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?
 }
 
 /// Queues the edition for the Kindle again, through the bundled CLI (as `daily_run` does), so
@@ -135,17 +141,15 @@ pub async fn morgue_send(date: String) -> Result<String, String> {
 /// Opens the kept EPUB in whatever the system opens EPUBs with.
 #[tauri::command]
 pub fn morgue_open(date: String) -> Result<(), String> {
-    let epub = morgue().paths(date_of(&date)?).0;
+    let epub = morgue()?.paths(date_of(&date)?).0;
     if !epub.is_file() {
         return Err(format!("{} isn't there any more", epub.display()));
     }
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("open").arg(&epub).spawn();
     #[cfg(target_os = "windows")]
-    let r = std::process::Command::new("cmd")
-        .args(["/C", "start", ""])
-        .arg(&epub)
-        .spawn();
+    // Not `cmd /C start`: it misreads a path with `&` or `^` in it.
+    let r = std::process::Command::new("explorer").arg(&epub).spawn();
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let r = std::process::Command::new("xdg-open").arg(&epub).spawn();
     r.map(|_| ()).map_err(|e| e.to_string())

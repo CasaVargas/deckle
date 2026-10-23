@@ -529,3 +529,23 @@ fn a_send_without_end_serialises_without_the_key() {
     assert_eq!(old.end, None);
     assert!(!serde_json::to_string(&old).unwrap().contains("\"end\""));
 }
+
+#[test]
+fn sends_to_two_kindles_of_one_model_stay_apart() {
+    use deckle_library::{SendRecord, Sidecar};
+    let send = |device: &str| SendRecord {
+        device: device.into(),
+        file: "a.kfx".into(),
+        ..Default::default()
+    };
+    let mut sc = Sidecar::default();
+    sc.record(send("ms:Kindle#A"));
+    sc.record(send("ms:Kindle#B"));
+    assert_eq!(sc.sends.len(), 2);
+    assert_eq!(sc.send_to("ms:Kindle#A").unwrap().device, "ms:Kindle#A");
+    // A record from before serials still answers for either Kindle until it is re-sent.
+    let mut old = Sidecar::default();
+    old.record(send("ms:Kindle"));
+    assert!(old.send_to("ms:Kindle#A").is_some());
+    assert!(old.forget("ms:Kindle#B", "a.kfx"));
+}

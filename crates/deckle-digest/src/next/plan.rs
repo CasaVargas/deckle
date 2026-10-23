@@ -92,10 +92,10 @@ const KINDS: [SectionKind; 9] = [
     SectionKind::Weather,
     SectionKind::Local,
     SectionKind::Feeds,
+    SectionKind::Shelf,
     SectionKind::Lottery,
     SectionKind::Horoscope,
     SectionKind::Puzzle,
-    SectionKind::Shelf,
     SectionKind::Onthisday,
 ];
 

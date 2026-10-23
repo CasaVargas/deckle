@@ -10,6 +10,20 @@
   Reading PDFs needs PDFium (free, from bblanchon/pdfium-binaries): `tools/fetch-pdfium.sh`
   fetches it for a source build, or set `DECKLE_PDFIUM`. Scans (no text layer) are refused; OCR
   is #19. The desktop app doesn't take PDFs yet.
+- **Morgue and From Your Shelf hardening** (#127, #126). Two builds of one date no longer share
+  a temp file, the Morgue's EPUB and sidecar are staged before either is replaced, and
+  `morgue.json` is saved only when the first import ran. Shelf read errors name the file, not the
+  book's title; a back-dated build no longer prints "-1 days ago"; "From Your Shelf" sits after
+  Feeds in the off-sections list; Windows **Open** uses Explorer.
+- **From Your Shelf, smaller fixes** (#126). A snapshot's freshness and the "plugged in" line now
+  count days the same way (in the paper's time zone). The same book on two Kindles is one line
+  even when only one copy has an ASIN (it is matched by title and author). Two Kindles with the
+  same name are told apart by the end of their serial, e.g. "Kindle (0001)".
+- **The Morgue, smaller fixes** (#127). Editions brought in from the cache keep their weather
+  line and lead on the calendar; an "unavailable" note no longer ends up in a story's text. The
+  Every edition card reloads when a build finishes or a send is queued, drops a slow earlier
+  search, says where the earlier editions stayed after you change the folder, and shows a
+  `digest.toml` that won't parse instead of quietly using the default folder.
 - **The Morgue** (#109): every edition is kept in a folder you can see, `~/Deckle/Morgue` (change
   it under `[morgue]` or on the Daily tab), for a year, with the stories' text so you can search
   it. **Every edition** on the Daily tab shows a month of front pages, search with the matching
@@ -17,6 +31,10 @@
   the Kindle. **Send again** puts an old edition back on the Kindle for a week, past the newest
   three. `deckle digest morgue list|search|show|send` does the same from the terminal. The
   editions already in the cache folder are brought in the first time.
+- **Two Kindles of one model keep their own send records and options** (#128). The library's
+  "on this Kindle" and update checks, and the per-Kindle choices (Cover first / Features first,
+  real-ASIN X-Ray), are now keyed by model and USB serial. What was recorded before still applies,
+  and a Kindle's first sighting inherits the model's old choices.
 
 ## 0.4.0 — a real front page, topic sections, From Your Shelf
 
