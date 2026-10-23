@@ -1,6 +1,6 @@
 # The edition bundle: the paper as data, for native readers
 
-Status: draft, 2026-10-23. No issue yet. Open questions are in §12.
+Status: accepted, 2026-10-23. No issue yet. The owner delegated the open questions; they are ruled in §12.
 
 **License of this document:** this specification, and the JSON Schema that implements it (`docs/formats/edition-bundle.schema.json`), are offered under CC-BY-4.0 and MIT respectively, in addition to the repository's GPL-3.0. Anyone may write a program that reads or writes edition bundles, open or closed, without taking on the GPL. Deckle's own code that writes them stays GPL-3.0.
 
@@ -304,13 +304,21 @@ Deckle Daily/
 
 The readers themselves are not this repository's work.
 
-## 12. Open questions for the owner
+## 12. Rulings (the owner's open questions)
 
-- **Long reads inside the bundle:** should `epub/` hold the long reads' EPUBs (so tapping a long read opens it in Books), or should `long_read` only name them? This draft puts them in, when `books = true`.
-- **Puzzle answers in the clear:** a reader can peek at them by opening `edition.json`. The alternative is a salted hash per cell, which only lets the reader check, not reveal. This draft keeps them in the clear: it's a 5×5 mini, and the reader is the owner's own.
-- **Whose video may be looped (§7):** limit footage loops to sources whose terms allow reuse, or keep the motion to the reader's parallax only? Decide before phase 3.
-- **Returns from more than one reader:** an iPad and an iPhone may both write returns for one edition. This draft merges them: read is the furthest, the puzzle is the most filled-in, and marks are the union.
-- **Licensing:** this draft offers the spec under CC-BY-4.0 and the schema under MIT, beside the GPL. That's the owner's call as copyright holder, and the point of the format.
+The owner delegated these; each is ruled as below and can be reopened on the PR.
+
+- **Long reads go inside the bundle**, under `epub/`, when the export has `books = true`. Tapping a long read in a reader should open it, and a bundle has to stay self-contained offline (§2).
+- **Puzzle answers stay in the clear.** It's a 5×5 mini, the reader is the owner's own app, and hashed cells would cost every reader complexity for no real secrecy. Readers keep answers hidden until asked.
+- **Motion (version 1.1) starts with parallax only.** Cutting loops from publishers' videos raises a reuse question per source, so `kind: "footage"` stays in the format but Deckle won't produce it until a list of sources that allow reuse is agreed in its own spec. `"parallax"` is made from photos already in the paper, and `"generated"` stays decoration-only (§7).
+- **Returns from several readers are merged:**
+  - **read:** the furthest `fraction` and the summed `seconds` per story;
+  - **puzzle:** per cell, the most recent reader's letter, and `done` if any reader is done;
+  - **marks:** the union, with the same story and quote counted once.
+- **The license grant stands:** the spec under CC-BY-4.0 and the schema under MIT, beside the GPL.
+  - The owner's own app doesn't need the grant: as copyright holder they can use their format any way they like. The grant is for other people's readers.
+  - It costs little, since reading a documented file format was never something the GPL could stop.
+  - Once published, a CC-BY or MIT grant can't be withdrawn for copies already out. That is fine for a file format, whose value is that others can rely on it.
 
 ## 13. Tests the build must add
 
