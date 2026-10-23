@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — a real front page, topic sections, From Your Shelf
 
+- A site's default author picture (the same grey avatar in several stories, or any small square
+  image) is no longer printed inside stories.
 - **Two Kindles of one model no longer share a snapshot.** A USB-storage Kindle is now told apart
   by its USB serial number (macOS, Windows and Linux), so a second Paperwhite keeps its own shelf
   snapshot and per-Kindle settings. Settings written before keep working. `[sync.devices."<id>"]
