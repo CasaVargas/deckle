@@ -2,7 +2,9 @@
 //! `deckle kindle upgrade` and `put-back` against a folder standing in for a Kindle's
 //! documents/ (Books and Kindle design §13).
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 use assert_cmd::Command;
 
@@ -16,6 +18,7 @@ fn deckle_at(home: &Path) -> Command {
 }
 
 /// Deckle's config folder for `home`, as `deckle_at` sets it up on each OS.
+#[cfg(unix)] // only the tests that run the fake Previewer use it
 fn config_dir(home: &Path) -> PathBuf {
     if cfg!(target_os = "macos") {
         home.join("Library/Application Support/deckle")
@@ -26,6 +29,7 @@ fn config_dir(home: &Path) -> PathBuf {
     }
 }
 
+#[cfg(unix)] // only the tests that run the fake Previewer use it
 fn fake_previewer() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh")
 }
@@ -57,6 +61,7 @@ fn calibre_with_fixture(home: &Path) -> (String, String) {
     (info.title, author)
 }
 
+#[cfg(unix)] // only the tests that run the fake Previewer use it
 fn names(dir: &Path) -> Vec<String> {
     let mut v: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
