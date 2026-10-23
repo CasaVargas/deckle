@@ -229,7 +229,7 @@ export default function App() {
   };
 
   const pickBooks = async () => {
-    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books and web articles", extensions: ["epub", "kfx", "webloc", "url", "html", "htm"] }] });
+    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "txt", "webloc", "url", "html", "htm"] }] });
     if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
   };
 
@@ -252,7 +252,7 @@ export default function App() {
     const rows = await api.inspectBooks(items.map((i) => i.source));
     const cdeFor = new Map(items.map((i) => [i.source, i.cde]));
     if (rows.length === 0) {
-      setNotice("The app sends EPUBs; send Word documents with `deckle run`.");
+      setNotice("The app can't send these; send them with `deckle run`.");
       return;
     }
     setBooks((prev) => {
@@ -438,7 +438,7 @@ export default function App() {
               </div>
               <h1>Drop EPUBs here</h1>
               <p>They become Kindle books with covers, page numbers, X-Ray and Word Wise.</p>
-              <p className="muted small">Also .kfx, web links and saved pages</p>
+              <p className="muted small">Also Word documents, text files, .kfx, web links and saved pages</p>
               <div className="empty-actions">
                 <button className="ghost" onClick={pickBooks}>
                   Choose files…

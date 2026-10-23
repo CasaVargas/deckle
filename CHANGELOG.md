@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Word documents and text files in the app** (#134). Drop a `.docx` or `.txt` on the window,
+  or pick one with **Choose files…**, and it's built and sent like an EPUB, its row showing the
+  title and author it imports with. A folder drop takes Word documents too, but leaves `.txt`
+  files alone (in a folder they're usually notes); name a text file directly to send it.
 - **PDFs, reflowed** (#18). `deckle run paper.pdf` turns a text PDF into a Kindle book that
   reflows: two-column pages read column by column, running heads and page numbers are dropped,
   words broken at line ends are joined again (compounds like "well-known" keep their hyphen), and

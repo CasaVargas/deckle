@@ -314,11 +314,19 @@ pub fn is_kfx(p: &Path) -> bool {
     has_extension(p, "kfx")
 }
 
-fn is_book(p: &Path) -> bool {
-    has_extension(p, "epub") || is_kfx(p)
+/// A Word document or a text file: imported to an EPUB first, as `deckle run` does.
+fn is_imported(p: &Path) -> bool {
+    deckle_docx::is_word(p) || deckle_txt::is_text(p)
 }
 
-/// EPUB and KFX files from a mix of file and folder paths (folders are walked, sorted by name).
+/// What a folder walk takes: EPUB, KFX and Word documents. A `.txt` in a folder is far more
+/// often a note or a README than a book, so text files are taken only when named directly.
+fn is_book(p: &Path) -> bool {
+    has_extension(p, "epub") || is_kfx(p) || deckle_docx::is_word(p)
+}
+
+/// EPUB, KFX and Word files from a mix of file and folder paths (folders are walked, sorted by
+/// name); text files only when given directly.
 pub fn expand_book_paths(paths: &[String]) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
@@ -339,7 +347,7 @@ pub fn expand_book_paths(paths: &[String]) -> Vec<PathBuf> {
         let p = PathBuf::from(p);
         if p.is_dir() {
             walk(&p, &mut out);
-        } else if is_book(&p) {
+        } else if is_book(&p) || deckle_txt::is_text(&p) {
             out.push(p);
         }
     }
@@ -381,7 +389,14 @@ pub fn book_row(path: &Path) -> BookRow {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    match inspect(path) {
+    // A Word document or text file shows the metadata of the EPUB it imports as; the pipeline
+    // imports it again when it runs. Its cover is the generated one, made at run time.
+    let inspected = if is_imported(path) {
+        deckle_library::book_info(path)
+    } else {
+        inspect(path).map_err(|e| e.to_string())
+    };
+    match inspected {
         Ok(info) => {
             let authors = info
                 .creators
@@ -397,6 +412,7 @@ pub fn book_row(path: &Path) -> BookRow {
             let cover = info
                 .cover_href
                 .as_deref()
+                .filter(|_| !is_imported(path))
                 .and_then(|h| cover_data_url(path, h));
             BookRow {
                 id,
@@ -801,12 +817,17 @@ pub fn start_tab(state: State<'_, AppState>) -> &'static str {
     state.start_tab
 }
 
+/// Off the main thread: a Word document or text file is imported to read its metadata.
 #[tauri::command]
-pub fn inspect_books(paths: Vec<String>) -> Vec<BookRow> {
-    expand_book_paths(&paths)
-        .iter()
-        .map(|p| book_row(p))
-        .collect()
+pub async fn inspect_books(paths: Vec<String>) -> Result<Vec<BookRow>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        expand_book_paths(&paths)
+            .iter()
+            .map(|p| book_row(p))
+            .collect()
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Fetches and builds web articles off the main thread; see [`article_rows`].
@@ -1105,16 +1126,42 @@ mod tests {
         std::fs::write(dir.path().join("sub/deeper/c.epub"), b"x").unwrap();
         std::fs::write(dir.path().join("sub/notes.txt"), b"x").unwrap();
         std::fs::write(dir.path().join("sub/deeper/d.kfx"), b"x").unwrap();
+        std::fs::write(dir.path().join("sub/deeper/e.docx"), b"x").unwrap();
+        std::fs::write(dir.path().join("story.txt"), b"x").unwrap();
         let direct = dir.path().join("a.epub");
         let found = expand_book_paths(&[
             dir.path().join("sub").to_string_lossy().into_owned(),
             direct.to_string_lossy().into_owned(),
+            dir.path().join("story.txt").to_string_lossy().into_owned(),
         ]);
         let names: Vec<String> = found
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, ["B.EPUB", "c.epub", "d.kfx", "a.epub"]);
+        // A folder's notes.txt stays out; a text file named directly comes in.
+        assert_eq!(
+            names,
+            ["B.EPUB", "c.epub", "d.kfx", "e.docx", "a.epub", "story.txt"]
+        );
+    }
+
+    #[test]
+    fn word_and_text_rows_show_the_imported_metadata() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures");
+        let docx = book_row(&fixtures.join("docx/deckle-mini.docx"));
+        assert_eq!(docx.error, None, "{}", docx.reason);
+        assert_eq!(docx.title, "Deckle Mini Document");
+        assert_eq!(docx.cover, None, "the cover is generated at run time");
+        let txt = book_row(&fixtures.join("txt/gutenberg-mini.txt"));
+        assert_eq!(txt.error, None, "{}", txt.reason);
+        assert_eq!(txt.title, "The Deckle Mini Novel");
+        assert_eq!(txt.authors, "Ada Testwright");
+        let dir = tempfile::tempdir().unwrap();
+        let bad = dir.path().join("broken.docx");
+        std::fs::write(&bad, b"not a zip").unwrap();
+        let row = book_row(&bad);
+        assert_eq!(row.mode, "error");
+        assert!(row.reason.contains("not a Word document"), "{}", row.reason);
     }
 
     #[test]
