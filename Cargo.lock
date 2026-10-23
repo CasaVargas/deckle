@@ -1187,6 +1187,7 @@ dependencies = [
  "deckle-core",
  "deckle-docx",
  "deckle-kfx",
+ "deckle-mobi",
  "deckle-pdf",
  "deckle-txt",
  "deckle-xray",
@@ -1204,7 +1205,12 @@ name = "deckle-mobi"
 version = "0.4.0"
 dependencies = [
  "encoding_rs",
+ "flate2",
+ "regex",
+ "roxmltree",
+ "tempfile",
  "thiserror 2.0.21",
+ "zip 9.0.5",
 ]
 
 [[package]]

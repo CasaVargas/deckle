@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Upgrade from the Kindle's own copy** (Books and Kindle design, phase 3). A DRM-free AZW3
+  (or a MOBI with a KF8 part) with no original on this computer is rebuilt as an EPUB from the
+  Kindle's copy: its text, pictures, fonts, styles, links and contents come back, and a quality
+  gate refuses a book that doesn't come back whole. The rebuild follows KindleUnpack's KF8
+  path; two Project Gutenberg AZW3s rebuilt this way pass EPUBCheck with no errors. Older
+  MOBI-only files, HUFF/CDIC compression and fixed-layout books are left as they are.
 - **Upgrade books Deckle didn't send** (Books and Kindle design, phase 1). The Kindle tab now
   reads AZW3 and MOBI files too (title, author, cover, DRM) and lists the books whose originals
   are on this computer: in your calibre library (read-only, matched by calibre's id, ASIN, ISBN,

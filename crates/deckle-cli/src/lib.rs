@@ -1068,9 +1068,11 @@ fn kindle_upgrade(
             .unwrap_or_else(|| s.shelved.book.file.clone())
     };
     let named = |s: &Sorted| files.contains(&s.shelved.book.file);
+    // An original on this computer, or the Kindle's own DRM-free KF8 copy (design §5).
+    let from_here = |s: &Sorted| matches!(s.class, Class::HasSource | Class::KindleCopy);
     let candidates: Vec<&Sorted> = sorted
         .iter()
-        .filter(|s| s.class == Class::HasSource)
+        .filter(|s| from_here(s))
         .filter(|s| files.is_empty() || named(s))
         .collect();
     let (plan, reading): (Vec<&Sorted>, Vec<&Sorted>) = candidates
@@ -1079,9 +1081,11 @@ fn kindle_upgrade(
     for f in files {
         if !sorted
             .iter()
-            .any(|s| &s.shelved.book.file == f && s.class == Class::HasSource)
+            .any(|s| &s.shelved.book.file == f && from_here(s))
         {
-            eprintln!("warning: {f}: not a book with an original on this computer");
+            eprintln!(
+                "warning: {f}: not a book Deckle can upgrade (no original, DRM, or not a book)"
+            );
         }
     }
     let count = |c: Class| sorted.iter().filter(|s| s.class == c).count();
@@ -1090,7 +1094,6 @@ fn kindle_upgrade(
             Class::Older,
             "Deckle's older builds: `deckle library reprocess`",
         ),
-        (Class::KindleCopy, "with no original here (AZW3/MOBI)"),
         (Class::NoSource, "KFX with no original here"),
         (Class::AmazonOwn, "Amazon's own, left alone"),
         (Class::Locked, "locked by DRM, left alone"),
@@ -1102,13 +1105,11 @@ fn kindle_upgrade(
     .collect::<Vec<_>>();
     if !json {
         for s in &plan {
-            let src = s.source.as_ref().expect("has a source");
-            println!(
-                "{}\n      {} ← {}",
-                title(s),
-                s.shelved.book.file,
-                src.path.display()
-            );
+            let from = match &s.source {
+                Some(src) => src.path.display().to_string(),
+                None => "rebuilt from the Kindle's own copy".to_owned(),
+            };
+            println!("{}\n      {} ← {from}", title(s), s.shelved.book.file);
         }
         for s in &reading {
             println!(
@@ -1173,8 +1174,25 @@ fn kindle_upgrade(
     let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
     let mut reports = Vec::new();
     for s in &plan {
-        let src = s.source.as_ref().expect("has a source");
         let file = &s.shelved.book.file;
+        let (source, origin) = match &s.source {
+            Some(src) => (src.path.clone(), src.origin),
+            // No original here: the Kindle's copy, rebuilt as an EPUB first.
+            None => match deckle_library::upgrade::rebuild_from_kindle(
+                &mut Conn::new(target),
+                &config,
+                file,
+            ) {
+                Ok(epub) => (epub, deckle_library::sources::Origin::KindleCopy),
+                Err(e) => {
+                    reports.push(RunReport {
+                        error: Some(e),
+                        ..Default::default()
+                    });
+                    continue;
+                }
+            },
+        };
         let at = deckle_core::devices::now_iso();
         let kept = deckle_library::upgrade::originals_dir(&config, &device.key, file, &at);
         let opts = RunOptions {
@@ -1199,8 +1217,8 @@ fn kindle_upgrade(
             replaces: vec![file.clone()],
             originals: Some(kept.clone()),
         };
-        let mut r = run(&src.path, &opts);
-        if let Err(e) = deckle_library::auto_add(&config, &src.path, &r, target) {
+        let mut r = run(&source, &opts);
+        if let Err(e) = deckle_library::auto_add(&config, &source, &r, target) {
             r.warnings.push(deckle_library::auto_add_warning(&e));
         }
         if let Err(e) = deckle_library::upgrade::record(
@@ -1208,8 +1226,8 @@ fn kindle_upgrade(
             &device.key,
             file,
             &title(s),
-            &src.path,
-            Some(src.origin),
+            &source,
+            Some(origin),
             &kept,
             &r,
             &at,

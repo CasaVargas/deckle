@@ -15,6 +15,9 @@ use crate::LibraryConfig;
 pub enum Origin {
     Calibre,
     Folder,
+    /// Rebuilt from the Kindle's own DRM-free copy (Books and Kindle design §5).
+    #[serde(rename = "kindle-copy")]
+    KindleCopy,
 }
 
 /// An original found on this computer.

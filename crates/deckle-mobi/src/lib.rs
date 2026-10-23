@@ -4,7 +4,12 @@
 //! DRM flag, and the cover. Nothing past record 0 and the cover is read, and a DRM-protected
 //! file is never decrypted.
 
+pub mod epub;
 pub mod fixture;
+pub mod index;
+pub mod kf8;
+pub mod palmdb;
+pub mod text;
 
 use std::io::{Read, Seek, SeekFrom};
 
@@ -33,6 +38,12 @@ pub enum MobiError {
     NotMobi(&'static str),
     #[error("reading the file: {0}")]
     Io(#[from] std::io::Error),
+    #[error("the file is damaged: {0}")]
+    Corrupt(&'static str),
+    #[error("can't rebuild this one: {0}")]
+    Unsupported(String),
+    #[error("{0} didn't come back whole: {1}")]
+    BadPart(String, String),
 }
 
 /// What record 0 says about a book.

@@ -53,11 +53,37 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
       return next;
     });
 
-  const upgrade = (rows: UpgradeRow[]) => {
+  const [rebuilding, setRebuilding] = useState(false);
+
+  // Books with no original here are rebuilt from the Kindle's own copy first; one that doesn't
+  // come back whole stays as it is.
+  const upgrade = async (rows: UpgradeRow[]) => {
     if (!view || rows.length === 0) return;
+    const sources = new Map(rows.filter((r) => r.source).map((r) => [r.file, r.source as string]));
+    const failed: string[] = [];
+    const copies = rows.filter((r) => !r.source).map((r) => r.file);
+    if (copies.length) {
+      setRebuilding(true);
+      try {
+        for (const r of await api.deviceRebuild(target, copies)) {
+          if (r.source) sources.set(r.file, r.source);
+          else failed.push(`${rows.find((x) => x.file === r.file)?.title ?? r.file}: ${r.error}`);
+        }
+      } catch (e) {
+        onNotice(String(e));
+        return;
+      } finally {
+        setRebuilding(false);
+      }
+    }
+    const ready = rows.filter((r) => sources.has(r.file));
+    if (ready.length === 0) {
+      onNotice(failed.join(" "));
+      return;
+    }
     onUpgrade(
-      rows.map((r) => ({ source: r.source, cde: null, upgradeOf: { device: view.device, file: r.file, title: r.title, origin: r.origin } })),
-      `${rows.length === 1 ? `${rows[0].title} is` : `${rows.length} books are`} ready to upgrade. The Kindle's copies are kept, so any of them can be put back.`,
+      ready.map((r) => ({ source: sources.get(r.file)!, cde: null, upgradeOf: { device: view.device, file: r.file, title: r.title, origin: r.origin } })),
+      `${ready.length === 1 ? `${ready[0].title} is` : `${ready.length} books are`} ready to upgrade. The Kindle's copies are kept, so any of them can be put back.${failed.length ? ` Left as they are: ${failed.join("; ")}.` : ""}`,
     );
   };
 
@@ -92,16 +118,16 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
               {view.rows.length} book{view.rows.length === 1 ? "" : "s"} can be upgraded
             </h3>
             <p className="muted small">
-              Their originals are on this computer. Each comes back with what a store book has. The Kindle's copy is kept with its highlights and
+              Each comes back with what a store book has, built from its original on this computer or, failing that, from the Kindle's own copy. The Kindle's copy is kept with its highlights and
               reading data, so any upgrade can be put back.
             </p>
           </div>
-          <button className="primary" disabled={busy || chosen.length === 0} onClick={() => upgrade(chosen)}>
-            {upgradeLabel(chosen.length)}
+          <button className="primary" disabled={busy || rebuilding || chosen.length === 0} onClick={() => upgrade(chosen)}>
+            {rebuilding ? "Rebuilding…" : upgradeLabel(chosen.length)}
           </button>
         </div>
       ) : (
-        <p className="muted small">No book on this Kindle that Deckle didn't send has its original on this computer.</p>
+        <p className="muted small">Every book on this Kindle that Deckle can upgrade is already current.</p>
       )}
 
       {view.rows.length > 0 && (
@@ -123,7 +149,7 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
                     </span>
                   </div>
                   <div className="byline">{r.authors.join(", ")}</div>
-                  <div className="shipped" title={r.source}>
+                  <div className="shipped" title={r.source ?? undefined}>
                     {sourceLine(r)}
                   </div>
                   <div className="gains">
@@ -135,7 +161,7 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
                   </div>
                   {warn && <p className="warn small">{warn}</p>}
                 </div>
-                <button className="ghost" disabled={busy} onClick={() => upgrade([r])}>
+                <button className="ghost" disabled={busy || rebuilding} onClick={() => upgrade([r])}>
                   Upgrade
                 </button>
               </li>
