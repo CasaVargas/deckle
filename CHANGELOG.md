@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Upgrades no longer offers a book it can't rebuild.** An older MOBI with no KF8 part (and no
+  original on this computer) was listed as "can be upgraded" and then failed with "couldn't
+  rebuild it cleanly". It is now left as it is and the Upgrades room says so ("1 older MOBI book
+  Deckle can't rebuild"). A book whose original is in calibre or a named folder still upgrades.
+
 ## 0.5.1 — choose the title's typeface
 
 - **The title's typeface, your choice.** `masthead` in `digest.toml` (or **The paper → Title font**

@@ -46,6 +46,9 @@ pub struct DeviceBook {
     /// A fixed-layout book (EXTH 122): comics, children's books. Left as it is.
     #[serde(default)]
     pub fixed_layout: bool,
+    /// An older MOBI with no KF8 part: it can't be rebuilt as an EPUB. False until read.
+    #[serde(default)]
+    pub no_kf8: bool,
     /// calibre's id for the book, when the file says (EXTH 112 `calibre:<uuid>`).
     #[serde(default)]
     pub calibre_id: Option<String>,
@@ -169,6 +172,7 @@ fn read_mobi_details(book: &mut DeviceBook, meta: Option<deckle_mobi::Meta>) {
     book.calibre_id = m.calibre_id;
     book.drm = m.drm;
     book.fixed_layout = m.fixed_layout;
+    book.no_kf8 = !m.kf8;
     book.cover = m.cover;
 }
 
@@ -231,6 +235,7 @@ struct Cached {
     end: i64,
     drm: bool,
     fixed_layout: bool,
+    no_kf8: bool,
     calibre_id: Option<String>,
     isbn: Option<String>,
 }
@@ -259,6 +264,7 @@ fn load_cached(book: &mut DeviceBook, cache: Option<&Path>, key: &str) -> bool {
     book.end = Some(c.end).filter(|e| *e >= 0);
     book.drm |= c.drm;
     book.fixed_layout = c.fixed_layout;
+    book.no_kf8 = c.no_kf8;
     book.calibre_id = c.calibre_id;
     book.isbn = c.isbn;
     book.cover = std::fs::read(jpg).ok();
@@ -278,6 +284,7 @@ fn save_cached(book: &DeviceBook, cache: Option<&Path>, key: &str) {
         end: book.end.unwrap_or(-1),
         drm: book.drm,
         fixed_layout: book.fixed_layout,
+        no_kf8: book.no_kf8,
         calibre_id: book.calibre_id.clone(),
         isbn: book.isbn.clone(),
     };

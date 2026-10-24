@@ -62,3 +62,8 @@ test("rows are grouped by where the new copy comes from, calibre first", () => {
   ]);
   expect(groups[1].title).toBe("Rebuilt from the Kindle's own copy");
 });
+
+test("older MOBI books are listed as left alone, with why", () => {
+  expect(leftAsIs({ "old-mobi": 1 })).toContain("1 older MOBI book Deckle can't rebuild");
+  expect(leftAsIs({ "old-mobi": 3 })).toContain("3 older MOBI books");
+});
