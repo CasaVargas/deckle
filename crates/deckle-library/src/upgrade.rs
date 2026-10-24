@@ -407,10 +407,7 @@ mod tests {
         assert_eq!(classify(&shelved(old.clone()), None), Class::OldMobi);
         assert!(!Class::OldMobi.upgradable());
         // Its original, if one is on this computer, still upgrades it.
-        assert_eq!(
-            classify(&shelved(old), Some(&source())),
-            Class::HasSource
-        );
+        assert_eq!(classify(&shelved(old), Some(&source())), Class::HasSource);
     }
 
     #[test]
