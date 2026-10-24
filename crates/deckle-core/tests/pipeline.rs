@@ -1312,3 +1312,43 @@ fn a_bound_book_runs_through_the_whole_pipeline() {
     assert_eq!(report.info.title, "Two in One");
     assert!(report.delivered.is_some());
 }
+
+#[test]
+#[cfg(unix)]
+fn markdown_file_and_folder_run_through_import_and_delivery() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/markdown");
+    for (source, title) in [("mini.md", "Deckle Markdown Mini"), ("notes", "notes")] {
+        let out = tempfile::tempdir().unwrap();
+        let opts = fill_opts(out.path(), false);
+        let mut stages = Vec::new();
+        let r = deckle_core::pipeline::run_with_progress(&fixtures.join(source), &opts, &mut |s| {
+            stages.push(s)
+        });
+        assert_eq!(r.error, None, "{r:?}");
+        assert_eq!(r.info.title, title);
+        assert_eq!(stages.first(), Some(&"import"));
+        assert!(r.delivered.as_ref().unwrap().exists());
+        assert!(r.work_dir.as_ref().unwrap().join("imported.epub").exists());
+        if source == "notes" {
+            assert!(r.warnings.iter().any(|w| w.contains("Missing")));
+        }
+        std::fs::remove_dir_all(r.work_dir.unwrap()).unwrap();
+    }
+}
+
+#[test]
+#[cfg(unix)]
+#[ignore = "requires installed Kindle Previewer; run explicitly for import validation"]
+fn markdown_real_previewer_smoke() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/markdown");
+    for source in ["mini.md", "notes"] {
+        let out = tempfile::tempdir().unwrap();
+        let mut opts = fill_opts(out.path(), false);
+        opts.previewer = None;
+        opts.keep_work_dir = false;
+        let report = run(&fixtures.join(source), &opts);
+        assert_eq!(report.error, None, "{source}: {report:?}");
+        let bytes = std::fs::read(report.delivered.unwrap()).unwrap();
+        assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
+    }
+}

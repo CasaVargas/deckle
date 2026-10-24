@@ -102,6 +102,10 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   Wikipedia adds summaries.
 - **Word Wise.** Hints from a Wiktionary-derived English lexicon, pointed at the Kindle's own
   dictionary when it has one.
+- **Markdown and notes folders.** A `.md`/`.markdown` file or flat folder becomes one book,
+  with headings, tables, local images and links between notes. Chapters follow filename order.
+  Add notes through the desktop picker or drop a folder; the library keeps a self-contained EPUB
+  snapshot. See [Markdown import](docs/markdown.md) for supported syntax.
 - **Other inputs.** `.docx`, `.txt`, web articles (a URL, `.webloc`/`.url`, or a saved `.html`)
   go through the same pipeline. A finished `.kfx` is sent as is.
 - **Bind several files into one book.** EPUBs, Word documents, text files, PDFs and web
@@ -207,6 +211,7 @@ deckle run book.epub --to device --cde ebok --llm anthropic     # X-Ray descript
 deckle run book.epub --to device --cde ebok --llm openai \
   --llm-endpoint http://localhost:11434/v1 --llm-model llama3   # or a local model
 deckle run book.epub --to device --word-wise-level 3            # hints for rarer words only
+deckle run ./notes --to device                   # a flat Markdown folder, one note per chapter
 deckle run notes.docx --to device                 # also .txt, .pdf, a URL, .webloc/.url/.html
 deckle inspect book.epub --json                   # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF

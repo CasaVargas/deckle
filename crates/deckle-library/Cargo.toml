@@ -11,6 +11,7 @@ deckle-core.workspace = true
 deckle-xray.workspace = true
 deckle-docx.workspace = true
 deckle-txt.workspace = true
+deckle-markdown.workspace = true
 deckle-pdf.workspace = true
 deckle-kfx.workspace = true
 deckle-mobi.workspace = true

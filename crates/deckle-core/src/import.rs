@@ -12,14 +12,22 @@ pub struct Imported {
 
 /// True when `path` needs importing before it's an EPUB.
 pub fn needs_import(path: &Path) -> bool {
-    deckle_docx::is_word(path) || deckle_pdf::is_pdf(path) || deckle_txt::is_text(path)
+    deckle_docx::is_word(path)
+        || deckle_pdf::is_pdf(path)
+        || deckle_txt::is_text(path)
+        || deckle_markdown::is_markdown_file(path)
+        || path.is_dir()
 }
 
 /// Imports `source` into `<dir>/<name>`; `None` when it is already an EPUB (or anything else the
 /// importers don't take). The error is the importer's own message.
 pub fn import(source: &Path, dir: &Path, name: &str) -> Option<Result<Imported, String>> {
     let epub = dir.join(name);
-    let warnings = if deckle_docx::is_word(source) {
+    let warnings = if deckle_markdown::is_markdown_file(source) || source.is_dir() {
+        deckle_markdown::convert(source, &epub)
+            .map(|r| r.warnings)
+            .map_err(|e| e.to_string())
+    } else if deckle_docx::is_word(source) {
         deckle_docx::convert(source, &epub)
             .map(|r| r.warnings)
             .map_err(|e| e.to_string())

@@ -278,8 +278,13 @@ export default function App() {
   };
 
   const pickBooks = async () => {
-    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "txt", "pdf", "webloc", "url", "html", "htm"] }] });
+    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "txt", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] }] });
     if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
+  };
+
+  const pickNotes = async () => {
+    const picked = await openDialog({ directory: true, multiple: false, title: "Choose a folder of Markdown notes" });
+    if (typeof picked === "string") addPaths([picked]);
   };
 
   const setLibraryOptions = async (root: string | null, autoAdd: boolean) => {
@@ -478,6 +483,9 @@ export default function App() {
             </button>
           )}
           {tab === "books" && (
+            <button className="ghost" onClick={pickNotes} disabled={busy}>Add notes folder</button>
+          )}
+          {tab === "books" && (
             <button className="ghost with-icon" onClick={() => setArticleOpen(true)} disabled={busy}>
               <Icon name="link" /> Add article
             </button>
@@ -522,9 +530,9 @@ export default function App() {
               <div className="glyph" aria-hidden="true">
                 <Icon name="download" size={40} />
               </div>
-              <h1>Drop EPUBs here</h1>
+              <h1>Drop books or notes here</h1>
               <p>They become Kindle books with covers, page numbers, X-Ray and Word Wise.</p>
-              <p className="muted small">Also PDFs, Word documents, text files, .kfx, web links and saved pages</p>
+              <p className="muted small">EPUBs, PDFs, Word documents, text, Markdown notes, .kfx, web links and saved pages</p>
               <div className="empty-actions">
                 <button className="ghost" onClick={pickBooks}>
                   Choose files…

@@ -84,10 +84,11 @@ pub struct Library {
     pub root: PathBuf,
 }
 
-/// EPUB, Word document, plain text or PDF: what the library keeps.
+/// EPUB, Word document, plain text, PDF or Markdown (kept as an EPUB snapshot).
 pub fn is_source(path: &Path) -> bool {
     deckle_docx::is_word(path)
         || deckle_txt::is_text(path)
+        || deckle_markdown::is_markdown(path)
         || deckle_pdf::is_pdf(path)
         || path
             .extension()
@@ -96,6 +97,12 @@ pub fn is_source(path: &Path) -> bool {
 
 /// The book's metadata: the EPUB's, or the EPUB a Word document, text file or PDF imports as.
 pub fn book_info(path: &Path) -> Result<BookInfo, String> {
+    if deckle_markdown::is_markdown(path) {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let epub = dir.path().join("imported.epub");
+        deckle_markdown::convert(path, &epub).map_err(|e| e.to_string())?;
+        return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
+    }
     if deckle_docx::is_word(path) {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let epub = dir.path().join("imported.epub");
@@ -301,12 +308,20 @@ impl Library {
             .expect("some name is free")
     }
 
-    /// Adds `source` (EPUB or Word document), or updates the book with the same identity in
+    /// Adds `source` (Markdown is snapshotted as EPUB), or updates the book with the same identity in
     /// place: its source when the bytes differ, its metadata, keeping `added` and `sends`.
     pub fn add(&self, source: &Path) -> Result<Added, String> {
+        // Markdown may depend on adjacent notes and images. Keep the self-contained EPUB,
+        // so re-sends still work when the original folder moves or disappears.
+        if deckle_markdown::is_markdown(source) {
+            let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+            let epub = dir.path().join("notes.epub");
+            deckle_markdown::convert(source, &epub).map_err(|e| e.to_string())?;
+            return self.add(&epub);
+        }
         if !is_source(source) {
             return Err(format!(
-                "{}: the library keeps EPUBs and Word documents",
+                "{}: the library takes EPUBs, Word documents, text, PDFs and Markdown",
                 source.display()
             ));
         }
