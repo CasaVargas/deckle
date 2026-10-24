@@ -56,10 +56,9 @@ simulated mass-storage Kindle. On real hardware it's been verified on a Kindle S
 a Kindle Paperwhite (over USB mass storage); other models are pending. Results per device are in
 [docs/devices.md](docs/devices.md). Bug reports with your model and firmware are very welcome.
 
-## Being built right now
+## The Daily (preview)
 
-On `main` and not in the latest release (0.3.1) yet; it ships in the next one. The first item is
-the screenshot above.
+Included in the current release. The first item is the screenshot above.
 
 - **Tomorrow's paper, so far.** The Daily tab opens on the next edition: a press bar with a
   countdown and **Stop the presses**, a live sketch of the front page that fills in as you save
