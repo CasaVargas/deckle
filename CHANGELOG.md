@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 — choose the title's typeface
 
 - **The title's typeface, your choice.** `masthead` in `digest.toml` (or **The paper → Title font**
   in the app) sets the face the paper's name is drawn in on the cover and the PDF edition:
