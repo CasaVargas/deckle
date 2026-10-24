@@ -59,6 +59,8 @@ struct Front {
 
 #[derive(Serialize)]
 struct SectionJson {
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    ai_brief: Vec<String>,
     key: String,
     kind: &'static str,
     title: String,
@@ -554,6 +556,7 @@ pub fn write(
             kind: kind_name(&s.key),
             title: s.title.clone(),
             kicker: s.kicker.clone(),
+            ai_brief: s.brief.clone(),
             unavailable: s.unavailable.clone(),
             stories,
             weather,

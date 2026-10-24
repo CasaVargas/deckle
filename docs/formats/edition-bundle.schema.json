@@ -59,6 +59,7 @@
         "key": { "type": "string" },
         "kind": { "type": "string", "description": "reading, weather, local, feeds, shelf, lottery, horoscope, puzzle, onthisday; a reader draws a kind it doesn't know from its stories' bodies." },
         "title": { "type": "string" },
+        "ai_brief": { "type": "array", "maxItems": 3, "items": { "type": "string" } },
         "kicker": { "type": ["string", "null"] },
         "unavailable": { "type": ["string", "null"] },
         "stories": { "type": "array", "items": { "$ref": "#/$defs/story" } },

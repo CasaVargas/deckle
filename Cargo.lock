@@ -1119,6 +1119,7 @@ dependencies = [
  "deckle-core",
  "deckle-highlights",
  "deckle-pdf",
+ "deckle-xray",
  "deunicode",
  "dom_query",
  "dom_smoothie",

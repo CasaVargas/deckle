@@ -227,6 +227,7 @@ pub fn section(
     let section = Section {
         weather: None,
         puzzle: None,
+        brief: Vec::new(),
         key: String::new(),
         title: TITLE.into(),
         kicker: Some(kicker),

@@ -164,6 +164,7 @@ mod tests {
 
     fn section(title: &str, headlines: &[&str]) -> Section {
         Section {
+            brief: Vec::new(),
             key: title.to_lowercase(),
             title: title.into(),
             articles: headlines

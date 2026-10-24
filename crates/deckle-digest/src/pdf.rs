@@ -350,6 +350,16 @@ fn document(g: &Gathered, t: Type, photos: Photos) -> Doc {
             p.after = t.body * 0.5;
             d.para(p);
         }
+        if !s.brief.is_empty() {
+            d.para(Para::new(vec![d.run(
+                Face::Italic,
+                t.body,
+                "AI-written section brief",
+            )]));
+            for line in &s.brief {
+                d.para(Para::new(vec![d.run(Face::Regular, t.body, line)]));
+            }
+        }
         for (j, a) in s.articles.iter().enumerate() {
             if j > 0 {
                 d.blocks.push(Block::Space(t.body * 0.6));

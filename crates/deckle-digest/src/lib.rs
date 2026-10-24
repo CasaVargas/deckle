@@ -11,6 +11,7 @@ pub mod bundle;
 pub mod config;
 pub mod cover;
 pub mod day;
+pub mod editor;
 pub mod epub;
 pub mod export;
 pub mod fetch;
@@ -132,6 +133,8 @@ impl Article {
 
 #[derive(Clone, Debug, Default)]
 pub struct Section {
+    /// AI-written news brief; empty unless the optional editor succeeded.
+    pub brief: Vec<String>,
     /// What the section is across editions: `config::section_key` (readership design §4).
     pub key: String,
     pub title: String,
@@ -321,6 +324,30 @@ pub fn gather_with(
     net: &dyn Net,
     opts: &GatherOptions,
 ) -> Gathered {
+    let key = std::env::var(cfg.llm.provider.env_key()).unwrap_or_default();
+    let key = zeroize::Zeroizing::new(key);
+    gather_with_editor(
+        cfg,
+        date,
+        now,
+        net,
+        opts,
+        &key,
+        &mut deckle_xray::llm::http_post,
+    )
+}
+
+/// Deterministic/offline-test entry point: provider HTTP and credentials are injected.
+#[allow(clippy::too_many_arguments)]
+pub fn gather_with_editor(
+    cfg: &Config,
+    date: NaiveDate,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    opts: &GatherOptions,
+    key: &str,
+    post: &mut deckle_xray::llm::Post<'_>,
+) -> Gathered {
     let mut edition = Edition {
         paper: cfg.title.clone(),
         date,
@@ -494,14 +521,16 @@ pub fn gather_with(
         }
     }
     edition.drop_template_photos();
-    Gathered {
+    let mut gathered = Gathered {
         edition,
         news,
         reading: g_reading,
         long_reads,
         reading_outcomes,
         notes,
-    }
+    };
+    editor::edit(&mut gathered, &cfg.llm, key, post);
+    gathered
 }
 
 /// Gathers and writes `<out_dir>/deckle-daily-<date>.epub`.

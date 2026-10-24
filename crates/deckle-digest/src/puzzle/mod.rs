@@ -204,6 +204,7 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
             .push_str(&format!("<p class=\"credit\">{}</p>\n", esc(CREDIT)));
     }
     Section {
+        brief: Vec::new(),
         key: section_key(SectionKind::Puzzle, None),
         title: "Puzzle".into(),
         kicker: Some(KICKER.into()),

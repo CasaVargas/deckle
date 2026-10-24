@@ -392,6 +392,7 @@ fn section_of(
     let mut section = Section {
         weather: None,
         puzzle: None,
+        brief: Vec::new(),
         key: String::new(),
         title: title.into(),
         kicker,

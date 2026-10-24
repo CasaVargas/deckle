@@ -576,6 +576,7 @@ mod front {
         let sections: Vec<Section> = sections
             .iter()
             .map(|(key, titles)| Section {
+                brief: Vec::new(),
                 key: (*key).into(),
                 title: (*key).into(),
                 articles: titles

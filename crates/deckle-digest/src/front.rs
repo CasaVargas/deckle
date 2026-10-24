@@ -167,6 +167,7 @@ mod tests {
 
     fn gathered(local: Vec<Article>) -> Gathered {
         let section = |key: &str, title: &str, articles| Section {
+            brief: Vec::new(),
             key: key.into(),
             title: title.into(),
             articles,
@@ -218,6 +219,7 @@ mod tests {
 
     fn many(key: &str, n: usize) -> Section {
         Section {
+            brief: Vec::new(),
             key: key.into(),
             title: key.into(),
             articles: (0..n).map(|i| story(&format!("{key}{i}"), false)).collect(),

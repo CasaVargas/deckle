@@ -196,6 +196,12 @@ fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8
     if let Some(k) = &s.kicker {
         body.push_str(&format!("<p class=\"kicker\">{}</p>\n", esc(k)));
     }
+    if !s.brief.is_empty() {
+        body.push_str("<p class=\"meta\">AI-written section brief</p>\n");
+        for line in &s.brief {
+            body.push_str(&format!("<p>{}</p>\n", esc(line)));
+        }
+    }
     if s.articles.len() >= 2 {
         body.push_str("<p class=\"in-section\">In this section</p>\n<ul class=\"toc\">\n");
         for (j, a) in s.articles.iter().enumerate() {

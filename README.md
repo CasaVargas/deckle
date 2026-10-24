@@ -299,3 +299,32 @@ Styles use generic fonts and relative spacing; Kindle reader settings can affect
 appearance. Fixed-layout EPUBs skip styling with a warning. Presets apply to Kindle/KFX
 conversion; the direct Kobo/PocketBook route does not support them yet.
 See the [preset design](docs/superpowers/specs/2026-10-24-book-style-presets-design.md) for the full defaults.
+
+### Optional Daily AI editor
+
+In **Daily → The paper → AI editor**, enable cross-feed duplicate removal, short
+news-section briefs, and AI-written horoscopes. It is off by default. The **Use Books
+provider** button copies your X-Ray provider, model, and server address; Daily reads
+credentials from `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the environment running
+Deckle, including scheduled builds. It does not copy saved Books API keys.
+
+The same settings can be written in `digest.toml`:
+
+```toml
+[llm]
+enabled = true
+provider = "openai"             # or "anthropic"
+model = ""                      # blank uses the existing provider default
+endpoint = ""                   # or a local OpenAI-compatible API base URL
+```
+
+Local OpenAI-compatible servers can run without a key; select a model installed on that
+server. API keys do not belong in this file. Feed/local-news titles and bounded excerpts,
+the date, and horoscope signs go to the selected provider. Saved reading, calendars,
+highlights, photos, and source URL fields are excluded. Briefs contain up to three short
+sentences; line wrapping depends on the reader. AI output is labelled and can be inaccurate.
+
+The editor keeps the first story in each validated duplicate group. It leaves news text
+intact. If the provider fails, an answer is invalid, or an edition exceeds 80 stories or
+20 news sections, the original paper ships with one runner notice. Rebuilding can produce
+different edits. No hosted provider is contacted until this option is enabled.
