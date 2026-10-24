@@ -7,10 +7,16 @@ use std::path::{Path, PathBuf};
 use base64::Engine;
 use deckle_core::clippings::read_on;
 use deckle_core::deliver::{Conn, Target};
-use deckle_core::inventory::{Space, list_on, list_with_positions, remove_on};
+use deckle_core::inventory::{DeviceBook, Space, list_with_positions, remove_on};
 use deckle_highlights::{Outcome, Pending, State};
+use deckle_library::care::{
+    self, Backup, BackupReport, Kind, Reading, RestoreReport, SpaceSplit, Spare, Weighed, kind_of,
+    reading,
+};
 use deckle_library::freshness::Reason;
-use deckle_library::shelf::{Shelved, shelve, source_cover};
+use deckle_library::shelf::{shelve, source_cover};
+use deckle_library::sources::{Sources, home};
+use deckle_library::upgrade::{Class, Sorted, sort};
 use deckle_library::{Library, LibraryConfig};
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +49,14 @@ pub struct DeviceBookRow {
     pub updates: Vec<UpdateReason>,
     /// Another book on this Kindle is the same one.
     pub duplicate: bool,
+    /// Its upgrade class (Books and Kindle design §3).
+    pub class: Class,
+    pub kind: Kind,
+    /// How far in, 0–1: the KFX's last position over its end, else the Kindle's own count.
+    pub fraction: Option<f64>,
+    pub reading: Reading,
+    /// When it was last read, UTC.
+    pub last_read: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -64,6 +78,13 @@ pub struct DeviceShelf {
     pub highlights: Vec<Pending>,
     /// Reading or parsing `My Clippings.txt` went wrong (the rows it could read still show).
     pub highlights_error: Option<String>,
+    /// This Kindle's room (design §7): the space by kind, what could make room, and the
+    /// backups on this computer.
+    pub split: Option<SpaceSplit>,
+    pub spare: Vec<Spare>,
+    pub backups: Vec<Backup>,
+    /// Reading positions left unread past the per-connection cap.
+    pub unread_positions: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,7 +99,7 @@ fn highlights_state(config: &Path) -> PathBuf {
     config.with_file_name("highlights.json")
 }
 
-fn data_url(bytes: &[u8]) -> String {
+pub fn data_url(bytes: &[u8]) -> String {
     let mime = if bytes.starts_with(&[0x89, b'P', b'N', b'G']) {
         "image/png"
     } else if bytes.starts_with(b"GIF8") {
@@ -123,7 +144,32 @@ pub fn library_set_at(
     Ok(library_status_at(config))
 }
 
-fn row(s: Shelved) -> DeviceBookRow {
+/// How far in `book` is, and when it was last read, from its position file.
+fn progress(book: &DeviceBook) -> (Option<f64>, Option<String>) {
+    let Some(p) = book
+        .yjf
+        .as_deref()
+        .and_then(|b| deckle_readership::parse_yjf(b).ok())
+    else {
+        return (None, None);
+    };
+    let by_end = match (p.last, book.end) {
+        (Some(last), Some(end)) if end > 0 => Some((last.max(0) as f64 / end as f64).min(1.0)),
+        _ => None,
+    };
+    let fraction = by_end
+        .or(p.kindle_fraction)
+        .filter(|f| f.is_finite())
+        .map(|f| f.clamp(0.0, 1.0));
+    (fraction, p.last_read)
+}
+
+fn row(sorted: Sorted) -> DeviceBookRow {
+    let Sorted {
+        shelved: s, class, ..
+    } = sorted;
+    let kind = kind_of(&s, deckle_digest::EDITION_PREFIX);
+    let (fraction, last_read) = progress(&s.book);
     let cover = s
         .book
         .cover
@@ -159,6 +205,11 @@ fn row(s: Shelved) -> DeviceBookRow {
             })
             .collect(),
         duplicate: s.duplicate,
+        class,
+        kind,
+        fraction,
+        reading: reading(fraction),
+        last_read,
     }
 }
 
@@ -177,18 +228,66 @@ pub fn shelf_on(
                 .for_device(&deckle_core::sync::device_id(conn.target))
                 .shelf
     });
-    let (inv, skipped) = match shelf_due {
-        true => list_with_positions(conn, cache, deckle_digest::EDITION_PREFIX),
-        false => list_on(conn, cache).map(|inv| (inv, 0)),
-    }
-    .map_err(|e| e.to_string())?;
+    // Every book's position, for the Shelf's progress (design §7).
+    let (inv, skipped) = list_with_positions(conn, cache, deckle_digest::EDITION_PREFIX)
+        .map_err(|e| e.to_string())?;
     let library = Library::configured(config).map(|(l, _)| l);
     let shelf_books = shelf_due.then(|| inv.books.clone());
     let current = deckle_library::freshness::Current::now(&Default::default());
-    let mut books: Vec<DeviceBookRow> = shelve(inv.books, library.as_ref(), &device.key, &current)
-        .into_iter()
-        .map(row)
+    let shelved = shelve(inv.books, library.as_ref(), &device.key, &current);
+    let keep = deckle_digest::Config::load(&digest).map_or(0, |c| c.keep);
+    let old_papers = match keep {
+        // No digest config: the paper's own prune decides nothing.
+        0 => Vec::new(),
+        keep => deckle_core::deliver::prunable(
+            shelved
+                .iter()
+                .filter(|s| !s.book.file.contains('/'))
+                .map(|s| s.book.file.clone()),
+            deckle_digest::EDITION_PREFIX,
+            keep,
+        ),
+    };
+    let weighed: Vec<(Kind, Option<f64>)> = shelved
+        .iter()
+        .map(|s| {
+            (
+                kind_of(s, deckle_digest::EDITION_PREFIX),
+                progress(&s.book).0,
+            )
+        })
         .collect();
+    let spare = care::spare(
+        &shelved
+            .iter()
+            .zip(&weighed)
+            .map(|(s, (kind, fraction))| Weighed {
+                shelved: s,
+                kind: *kind,
+                fraction: *fraction,
+            })
+            .collect::<Vec<_>>(),
+        &old_papers,
+    );
+    let split = inv.space.map(|space| {
+        care::split(
+            &shelved
+                .iter()
+                .zip(&weighed)
+                .map(|(s, (kind, _))| (*kind, s.book.size))
+                .collect::<Vec<_>>(),
+            space,
+        )
+    });
+    let sources = Sources::gather(&LibraryConfig::load(config), home().as_deref());
+    let mut books: Vec<DeviceBookRow> = sort(shelved, &sources, |b| {
+        deckle_readership::parse_yjf(b)
+            .ok()
+            .and_then(|p| p.kindle_fraction)
+    })
+    .into_iter()
+    .map(row)
+    .collect();
     // Deckle's books first, then by title (else file name).
     books.sort_by_cached_key(|b| {
         (
@@ -223,6 +322,10 @@ pub fn shelf_on(
         books,
         highlights,
         highlights_error,
+        split,
+        spare,
+        backups: care::backups(&care::backups_root(config)),
+        unread_positions: skipped,
     })
 }
 
@@ -381,6 +484,19 @@ pub fn write_highlights_on(conn: &mut Conn<'_>, state: &Path) -> Result<Outcome,
     })
 }
 
+/// Before an upgrade replaces anything (Books and Kindle design §6): when there's a folder for
+/// highlights, what's new goes there, over its own session. A failure is logged; the old copy's
+/// `.sdr` is kept either way.
+pub fn highlights_first(target: &Target, config: &Path) {
+    let state = highlights_state(config);
+    if State::load(&state).folder.is_none() {
+        return;
+    }
+    if let Err(e) = write_highlights_on(&mut Conn::new(target), &state) {
+        eprintln!("upgrade: highlights weren't saved first: {e}");
+    }
+}
+
 /// Every English word looked up on the Kindle, as a CSV Anki imports, written over `to` (#135).
 /// Reads `vocab.db` over `conn`, never writes to the Kindle, and defines words only from a Word
 /// Wise database already on this machine. Returns how many words went out.
@@ -402,7 +518,7 @@ pub fn remove_from(conn: &mut Conn<'_>, config: &Path, file: &str) -> Result<Vec
     Ok(removed)
 }
 
-fn with_target<T: Send + 'static>(
+pub fn with_target<T: Send + 'static>(
     target: RunTarget,
     f: impl FnOnce(&mut Conn<'_>, &Path) -> Result<T, String> + Send + 'static,
 ) -> Result<T, String> {
@@ -485,6 +601,151 @@ pub async fn device_remove(target: RunTarget, file: String) -> Result<Vec<String
     .map_err(|e| e.to_string())?
 }
 
+/// Removes each of `files`, over one session (This Kindle's Make room). `(file, error)` for
+/// each that couldn't go.
+pub fn remove_many(conn: &mut Conn<'_>, config: &Path, files: &[String]) -> Vec<(String, String)> {
+    files
+        .iter()
+        .filter_map(|f| remove_from(conn, config, f).err().map(|e| (f.clone(), e)))
+        .collect()
+}
+
+/// Backs up every DRM-free book on the Kindle and its `.sdr` into a new folder under `into`
+/// (default: `kindle-backups/` beside `library.json`).
+pub fn backup_to(
+    conn: &mut Conn<'_>,
+    config: &Path,
+    cache: Option<&Path>,
+    into: Option<&Path>,
+) -> Result<BackupReport, String> {
+    let device = deckle_library::device_ref(conn.target);
+    // Every book's details, so an AZW whose record 0 says DRM is left out over MTP too.
+    let (inv, _) =
+        deckle_core::inventory::list_detailed(conn, cache, deckle_digest::EDITION_PREFIX)
+            .map_err(|e| e.to_string())?;
+    let library = Library::configured(config).map(|(l, _)| l);
+    let current = deckle_library::freshness::Current::now(&Default::default());
+    let shelved = shelve(inv.books, library.as_ref(), &device.key, &current);
+    let root = into.map_or_else(|| care::backups_root(config), Path::to_path_buf);
+    let at = deckle_digest::chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%SZ")
+        .to_string();
+    care::backup_on(
+        conn,
+        &shelved,
+        &root,
+        &deckle_shelf::friendly_name(&device.name),
+        deckle_digest::EDITION_PREFIX,
+        &at,
+    )
+}
+
+/// Puts the backup in `dir` on the Kindle, leaving the books already there alone.
+pub fn restore_from(conn: &mut Conn<'_>, dir: &Path) -> Result<RestoreReport, String> {
+    let present: Vec<String> = deckle_core::inventory::list_on(conn, None)
+        .map_err(|e| e.to_string())?
+        .books
+        .into_iter()
+        .map(|b| b.file)
+        .collect();
+    care::restore_on(conn, dir, &present)
+}
+
+#[tauri::command]
+pub async fn device_remove_many(
+    target: RunTarget,
+    files: Vec<String>,
+) -> Result<Vec<(String, String)>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        with_target(target, move |conn, config| {
+            Ok(remove_many(conn, config, &files))
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn device_backup(
+    target: RunTarget,
+    into: Option<String>,
+) -> Result<BackupReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        with_target(target, move |conn, config| {
+            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+            backup_to(conn, config, Some(&cache), into.as_deref().map(Path::new))
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn device_restore(target: RunTarget, dir: String) -> Result<RestoreReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        with_target(target, move |conn, _| restore_from(conn, Path::new(&dir)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[cfg(test)]
+mod rooms_tests {
+    use super::*;
+
+    #[test]
+    fn the_shelf_reads_an_azw3s_place_and_this_kindle_backs_it_up_and_restores_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = tmp.path().join("library.json");
+        let kindle = tmp.path().join("Kindle");
+        std::fs::create_dir_all(kindle.join("Side.sdr")).unwrap();
+        std::fs::write(
+            kindle.join("Side.azw3"),
+            deckle_mobi::fixture::build(&deckle_mobi::fixture::Book {
+                title: "Side",
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        // 15% in, by the Kindle's own count.
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/yjf/book.yjf"),
+            kindle.join("Side.sdr/Side.azw3f"),
+        )
+        .unwrap();
+        let target = Target::Folder(kindle);
+        let shelf = shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        let b = &shelf.books[0];
+        assert_eq!((b.kind, b.reading), (Kind::Sideloaded, Reading::Reading));
+        assert!(
+            (b.fraction.unwrap() - 0.15).abs() < 0.01,
+            "{:?}",
+            b.fraction
+        );
+        assert!(shelf.spare.is_empty() && shelf.backups.is_empty());
+
+        let done = backup_to(&mut Conn::new(&target), &config, None, None).unwrap();
+        assert_eq!(done.copied, ["Side.azw3"]);
+        let shelf = shelf_on(&mut Conn::new(&target), &config, None).unwrap();
+        assert_eq!(shelf.backups.len(), 1);
+
+        let other = Target::Folder(tmp.path().join("Other"));
+        std::fs::create_dir_all(tmp.path().join("Other")).unwrap();
+        let back = restore_from(&mut Conn::new(&other), &shelf.backups[0].dir).unwrap();
+        assert_eq!(back.restored, ["Side.azw3"]);
+        assert!(
+            remove_many(
+                &mut Conn::new(&other),
+                &config,
+                &["Side.azw3".into(), "Gone.azw3".into()]
+            )
+            .len()
+                == 1
+        );
+        assert!(!tmp.path().join("Other/Side.azw3").exists());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -538,6 +799,12 @@ mod tests {
             Some(book.source_path().to_string_lossy().as_ref())
         );
         assert!(shelf.books[1].library_source.is_none());
+
+        assert_eq!(b.kind, Kind::Deckle);
+        // The golden KFX carries no build stamp, so it reads as an older build.
+        assert_eq!(b.class, Class::Older);
+        assert_eq!(shelf.books[1].class, Class::Pdf);
+        assert!(shelf.split.is_some());
 
         remove_from(&mut conn, &config, file).unwrap();
         assert!(!out.join(file).exists());

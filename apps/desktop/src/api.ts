@@ -2,13 +2,23 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, ReadershipView, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus } from "./types";
+import type { BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
   path: string;
   cde: string | null;
   asin: string | null;
+  upgrade_of?: UpgradeOf | null;
+  cover?: CoverRequest;
+}
+
+export type CoverRequest = { kind: "generated" } | { kind: "image"; path: string } | null;
+
+/** The cover a send asks for: the picked image's path, without the thumbnail the app shows. */
+export function coverRequest(c: CoverChoice | null): CoverRequest {
+  if (!c || c.kind === "own") return null;
+  return c.kind === "image" ? { kind: "image", path: c.path } : { kind: c.kind };
 }
 
 export const api = {
@@ -17,6 +27,18 @@ export const api = {
   takePreloadedTarget: () => invoke<string | null>("take_preloaded_target"),
   startTab: () => invoke<"books" | "daily" | "kindle">("start_tab"),
   inspectBooks: (paths: string[]) => invoke<BookRow[]>("inspect_books", { paths }),
+  /** The Books tab's library; `device` is the footer's Kindle, for "on this Kindle". */
+  libraryCatalog: (device: string | null) => invoke<CatalogView>("library_catalog", { device }),
+  /** Small covers, as `[path, data URL]`. */
+  libraryCovers: (paths: string[]) => invoke<[string, string | null][]>("library_covers", { paths }),
+  /** What Deckle will do to a book, with the cover picked for it (Before you send). */
+  bookPreflight: (path: string, cover: CoverChoice | null) => invoke<PreflightView>("book_preflight", { path, cover: coverRequest(cover) }),
+  coverCandidates: (title: string, author: string, isbn: string | null) => invoke<CoverOffer[]>("cover_candidates", { title, author, isbn }),
+  /** Fetches a picked Open Library cover; resolves to its path on this computer. */
+  coverFetch: (large: string) => invoke<string>("cover_fetch", { large }),
+  libraryFixDetails: (dir: string, details: BookDetails) => invoke<void>("library_fix_details", { dir, details }),
+  libraryWatchSet: (dir: string | null) => invoke<string | null>("library_watch_set", { dir }),
+  libraryWatchScan: () => invoke<Watched>("library_watch_scan"),
   /** The files bound, in order, into one book; resolves to its row (#22). */
   bindBooks: (paths: string[], title: string, author: string | null) => invoke<BookRow>("bind_books", { paths, title, author }),
   /** Web addresses, .webloc/.url link files or saved pages, each built into a book (slow: fetches). */
@@ -27,6 +49,15 @@ export const api = {
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
   runBooks: (books: RunRequest[], target: RunTarget) =>
     invoke<void>("run_books", { books, target }),
+  /** Books Deckle didn't send, sorted, with their originals; reads every book once (slow over MTP the first time). */
+  deviceUpgrades: (target: RunTarget) => invoke<UpgradesView>("device_upgrades", { target }),
+  /** Rebuilds the Kindle's own DRM-free copies of these books as EPUBs, for books with no original here. */
+  deviceRebuild: (target: RunTarget, files: string[]) => invoke<Rebuild[]>("device_rebuild", { target, files }),
+  /** Undoes an upgrade: the kept copy goes back, Deckle's goes. */
+  devicePutBack: (target: RunTarget, file: string) => invoke<PutBack>("device_put_back", { target, file }),
+  librarySources: () => invoke<SourcesStatus>("library_sources"),
+  librarySourcesSet: (findInCalibre: boolean, calibre: string | null, folders: string[]) =>
+    invoke<SourcesStatus>("library_sources_set", { findInCalibre, calibre, folders }),
   planBooks: (books: RunRequest[], target: RunTarget) =>
     invoke<PlanRow[]>("plan_books", { books, target }),
   setDeviceOptions: (key: string, cdeOverride: "pdoc" | "ebok" | null, verifiedRealAsin: boolean) =>
@@ -39,6 +70,11 @@ export const api = {
   /** Slow over MTP (a few seconds). */
   deviceBooks: (target: RunTarget) => invoke<DeviceShelf>("device_books", { target }),
   deviceRemove: (target: RunTarget, file: string) => invoke<string[]>("device_remove", { target, file }),
+  /** Removes each file over one session; `[file, error]` for each that couldn't go. */
+  deviceRemoveMany: (target: RunTarget, files: string[]) => invoke<[string, string][]>("device_remove_many", { target, files }),
+  /** Every DRM-free book and its .sdr into a new folder under `into` (default: kindle-backups/). */
+  deviceBackup: (target: RunTarget, into: string | null) => invoke<BackupReport>("device_backup", { target, into }),
+  deviceRestore: (target: RunTarget, dir: string) => invoke<RestoreReport>("device_restore", { target, dir }),
   highlightsStatus: () => invoke<HighlightsStatus>("highlights_status"),
   highlightsSet: (folder: string | null, clippings: boolean) => invoke<HighlightsStatus>("highlights_set", { folder, clippings }),
   /** Reads the Kindle again (its own session) and writes what's new into the folder. */

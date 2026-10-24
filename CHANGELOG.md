@@ -7,6 +7,52 @@
   `"blackletter"` (as before), `"serif"`, `"sans"`, or the path to a `.ttf` of your own. A
   file that can't be used falls back to the blackletter and the run says why. Inside the book the
   title is still your Kindle's own font.
+
+## 0.5.0 — your library, a smarter Kindle tab, and other readers
+
+- **The Books tab, a library as well as a queue** (Books and Kindle design, phase 5).
+  - **Your library** sits beside **To send**: covers from Deckle's library, calibre and the
+    folders you named. You can search it, and group it by series with the gaps called out
+    ("The Expanse, 1–4 · 5 isn't in your library"). **Not on this Kindle** shows what that
+    Kindle doesn't have yet. Pick books and add them to To send. With no library, the queue is
+    the whole tab, as before.
+  - **Before you send**: click a queued book's title for:
+    - what Deckle will do: typography fixes counted, pop-up notes made, the cover, the mode and
+      why, X-Ray and Word Wise, contents, pictures and warnings, worked out by running the
+      stages before Kindle Previewer;
+    - the first page of chapter one as a Kindle sets it, **Before** and **After** the
+      typography pass;
+    - **Cover**: its own, Deckle's typographic cover, or one of Open Library's (with Open
+      Library on);
+    - **Fix details**: title, authors, series and number, written to the library's copy and
+      never to the original or calibre.
+  - **Watch a folder** (Settings → General, off by default): EPUBs that land in it are added to
+    the library.
+- **The Kindle tab, in rooms** (Books and Kindle design, phase 4). Like the Daily tab, a rail
+  down the left: **Shelf**, every book with its cover, a progress bar and when it was last
+  opened (from the Kindle's own position files, now read for AZW3 as well as KFX), filtered by
+  Reading, Not started, Finished, Amazon's own, Sideloaded or Deckle, sorted by recently read,
+  title, author or size, and searchable; **Upgrades**, grouped by where each new copy comes from;
+  **Highlights**; **Words**; and **This Kindle**: the space split by kind, **Make room** (finished
+  books over 10 MB, second copies of a book, papers past `keep`) and **Back up**, which copies
+  every DRM-free book and its `.sdr` (reading position, highlights) to this computer, Amazon's own
+  left out. **Restore** puts a backup on any Kindle, leaving the books already there alone. CLI:
+  `deckle kindle backup [--into DIR]` and `deckle kindle restore DIR`.
+- **Upgrade from the Kindle's own copy** (Books and Kindle design, phase 3). A DRM-free AZW3
+  (or a MOBI with a KF8 part) with no original on this computer is rebuilt as an EPUB from the
+  Kindle's copy: its text, pictures, fonts, styles, links and contents come back, and a quality
+  gate refuses a book that doesn't come back whole. The rebuild follows KindleUnpack's KF8
+  path; two Project Gutenberg AZW3s rebuilt this way pass EPUBCheck with no errors. Older
+  MOBI-only files, HUFF/CDIC compression and fixed-layout books are left as they are.
+- **Upgrade books Deckle didn't send** (Books and Kindle design, phase 1). The Kindle tab now
+  reads AZW3 and MOBI files too (title, author, cover, DRM) and lists the books whose originals
+  are on this computer: in your calibre library (read-only, matched by calibre's id, ASIN, ISBN,
+  then title and author) or in folders you name in Settings → General. **Upgrade** sends each
+  through the Books tab with Enhanced Typesetting, page numbers, X-Ray and Word Wise in place of
+  the Kindle's copy, which is kept with its `.sdr` (highlights, reading data); **Put back**
+  undoes it. Books you're partway through aren't ticked at first. Store books and anything with
+  DRM are never touched. CLI: `deckle kindle upgrade [--dry-run]` and `deckle kindle put-back`;
+  `deckle kindle books` names each book's class.
 - **The paper as data, version 1.1: fit for a 12.9-inch iPad** (Books and Kindle design,
   phase 2). Bundles now carry each photo as a full-size color master (up to 2400 px, JPEG 85)
   with its caption, credit, alt text, focus point and average color, and each story's byline,

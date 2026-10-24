@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 fs4 = "0.13"
 deckle-kfx.workspace = true
+deckle-mobi.workspace = true
 deckle-transport.workspace = true
 deckle-xray.workspace = true
 deckle-wordwise.workspace = true
@@ -28,6 +29,7 @@ csv.workspace = true
 tempfile.workspace = true
 deunicode.workspace = true
 regex.workspace = true
+base64.workspace = true
 ureq.workspace = true
 rusqlite.workspace = true
 

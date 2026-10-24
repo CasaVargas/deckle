@@ -39,10 +39,27 @@ pub struct DeviceBook {
     pub from_deckle: bool,
     pub xray: bool,
     pub word_wise: bool,
+    /// DRM-protected: a KFX that is a DRMION container or has a `.voucher`, or an AZW/MOBI whose
+    /// record 0 says it's encrypted. Such a file is never opened past its metadata.
+    #[serde(default)]
+    pub drm: bool,
+    /// A fixed-layout book (EXTH 122): comics, children's books. Left as it is.
+    #[serde(default)]
+    pub fixed_layout: bool,
+    /// calibre's id for the book, when the file says (EXTH 112 `calibre:<uuid>`).
+    #[serde(default)]
+    pub calibre_id: Option<String>,
+    #[serde(default)]
+    pub isbn: Option<String>,
+    /// Whether the book's details were read: false over MTP unless asked for (see
+    /// [`list_detailed`]), and for formats that carry none.
+    #[serde(default)]
+    pub details: bool,
     /// The KFX's end position (`erl`), the denominator of a reading position.
     #[serde(skip)]
     pub end: Option<i64>,
-    /// The `.yjf` reading-position sidecar's bytes, when [`list_with_positions`] read it.
+    /// The reading-position sidecar's bytes (KFX `.yjf`, AZW3 `.azw3f`), when
+    /// [`list_with_positions`] read it.
     #[serde(skip)]
     pub yjf: Option<Vec<u8>>,
     /// The KFX's cover, JPEG.
@@ -99,6 +116,12 @@ impl Positions<'_> {
     }
 }
 
+/// A reading-position file in a `.sdr`: KFX `.yjf`, AZW3 `.azw3f` (the same KRDS container; its
+/// positions aren't KFX ids, but the Kindle's own fraction is there).
+fn is_position_file(name: &str) -> bool {
+    crate::yjf::is_yjf(name) || name.to_ascii_lowercase().ends_with(".azw3f")
+}
+
 /// How many folders below `documents/` a walk looks into.
 fn depth_for(want: &Option<Positions<'_>>) -> usize {
     if want.is_some() { SHELF_DEPTH } else { 1 }
@@ -117,8 +140,45 @@ pub fn is_generated_asin(asin: &str) -> bool {
     asin.len() == 10 && asin.starts_with("B0") && asin.ends_with("DECK")
 }
 
-/// The KFX's own details: title, authors, CDE type, ASIN, cover.
-fn read_details(book: &mut DeviceBook, kfx: &[u8]) {
+/// Formats whose files carry details Deckle reads: KFX, and the PalmDB ones.
+const DETAIL_FORMATS: [&str; 5] = ["kfx", "azw3", "azw", "mobi", "prc"];
+
+fn has_details(format: &str) -> bool {
+    DETAIL_FORMATS.contains(&format)
+}
+
+/// The book's own details, from its whole file (KFX) or its first records (PalmDB).
+fn read_details(book: &mut DeviceBook, bytes: &[u8]) {
+    book.details = true;
+    if book.format == "kfx" {
+        read_kfx_details(book, bytes);
+    } else {
+        read_mobi_details(book, deckle_mobi::read_meta(bytes).ok());
+    }
+}
+
+fn read_mobi_details(book: &mut DeviceBook, meta: Option<deckle_mobi::Meta>) {
+    book.details = true;
+    let Some(m) = meta else { return };
+    book.title = m.title;
+    book.authors = m.authors;
+    book.cde = m.cde;
+    book.from_deckle = m.asin.as_deref().is_some_and(is_generated_asin);
+    book.asin = m.asin;
+    book.isbn = m.isbn;
+    book.calibre_id = m.calibre_id;
+    book.drm = m.drm;
+    book.fixed_layout = m.fixed_layout;
+    book.cover = m.cover;
+}
+
+/// The KFX's own details: title, authors, CDE type, ASIN, cover. A DRMION container is a
+/// store (or loaned) book: only that much is known.
+fn read_kfx_details(book: &mut DeviceBook, kfx: &[u8]) {
+    if kfx.starts_with(deckle_kfx::kpf::DRMION_SIGNATURE) {
+        book.drm = true;
+        return;
+    }
     let Ok(k) = crate::inspect::inspect_kfx(kfx) else {
         return;
     };
@@ -134,59 +194,99 @@ fn read_details(book: &mut DeviceBook, kfx: &[u8]) {
 /// A KFX's details, cached under `cache` by path, size and modified time, so a listing
 /// doesn't re-read every book.
 fn details_cached(book: &mut DeviceBook, path: &Path, cache: Option<&Path>) {
-    #[derive(Serialize, Deserialize)]
-    struct Cached {
-        title: Option<String>,
-        authors: Vec<String>,
-        cde: Option<String>,
-        asin: Option<String>,
-        /// `-1` when unknown. Required, so a cache file from before `end` is re-read once.
-        end: i64,
-    }
     let stamp = std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let key = format!(
-        "{:016x}",
-        fnv(&format!("{}|{}|{stamp}", path.display(), book.size))
-    );
-    let files = cache.map(|c| (c.join(format!("{key}.json")), c.join(format!("{key}.jpg"))));
-    if let Some((json, jpg)) = &files
-        && let Some(c) = std::fs::read(json)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Cached>(&b).ok())
-    {
-        book.title = c.title;
-        book.authors = c.authors;
-        book.cde = c.cde;
-        book.from_deckle = c.asin.as_deref().is_some_and(is_generated_asin);
-        book.asin = c.asin;
-        book.end = Some(c.end).filter(|e| *e >= 0);
-        book.cover = std::fs::read(jpg).ok();
+    let key = format!("{}|{}|{stamp}", path.display(), book.size);
+    if load_cached(book, cache, &key) {
         return;
     }
-    let Ok(bytes) = std::fs::read(path) else {
+    if book.format == "kfx" {
+        let Ok(bytes) = std::fs::read(path) else {
+            return;
+        };
+        read_details(book, &bytes);
+    } else {
+        // Only the header, record 0 and the cover: a partial read.
+        let meta = std::fs::File::open(path)
+            .ok()
+            .and_then(|mut f| deckle_mobi::read_meta_from(&mut f).ok());
+        read_mobi_details(book, meta);
+    }
+    save_cached(book, cache, &key);
+}
+
+/// What a listing keeps of a book's details between listings. Every field is required, so a
+/// cache file written by an older Deckle is re-read once.
+#[derive(Serialize, Deserialize)]
+struct Cached {
+    title: Option<String>,
+    authors: Vec<String>,
+    cde: Option<String>,
+    asin: Option<String>,
+    /// `-1` when unknown.
+    end: i64,
+    drm: bool,
+    fixed_layout: bool,
+    calibre_id: Option<String>,
+    isbn: Option<String>,
+}
+
+fn cache_files(cache: Option<&Path>, key: &str) -> Option<(PathBuf, PathBuf)> {
+    let key = format!("{:016x}", fnv(key));
+    cache.map(|c| (c.join(format!("{key}.json")), c.join(format!("{key}.jpg"))))
+}
+
+/// Fills `book` from the cache entry for `key`; false when there is none.
+fn load_cached(book: &mut DeviceBook, cache: Option<&Path>, key: &str) -> bool {
+    let Some((json, jpg)) = cache_files(cache, key) else {
+        return false;
+    };
+    let Some(c) = std::fs::read(json)
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Cached>(&b).ok())
+    else {
+        return false;
+    };
+    book.title = c.title;
+    book.authors = c.authors;
+    book.cde = c.cde;
+    book.from_deckle = c.asin.as_deref().is_some_and(is_generated_asin);
+    book.asin = c.asin;
+    book.end = Some(c.end).filter(|e| *e >= 0);
+    book.drm |= c.drm;
+    book.fixed_layout = c.fixed_layout;
+    book.calibre_id = c.calibre_id;
+    book.isbn = c.isbn;
+    book.cover = std::fs::read(jpg).ok();
+    book.details = true;
+    true
+}
+
+fn save_cached(book: &DeviceBook, cache: Option<&Path>, key: &str) {
+    let Some((json, jpg)) = cache_files(cache, key) else {
         return;
     };
-    read_details(book, &bytes);
-    if let Some((json, jpg)) = files {
-        let c = Cached {
-            title: book.title.clone(),
-            authors: book.authors.clone(),
-            cde: book.cde.clone(),
-            asin: book.asin.clone(),
-            end: book.end.unwrap_or(-1),
-        };
-        if let Some(dir) = json.parent()
-            && std::fs::create_dir_all(dir).is_ok()
-        {
-            let _ = std::fs::write(&json, serde_json::to_vec(&c).unwrap_or_default());
-            if let Some(cover) = &book.cover {
-                let _ = std::fs::write(&jpg, cover);
-            }
+    let c = Cached {
+        title: book.title.clone(),
+        authors: book.authors.clone(),
+        cde: book.cde.clone(),
+        asin: book.asin.clone(),
+        end: book.end.unwrap_or(-1),
+        drm: book.drm,
+        fixed_layout: book.fixed_layout,
+        calibre_id: book.calibre_id.clone(),
+        isbn: book.isbn.clone(),
+    };
+    if let Some(dir) = json.parent()
+        && std::fs::create_dir_all(dir).is_ok()
+    {
+        let _ = std::fs::write(&json, serde_json::to_vec(&c).unwrap_or_default());
+        if let Some(cover) = &book.cover {
+            let _ = std::fs::write(&jpg, cover);
         }
     }
 }
@@ -204,6 +304,8 @@ fn sidecar_flags(book: &mut DeviceBook, names: impl IntoIterator<Item = String>)
     for n in names {
         book.xray |= is_xray_sidecar(&n);
         book.word_wise |= is_word_wise(&n);
+        // A store KFX's key travels beside it.
+        book.drm |= n.to_ascii_lowercase().ends_with(".voucher");
     }
 }
 
@@ -277,11 +379,11 @@ fn book_on_disk(
     };
     let sdr = docs.join(sdr_name(file));
     sidecar_flags(&mut book, names_in(&sdr));
-    if book.format == "kfx" {
+    if has_details(&book.format) {
         details_cached(&mut book, path, cache);
     }
     if want.as_ref().is_some_and(|w| w.wanted(file))
-        && let Some(name) = names_in(&sdr).into_iter().find(|n| crate::yjf::is_yjf(n))
+        && let Some(name) = names_in(&sdr).into_iter().find(|n| is_position_file(n))
     {
         book.yjf = std::fs::read(sdr.join(name)).ok();
     }
@@ -300,7 +402,12 @@ fn mtp_err(e: MtpError) -> DeliverError {
     DeliverError::Mtp(e.to_string())
 }
 
-fn list_mtp(dev: &mut Mtp, want: &mut Option<Positions<'_>>) -> Result<Inventory, DeliverError> {
+fn list_mtp(
+    dev: &mut Mtp,
+    want: &mut Option<Positions<'_>>,
+    cache: Option<&Path>,
+    deep: bool,
+) -> Result<Inventory, DeliverError> {
     let storage = *dev
         .storages()
         .map_err(mtp_err)?
@@ -348,7 +455,7 @@ fn list_mtp(dev: &mut Mtp, want: &mut Option<Positions<'_>>) -> Result<Inventory
                     && w.wanted(&book.file)
                     && let Some((fh, _)) = inside
                         .iter()
-                        .find(|(_, i)| !i.association && crate::yjf::is_yjf(&i.filename))
+                        .find(|(_, i)| !i.association && is_position_file(&i.filename))
                 {
                     if w.read < MAX_YJF {
                         w.read += 1;
@@ -357,6 +464,19 @@ fn list_mtp(dev: &mut Mtp, want: &mut Option<Positions<'_>>) -> Result<Inventory
                     } else {
                         w.over += 1;
                     }
+                }
+            }
+            // MTP has no partial reads: a book is read whole once, then known by its name and
+            // size.
+            // A plain listing takes what an earlier detailed one cached, and reads nothing more.
+            if has_details(&book.format) && cache.is_some() {
+                let key = format!("mtp|{}|{}", book.file, book.size);
+                if !load_cached(&mut book, cache, &key)
+                    && deep
+                    && let Ok(bytes) = dev.get_object(*h)
+                {
+                    read_details(&mut book, &bytes);
+                    save_cached(&book, cache, &key);
                 }
             }
             books.push(book);
@@ -370,7 +490,24 @@ fn list_mtp(dev: &mut Mtp, want: &mut Option<Positions<'_>>) -> Result<Inventory
 /// What's on the connection's target. A folder export lists like a `documents` folder.
 /// `cache` keeps KFX details between listings (mass storage and folders).
 pub fn list_on(conn: &mut Conn<'_>, cache: Option<&Path>) -> Result<Inventory, DeliverError> {
-    walk(conn, cache, &mut None)
+    walk(conn, cache, &mut None, false)
+}
+
+/// [`list_with_positions`] with every book's details, over MTP too: each book not in `cache`
+/// is read whole once (slow the first time on a big Kindle). For sorting books into upgrade
+/// classes, and seeing which ones are being read.
+pub fn list_detailed(
+    conn: &mut Conn<'_>,
+    cache: Option<&Path>,
+    skip_prefix: &str,
+) -> Result<(Inventory, usize), DeliverError> {
+    let mut want = Some(Positions {
+        skip_prefix,
+        read: 0,
+        over: 0,
+    });
+    let inv = walk(conn, cache, &mut want, true)?;
+    Ok((inv, want.map_or(0, |w| w.over)))
 }
 
 /// [`list_on`], also reading each KFX book's `.yjf` in the same walk (and the same MTP
@@ -386,7 +523,7 @@ pub fn list_with_positions(
         read: 0,
         over: 0,
     });
-    let inv = walk(conn, cache, &mut want)?;
+    let inv = walk(conn, cache, &mut want, false)?;
     Ok((inv, want.map_or(0, |w| w.over)))
 }
 
@@ -394,6 +531,7 @@ fn walk(
     conn: &mut Conn<'_>,
     cache: Option<&Path>,
     want: &mut Option<Positions<'_>>,
+    deep: bool,
 ) -> Result<Inventory, DeliverError> {
     match conn.target {
         Target::Folder(dir) => Ok(Inventory {
@@ -405,7 +543,7 @@ fn walk(
             space: space_of(&dev.root),
         }),
         Target::Mtp(_) => match conn.mtp() {
-            Some(Ok(dev)) => list_mtp(dev, want),
+            Some(Ok(dev)) => list_mtp(dev, want, cache, deep),
             Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
             None => unreachable!("an MTP target always has a connection"),
         },
@@ -488,19 +626,8 @@ pub fn remove_on(conn: &mut Conn<'_>, file: &str) -> Result<Vec<String>, Deliver
 }
 
 fn remove_mtp(dev: &mut Mtp, parts: &[&str]) -> Result<Vec<String>, DeliverError> {
-    let storage = *dev
-        .storages()
-        .map_err(mtp_err)?
-        .first()
-        .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
-    let mut parent = dev.find_documents(storage).map_err(mtp_err)?;
     let (name, folders) = parts.split_last().expect("checked: at least one part");
-    for f in folders {
-        parent = dev
-            .find_child(storage, parent, f)
-            .map_err(mtp_err)?
-            .ok_or_else(|| DeliverError::Refused(format!("documents/{f}: not found")))?;
-    }
+    let (storage, parent) = mtp_parent(dev, folders)?;
     let file = parts.join("/");
     let handle = dev
         .find_child(storage, parent, name)
@@ -518,6 +645,172 @@ fn remove_mtp(dev: &mut Mtp, parts: &[&str]) -> Result<Vec<String>, DeliverError
         removed.push(format!("documents/{}", sdr_name(&file)));
     }
     Ok(removed)
+}
+
+/// A book file and its `.sdr` folder's files (name, bytes), as read off the target.
+pub struct BookFiles {
+    pub book: Vec<u8>,
+    pub sdr: Vec<(String, Vec<u8>)>,
+}
+
+/// Reads `documents/<file>` and the files in its `.sdr` folder (not deeper), over the caller's
+/// connection.
+pub fn read_book_on(conn: &mut Conn<'_>, file: &str) -> Result<BookFiles, DeliverError> {
+    let parts = check_file(file)?;
+    let docs = match conn.target {
+        Target::Folder(dir) => dir.clone(),
+        Target::MassStorage(dev) => dev.root.join("documents"),
+        Target::Mtp(_) => {
+            return match conn.mtp() {
+                Some(Ok(dev)) => read_book_mtp(dev, &parts),
+                Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+                None => unreachable!("an MTP target always has a connection"),
+            };
+        }
+    };
+    let path: PathBuf = parts.iter().fold(docs, |p, s| p.join(s));
+    let book = std::fs::read(&path).map_err(|source| match source.kind() {
+        std::io::ErrorKind::NotFound => {
+            DeliverError::Refused(format!("documents/{file}: not found"))
+        }
+        _ => DeliverError::Io {
+            path: path.clone(),
+            source,
+        },
+    })?;
+    let sdr_dir = path.with_extension("sdr");
+    let mut sdr = Vec::new();
+    for name in names_in(&sdr_dir) {
+        let p = sdr_dir.join(&name);
+        if p.is_file() {
+            let bytes = std::fs::read(&p).map_err(|source| DeliverError::Io { path: p, source })?;
+            sdr.push((name, bytes));
+        }
+    }
+    sdr.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(BookFiles { book, sdr })
+}
+
+fn mtp_parent(dev: &mut Mtp, folders: &[&str]) -> Result<(u32, u32), DeliverError> {
+    let storage = *dev
+        .storages()
+        .map_err(mtp_err)?
+        .first()
+        .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
+    let mut parent = dev.find_documents(storage).map_err(mtp_err)?;
+    for f in folders {
+        parent = dev
+            .find_child(storage, parent, f)
+            .map_err(mtp_err)?
+            .ok_or_else(|| DeliverError::Refused(format!("documents/{f}: not found")))?;
+    }
+    Ok((storage, parent))
+}
+
+fn read_book_mtp(dev: &mut Mtp, parts: &[&str]) -> Result<BookFiles, DeliverError> {
+    let (name, folders) = parts.split_last().expect("checked: at least one part");
+    let (storage, parent) = mtp_parent(dev, folders)?;
+    let file = parts.join("/");
+    let handle = dev
+        .find_child(storage, parent, name)
+        .map_err(mtp_err)?
+        .ok_or_else(|| DeliverError::Refused(format!("documents/{file}: not found")))?;
+    let book = dev.get_object(handle).map_err(mtp_err)?;
+    let mut sdr = Vec::new();
+    if let Some(h) = dev
+        .find_child(storage, parent, &sdr_name(name))
+        .map_err(mtp_err)?
+    {
+        for (c, info) in dev.list(storage, h).map_err(mtp_err)? {
+            if !info.association {
+                sdr.push((info.filename.clone(), dev.get_object(c).map_err(mtp_err)?));
+            }
+        }
+    }
+    sdr.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(BookFiles { book, sdr })
+}
+
+/// Copies `documents/<file>` and its `.sdr` folder into `dest`, as `dest/<name>` and
+/// `dest/<stem>.sdr/` (Books and Kindle design §6: an upgrade keeps the old copy).
+pub fn copy_out(conn: &mut Conn<'_>, file: &str, dest: &Path) -> Result<(), DeliverError> {
+    let files = read_book_on(conn, file)?;
+    let name = file.rsplit('/').next().unwrap_or(file);
+    let io = |path: PathBuf| move |source| DeliverError::Io { path, source };
+    std::fs::create_dir_all(dest).map_err(io(dest.to_path_buf()))?;
+    let book = dest.join(name);
+    std::fs::write(&book, &files.book).map_err(io(book.clone()))?;
+    if !files.sdr.is_empty() {
+        let sdr = dest.join(sdr_name(name));
+        std::fs::create_dir_all(&sdr).map_err(io(sdr.clone()))?;
+        for (n, bytes) in &files.sdr {
+            let p = sdr.join(n);
+            std::fs::write(&p, bytes).map_err(io(p.clone()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Puts a book [`copy_out`] kept back as `documents/<file>`, with its `.sdr` files. An existing
+/// file of that name is overwritten.
+pub fn copy_in(conn: &mut Conn<'_>, src: &Path, file: &str) -> Result<(), DeliverError> {
+    let parts = check_file(file)?;
+    let name = *parts.last().expect("checked: at least one part");
+    let io = |path: PathBuf| move |source| DeliverError::Io { path, source };
+    let book_path = src.join(name);
+    let book = std::fs::read(&book_path).map_err(io(book_path.clone()))?;
+    let sdr_src = src.join(sdr_name(name));
+    let mut sdr = Vec::new();
+    for n in names_in(&sdr_src) {
+        let p = sdr_src.join(&n);
+        if p.is_file() {
+            sdr.push((n, std::fs::read(&p).map_err(io(p.clone()))?));
+        }
+    }
+    let docs = match conn.target {
+        Target::Folder(dir) => dir.clone(),
+        Target::MassStorage(dev) => dev.root.join("documents"),
+        Target::Mtp(_) => {
+            let dev = match conn.mtp() {
+                Some(Ok(dev)) => dev,
+                Some(Err(e)) => return Err(DeliverError::Mtp(e.to_string())),
+                None => unreachable!("an MTP target always has a connection"),
+            };
+            let (_, folders) = parts.split_last().expect("checked");
+            let (storage, parent) = mtp_parent(dev, folders)?;
+            if let Some(h) = dev.find_child(storage, parent, name).map_err(mtp_err)? {
+                dev.delete(h).map_err(mtp_err)?;
+            }
+            dev.send_file(storage, parent, name, &book)
+                .map_err(mtp_err)?;
+            if !sdr.is_empty() {
+                let folder = dev
+                    .ensure_folder(storage, parent, &sdr_name(name))
+                    .map_err(mtp_err)?;
+                for (n, bytes) in &sdr {
+                    if let Some(h) = dev.find_child(storage, folder, n).map_err(mtp_err)? {
+                        dev.delete(h).map_err(mtp_err)?;
+                    }
+                    dev.send_file(storage, folder, n, bytes).map_err(mtp_err)?;
+                }
+            }
+            return Ok(());
+        }
+    };
+    let path: PathBuf = parts.iter().fold(docs, |p, s| p.join(s));
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(io(dir.to_path_buf()))?;
+    }
+    std::fs::write(&path, &book).map_err(io(path.clone()))?;
+    if !sdr.is_empty() {
+        let dir = path.with_extension("sdr");
+        std::fs::create_dir_all(&dir).map_err(io(dir.clone()))?;
+        for (n, bytes) in &sdr {
+            let p = dir.join(n);
+            std::fs::write(&p, bytes).map_err(io(p.clone()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

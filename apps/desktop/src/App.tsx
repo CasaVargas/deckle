@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { api } from "./api";
+import { api, coverRequest } from "./api";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
+import BeforeYouSend from "./BeforeYouSend";
 import BindPanel from "./BindPanel";
+import Library from "./Library";
 import { bindable } from "./bindList";
 import ArticleField from "./ArticleField";
 import { parseAddresses } from "./articles";
@@ -15,7 +17,7 @@ import DailyView from "./DailyView";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
-import type { BookRow, BookState, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings } from "./types";
+import type { BookRow, BookState, CatalogView, CoverChoice, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
   previewer_path: null,
@@ -39,7 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
 /** Link files and saved pages become articles (web-article design); everything else is a book. */
 const ARTICLE_FILE = /\.(webloc|url|html?)$/i;
 function toState(row: BookRow): BookState {
-  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false };
+  return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false, upgradeOf: null, coverPick: null };
 }
 
 export default function App() {
@@ -63,6 +65,10 @@ export default function App() {
   const [autoExport, setAutoExport] = useState<string | null>(null);
   const [tab, setTab] = useState<"books" | "daily" | "kindle">("books");
   const [library, setLibrary] = useState<LibraryStatus | null>(null);
+  /** The Books tab's library (Books and Kindle design §8): Deckle's, calibre's and your folders' books. */
+  const [catalog, setCatalog] = useState<CatalogView | null>(null);
+  /** The queued book Before you send is open for. */
+  const [beforeFor, setBeforeFor] = useState<string | null>(null);
   const booksRef = useRef(books);
   booksRef.current = books;
   const tabRef = useRef(tab);
@@ -110,6 +116,45 @@ export default function App() {
     setDevices(d);
     setTargetKey((cur) => (cur && d.some((x) => x.key === cur) ? cur : d[0]?.key ?? null));
   }, []);
+
+  const loadCatalog = useCallback(async () => {
+    try {
+      setCatalog(await api.libraryCatalog(targetKey));
+    } catch {
+      setCatalog(null);
+    }
+  }, [targetKey]);
+  // Again after each send: what's on the Kindle changed.
+  useEffect(() => {
+    if (!busy) loadCatalog();
+  }, [loadCatalog, busy]);
+  // The watched folder, looked at every two minutes while Deckle is open.
+  const watching = !!catalog?.watch;
+  useEffect(() => {
+    if (!watching) return;
+    const look = async () => {
+      try {
+        const w = await api.libraryWatchScan();
+        if (w.added.length) {
+          setNotice(w.added.length === 1 ? `${w.added[0]} was added to your library from the watched folder.` : `${w.added.length} books were added to your library from the watched folder.`);
+          loadCatalog();
+        }
+      } catch {
+        // A folder that went away says so in Settings; nothing to do here.
+      }
+    };
+    look();
+    const t = window.setInterval(look, 120_000);
+    return () => window.clearInterval(t);
+  }, [watching, loadCatalog]);
+
+  const setCoverPick = (id: string, cover: CoverChoice | null) => setBooks((prev) => prev.map((b) => (b.id === id ? { ...b, coverPick: cover } : b)));
+  // Fixed details show in the queue at once: the row is read again from the library's copy.
+  const refreshRow = async (book: BookState) => {
+    const [row] = await api.inspectBooks([book.path]);
+    if (row) setBooks((prev) => prev.map((b) => (b.id === book.id ? { ...b, title: row.title, authors: row.authors, series: row.series, cover: row.cover ?? b.cover } : b)));
+    await loadCatalog();
+  };
 
   const device = devices.find((d) => d.key === targetKey) ?? null;
   const deviceTarget: RunTarget | null = device
@@ -252,16 +297,17 @@ export default function App() {
 
   // Re-send, Upgrade and Update from the Kindle tab: the library copies go on the Books tab
   // for review, each with its chosen mode.
-  const resendFromLibrary = async (items: { source: string; cde: "pdoc" | "ebok" | null }[], what: string) => {
+  const resendFromLibrary = async (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf }[], what: string) => {
     const rows = await api.inspectBooks(items.map((i) => i.source));
     const cdeFor = new Map(items.map((i) => [i.source, i.cde]));
+    const upgradeFor = new Map(items.map((i) => [i.source, i.upgradeOf ?? null]));
     if (rows.length === 0) {
       setNotice("The app can't send these; send them with `deckle run`.");
       return;
     }
     setBooks((prev) => {
       const ids = new Set(rows.map((r) => r.id));
-      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cdeFor.get(r.path) ?? null }))];
+      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cdeFor.get(r.path) ?? null, upgradeOf: upgradeFor.get(r.path) ?? null }))];
     });
     setTab("books");
     const skipped = items.length - rows.length;
@@ -274,6 +320,9 @@ export default function App() {
   };
 
   const runnable = books.filter((b) => b.mode !== "error");
+  // Library first, the queue docked beside it; with no library, the queue is the whole tab.
+  const docked = !!catalog && catalog.entries.length > 0;
+  const opened = books.find((b) => b.id === beforeFor) ?? null;
   const parts = books.filter((b) => bindable(b.path, b.mode));
 
   // The bound book takes the parts' place in the list (#22).
@@ -312,7 +361,7 @@ export default function App() {
     );
     try {
       await api.runBooks(
-        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin })),
+        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin, upgrade_of: b.upgradeOf, cover: coverRequest(b.coverPick) })),
         target,
       );
     } catch (e) {
@@ -459,8 +508,16 @@ export default function App() {
           <BindPanel books={parts} busy={binding || busy} onBind={bindBooks} onCancel={() => setBindOpen(false)} />
         )}
         {tab === "books" && (
-        <main className={`list-area ${books.length === 0 ? "empty" : ""}`}>
-          {books.length === 0 ? (
+        <div className={docked ? "books-split" : "books-whole"}>
+        {docked && catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
+        <main className={`list-area ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
+          {docked && <h2 className="dock-head">To send{books.length ? ` · ${books.length}` : ""}</h2>}
+          {books.length === 0 && docked ? (
+            <div className="dock-empty muted">
+              <p>Nothing to send yet.</p>
+              <p className="small">Pick books from your library, or drop EPUBs, PDFs and Word documents here.</p>
+            </div>
+          ) : books.length === 0 ? (
             <div className="dropzone-inner">
               <div className="glyph" aria-hidden="true">
                 <Icon name="download" size={40} />
@@ -491,12 +548,26 @@ export default function App() {
                   onToggleReport={toggleReport}
                   onRemove={remove}
                   onReveal={(p) => api.reveal(p)}
+                  onOpen={(id) => setBeforeFor(id)}
                 />
               ))}
             </ul>
           )}
           {dragging && <div className="drop-overlay">Drop to add</div>}
         </main>
+        {opened && (
+          <BeforeYouSend
+            key={opened.id}
+            book={opened}
+            plan={plans[opened.id]}
+            settings={settings}
+            entry={catalog?.entries.find((e) => e.path === opened.path) ?? null}
+            onCover={setCoverPick}
+            onFixed={refreshRow}
+            onClose={() => setBeforeFor(null)}
+          />
+        )}
+        </div>
         )}
 
         {!settingsPage && noticeBar}

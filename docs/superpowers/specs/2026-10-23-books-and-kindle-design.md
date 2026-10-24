@@ -379,6 +379,30 @@ The owner accepted each recommendation below (2026-10-23).
 - **App:** the Upgrades list, the rooms and the Books library are checked against the fake
   Kindle image in light and dark.
 
+## 14. Build notes, phase 1
+
+- **`deckle-mobi`** reads record 0's MOBI header and EXTH records, and the cover record, with
+  a partial read on disk. Its `fixture` module builds small PalmDB books for tests in other
+  crates. The KF8 → EPUB rebuild (§5) comes in phase 3.
+- **The inventory** reads AZW3, AZW, MOBI and PRC details as well as KFX, cached as before.
+  DRM is a DRMION KFX, a `.voucher` in the `.sdr`, or a PalmDB encryption type. A cache entry
+  from an older Deckle is read again once. `list_detailed` reads details over MTP too (each
+  uncached book whole, once) and the reading positions; only the upgrade scan uses it, so the
+  Kindle tab's listing stays as fast as before.
+- **Where old copies are kept:** `kindle-originals/<device>/<when> <file stem>/` beside
+  `library.json`, not in the library book's folder. The upgrade can happen before the book is
+  in the library, and there may be no library at all. `upgrades.json` beside it records each
+  upgrade for Put back.
+- **Highlights first** runs the highlights export when there's a highlights folder. Either way,
+  the kept `.sdr` holds the Kindle's annotations, and `My Clippings.txt` stays on the Kindle.
+- **Your place:** the reading-position spike (§11) needs a Kindle, so it hasn't run. The row
+  says how far in you are, from the Kindle's own fraction in the `.yjf`, and that the new copy
+  opens at the start. A page number would need the old file's page map, which isn't read.
+- **Folders** are searched for EPUBs only. calibre's DOCX and TXT formats count as originals.
+- **The app:** the Upgrades panel sits in today's Kindle tab until its rooms come (phase 4).
+  An upgrade goes through the Books tab like Update, so the run shows its progress there. A
+  send replaces the Kindle's copy only on the Kindle it was listed from.
+
 ## 15. Build notes, phase 2
 
 - **Masters** are made from the same download as the edition's photo, only when some export
@@ -400,3 +424,123 @@ The owner accepted each recommendation below (2026-10-23).
   first: later sections already drop titles an earlier one printed.
 - All new `edition.json` fields are always written, `null` when unknown. The schema marks them
   optional, so a 1.0 bundle still validates.
+
+## 16. Build notes, phase 3
+
+- **What's rebuilt:** KF8 only, an AZW3 or the KF8 half of a joint MOBI. Text records with
+  PalmDOC or no compression, trailing entries stripped. The FDST flows. The XHTML parts from
+  the skeleton and fragment indexes, with KindleUnpack's fix for a fragment whose insert point
+  falls inside a tag. `kindle:pos` links become `partNNNN.xhtml#anchor`: the nearest `id` or
+  `name` before the position, else the element's `aid` as `aid-…`. Images and fonts (XOR and
+  zlib undone) come back as files, CSS and SVG flows too. The NCX becomes `nav.xhtml` and
+  `toc.ncx`, and EXTH becomes the OPF (cover from EXTH 201).
+- **Not rebuilt:** MOBI 6-only files (their HTML isn't XHTML and needs a real HTML-to-XHTML
+  pass), HUFF/CDIC compression (rare outside store books), and fixed layout. Each says why and
+  stays as it is. The class is still "rebuild from the Kindle's copy", and the attempt is what
+  fails.
+- **The quality gate** is stricter than the spec's text-length rule:
+  - the text must decompress to at least 98% of the PalmDOC header's length;
+  - the parts must cover 98% of the main flow;
+  - every `kindle:embed` a part or stylesheet uses must resolve;
+  - every part must be well-formed XML.
+
+  Failing any of these writes nothing.
+- **Checked on real files:** Project Gutenberg's AZW3s of *Frankenstein* (34 parts, 2 images)
+  and *Pride and Prejudice* (76 parts, 165 images, the cover found by EXTH 201) rebuilt and
+  passed EPUBCheck 5.1.0 with 0 errors and 0 warnings. That took two fixes: the NCX's
+  `playOrder` is shared by entries with one target, and the Kindle's `cid` attributes are
+  dropped like unlinked `aid`s. CI tests use `fixture::build_kf8`, a small KF8 writer with real
+  skeleton, fragment and NCX indexes. `cargo run -p deckle-mobi --example rebuild -- in.azw3
+  out.epub` tries a file by hand.
+- **Rebuilt EPUBs** live in `kindle-rebuilt/<device>/` beside `library.json` and are what the
+  upgrade sends, with `origin: "kindle-copy"`. The app rebuilds when you press Upgrade, not when
+  it lists the books.
+
+## 17. Build notes, phase 4
+
+- **Progress for every book.** The Kindle tab's listing now always reads each book's position
+  file. It reads AZW3's `.azw3f` as well as KFX's `.yjf`: it's the same KRDS container, and the
+  Kindle's own fraction (`book.info.store`) is in it. A KFX with a known end uses its last
+  position over its end instead. From Your Shelf still takes KFX only (its design §2), since an
+  AZW3's positions aren't KFX ids. Under 2% counts as not started, and 97% or more as finished:
+  the same lines as "partway" in §12.
+- **Class badges over MTP** come from the details cache. A plain listing now takes what an
+  earlier detailed one cached, but reads no book whole. So the Shelf shows "Can be upgraded" once
+  the Upgrades room has looked. The Upgrades room loads only when it's opened.
+- **Kinds** for the space and the filters:
+  - DRM means Amazon's own, from the Store or Send to Kindle;
+  - then the paper (a Deckle file named like an edition);
+  - then Deckle's books (from Deckle or in the library);
+  - everything else is sideloaded.
+
+  "System and other" is the used space that isn't a book `documents/` lists.
+- **Make room** offers:
+  - finished books over 10 MB, not ticked at first;
+  - second copies of a book (same ASIN, or same title and first author). It keeps Deckle's or
+    Amazon's copy, then a KFX, then the one being read, then the largest;
+  - papers past the Daily's `keep`, using the same rule as the paper's own prune.
+
+  A row says when a reading position goes with the book. Removing goes through the existing
+  remove, so library send records are forgotten too.
+- **Back up** goes to `kindle-backups/<Kindle> <time>/` beside `library.json`, or a folder you
+  pick:
+  - it keeps the Kindle's folder layout, with a `deckle-backup.json` manifest;
+  - Amazon's own and the paper are left out;
+  - a book that won't copy costs that book, not the backup;
+  - it lists with a detailed read, so an AZW whose record 0 says DRM is left out over MTP too.
+    The first backup of a big MTP Kindle reads each book twice: once for its details, which are
+    cached, and once to copy it.
+- **Restore** reads the manifest and puts each book and its `.sdr` back through the same
+  `copy_in` Put back uses. A file already on the Kindle is never overwritten.
+- **Not checked on hardware yet:**
+  - `.azw3f` fractions against what a Paperwhite shows;
+  - a backup and restore over MTP;
+  - whether a restored `.sdr` brings the reading position back on a different Kindle.
+
+## 18. Build notes, phase 5
+
+- **The library** (`deckle_library::catalog`) lists, one entry a book:
+  - Deckle's library first;
+  - then calibre's and your folders' books that aren't already in it (same ISBN, or same title
+    and first author).
+
+  calibre's series come from `books_series_link`; a library without that table has none. A
+  folder EPUB's series comes from its OPF. "On this Kindle" means the library has sent the book
+  there, or an upgrade used it on that Kindle (`upgrades.json`), matched with `same_device`, so
+  older profile keys still count.
+- **Covers in the grid** load as cards scroll into view, 24 at a time:
+  - calibre's `cover.jpg` when the book sits in a calibre folder, else the EPUB's own;
+  - made 360 px tall by the thumbnail renderer.
+- **Before you send** runs `deckle_core::preflight` in a scratch folder: import, inspect, the
+  cover, and normalize with the book's settings. It needs no Previewer and no network. The
+  Open Library metadata fill is left out, since it fetches. The mode and its reason come from
+  the cover rule's plan the queue already shows.
+- **Chapter one** is the contents entry that names it ("Chapter 1", "One", "I.", "Prologue"),
+  from its anchor on. Otherwise it's the first spine item past the front matter with a page of
+  text. Its images are inlined as `data:` URLs. Its stylesheets come without `@font-face`,
+  `@import` or `url()`. The frame is `sandbox=""` with `default-src 'none'`, so a book's markup
+  can't run or load anything.
+- **The cover picker** is a new `RunOptions::cover`:
+  - `Auto` (as before);
+  - `Generated`: the typographic cover, even for a book that has its own;
+  - `Image(path)`: a picked file, made a JPEG.
+
+  normalize's `replace_cover` puts the new image in the old cover's place, so the cover page
+  and the `cover-image` item both follow. Open Library's covers (`deckle_core::covers`) are the
+  ISBN's, then those of its editions by title and author. The 1×1 "no cover" placeholder and
+  repeats are dropped. Only offered when Open Library is on. A picked cover is kept in Deckle's
+  cache under `covers/`.
+- **Fix details** (`deckle_library::details`) rewrites the library copy's OPF:
+  - the first `dc:title`'s text;
+  - every `dc:creator`, with the EPUB 3 metas that refine them;
+  - calibre's series metas, and EPUB 3's `belongs-to-collection` with its refines.
+
+  Then it updates the sidecar. The book keeps its `id` and ASIN, so earlier sends still match
+  it. Only an EPUB copy can be fixed.
+- **Watch a folder** (`deckle_library::watch`, `library.json` → `watch`): the app looks every
+  two minutes. It adds each EPUB in the folder (not its subfolders) once, keyed by path, size
+  and time in `watched.json`. It skips a file changed in the last five seconds, which may
+  still be downloading.
+- **Not checked yet:** a large calibre library's grid (hundreds of covers) on a real Mac, and
+  Open Library's covers over the real network.
+

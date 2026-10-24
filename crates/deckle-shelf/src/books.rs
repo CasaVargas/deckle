@@ -78,6 +78,10 @@ pub fn build(
     let mut errors = Vec::new();
     for shelved in shelve(books, library, device_key, &current) {
         let b = shelved.book;
+        // KFX only: an AZW3's `.azw3f` positions aren't KFX ids (From Your Shelf design §2).
+        if b.format != "kfx" {
+            continue;
+        }
         let Some(bytes) = &b.yjf else { continue };
         let title = b
             .title

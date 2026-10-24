@@ -69,6 +69,7 @@ pub(crate) fn pipeline_with(
             .clone()
             .map_err(|e| Skip::Retry(format!("can't convert books yet: {e}")))?;
         let opts = RunOptions {
+            cover: Default::default(),
             cde_type: deckle_kfx::convert::CdeType::Pdoc,
             cde_override: None,
             amazon_match: false,
@@ -88,6 +89,7 @@ pub(crate) fn pipeline_with(
             wikipedia: false,
             word_wise: Some(Default::default()),
             replaces: Vec::new(),
+            originals: None,
         };
         let prepared = prepare(book, &opts, &mut |_| {})
             .map_err(|r| Skip::Unreadable(r.error.unwrap_or_else(|| "not converted".into())))?;

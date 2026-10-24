@@ -350,6 +350,7 @@ fn push_options(wishes: &Wishes, finishing: &Finishing, target: &Target) -> RunO
         _ => None,
     };
     RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: wishes.cde_override.or(device_override),
         amazon_match: false,
@@ -371,6 +372,7 @@ fn push_options(wishes: &Wishes, finishing: &Finishing, target: &Target) -> RunO
             ..finishing.word_wise.clone()
         }),
         replaces: Vec::new(),
+        originals: None,
     }
 }
 
@@ -507,6 +509,7 @@ mod tests {
         /// `digest run` asks for long reads.
         fn prepared_mini() -> Prepared {
             let opts = RunOptions {
+                cover: Default::default(),
                 cde_type: CdeType::Pdoc,
                 cde_override: None,
                 amazon_match: false,
@@ -527,6 +530,7 @@ mod tests {
                 wikipedia: false,
                 word_wise: Some(WordWiseOptions::default()),
                 replaces: Vec::new(),
+                originals: None,
             };
             prepare(
                 &deckle_kfx::fixtures::path("deckle-mini.epub"),

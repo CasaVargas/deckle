@@ -359,6 +359,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             let target = resolve_target(&to)?;
             let opts = RunOptions {
+                cover: Default::default(),
                 cde_type: cde.into(),
                 cde_override: cde.to_override(),
                 amazon_match,
@@ -385,6 +386,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     }
                 }),
                 replaces: Vec::new(),
+                originals: None,
             };
             let reports: Vec<_> = epubs
                 .iter()
@@ -503,7 +505,9 @@ fn run_input(input: &Path, opts: &RunOptions, net: &dyn deckle_digest::Net) -> R
     // Kindle-updates design).
     let config = deckle_library::config::default_path();
     let opts = RunOptions {
+        cover: Default::default(),
         replaces: deckle_library::previous_copies(&config, &source, &opts.target),
+        originals: None,
         ..opts.clone()
     };
     let report = RunReport {
@@ -863,14 +867,18 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
             let current = deckle_library::freshness::Current::now(&Default::default());
             let shelf =
                 deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key, &current);
-            let rows: Vec<_> = shelf
+            let sources = originals();
+            let sorted = deckle_library::upgrade::sort(shelf, &sources, |_| None);
+            let rows: Vec<_> = sorted
                 .iter()
                 .map(|s| {
                     serde_json::json!({
-                        "book": s.book,
-                        "library": s.library.as_ref().map(|b| &b.dir),
-                        "updates": s.updates,
-                        "duplicate": s.duplicate,
+                        "book": s.shelved.book,
+                        "library": s.shelved.library.as_ref().map(|b| &b.dir),
+                        "updates": s.shelved.updates,
+                        "duplicate": s.shelved.duplicate,
+                        "class": s.class,
+                        "source": s.source.as_ref().map(|x| &x.path),
                     })
                 })
                 .collect();
@@ -887,7 +895,8 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
                         ),
                         None => device.name.clone(),
                     }];
-                    for s in &shelf {
+                    for sorted in &sorted {
+                        let s = &sorted.shelved;
                         let b = &s.book;
                         let title = match (&b.title, b.authors.first()) {
                             (Some(t), Some(a)) => format!("{t} — {a}"),
@@ -916,6 +925,11 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
                             } else {
                                 String::new()
                             },
+                            if s.library.is_none() && !b.from_deckle {
+                                sorted.class.label().to_owned()
+                            } else {
+                                String::new()
+                            },
                             if s.updates.is_empty() {
                                 String::new()
                             } else {
@@ -934,7 +948,7 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
                             b.file
                         ));
                     }
-                    if shelf.is_empty() {
+                    if sorted.is_empty() {
                         lines.push("no books".into());
                     }
                     lines.join("\n")
@@ -976,7 +990,363 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
             })?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::KindleCommand::Upgrade {
+            files,
+            dry_run,
+            yes,
+            include_reading,
+            previewer: pv,
+        } => {
+            drop(conn);
+            kindle_upgrade(json, &target, &files, dry_run, yes, include_reading, pv)
+        }
+        cli::KindleCommand::PutBack { file } => {
+            let config = deckle_library::config::default_path();
+            let done = deckle_library::upgrade::put_back(&mut conn, &config, &file)?;
+            emit(json, &done, || {
+                let mut lines = vec![format!("put back {}", done.restored)];
+                lines.extend(done.removed.iter().map(|r| format!("removed {r}")));
+                lines.join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::KindleCommand::Backup { into } => {
+            let root = into.unwrap_or_else(|| {
+                deckle_library::care::backups_root(&deckle_library::config::default_path())
+            });
+            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+            // Every book's details: an AZW whose record 0 says DRM is left out over MTP too.
+            let (inv, _) = deckle_core::inventory::list_detailed(
+                &mut conn,
+                Some(&cache),
+                deckle_digest::EDITION_PREFIX,
+            )
+            .map_err(|e| e.to_string())?;
+            let current = deckle_library::freshness::Current::now(&Default::default());
+            let shelf =
+                deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key, &current);
+            let at = deckle_digest::chrono::Utc::now()
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string();
+            let done = deckle_library::care::backup_on(
+                &mut conn,
+                &shelf,
+                &root,
+                &deckle_shelf::friendly_name(&device.name),
+                deckle_digest::EDITION_PREFIX,
+                &at,
+            )?;
+            emit(json, &done, || {
+                let mut lines: Vec<String> =
+                    done.copied.iter().map(|f| format!("copied {f}")).collect();
+                lines.extend(done.failed.iter().map(|(f, e)| format!("failed {f}: {e}")));
+                lines.push(format!(
+                    "{} backed up to {}; {} left out (Amazon's own, the paper)",
+                    done.copied.len(),
+                    done.dir.display(),
+                    done.skipped.len()
+                ));
+                lines.join("\n")
+            })?;
+            Ok(if done.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        cli::KindleCommand::Restore { dir } => {
+            let present: Vec<String> = list_on(&mut conn, None)
+                .map_err(|e| e.to_string())?
+                .books
+                .into_iter()
+                .map(|b| b.file)
+                .collect();
+            let done = deckle_library::care::restore_on(&mut conn, &dir, &present)?;
+            emit(json, &done, || {
+                let mut lines: Vec<String> = done
+                    .restored
+                    .iter()
+                    .map(|f| format!("restored {f}"))
+                    .collect();
+                lines.extend(done.already.iter().map(|f| format!("already there: {f}")));
+                lines.extend(done.failed.iter().map(|(f, e)| format!("failed {f}: {e}")));
+                lines.push(format!(
+                    "{} restored to {}",
+                    done.restored.len(),
+                    device.name
+                ));
+                lines.join("\n")
+            })?;
+            Ok(if done.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
     }
+}
+
+/// The originals on this computer (Books and Kindle design §4); a calibre library that won't
+/// open is a warning.
+fn originals() -> deckle_library::sources::Sources {
+    let cfg = deckle_library::LibraryConfig::load(&deckle_library::config::default_path());
+    let found =
+        deckle_library::sources::Sources::gather(&cfg, deckle_library::sources::home().as_deref());
+    for w in &found.warnings {
+        eprintln!("warning: {w}");
+    }
+    found
+}
+
+/// `kindle upgrade`: books with an original on this computer, rebuilt and put in place of the
+/// Kindle's copy, which is kept (Books and Kindle design §6).
+fn kindle_upgrade(
+    json: bool,
+    target: &Target,
+    files: &[String],
+    dry_run: bool,
+    yes: bool,
+    include_reading: bool,
+    pv: Option<PathBuf>,
+) -> Result<ExitCode, String> {
+    use deckle_core::deliver::Conn;
+    use deckle_library::upgrade::{Class, Sorted};
+    let config = deckle_library::config::default_path();
+    let device = deckle_library::device_ref(target);
+    let library = deckle_library::Library::configured(&config).map(|(l, _)| l);
+    let sources = originals();
+    let word_wise = deckle_core::wordwise::WordWiseOptions::default();
+    let current = deckle_library::freshness::Current::now(&word_wise);
+    let sorted = {
+        // The listing's session ends before the first rebuild opens its own.
+        let mut conn = Conn::new(target);
+        let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+        let (inv, _) = deckle_core::inventory::list_detailed(
+            &mut conn,
+            Some(&cache),
+            deckle_digest::EDITION_PREFIX,
+        )
+        .map_err(|e| e.to_string())?;
+        let shelf =
+            deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key, &current);
+        deckle_library::upgrade::sort(shelf, &sources, |b| {
+            deckle_readership::parse_yjf(b)
+                .ok()
+                .and_then(|p| p.kindle_fraction)
+        })
+    };
+    let title = |s: &Sorted| {
+        s.shelved
+            .book
+            .title
+            .clone()
+            .unwrap_or_else(|| s.shelved.book.file.clone())
+    };
+    let named = |s: &Sorted| files.contains(&s.shelved.book.file);
+    // An original on this computer, or the Kindle's own DRM-free KF8 copy (design §5).
+    let from_here = |s: &Sorted| matches!(s.class, Class::HasSource | Class::KindleCopy);
+    let candidates: Vec<&Sorted> = sorted
+        .iter()
+        .filter(|s| from_here(s))
+        .filter(|s| files.is_empty() || named(s))
+        .collect();
+    let (plan, reading): (Vec<&Sorted>, Vec<&Sorted>) = candidates
+        .into_iter()
+        .partition(|s| include_reading || named(s) || !s.partway());
+    for f in files {
+        if !sorted
+            .iter()
+            .any(|s| &s.shelved.book.file == f && from_here(s))
+        {
+            eprintln!(
+                "warning: {f}: not a book Deckle can upgrade (no original, DRM, or not a book)"
+            );
+        }
+    }
+    let count = |c: Class| sorted.iter().filter(|s| s.class == c).count();
+    let summary = [
+        (
+            Class::Older,
+            "Deckle's older builds: `deckle library reprocess`",
+        ),
+        (Class::NoSource, "KFX with no original here"),
+        (Class::AmazonOwn, "Amazon's own, left alone"),
+        (Class::Locked, "locked by DRM, left alone"),
+        (Class::FixedLayout, "fixed layout, left alone"),
+    ]
+    .into_iter()
+    .filter(|(c, _)| count(*c) > 0)
+    .map(|(c, what)| format!("{} {what}", count(c)))
+    .collect::<Vec<_>>();
+    if !json {
+        for s in &plan {
+            let from = match &s.source {
+                Some(src) => src.path.display().to_string(),
+                None => "rebuilt from the Kindle's own copy".to_owned(),
+            };
+            println!("{}\n      {} ← {from}", title(s), s.shelved.book.file);
+        }
+        for s in &reading {
+            println!(
+                "{} (skipped: {:.0}% read; name its file or pass --include-reading)",
+                title(s),
+                s.fraction.unwrap_or(0.0) * 100.0
+            );
+        }
+        for line in &summary {
+            println!("{line}");
+        }
+    }
+    if plan.is_empty() {
+        if json {
+            println!("[]");
+        } else {
+            println!("nothing to upgrade on {}", device.name);
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if dry_run {
+        if !json {
+            println!(
+                "{} can be upgraded on {}; nothing changed",
+                plan.len(),
+                device.name
+            );
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !yes {
+        use std::io::{BufRead, IsTerminal, Write};
+        if !std::io::stdin().is_terminal() {
+            return Err("pass --yes to upgrade without a terminal to confirm in".into());
+        }
+        print!(
+            "Upgrade {} on {}? The old copies are kept. [y/N] ",
+            plan.len(),
+            device.name
+        );
+        std::io::stdout().flush().ok();
+        let mut answer = String::new();
+        std::io::stdin()
+            .lock()
+            .read_line(&mut answer)
+            .map_err(|e| e.to_string())?;
+        if !answer.trim().eq_ignore_ascii_case("y") {
+            println!("nothing changed");
+            return Ok(ExitCode::SUCCESS);
+        }
+    }
+    // Highlights first, when there's a folder for them (design §6). The old .sdr is kept too.
+    let state = highlights::state_path();
+    if deckle_highlights::State::load(&state).folder.is_some() {
+        let read =
+            deckle_core::clippings::read_on(&mut Conn::new(target)).map_err(|e| e.to_string());
+        match read.map(|b| b.map(|b| deckle_highlights::export_clippings(&b, &state, None))) {
+            Ok(Some(Err(e))) | Err(e) => eprintln!("warning: highlights weren't saved first: {e}"),
+            _ => {}
+        }
+    }
+    let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
+    let mut reports = Vec::new();
+    for s in &plan {
+        let file = &s.shelved.book.file;
+        let (source, origin) = match &s.source {
+            Some(src) => (src.path.clone(), src.origin),
+            // No original here: the Kindle's copy, rebuilt as an EPUB first.
+            None => match deckle_library::upgrade::rebuild_from_kindle(
+                &mut Conn::new(target),
+                &config,
+                file,
+            ) {
+                Ok(epub) => (epub, deckle_library::sources::Origin::KindleCopy),
+                Err(e) => {
+                    reports.push(RunReport {
+                        error: Some(e),
+                        ..Default::default()
+                    });
+                    continue;
+                }
+            },
+        };
+        let at = deckle_core::devices::now_iso();
+        let kept = deckle_library::upgrade::originals_dir(&config, &device.key, file, &at);
+        let opts = RunOptions {
+            cover: Default::default(),
+            cde_type: deckle_kfx::convert::CdeType::Pdoc,
+            // The cover rule picks the mode, as for any book.
+            cde_override: None,
+            amazon_match: false,
+            generated_cover: Some(None),
+            metadata_fill: false,
+            typography: true,
+            popup_notes: true,
+            verified_real_asin: false,
+            asin: None,
+            pages: Some(None),
+            target: target.clone(),
+            previewer: Some(located.path.clone()),
+            keep_work_dir: false,
+            xray: deckle_core::pipeline::XRayMode::Auto,
+            llm: None,
+            wikipedia: false,
+            word_wise: Some(word_wise.clone()),
+            replaces: vec![file.clone()],
+            originals: Some(kept.clone()),
+        };
+        let mut r = run(&source, &opts);
+        if let Err(e) = deckle_library::auto_add(&config, &source, &r, target) {
+            r.warnings.push(deckle_library::auto_add_warning(&e));
+        }
+        if let Err(e) = deckle_library::upgrade::record(
+            &config,
+            &device.key,
+            file,
+            &title(s),
+            &source,
+            Some(origin),
+            &kept,
+            &r,
+            &at,
+        ) {
+            r.warnings.push(format!(
+                "the upgrade wasn't recorded, so it can't be put back from Deckle: {e}"
+            ));
+        }
+        reports.push(r);
+    }
+    let failed = reports.iter().filter(|r| r.error.is_some()).count();
+    emit(json, &reports, || {
+        plan.iter()
+            .zip(&reports)
+            .map(|(s, r)| match &r.error {
+                Some(e) => format!(
+                    "FAIL  {}\n      {e} (the old copy is still there)",
+                    title(s)
+                ),
+                None => format!(
+                    "OK    {}{}{}",
+                    title(s),
+                    r.replaced
+                        .iter()
+                        .map(|f| format!(
+                            "\n      replaced {f} (kept; `deckle kindle put-back {f}` undoes it)"
+                        ))
+                        .collect::<String>(),
+                    if r.warnings.is_empty() {
+                        String::new()
+                    } else {
+                        format!("\n      warnings: {}", r.warnings.join("; "))
+                    }
+                ),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    })?;
+    Ok(if failed == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_FAILURE)
+    })
 }
 
 /// One book `library reprocess` would update: the device file, the library source, the mode
@@ -1074,6 +1444,7 @@ fn reprocess(
             _ => None,
         };
         let opts = RunOptions {
+            cover: Default::default(),
             cde_type: cde.unwrap_or(deckle_kfx::convert::CdeType::Pdoc),
             cde_override: cde,
             amazon_match: false,
@@ -1093,6 +1464,7 @@ fn reprocess(
             word_wise: Some(word_wise.clone()),
             // This copy goes once the new one is written, whatever it's called now.
             replaces: vec![u.file.clone()],
+            originals: None,
         };
         let mut r = run(&u.source, &opts);
         if r.error.is_none()
@@ -2270,6 +2642,7 @@ fn queue_edition(
 /// must always show (design §5).
 fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Path) -> RunOptions {
     RunOptions {
+        cover: Default::default(),
         cde_type: deckle_kfx::convert::CdeType::Pdoc,
         cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
         amazon_match: false,
@@ -2288,6 +2661,7 @@ fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Pa
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     }
 }
 
@@ -2303,6 +2677,7 @@ fn prepare_long_reads(
     paper: &RunOptions,
 ) -> (Vec<LongRead>, Vec<(String, String)>) {
     let opts = RunOptions {
+        cover: Default::default(),
         cde_override: None,
         xray: deckle_core::pipeline::XRayMode::Auto,
         word_wise: Some(Default::default()),

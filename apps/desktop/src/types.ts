@@ -38,7 +38,87 @@ export interface BookState extends BookRow {
   exported: boolean;
   /** Older copies this send removed from the Kindle. */
   replaced: string[];
+  /** The Kindle's own copy this send upgrades: replaced, and kept for Put back. */
+  upgradeOf: UpgradeOf | null;
+  /** The cover picked in Before you send; null: the book's own. */
+  coverPick: CoverChoice | null;
 }
+
+/** A cover picked on the Books tab (Books and Kindle design §8). */
+export type CoverChoice = { kind: "own" } | { kind: "generated" } | { kind: "image"; path: string; thumb: string };
+
+/** A book in the Books tab's library: Deckle's own, calibre's or a folder's. */
+export interface CatalogEntry {
+  path: string;
+  from: "library" | "calibre" | "folder";
+  title: string;
+  authors: string[];
+  series: { name: string; index: number | null } | null;
+  isbn: string | null;
+  /** Its folder in Deckle's library: its details can be fixed. */
+  library_dir: string | null;
+  sent_to: string[];
+  added: string | null;
+  /** On the Kindle picked in the footer. */
+  on_kindle: boolean;
+}
+
+export interface CatalogView {
+  entries: CatalogEntry[];
+  library: boolean;
+  watch: string | null;
+  warnings: string[];
+}
+
+/** The first page of chapter one, for the page preview. */
+export interface Chapter {
+  href: string;
+  title: string | null;
+  html: string;
+  css: string;
+}
+
+/** What Deckle will do to a book (Before you send). */
+export interface PreflightView {
+  typography: { quotes: number; dashes: number; ellipses: number; empty_paragraphs: number } | null;
+  notes: number | null;
+  notes_skipped: number;
+  cover: "own" | "generated" | "picked" | "none";
+  cover_url: string | null;
+  images_downscaled: number;
+  toc_synthesized: boolean;
+  warnings: string[];
+  before: Chapter | null;
+  after: Chapter | null;
+}
+
+export interface CoverOffer {
+  thumb: string;
+  large: string;
+}
+
+export interface Watched {
+  added: string[];
+  failed: [string, string][];
+}
+
+export interface BookDetails {
+  title: string;
+  authors: string[];
+  series: { name: string; index: number | null } | null;
+}
+
+/** A book on a Kindle that a send replaces with Deckle's build of its original (Books and Kindle design §6). */
+export interface UpgradeOf {
+  /** The Kindle's profile key. */
+  device: string;
+  file: string;
+  title: string;
+  origin: Origin | null;
+}
+
+/** Where an upgrade's EPUB came from. */
+export type Origin = "calibre" | "folder" | "kindle-copy";
 
 export interface WordWiseSummary {
   hints: number;
@@ -359,6 +439,52 @@ export interface DeviceBookRow {
   /** Why Deckle could build it better now (Kindle-updates design §5). */
   updates: { older: boolean; feature: "X-Ray" | "Word Wise" | null; text: string }[];
   duplicate: boolean;
+  /** Its upgrade class (Books and Kindle design §3). */
+  class: UpgradeClass;
+  kind: BookKind;
+  /** How far in, 0–1. */
+  fraction: number | null;
+  reading: ReadingState;
+  /** When it was last read, UTC. */
+  last_read: string | null;
+}
+
+/** What a book on a Kindle is, for the space it takes and the Shelf's filters. */
+export type BookKind = "amazon-own" | "deckle" | "paper" | "sideloaded";
+export type ReadingState = "not-started" | "reading" | "finished";
+
+/** The space on a Kindle by kind; `other` is the system, dictionaries and fonts. */
+export interface SpaceSplit {
+  total: number;
+  free: number;
+  /** `[kind, bytes, books]`, largest first. */
+  kinds: [BookKind, number, number][];
+  other: number;
+}
+
+/** A book that could go to make room. */
+export type Spare = { file: string; title: string; size: number; has_sdr: boolean } & ({ why: "finished" } | { why: "duplicate"; keeping: string } | { why: "old-paper" });
+
+export interface Backup {
+  dir: string;
+  device: string;
+  at: string;
+  books: number;
+  size: number;
+}
+
+export interface BackupReport {
+  dir: string;
+  copied: string[];
+  /** `[file, why]` */
+  skipped: [string, string][];
+  failed: [string, string][];
+}
+
+export interface RestoreReport {
+  restored: string[];
+  already: string[];
+  failed: [string, string][];
 }
 
 export interface DeviceShelf {
@@ -368,6 +494,12 @@ export interface DeviceShelf {
   /** The Kindle's highlights by book, as the next export would write them. */
   highlights: HighlightRow[];
   highlights_error: string | null;
+  /** This Kindle's room (design §7). */
+  split: SpaceSplit | null;
+  spare: Spare[];
+  backups: Backup[];
+  /** Reading positions left unread past the per-connection cap. */
+  unread_positions: number;
 }
 
 /** One book's highlights (highlights export design §6). */
@@ -535,4 +667,72 @@ export interface NextPaper {
   off: PagePlanRow[];
   pages: number;
   week: WeekDay[];
+}
+
+/** What a book on a Kindle is, for upgrading (Books and Kindle design §3). */
+export type UpgradeClass =
+  | "current"
+  | "older"
+  | "has-source"
+  | "kindle-copy"
+  | "no-source"
+  | "amazon-own"
+  | "locked"
+  | "fixed-layout"
+  | "pdf"
+  | "other"
+  | "unread";
+
+/** A book the Kindle tab can upgrade from its original on this computer. */
+export interface UpgradeRow {
+  file: string;
+  title: string;
+  authors: string[];
+  format: string;
+  class: UpgradeClass;
+  /** The original; null for a book rebuilt from the Kindle's copy when it's upgraded. */
+  source: string | null;
+  origin: Origin;
+  fraction: number | null;
+  partway: boolean;
+  gains: string[];
+  cover: string | null;
+}
+
+export interface UpgradeHistoryRow {
+  old_file: string;
+  new_file: string | null;
+  title: string;
+  origin: Origin | null;
+  at: string;
+}
+
+/** One book the rebuild tried: its EPUB, or why not. */
+export interface Rebuild {
+  file: string;
+  source: string | null;
+  error: string | null;
+}
+
+/** Where originals are looked for (Settings → General → Library). */
+export interface SourcesStatus {
+  find_in_calibre: boolean;
+  calibre: string | null;
+  folders: string[];
+  /** The folder whose new EPUBs are added to the library. */
+  watch?: string | null;
+}
+
+export interface UpgradesView {
+  device: string;
+  rows: UpgradeRow[];
+  counts: Partial<Record<UpgradeClass, number>>;
+  history: UpgradeHistoryRow[];
+  sources: SourcesStatus;
+  warnings: string[];
+}
+
+export interface PutBack {
+  restored: string;
+  removed: string[];
 }

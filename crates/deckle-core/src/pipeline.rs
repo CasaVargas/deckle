@@ -23,6 +23,19 @@ pub use deckle_cover::Template as CoverTemplate;
 use deckle_kfx::convert::{CdeType, ConvertOptions, ConvertOutput, kpf_to_kfx};
 use deckle_kfx::metadata::{fix_language, generate_asin};
 
+/// Which cover a book goes out with (the Books tab's cover picker, Books and Kindle §8).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum CoverPick {
+    /// The book's own; a generated one only when it has none and `generated_cover` is on.
+    #[default]
+    Auto,
+    /// Deckle's typographic cover, in place of the book's own: `None` the template by the
+    /// book's hash.
+    Generated(Option<CoverTemplate>),
+    /// An image file (an Open Library cover, say), in place of the book's own.
+    Image(PathBuf),
+}
+
 #[derive(Clone, Debug)]
 pub struct RunOptions {
     /// Legacy default; the cover rule decides unless `cde_override` is set.
@@ -41,6 +54,8 @@ pub struct RunOptions {
     pub typography: bool,
     /// Footnotes and endnotes to Kindle pop-up notes in normalize (issue #31).
     pub popup_notes: bool,
+    /// The cover picked for this book.
+    pub cover: CoverPick,
     /// Spike 2 passed on this device: real ASINs keep our sidecars.
     pub verified_real_asin: bool,
     /// An ASIN the owner typed (design §3); replaces Match. `None`: Match, else generated.
@@ -61,6 +76,9 @@ pub struct RunOptions {
     /// Older copies of this book under other names in `documents/` (the library's send
     /// records); removed after delivery, on the same connection (Kindle-updates design §4).
     pub replaces: Vec<String>,
+    /// Where each copy `replaces` removes is kept first, file and `.sdr` (an upgrade, Books and
+    /// Kindle design §6). A copy that can't be kept stays on the Kindle.
+    pub originals: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -341,24 +359,18 @@ pub fn prepare_with(
     report.info = info.clone();
     report.warnings.extend(info.warnings.iter().cloned());
 
-    let generated_cover = match (&info.cover_href, opts.generated_cover) {
-        (None, Some(style)) => match generated_cover(&info, style) {
-            Ok((cover, warnings)) => {
-                report.warnings.extend(warnings);
-                Some(cover)
-            }
-            Err(e) => {
-                report.warnings.push(format!("cover not generated: {e}"));
-                None
-            }
-        },
-        _ => None,
-    };
+    let (generated_cover, replace_cover) = cover_for(
+        &info,
+        &opts.cover,
+        opts.generated_cover,
+        &mut report.warnings,
+    );
     let normalized = work_path.join("normalized.epub");
     let normalize_opts = NormalizeOptions {
         fill,
         typography: opts.typography,
         generated_cover,
+        replace_cover,
         popup_notes: opts.popup_notes,
         ..Default::default()
     };
@@ -391,6 +403,45 @@ pub fn prepare_with(
         wishes: Wishes::of(opts),
         name: None,
         _work: work,
+    })
+}
+
+/// The cover normalize adds, and whether it replaces the book's own: what `pick` asks for,
+/// else a generated one for a coverless book when `auto` is on. A cover that can't be made is a
+/// warning, and the book keeps its own.
+pub(crate) fn cover_for(
+    info: &crate::inspect::BookInfo,
+    pick: &CoverPick,
+    auto: Option<Option<CoverTemplate>>,
+    warnings: &mut Vec<String>,
+) -> (Option<GeneratedCover>, bool) {
+    let made = match pick {
+        CoverPick::Auto => match (&info.cover_href, auto) {
+            (None, Some(style)) => generated_cover(info, style),
+            _ => return (None, false),
+        },
+        CoverPick::Generated(style) => generated_cover(info, *style),
+        CoverPick::Image(path) => picked_cover(path).map(|c| (c, Vec::new())),
+    };
+    match made {
+        Ok((cover, w)) => {
+            warnings.extend(w);
+            (Some(cover), *pick != CoverPick::Auto)
+        }
+        Err(e) => {
+            warnings.push(format!("cover not generated: {e}"));
+            (None, false)
+        }
+    }
+}
+
+/// An image file as a JPEG cover.
+fn picked_cover(path: &Path) -> Result<GeneratedCover, String> {
+    let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let img = image::load_from_memory(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(GeneratedCover {
+        style: "picked".into(),
+        jpeg: crate::normalize::encode_jpeg(&img, 90)?,
     })
 }
 
@@ -445,6 +496,7 @@ fn replace_older_copies(
     report: &mut RunReport,
     asin: &str,
     named: &[String],
+    originals: Option<&Path>,
     delivered: &Path,
 ) {
     let new_name = delivered
@@ -463,6 +515,19 @@ fn replace_older_copies(
         }
     }
     for file in old {
+        if let Some(dir) = originals {
+            match crate::inventory::copy_out(conn, &file, dir) {
+                Ok(()) => {}
+                // Already gone: nothing to keep or remove.
+                Err(DeliverError::Refused(_)) => continue,
+                Err(e) => {
+                    report.warnings.push(format!(
+                        "{file} stays on the Kindle: its copy couldn't be kept: {e}"
+                    ));
+                    continue;
+                }
+            }
+        }
         match crate::inventory::remove_on(conn, &file) {
             Ok(_) => report.replaced.push(file),
             // Already gone (removed by hand since that send).
@@ -682,7 +747,14 @@ pub fn finish_with(
         },
         report
     );
-    replace_older_copies(conn, &mut report, &asin, &opts.replaces, &delivered);
+    replace_older_copies(
+        conn,
+        &mut report,
+        &asin,
+        &opts.replaces,
+        opts.originals.as_deref(),
+        &delivered,
+    );
     report.delivered = Some(delivered);
     // Known issues for this Kindle (design §6): warnings only, the book is already on it.
     let used = SendUse {
@@ -709,6 +781,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
     let dir = tempfile::tempdir().map_err(|e| format!("workdir: {e}"))?;
     let target = Target::Folder(dir.path().to_path_buf());
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: Some(CdeType::Pdoc),
         amazon_match: false,
@@ -727,6 +800,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let r = finish(prepared, &mut Conn::new(&target), &opts, &mut |_| {});
     match (r.error, r.delivered) {

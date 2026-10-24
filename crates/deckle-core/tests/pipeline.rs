@@ -17,6 +17,7 @@ fn fake(name: &str) -> PathBuf {
 fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: Some(None),
@@ -35,6 +36,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -80,6 +82,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
 fn missing_previewer_fails_before_any_work() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -98,6 +101,7 @@ fn missing_previewer_fails_before_any_work() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -116,6 +120,7 @@ fn missing_previewer_fails_before_any_work() {
 fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -134,6 +139,7 @@ fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     let err = report.error.expect("error");
@@ -155,6 +161,7 @@ fn docx_fixture() -> PathBuf {
 fn a_word_document_runs_through_the_whole_pipeline() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -173,6 +180,7 @@ fn a_word_document_runs_through_the_whole_pipeline() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&docx_fixture(), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -207,6 +215,7 @@ fn a_broken_word_document_fails_at_import() {
     let bad = dir.path().join("notes.docx");
     std::fs::write(&bad, b"not really a document").unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -225,6 +234,7 @@ fn a_broken_word_document_fails_at_import() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&bad, &opts);
     let err = report.error.expect("error");
@@ -242,6 +252,7 @@ fn a_plain_text_file_runs_through_the_whole_pipeline() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/txt/gutenberg-mini.txt");
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -260,6 +271,7 @@ fn a_plain_text_file_runs_through_the_whole_pipeline() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&txt, &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -282,6 +294,7 @@ fn a_text_pdf_runs_through_the_whole_pipeline_with_a_quality_note() {
     let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf/book.pdf");
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -300,6 +313,7 @@ fn a_text_pdf_runs_through_the_whole_pipeline_with_a_quality_note() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&pdf, &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -328,6 +342,7 @@ fn an_empty_text_file_fails_at_import() {
     let empty = dir.path().join("empty.txt");
     std::fs::write(&empty, b"\n\n").unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -346,6 +361,7 @@ fn an_empty_text_file_fails_at_import() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&empty, &opts);
     assert_eq!(
@@ -376,6 +392,7 @@ fn real_previewer_end_to_end() {
     }
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: Some(None),
@@ -394,6 +411,7 @@ fn real_previewer_end_to_end() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -405,6 +423,7 @@ fn real_previewer_end_to_end() {
 fn missing_media_notice_from_previewer_reaches_the_report() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -423,6 +442,7 @@ fn missing_media_notice_from_previewer_reaches_the_report() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None);
@@ -439,6 +459,7 @@ fn run_with_progress_reports_each_stage_in_order() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -457,6 +478,7 @@ fn run_with_progress_reports_each_stage_in_order() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -478,6 +500,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Ebok,
         cde_override: Some(CdeType::Ebok),
         asin: None,
@@ -496,6 +519,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -547,6 +571,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -565,6 +590,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let report = run_with_progress(
@@ -590,6 +616,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
     .unwrap();
     let device = deckle_core::deliver::detect_in(&[root.path().to_path_buf()]).remove(0);
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc, // ignored: the rule decides unless cde_override is set
         cde_override: None,
         asin: None,
@@ -608,6 +635,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -636,6 +664,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
 fn folder_target_is_pdoc_and_an_override_wins() {
     let out = tempfile::tempdir().unwrap();
     let mut opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: None,
         asin: None,
@@ -654,6 +683,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(r.decision.unwrap().cde, CdeType::Pdoc);
@@ -671,6 +701,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
 fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: None,
         asin: None,
@@ -689,6 +720,7 @@ fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
         wikipedia: false,
         word_wise: Some(Default::default()),
         replaces: Vec::new(),
+        originals: None,
     };
     let r = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
     assert_eq!(r.error, None, "{r:?}");
@@ -733,6 +765,7 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
     drop(conn);
     let out = tmp.path().join("out");
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: Some(CdeType::Ebok),
         asin: Some("B0WWTESTDK".into()),
@@ -755,6 +788,7 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
             cache_dir: tmp.path().join("cache"),
         }),
         replaces: Vec::new(),
+        originals: None,
     };
     let mut seen = Vec::new();
     let r = deckle_core::pipeline::run_with_progress(
@@ -798,6 +832,7 @@ fn a_word_document_built_as_ebok_ships_xray_and_word_wise_sidecars() {
     drop(conn);
     let out = tmp.path().join("out");
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Ebok,
         cde_override: Some(CdeType::Ebok),
         asin: Some("B0DOCXTEST".into()),
@@ -820,6 +855,7 @@ fn a_word_document_built_as_ebok_ships_xray_and_word_wise_sidecars() {
             cache_dir: tmp.path().join("cache"),
         }),
         replaces: Vec::new(),
+        originals: None,
     };
     let mut seen: Vec<&'static str> = Vec::new();
     let r = run_with_progress(&docx_fixture(), &opts, &mut |s| seen.push(s));
@@ -881,6 +917,7 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
     let tmp = tempfile::tempdir().unwrap();
     let (a, b) = (tmp.path().join("run"), tmp.path().join("split"));
     let opts = |dir: &std::path::Path| RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: None,
         asin: None,
@@ -899,6 +936,7 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let epub = deckle_kfx::fixtures::path("deckle-mini.epub");
     let whole = run(&epub, &opts(&a));
@@ -962,6 +1000,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
     // The library's record names one more (an MTP-style hint); one that's gone is ignored.
     std::fs::write(out.path().join("Renamed by hand.kfx"), &store).unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -980,6 +1019,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
         wikipedia: false,
         word_wise: None,
         replaces: vec!["Renamed by hand.kfx".into(), "Long gone.kfx".into()],
+        originals: None,
     };
     let report = run(&epub, &opts);
     assert_eq!(report.error, None, "{report:?}");
@@ -1003,6 +1043,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
 #[cfg(unix)]
 fn fill_opts(out: &std::path::Path, metadata_fill: bool) -> RunOptions {
     RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -1021,6 +1062,7 @@ fn fill_opts(out: &std::path::Path, metadata_fill: bool) -> RunOptions {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     }
 }
 
@@ -1141,6 +1183,7 @@ fn docx_normalized(
 ) -> (RunReport, Vec<u8>) {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         generated_cover,
         keep_work_dir: true,
         ..fill_opts(out.path(), false)
@@ -1195,6 +1238,7 @@ fn an_epub_with_a_cover_normalizes_the_same_with_generated_covers_on_or_off() {
     let normalized = |generated_cover| {
         let out = tempfile::tempdir().unwrap();
         let opts = RunOptions {
+            cover: Default::default(),
             generated_cover,
             keep_work_dir: true,
             ..fill_opts(out.path(), false)
@@ -1242,6 +1286,7 @@ fn a_bound_book_runs_through_the_whole_pipeline() {
     .unwrap();
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
         pages: None,
@@ -1260,6 +1305,7 @@ fn a_bound_book_runs_through_the_whole_pipeline() {
         wikipedia: false,
         word_wise: None,
         replaces: Vec::new(),
+        originals: None,
     };
     let report = run(&bound, &opts);
     assert_eq!(report.error, None, "{report:?}");

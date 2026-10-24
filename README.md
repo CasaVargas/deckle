@@ -116,6 +116,12 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   into pop-up notes.
 - **Library.** A plain folder (`Author/Title/` plus a `deckle.json`), no database. Deckle can
   tell you which books on the Kindle it could now build better and re-send them.
+- **Upgrade books Deckle didn't send.** Books calibre or anything else put on the Kindle are
+  matched to their originals on your computer (your calibre library, read-only, or folders you
+  name) and rebuilt with Enhanced Typesetting, page numbers, X-Ray and Word Wise. With no
+  original, a DRM-free AZW3 is rebuilt from the Kindle's own copy, and checked before it
+  replaces anything. The Kindle's copy is kept with its highlights and reading data, so an
+  upgrade can be put back. Store books and anything with DRM are left alone.
 - **Highlights out.** Highlights and notes from the Kindle's `My Clippings.txt`, as one Markdown
   file per book in a folder you choose (a notes vault, iCloud Drive). It covers sideloaded books,
   which Amazon's own export leaves out, and later exports only add what's new, so your own edits
@@ -209,6 +215,10 @@ deckle library init ~/Books/Deckle                # keep a copy of everything yo
 deckle library list --series                      # grouped by series
 deckle library reprocess --dry-run                # books Deckle could build better now
 deckle kindle books                               # what's on the Kindle, and free space
+deckle kindle upgrade --dry-run                   # books with an original here (calibre, folders)
+deckle kindle put-back "Middlemarch.azw3"         # undo an upgrade: the kept copy goes back
+deckle kindle backup                              # DRM-free books and their .sdr, to this computer
+deckle kindle restore "…/kindle-backups/Kindle Scribe 2026-10-23T22-30"  # onto any Kindle
 deckle highlights list                            # books with highlights, and what's new
 deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (folder remembered)
 deckle words anki --to ~/Desktop/words.csv        # looked-up words as Anki cards (File → Import)
@@ -247,8 +257,9 @@ fixtures and real Kindles, before it merges.
 ## Credits
 
 Deckle builds on research and code from the MobileRead community: jhowell's KFX Input/Output and
-kfxlib, jloutsch's kfxgen, xxyzz's WordDumb and Proficiency, seapy's kindle-cli, and calibre's
-Kindle driver. Word Wise definitions come from Wiktionary via kaikki.org (CC BY-SA 4.0), word
+kfxlib, jloutsch's kfxgen, xxyzz's WordDumb and Proficiency, seapy's kindle-cli, calibre's
+Kindle driver, the MobileRead wiki's MOBI format notes, and KindleUnpack (GPL-3), whose KF8
+path Deckle's AZW3 rebuild follows. Word Wise definitions come from Wiktionary via kaikki.org (CC BY-SA 4.0), word
 frequencies from wordfreq (CC BY-SA 4.0). PDFs are read with PDFium (BSD-3-Clause), built by
 bblanchon/pdfium-binaries.
 

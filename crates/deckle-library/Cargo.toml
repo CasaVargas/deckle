@@ -13,11 +13,15 @@ deckle-docx.workspace = true
 deckle-txt.workspace = true
 deckle-pdf.workspace = true
 deckle-kfx.workspace = true
+deckle-mobi.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 unicode-normalization = "0.1"
+rusqlite.workspace = true
+regex.workspace = true
+zip.workspace = true
 
 [dev-dependencies]
-zip.workspace = true
+roxmltree.workspace = true
