@@ -1,0 +1,19 @@
+[package]
+name = "deckle-markdown"
+description = "Markdown files and flat notes folders to EPUB 3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+serde_yaml_ng = "0.10"
+serde.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+roxmltree.workspace = true

@@ -128,10 +128,10 @@ pub enum Command {
     },
     /// List connected Kindles.
     Devices,
-    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), text files (.txt),
+    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), text files (.txt), Markdown files or notes folders,
     /// text PDFs (.pdf, reflowed; needs PDFium) or web articles.
     Run {
-        /// EPUBs; Word documents (.docx); text files (.txt); text PDFs (.pdf); or web articles:
+        /// EPUBs; Word documents (.docx); text files (.txt); Markdown (.md/.markdown) or flat notes folders; text PDFs (.pdf); or web articles:
         /// an address, a .webloc/.url link file or a saved .html page, each built into its own
         /// book first.
         epubs: Vec<PathBuf>,

@@ -354,7 +354,10 @@ pub fn is_kfx(p: &Path) -> bool {
 
 /// A Word document or a text file: imported to an EPUB first, as `deckle run` does.
 fn is_imported(p: &Path) -> bool {
-    deckle_docx::is_word(p) || deckle_txt::is_text(p) || deckle_pdf::is_pdf(p)
+    deckle_docx::is_word(p)
+        || deckle_txt::is_text(p)
+        || deckle_pdf::is_pdf(p)
+        || deckle_markdown::is_markdown(p)
 }
 
 /// What a folder walk takes: EPUB, KFX, Word documents and PDFs. A `.txt` in a folder is far more
@@ -363,8 +366,8 @@ fn is_book(p: &Path) -> bool {
     has_extension(p, "epub") || is_kfx(p) || deckle_docx::is_word(p) || deckle_pdf::is_pdf(p)
 }
 
-/// EPUB, KFX and Word files from a mix of file and folder paths (folders are walked, sorted by
-/// name); text files only when given directly.
+/// Files and folders for the send queue. A folder with top-level Markdown is one notes book;
+/// other folders are walked for books. Text and Markdown files are also accepted directly.
 pub fn expand_book_paths(paths: &[String]) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
@@ -383,7 +386,9 @@ pub fn expand_book_paths(paths: &[String]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for p in paths {
         let p = PathBuf::from(p);
-        if p.is_dir() {
+        if deckle_markdown::is_markdown(&p) {
+            out.push(p);
+        } else if p.is_dir() {
             walk(&p, &mut out);
         } else if is_book(&p) || deckle_txt::is_text(&p) {
             out.push(p);
@@ -1135,6 +1140,23 @@ pub fn devices_file(app: &AppHandle) -> PathBuf {
 mod tests {
     use super::*;
     use deckle_transport::usb::MtpInfo;
+
+    #[test]
+    fn markdown_paths_are_one_book_and_inspect_as_imports() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/markdown");
+        let paths = vec![
+            root.join("mini.md").to_string_lossy().into_owned(),
+            root.join("notes").to_string_lossy().into_owned(),
+        ];
+        let expanded = expand_book_paths(&paths);
+        assert_eq!(expanded, vec![root.join("mini.md"), root.join("notes")]);
+        let single = book_row(&expanded[0]);
+        assert_eq!(single.error, None, "{}", single.reason);
+        assert_eq!(single.title, "Deckle Markdown Mini");
+        let folder = book_row(&expanded[1]);
+        assert_eq!(folder.error, None, "{}", folder.reason);
+        assert_eq!(folder.title, "notes");
+    }
 
     #[test]
     fn an_mtp_kindle_profile_carries_its_known_issues_and_a_recorded_firmware() {

@@ -549,3 +549,32 @@ fn sends_to_two_kindles_of_one_model_stay_apart() {
     assert!(old.send_to("ms:Kindle#A").is_some());
     assert!(old.forget("ms:Kindle#B", "a.kfx"));
 }
+
+#[test]
+fn markdown_library_snapshot_retains_assets_and_updates_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("notes");
+    std::fs::create_dir(&source).unwrap();
+    let fixture =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/markdown/images/square.png");
+    std::fs::copy(fixture, source.join("square.png")).unwrap();
+    let note = "# Notes\n\n![A square](square.png)\n";
+    std::fs::write(source.join("note.md"), note).unwrap();
+    let library = Library::new(temp.path().join("library"));
+    let first = library.add(&source).unwrap();
+    assert_eq!(first.book.source_path().extension().unwrap(), "epub");
+    assert_eq!(
+        std::fs::read_to_string(source.join("note.md")).unwrap(),
+        note
+    );
+    std::fs::write(source.join("note.md"), format!("{note}\nMore notes.\n")).unwrap();
+    let second = library.add(&source).unwrap();
+    assert!(!second.new);
+    assert!(second.copied);
+    assert_eq!(first.book.sidecar.id, second.book.sidecar.id);
+    std::fs::remove_dir_all(&source).unwrap();
+    let info = deckle_library::book_info(&second.book.source_path()).unwrap();
+    assert_eq!(info.title, "notes");
+    let mut epub = deckle_core::epub::EpubReader::open(&second.book.source_path()).unwrap();
+    assert!(epub.read_bytes("OEBPS/images/image-001.png").is_ok());
+}

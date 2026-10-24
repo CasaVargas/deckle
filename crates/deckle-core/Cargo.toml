@@ -16,6 +16,7 @@ deckle-wordwise.workspace = true
 deckle-docx.workspace = true
 deckle-cover.workspace = true
 deckle-txt.workspace = true
+deckle-markdown.workspace = true
 deckle-pdf.workspace = true
 sha2.workspace = true
 flate2 = "1"
