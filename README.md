@@ -278,3 +278,24 @@ Deckle is not affiliated with Amazon.
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
+
+### Book style presets
+
+Choose **Book options → Book style** in the desktop app, or use
+`deckle run book.epub --preset academic` (`novel` and `manual` are also available).
+Academic uses spaced serif paragraphs and pop-up notes; Novel uses indented serif
+paragraphs and X-Ray when eligible; Manual uses spaced sans-serif paragraphs and
+keeps existing note handling. All use automatic pages and default Word Wise off.
+The app remembers the choice for that source path and previews it in Before you send.
+Choose Original style / app settings to clear it.
+
+CLI flags override preset defaults, for example:
+
+```sh
+deckle run novel.epub --preset novel --popup-notes=false --pages off --xray off
+```
+
+Styles use generic fonts and relative spacing; Kindle reader settings can affect their
+appearance. Fixed-layout EPUBs skip styling with a warning. Presets apply to Kindle/KFX
+conversion; the direct Kobo/PocketBook route does not support them yet.
+See the [preset design](docs/superpowers/specs/2026-10-24-book-style-presets-design.md) for the full defaults.

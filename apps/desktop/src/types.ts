@@ -152,6 +152,7 @@ export interface PlanRow {
 }
 
 export interface Settings {
+  book_presets: Record<string, StylePreset>;
   previewer_path: string | null;
   cde: "auto" | "pdoc" | "ebok";
   pages_auto: boolean;
@@ -748,3 +749,5 @@ export interface BookSearchReport {
   }[];
   warnings: string[];
 }
+
+export type StylePreset = "academic" | "novel" | "manual";

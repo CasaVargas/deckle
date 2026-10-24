@@ -17,6 +17,7 @@ fn fake(name: &str) -> PathBuf {
 fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -82,6 +83,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
 fn missing_previewer_fails_before_any_work() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -120,6 +122,7 @@ fn missing_previewer_fails_before_any_work() {
 fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -161,6 +164,7 @@ fn docx_fixture() -> PathBuf {
 fn a_word_document_runs_through_the_whole_pipeline() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -215,6 +219,7 @@ fn a_broken_word_document_fails_at_import() {
     let bad = dir.path().join("notes.docx");
     std::fs::write(&bad, b"not really a document").unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -252,6 +257,7 @@ fn a_plain_text_file_runs_through_the_whole_pipeline() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/txt/gutenberg-mini.txt");
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -294,6 +300,7 @@ fn a_text_pdf_runs_through_the_whole_pipeline_with_a_quality_note() {
     let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf/book.pdf");
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -342,6 +349,7 @@ fn an_empty_text_file_fails_at_import() {
     let empty = dir.path().join("empty.txt");
     std::fs::write(&empty, b"\n\n").unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -392,6 +400,7 @@ fn real_previewer_end_to_end() {
     }
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -423,6 +432,7 @@ fn real_previewer_end_to_end() {
 fn missing_media_notice_from_previewer_reaches_the_report() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -459,6 +469,7 @@ fn run_with_progress_reports_each_stage_in_order() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -500,6 +511,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Ebok,
         cde_override: Some(CdeType::Ebok),
@@ -571,6 +583,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -616,6 +629,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
     .unwrap();
     let device = deckle_core::deliver::detect_in(&[root.path().to_path_buf()]).remove(0);
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc, // ignored: the rule decides unless cde_override is set
         cde_override: None,
@@ -664,6 +678,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
 fn folder_target_is_pdoc_and_an_override_wins() {
     let out = tempfile::tempdir().unwrap();
     let mut opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: None,
@@ -701,6 +716,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
 fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: None,
@@ -765,6 +781,7 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
     drop(conn);
     let out = tmp.path().join("out");
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: Some(CdeType::Ebok),
@@ -832,6 +849,7 @@ fn a_word_document_built_as_ebok_ships_xray_and_word_wise_sidecars() {
     drop(conn);
     let out = tmp.path().join("out");
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Ebok,
         cde_override: Some(CdeType::Ebok),
@@ -917,6 +935,7 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
     let tmp = tempfile::tempdir().unwrap();
     let (a, b) = (tmp.path().join("run"), tmp.path().join("split"));
     let opts = |dir: &std::path::Path| RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: None,
@@ -1000,6 +1019,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
     // The library's record names one more (an MTP-style hint); one that's gone is ignored.
     std::fs::write(out.path().join("Renamed by hand.kfx"), &store).unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -1043,6 +1063,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
 #[cfg(unix)]
 fn fill_opts(out: &std::path::Path, metadata_fill: bool) -> RunOptions {
     RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -1286,6 +1307,7 @@ fn a_bound_book_runs_through_the_whole_pipeline() {
     .unwrap();
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         asin: None,
@@ -1350,5 +1372,59 @@ fn markdown_real_previewer_smoke() {
         assert_eq!(report.error, None, "{source}: {report:?}");
         let bytes = std::fs::read(report.delivered.unwrap()).unwrap();
         assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn built_in_presets_reach_normalization_and_select_stage_defaults() {
+    use deckle_core::preset::Preset;
+    let out = tempfile::tempdir().unwrap();
+    for preset in [Preset::Academic, Preset::Novel, Preset::Manual] {
+        let mut opts = RunOptions {
+            preset: None,
+            cover: Default::default(),
+            cde_type: CdeType::Pdoc,
+            asin: None,
+            pages: Some(None),
+            target: Target::Folder(out.path().to_path_buf()),
+            previewer: Some(fake("ok.sh")),
+            keep_work_dir: false,
+            cde_override: None,
+            amazon_match: false,
+            generated_cover: Some(None),
+            metadata_fill: false,
+            typography: false,
+            popup_notes: false,
+            verified_real_asin: false,
+            xray: XRayMode::Auto,
+            llm: None,
+            wikipedia: false,
+            word_wise: None,
+            replaces: Vec::new(),
+            originals: None,
+        };
+        preset.apply(&mut opts);
+        assert_eq!(opts.pages, Some(None));
+        assert_eq!(
+            opts.xray,
+            if preset == Preset::Novel {
+                XRayMode::Auto
+            } else {
+                XRayMode::Off
+            }
+        );
+        assert!(opts.word_wise.is_none());
+        assert!(!opts.amazon_match && !opts.metadata_fill && !opts.wikipedia && opts.llm.is_none());
+        assert!(opts.cde_override.is_none());
+        let report = run(&deckle_kfx::fixtures::path("deckle-mini.epub"), &opts);
+        assert_eq!(report.error, None, "{report:?}");
+        assert_eq!(report.normalize.style_preset, Some(preset));
+        assert_eq!(
+            report.normalize.typography.is_some(),
+            preset != Preset::Manual
+        );
+        assert_eq!(report.normalize.notes.is_some(), preset != Preset::Manual);
+        assert!(report.pages.is_some());
     }
 }

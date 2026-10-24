@@ -60,6 +60,7 @@ fn preflight_shows_the_typography_pass_and_the_cover_it_goes_out_with() {
     let tmp = tempfile::tempdir().unwrap();
     let src = book(tmp.path());
     let opts = PreflightOptions {
+        preset: None,
         typography: true,
         ..Default::default()
     };

@@ -12,16 +12,16 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 const list = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
 /** What Deckle will do to a book, from its preflight, the cover rule's plan and the settings. */
-export function plannedLines(v: PreflightView, plan: PlanRow | undefined, book: Pick<BookState, "cdeOverride">, s: Pick<Settings, "typography" | "popup_notes" | "xray" | "word_wise" | "generated_cover">): PlannedLine[] {
+export function plannedLines(v: PreflightView, plan: PlanRow | undefined, book: Pick<BookState, "cdeOverride">, s: Pick<Settings, "typography" | "popup_notes" | "xray" | "word_wise" | "generated_cover">, preset = false): PlannedLine[] {
   const out: PlannedLine[] = [];
-  if (!s.typography) out.push({ what: "Typography", text: "Off. Turn it on in Settings → Books for curly quotes, proper dashes and ellipses.", tone: "muted" });
+  if (!s.typography) out.push({ what: "Typography", text: preset ? "Off for this book’s style preset." : "Off. Turn it on in Settings → Books for curly quotes, proper dashes and ellipses.", tone: "muted" });
   else {
     const t = v.typography;
     const fixed = t ? [t.quotes && plural(t.quotes, "curly quote"), t.dashes && plural(t.dashes, "dash", "dashes"), t.ellipses && plural(t.ellipses, "ellipsis", "ellipses")].filter((x): x is string => !!x) : [];
     const parts = [fixed.length ? `${list(fixed)} fixed` : "", t?.empty_paragraphs ? `${plural(t.empty_paragraphs, "empty paragraph")} removed` : ""].filter(Boolean);
     out.push({ what: "Typography", text: parts.length ? parts.join("; ") : "Nothing to fix: the book's typography is clean", tone: "" });
   }
-  if (!s.popup_notes) out.push({ what: "Pop-up notes", text: "Off. Turn it on in Settings → Books to read footnotes without leaving the page.", tone: "muted" });
+  if (!s.popup_notes) out.push({ what: "Pop-up notes", text: preset ? "Off for this book’s style preset; existing notes are kept." : "Off. Turn it on in Settings → Books to read footnotes without leaving the page.", tone: "muted" });
   else {
     const n = v.notes ?? 0;
     const skipped = v.notes_skipped ? `; ${plural(v.notes_skipped, "note-like link")} with no way back left as ${v.notes_skipped === 1 ? "it is" : "they are"}` : "";
@@ -44,7 +44,7 @@ export function plannedLines(v: PreflightView, plan: PlanRow | undefined, book: 
     });
   if (cde === "ebok") {
     const on = [s.xray && "X-Ray", s.word_wise && "Word Wise"].filter(Boolean);
-    out.push({ what: "X-Ray and Word Wise", text: on.length ? `${on.join(" and ")}, built for this book` : "Both off in Settings", tone: on.length ? "" : "muted" });
+    out.push({ what: "X-Ray and Word Wise", text: on.length ? `${on.join(" and ")}, built for this book` : preset ? "Both off for this book’s style preset" : "Both off in Settings", tone: on.length ? "" : "muted" });
   } else if (cde === "pdoc") out.push({ what: "X-Ray and Word Wise", text: "Not on a personal document (PDOC): send it as EBOK for them", tone: "muted" });
   if (v.toc_synthesized) out.push({ what: "Contents", text: "The book has none, so Deckle makes one from its headings", tone: "" });
   if (v.images_downscaled) out.push({ what: "Pictures", text: `${plural(v.images_downscaled, "picture")} made smaller for the Kindle`, tone: "" });

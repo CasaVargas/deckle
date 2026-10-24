@@ -199,6 +199,7 @@ fn nested_layout_cover_rename_rewrites_every_reference() {
 
 fn typography_on() -> NormalizeOptions {
     NormalizeOptions {
+        preset: None,
         typography: true,
         ..Default::default()
     }
@@ -410,6 +411,88 @@ fn accessibility_includes_generated_cover_and_navigation_pages() {
             doc.root_element()
                 .attribute(("http://www.w3.org/XML/1998/namespace", "lang")),
             Some("en")
+        );
+    }
+}
+
+#[test]
+fn presets_style_spine_content_and_leave_default_output_unstyled() {
+    use deckle_core::preset::Preset;
+    let tmp = tempfile::tempdir().unwrap();
+    for preset in [
+        None,
+        Some(Preset::Academic),
+        Some(Preset::Novel),
+        Some(Preset::Manual),
+    ] {
+        let out = tmp.path().join("out.epub");
+        normalize(
+            &mini(),
+            &out,
+            &NormalizeOptions {
+                preset,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // The fixture's reading documents must receive the style, not just the cover/nav.
+        let mut zip = zip::ZipArchive::new(std::fs::File::open(&out).unwrap()).unwrap();
+        let names: Vec<_> = (0..zip.len())
+            .map(|i| zip.by_index(i).unwrap().name().unwrap().into_owned())
+            .collect();
+        let mut styled = 0;
+        for name in names.iter().filter(|n| n.ends_with(".xhtml")) {
+            let text = String::from_utf8(read_entry(&out, name)).unwrap();
+            roxmltree::Document::parse(&text).unwrap();
+            if text.contains("data-deckle-preset") {
+                styled += 1;
+                assert!(text.contains(&preset.unwrap().css()));
+            }
+        }
+        assert_eq!(styled > 0, preset.is_some());
+    }
+}
+
+#[test]
+fn presets_skip_fixed_layout_and_replace_their_css_on_reprocessing() {
+    use deckle_core::preset::Preset;
+    let tmp = tempfile::tempdir().unwrap();
+    let opts = NormalizeOptions {
+        preset: Some(Preset::Novel),
+        ..Default::default()
+    };
+    let first = tmp.path().join("first.epub");
+    let second = tmp.path().join("second.epub");
+    normalize(&mini(), &first, &opts).unwrap();
+    normalize(&first, &second, &opts).unwrap();
+    for name in ["OEBPS/c0.xhtml", "OEBPS/c1.xhtml", "OEBPS/c2.xhtml"] {
+        assert_eq!(read_entry(&first, name), read_entry(&second, name));
+    }
+    let nav = String::from_utf8(read_entry(&first, "OEBPS/nav.xhtml")).unwrap();
+    assert!(!nav.contains("data-deckle-preset"));
+    assert_eq!(
+        read_entry(&mini(), "OEBPS/style.css"),
+        read_entry(&first, "OEBPS/style.css")
+    );
+    let opf = String::from_utf8(read_entry(&mini(), "OEBPS/content.opf")).unwrap();
+    for fixed in [
+        opf.replace(
+            "</metadata>",
+            "<meta property=\"rendition:layout\"> pre-paginated </meta></metadata>",
+        ),
+        opf.replace(
+            "<itemref ",
+            "<itemref properties=\"rendition:layout-pre-paginated\" ",
+        ),
+    ] {
+        let source = variant(&[("OEBPS/content.opf", Some(fixed.as_bytes()))]);
+        let report = normalize(source.path(), &second, &opts).unwrap();
+        assert_eq!(report.style_preset, None);
+        assert!(report.warnings.iter().any(|w| w.contains("fixed-layout")));
+        assert!(
+            !String::from_utf8(read_entry(&second, "OEBPS/c0.xhtml"))
+                .unwrap()
+                .contains("data-deckle-preset")
         );
     }
 }

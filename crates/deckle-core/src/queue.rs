@@ -350,6 +350,7 @@ fn push_options(wishes: &Wishes, finishing: &Finishing, target: &Target) -> RunO
         _ => None,
     };
     RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: wishes.cde_override.or(device_override),
@@ -509,6 +510,7 @@ mod tests {
         /// `digest run` asks for long reads.
         fn prepared_mini() -> Prepared {
             let opts = RunOptions {
+                preset: None,
                 cover: Default::default(),
                 cde_type: CdeType::Pdoc,
                 cde_override: None,

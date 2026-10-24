@@ -40,6 +40,7 @@ pub struct BookRow {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    pub book_presets: std::collections::BTreeMap<String, deckle_core::preset::Preset>,
     pub previewer_path: Option<String>,
     /// `auto` (cover rule) | `pdoc` | `ebok`
     pub cde: String,
@@ -70,6 +71,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            book_presets: Default::default(),
             previewer_path: None,
             cde: "auto".into(),
             pages_auto: true,
@@ -773,7 +775,8 @@ pub fn run_books_with(
         {
             replaces.push(u.file.clone());
         }
-        let opts = RunOptions {
+        let mut opts = RunOptions {
+            preset: None,
             cover: b.cover.as_ref().map(CoverChoice::pick).unwrap_or_default(),
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
             cde_override: override_str.map(cde_from),
@@ -807,6 +810,9 @@ pub fn run_books_with(
             replaces,
             originals: kept.clone(),
         };
+        if let Some(preset) = settings.book_presets.get(&b.path) {
+            preset.apply(&mut opts);
+        }
         let id = b.id.clone();
         let report = run_with_progress(Path::new(&b.path), &opts, &mut |stage| {
             emit(ProgressEvent {
@@ -1449,7 +1455,12 @@ mod tests {
         );
         assert!(!s.typography, "the typography pass is off by default");
         assert!(!s.popup_notes, "the pop-up notes pass is off by default");
+        assert!(s.book_presets.is_empty());
         let mut changed = s.clone();
+        changed.book_presets.insert(
+            "/books/novel.epub".into(),
+            deckle_core::preset::Preset::Novel,
+        );
         changed.cde = "ebok".into();
         changed.metadata_fill = true;
         changed.typography = true;

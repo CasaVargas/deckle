@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "./api";
 import { kindlePage, plannedLines } from "./beforeSend";
 import Icon from "./Icon";
+import { presetSettings, PRESETS } from "./presets";
 import type { BookState, CatalogEntry, CoverChoice, CoverOffer, PlanRow, PreflightView, Settings } from "./types";
 
 interface Props {
@@ -29,6 +30,8 @@ function Page({ html, css, label }: { html: string; css: string; label: string }
  * page of chapter one before and after, its cover, and its details.
  */
 export default function BeforeYouSend({ book, plan, settings, entry, onCover, onFixed, onClose }: Props) {
+  const preset = settings.book_presets[book.path];
+  settings = presetSettings(settings, book.path);
   const [pane, setPane] = useState<Pane>("plan");
   const [view, setView] = useState<PreflightView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +58,7 @@ export default function BeforeYouSend({ book, plan, settings, entry, onCover, on
     return () => {
       live = false;
     };
-  }, [book.path, book.coverPick]);
+  }, [book.path, book.coverPick, preset]);
 
   // The typographic cover is made to be shown as soon as the Cover pane opens.
   useEffect(() => {
@@ -95,6 +98,7 @@ export default function BeforeYouSend({ book, plan, settings, entry, onCover, on
         <div>
           <h2>{book.title}</h2>
           <div className="muted small">{book.authors}</div>
+          {preset && <p className="muted small">{PRESETS[preset]} style · saved for this book</p>}
         </div>
         <button className="icon" aria-label="Close" onClick={onClose}>
           <Icon name="x" size={18} />
@@ -119,7 +123,7 @@ export default function BeforeYouSend({ book, plan, settings, entry, onCover, on
 
       {view && pane === "plan" && (
         <ul className="plan-lines">
-          {plannedLines(view, plan, book, settings).map((l) => (
+          {plannedLines(view, plan, book, settings, !!preset).map((l) => (
             <li key={l.what} className={l.tone}>
               <strong>{l.what}</strong>
               <span>{l.text}</span>
@@ -143,7 +147,7 @@ export default function BeforeYouSend({ book, plan, settings, entry, onCover, on
               <Page html={chapter.html} css={chapter.css} label={after ? "Chapter one, as Deckle sends it" : "Chapter one, as the file has it"} />
               <p className="muted small">
                 {chapter.title ?? chapter.href}, the first page as a Kindle sets it.
-                {!settings.typography && " Typography fixes are off (Settings → Books), so Before and After match."}
+                {!settings.typography && " Typography cleanup is off for this book."}
               </p>
             </>
           ) : (

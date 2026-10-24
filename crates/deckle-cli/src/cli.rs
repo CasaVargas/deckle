@@ -135,13 +135,16 @@ pub enum Command {
         /// an address, a .webloc/.url link file or a saved .html page, each built into its own
         /// book first.
         epubs: Vec<PathBuf>,
+        /// Built-in font, spacing and enhancement defaults: academic, novel, manual.
+        #[arg(long)]
+        preset: Option<deckle_core::preset::Preset>,
         /// A folder path, or `device` for the first connected Kindle.
         #[arg(long, default_value = "device")]
         to: String,
         /// `auto` lets the cover rule decide; `pdoc`/`ebok` override it.
         #[arg(long, value_enum, default_value_t = CdeArg::Auto)]
         cde: CdeArg,
-        /// Approximate page numbers: a count, or `auto`.
+        /// Approximate page numbers: a count, `auto`, or `off`.
         #[arg(long)]
         pages: Option<String>,
         #[arg(long)]
@@ -155,9 +158,10 @@ pub enum Command {
         #[arg(long)]
         fill_metadata: bool,
         /// Tidy the text: curly quotes, dashes, ellipses, and stray empty paragraphs removed
-        /// (off by default). Code and non-English quotes are left alone.
-        #[arg(long)]
-        typography: bool,
+        /// (off without a preset). Use `--typography=false` to override a preset.
+        /// Code and non-English quotes are left alone.
+        #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
+        typography: Option<bool>,
         /// Don't make a typographic cover for a book that has none (one is made by default).
         #[arg(long)]
         no_generated_cover: bool,
@@ -165,10 +169,11 @@ pub enum Command {
         /// book by its identifier).
         #[arg(long, value_parser = clap::builder::PossibleValuesParser::new(["classic", "band", "rule"]))]
         cover_style: Option<String>,
-        /// Turn footnotes and endnotes into Kindle pop-up notes (off by default). Notes the book
+        /// Turn footnotes and endnotes into Kindle pop-up notes (off without a preset).
+        /// Use `--popup-notes=false` to override a preset. Notes the book
         /// marks always convert; others only when the note links back to its reference.
-        #[arg(long)]
-        popup_notes: bool,
+        #[arg(long, num_args = 0..=1, default_missing_value = "true", require_equals = true)]
+        popup_notes: Option<bool>,
         /// This Kindle keeps Deckle's sidecars for real ASINs (spike 2 passed).
         #[arg(long)]
         verified_asin: bool,
@@ -177,8 +182,8 @@ pub enum Command {
         #[arg(long)]
         asin: Option<String>,
         /// X-Ray sidecar for EBOK books: `auto` (default) or `off`.
-        #[arg(long, value_enum, default_value_t = XRayArg::Auto)]
-        xray: XRayArg,
+        #[arg(long, value_enum)]
+        xray: Option<XRayArg>,
         /// LLM for X-Ray descriptions (key from ANTHROPIC_API_KEY / OPENAI_API_KEY).
         #[arg(long, value_enum, default_value_t = LlmArg::Off)]
         llm: LlmArg,
@@ -193,8 +198,8 @@ pub enum Command {
         wikipedia: bool,
         /// Word Wise sidecar for EBOK books: `auto` (default) or `off`. The first use downloads
         /// Deckle's Word Wise database (about 12 MB) unless `--wordwise-db` is given.
-        #[arg(long = "word-wise", value_enum, default_value_t = XRayArg::Auto)]
-        word_wise: XRayArg,
+        #[arg(long = "word-wise", value_enum)]
+        word_wise: Option<XRayArg>,
         /// Highest Word Wise difficulty to hint, 1 (rarest words only) to 5 (all).
         #[arg(long = "word-wise-level", default_value_t = 5, value_parser = clap::value_parser!(u8).range(1..=5))]
         word_wise_level: u8,
@@ -552,9 +557,10 @@ pub fn parse_pages(arg: Option<&str>) -> Result<Option<Option<u32>>, String> {
     match arg {
         None => Ok(None),
         Some("auto") => Ok(Some(None)),
+        Some("off") => Ok(None),
         Some(n) => n
             .parse::<u32>()
             .map(|n| Some(Some(n)))
-            .map_err(|_| format!("--pages expects a number or `auto`, got {n:?}")),
+            .map_err(|_| format!("--pages expects a number, `auto`, or `off`, got {n:?}")),
     }
 }

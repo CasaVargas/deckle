@@ -23,6 +23,7 @@ pub mod normalize;
 pub mod notes;
 pub mod pipeline;
 pub mod preflight;
+pub mod preset;
 pub mod previewer;
 pub mod queue;
 pub mod reader;

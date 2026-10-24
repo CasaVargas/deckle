@@ -315,6 +315,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         } => save(json, targets, title, list, remove, bookmarklet),
         cli::Command::Run {
             epubs,
+            preset,
             to,
             cde,
             pages,
@@ -347,18 +348,26 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 .as_deref()
                 .map(deckle_core::cover_rule::manual_asin)
                 .transpose()?;
+            let pages_explicit = pages.is_some();
             let pages = cli::parse_pages(pages.as_deref())?;
             // No Kindle but a Kobo or a PocketBook: neither needs Previewer (other readers §8).
             if to == "device"
                 && detect_kindle().is_none()
                 && let Some(reader) = detect_reader()
             {
+                if preset.is_some() {
+                    return Err(
+                        "style presets currently require a Kindle or --to <folder> KFX export"
+                            .into(),
+                    );
+                }
                 return send_to_reader(&epubs, &reader, json);
             }
             // Fail before any work (and before touching the target) when Previewer is missing.
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
             let target = resolve_target(&to)?;
-            let opts = RunOptions {
+            let mut opts = RunOptions {
+                preset: None,
                 cover: Default::default(),
                 cde_type: cde.into(),
                 cde_override: cde.to_override(),
@@ -367,27 +376,46 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .then(|| cover_style.as_deref().map(str::parse).transpose())
                     .transpose()?,
                 metadata_fill: fill_metadata,
-                typography,
-                popup_notes,
+                typography: typography.unwrap_or(false),
+                popup_notes: popup_notes.unwrap_or(false),
                 verified_real_asin: verified_asin,
                 asin,
                 pages,
                 target,
                 previewer: Some(located.path),
                 keep_work_dir,
-                xray: xray.into(),
+                xray: xray.unwrap_or(cli::XRayArg::Auto).into(),
                 llm: llm.config(llm_model, llm_endpoint),
                 wikipedia,
-                word_wise: (word_wise == cli::XRayArg::Auto).then(|| {
-                    deckle_core::wordwise::WordWiseOptions {
+                word_wise: (word_wise.unwrap_or(cli::XRayArg::Auto) == cli::XRayArg::Auto).then(
+                    || deckle_core::wordwise::WordWiseOptions {
                         level: word_wise_level,
                         database: wordwise_db,
                         ..Default::default()
-                    }
-                }),
+                    },
+                ),
                 replaces: Vec::new(),
                 originals: None,
             };
+            if let Some(preset) = preset {
+                let word_wise_options = opts.word_wise.take();
+                preset.apply(&mut opts);
+                if let Some(on) = typography {
+                    opts.typography = on;
+                }
+                if let Some(on) = popup_notes {
+                    opts.popup_notes = on;
+                }
+                if pages_explicit {
+                    opts.pages = pages;
+                }
+                if let Some(xray) = xray {
+                    opts.xray = xray.into();
+                }
+                if word_wise.is_some() {
+                    opts.word_wise = word_wise_options;
+                }
+            }
             let reports: Vec<_> = epubs
                 .iter()
                 .map(|e| run_input(e, &opts, &deckle_digest::Http))
@@ -1271,6 +1299,7 @@ fn kindle_upgrade(
         let at = deckle_core::devices::now_iso();
         let kept = deckle_library::upgrade::originals_dir(&config, &device.key, file, &at);
         let opts = RunOptions {
+            preset: None,
             cover: Default::default(),
             cde_type: deckle_kfx::convert::CdeType::Pdoc,
             // The cover rule picks the mode, as for any book.
@@ -1444,6 +1473,7 @@ fn reprocess(
             _ => None,
         };
         let opts = RunOptions {
+            preset: None,
             cover: Default::default(),
             cde_type: cde.unwrap_or(deckle_kfx::convert::CdeType::Pdoc),
             cde_override: cde,
@@ -2679,6 +2709,7 @@ fn queue_edition(
 /// must always show (design §5).
 fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Path) -> RunOptions {
     RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: deckle_kfx::convert::CdeType::Pdoc,
         cde_override: Some(deckle_kfx::convert::CdeType::Pdoc),
