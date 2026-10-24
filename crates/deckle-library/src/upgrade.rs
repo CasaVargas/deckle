@@ -23,6 +23,8 @@ pub enum Class {
     HasSource,
     /// A DRM-free AZW3 or MOBI with no original here: rebuilt from the Kindle's own copy.
     KindleCopy,
+    /// An older MOBI with no KF8 part and no original here: it can't be rebuilt, so it stays.
+    OldMobi,
     /// A DRM-free KFX with no original here.
     NoSource,
     /// A Kindle Store book: never touched.
@@ -50,6 +52,7 @@ impl Class {
             Class::Older => "Deckle, older build",
             Class::HasSource => "original on this computer",
             Class::KindleCopy => "rebuild from the Kindle's copy",
+            Class::OldMobi => "older MOBI, can't be rebuilt",
             Class::NoSource => "no original on this computer",
             Class::AmazonOwn => "Amazon's own",
             Class::Locked => "locked (DRM)",
@@ -96,6 +99,8 @@ pub fn classify(s: &Shelved, source: Option<&Source>) -> Class {
     }
     if b.format == "kfx" {
         Class::NoSource
+    } else if b.no_kf8 {
+        Class::OldMobi
     } else {
         Class::KindleCopy
     }
@@ -391,6 +396,18 @@ mod tests {
             ..book("azw3")
         };
         assert_eq!(classify(&shelved(unread), Some(&s)), Class::Unread);
+    }
+
+    #[test]
+    fn an_older_mobi_with_no_kf8_part_is_left_as_it_is() {
+        let old = DeviceBook {
+            no_kf8: true,
+            ..book("mobi")
+        };
+        assert_eq!(classify(&shelved(old.clone()), None), Class::OldMobi);
+        assert!(!Class::OldMobi.upgradable());
+        // Its original, if one is on this computer, still upgrades it.
+        assert_eq!(classify(&shelved(old), Some(&source())), Class::HasSource);
     }
 
     #[test]

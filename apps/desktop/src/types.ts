@@ -675,6 +675,7 @@ export type UpgradeClass =
   | "older"
   | "has-source"
   | "kindle-copy"
+  | "old-mobi"
   | "no-source"
   | "amazon-own"
   | "locked"

@@ -28,6 +28,7 @@ export function leftAsIs(counts: Partial<Record<UpgradeClass, number>>): string 
   if (n("amazon-own")) parts.push(`${plural(n("amazon-own"), "store book")}, which already have all of this`);
   if (n("locked")) parts.push(`${n("locked")} locked by DRM, which Deckle never opens`);
   if (n("fixed-layout")) parts.push(`${plural(n("fixed-layout"), "fixed-layout book")}`);
+  if (n("old-mobi")) parts.push(`${plural(n("old-mobi"), "older MOBI book")} Deckle can't rebuild`);
   if (n("no-source")) parts.push(`${n("no-source")} KFX with no original on this computer`);
   if (n("pdf")) parts.push(`${plural(n("pdf"), "PDF")}`);
   if (n("unread")) parts.push(`${n("unread")} not read yet`);
