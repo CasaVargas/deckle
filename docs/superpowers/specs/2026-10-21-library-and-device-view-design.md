@@ -48,7 +48,8 @@ the original file at hand.
 
 - Keeping built KFX files. A re-send converts again (owner, 2026-10-21): builds depend on
   the device anyway, and #39 wants rebuilds.
-- Tagging, search (#41), duplicates (#38), per-device shelves (#37), Collections (#36).
+- Tagging, duplicates (#38), per-device shelves (#37), Collections (#36).
+- Search (#41) is now covered by [the metadata search design](2026-10-24-library-search-design.md).
 - Reading every KFX on an MTP Kindle to show its details. MTP has no partial reads in
   Deckle's transport, and books are large. On MTP, details come from the library's send
   records (§5); other books show their file name and size.

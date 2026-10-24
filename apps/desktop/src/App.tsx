@@ -509,7 +509,7 @@ export default function App() {
         )}
         {tab === "books" && (
         <div className={docked ? "books-split" : "books-whole"}>
-        {docked && catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
+        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
         <main className={`list-area ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
           {docked && <h2 className="dock-head">To send{books.length ? ` · ${books.length}` : ""}</h2>}
           {books.length === 0 && docked ? (

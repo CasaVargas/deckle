@@ -79,6 +79,7 @@ pub fn run() {
             daily::email_test,
             kindle::library_status,
             books::library_catalog,
+            books::library_search,
             books::library_covers,
             books::book_preflight,
             books::cover_candidates,

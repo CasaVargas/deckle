@@ -14,6 +14,7 @@ pub mod catalog;
 pub mod config;
 pub mod details;
 pub mod freshness;
+pub mod search;
 pub mod series;
 pub mod shelf;
 pub mod sidecar;

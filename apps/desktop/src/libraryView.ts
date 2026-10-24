@@ -63,8 +63,14 @@ export function seriesLine(g: SeriesGroup): string {
   return `${head} · ${list(g.missing)} ${many ? "aren't" : "isn't"} in your library`;
 }
 
+export function matchesMetadata(title: string, authors: string[], series: string | null, query: string): boolean {
+  const fold = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+  const haystack = fold([title, ...authors, series ?? ""].join(" "));
+  return fold(query).split(/\s+/).filter(Boolean).every((term) => haystack.includes(term));
+}
+
 function matches(b: CatalogEntry, q: string): boolean {
-  return !q || [b.title, ...b.authors, b.series?.name ?? ""].some((s) => s.toLowerCase().includes(q));
+  return matchesMetadata(b.title, b.authors, b.series?.name ?? null, q);
 }
 
 const byTitle = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: "base" });

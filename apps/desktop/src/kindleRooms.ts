@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { matchesMetadata } from "./libraryView";
 import type { BookKind, DeviceBookRow, DeviceShelf, Spare } from "./types";
 
 /** The Kindle tab's rooms (Books and Kindle design §7), like the Daily tab's. */
@@ -77,7 +78,7 @@ export function filterCounts(books: DeviceBookRow[]): Record<ShelfFilter, number
 /** The Shelf's books: filtered, searched (title, author, file name) and sorted. */
 export function shelfBooks(books: DeviceBookRow[], filter: ShelfFilter, query: string, sort: ShelfSort): DeviceBookRow[] {
   const q = query.trim().toLowerCase();
-  const found = books.filter((b) => matches(b, filter) && (!q || [titleOf(b), b.file, ...b.authors].some((s) => s.toLowerCase().includes(q))));
+  const found = books.filter((b) => matches(b, filter) && matchesMetadata(titleOf(b), [...b.authors, b.file], null, q));
   const byTitle = (a: DeviceBookRow, b: DeviceBookRow) => titleOf(a).localeCompare(titleOf(b), undefined, { sensitivity: "base" });
   const author = (b: DeviceBookRow) => b.authors[0] ?? "￿";
   const order: Record<ShelfSort, (a: DeviceBookRow, b: DeviceBookRow) => number> = {

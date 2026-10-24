@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { fromLabel, libraryItems, seriesLine } from "./libraryView";
 import type { LibraryFilter, LibraryItem } from "./libraryView";
-import type { CatalogEntry, CatalogView } from "./types";
+import type { BookSearchReport, CatalogEntry, CatalogView } from "./types";
 
 interface Props {
   catalog: CatalogView;
@@ -78,6 +78,25 @@ function Card({ book, cover, selected, queued, onToggle, onSeen }: { book: Catal
  */
 export default function Library({ catalog, hasKindle, queued, busy, onAdd }: Props) {
   const [query, setQuery] = useState("");
+  const [search, setSearch] = useState<BookSearchReport | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchVersion = useRef(0);
+  useEffect(() => () => { searchVersion.current++; }, []);
+  const searchAll = async () => {
+    const version = ++searchVersion.current;
+    setSearching(true);
+    setSearchError(null);
+    setSearch(null);
+    try {
+      const result = await api.librarySearch(query);
+      if (version === searchVersion.current) setSearch(result);
+    } catch (e) {
+      if (version === searchVersion.current) setSearchError(String(e));
+    } finally {
+      if (version === searchVersion.current) setSearching(false);
+    }
+  };
   const [filter, setFilter] = useState<LibraryFilter>("all");
   const [bySeries, setBySeries] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -110,7 +129,7 @@ export default function Library({ catalog, hasKindle, queued, busy, onAdd }: Pro
         )}
       </div>
       <div className="shelf-tools">
-        <div className="filter-chips" role="group" aria-label="Show">
+        {!search && <div className="filter-chips" role="group" aria-label="Show">
           <button className={`filter-chip ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
             All
           </button>
@@ -126,17 +145,36 @@ export default function Library({ catalog, hasKindle, queued, busy, onAdd }: Pro
           <button className={`filter-chip ${bySeries ? "on" : ""}`} aria-pressed={bySeries} onClick={() => setBySeries((s) => !s)}>
             Series
           </button>
-        </div>
-        <div className="shelf-search">
-          <input type="search" placeholder="Search titles, authors, series" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search your library" />
-        </div>
+        </div>}
+        <form className="shelf-search" onSubmit={(e) => { e.preventDefault(); if (!busy && !searching) void searchAll(); }}>
+          <input type="search" placeholder="Search titles, authors, series" value={query} disabled={searching} onChange={(e) => { setQuery(e.target.value); setSearch(null); setSearchError(null); }} aria-label="Search library and Kindles" />
+          <button type="submit" disabled={busy || searching}>{searching ? "Searching…" : "Search library and Kindles"}</button>
+        </form>
       </div>
       {catalog.warnings.map((w) => (
         <p key={w} className="warn small">
           {w}
         </p>
       ))}
-      {items.length === 0 ? (
+      {searchError && <p className="warn" role="alert">{searchError}</p>}
+      {searching && <p role="status">Reading connected Kindles…</p>}
+      {search ? (
+        <section className="book-search-results" aria-label="Search results" aria-live="polite">
+          <p className="muted small">{search.results.length} results. Unplugged Kindles show previous sends, not a current inventory.</p>
+          <button onClick={() => setSearch(null)}>Back to library</button>
+          {search.warnings.map((warning) => <p className="warn" key={warning}>{warning}</p>)}
+          {search.results.length === 0 && <p>No books match.</p>}
+          {search.results.map((hit, i) => (
+            <article key={i} className="lib-series">
+              <h3>{hit.title}</h3>
+              <p>{hit.authors.join(", ")}{hit.series ? ` · ${hit.series.name}` : ""}</p>
+              <ul>{hit.locations.map((loc, j) => (
+                <li key={j}>{loc.name} — {loc.kind === "library" ? "local" : loc.kind === "connected" ? "connected" : "previously sent; presence unverified"}<br /><span className="muted small">{loc.device ? `${loc.device} · ` : ""}{loc.path}</span></li>
+              ))}</ul>
+            </article>
+          ))}
+        </section>
+      ) : items.length === 0 ? (
         <p className="muted">{catalog.entries.length === 0 ? "Nothing here yet." : "No books match."}</p>
       ) : (
         <div className="lib-items">

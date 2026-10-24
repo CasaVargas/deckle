@@ -549,3 +549,8 @@ input[type=checkbox] { padding: 0; }
   .books-split > .list-area { border-left: 0; border-top: 1px solid var(--line); }
   .plan-lines li { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
+
+/* Cross-device search keeps long device paths readable in the Books pane. */
+.library .shelf-search { flex-wrap: wrap; }
+.book-search-results { overflow-wrap: anywhere; }
+.books-whole > .library { max-height: 60%; flex-shrink: 0; }
