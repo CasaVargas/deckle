@@ -600,6 +600,7 @@ mod front {
                 date: NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
                 place: String::new(),
                 weather_line: None,
+                masthead: Default::default(),
                 sections,
                 assets: Vec::new(),
             },
@@ -1348,4 +1349,74 @@ fn long_reads_ride_inside_a_bundle_only_with_books() {
         r.bundle(false).is_none(),
         "only the bundle asked for is built"
     );
+}
+
+// ---- the masthead font (masthead design) -------------------------------------------------------
+
+#[test]
+fn the_masthead_setting_is_left_out_of_a_save_until_it_is_changed() {
+    use deckle_digest::masthead::MastheadFont;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut c = config();
+    deckle_digest::config::save(&path, &c).unwrap();
+    let set = |t: &str| t.lines().any(|l| l.starts_with("masthead"));
+    assert!(!set(&std::fs::read_to_string(&path).unwrap()));
+    c.masthead = MastheadFont::Sans;
+    deckle_digest::config::save(&path, &c).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("masthead = \"sans\""), "{text}");
+    assert_eq!(Config::parse(&text).unwrap().masthead, MastheadFont::Sans);
+}
+
+#[test]
+fn the_cover_is_drawn_in_the_chosen_masthead_face() {
+    use deckle_digest::masthead::MastheadFont;
+    let jpeg = |face: MastheadFont| {
+        let mut c = config();
+        c.masthead = face;
+        deckle_digest::cover::render(&gather(&c, date(), now(), &fake)).unwrap()
+    };
+    let black = jpeg(MastheadFont::Blackletter);
+    assert_ne!(black, jpeg(MastheadFont::Serif));
+    assert_ne!(black, jpeg(MastheadFont::Sans));
+    assert_eq!(black, jpeg(MastheadFont::Blackletter), "and it is stable");
+}
+
+#[test]
+fn a_bad_masthead_file_falls_back_and_says_so() {
+    use deckle_digest::masthead::MastheadFont;
+    let mut c = config();
+    c.masthead = MastheadFont::File("/no/such/font.ttf".into());
+    let g = gather(&c, date(), now(), &fake);
+    assert!(g.edition.masthead.is_blackletter());
+    assert!(
+        g.notes.iter().any(|n| n.starts_with("Masthead font:")),
+        "{:?}",
+        g.notes
+    );
+    deckle_digest::cover::render(&g).expect("the paper still comes out");
+}
+
+#[test]
+fn the_pdf_embeds_the_chosen_masthead_face() {
+    use deckle_digest::config::Photos;
+    use deckle_digest::masthead::MastheadFont;
+    use deckle_digest::pdf::{Screen, render};
+    let has = |bytes: &[u8], needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
+    let mut c = config();
+    let default = render(
+        &gather(&c, date(), now(), &fake),
+        Screen::Remarkable2,
+        Photos::Gray,
+    );
+    assert!(has(&default, b"UnifrakturMaguntia-Book"));
+    c.masthead = MastheadFont::Serif;
+    let serif = render(
+        &gather(&c, date(), now(), &fake),
+        Screen::Remarkable2,
+        Photos::Gray,
+    );
+    assert!(!has(&serif, b"UnifrakturMaguntia-Book"));
+    assert!(has(&serif, b"/Masthead"));
 }

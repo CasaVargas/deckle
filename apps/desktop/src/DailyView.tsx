@@ -6,6 +6,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { ROOMS, destinations, roomNotes } from "./dailyRooms";
+import { fontFileName, mastheadChoice, mastheadValue } from "./mastheadView";
+import type { MastheadChoice } from "./mastheadView";
 import type { Place, Room } from "./dailyRooms";
 import Icon from "./Icon";
 import PagePlanCard from "./PagePlanCard";
@@ -621,6 +623,33 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                   <select value={draft.units} onChange={(e) => edit((c) => (c.units = e.target.value as DailyConfig["units"]))}>
                     <option value="imperial">°F, mph</option>
                     <option value="metric">°C, km/h</option>
+                  </select>
+                </label>
+                <label>
+                  <span className="label">Title font</span>
+                  <select
+                    value={mastheadChoice(draft.masthead)}
+                    onChange={async (e) => {
+                      const choice = e.target.value as MastheadChoice;
+                      if (choice !== "file") {
+                        edit((c) => (c.masthead = mastheadValue(choice)));
+                        return;
+                      }
+                      const picked = await openDialog({
+                        multiple: false,
+                        filters: [{ name: "TrueType font", extensions: ["ttf"] }],
+                      });
+                      if (typeof picked === "string") edit((c) => (c.masthead = picked));
+                    }}
+                  >
+                    <option value="blackletter">Blackletter</option>
+                    <option value="serif">Serif</option>
+                    <option value="sans">Sans</option>
+                    <option value="file">
+                      {mastheadChoice(draft.masthead) === "file" && draft.masthead
+                        ? `Custom: ${fontFileName(draft.masthead)}`
+                        : "Choose a .ttf file…"}
+                    </option>
                   </select>
                 </label>
               </div>

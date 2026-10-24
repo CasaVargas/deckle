@@ -199,6 +199,7 @@ pub fn write_test_epub(path: &Path, date: NaiveDate) -> Result<(), String> {
             date,
             place: String::new(),
             weather_line: None,
+            masthead: Default::default(),
             sections: vec![crate::Section {
                 weather: None,
                 puzzle: None,

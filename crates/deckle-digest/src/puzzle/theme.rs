@@ -183,6 +183,7 @@ mod tests {
             date: NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
             place: "Pine Ridge, NC".into(),
             weather_line: None,
+            masthead: Default::default(),
             sections: vec![
                 section("Weather", &["Rain and storm, low of 40"]),
                 section(

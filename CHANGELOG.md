@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The title's typeface, your choice.** `masthead` in `digest.toml` (or **The paper → Title font**
+  in the app) sets the face the paper's name is drawn in on the cover and the PDF edition:
+  `"blackletter"` (as before), `"serif"`, `"sans"`, or the path to a `.ttf` of your own. A
+  file that can't be used falls back to the blackletter and the run says why. Inside the book the
+  title is still your Kindle's own font.
 - **The paper as data, version 1.1: fit for a 12.9-inch iPad** (Books and Kindle design,
   phase 2). Bundles now carry each photo as a full-size color master (up to 2400 px, JPEG 85)
   with its caption, credit, alt text, focus point and average color, and each story's byline,

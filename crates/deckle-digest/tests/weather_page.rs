@@ -96,6 +96,7 @@ fn xhtml(section: deckle_digest::Section) -> String {
             date: date(),
             place: "New York, NY".into(),
             weather_line: None,
+            masthead: Default::default(),
             sections: vec![section],
             assets: Vec::new(),
         },

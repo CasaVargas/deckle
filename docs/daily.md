@@ -352,6 +352,25 @@ shelf = true      # read the books (and what the Kindle shares) when it connects
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 
+## The title's typeface
+
+The paper's name is drawn on the cover, and at the top of the PDF edition, in a blackletter face
+(UnifrakturMaguntia). `masthead` at the top of `digest.toml` changes it, or **The paper → Title
+font** in the app:
+
+```toml
+masthead = "blackletter"   # the default; or "serif" (Old Standard Bold), "sans" (Inter Bold),
+                           # or the path to a .ttf file, e.g. "~/Fonts/Fraktur.ttf"
+```
+
+- Only the title changes: the date band, the ears and the headlines keep their own faces.
+- A file must be **TrueType (`.ttf`)**; `.otf` and `.ttc` aren't read.
+- A missing file, one that isn't TrueType, or a font without a letter of your title falls back
+  to the blackletter, and the run says why ("Masthead font: …"). The paper still comes out.
+- **Inside the book the title is your Kindle's own font**, because a Kindle sets the text in the
+  font you picked on it (Aa → Font). This setting can't reach that.
+- A long read's "Deckle Reads" cover keeps the blackletter.
+
 ## Email to Kindle (opt-in)
 
 With no cable, the paper can arrive over Wi-Fi: `digest run` emails its EPUB to your Kindle's

@@ -178,6 +178,7 @@ mod tests {
                 date: chrono::NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
                 place: String::new(),
                 weather_line: None,
+                masthead: Default::default(),
                 sections: vec![
                     section("reading", "Your Reading", vec![story("Saved", true)]),
                     section("local", "Local", local),

@@ -583,6 +583,7 @@ mod page {
                 date: date(),
                 place: "New York, NY".into(),
                 weather_line: None,
+                masthead: Default::default(),
                 sections: vec![s],
                 assets: Vec::new(),
             },

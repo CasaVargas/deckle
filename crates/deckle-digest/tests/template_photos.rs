@@ -48,6 +48,7 @@ fn edition(articles: Vec<Article>) -> Edition {
         date: chrono::NaiveDate::from_ymd_opt(2026, 10, 22).unwrap(),
         place: String::new(),
         weather_line: None,
+        masthead: Default::default(),
         sections: vec![Section {
             articles,
             ..Default::default()
