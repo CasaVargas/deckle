@@ -25,6 +25,7 @@ fn gathered(date: NaiveDate) -> Gathered {
             date,
             place: "Linden Falls, NC".into(),
             weather_line: Some("Clear".into()),
+            masthead: Default::default(),
             sections: vec![
                 Section {
                     key: "local".into(),

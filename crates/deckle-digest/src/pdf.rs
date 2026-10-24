@@ -10,6 +10,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
+use crate::masthead::Masthead;
 use ab_glyph::{Font, FontRef, GlyphId};
 use pdf_writer::types::{
     ActionType, AnnotationType, CidFontType, FontFlags, SystemInfo, UnicodeCmap,
@@ -24,7 +25,6 @@ use crate::{Gathered, long_date};
 const REGULAR: &[u8] = include_bytes!("../fonts/OldStandard-Regular.ttf");
 const BOLD: &[u8] = include_bytes!("../fonts/OldStandard-Bold.ttf");
 const ITALIC: &[u8] = include_bytes!("../fonts/OldStandard-Italic.ttf");
-const MASTHEAD: &[u8] = include_bytes!("../fonts/UnifrakturMaguntia-Book.ttf");
 
 /// A screen the PDF edition is laid out for: its page is the screen's size.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,13 +81,16 @@ impl Face {
 
 struct Fonts {
     faces: [FontRef<'static>; 4],
+    /// The masthead face's file, as embedded.
+    masthead: Masthead,
 }
 
 impl Fonts {
-    fn new() -> Self {
-        let f = |b: &'static [u8]| FontRef::try_from_slice(b).expect("bundled font");
+    fn new(masthead: Masthead) -> Self {
+        let f = |b: &'static [u8]| FontRef::try_from_slice(b).expect("checked font");
         Fonts {
-            faces: [f(REGULAR), f(BOLD), f(ITALIC), f(MASTHEAD)],
+            faces: [f(REGULAR), f(BOLD), f(ITALIC), f(masthead.bytes())],
+            masthead,
         }
     }
 
@@ -1276,7 +1279,7 @@ impl<'a> Layout<'a> {
 pub fn render(g: &Gathered, screen: Screen, photos: Photos) -> Vec<u8> {
     let page = screen.page();
     let t = Type::for_width(page.0);
-    let fonts = Fonts::new();
+    let fonts = Fonts::new(g.edition.masthead);
     let doc = document(g, t, photos);
     let mut lay = Layout::new(&fonts, page, t, doc.anchors);
     lay.run(&doc);
@@ -1471,9 +1474,13 @@ fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, footer: &str) -> Vec<u8> {
         "OldStandard-Regular",
         "OldStandard-Bold",
         "OldStandard-Italic",
-        "UnifrakturMaguntia-Book",
+        if fonts.masthead.is_blackletter() {
+            "UnifrakturMaguntia-Book"
+        } else {
+            "Masthead"
+        },
     ];
-    let files = [REGULAR, BOLD, ITALIC, MASTHEAD];
+    let files = [REGULAR, BOLD, ITALIC, fonts.masthead.bytes()];
     let info = SystemInfo {
         registry: Str(b"Adobe"),
         ordering: Str(b"Identity"),
@@ -1611,7 +1618,7 @@ mod tests {
     use super::*;
 
     fn fonts() -> Fonts {
-        Fonts::new()
+        Fonts::new(Masthead::default())
     }
 
     #[test]

@@ -58,6 +58,10 @@ pub enum Units {
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub title: String,
+    /// The face the paper's name is drawn in (masthead design §1). Left out of a save while it's
+    /// the default.
+    #[serde(skip_serializing_if = "crate::masthead::MastheadFont::is_default")]
+    pub masthead: crate::masthead::MastheadFont,
     pub place: String,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
@@ -124,6 +128,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             title: "The Deckle Daily".into(),
+            masthead: crate::masthead::MastheadFont::default(),
             place: String::new(),
             latitude: None,
             longitude: None,
@@ -820,6 +825,7 @@ pub const STARTER: &str = r#"# Deckle Daily — your morning paper, built on thi
 # Edit freely; `deckle digest build` shows what a change does.
 
 title = "The Deckle Daily"
+# masthead = "blackletter"        # the title's typeface: "serif", "sans", or the path to a .ttf
 place = "New York, NY"            # shown on the masthead and the weather page
 latitude = 40.71                  # for the forecast (Open-Meteo, no key)
 longitude = -74.01

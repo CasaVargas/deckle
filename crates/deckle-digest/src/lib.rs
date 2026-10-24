@@ -21,6 +21,7 @@ pub mod horoscope;
 pub mod inbox;
 pub mod longread;
 pub mod mail;
+pub mod masthead;
 pub mod moon;
 pub mod next;
 pub mod pdf;
@@ -152,6 +153,8 @@ pub struct Edition {
     pub place: String,
     /// "Clear · 74°/40°F · 0% rain", for the front page and the cover.
     pub weather_line: Option<String>,
+    /// The face the paper's name is drawn in on the cover and the PDF.
+    pub masthead: masthead::Masthead,
     pub sections: Vec<Section>,
     /// Pictures pages show, `(href, PNG)` inside `OEBPS/`: the weather icons.
     pub assets: Vec<(String, Vec<u8>)>,
@@ -323,6 +326,7 @@ pub fn gather_with(
         date,
         place: cfg.place.clone(),
         weather_line: None,
+        masthead: masthead::Masthead::default(),
         sections: Vec::new(),
         assets: Vec::new(),
     };
@@ -333,6 +337,10 @@ pub fn gather_with(
     let mut long_reads = Vec::new();
     let mut reading_outcomes = Vec::new();
     let mut notes = Vec::new();
+    match cfg.masthead.resolve(&cfg.title) {
+        Ok(m) => edition.masthead = m,
+        Err(why) => notes.push(format!("Masthead font: {why}; using the blackletter.")),
+    }
     // Loaded when the paper has a puzzle; saved with today's headlines once all is gathered.
     let mut puzzles: Option<puzzle::store::Store> = None;
     let queue = reading::ReadingQueue::new(

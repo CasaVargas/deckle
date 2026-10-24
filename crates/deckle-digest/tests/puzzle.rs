@@ -245,6 +245,7 @@ fn xhtml(s: Section) -> String {
             date: date(),
             place: "New York, NY".into(),
             weather_line: None,
+            masthead: Default::default(),
             sections: vec![s],
             assets: Vec::new(),
         },
@@ -642,6 +643,7 @@ fn a_word_in_the_section_name_is_no_theme() {
         date: date(),
         place: String::new(),
         weather_line: None,
+        masthead: Default::default(),
         sections: vec![Section {
             title: "Rain Gauge".into(),
             articles: vec![Article {

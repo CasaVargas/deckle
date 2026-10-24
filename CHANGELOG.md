@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **The title's typeface, your choice.** `masthead` in `digest.toml` (or **The paper → Title font**
+  in the app) sets the face the paper's name is drawn in on the cover and the PDF edition:
+  `"blackletter"` (as before), `"serif"`, `"sans"`, or the path to a `.ttf` of your own. A
+  file that can't be used falls back to the blackletter and the run says why. Inside the book the
+  title is still your Kindle's own font.
+
 ## 0.5.0 — your library, a smarter Kindle tab, and other readers
 
 - **The Books tab, a library as well as a queue** (Books and Kindle design, phase 5).

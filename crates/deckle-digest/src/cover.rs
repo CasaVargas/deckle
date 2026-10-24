@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The cover: a front page in miniature, so the Kindle library tile is today's paper.
-//! Fonts are bundled (OFL): UnifrakturMaguntia for the masthead, Old Standard for the rest.
+//! Fonts are bundled (OFL): UnifrakturMaguntia for the masthead unless the `masthead` setting
+//! says otherwise, Old Standard for the rest.
 //!
 //! Layout, top to bottom: ears (edition number, place), masthead, a black date band sized to
 //! stay legible on a library tile, the weather line, the lead story with its opening
@@ -9,6 +10,7 @@
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont, point};
 use image::{GrayImage, Luma};
 
+use crate::masthead::Masthead;
 use crate::{Gathered, long_date};
 
 pub const WIDTH: u32 = 1264;
@@ -21,7 +23,6 @@ const SAVED_ON_COVER: usize = 2;
 const BLACK: u8 = 0;
 const WHITE: u8 = 255;
 
-const BLACKLETTER: &[u8] = include_bytes!("../fonts/UnifrakturMaguntia-Book.ttf");
 const SERIF: &[u8] = include_bytes!("../fonts/OldStandard-Regular.ttf");
 const SERIF_BOLD: &[u8] = include_bytes!("../fonts/OldStandard-Bold.ttf");
 const SERIF_ITALIC: &[u8] = include_bytes!("../fonts/OldStandard-Italic.ttf");
@@ -163,10 +164,10 @@ fn paragraph(
     y
 }
 
-fn fonts() -> Result<Fonts<'static>, String> {
+fn fonts(masthead: Masthead) -> Result<Fonts<'static>, String> {
     let font = |b| FontRef::try_from_slice(b).map_err(|e| e.to_string());
     Ok(Fonts {
-        black: font(BLACKLETTER)?,
+        black: font(masthead.bytes())?,
         serif: font(SERIF)?,
         bold: font(SERIF_BOLD)?,
         italic: font(SERIF_ITALIC)?,
@@ -193,7 +194,7 @@ pub fn render_reads(
     minutes: usize,
     via: Option<&str>,
 ) -> Result<Vec<u8>, String> {
-    let f = fonts()?;
+    let f = fonts(Masthead::default())?;
     let inner = WIDTH as f32 - 2.0 * MARGIN;
     let mut c = Canvas {
         img: GrayImage::from_pixel(WIDTH, HEIGHT, Luma([WHITE])),
@@ -248,7 +249,7 @@ pub fn lead_of(g: &Gathered) -> Option<(usize, usize)> {
 
 /// The cover as a JPEG.
 pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
-    let f = fonts()?;
+    let f = fonts(g.edition.masthead)?;
     let e = &g.edition;
     let inner = WIDTH as f32 - 2.0 * MARGIN;
     let mut c = Canvas {

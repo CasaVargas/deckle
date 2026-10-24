@@ -232,6 +232,8 @@ export interface FeedConfig {
 /** `digest.toml`, as the backend's `deckle_digest::Config` serializes it. */
 export interface DailyConfig {
   title: string;
+  /** The title's typeface: absent for the blackletter, else "serif", "sans" or a .ttf path. */
+  masthead?: string;
   place: string;
   latitude: number | null;
   longitude: number | null;

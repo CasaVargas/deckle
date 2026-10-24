@@ -35,6 +35,7 @@ fn gathered() -> Gathered {
             date: date(),
             place: "Linden Falls, NC".into(),
             weather_line: Some("Clear · 74°/40°F".into()),
+            masthead: Default::default(),
             sections: vec![
                 section(
                     "local",
