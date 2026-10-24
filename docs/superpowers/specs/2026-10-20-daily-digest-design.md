@@ -50,8 +50,8 @@ What makes it unique, not just "RSS to EPUB":
    sends the edition through Amazon. Spec: `2026-10-21-send-to-kindle-email-design.md` (#50).
 4. ~~Full-text articles and images~~ — in progress (#51), see §5a.
 5. ~~Desktop app: a Daily tab~~ — #52, see §5c.
-6. Optional LLM editor (existing provider settings): dedupe stories across feeds, a three-line
-   brief per section, an LLM-written horoscope.
+6. Optional LLM editor (#53): dedupe stories across feeds, news-section briefs, and an
+   AI-written horoscope. Design: `2026-10-24-daily-llm-editor-design.md`; default off.
 7. Extras: Sudoku/word puzzles with answers in the next edition, word of the day from the
    Word Wise lexicon, NC lottery games if a stable source exists, weekly long-read edition.
 

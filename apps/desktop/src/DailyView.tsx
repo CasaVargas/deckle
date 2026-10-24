@@ -23,6 +23,7 @@ import ExportFolders from "./ExportFolders";
 import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
 import YourDay from "./YourDay";
+import DailyEditor from "./DailyEditor";
 import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PlaceRow, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL, SIGNS } from "./types";
 
@@ -783,6 +784,8 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                   </label>
                 </div>
               </div>
+
+              <DailyEditor value={draft.llm} onChange={(value) => edit((c) => { c.llm = value; })} />
 
               <div className="label">Horoscope {draft.horoscope.signs.length === 0 && <span className="muted small">(none chosen: all twelve)</span>}</div>
               <div className="places">

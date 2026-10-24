@@ -57,6 +57,8 @@ pub enum Units {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip_serializing_if = "crate::editor::EditorConfig::is_default")]
+    pub llm: crate::editor::EditorConfig,
     pub title: String,
     /// The face the paper's name is drawn in (masthead design §1). Left out of a save while it's
     /// the default.
@@ -127,6 +129,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            llm: Default::default(),
             title: "The Deckle Daily".into(),
             masthead: crate::masthead::MastheadFont::default(),
             place: String::new(),
@@ -950,6 +953,7 @@ impl Config {
         let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
         cfg.normalize();
         cfg.email.validate()?;
+        cfg.llm.validate()?;
         validate_exports(&cfg.export)?;
         Ok(cfg)
     }
@@ -975,6 +979,7 @@ impl Config {
 /// [`STARTER`] (Daily design §5c).
 pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     cfg.email.validate()?;
+    cfg.llm.validate()?;
     validate_exports(&cfg.export)?;
     let mut cfg = cfg.clone();
     cfg.normalize();

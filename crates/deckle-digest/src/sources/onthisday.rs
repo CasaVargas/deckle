@@ -65,6 +65,7 @@ pub fn section(date: NaiveDate, net: &dyn Net) -> Section {
         Ok(a) => Section {
             weather: None,
             puzzle: None,
+            brief: Vec::new(),
             key: String::new(),
             title: TITLE.into(),
             kicker: None,

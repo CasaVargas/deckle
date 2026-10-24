@@ -197,6 +197,7 @@ pub fn section(
     Some(Section {
         weather: None,
         puzzle: None,
+        brief: Vec::new(),
         key: section_key(SectionKind::Shelf, None),
         title: "From Your Shelf".into(),
         kicker: Some(kicker(&primary_snap, date, tz)),

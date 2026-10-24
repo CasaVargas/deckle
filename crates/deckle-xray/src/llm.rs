@@ -238,13 +238,66 @@ pub fn describe(
     lang: &str,
     post: &mut Post<'_>,
 ) -> Result<Vec<Described>, LlmError> {
+    let body = request_body(provider, model, title, author, cands, lang);
+    let (text, truncated) = send_completion(provider, api_key, endpoint, body, post)?;
+    match parse_items(&text) {
+        Err(LlmError::NotJson) if truncated => Err(LlmError::Truncated),
+        other => other,
+    }
+}
+
+/// Generic provider completion, sharing authentication, transport and response decoding
+/// with X-Ray. Consumers validate their own response schema.
+#[allow(clippy::too_many_arguments)]
+pub fn complete(
+    provider: Provider,
+    model: &str,
+    api_key: &str,
+    endpoint: &str,
+    system: &str,
+    user: &str,
+    max_tokens: u64,
+    post: &mut Post<'_>,
+) -> Result<String, LlmError> {
+    let mut body = match provider {
+        Provider::Anthropic => serde_json::json!({
+            "model": model, "max_tokens": max_tokens, "system": system,
+            "messages": [{"role": "user", "content": user}]
+        }),
+        Provider::OpenAi => serde_json::json!({
+            "model": model, "max_tokens": max_tokens,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]
+        }),
+    };
+    // Hosted OpenAI uses the current completion budget field. Local compatible servers
+    // retain max_tokens, as in the existing X-Ray path.
+    if provider == Provider::OpenAi
+        && (endpoint.is_empty() || endpoint.trim_end_matches('/') == provider.default_endpoint())
+    {
+        body.as_object_mut().unwrap().remove("max_tokens");
+        body["max_completion_tokens"] = serde_json::json!(max_tokens);
+    }
+    let (text, truncated) = send_completion(provider, api_key, endpoint, body, post)?;
+    if truncated {
+        Err(LlmError::Truncated)
+    } else {
+        Ok(text)
+    }
+}
+
+fn send_completion(
+    provider: Provider,
+    api_key: &str,
+    endpoint: &str,
+    mut body: serde_json::Value,
+    post: &mut Post<'_>,
+) -> Result<(String, bool), LlmError> {
     let base = if endpoint.is_empty() {
         provider.default_endpoint()
     } else {
         endpoint
     }
     .trim_end_matches('/');
-    let mut body = request_body(provider, model, title, author, cands, lang);
     // A self-hosted OpenAI-compatible server (Ollama, LM Studio): ask reasoning models such as
     // qwen3 not to "think" first, which roughly doubles a local model's output.
     let local = provider == Provider::OpenAi && base != provider.default_endpoint();
@@ -291,10 +344,7 @@ pub fn describe(
             .map(str::to_owned),
     }
     .ok_or(LlmError::NoContent)?;
-    match parse_items(&text) {
-        Err(LlmError::NotJson) if truncated => Err(LlmError::Truncated),
-        other => other,
-    }
+    Ok((text, truncated))
 }
 
 /// Real HTTP POST (ureq), for use as the `post` argument.

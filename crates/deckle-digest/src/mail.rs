@@ -203,6 +203,7 @@ pub fn write_test_epub(path: &Path, date: NaiveDate) -> Result<(), String> {
             sections: vec![crate::Section {
                 weather: None,
                 puzzle: None,
+                brief: Vec::new(),
                 key: String::new(),
                 title: "Email test".into(),
                 kicker: None,

@@ -138,6 +138,7 @@ pub fn section(cfg: &Config, date: NaiveDate) -> Section {
     Section {
         weather: None,
         puzzle: None,
+        brief: Vec::new(),
         key: String::new(),
         title: "Horoscope".into(),
         kicker: Some("Written by Deckle, for fun.".into()),

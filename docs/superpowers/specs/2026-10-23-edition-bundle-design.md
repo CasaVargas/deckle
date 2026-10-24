@@ -372,3 +372,12 @@ The owner delegated these; each is ruled as below and can be reopened on the PR.
 - **The schema** (`docs/formats/edition-bundle.schema.json`, JSON Schema 2020-12) is validated in the tests with `jsonschema` 0.33, a dev-dependency with default features off, so nothing is fetched.
 - **The app:** export folders gain **As: Bundle, for a reader app**. The photos setting is ignored for a bundle.
 - **Kept for phase 2:** reading `.deckle-returns/`.
+
+## Optional AI editor extension (#53)
+
+A section may include `ai_brief`, an array of one to three plain-text sentences generated
+by the opt-in Daily editor. It is omitted when absent. Native readers should label it
+"AI-written section brief" and render it above the section's stories. EPUB and PDF do the
+same. Horoscope sections use their existing kicker to identify AI-written entertainment.
+Deduplicated stories are already removed before the bundle is assembled. Default editions
+remain unchanged; the schema accepts this optional addition to version 1.1.
