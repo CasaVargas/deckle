@@ -737,3 +737,14 @@ export interface PutBack {
   restored: string;
   removed: string[];
 }
+
+/** Search combines live device inventories with explicitly labelled send history. */
+export interface BookSearchReport {
+  results: {
+    title: string;
+    authors: string[];
+    series: { name: string; index: number | null } | null;
+    locations: { kind: "library" | "connected" | "recorded_send"; device: string | null; name: string; path: string }[];
+  }[];
+  warnings: string[];
+}

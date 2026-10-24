@@ -1522,10 +1522,47 @@ fn library(json: bool, action: cli::LibraryCommand) -> Result<ExitCode, String> 
         }
         return Ok(ExitCode::SUCCESS);
     }
+    if let cli::LibraryCommand::Search { query } = &action {
+        let mut targets: Vec<_> = deckle_core::deliver::detect_mass_storage()
+            .into_iter()
+            .map(Target::MassStorage)
+            .collect();
+        targets.extend(deckle_transport::usb::detect().into_iter().map(Target::Mtp));
+        let report = deckle_library::search::collect(&config, &targets, &query.join(" "));
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?
+            );
+        } else {
+            for hit in &report.results {
+                println!("{} — {}", hit.title, hit.authors.join(", "));
+                for loc in &hit.locations {
+                    let status = match loc.kind {
+                        deckle_library::search::LocationKind::Library => "local",
+                        deckle_library::search::LocationKind::Connected => "connected",
+                        deckle_library::search::LocationKind::RecordedSend => {
+                            "previously sent; presence unverified"
+                        }
+                    };
+                    println!("  {} ({status}): {}", loc.name, loc.path);
+                }
+            }
+            if report.results.is_empty() {
+                println!("No books match.");
+            }
+            for warning in &report.warnings {
+                eprintln!("warning: {warning}");
+            }
+        }
+        return Ok(ExitCode::SUCCESS);
+    }
     let (lib, _) = Library::configured(&config)
         .ok_or("no library yet: run `deckle library init <folder>` first")?;
     match action {
-        cli::LibraryCommand::Init { .. } => unreachable!("handled above"),
+        cli::LibraryCommand::Init { .. } | cli::LibraryCommand::Search { .. } => {
+            unreachable!("handled above")
+        }
         cli::LibraryCommand::Add { books } => {
             let mut failed = false;
             for b in &books {

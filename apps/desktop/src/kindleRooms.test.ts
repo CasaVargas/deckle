@@ -106,3 +106,9 @@ describe("This Kindle", () => {
     expect(s[0].label).toBe("Amazon's own · 3 books");
   });
 });
+
+it("matches Kindle titles and authors across terms, ignoring accents", () => {
+  const rows = [book({ title: "Éarthsea", authors: ["Ursula Le Guin"] })];
+  expect(shelfBooks(rows, "all", "GUIN earthsea", "title")).toHaveLength(1);
+  expect(shelfBooks(rows, "all", "guin absent", "title")).toHaveLength(0);
+});

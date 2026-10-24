@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { libraryItems, missingNumbers, ranges, seriesKey, seriesLine, type SeriesGroup } from "./libraryView";
+import { matchesMetadata, libraryItems, missingNumbers, ranges, seriesKey, seriesLine, type SeriesGroup } from "./libraryView";
 import type { CatalogEntry } from "./types";
 
 const e = (title: string, over: Partial<CatalogEntry> = {}): CatalogEntry => ({
@@ -50,4 +50,11 @@ describe("series", () => {
     expect(libraryItems(books, "stephenson", "all", true).map((i) => (i.kind === "book" ? i.book.title : ""))).toEqual(["Anathem"]);
     expect(libraryItems(books, "", "all", false)).toHaveLength(7);
   });
+});
+
+it("searches metadata across fields with case and accent folding", () => {
+  const entry = e("Éarthsea", { authors: ["Ursula Le Guin"], series: s("Earthsea Cycle", 1) });
+  expect(libraryItems([entry], "GUIN earthsea cycle", "all", false)).toHaveLength(1);
+  expect(matchesMetadata("Éarthsea", ["Ursula Le Guin"], null, "guin e\u0301arthsea")).toBe(true);
+  expect(matchesMetadata("Éarthsea", ["Ursula Le Guin"], null, "guin absent")).toBe(false);
 });

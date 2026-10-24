@@ -286,6 +286,22 @@ pub async fn library_watch_scan() -> Result<Watched, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Explicit searches scan devices once, rather than opening an MTP session on each keystroke.
+#[tauri::command]
+pub async fn library_search(query: String) -> Result<deckle_library::search::Report, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        use deckle_core::deliver::{Target, detect_mass_storage};
+        let mut targets: Vec<_> = detect_mass_storage()
+            .into_iter()
+            .map(Target::MassStorage)
+            .collect();
+        targets.extend(deckle_transport::usb::detect().into_iter().map(Target::Mtp));
+        deckle_library::search::collect(&deckle_library::config::default_path(), &targets, &query)
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

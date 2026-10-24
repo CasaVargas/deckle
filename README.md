@@ -212,6 +212,7 @@ deckle inspect book.epub --json                   # metadata, spine, TOC, warnin
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF
 
 deckle library init ~/Books/Deckle                # keep a copy of everything you send
+deckle library search le guin --json               # library, connected Kindles and past sends
 deckle library list --series                      # grouped by series
 deckle library reprocess --dry-run                # books Deckle could build better now
 deckle kindle books                               # what's on the Kindle, and free space

@@ -345,6 +345,11 @@ pub enum WordsCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum LibraryCommand {
+    /// Search titles, authors and series in the library and connected Kindles.
+    Search {
+        #[arg(required = true, num_args = 1..)]
+        query: Vec<String>,
+    },
     /// Use DIR as the library (created when missing) and remember it.
     Init {
         dir: PathBuf,
