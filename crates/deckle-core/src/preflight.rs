@@ -17,6 +17,7 @@ use crate::pipeline::{CoverPick, CoverTemplate, cover_for};
 /// The settings that change what normalize does.
 #[derive(Clone, Debug, Default)]
 pub struct PreflightOptions {
+    pub preset: Option<crate::preset::Preset>,
     pub typography: bool,
     pub popup_notes: bool,
     /// As [`crate::pipeline::RunOptions::generated_cover`].
@@ -87,6 +88,7 @@ pub fn preflight(src: &Path, opts: &PreflightOptions, work: &Path) -> Result<Pre
         &source,
         &normalized,
         &NormalizeOptions {
+            preset: opts.preset,
             typography: opts.typography,
             popup_notes: opts.popup_notes,
             generated_cover: generated,

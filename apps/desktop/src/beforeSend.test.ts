@@ -45,3 +45,12 @@ test("the page loads nothing and can't be broken out of by the book's CSS", () =
   expect(page).not.toContain("</style><script>");
   expect(page).toContain("<body><p>Hi</p></body>");
 });
+
+test("preset-disabled stages explain the per-book choice", () => {
+  const lines = plannedLines(view({}), undefined, { cdeOverride: "ebok" }, { ...on, typography: false, popup_notes: false, xray: false, word_wise: false }, true);
+  for (const what of ["Typography", "Pop-up notes", "X-Ray and Word Wise"]) {
+    const line = lines.find((l) => l.what === what)!;
+    expect(line.text).toContain("style preset");
+    expect(line.text).not.toContain("Settings");
+  }
+});

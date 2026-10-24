@@ -38,6 +38,7 @@ pub enum CoverPick {
 
 #[derive(Clone, Debug)]
 pub struct RunOptions {
+    pub preset: Option<crate::preset::Preset>,
     /// Legacy default; the cover rule decides unless `cde_override` is set.
     pub cde_type: CdeType,
     /// Owner override for this run (per book or per device).
@@ -367,6 +368,7 @@ pub fn prepare_with(
     );
     let normalized = work_path.join("normalized.epub");
     let normalize_opts = NormalizeOptions {
+        preset: opts.preset,
         fill,
         typography: opts.typography,
         generated_cover,
@@ -781,6 +783,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
     let dir = tempfile::tempdir().map_err(|e| format!("workdir: {e}"))?;
     let target = Target::Folder(dir.path().to_path_buf());
     let opts = RunOptions {
+        preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
         cde_override: Some(CdeType::Pdoc),

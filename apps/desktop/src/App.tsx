@@ -7,6 +7,7 @@ import { api, coverRequest } from "./api";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
 import BeforeYouSend from "./BeforeYouSend";
+import { presetSettings } from "./presets";
 import BindPanel from "./BindPanel";
 import Library from "./Library";
 import { bindable } from "./bindList";
@@ -20,6 +21,7 @@ import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import type { BookRow, BookState, CatalogView, CoverChoice, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
+  book_presets: {},
   previewer_path: null,
   cde: "auto",
   pages_auto: true,
@@ -550,7 +552,17 @@ export default function App() {
                   book={b}
                   busy={busy}
                   plan={plans[b.id]}
-                  settings={settings}
+                  settings={presetSettings(settings, b.path)}
+                  preset={settings.book_presets[b.path] ?? null}
+                  onPreset={(preset) => {
+                    const book_presets = { ...settings.book_presets };
+                    if (preset) book_presets[b.path] = preset;
+                    else delete book_presets[b.path];
+                    const next = { ...settings, book_presets };
+                    setBusy(true);
+                    api.setSettings(next).then(() => setSettings(next))
+                      .catch((e) => setNotice(String(e))).finally(() => setBusy(false));
+                  }}
                   onOverride={override}
                   onAsin={setAsin}
                   onToggleReport={toggleReport}

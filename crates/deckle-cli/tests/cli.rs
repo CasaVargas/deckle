@@ -179,7 +179,10 @@ fn run_help_offers_popup_notes_off_by_default() {
         .lines()
         .find(|l| l.contains("--popup-notes"))
         .unwrap_or_else(|| panic!("no --popup-notes in:\n{s}"));
-    assert!(!line.contains('<'), "{line}");
+    assert!(
+        line.contains("[=<"),
+        "the true/false value is optional: {line}"
+    );
     assert!(s.contains("pop-up notes"), "{s}");
 }
 
@@ -195,7 +198,10 @@ fn run_help_offers_typography_off_by_default() {
         .lines()
         .find(|l| l.contains("--typography"))
         .unwrap_or_else(|| panic!("no --typography in:\n{s}"));
-    assert!(!line.contains('<'), "{line}");
+    assert!(
+        line.contains("[=<"),
+        "the true/false value is optional: {line}"
+    );
     assert!(s.contains("curly quotes"), "{s}");
 }
 
@@ -752,4 +758,63 @@ fn run_rejects_an_unknown_cover_style() {
     assert!(!out.status.success());
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("classic") && err.contains("band"), "{err}");
+}
+
+#[test]
+fn unknown_style_lists_valid_presets() {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["run", "book.epub", "--preset", "mystery"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let error = String::from_utf8_lossy(&out.stderr);
+    assert!(error.contains("academic, novel, or manual"), "{error}");
+}
+
+#[test]
+#[cfg(unix)]
+fn preset_defaults_and_explicit_flags_reach_the_pipeline() {
+    let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../deckle-core/tests/fake_previewer/ok.sh");
+    for extra in [
+        vec![],
+        vec![
+            "--typography=false",
+            "--popup-notes=false",
+            "--pages",
+            "off",
+            "--xray",
+            "off",
+            "--word-wise",
+            "off",
+        ],
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = Command::cargo_bin("deckle")
+            .unwrap()
+            .env("HOME", tmp.path())
+            .env("XDG_CONFIG_HOME", tmp.path())
+            .args(["--json", "run"])
+            .arg(deckle_kfx::fixtures::path("deckle-mini.epub"))
+            .args(["--preset", "academic", "--to"])
+            .arg(tmp.path().join("out"))
+            .arg("--previewer")
+            .arg(&fake)
+            .args(&extra)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let report: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        let r = &report[0];
+        assert_eq!(r["normalize"]["style_preset"], "academic");
+        assert_eq!(r["normalize"]["typography"].is_null(), !extra.is_empty());
+        assert_eq!(r["normalize"]["notes"].is_null(), !extra.is_empty());
+        assert_eq!(r["pages"].is_null(), !extra.is_empty());
+        assert!(r["word_wise"].is_null());
+    }
 }

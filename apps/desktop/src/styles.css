@@ -554,3 +554,6 @@ input[type=checkbox] { padding: 0; }
 .library .shelf-search { flex-wrap: wrap; }
 .book-search-results { overflow-wrap: anywhere; }
 .books-whole > .library { max-height: 60%; flex-shrink: 0; }
+
+.preset-picker { display: grid; gap: 0.4rem; padding: 0.65rem; font-size: 0.85rem; }
+.preset-picker select { max-width: 100%; }

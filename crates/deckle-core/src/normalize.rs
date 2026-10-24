@@ -19,6 +19,7 @@ use crate::typography::{self, TypographyReport};
 
 #[derive(Clone, Debug)]
 pub struct NormalizeOptions {
+    pub preset: Option<crate::preset::Preset>,
     /// Longest side above which raster images are downscaled.
     pub max_image_px: u32,
     pub jpeg_quality: u8,
@@ -47,6 +48,7 @@ pub struct GeneratedCover {
 impl Default for NormalizeOptions {
     fn default() -> Self {
         NormalizeOptions {
+            preset: None,
             max_image_px: 1920,
             jpeg_quality: 85,
             fill: Default::default(),
@@ -60,6 +62,8 @@ impl Default for NormalizeOptions {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct NormalizeReport {
+    /// Preset applied to at least one reading document.
+    pub style_preset: Option<crate::preset::Preset>,
     pub images_downscaled: u32,
     /// OPF language elements and XHTML root attributes repaired by the offline pass.
     pub language_tags_fixed: u32,
@@ -594,6 +598,60 @@ pub fn normalize(
         report
             .warnings
             .extend(warnings.into_iter().map(|w| format!("{href}: {w}")));
+    }
+
+    if let Some(preset) = opts.preset {
+        if package.descendants().any(|n| {
+            n.attribute("property") == Some("rendition:layout")
+                && n.text().is_some_and(|s| s.trim() == "pre-paginated")
+        }) {
+            report
+                .warnings
+                .push("style preset skipped for fixed-layout EPUB".into());
+        } else {
+            let ids: std::collections::HashSet<_> = package
+                .descendants()
+                .filter(|n| n.has_tag_name("itemref"))
+                .filter(|n| {
+                    let fixed = n
+                        .attribute("properties")
+                        .unwrap_or("")
+                        .split_whitespace()
+                        .any(|p| p == "rendition:layout-pre-paginated");
+                    if fixed {
+                        report
+                            .warnings
+                            .push("style preset skipped for a fixed-layout spine item".into());
+                    }
+                    !fixed
+                })
+                .filter_map(|n| n.attribute("idref"))
+                .collect();
+            for item in package.descendants().filter(|n| {
+                n.has_tag_name("item")
+                    && n.attribute("id").is_some_and(|id| ids.contains(id))
+                    && n.attribute("media-type") == Some("application/xhtml+xml")
+            }) {
+                let Some(href) = item.attribute("href") else {
+                    continue;
+                };
+                let name = join(&opf_dir, &crate::epub::percent_decode(href));
+                let result = files
+                    .get(&name)
+                    .and_then(|b| std::str::from_utf8(b).ok())
+                    .ok_or_else(|| "missing or non-UTF-8 XHTML".to_owned())
+                    .and_then(|text| crate::preset::style_xhtml(text, preset));
+                match result {
+                    Ok(styled) => {
+                        report.style_preset = Some(preset);
+                        files.insert(name, styled.into_bytes());
+                    }
+                    Err(e) => report
+                        .warnings
+                        .push(format!("{href}: style preset skipped: {e}")),
+                }
+            }
+        }
     }
 
     files.insert(opf_path.clone(), opf.into_bytes());

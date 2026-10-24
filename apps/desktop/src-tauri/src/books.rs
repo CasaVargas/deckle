@@ -121,11 +121,16 @@ pub fn preflight_with(
     cover: Option<&CoverChoice>,
 ) -> Result<PreflightView, String> {
     let work = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let preset = settings
+        .book_presets
+        .get(&path.to_string_lossy().into_owned())
+        .copied();
     let p = preflight(
         path,
         &PreflightOptions {
-            typography: settings.typography,
-            popup_notes: settings.popup_notes,
+            preset,
+            typography: preset.map_or(settings.typography, |p| p.typography()),
+            popup_notes: preset.map_or(settings.popup_notes, |p| p.popup_notes()),
             generated_cover: settings.generated_cover.then_some(None),
             cover: cover.map(CoverChoice::pick).unwrap_or_default(),
         },
@@ -305,6 +310,24 @@ pub async fn library_search(query: String) -> Result<deckle_library::search::Rep
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_preset_is_used_after_reloading_settings_and_in_preflight() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("settings.json");
+        let source = deckle_kfx::fixtures::path("deckle-mini.epub");
+        let mut settings = crate::commands::Settings::default();
+        settings.book_presets.insert(
+            source.to_string_lossy().into_owned(),
+            deckle_core::preset::Preset::Academic,
+        );
+        crate::commands::save_settings_to(&file, &settings).unwrap();
+        let loaded = crate::commands::load_settings_from(&file);
+        let view = preflight_with(&source, &loaded, None).unwrap();
+        assert!(view.typography.is_some() && view.notes.is_some());
+        assert!(view.after.unwrap().css.contains("line-height: 1.45"));
+        assert!(!view.before.unwrap().css.contains("line-height: 1.45"));
+    }
 
     #[test]
     fn the_catalog_covers_preflight_and_fix_details_work_on_a_library_book() {

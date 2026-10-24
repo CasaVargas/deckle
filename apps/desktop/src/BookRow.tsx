@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { beforeChip, doneChips, type Chip } from "./bookStatus";
 import Icon from "./Icon";
-import type { BookState, PlanRow, Settings } from "./types";
+import { PRESETS } from "./presets";
+import type { BookState, PlanRow, Settings, StylePreset } from "./types";
 import { STAGES, STAGE_LABEL } from "./types";
 
 interface Props {
@@ -12,6 +13,8 @@ interface Props {
   plan?: PlanRow;
   /** Which features are on: the before-sending chip names them. */
   settings: Pick<Settings, "xray" | "word_wise">;
+  preset?: StylePreset | null;
+  onPreset?: (preset: StylePreset | null) => void;
   onOverride: (id: string, cde: "pdoc" | "ebok" | null) => void;
   onAsin: (id: string, asin: string | null) => void;
   onToggleReport: (id: string) => void;
@@ -37,7 +40,7 @@ const SOURCE = { llm: "AI model", wikipedia: "Wikipedia", basic: "basic" } as co
 
 const ASIN = /^[A-Z0-9]{10}$/;
 
-export default function BookRowView({ book, busy, plan, settings, onOverride, onAsin, onToggleReport, onRemove, onReveal, onOpen }: Props) {
+export default function BookRowView({ book, busy, plan, settings, preset, onPreset, onOverride, onAsin, onToggleReport, onRemove, onReveal, onOpen }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   /** The ASIN field's text while it is open; `null` when closed. */
   const [asinDraft, setAsinDraft] = useState<string | null>(null);
@@ -123,6 +126,7 @@ export default function BookRowView({ book, busy, plan, settings, onOverride, on
               {book.title}
             </span>
           )}
+          {preset && <span className="chip" title="Saved book style">{PRESETS[preset]}</span>}
           {book.coverPick && book.coverPick.kind !== "own" && (
             <span className="chip" title="The cover picked in Before you send">
               {book.coverPick.kind === "generated" ? "Typographic cover" : "Open Library cover"}
@@ -224,6 +228,13 @@ export default function BookRowView({ book, busy, plan, settings, onOverride, on
         </button>
         {menuOpen && (
           <div className="menu" onMouseLeave={() => setMenuOpen(false)}>
+            {onPreset && <label className="preset-picker">Book style
+              <select aria-label="Book style" value={preset ?? ""} disabled={busy || book.mode === "error" || book.mode === "ready"}
+                onChange={(e) => onPreset((e.target.value || null) as StylePreset | null)}>
+                <option value="">Original style / app settings</option>
+                {Object.entries(PRESETS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>}
             <button onClick={() => { onOverride(book.id, "ebok"); setMenuOpen(false); }} disabled={effectiveCde === "ebok" || book.mode === "error" || book.mode === "ready"}>
               Prefer features (EBOK)
             </button>
