@@ -141,3 +141,59 @@ fn a_finished_kfx_reports_title_type_and_cover() {
     }
     assert!(deckle_core::inspect::inspect_kfx(b"not a kfx").is_err());
 }
+
+#[test]
+fn accessibility_audit_covers_nonspine_xhtml_once_and_preserves_empty_alt() {
+    let mut epub = crate_epub();
+    let mut opf = String::new();
+    std::io::Read::read_to_string(&mut epub.by_name("OEBPS/content.opf").unwrap(), &mut opf)
+        .unwrap();
+    let opf = opf.replace("<dc:language>en</dc:language>", "<dc:language>en_US</dc:language>")
+        .replace("</manifest>", "<item id='extra' href='extra.xhtml' media-type='application/xhtml+xml'/><item id='duplicate' href='extra.xhtml' media-type='application/xhtml+xml'/></manifest>");
+    let extra = br#"<html xmlns="http://www.w3.org/1999/xhtml"><body><img src="one.jpg"/><img src="two.jpg" alt=""/><img src="three.jpg" alt="Diagram"/><img src="four.jpg"/></body></html>"#;
+    let source = variant(&[
+        ("OEBPS/content.opf", opf.as_bytes()),
+        ("OEBPS/extra.xhtml", extra),
+    ]);
+    let info = inspect(source.path()).unwrap();
+    assert_eq!(info.language, "en-US");
+    assert_eq!(info.images_missing_alt, 2);
+    assert_eq!(
+        info.warnings
+            .iter()
+            .filter(|w| w.contains("missing alt text"))
+            .count(),
+        1
+    );
+    let json = serde_json::to_value(&info).unwrap();
+    assert_eq!(json["images_missing_alt"], 2);
+}
+
+fn crate_epub() -> zip::ZipArchive<std::fs::File> {
+    zip::ZipArchive::new(std::fs::File::open(mini()).unwrap()).unwrap()
+}
+
+#[test]
+fn accessibility_audit_reports_unreadable_documents_and_missing_language() {
+    let mut epub = crate_epub();
+    let mut opf = String::new();
+    std::io::Read::read_to_string(&mut epub.by_name("OEBPS/content.opf").unwrap(), &mut opf)
+        .unwrap();
+    let opf = opf.replace("<dc:language>en</dc:language>", "");
+    let source = variant(&[
+        ("OEBPS/content.opf", opf.as_bytes()),
+        ("OEBPS/c0.xhtml", b"<html><img></html>"),
+    ]);
+    let info = inspect(source.path()).unwrap();
+    assert_eq!(info.language, "en");
+    assert!(
+        info.warnings
+            .iter()
+            .any(|w| w == "no dc:language; assuming en")
+    );
+    assert!(
+        info.warnings
+            .iter()
+            .any(|w| w.contains("c0.xhtml: image-alt audit skipped"))
+    );
+}

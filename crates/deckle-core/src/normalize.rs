@@ -2,7 +2,7 @@
 //! Stage 2: write a cleaned EPUB that Kindle Previewer converts well. v1 scope: JPEG/JFIF cover
 //! with the `cover-image` property, image downscaling, script and remote-resource removal, and a
 //! synthesized nav TOC when the book has none, and a generated cover when it has none of those
-//! either (#27). Everything else passes through byte for byte, unless the opt-in typography
+//! either (#27), plus offline language-tag repair (#32). Other content passes through byte for byte, unless the opt-in typography
 //! (#30, [`crate::typography`]) or pop-up notes (#31, [`crate::notes`]) pass is on.
 
 use std::collections::BTreeMap;
@@ -61,6 +61,8 @@ impl Default for NormalizeOptions {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct NormalizeReport {
     pub images_downscaled: u32,
+    /// OPF language elements and XHTML root attributes repaired by the offline pass.
+    pub language_tags_fixed: u32,
     pub scripts_removed: u32,
     pub remote_refs_removed: u32,
     pub cover_converted_to_jpeg: bool,
@@ -552,6 +554,46 @@ pub fn normalize(
                 .warnings
                 .push("generated cover not added: the OPF has no manifest or spine".into()),
         }
+    }
+
+    // Run after generated navigation and cover pages, so they receive language tags too.
+    let (fixed_opf, book_language, fixed) =
+        crate::accessibility::normalize_opf(&opf, &mut report.warnings)
+            .map_err(NormalizeError::Xml)?;
+    opf = fixed_opf;
+    report.language_tags_fixed += fixed;
+    let package =
+        roxmltree::Document::parse(&opf).map_err(|e| NormalizeError::Xml(e.to_string()))?;
+    let mut seen = std::collections::HashSet::new();
+    for item in package.descendants().filter(|n| {
+        n.has_tag_name("item") && n.attribute("media-type") == Some("application/xhtml+xml")
+    }) {
+        let Some(href) = item.attribute("href") else {
+            continue;
+        };
+        let name = join(&opf_dir, &crate::epub::percent_decode(href));
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let Some(text) = files.get(&name).and_then(|b| std::str::from_utf8(b).ok()) else {
+            report.warnings.push(format!(
+                "{href}: language repair skipped (missing or non-UTF-8 XHTML)"
+            ));
+            continue;
+        };
+        let mut warnings = Vec::new();
+        match crate::accessibility::normalize_xhtml(text, &book_language, &mut warnings) {
+            Ok((fixed, count)) => {
+                if count > 0 {
+                    files.insert(name, fixed.into_bytes());
+                }
+                report.language_tags_fixed += count;
+            }
+            Err(e) => warnings.push(format!("language repair skipped: {e}")),
+        }
+        report
+            .warnings
+            .extend(warnings.into_iter().map(|w| format!("{href}: {w}")));
     }
 
     files.insert(opf_path.clone(), opf.into_bytes());

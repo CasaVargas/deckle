@@ -341,3 +341,75 @@ fn a_book_with_a_cover_ignores_the_generated_one_byte_for_byte() {
         std::fs::read(without.path()).unwrap()
     );
 }
+
+#[test]
+fn accessibility_repairs_package_and_roots_and_keeps_alt_and_inline_language() {
+    let opf = String::from_utf8(read_entry(&mini(), "OEBPS/content.opf"))
+        .unwrap()
+        .replace(
+            "<dc:language>en</dc:language>",
+            "<dc:language>en_US</dc:language>",
+        );
+    let chapter = br#"<html xmlns="http://www.w3.org/1999/xhtml" data-lang="de"><head><title>One</title></head><body><p xml:lang="es">Hola</p><img src="none.png"/><img src="decorative.png" alt=""/><img src="diagram.png" alt="Diagram"/></body></html>"#;
+    let french = br#"<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="fr_ca"><head><title>Two</title></head><body>Bonjour</body></html>"#;
+    let source = variant(&[
+        ("OEBPS/content.opf", Some(opf.as_bytes())),
+        ("OEBPS/c0.xhtml", Some(chapter)),
+        ("OEBPS/c1.xhtml", Some(french)),
+    ]);
+    let out = tempfile::NamedTempFile::new().unwrap();
+    let report = normalize(source.path(), out.path(), &NormalizeOptions::default()).unwrap();
+    assert!(report.language_tags_fixed >= 5);
+    let info = inspect(out.path()).unwrap();
+    assert_eq!(info.language, "en-US");
+    assert_eq!(info.images_missing_alt, 1);
+    let text = String::from_utf8(read_entry(out.path(), "OEBPS/c0.xhtml")).unwrap();
+    assert!(text.contains("<p xml:lang=\"es\">Hola</p>"));
+    assert!(text.contains("<img src=\"decorative.png\" alt=\"\"/>"));
+    let doc = roxmltree::Document::parse(&text).unwrap();
+    assert_eq!(doc.root_element().attribute("lang"), Some("en-US"));
+    let text = String::from_utf8(read_entry(out.path(), "OEBPS/c1.xhtml")).unwrap();
+    let doc = roxmltree::Document::parse(&text).unwrap();
+    assert_eq!(doc.root_element().attribute("lang"), Some("fr-CA"));
+    assert_eq!(
+        doc.root_element()
+            .attribute(("http://www.w3.org/XML/1998/namespace", "lang")),
+        Some("fr-CA")
+    );
+    let again = tempfile::NamedTempFile::new().unwrap();
+    let report = normalize(out.path(), again.path(), &NormalizeOptions::default()).unwrap();
+    assert_eq!(report.language_tags_fixed, 0);
+    assert_eq!(
+        read_entry(out.path(), "OEBPS/c0.xhtml"),
+        read_entry(again.path(), "OEBPS/c0.xhtml")
+    );
+}
+
+#[test]
+fn accessibility_includes_generated_cover_and_navigation_pages() {
+    let coverless = coverless();
+    let opf = String::from_utf8(read_entry(coverless.path(), "OEBPS/content.opf")).unwrap()
+        .replace(r#"<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>"#, "");
+    let source = variant(&[
+        ("OEBPS/content.opf", Some(opf.as_bytes())),
+        ("OEBPS/nav.xhtml", None),
+    ]);
+    let out = tempfile::NamedTempFile::new().unwrap();
+    let options = NormalizeOptions {
+        generated_cover: Some(generated()),
+        ..Default::default()
+    };
+    let report = normalize(source.path(), out.path(), &options).unwrap();
+    assert!(report.toc_synthesized);
+    assert!(report.cover_generated.is_some());
+    for name in ["OEBPS/deckle-nav.xhtml", "OEBPS/deckle-cover.xhtml"] {
+        let text = String::from_utf8(read_entry(out.path(), name)).unwrap();
+        let doc = roxmltree::Document::parse(&text).unwrap();
+        assert_eq!(doc.root_element().attribute("lang"), Some("en"), "{name}");
+        assert_eq!(
+            doc.root_element()
+                .attribute(("http://www.w3.org/XML/1998/namespace", "lang")),
+            Some("en")
+        );
+    }
+}

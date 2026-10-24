@@ -55,6 +55,8 @@ pub struct BookInfo {
     pub title: String,
     pub creators: Vec<Creator>,
     pub language: String,
+    /// XHTML img elements with no alt attribute (empty alt is intentional and preserved).
+    pub images_missing_alt: u32,
     pub identifiers: Vec<String>,
     pub isbn: Option<String>,
     pub series: Option<Series>,
@@ -219,10 +221,7 @@ pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
     }
-    if info.language.is_empty() {
-        info.warnings.push("no dc:language; assuming en".into());
-        info.language = "en".into();
-    }
+    info.language = crate::accessibility::book_language(&info.language, &mut info.warnings);
 
     // manifest: id -> (href, media-type, properties)
     let mut items: Vec<(String, String, String, String)> = Vec::new();
@@ -297,6 +296,32 @@ pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
         }
     } else {
         info.warnings.push("OPF has no spine".into());
+    }
+    let mut audited = std::collections::HashSet::new();
+    for (_, href, media_type, _) in &items {
+        if media_type != "application/xhtml+xml" {
+            continue;
+        }
+        let full = epub.resolve(href);
+        if !audited.insert(full.clone()) {
+            continue;
+        }
+        match epub
+            .read_string(&full)
+            .map_err(|e| e.to_string())
+            .and_then(|text| crate::accessibility::missing_alt(&text))
+        {
+            Ok(count) => {
+                info.images_missing_alt += count;
+                if count > 0 {
+                    info.warnings
+                        .push(format!("{href}: {count} image(s) missing alt text"));
+                }
+            }
+            Err(e) => info
+                .warnings
+                .push(format!("{href}: image-alt audit skipped: {e}")),
+        }
     }
     Ok(info)
 }

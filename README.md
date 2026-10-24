@@ -112,6 +112,9 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   pictures. It's never as good as a real ebook, and the run says so. The app ships with the
   PDFium library it needs; a source build of the CLI gets it with `tools/fetch-pdfium.sh` (or
   `DECKLE_PDFIUM`). Scans aren't supported.
+- **Accessibility checks.** Normalize language-tag spelling and fill missing chapter language
+  attributes while preserving explicit languages. Inspection reports images missing alt text;
+  existing descriptions and intentional empty alt attributes stay unchanged. This runs offline.
 - **Optional cleanups.** Fill missing metadata from Open Library, fix typography, turn footnotes
   into pop-up notes.
 - **Library.** A plain folder (`Author/Title/` plus a `deckle.json`), no database. Deckle can

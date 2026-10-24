@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Deckle pipeline stages.
 
+pub mod accessibility;
 pub mod bind;
 pub mod clippings;
 pub mod compat;
