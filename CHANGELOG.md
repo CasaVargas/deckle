@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0 — notes become books, and a more personal paper
+
+- **Markdown becomes a book.** Import a Markdown file or a folder of notes, including local
+  images, tables, YAML metadata and links between notes. The library keeps a self-contained
+  EPUB snapshot. Unsupported or missing links and images produce warnings.
+- **Search across your library and Kindles.** Find titles, authors and series across library
+  copies, a scanned connected Kindle and recorded sends. Historical sends are identified as
+  records, not proof that a book is still on a device.
+- **Book styles.** Choose Academic, Novel or Manual per queued book, or use `--preset` in the
+  CLI. Presets set typography and enrichment defaults; fixed-layout content is left alone.
+- **Language repairs and image accessibility checks.** Normalize language tags and fill missing
+  document language declarations. Report images missing alt text without inventing descriptions
+  or overwriting existing alt text. These checks work offline.
+- **An optional Daily AI editor.** When enabled, it groups duplicate stories across sections,
+  adds short section briefs and writes entertainment horoscopes. AI text is labeled; article
+  bodies are preserved. Provider failures leave the original edition intact. Off by default,
+  with provider credentials read from environment variables.
+
 ## 0.5.2 — the title's typeface, and a fix for Upgrades
 
 - **Upgrades no longer offers a book it can't rebuild.** An older MOBI with no KF8 part (and no
