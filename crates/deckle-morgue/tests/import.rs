@@ -21,6 +21,7 @@ fn gathered(date: NaiveDate) -> Gathered {
     };
     Gathered {
         edition: Edition {
+            large_print: false,
             paper: "The Deckle Daily".into(),
             date,
             place: "Linden Falls, NC".into(),

@@ -78,6 +78,60 @@ p.in-section { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1e
 ul.toc { margin: 0 0 1em 0; padding-left: 1.2em; }
 "#;
 
+/// Large print (many papers §6), after [`STYLE`]: no text below body size (the crossword's
+/// clue numbers stay small inside their squares), heads 1.1×, heavier rules, and the strip as
+/// a list. A Kindle sets the size itself (Aa); this makes the paper read well when it's big.
+pub(crate) const LARGE_STYLE: &str = r#"
+.ears, .kicker, .meta, .link, .lo, .credit, .label, .small, .caption, .source,
+p.back, p.in-section, table.strip td, table.grid.small td { font-size: 1em; }
+.paper { font-size: 2.64em; }
+.section-head { font-size: 1.54em; border-top-width: 4px; border-bottom-width: 2px; }
+h2.headline { font-size: 1.32em; }
+h2.lead { font-size: 1.76em; }
+h3.subhead { font-size: 1.16em; }
+.big { font-size: 2.42em; }
+.weather, .rule, table.strip, table.day td, table.cols td, ul.index li { border-width: 2px; }
+ul.strip-list { list-style-type: none; padding-left: 0; border-top: 2px solid black;
+  border-bottom: 2px solid black; margin: 0.4em 0; }
+ul.strip-list li.day { padding: 0.25em 0; border-bottom: 1px solid black; }
+ul.strip-list img { width: 1.6em; height: 1.6em; vertical-align: middle; }
+"#;
+
+/// The edition's stylesheet: [`STYLE`], then [`LARGE_STYLE`] for a large-print paper.
+pub(crate) fn stylesheet(large_print: bool) -> String {
+    match large_print {
+        true => format!("{STYLE}{LARGE_STYLE}"),
+        false => STYLE.to_owned(),
+    }
+}
+
+/// The smallest `font-size: Nem` in effect across `css`, a later rule for a selector winning
+/// over an earlier one; selectors in `except` aren't counted (tests).
+#[cfg(test)]
+pub(crate) fn min_font_em(css: &str, except: &[&str]) -> f64 {
+    use std::collections::BTreeMap;
+    let mut sizes: BTreeMap<String, f64> = BTreeMap::new();
+    for rule in css.split('}') {
+        let Some((selectors, body)) = rule.split_once('{') else {
+            continue;
+        };
+        let Some(size) = body.split(';').find_map(|d| {
+            let (k, v) = d.split_once(':')?;
+            (k.trim() == "font-size").then(|| v.trim().strip_suffix("em")?.parse::<f64>().ok())?
+        }) else {
+            continue;
+        };
+        for sel in selectors.split(',') {
+            sizes.insert(sel.split_whitespace().collect::<Vec<_>>().join(" "), size);
+        }
+    }
+    sizes
+        .into_iter()
+        .filter(|(sel, _)| !except.contains(&sel.as_str()))
+        .map(|(_, s)| s)
+        .fold(f64::INFINITY, f64::min)
+}
+
 pub(crate) fn page(title: &str, body: &str) -> Vec<u8> {
     format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
@@ -410,7 +464,7 @@ pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
         ("OEBPS/content.opf".into(), opf(e, &uid)),
         ("OEBPS/toc.ncx".into(), ncx(e, &uid)),
         ("OEBPS/nav.xhtml".into(), nav(e)),
-        ("OEBPS/style.css".into(), STYLE.as_bytes().to_vec()),
+        ("OEBPS/style.css".into(), stylesheet(e.large_print).into_bytes()),
         ("OEBPS/cover.jpg".into(), cover),
         ("OEBPS/front.xhtml".into(), front_page(g)),
     ];
@@ -433,4 +487,18 @@ pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
         }
     }
     files
+}
+
+#[cfg(test)]
+mod large_print_tests {
+    use super::{LARGE_STYLE, STYLE, min_font_em, stylesheet};
+
+    #[test]
+    fn large_print_has_nothing_under_body_size() {
+        // The regular paper has small print; the crossword's clue numbers stay small anywhere.
+        assert!(min_font_em(STYLE, &[]) < 1.0);
+        assert!(min_font_em(&stylesheet(true), &["table.grid span.n"]) >= 1.0);
+        assert_eq!(stylesheet(false), STYLE);
+        assert!(stylesheet(true).ends_with(LARGE_STYLE));
+    }
 }

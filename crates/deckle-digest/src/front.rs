@@ -175,6 +175,7 @@ mod tests {
         };
         Gathered {
             edition: Edition {
+                large_print: false,
                 paper: "The Deckle Daily".into(),
                 date: chrono::NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
                 place: String::new(),

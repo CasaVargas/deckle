@@ -241,6 +241,7 @@ fn page_cfg() -> Config {
 fn xhtml(s: Section) -> String {
     let g = Gathered {
         edition: Edition {
+            large_print: false,
             paper: "The Deckle Daily".into(),
             date: date(),
             place: "New York, NY".into(),
@@ -639,6 +640,7 @@ fn a_word_in_the_section_name_is_no_theme() {
     use deckle_digest::puzzle::theme::harvest;
     use deckle_digest::{Article, Edition};
     let e = Edition {
+        large_print: false,
         paper: "The Deckle Daily".into(),
         date: date(),
         place: String::new(),

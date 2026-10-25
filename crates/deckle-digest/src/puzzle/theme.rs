@@ -180,6 +180,7 @@ mod tests {
 
     fn edition() -> (Edition, Vec<usize>) {
         let e = Edition {
+            large_print: false,
             paper: "The Deckle Daily".into(),
             date: NaiveDate::from_ymd_opt(2026, 10, 21).unwrap(),
             place: "Pine Ridge, NC".into(),

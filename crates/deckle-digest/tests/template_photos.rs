@@ -44,6 +44,7 @@ fn story(photos: Vec<Vec<u8>>, lead: bool) -> Article {
 
 fn edition(articles: Vec<Article>) -> Edition {
     Edition {
+        large_print: false,
         paper: "P".into(),
         date: chrono::NaiveDate::from_ymd_opt(2026, 10, 22).unwrap(),
         place: String::new(),

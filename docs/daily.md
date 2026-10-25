@@ -372,7 +372,7 @@ paper has its own title, sections, feeds, place, `keep`, export folders, reMarka
 ```toml
 reader = "Maya"                   # who it's for
 kindle = "Mom's Kindle"           # only this Kindle gets it (its name or sync id); leave out for any
-large_print = true                # (a layout for big type; coming)
+large_print = true                # a layout for big type (below)
 ```
 
 - **Shared settings.** `[sync]`, `[reading]` (the Inbox and saved articles) and the email
@@ -394,8 +394,12 @@ large_print = true                # (a layout for big type; coming)
   (`\Deckle\Digest-<slug>`). A main paper you scheduled before many papers keeps its job
   until you set its time again. `schedule --off` removes everything; with `--paper`, only that
   paper's job.
-- **For now:** the `digest morgue` commands work on the main paper only. Large print and the
-  app's Your papers are coming.
+- **Large print.** `large_print = true` lays the paper out for big type: nothing smaller than
+  the body text, bigger headlines, heavier rules, the five-day forecast as a list (one day a
+  line), and one photo a story. Set the text size on the Kindle itself (Aa). It applies to
+  every book on that Kindle.
+- **For now:** the `digest morgue` commands work on the main paper only. The app's Your papers
+  is coming.
 - **Removing a paper:** delete its file, then run `deckle digest schedule --at …` for any
   paper (or `--off`) so its job goes too.
 

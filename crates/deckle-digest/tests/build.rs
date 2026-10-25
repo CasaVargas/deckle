@@ -597,6 +597,7 @@ mod front {
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
             edition: Edition {
+                large_print: false,
                 paper: "The Deckle Daily".into(),
                 date: NaiveDate::from_ymd_opt(2026, 10, 23).unwrap(),
                 place: String::new(),
