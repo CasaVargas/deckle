@@ -94,6 +94,66 @@ fn resolve_target(to: &str) -> Result<Target, String> {
     Ok(Target::Folder(dir))
 }
 
+/// Every connected Kindle: mass storage first, then MTP.
+fn connected_kindles() -> Vec<Target> {
+    let mut out: Vec<Target> = detect_mass_storage()
+        .into_iter()
+        .map(Target::MassStorage)
+        .collect();
+    out.extend(deckle_transport::usb::detect().into_iter().map(Target::Mtp));
+    out
+}
+
+/// A Kindle picked with `--kindle`: its sync id, what to call it, and its connection when it's
+/// plugged in.
+struct Chosen {
+    id: String,
+    label: String,
+    target: Option<Target>,
+}
+
+/// The Kindle `arg` names: a connected one by its name or id, else a named one from the
+/// config (Kindle profiles design §2).
+fn choose_kindle(
+    arg: &str,
+    sync: &deckle_digest::config::SyncConfig,
+    connected: Vec<Target>,
+) -> Result<Chosen, String> {
+    let want = arg.trim();
+    for t in connected {
+        let id = deckle_core::sync::device_id(&t);
+        let name = sync.device_name(&id);
+        let by_name = name
+            .as_deref()
+            .is_some_and(|n| n.eq_ignore_ascii_case(want));
+        if by_name || deckle_core::sync::same_kindle(&id, want) {
+            return Ok(Chosen {
+                label: name.unwrap_or_else(|| id.clone()),
+                id,
+                target: Some(t),
+            });
+        }
+    }
+    if let Some(id) = sync.find_device(want) {
+        return Ok(Chosen {
+            label: sync.device_name(&id).unwrap_or_else(|| id.clone()),
+            id,
+            target: None,
+        });
+    }
+    let mut names: Vec<&str> = sync.named().map(|(_, n)| n).collect();
+    names.sort_unstable();
+    names.dedup();
+    Err(if names.is_empty() {
+        format!("no Kindle is called \"{want}\"; plug it in and name it with `deckle devices name`")
+    } else {
+        format!(
+            "no Kindle is called \"{want}\"; known: {}",
+            names.join(", ")
+        )
+    })
+}
+
 /// Title and first author of a KFX, for naming the file when sending it.
 fn info_from_kfx(kfx: &[u8]) -> BookInfo {
     deckle_core::inspect::inspect_kfx(kfx)
@@ -248,7 +308,19 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             emit(json, &path, || format!("sent to {}", path.display()))?;
             Ok(ExitCode::SUCCESS)
         }
-        cli::Command::Devices => {
+        cli::Command::Devices {
+            action: Some(cli::DevicesCommand::Name { name, kindle }),
+        } => name_kindle(json, &name, kindle.as_deref()),
+        cli::Command::Devices { action: None } => {
+            let names = deckle_digest::Config::load(&deckle_digest::config::default_path())
+                .unwrap_or_default()
+                .sync;
+            let named = |t: &Target| {
+                names
+                    .device_name(&deckle_core::sync::device_id(t))
+                    .map(|n| format!("{n}  "))
+                    .unwrap_or_default()
+            };
             let devices = detect_mass_storage();
             let mtp = deckle_transport::usb::detect();
             #[derive(serde::Serialize)]
@@ -265,7 +337,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .iter()
                     .map(|d| {
                         format!(
-                            "{}  {}  mass storage, thumbnails:{}  sync id \"{}\"",
+                            "{}{}  {}  mass storage, thumbnails:{}  sync id \"{}\"",
+                            named(&Target::MassStorage(d.clone())),
                             d.root.display(),
                             d.model_hint,
                             if d.thumbnails_writable {
@@ -279,7 +352,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .collect();
                 lines.extend(mtp.iter().map(|m| {
                     format!(
-                        "usb {}:{}  {}  MTP (serial {})  sync id \"{}\"",
+                        "{}usb {}:{}  {}  MTP (serial {})  sync id \"{}\"",
+                        named(&Target::Mtp(m.clone())),
                         m.bus,
                         m.address,
                         m.product.clone().unwrap_or_else(|| "Kindle".into()),
@@ -317,6 +391,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             epubs,
             preset,
             to,
+            kindle,
             cde,
             pages,
             previewer: pv,
@@ -350,8 +425,12 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 .transpose()?;
             let pages_explicit = pages.is_some();
             let pages = cli::parse_pages(pages.as_deref())?;
+            if kindle.is_some() && to != "device" {
+                return Err("--kindle sends to a Kindle; leave out --to".into());
+            }
             // No Kindle but a Kobo or a PocketBook: neither needs Previewer (other readers §8).
             if to == "device"
+                && kindle.is_none()
                 && detect_kindle().is_none()
                 && let Some(reader) = detect_reader()
             {
@@ -365,7 +444,32 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             }
             // Fail before any work (and before touching the target) when Previewer is missing.
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
-            let target = resolve_target(&to)?;
+            // `--kindle`: that Kindle when it's connected; otherwise the books wait for it.
+            let chosen = match &kindle {
+                Some(k) => {
+                    let cfg = deckle_digest::Config::load(&deckle_digest::config::default_path())
+                        .unwrap_or_default();
+                    Some(choose_kindle(k, &cfg.sync, connected_kindles())?)
+                }
+                None => None,
+            };
+            let target = match &chosen {
+                Some(Chosen {
+                    target: Some(t), ..
+                }) => t.clone(),
+                // `prepare` delivers nothing: the Kindle is known at push.
+                Some(_) => Target::Folder(std::env::temp_dir()),
+                None => {
+                    let connected = connected_kindles();
+                    if to == "device" && connected.len() > 1 {
+                        eprintln!(
+                            "{} Kindles are connected; sending to the first. Choose with --kindle <name>.",
+                            connected.len()
+                        );
+                    }
+                    resolve_target(&to)?
+                }
+            };
             let mut opts = RunOptions {
                 preset: None,
                 cover: Default::default(),
@@ -415,6 +519,14 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 if word_wise.is_some() {
                     opts.word_wise = word_wise_options;
                 }
+            }
+            if let Some(Chosen {
+                id,
+                label,
+                target: None,
+            }) = &chosen
+            {
+                return queue_for_kindle(json, &epubs, &opts, id, label);
             }
             let reports: Vec<_> = epubs
                 .iter()
@@ -491,6 +603,122 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             })
         }
     }
+}
+
+/// `devices name`: names the connected Kindle (the one `kindle` picks when several are).
+fn name_kindle(json: bool, name: &str, kindle: Option<&str>) -> Result<ExitCode, String> {
+    let path = deckle_digest::config::default_path();
+    let mut cfg = deckle_digest::Config::load(&path).unwrap_or_default();
+    let connected = connected_kindles();
+    let target = match kindle {
+        Some(k) => choose_kindle(k, &cfg.sync, connected)?
+            .target
+            .ok_or_else(|| format!("{k} isn't connected; plug it in to name it"))?,
+        None => match connected.len() {
+            0 => return Err("no Kindle connected; plug in the one to name".into()),
+            1 => connected.into_iter().next().expect("one"),
+            n => {
+                return Err(format!(
+                    "{n} Kindles are connected; choose one with --kindle <name or sync id> (`deckle devices` lists them)"
+                ));
+            }
+        },
+    };
+    let id = deckle_core::sync::device_id(&target);
+    cfg.sync.set_device_name(&id, name)?;
+    deckle_digest::config::save(&path, &cfg)?;
+    let name = name.trim();
+    #[derive(serde::Serialize)]
+    struct Named<'a> {
+        id: &'a str,
+        name: &'a str,
+    }
+    emit(json, &Named { id: &id, name }, || match name {
+        "" => format!("{id}: name cleared"),
+        n => format!("{id} is now \"{n}\""),
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `run --kindle` for a Kindle that isn't connected: each book is prepared and queued for it,
+/// delivered by the next `push` or `watch` that sees it (Kindle profiles design §2).
+fn queue_for_kindle(
+    json: bool,
+    inputs: &[PathBuf],
+    opts: &RunOptions,
+    id: &str,
+    label: &str,
+) -> Result<ExitCode, String> {
+    #[derive(serde::Serialize)]
+    struct Queued {
+        input: PathBuf,
+        kindle: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        queued: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    }
+    let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+    let results: Vec<Queued> = inputs
+        .iter()
+        .map(|input| {
+            let queued = queue_one(input, opts, &outbox, id);
+            Queued {
+                input: input.clone(),
+                kindle: label.to_owned(),
+                error: queued.as_ref().err().cloned(),
+                queued: queued.ok(),
+            }
+        })
+        .collect();
+    let failed = results.iter().filter(|r| r.error.is_some()).count();
+    emit(json, &results, || {
+        let mut lines: Vec<String> = results
+            .iter()
+            .map(|r| match (&r.queued, &r.error) {
+                (_, Some(e)) => format!("FAIL  {}\n      {e}", r.input.display()),
+                (Some(name), None) => {
+                    format!("QUEUED {}\n      for {label}: {name}", r.input.display())
+                }
+                _ => format!("??    {}", r.input.display()),
+            })
+            .collect();
+        if failed < results.len() {
+            lines.push(format!(
+                "{label} isn't connected: `deckle digest push` (or `watch`) delivers when it is"
+            ));
+        }
+        lines.join("\n")
+    })?;
+    Ok(if failed == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(EXIT_FAILURE)
+    })
+}
+
+/// One `run --kindle` input up to the KPF, into the outbox for Kindle `id`; the queue name.
+fn queue_one(
+    input: &Path,
+    opts: &RunOptions,
+    outbox: &deckle_core::queue::Queue,
+    id: &str,
+) -> Result<String, String> {
+    let arg = input.to_string_lossy();
+    let source = if deckle_digest::web_book::is_article(&arg) {
+        import_article(&arg, &deckle_digest::Http, &articles_dir())
+            .map_err(|e| format!("import: {e}"))?
+            .path
+    } else {
+        input.to_path_buf()
+    };
+    let prepared = deckle_core::pipeline::prepare(&source, opts, &mut |_| {})
+        .map_err(|r| r.error.unwrap_or_else(|| "not converted".into()))?;
+    let name = deckle_core::deliver::device_filename(&prepared.report.info);
+    outbox
+        .add_prepared_owned(&prepared, &name, None, Some(id))
+        .map_err(|e| format!("outbox: {e}"))?;
+    Ok(name)
 }
 
 /// Where `run` and the desktop app write web articles' EPUBs (web-article design §3).
@@ -2480,6 +2708,23 @@ struct DigestOutcome {
     /// What went to a reMarkable in the same run (`[remarkable]`).
     #[serde(skip_serializing_if = "Option::is_none")]
     remarkable: Option<deckle_core::sync::RemarkablePush>,
+    /// Books left queued for other Kindles: (queue name, the Kindle's name or id).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    waiting: Vec<(String, String)>,
+}
+
+/// "2 books wait for Mom's Kindle", one line per Kindle, from (queue name, Kindle) pairs.
+fn waiting_lines(waiting: &[(String, String)]) -> Vec<String> {
+    let mut by: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (_, kindle) in waiting {
+        *by.entry(kindle.as_str()).or_default() += 1;
+    }
+    by.into_iter()
+        .map(|(kindle, n)| {
+            let books = if n == 1 { "book waits" } else { "books wait" };
+            format!("{n} {books} for {kindle}")
+        })
+        .collect()
 }
 
 /// One push to a reMarkable, as lines of the run's report.
@@ -2517,7 +2762,8 @@ impl DigestOutcome {
                     && self.readership.is_none()
                     && self.shelf.is_none()
                     && f.shelf_error.is_none()
-                    && f.positions_error.is_none() =>
+                    && f.positions_error.is_none()
+                    && self.waiting.is_empty() =>
             {
                 "      nothing queued".to_owned()
             }
@@ -2555,6 +2801,11 @@ impl DigestOutcome {
                 if let Some(e) = &f.shelf_error {
                     lines.push(format!("      shelf: {e}"));
                 }
+                lines.extend(
+                    waiting_lines(&self.waiting)
+                        .into_iter()
+                        .map(|l| format!("      {l}")),
+                );
                 lines.join("\n")
             }
             None if self.queued => format!(
@@ -3292,11 +3543,22 @@ fn sync_to(
     });
     record_morgue(&flush);
     let shelf = record_shelf(cfg, target, &flush);
+    let waiting = flush
+        .waiting
+        .iter()
+        .map(|(name, id)| {
+            (
+                name.clone(),
+                cfg.sync.device_name(id).unwrap_or_else(|| id.clone()),
+            )
+        })
+        .collect();
     Ok(DigestOutcome {
         flush: Some(flush),
         highlights,
         readership: recorded,
         shelf,
+        waiting,
         ..Default::default()
     })
 }
