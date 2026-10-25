@@ -1,6 +1,7 @@
 # Publisher subscriptions: the paper you pay for, in full — design
 
-**Status:** draft for the owner, 2026-10-25 · **Owner:** Jonathan (CasaVargas LLC) ·
+**Status:** approved by the owner on 2026-10-25 with the §12 draft answers as rulings ·
+**Owner:** Jonathan (CasaVargas LLC) ·
 **Builds on:** `2026-10-20-daily-digest-design.md` (the paper, §5a full text; "paid or
 paywalled content, logins, cookies" were a non-goal there, reversed here for the owner's own
 subscriptions only), `2026-10-21-send-to-kindle-email-design.md` (the keychain pattern),
@@ -358,17 +359,15 @@ The paper as printed, for the devices that can show a page.
    round-trips and expired cookies are dropped on load. Half a day; it only changes the file
    format if it fails.
 
-## 12. Open questions for the owner
+## 12. Rulings (the owner's open questions, approved 2026-10-25)
 
-1. **Should a subscribed paper also feed Local?** This draft keeps them separate: Local stays
-   the Google News search plus whatever feeds it lists, and the Pilot gets its own group. The
-   alternative, "Local *is* The Pilot when you subscribe", is one config line less but mixes two
-   kinds of section. Draft answer: separate; the owner can set `[local] max_items = 0` style
-   trims if Local turns redundant.
-2. **E-edition on the reMarkable by default** when `[remarkable]` is set and the site has one?
-   Draft answer: no, opt in with `eedition = "remarkable"`; the files are big.
-3. **Social-login-only papers:** refuse with a clear message (draft), or document a
-   cookie-import escape hatch? Draft: refuse; revisit if a paper the owner cares about needs it.
+1. **A subscribed paper doesn't feed Local.** Local stays the Google News search plus
+   whatever feeds it lists; the Pilot gets its own group. The owner trims Local if it turns
+   redundant.
+2. **The e-edition is opt in** (`eedition = "remarkable"`), never sent by default; the files
+   are big.
+3. **Social-login-only papers are refused** with a clear message. No cookie-import escape
+   hatch; revisit if a paper the owner cares about needs it.
 
 ## 13. Tests the build must add
 
