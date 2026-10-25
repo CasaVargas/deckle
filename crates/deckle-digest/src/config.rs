@@ -1140,6 +1140,20 @@ impl Config {
         Ok(cfg)
     }
 
+    /// Where an extra paper keeps a state file (`papers/<slug>/<name>`); `None` for the main
+    /// paper, which keeps today's paths.
+    pub fn state_file(&self, name: &str) -> Option<PathBuf> {
+        self.paper.as_ref().map(|p| p.state_dir.join(name))
+    }
+
+    /// The build's work folder under `cache`: `digest`, or `digest/papers/<slug>`.
+    pub fn work_dir(&self, cache: &Path) -> PathBuf {
+        match &self.paper {
+            None => cache.join("digest"),
+            Some(p) => cache.join("digest").join("papers").join(&p.slug),
+        }
+    }
+
     /// `main` for `digest.toml`'s paper, else the extra paper's slug.
     pub fn slug(&self) -> &str {
         self.paper

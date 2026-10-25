@@ -177,3 +177,47 @@ fn create_writes_a_parseable_paper() {
     assert!(err.contains("already exists"), "{err}");
     assert!(papers::create(&main, "Bad Name", "x", "y").is_err());
 }
+
+#[test]
+fn stems_and_exact_edition_names_per_paper() {
+    use deckle_digest::{edition_file, edition_prefix, edition_stem, is_edition_name};
+    let (_d, main) = home();
+    paper(&main, "kid-courier", "title = \"The Kid Courier\"\n");
+    let date = chrono::NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
+    let first = load_one(&main, MAIN).unwrap();
+    let kid = load_one(&main, "kid-courier").unwrap();
+    assert_eq!(edition_stem(&first, date), "deckle-daily-2026-10-24");
+    assert_eq!(
+        edition_stem(&kid, date),
+        "deckle-daily-kid-courier-2026-10-24"
+    );
+    assert_eq!(
+        edition_file(&kid, date),
+        "deckle-daily-kid-courier-2026-10-24.kfx"
+    );
+    assert_eq!(edition_prefix(&kid), "deckle-daily-kid-courier-");
+    assert!(is_edition_name(
+        "deckle-daily-2026-10-24.kfx",
+        "deckle-daily-"
+    ));
+    assert!(!is_edition_name(
+        "deckle-daily-kid-courier-2026-10-24.kfx",
+        "deckle-daily-"
+    ));
+    assert!(!is_edition_name(
+        "deckle-daily-email-test.kfx",
+        "deckle-daily-"
+    ));
+    assert!(is_edition_name(
+        "deckle-daily-kid-courier-2026-10-24.epub",
+        "deckle-daily-kid-courier-"
+    ));
+    assert_eq!(
+        kid.state_file("readership.json"),
+        Some(papers::papers_dir(&main).join("kid-courier/readership.json"))
+    );
+    assert_eq!(first.state_file("readership.json"), None);
+    let cache = std::path::Path::new("/cache");
+    assert_eq!(first.work_dir(cache), cache.join("digest"));
+    assert_eq!(kid.work_dir(cache), cache.join("digest/papers/kid-courier"));
+}

@@ -1421,3 +1421,42 @@ fn the_pdf_embeds_the_chosen_masthead_face() {
     assert!(!has(&serif, b"UnifrakturMaguntia-Book"));
     assert!(has(&serif, b"/Masthead"));
 }
+
+/// An extra paper (many papers §3), with its state in a temp folder.
+fn as_extra(mut c: Config, slug: &str, dir: &std::path::Path) -> Config {
+    c.paper = Some(deckle_digest::config::PaperRef {
+        slug: slug.into(),
+        state_dir: dir.join(slug),
+    });
+    c
+}
+
+#[test]
+fn an_extra_paper_never_prints_saved_articles() {
+    let (d, c, _q, _ids) = reading_setup(&[WXII]);
+    let extra = as_extra(c.clone(), "kid-courier", d.path());
+    let g = gather(&extra, date(), now(), &net_with_pages);
+    assert!(g.edition.sections.iter().all(|s| s.title != "Your Reading"));
+    assert!(g.reading_outcomes.is_empty());
+    assert_eq!(g.reading, None);
+    assert!(
+        g.notes
+            .iter()
+            .any(|n| n.contains("Saved articles go to the main paper"))
+    );
+    // The main paper still prints them.
+    let g = gather(&c, date(), now(), &net_with_pages);
+    assert_eq!(g.edition.sections[0].title, "Your Reading");
+}
+
+#[test]
+fn an_extra_papers_build_is_named_by_its_stem() {
+    let out = tempfile::tempdir().unwrap();
+    let extra = as_extra(config(), "kid-courier", out.path());
+    let r = build(&extra, date(), now(), out.path(), &fake).unwrap();
+    assert_eq!(
+        r.epub,
+        out.path().join("deckle-daily-kid-courier-2026-10-20.epub")
+    );
+    assert_eq!(r.prefix, "deckle-daily-kid-courier-");
+}

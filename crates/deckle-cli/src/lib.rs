@@ -4371,6 +4371,7 @@ mod tests {
                 ("c3".into(), Outcome::Book),
             ],
             notes: Vec::new(),
+            prefix: deckle_digest::EDITION_PREFIX.to_owned(),
         };
         let opts = paper_options(Some(fake_previewer()), false, tmp.path());
         let (ok, failed) = prepare_long_reads(&built, &opts);
@@ -4723,6 +4724,7 @@ mod layout_tests {
             bundles: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
+            prefix: deckle_digest::EDITION_PREFIX.to_owned(),
         };
         let items: Vec<Option<u32>> = with_items(layout, &built)
             .sections

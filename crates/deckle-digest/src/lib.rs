@@ -64,6 +64,32 @@ pub fn edition_filename(date: NaiveDate) -> String {
     format!("{EDITION_PREFIX}{date}.kfx")
 }
 
+/// The paper's edition prefix: `deckle-daily-` for the main paper, `deckle-daily-<slug>-` for
+/// another (many papers §4).
+pub fn edition_prefix(cfg: &Config) -> String {
+    match &cfg.paper {
+        None => EDITION_PREFIX.to_owned(),
+        Some(p) => format!("{EDITION_PREFIX}{}-", p.slug),
+    }
+}
+
+/// `<prefix>YYYY-MM-DD`: the paper's edition on `date`, for every file it's written as.
+pub fn edition_stem(cfg: &Config, date: NaiveDate) -> String {
+    format!("{}{date}", edition_prefix(cfg))
+}
+
+/// `<stem>.kfx`: the edition on the Kindle.
+pub fn edition_file(cfg: &Config, date: NaiveDate) -> String {
+    format!("{}.kfx", edition_stem(cfg, date))
+}
+
+/// `<prefix>YYYY-MM-DD.kfx` or `.epub`, exactly: one paper's edition, never another paper's
+/// (`deckle-daily-kid-courier-…` for prefix `deckle-daily-`) or a test file.
+pub fn is_edition_name(name: &str, prefix: &str) -> bool {
+    deckle_core::deliver::is_dated(name, prefix)
+        && (name.ends_with(".kfx") || name.ends_with(".epub"))
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Article {
     pub title: String,
@@ -255,6 +281,8 @@ pub struct BuildReport {
     pub bundles: Vec<BundleBuild>,
     pub reading_outcomes: Vec<(String, reading::Outcome)>,
     pub notes: Vec<String>,
+    /// The paper's edition prefix (`edition_prefix`): what exports name and prune by.
+    pub prefix: String,
 }
 
 /// One edition bundle, `books` saying whether it carries the long reads.
@@ -377,8 +405,16 @@ pub fn gather_with_editor(
             .clone()
             .unwrap_or_else(reading::ReadingQueue::default_path),
     );
-    let saved = queue.for_edition(date, cfg.reading.max_items);
+    // Saved articles are the main paper's (many papers §3): another paper never prints them.
+    let saved = match cfg.paper {
+        None => queue.for_edition(date, cfg.reading.max_items),
+        Some(_) => Vec::new(),
+    };
     let mut kinds = cfg.sections.clone();
+    if cfg.paper.is_some() && kinds.contains(&SectionKind::Reading) {
+        kinds.retain(|k| *k != SectionKind::Reading);
+        notes.push("Saved articles go to the main paper (digest.toml).".into());
+    }
     if !saved.is_empty() && !kinds.contains(&SectionKind::Reading) {
         // Saving is an explicit ask: print it even if the config predates the section.
         kinds.insert(0, SectionKind::Reading);
@@ -567,7 +603,8 @@ pub fn build_gathered(
     opts: &GatherOptions,
 ) -> Result<(BuildReport, Gathered), String> {
     let gathered = gather_with(cfg, date, now, net, opts);
-    let path = out_dir.join(format!("deckle-daily-{date}.epub"));
+    let stem = edition_stem(cfg, date);
+    let path = out_dir.join(format!("{stem}.epub"));
     write_edition(&gathered, &path)?;
     let mut long_reads = Vec::new();
     for lr in &gathered.long_reads {
@@ -576,11 +613,12 @@ pub fn build_gathered(
         long_reads.push(p);
     }
     let mut r = report(&gathered.edition, path);
+    r.prefix = edition_prefix(cfg);
     r.long_reads = long_reads;
     // The fetch kept the photos in color for an export; the paper above grayed them.
     if cfg.wants_color() {
         let dir = out_dir.join("color");
-        let color = dir.join(format!("deckle-daily-{date}.epub"));
+        let color = dir.join(format!("{stem}.epub"));
         write_edition_as(&gathered, &color, config::Photos::Color)?;
         r.color_epub = Some(color);
         for lr in &gathered.long_reads {
@@ -593,7 +631,7 @@ pub fn build_gathered(
         let p = out_dir
             .join("pdf")
             .join(format!("{screen:?}-{photos:?}").to_lowercase())
-            .join(format!("deckle-daily-{date}.pdf"));
+            .join(format!("{stem}.pdf"));
         if let Some(dir) = p.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
@@ -657,6 +695,7 @@ fn report(edition: &Edition, epub: PathBuf) -> BuildReport {
         bundles: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
+        prefix: EDITION_PREFIX.to_owned(),
     }
 }
 
