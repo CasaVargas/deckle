@@ -46,7 +46,7 @@ sha1 = "0.11"
 rand = "0.9"
 deunicode = "1"
 regex = "1"
-ureq = { version = "3", features = ["platform-verifier"] }
+ureq = { version = "3", features = ["platform-verifier", "cookies", "json"] }
 base64 = "0.22"
 sha2 = "0.11"
 encoding_rs = "0.8"
