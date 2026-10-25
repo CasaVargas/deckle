@@ -488,6 +488,8 @@ pub fn gather_with_editor(
                     edition.sections.push(place);
                 }
             }
+            // Task 3 of the interests plan fills this in
+            SectionKind::Interests => {}
             SectionKind::Feeds => {
                 for feed in &cfg.feeds {
                     news.push(edition.sections.len());

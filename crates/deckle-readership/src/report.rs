@@ -68,10 +68,11 @@ pub struct Suggestion {
     pub why: String,
 }
 
-const KINDS: [SectionKind; 9] = [
+const KINDS: [SectionKind; 10] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
+    SectionKind::Interests,
     SectionKind::Feeds,
     SectionKind::Shelf,
     SectionKind::Lottery,
@@ -81,15 +82,16 @@ const KINDS: [SectionKind; 9] = [
 ];
 
 fn kind_of(key: &str) -> Option<SectionKind> {
-    KINDS
-        .into_iter()
-        .find(|k| *k != SectionKind::Feeds && section_key(*k, None) == key)
+    KINDS.into_iter().find(|k| {
+        *k != SectionKind::Feeds && *k != SectionKind::Interests && section_key(*k, None) == key
+    })
 }
 
 /// What the paper prints for a section, for one no edition in the window had yet.
 fn paper_name(key: &str) -> String {
     if let Some(name) = key
         .strip_prefix("feeds:")
+        .or_else(|| key.strip_prefix("interests:"))
         .or_else(|| key.strip_prefix("local:"))
     {
         return name.to_owned();

@@ -87,10 +87,11 @@ pub struct NextPaper {
 }
 
 /// Every kind, in the starter's order: where an off section is listed.
-const KINDS: [SectionKind; 9] = [
+const KINDS: [SectionKind; 10] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
+    SectionKind::Interests,
     SectionKind::Feeds,
     SectionKind::Shelf,
     SectionKind::Lottery,
@@ -288,6 +289,8 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             }
             out
         }
+        // Task 4 of the interests plan fills this in
+        SectionKind::Interests => Vec::new(),
         SectionKind::Feeds => cfg
             .feeds
             .iter()
@@ -448,7 +451,7 @@ pub fn estimate(rows: &[PlanRow], planned: &[usize], history: &History, cfg: &Co
         };
         total += match r.kind {
             SectionKind::Reading => per(3.0),
-            SectionKind::Local | SectionKind::Feeds => per(story),
+            SectionKind::Local | SectionKind::Feeds | SectionKind::Interests => per(story),
             SectionKind::Weather => whole(&r.key, 2.0),
             SectionKind::Lottery => whole(&r.key, 1.0),
             SectionKind::Horoscope => {
