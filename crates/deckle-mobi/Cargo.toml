@@ -1,6 +1,6 @@
 [package]
 name = "deckle-mobi"
-description = "Deckle: read Kindle MOBI, AZW and AZW3 (PalmDB) books: metadata, DRM flag, cover"
+description = "Deckle: read Kindle MOBI, AZW and AZW3 (PalmDB) books, and rebuild DRM-free ones as EPUB"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,6 +13,7 @@ regex.workspace = true
 roxmltree.workspace = true
 zip.workspace = true
 flate2 = "1"
+dom_query = "0.28"
 
 [dev-dependencies]
 zip.workspace = true

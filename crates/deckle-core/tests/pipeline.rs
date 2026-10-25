@@ -1547,3 +1547,66 @@ fn rtf_real_previewer_smoke() {
         assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
     }
 }
+
+#[test]
+#[cfg(unix)]
+fn kindle_books_run_through_import_and_delivery() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mobi");
+    for (source, title) in [
+        ("mini6.mobi", "The Deckle MOBI Mini"),
+        ("huff.mobi", "The Deckle MOBI Mini"),
+        ("mini.azw3", "The Deckle AZW3 Mini"),
+    ] {
+        let out = tempfile::tempdir().unwrap();
+        let opts = fill_opts(out.path(), false);
+        let mut stages = Vec::new();
+        let r = deckle_core::pipeline::run_with_progress(&fixtures.join(source), &opts, &mut |s| {
+            stages.push(s)
+        });
+        assert_eq!(r.error, None, "{source}: {r:?}");
+        assert_eq!(r.info.title, title);
+        assert_eq!(r.info.creators[0].name, "Ada Testwright");
+        assert_eq!(stages.first(), Some(&"import"));
+        assert!(r.delivered.as_ref().unwrap().exists());
+        std::fs::remove_dir_all(r.work_dir.unwrap()).unwrap();
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn a_drm_protected_kindle_book_stops_at_import() {
+    let out = tempfile::tempdir().unwrap();
+    let src = out.path().join("store.azw3");
+    std::fs::write(
+        &src,
+        deckle_mobi::fixture::build(&deckle_mobi::fixture::Book {
+            title: "Store",
+            drm: true,
+            kf8: true,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    let opts = fill_opts(out.path(), false);
+    let r = run(&src, &opts);
+    let err = r.error.expect("refused");
+    assert!(err.contains("never removes DRM"), "{err}");
+    assert!(r.delivered.is_none());
+}
+
+#[test]
+#[cfg(unix)]
+#[ignore = "requires installed Kindle Previewer; run explicitly for import validation"]
+fn mobi_real_previewer_smoke() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mobi");
+    for source in ["mini6.mobi", "huff.mobi", "mini.azw3"] {
+        let out = tempfile::tempdir().unwrap();
+        let mut opts = fill_opts(out.path(), false);
+        opts.previewer = None;
+        opts.keep_work_dir = false;
+        let report = run(&fixtures.join(source), &opts);
+        assert_eq!(report.error, None, "{source}: {report:?}");
+        let bytes = std::fs::read(report.delivered.unwrap()).unwrap();
+        assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
+    }
+}

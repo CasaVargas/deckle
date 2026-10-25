@@ -29,7 +29,7 @@ pub struct Rebuilt {
     pub warnings: Vec<String>,
 }
 
-const NONE: u32 = u32::MAX;
+pub(crate) const NONE: u32 = u32::MAX;
 
 /// Kindle's base-32 digits.
 fn base32(s: &[u8]) -> Option<u64> {
@@ -72,7 +72,7 @@ struct Part {
     end: usize,
 }
 
-fn exth(rec0: &[u8]) -> Vec<(u32, Vec<u8>)> {
+pub(crate) fn exth(rec0: &[u8]) -> Vec<(u32, Vec<u8>)> {
     let Some(hl) = be32(rec0, 20) else {
         return Vec::new();
     };
@@ -123,7 +123,7 @@ fn kf8_base(db: &PalmDb<'_>) -> Result<usize, MobiError> {
 }
 
 /// The book's text stream: every text record, trailing entries off, decompressed.
-fn text_stream(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<Vec<u8>, MobiError> {
+pub(crate) fn text_stream(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<Vec<u8>, MobiError> {
     let compression = be16(rec0, 0).unwrap_or(0);
     if be16(rec0, 12).unwrap_or(0) != 0 {
         return Err(MobiError::Unsupported("it is DRM-protected".into()));
@@ -136,6 +136,16 @@ fn text_stream(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<Vec<u8>, Mob
     } else {
         0
     };
+    let mut huff = None;
+    if compression == 17480 {
+        let first = base + be32(rec0, 0x70).unwrap_or(0) as usize;
+        let n = be32(rec0, 0x74).unwrap_or(0) as usize;
+        if n == 0 {
+            return Err(MobiError::Corrupt("HUFF/CDIC text with no HUFF record"));
+        }
+        let cdics: Vec<&[u8]> = (first + 1..first + n).map(|i| db.record(i)).collect();
+        huff = Some(crate::text::Huff::new(db.record(first), &cdics)?);
+    }
     let mut out = Vec::with_capacity(length);
     for i in 1..=count {
         let rec = crate::text::trim_trailing(db.record(base + i), flags);
@@ -143,9 +153,8 @@ fn text_stream(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<Vec<u8>, Mob
             1 => out.extend_from_slice(rec),
             2 => crate::text::palmdoc(rec, &mut out)?,
             17480 => {
-                return Err(MobiError::Unsupported(
-                    "HUFF/CDIC compression isn't read yet".into(),
-                ));
+                let h = huff.as_mut().expect("read above");
+                out.extend(h.unpack(rec)?);
             }
             _ => {
                 return Err(MobiError::Unsupported(format!(
@@ -161,7 +170,7 @@ fn text_stream(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<Vec<u8>, Mob
     Ok(out)
 }
 
-fn index_at(
+pub(crate) fn index_at(
     db: &PalmDb<'_>,
     base: usize,
     rec0: &[u8],
@@ -301,10 +310,10 @@ fn anchor_at(part: &Part, pos: usize, linked: &mut BTreeSet<Vec<u8>>) -> Vec<u8>
     Vec::new()
 }
 
-struct Resources {
+pub(crate) struct Resources {
     /// Resource number (1-based, as `kindle:embed` counts) → file name and media type.
-    files: BTreeMap<u64, (String, &'static str)>,
-    list: Vec<Resource>,
+    pub files: BTreeMap<u64, (String, &'static str)>,
+    pub list: Vec<Resource>,
 }
 
 fn image_type(b: &[u8]) -> Option<(&'static str, &'static str)> {
@@ -349,7 +358,7 @@ fn font(rec: &[u8]) -> Option<(Vec<u8>, &'static str, &'static str)> {
     Some((data, ext, mime))
 }
 
-fn resources(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Resources {
+pub(crate) fn resources(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Resources {
     let mut out = Resources {
         files: BTreeMap::new(),
         list: Vec::new(),
@@ -735,7 +744,7 @@ fn replace(hay: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     out
 }
 
-fn fnv(b: &[u8]) -> u64 {
+pub(crate) fn fnv(b: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &x in b {
         h ^= u64::from(x);

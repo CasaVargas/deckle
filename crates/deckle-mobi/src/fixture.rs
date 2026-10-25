@@ -445,3 +445,251 @@ pub fn build_kf8(b: &Kf8<'_>) -> Vec<u8> {
     }
     out
 }
+
+/// HUFF and CDIC records for tests: every code is 8 bits and byte `b` decodes to itself, except
+/// for `overrides` of (byte, phrase, literal); a phrase that isn't literal is itself compressed.
+pub fn huff_tables(overrides: &[(u8, &[u8], bool)]) -> (Vec<u8>, Vec<u8>) {
+    let mut huff = b"HUFF\0\0\0\x18".to_vec();
+    huff.extend(24u32.to_be_bytes());
+    huff.extend((24u32 + 1024).to_be_bytes());
+    huff.extend([0u8; 8]);
+    for _ in 0..256 {
+        // Code length 8, terminal, max code 255: code byte b is phrase 255 - b.
+        huff.extend(((255u32 << 8) | 0x80 | 8).to_be_bytes());
+    }
+    huff.extend([0u8; 64 * 4]);
+    let phrase = |r: usize| -> (Vec<u8>, bool) {
+        let b = (255 - r) as u8;
+        match overrides.iter().find(|(o, _, _)| *o == b) {
+            Some((_, p, literal)) => (p.to_vec(), *literal),
+            None => (vec![b], true),
+        }
+    };
+    let mut cdic = b"CDIC\0\0\0\x10".to_vec();
+    cdic.extend(256u32.to_be_bytes());
+    cdic.extend(8u32.to_be_bytes());
+    let mut entries = Vec::new();
+    let mut offsets = Vec::new();
+    for r in 0..256 {
+        let (p, literal) = phrase(r);
+        offsets.push((512 + entries.len()) as u16);
+        let flag = if literal { 0x8000u16 } else { 0 };
+        entries.extend((p.len() as u16 | flag).to_be_bytes());
+        entries.extend(p);
+    }
+    for o in offsets {
+        cdic.extend(o.to_be_bytes());
+    }
+    cdic.extend(entries);
+    (huff, cdic)
+}
+
+/// How a [`Mobi6`] fixture stores its text records.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Compression {
+    #[default]
+    None,
+    PalmDoc,
+    Huff,
+}
+
+/// An older (MOBI 6) book for tests: Mobipocket HTML as one text stream, images as records,
+/// optionally an NCX index, EXTH metadata and a cover.
+#[derive(Clone, Debug, Default)]
+pub struct Mobi6<'a> {
+    pub title: &'a str,
+    pub authors: &'a [&'a str],
+    /// The whole text stream. `{{filepos:needle}}` becomes `filepos=` the byte offset of the
+    /// first `needle` after it is written, zero-padded to 10 digits as KindleGen writes it.
+    pub html: &'a str,
+    pub images: &'a [&'a [u8]],
+    /// Contents entries: title, level, needle.
+    pub toc: &'a [(&'a str, u64, &'a str)],
+    /// The cover's image number, from 1.
+    pub cover: Option<u32>,
+    pub compression: Compression,
+    /// A plain PalmDOC (`TEXtREAd`) file: no MOBI header at all.
+    pub plain: bool,
+    pub drm: bool,
+}
+
+/// PalmDOC compression that only uses literals: bytes 1–8 and 0x80 and up go in one-byte runs.
+fn palmdoc_literals(data: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for &b in data {
+        if (1..=8).contains(&b) || b >= 0x80 {
+            out.push(1);
+        }
+        out.push(b);
+    }
+    out
+}
+
+/// The file's bytes.
+pub fn build_mobi6(b: &Mobi6<'_>) -> Vec<u8> {
+    // Resolve filepos markers at their final width.
+    let mut html = b.html.to_owned();
+    let width = "filepos=0000000000".len();
+    let mut marks = Vec::new();
+    while let Some(s) = html.find("{{filepos:") {
+        let e = html[s..].find("}}").unwrap() + s + 2;
+        let needle = html[s + 10..e - 2].to_owned();
+        html.replace_range(s..e, &"#".repeat(width));
+        marks.push((s, needle));
+    }
+    for (at, needle) in marks {
+        let target = html.find(&needle).unwrap();
+        html.replace_range(at..at + width, &format!("filepos={target:010}"));
+    }
+    let text = html.into_bytes();
+
+    let mut records: Vec<Vec<u8>> = vec![Vec::new()];
+    let chunks: Vec<&[u8]> = text.chunks(4096).collect();
+    for c in &chunks {
+        records.push(match b.compression {
+            Compression::None => c.to_vec(),
+            Compression::PalmDoc => palmdoc_literals(c),
+            Compression::Huff => c.to_vec(),
+        });
+    }
+    let text_records = chunks.len();
+    let huff_at = records.len();
+    if b.compression == Compression::Huff {
+        let (huff, cdic) = huff_tables(&[]);
+        records.push(huff);
+        records.push(cdic);
+    }
+    let ncx_at = records.len();
+    if !b.toc.is_empty() {
+        let mut titles = Vec::new();
+        let mut entries = Vec::new();
+        for (i, (title, level, needle)) in b.toc.iter().enumerate() {
+            let pos = find_bytes(&text, needle.as_bytes()).unwrap() as u64;
+            let noffs = titles.len() as u64;
+            titles.extend(vwi(title.len() as u64));
+            titles.extend(title.as_bytes());
+            let mut body = vec![0x0F];
+            for v in [pos, 0, noffs, *level] {
+                body.extend(vwi(v));
+            }
+            entries.push((format!("{i:02X}").into_bytes(), body));
+        }
+        records.extend(indx(
+            &[
+                [1, 1, 1, 0],
+                [2, 1, 2, 0],
+                [3, 1, 4, 0],
+                [4, 1, 8, 0],
+                [0, 0, 0, 1],
+            ],
+            1,
+            &entries,
+            &titles,
+        ));
+    }
+    let first_image = records.len();
+    for img in b.images {
+        records.push(img.to_vec());
+    }
+    records.push(b"FLIS\0\0\0\x08".to_vec());
+
+    let mut rec0 = vec![0u8; 16];
+    let compression: u16 = match b.compression {
+        Compression::None => 1,
+        Compression::PalmDoc => 2,
+        Compression::Huff => 17480,
+    };
+    rec0[0..2].copy_from_slice(&compression.to_be_bytes());
+    rec0[4..8].copy_from_slice(&(text.len() as u32).to_be_bytes());
+    rec0[8..10].copy_from_slice(&(text_records as u16).to_be_bytes());
+    rec0[10..12].copy_from_slice(&4096u16.to_be_bytes());
+    rec0[12..14].copy_from_slice(&u16::from(b.drm).wrapping_mul(2).to_be_bytes());
+    if !b.plain {
+        let mut ex: Vec<(u32, Vec<u8>)> = b
+            .authors
+            .iter()
+            .map(|a| (100, a.as_bytes().to_vec()))
+            .collect();
+        if let Some(c) = b.cover {
+            ex.push((201, (c - 1).to_be_bytes().to_vec()));
+        }
+        ex.push((503, b.title.as_bytes().to_vec()));
+        ex.push((524, b"en".to_vec()));
+        let body: Vec<u8> = ex.iter().flat_map(|(k, d)| exth(*k, d)).collect();
+        let mut exth_block = b"EXTH".to_vec();
+        exth_block.extend((12 + body.len() as u32).to_be_bytes());
+        exth_block.extend((ex.len() as u32).to_be_bytes());
+        exth_block.extend(body);
+        while !exth_block.len().is_multiple_of(4) {
+            exth_block.push(0);
+        }
+        rec0.resize(16 + MOBI_HEADER_LEN, 0);
+        let put =
+            |r: &mut Vec<u8>, at: usize, v: u32| r[at..at + 4].copy_from_slice(&v.to_be_bytes());
+        rec0[16..20].copy_from_slice(b"MOBI");
+        put(&mut rec0, 20, MOBI_HEADER_LEN as u32);
+        put(&mut rec0, 24, 2);
+        put(&mut rec0, 28, 65001);
+        put(&mut rec0, 36, 6);
+        put(&mut rec0, 0x50, first_image as u32);
+        put(
+            &mut rec0,
+            0x54,
+            (16 + MOBI_HEADER_LEN + exth_block.len()) as u32,
+        );
+        put(&mut rec0, 0x58, b.title.len() as u32);
+        put(
+            &mut rec0,
+            0x6C,
+            if b.images.is_empty() {
+                u32::MAX
+            } else {
+                first_image as u32
+            },
+        );
+        put(&mut rec0, 0x70, huff_at as u32);
+        put(
+            &mut rec0,
+            0x74,
+            if b.compression == Compression::Huff {
+                2
+            } else {
+                0
+            },
+        );
+        put(&mut rec0, 0x80, 0x40);
+        put(
+            &mut rec0,
+            0xF4,
+            if b.toc.is_empty() {
+                u32::MAX
+            } else {
+                ncx_at as u32
+            },
+        );
+        rec0.extend(exth_block);
+        rec0.extend(b.title.as_bytes());
+        rec0.extend([0, 0]);
+    }
+    records[0] = rec0;
+
+    let mut out = vec![0u8; 78];
+    out[..b.title.len().min(31)].copy_from_slice(&b.title.as_bytes()[..b.title.len().min(31)]);
+    out[60..68].copy_from_slice(if b.plain { b"TEXtREAd" } else { b"BOOKMOBI" });
+    out[76..78].copy_from_slice(&(records.len() as u16).to_be_bytes());
+    let mut at = 78 + records.len() * 8 + 2;
+    for (i, r) in records.iter().enumerate() {
+        out.extend((at as u32).to_be_bytes());
+        out.extend([0, (i >> 16) as u8, (i >> 8) as u8, i as u8]);
+        at += r.len();
+    }
+    out.extend([0, 0]);
+    for r in records {
+        out.extend(r);
+    }
+    out
+}
+
+fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    hay.windows(needle.len()).position(|w| w == needle)
+}
