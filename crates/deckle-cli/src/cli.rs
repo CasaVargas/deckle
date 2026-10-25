@@ -128,10 +128,10 @@ pub enum Command {
     },
     /// List connected Kindles.
     Devices,
-    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), text files (.txt), FictionBook (.fb2, .fb2.zip), Markdown files or notes folders,
+    /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), OpenDocument text (.odt), text files (.txt), FictionBook (.fb2, .fb2.zip), Markdown files or notes folders,
     /// text PDFs (.pdf, reflowed; needs PDFium) or web articles.
     Run {
-        /// EPUBs; Word documents (.docx); text files (.txt); FictionBook (.fb2/.fb2.zip); Markdown (.md/.markdown) or flat notes folders; text PDFs (.pdf); or web articles:
+        /// EPUBs; Word documents (.docx); OpenDocument text (.odt/.ott/.fodt); text files (.txt); FictionBook (.fb2/.fb2.zip); Markdown (.md/.markdown) or flat notes folders; text PDFs (.pdf); or web articles:
         /// an address, a .webloc/.url link file or a saved .html page, each built into its own
         /// book first.
         epubs: Vec<PathBuf>,
@@ -225,7 +225,7 @@ pub enum Command {
         #[arg(long)]
         bookmarklet: bool,
     },
-    /// Bind several files into one book, in the order given: EPUBs, Word documents, text files, FB2,
+    /// Bind several files into one book, in the order given: EPUBs, Word and OpenDocument files, text files, FB2,
     /// text PDFs and web articles (an address, a .webloc/.url link file or a saved .html page).
     /// Each becomes a part with its own entry in the contents. Writes an EPUB; send it with
     /// `deckle run`.

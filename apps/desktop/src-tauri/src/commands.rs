@@ -354,23 +354,25 @@ pub fn is_kfx(p: &Path) -> bool {
     has_extension(p, "kfx")
 }
 
-/// A Word document, text, FB2, PDF or Markdown file: imported to an EPUB first, as `deckle run`
-/// does.
+/// A Word or OpenDocument file, text, FB2, PDF or Markdown file: imported to an EPUB first, as
+/// `deckle run` does.
 fn is_imported(p: &Path) -> bool {
     deckle_docx::is_word(p)
         || deckle_txt::is_text(p)
         || deckle_fb2::is_fb2(p)
+        || deckle_odt::is_odt(p)
         || deckle_pdf::is_pdf(p)
         || deckle_markdown::is_markdown(p)
 }
 
-/// What a folder walk takes: EPUB, KFX, Word documents, FB2 and PDFs. A `.txt` in a folder is far
+/// What a folder walk takes: EPUB, KFX, Word and OpenDocument files, FB2 and PDFs. A `.txt` in a folder is far
 /// more often a note or a README than a book, so text files are taken only when named directly.
 fn is_book(p: &Path) -> bool {
     has_extension(p, "epub")
         || is_kfx(p)
         || deckle_docx::is_word(p)
         || deckle_fb2::is_fb2(p)
+        || deckle_odt::is_odt(p)
         || deckle_pdf::is_pdf(p)
 }
 
@@ -1152,6 +1154,18 @@ pub fn devices_file(app: &AppHandle) -> PathBuf {
 mod tests {
     use super::*;
     use deckle_transport::usb::MtpInfo;
+
+    #[test]
+    fn odt_files_are_books_in_a_folder_walk() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/odt");
+        let expanded = expand_book_paths(&[root.to_string_lossy().into_owned()]);
+        assert!(expanded.contains(&root.join("mini.odt")));
+        assert!(expanded.contains(&root.join("mini.fodt")));
+        assert!(!expanded.contains(&root.join("sheet.ods")));
+        let row = book_row(&root.join("mini.odt"));
+        assert_eq!(row.error, None, "{}", row.reason);
+        assert_eq!(row.title, "The Deckle ODT Mini");
+    }
 
     #[test]
     fn fb2_files_are_books_in_a_folder_walk() {

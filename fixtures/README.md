@@ -66,6 +66,17 @@ Made by `python3 -I tools/ref/make_fb2_fixtures.py fixtures/fb2` (standard libra
 | `cp1251.fb2` | A short Russian book declared and encoded `windows-1251` |
 | `broken.fb2` | `mini.fb2` cut off mid-section |
 
+## `odt/`
+
+Made by `python3 -I tools/ref/make_odt_fixtures.py fixtures/odt` (standard library only).
+
+| File | What |
+|---|---|
+| `mini.odt` | `meta.xml` (title, creator and initial creator, language, description, keywords, date); Title and Subtitle paragraphs; Heading 1–4 with two level-1 chapters; formatting from automatic styles and an inherited common text style; `text:s`, tab, line break; a numbered list starting at 3 with a nested bullet list; a quotation; a header-row table with a spanned cell; an inline GIF and a paragraph-anchored PNG with alt text; a bookmark and a link to it, an external link, a page-number field; two footnotes and an endnote; a stored table of contents, a comment and a tracked deletion that must not appear |
+| `mini.fodt` | The same document as flat ODF, pictures as base64 |
+| `sheet.ods` | A spreadsheet mimetype |
+| `encrypted.odt` | A manifest with `encryption-data` |
+
 ## Not in the repo
 
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB

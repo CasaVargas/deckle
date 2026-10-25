@@ -598,3 +598,17 @@ fn fb2_is_a_source_and_reads_its_metadata() {
     assert_eq!(info.title, "The Deckle FB2 Mini");
     assert_eq!(info.series.unwrap().name, "Deckle Fixtures");
 }
+
+#[test]
+fn odt_is_a_source_and_reads_its_metadata() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/odt/mini.odt");
+    assert!(deckle_library::is_source(&fixture));
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::new(temp.path().join("library"));
+    let added = library.add(&fixture).unwrap();
+    assert!(added.new);
+    assert_eq!(added.book.source_path().extension().unwrap(), "odt");
+    let info = deckle_library::book_info(&added.book.source_path()).unwrap();
+    assert_eq!(info.title, "The Deckle ODT Mini");
+    assert_eq!(info.creators[0].name, "Ada Testwright");
+}

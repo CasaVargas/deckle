@@ -21,6 +21,7 @@ python3 -m venv /tmp/kfxvenv && /tmp/kfxvenv/bin/pip install lxml pillow pypdf b
 | `make_notes_epubs.py OUT_DIR` | Builds the pop-up notes fixtures (#31) in `fixtures/notes/` |
 | `make_txt_fixtures.py OUT_DIR` | Builds the plain text fixtures in `fixtures/txt` |
 | `make_fb2_fixtures.py OUT_DIR` | Builds the FictionBook fixtures in `fixtures/fb2` |
+| `make_odt_fixtures.py OUT_DIR` | Builds the OpenDocument fixtures in `fixtures/odt` |
 | `kpf2kfx.py <KFX-Input> IN.kpf OUT.kfx CDE ASIN` | KPF to monolithic KFX with approximate pages; prints fragment type counts |
 | `kpf2kfx_opts.py <KFX-Input> IN.kpf OUT.kfx CDE ASIN PAGES\|none` | Same, with page-list control |
 | `dump_kpf_raw.py <KFX-Input> IN.kpf` | Pre-fix-up fragment inventory of a KPF (what the Rust KDF reader must produce) |

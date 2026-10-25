@@ -177,3 +177,23 @@ Crate tests cover:
 The pipeline and CLI tests run both fixtures through the fake Previewer. A library test adds an
 ODT and reads its metadata back. An opt-in `odt_real_previewer_smoke` test runs them through real
 Kindle Previewer.
+
+## 5. Implementation notes (2026-10-25, #168)
+
+These are the calls made where §2 left room, so the code and this document agree:
+
+- **Other ODF types.** `is_odt` takes only `.odt`, `.ott` and `.fodt`, so a folder walk never
+  picks up a spreadsheet. The "this is an OpenDocument spreadsheet" error therefore fires only
+  for a text-named file whose mimetype says otherwise.
+- **Image placement.** Every picture is an `<img>` where its frame sits. A paragraph holding
+  only pictures gets the `figure` class, which centres it, as in DOCX. The anchor type isn't
+  consulted.
+- **Text boxes keep their text.** LibreOffice puts captioned pictures inside a frame's
+  `draw:text-box`. Its paragraphs are rendered inline with `<br/>` between them, so the picture
+  and caption survive. Embedded objects (charts, formulas) warn and are left out.
+- **Title and Subtitle.** These paragraphs don't repeat their style chain's bold, because the
+  class already styles them.
+- **List items** with several paragraphs join them with `<br/>`. A heading inside a list item is
+  a heading, not an item.
+- **Checked:** `odt_real_previewer_smoke` passed with Kindle Previewer 4 on macOS on 2026-10-25,
+  for `mini.odt` and `mini.fodt`. Reading on physical hardware remains untested.
