@@ -123,6 +123,8 @@ pub struct Extra {
     pub byline: Option<String>,
     /// RFC 3339.
     pub published: Option<String>,
+    /// How the page was fetched: open, through a subscription, or walled.
+    pub access: publisher::Access,
 }
 
 #[derive(Clone, Debug, Default)]

@@ -39,11 +39,18 @@ pub fn detect_kind(html: &str) -> Option<&'static str> {
 }
 
 /// How a page was obtained.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum Access {
+    #[default]
     Open,
-    Subscription { site: String, service: String },
-    Walled { site: String, why: Walled },
+    Subscription {
+        site: String,
+        service: String,
+    },
+    Walled {
+        site: String,
+        why: Walled,
+    },
 }
 
 /// Why a subscriber page could not be read.

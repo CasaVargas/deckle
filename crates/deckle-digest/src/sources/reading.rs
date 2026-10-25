@@ -6,6 +6,7 @@ use chrono::Local;
 
 use crate::config::Config;
 use crate::fetch::Net;
+use crate::publisher::Access;
 use crate::reading::{Entry, MAX_TRIES, Outcome};
 use crate::sources::feeds::{by_line, host, par_map, story_body};
 use crate::{Article, Section, article, esc};
@@ -65,7 +66,7 @@ enum Got {
     Retry(String),
 }
 
-fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String), String> {
+fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String, Access), String> {
     if let Some(file) = &e.file {
         let bytes = std::fs::read(file).map_err(|err| format!("{}: {err}", file.display()))?;
         let base = url::Url::from_file_path(file)
@@ -73,6 +74,7 @@ fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String), String> {
         return Ok((
             String::from_utf8_lossy(&bytes).into_owned(),
             base.to_string(),
+            Access::Open,
         ));
     }
     let url = e.url.as_deref().ok_or("nothing to fetch")?;
@@ -81,8 +83,11 @@ fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String), String> {
     } else {
         url.to_owned()
     };
-    let bytes = net.get_page(&url)?;
-    Ok((String::from_utf8_lossy(&bytes).into_owned(), url))
+    let (bytes, access) = net.get_page_as(&url)?;
+    if let Access::Walled { site, why } = &access {
+        return Err(format!("no readable article: {}", why.note(site)));
+    }
+    Ok((String::from_utf8_lossy(&bytes).into_owned(), url, access))
 }
 
 fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
@@ -103,12 +108,13 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
     } else {
         None
     };
-    let extracted = fetch_html(e, net).and_then(|(html, base)| {
+    let extracted = fetch_html(e, net).and_then(|(html, base, access)| {
         article::extract_with(&html, &base, cap)
+            .map(|x| (x, access))
             .ok_or_else(|| "no readable article (a paywall, a sign-in page, or a video)".to_owned())
     });
-    let x = match extracted {
-        Ok(x) => x,
+    let (x, access) = match extracted {
+        Ok(got) => got,
         Err(why) => {
             // The try this edition makes; a same-day rebuild doesn't count again.
             let tries = e.tries + u32::from(e.tried_on != Some(date));
@@ -138,7 +144,8 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         .unwrap_or_else(|| outlet.clone());
     let meta = format!("{saved} · {outlet} · about {} min", minutes(x.words));
     if x.words > cfg.reading.long_read_words && !inline {
-        let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
+        let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+        extra.access = access;
         let lr = LongRead {
             id: e.id.clone(),
             title: title.clone(),
@@ -174,7 +181,8 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         };
         return Got::Long(Box::new(lr), pointer);
     }
-    let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
+    let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+    extra.access = access;
     Got::Story(Article {
         title,
         meta: Some(match x.byline.as_deref() {
