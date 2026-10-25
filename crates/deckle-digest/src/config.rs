@@ -101,6 +101,10 @@ pub struct Config {
     /// Send-to-Kindle email (email design §5). Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "EmailConfig::is_default")]
     pub email: EmailConfig,
+    /// Newspapers the household subscribes to (publisher subscriptions design §3). A
+    /// household setting: every paper sees the same list. Left out of a save while empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subscriptions: Vec<SubscriptionConfig>,
     /// Your Day: today's events from calendars (almanac design §5). Left out of a save
     /// while it's untouched.
     #[serde(skip_serializing_if = "DayConfig::is_default")]
@@ -249,6 +253,7 @@ impl Default for Config {
             reading: ReadingConfig::default(),
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
+            subscriptions: Vec::new(),
             day: DayConfig::default(),
             puzzle: PuzzleConfig::default(),
             shelf: ShelfConfig::default(),
@@ -796,6 +801,55 @@ impl SyncConfig {
     }
 }
 
+/// `[[subscriptions]]`: a newspaper the owner subscribes to. The password is not stored here;
+/// it lives in the system keychain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubscriptionConfig {
+    /// A bare lowercase host: no scheme, path or `www.`.
+    pub site: String,
+    pub username: String,
+    /// `"blox"` once detected; `None` until then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+impl SubscriptionConfig {
+    /// `site` as a bare host: `https://www.ThePilot.com/` becomes `thepilot.com`. A path, query
+    /// or fragment after the host is an error, as is anything that isn't a dotted host.
+    pub fn normalized_site(raw: &str) -> Result<String, String> {
+        let bad = |why: &str| format!("[[subscriptions]] site = {raw:?}: {why}");
+        let s = raw.trim();
+        let s = s
+            .strip_prefix("https://")
+            .or_else(|| s.strip_prefix("http://"))
+            .unwrap_or(s);
+        let (host, rest) = match s.find(['/', '?', '#']) {
+            Some(i) => (&s[..i], &s[i..]),
+            None => (s, ""),
+        };
+        if !rest.is_empty() && rest != "/" {
+            return Err(bad("use just the site's host, like thepilot.com"));
+        }
+        let host = host.to_ascii_lowercase();
+        let host = host.strip_prefix("www.").unwrap_or(&host);
+        if host.is_empty() || host.contains(char::is_whitespace) || !host.contains('.') {
+            return Err(bad("use a host like thepilot.com"));
+        }
+        Ok(host.to_owned())
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if self.username.trim().is_empty() {
+            return Err(format!(
+                "[[subscriptions]] site = {:?}: username is empty",
+                self.site
+            ));
+        }
+        Ok(())
+    }
+}
+
 /// `[email]`: the paper to a Send-to-Kindle address over the owner's own SMTP account (email
 /// design §5). The password is never here: it's in the system keychain (`secret`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1072,6 +1126,12 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # username = "you@example.com"
 # usb_too = false            # also queue the paper for USB when the email succeeds
 
+# A newspaper you subscribe to: the paper signs in as you to read its full articles. The
+# password is not stored here; it goes in the system keychain. One block per site.
+# [[subscriptions]]
+# site = "thepilot.com"           # just the host, no https:// or path
+# username = "you@example.com"
+
 # When the paper is built, once `deckle digest schedule` is installed.
 # [schedule]
 # at = "05:30"                    # 24-hour
@@ -1102,7 +1162,7 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 /// and `{place}` are filled in as TOML strings, and `{location}` with the main paper's latitude
 /// and longitude lines (empty when it has none).
 pub const PAPER_STARTER: &str = r#"# A Deckle Daily paper of its own (many papers). The household settings, [sync], [reading]
-# and the email account, are set in digest.toml for every paper.
+# [[subscriptions]] and the email account, are set in digest.toml for every paper.
 
 title = {title}
 reader = {reader}                 # who it's for, on its card in the Daily tab
@@ -1133,6 +1193,7 @@ impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
         cfg.normalize();
+        cfg.normalize_subscriptions()?;
         cfg.email.validate()?;
         cfg.llm.validate()?;
         cfg.schedule.validate()?;
@@ -1171,6 +1232,22 @@ impl Config {
         }
     }
 
+    /// Makes each subscription's site a bare host, so a loaded site is always normalized.
+    fn normalize_subscriptions(&mut self) -> Result<(), String> {
+        for s in &mut self.subscriptions {
+            s.site = SubscriptionConfig::normalized_site(&s.site)?;
+        }
+        Ok(())
+    }
+
+    /// The subscription for `host`: its site, or a subdomain of it.
+    pub fn subscription(&self, host: &str) -> Option<&SubscriptionConfig> {
+        let host = host.to_ascii_lowercase();
+        self.subscriptions
+            .iter()
+            .find(|s| host == s.site || host.ends_with(&format!(".{}", s.site)))
+    }
+
     pub fn load(path: &Path) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         Self::parse(&text).map_err(|e| format!("{}: {e}", path.display()))
@@ -1181,6 +1258,12 @@ impl Config {
 /// order and every value that didn't change stay as they are. A missing file starts from
 /// [`STARTER`] (Daily design §5c).
 pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
+    let mut cfg = cfg.clone();
+    cfg.normalize_subscriptions()?;
+    for s in &cfg.subscriptions {
+        s.validate()?;
+    }
+    let cfg = &cfg;
     cfg.email.validate()?;
     cfg.llm.validate()?;
     cfg.schedule.validate()?;
@@ -1205,6 +1288,7 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
         let t = new.as_table_mut();
         t.remove("sync");
         t.remove("reading");
+        t.remove("subscriptions");
         if let Some(email) = t.get_mut("email").and_then(|e| e.as_table_like_mut()) {
             for key in ["from", "smtp_host", "smtp_port", "username"] {
                 email.remove(key);
@@ -1789,6 +1873,106 @@ mod tests {
         assert_eq!(e.smtp_host, "smtp.gmail.com");
         assert_eq!(e.smtp_port, 587);
         assert!(!e.usb_too);
+    }
+
+    #[test]
+    fn subscriptions_parse_and_round_trip() {
+        let text = "[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"me@example.com\"\n";
+        let cfg = Config::parse(text).unwrap();
+        assert_eq!(cfg.subscriptions.len(), 1);
+        assert_eq!(cfg.subscriptions[0].site, "thepilot.com");
+        assert_eq!(cfg.subscriptions[0].kind, None);
+        assert!(cfg.subscription("www.thepilot.com").is_some());
+        assert!(cfg.subscription("thepilot.com").is_some());
+        assert!(cfg.subscription("notthepilot.com").is_none());
+        let empty = Config::default();
+        assert!(!toml::to_string(&empty).unwrap().contains("subscriptions"));
+    }
+
+    #[test]
+    fn a_site_is_a_bare_host() {
+        assert_eq!(
+            SubscriptionConfig::normalized_site("https://www.ThePilot.com/").unwrap(),
+            "thepilot.com"
+        );
+        assert_eq!(
+            SubscriptionConfig::normalized_site("thepilot.com").unwrap(),
+            "thepilot.com"
+        );
+        let e = SubscriptionConfig::normalized_site("thepilot.com/news").unwrap_err();
+        assert!(e.contains("site"), "{e}");
+        assert!(SubscriptionConfig::normalized_site("").is_err());
+        assert!(SubscriptionConfig::normalized_site("localhost").is_err());
+        assert!(SubscriptionConfig::normalized_site("the pilot.com").is_err());
+        let cfg =
+            Config::parse("[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"\"\n").unwrap();
+        assert!(
+            cfg.subscriptions[0]
+                .validate()
+                .unwrap_err()
+                .contains("username")
+        );
+    }
+
+    #[test]
+    fn a_loaded_site_is_normalized_and_bad_ones_refused() {
+        let cfg = Config::parse(
+            "[[subscriptions]]\nsite = \"https://WWW.ThePilot.com/\"\nusername = \"me\"\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.subscriptions[0].site, "thepilot.com");
+        assert!(
+            Config::parse("[[subscriptions]]\nsite = \"a.com/x\"\nusername = \"me\"\n").is_err()
+        );
+        assert!(
+            Config::parse("[[subscriptions]]\nsite = \"a.com\"\nusername = \"m\"\nx = 1\n")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn saving_keeps_subscriptions_and_leaves_an_empty_list_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, STARTER).unwrap();
+        let mut c = Config::load(&path).unwrap();
+        save(&path, &c).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("\n[[subscriptions]]")
+        );
+        c.subscriptions.push(SubscriptionConfig {
+            site: "thepilot.com".into(),
+            username: "me@example.com".into(),
+            kind: None,
+        });
+        save(&path, &c).unwrap();
+        assert_eq!(Config::load(&path).unwrap().subscriptions, c.subscriptions);
+        c.subscriptions[0].username = String::new();
+        assert!(save(&path, &c).unwrap_err().contains("username"));
+    }
+
+    #[test]
+    fn the_starter_subscriptions_block_parses_once_uncommented() {
+        assert!(Config::parse(STARTER).unwrap().subscriptions.is_empty());
+        let block: String = STARTER
+            .lines()
+            .skip_while(|l| !l.starts_with("# [[subscriptions]]"))
+            .take_while(|l| l.starts_with('#'))
+            .map(|l| format!("{}\n", l.strip_prefix("# ").unwrap_or(l)))
+            .collect();
+        assert!(block.starts_with("[[subscriptions]]"), "{block}");
+        let text = STARTER.replace(
+            &block
+                .lines()
+                .map(|l| format!("# {l}\n"))
+                .collect::<String>(),
+            &block,
+        );
+        let subs = Config::parse(&text).unwrap().subscriptions;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].site, "thepilot.com");
     }
 
     #[test]
