@@ -24,7 +24,9 @@ import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
 import YourDay from "./YourDay";
 import DailyEditor from "./DailyEditor";
-import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PlaceRow, ReadingEntry, RunResult } from "./types";
+import Papers from "./Papers";
+import { DAYS } from "./papersView";
+import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PapersView, PlaceRow, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL, SIGNS } from "./types";
 
 /** Amazon's Manage Your Content and Devices: the approved-sender list and the emailed Docs. */
@@ -89,56 +91,93 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [testing, setTesting] = useState(false);
   const [room, setRoom] = useState<Room>("today");
   const [openPlace, setOpenPlace] = useState<Place["key"] | null>(null);
+  // Your papers (many papers §7): the selected paper is the one every room works on
+  const [papers, setPapers] = useState<PapersView | null>(null);
+  const [paper, setPaper] = useState("main");
+  const arg = paper === "main" ? null : paper;
+  const isMain = paper === "main";
 
-  const load = useCallback(async (s?: DailyState) => {
-    const st = s ?? (await api.dailyState());
-    setState(st);
-    setDraft(st.config ? structuredClone(st.config) : null);
-    setDirty(false);
-    api.emailStatus().then(setEmailStatus).catch(() => {});
+  const loadPapers = useCallback(() => {
+    api.papersList().then(setPapers).catch(() => setPapers(null));
   }, []);
+
+  const load = useCallback(
+    async (s?: DailyState) => {
+      const st = s ?? (await api.dailyState(arg));
+      setState(st);
+      setDraft(st.config ? structuredClone(st.config) : null);
+      setDirty(false);
+      api.emailStatus(arg).then(setEmailStatus).catch(() => {});
+    },
+    [arg],
+  );
 
   // Tomorrow's paper: recomputed from local files often; headlines fetched on open and focus only
   const loadNext = useCallback(() => {
-    api.dailyNext().then(setNext).catch(() => {});
-  }, []);
+    api.dailyNext(arg).then(setNext).catch(() => {});
+  }, [arg]);
   const refreshNext = useCallback(() => {
-    api.dailyNextRefresh().then(setNext).catch(() => {});
-  }, []);
+    api.dailyNextRefresh(arg).then(setNext).catch(() => {});
+  }, [arg]);
 
   const refreshSide = useCallback(() => {
-    api.editionPreview().then(setPreview).catch(() => {});
+    api.editionPreview(arg).then(setPreview).catch(() => {});
     api.readingList().then(setReading).catch(() => {});
     loadNext();
-  }, [loadNext]);
+  }, [arg, loadNext]);
+  const refreshSideRef = useRef(refreshSide);
+  refreshSideRef.current = refreshSide;
 
   useEffect(() => {
-    load();
-    refreshSide();
-    refreshNext();
-    api
-      .scheduleGet()
-      .then((s) => {
-        if (s.at) setTime(s.at);
-      })
-      .catch(() => {});
     const un = api.onDailyFinished((r) => {
       setResult({ r, send: runningRef.current === "send" });
       runningRef.current = null;
       setRunning(null);
-      refreshSide();
+      refreshSideRef.current();
     });
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
+  // Everything below follows the selected paper.
+  useEffect(() => {
+    load();
+    loadPapers();
+    refreshSide();
+    refreshNext();
+    setResult(null);
     const onFocus = () => refreshNext();
     window.addEventListener("focus", onFocus);
     const tick = setInterval(() => {
       if (document.visibilityState === "visible") loadNext();
     }, 60_000);
     return () => {
-      un.then((f) => f());
       window.removeEventListener("focus", onFocus);
       clearInterval(tick);
     };
-  }, [load, refreshSide, refreshNext, loadNext]);
+  }, [load, loadPapers, refreshSide, refreshNext, loadNext]);
+
+  // The press time shown is the selected paper's: its installed job, else its file's
+  useEffect(() => {
+    const card = papers?.papers.find((p) => p.slug === paper);
+    api
+      .scheduleGet()
+      .then((s) => {
+        const job = s.papers?.find((p) => p.slug === paper);
+        setTime(job?.at ?? card?.at ?? (isMain && s.at ? s.at : "05:30"));
+      })
+      .catch(() => {});
+  }, [paper, papers, isMain]);
+
+  const choosePaper = (slug: string) => {
+    if (slug === paper) return;
+    if (dirty) {
+      onNotice("Save your changes to this paper first.");
+      return;
+    }
+    setPaper(slug);
+  };
 
   const edit = (f: (c: DailyConfig) => void) => {
     setDraft((d) => {
@@ -152,9 +191,16 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
   const save = async (c = draft): Promise<boolean> => {
     if (!c) return false;
+    const daysBefore = (state?.config?.schedule?.days ?? []).join();
     try {
-      await load(await api.dailySave(c));
+      await load(await api.dailySave(c, arg));
+      // New days move an installed job: it's reinstalled with them.
+      const card = papers?.papers.find((p) => p.slug === paper);
+      if (card?.installed && next?.press.at && (c.schedule?.days ?? []).join() !== daysBefore) {
+        await api.scheduleSet(next.press.at, arg);
+      }
       loadNext();
+      loadPapers();
       return true;
     } catch (e) {
       onNotice(String(e));
@@ -187,20 +233,20 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     setTesting(true);
     setEmailMsg(null);
     try {
-      setEmailMsg({ text: await api.emailTest(), ok: true });
+      setEmailMsg({ text: await api.emailTest(arg), ok: true });
     } catch (e) {
       setEmailMsg({ text: String(e), ok: false });
     }
     setTesting(false);
   };
 
-  const run = async (send: boolean) => {
+  const run = async (send: boolean, slug = paper) => {
     if (running) return;
     if (dirty) await save();
     setResult(null);
     runningRef.current = send ? "send" : "preview";
     setRunning(runningRef.current);
-    api.dailyRun(send).catch((e) => {
+    api.dailyRun(send, slug === "main" ? null : slug).catch((e) => {
       runningRef.current = null;
       setRunning(null);
       onNotice(String(e));
@@ -231,16 +277,34 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
   const setScheduleOn = async (on: boolean, at = time) => {
     try {
-      await api.scheduleSet(on ? at : null);
+      await api.scheduleSet(on ? at : null, arg);
       loadNext();
+      loadPapers();
+      load();
     } catch (e) {
       onNotice(String(e));
     }
   };
 
+  const createPaper = async (title: string, reader: string): Promise<boolean> => {
+    if (dirty) {
+      onNotice("Save your changes to this paper first.");
+      return false;
+    }
+    try {
+      const slug = await api.paperCreate(title, reader);
+      setPaper(slug);
+      setRoom("paper");
+      return true;
+    } catch (e) {
+      onNotice(String(e));
+      return false;
+    }
+  };
+
   const stopPresses = async (on: boolean) => {
     try {
-      setNext(await api.pressStop(on));
+      setNext(await api.pressStop(on, arg));
     } catch (e) {
       onNotice(String(e));
     }
@@ -265,11 +329,29 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     );
   }
 
+  const papersStrip = papers && (
+    <Papers
+      view={papers}
+      selected={paper}
+      busy={running !== null}
+      onSelect={choosePaper}
+      onPreview={(slug) => {
+        if (slug !== paper && dirty) return onNotice("Save your changes to this paper first.");
+        setPaper(slug);
+        setRoom("today");
+        run(false, slug);
+      }}
+      onCreate={createPaper}
+    />
+  );
+  const mainTitle = papers?.papers[0]?.title ?? "the main paper";
+
   if (!draft) {
     return (
       <div className="daily">
+        {papersStrip}
         <section className="card">
-          <h2>digest.toml has a problem</h2>
+          <h2>{isMain ? "digest.toml" : `papers/${paper}.toml`} has a problem</h2>
           <p className="fail">{state.error}</p>
           <button className="ghost" onClick={() => api.reveal(state.config_path)}>
             Show the file
@@ -314,15 +396,17 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         The morning paper arrives over Wi-Fi with no cable: Deckle emails it to your Kindle's Send-to-Kindle address from your
         own mail account. If an email fails, the paper waits for USB as before.
       </p>
+      {!isMain && <p className="muted small">It goes from the mail account set on {mainTitle}.</p>}
       <label className="check">
         <input type="checkbox" checked={!!draft.email?.enabled} onChange={(e) => editEmail((m) => (m.enabled = e.target.checked))} />
         Email the paper to my Kindle
       </label>
       <div className="grid2">
         <label>
-          <span className="label">Kindle address</span>
+          <span className="label">{isMain ? "Kindle address" : "Send to"}</span>
           <input value={draft.email?.to ?? ""} placeholder="you_ABC123@kindle.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.to = e.target.value))} />
         </label>
+        {isMain && (<>
         <label>
           <span className="label">From</span>
           <input value={draft.email?.from ?? ""} placeholder="you@example.com" spellCheck={false} onChange={(e) => editEmail((m) => (m.from = e.target.value))} />
@@ -363,6 +447,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
             </button>
           </form>
         </div>
+        </>)}
       </div>
       <label className="check">
         <input type="checkbox" checked={!!draft.email?.usb_too} onChange={(e) => editEmail((m) => (m.usb_too = e.target.checked))} />
@@ -372,7 +457,9 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         <button className="ghost" disabled={testing || !emailStatus?.configured || !emailStatus?.has_password} onClick={sendTest}>
           {testing ? "Sending…" : "Send a test"}
         </button>
-        {emailStatus && !emailStatus.configured && <span className="muted small">Fill in the addresses and server first.</span>}
+        {emailStatus && !emailStatus.configured && (
+          <span className="muted small">{isMain ? "Fill in the addresses and server first." : `Fill in Send to, and the account on ${mainTitle}.`}</span>
+        )}
       </div>
       {emailMsg && <p className={`small ${emailMsg.ok ? "" : "fail"}`}>{emailMsg.text}</p>}
       <p className="muted small">
@@ -432,6 +519,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       </nav>
 
       <div className="daily">
+        {papersStrip}
         {room === "today" && (
           <>
             <PressBar press={next?.press ?? null} time={time} onTime={setTime} onSchedule={setScheduleOn} onRestart={() => stopPresses(false)} />
@@ -476,17 +564,31 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
         {room === "editions" && (
           <>
-            <Readership onApplied={() => load().then(loadNext)} />
+            <Readership key={paper} paper={arg} onApplied={() => load().then(loadNext)} />
 
-            <EveryEdition
-              disabled={planLocked}
-              building={running !== null}
-              onFolder={(folder) => planSave((c) => ({ ...c, morgue: { keep_days: c.morgue?.keep_days ?? 365, folder } }))}
-            />
+            {isMain ? (
+              <EveryEdition
+                disabled={planLocked}
+                building={running !== null}
+                onFolder={(folder) => planSave((c) => ({ ...c, morgue: { keep_days: c.morgue?.keep_days ?? 365, folder } }))}
+              />
+            ) : (
+              <section className="card">
+                <h3>Every edition</h3>
+                <p className="muted small">The app shows {mainTitle}'s editions for now. This paper's are kept in its own folder in the Morgue.</p>
+              </section>
+            )}
           </>
         )}
 
-        {room === "reading" && (
+        {room === "reading" && !isMain && (
+          <section className="card">
+            <h3>Your Reading</h3>
+            <p className="muted small">Saved articles go to {mainTitle}.</p>
+          </section>
+        )}
+
+        {room === "reading" && isMain && (
           <>
             <section className="card">
               <h3>Your Reading</h3>
@@ -620,6 +722,24 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                   <input value={draft.title} onChange={(e) => edit((c) => (c.title = e.target.value))} />
                 </label>
                 <label>
+                  <span className="label">For</span>
+                  <input value={draft.reader ?? ""} placeholder="Who reads it" onChange={(e) => edit((c) => (c.reader = e.target.value))} />
+                </label>
+                <label>
+                  <span className="label">Kindle</span>
+                  <select value={draft.kindle ?? ""} onChange={(e) => edit((c) => (c.kindle = e.target.value))}>
+                    <option value="">Any Kindle</option>
+                    {(papers?.kindles ?? []).map((k) => (
+                      <option key={k.sync_id} value={k.name}>
+                        {k.name}
+                      </option>
+                    ))}
+                    {draft.kindle && !(papers?.kindles ?? []).some((k) => k.name === draft.kindle) && (
+                      <option value={draft.kindle}>{draft.kindle} (not named yet)</option>
+                    )}
+                  </select>
+                </label>
+                <label>
                   <span className="label">Units</span>
                   <select value={draft.units} onChange={(e) => edit((c) => (c.units = e.target.value as DailyConfig["units"]))}>
                     <option value="imperial">°F, mph</option>
@@ -653,6 +773,48 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                     </option>
                   </select>
                 </label>
+              </div>
+
+              {(papers?.kindles.length ?? 0) === 0 && (
+                <p className="muted small">To send this paper to one Kindle only, name your Kindles in the Kindle tab.</p>
+              )}
+
+              <div className="grid2">
+                <div>
+                  <div className="label">Type</div>
+                  <label className="check">
+                    <input type="checkbox" checked={!!draft.large_print} onChange={(e) => edit((c) => (c.large_print = e.target.checked))} />
+                    Large print
+                  </label>
+                  <p className="muted small">
+                    Nothing smaller than the body text, bigger headlines and one photo a story. Set the text size on the Kindle itself
+                    (Aa). It applies to every book on that Kindle.
+                  </p>
+                </div>
+                <div>
+                  <div className="label">Days</div>
+                  <div className="places">
+                    {DAYS.map((d) => {
+                      const days = draft.schedule?.days ?? [];
+                      return (
+                        <button
+                          key={d}
+                          className={`chip ${days.includes(d) ? "on" : ""}`}
+                          onClick={() =>
+                            edit((c) => {
+                              const cur = c.schedule?.days ?? [];
+                              const nextDays = cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d];
+                              c.schedule = { ...c.schedule, days: DAYS.filter((x) => nextDays.includes(x)) };
+                            })
+                          }
+                        >
+                          {d[0].toUpperCase() + d.slice(1)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="muted small">{(draft.schedule?.days ?? []).length === 0 ? "None chosen: every day." : "Built on these days only."} The time is set on Today.</p>
+                </div>
               </div>
 
               <div className="label">Place</div>

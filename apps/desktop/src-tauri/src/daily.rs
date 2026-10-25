@@ -319,12 +319,39 @@ pub struct PapersView {
     pub papers: Vec<PaperCard>,
     /// Paper files that were skipped, and why.
     pub notes: Vec<String>,
+    /// The household's named Kindles, for a paper's Kindle picker.
+    pub kindles: Vec<KnownKindle>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct KnownKindle {
+    pub sync_id: String,
+    pub name: String,
+}
+
+pub fn papers_at(
+    main: &Path,
+    status: &deckle_digest::schedule::Status,
+) -> Result<PapersView, String> {
+    let (papers, notes) = cards_at(main, status)?;
+    let kindles = Config::load(main)?
+        .sync
+        .named()
+        .map(|(id, name)| KnownKindle {
+            sync_id: id.to_owned(),
+            name: name.to_owned(),
+        })
+        .collect();
+    Ok(PapersView {
+        papers,
+        notes,
+        kindles,
+    })
 }
 
 #[tauri::command]
 pub fn papers_list() -> Result<PapersView, String> {
-    let (papers, notes) = cards_at(&config_path(), &deckle_digest::schedule::status())?;
-    Ok(PapersView { papers, notes })
+    papers_at(&config_path(), &deckle_digest::schedule::status())
 }
 
 /// Writes `papers/<slug>.toml` for a new paper; returns its slug.
@@ -771,7 +798,9 @@ mod tests {
             }],
             ..Default::default()
         };
-        let (cards, notes) = cards_at(&main, &status).unwrap();
+        let view = papers_at(&main, &status).unwrap();
+        assert!(view.kindles.is_empty());
+        let (cards, notes) = (view.papers, view.notes);
         assert!(notes.is_empty(), "{notes:?}");
         let titles: Vec<&str> = cards.iter().map(|c| c.title.as_str()).collect();
         // main first, then by title

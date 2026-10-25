@@ -5,14 +5,14 @@ import { barTone, headline, howFar } from "./readershipView";
 import type { ReadershipSuggestion, ReadershipView } from "./types";
 
 /** How far you read the paper, per section, with suggested edits (readership design §7). */
-export default function Readership({ onApplied }: { onApplied?: () => void }) {
+export default function Readership({ paper = null, onApplied }: { paper?: string | null; onApplied?: () => void }) {
   const [view, setView] = useState<ReadershipView | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.readershipReport().then(setView).catch((e) => setError(String(e)));
-  }, []);
+    api.readershipReport(paper).then(setView).catch((e) => setError(String(e)));
+  }, [paper]);
 
   const act = (id: string, run: () => Promise<ReadershipView>) => {
     setBusy(id);
@@ -50,7 +50,7 @@ export default function Readership({ onApplied }: { onApplied?: () => void }) {
       {!view.enabled ? (
         <p className="muted small">
           Readership is off.{" "}
-          <button className="link" onClick={() => act("on", () => api.readershipSet(true))} disabled={busy !== null}>
+          <button className="link" onClick={() => act("on", () => api.readershipSet(true).then(() => api.readershipReport(paper)))} disabled={busy !== null}>
             Turn it on
           </button>
         </p>
@@ -86,12 +86,12 @@ export default function Readership({ onApplied }: { onApplied?: () => void }) {
                     <button
                       className="ghost"
                       disabled={busy !== null}
-                      onClick={() => act(s.id, () => api.readershipApply(s.id).finally(() => onApplied?.()))}
+                      onClick={() => act(s.id, () => api.readershipApply(s.id, paper).finally(() => onApplied?.()))}
                     >
                       {busy === s.id ? "Saving…" : s.kind === "drop" ? "Drop it" : "Move up"}
                     </button>
                   )}
-                  <button className="link" disabled={busy !== null} onClick={() => act(s.id, () => api.readershipDismiss(s.id))}>
+                  <button className="link" disabled={busy !== null} onClick={() => act(s.id, () => api.readershipDismiss(s.id, paper))}>
                     Dismiss
                   </button>
                 </div>
