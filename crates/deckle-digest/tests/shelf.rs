@@ -579,6 +579,7 @@ mod page {
     fn xhtml(s: Section) -> String {
         let g = Gathered {
             edition: Edition {
+                large_print: false,
                 paper: "The Deckle Daily".into(),
                 date: date(),
                 place: "New York, NY".into(),

@@ -318,6 +318,8 @@ pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
                 icon: now_icon.href().to_owned(),
             });
             let mut cells = String::new();
+            // Large print: one day a line instead of five columns (many papers §6).
+            let mut rows = String::new();
             for n in 0..d.time.len().min(5) {
                 let icon = Icon::from_code(d.weather_code[n]);
                 if !assets.iter().any(|(h, _)| h == icon.href()) {
@@ -343,11 +345,24 @@ pub fn page(i: &PageInputs) -> (Section, Option<String>, Assets) {
                     deg(d.temperature_2m_min[n]),
                     esc(&strip_word(f, n, units)),
                 ));
+                rows.push_str(&format!(
+                    "<li class=\"day\"><img src=\"{}\" alt=\"\"/> <span class=\"wday\">{}</span> \
+                     <b>{}</b> {} <span class=\"word\">{}</span></li>",
+                    icon.href(),
+                    esc(&day),
+                    deg(d.temperature_2m_max[n]),
+                    deg(d.temperature_2m_min[n]),
+                    esc(&strip_word(f, n, units)),
+                ));
             }
+            let strip = match cfg.large_print {
+                true => format!("<ul class=\"strip-list\">{rows}</ul>"),
+                false => format!("<table class=\"strip\"><tr>{cells}</tr></table>"),
+            };
             articles.push(Article {
                 title: format!("Today: {sky}"),
                 body: format!(
-                    "<table class=\"strip\"><tr>{cells}</tr></table>\
+                    "{strip}\
                      <p>Right now: {now}{unit} and {now_sky}, feels like {feels}. \
                      Humidity {hum}%, wind {wind} {wind_unit}.</p>",
                     now = deg(f.current.temperature_2m),

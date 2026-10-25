@@ -353,3 +353,18 @@ These are the calls made where the spec left room, so the code and this document
   a real install loads jobs into the login session whatever `HOME` is.
 - **Saving an extra paper** adds a key the file lacks only when it isn't the default, so a
   hand-written paper file stays short.
+
+## 14. Implementation notes, PR 3 (2026-10-25)
+
+- **`render::LARGE_STYLE`** follows `STYLE` in `style.css` only when `Edition.large_print`;
+  a regular paper's stylesheet and pages are byte-identical to before (the weather golden
+  still matches). Later rules win, and a test checks that no selector is under 1em in effect.
+  The one exception is the crossword's clue numbers (`table.grid span.n`), which have to fit
+  inside their squares.
+- **Heads** are 1.1× (`.paper`, `.section-head`, `h2.headline`, `h2.lead`, `h3.subhead`,
+  `.big`). **Rules** go from 1px to 2px, and the section head's top rule from 3px to 4px.
+- **The forecast strip** is `<ul class="strip-list">` with a `<li class="day">` per day when
+  `cfg.large_print`, in `sources::weather`. The table stays for regular papers.
+- **Photos:** gather prints with `max_photos` capped at 1 (`print_config`).
+- **`body { font-size: 1.25em }`** is not added: it waits on the device check on the
+  Paperwhite and the Scribe (§6).

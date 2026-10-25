@@ -234,6 +234,7 @@ fn send_file<M: Mailer>(
 pub fn write_test_epub(path: &Path, date: NaiveDate) -> Result<(), String> {
     let gathered = crate::Gathered {
         edition: crate::Edition {
+            large_print: false,
             paper: "Deckle Daily email test".into(),
             date,
             place: String::new(),
