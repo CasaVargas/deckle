@@ -159,3 +159,26 @@ Crate tests cover:
 The pipeline and CLI tests run `mini6.mobi` and `mini.azw3` through the fake Previewer. The
 library test adds both. An opt-in `mobi_real_previewer_smoke` test runs them through real Kindle
 Previewer.
+
+## 5. Implementation notes (2026-10-25, #172)
+
+These are the calls made where §2 left room, so the code and this document agree:
+
+- **Fixtures** are built by the crate's own `fixture` module, not a Python script. The PalmDB,
+  MOBI header, index and HUFF layouts already live there for the KF8 tests. An ignored test
+  writes `fixtures/mobi/`, and a guard test fails if the committed files drift from the
+  builders.
+- **The HUFF fixture tables** are 8-bit codes in which each byte decodes to itself, plus one
+  overridden phrase that is itself compressed. That exercises the code tables, the CDIC
+  dictionary and recursion. Variable-length codes follow KindleUnpack line for line but have
+  no fixture, and a real HUFF book is still to be checked by hand.
+- **A piece with nothing to read** (only anchors, say, between two page breaks) carries its
+  markup into the next part, so a link aimed at it still lands.
+- **Part `<title>`s** are the book title. The contents come from the NCX or headings, not from
+  file titles.
+- **The DRM check** happens in `convert` before routing, and again in each rebuild. A DRM file
+  gets `MobiError::Drm` ("Deckle never removes DRM"), never a decode attempt.
+- **The desktop app** now depends on `deckle-mobi` normally, not only in tests.
+- **Checked:** `mobi_real_previewer_smoke` passed with Kindle Previewer 4 on macOS on 2026-10-25,
+  for `mini6.mobi`, `huff.mobi` and `mini.azw3`. Reading on physical hardware, and a real-world
+  HUFF/CDIC book, remain unchecked.

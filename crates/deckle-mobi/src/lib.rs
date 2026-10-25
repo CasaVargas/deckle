@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Kindle's PalmDB formats, MOBI, AZW and AZW3 (KF8), as far as the Kindle tab needs them
-//! (Books and Kindle design §3): the metadata in record 0's MOBI header and EXTH records, the
-//! DRM flag, and the cover. Nothing past record 0 and the cover is read, and a DRM-protected
-//! file is never decrypted.
+//! Kindle's PalmDB formats, MOBI, AZW and AZW3 (KF8): the metadata in record 0's MOBI header and
+//! EXTH records, the DRM flag and the cover for the Kindle tab (Books and Kindle design §3), and a
+//! DRM-free book rebuilt as an EPUB for the library's upgrade (§5) and the import stage (MOBI
+//! import design). A DRM-protected file is never decrypted.
 
 pub mod epub;
 pub mod fixture;
+mod import;
 pub mod index;
 pub mod kf8;
+pub mod mobi6;
 pub mod palmdb;
 pub mod text;
+
+pub use import::{ImportReport, convert, is_mobi_file, to_epub};
 
 use std::io::{Read, Seek, SeekFrom};
 
@@ -44,6 +48,8 @@ pub enum MobiError {
     Unsupported(String),
     #[error("{0} didn't come back whole: {1}")]
     BadPart(String, String),
+    #[error("this book is DRM-protected, and Deckle never removes DRM; use a DRM-free copy")]
+    Drm,
 }
 
 /// What record 0 says about a book.

@@ -89,6 +89,18 @@ JPEG inside was made once with macOS `sips` and is embedded in the script as hex
 | `japanese.rtf` | A `\fcharset128` font with Shift-JIS `\'hh` pairs, `\deflang1041` |
 | `unclosed.rtf` | Missing its final brace |
 
+## `mobi/`
+
+Written by the ignored `write_fixtures` test in `crates/deckle-mobi/tests/import.rs` from the
+crate's `fixture` builders (`cargo test -p deckle-mobi --test import -- --ignored write_fixtures`).
+The `committed_fixtures_match_their_builders` test keeps them in step.
+
+| File | What |
+|---|---|
+| `mini6.mobi` | MOBI 6, PalmDOC-compressed: loose Mobipocket HTML (unquoted attributes, `<font>`, `<center>`, an unclosed `<p>`, a script), two page breaks, `filepos` links both ways, a `recindex` picture, a PNG cover, an NCX index, EXTH metadata |
+| `huff.mobi` | The same book with HUFF/CDIC-compressed text records |
+| `mini.azw3` | A KF8 book: three parts, a `kindle:pos` link, a CSS flow, a cover, an NCX index |
+
 ## Not in the repo
 
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB

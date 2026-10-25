@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **DRM-free Kindle books become real KFX.** Import `.mobi`, `.azw`, `.azw3` or `.prc`. AZW3
+  books are rebuilt from their KF8 part. Older MOBI files have their Mobipocket HTML cleaned
+  up: links, pictures and the contents come through, and HUFF/CDIC-compressed text is read.
+  Either way the book gets KFX typesetting, page numbers, X-Ray and Word Wise. DRM-protected
+  files are refused, never decrypted.
 - **RTF becomes a book.** Import `.rtf` from TextEdit, WordPad, Scrivener or older Word, the same
   way as Word documents: headings become the contents, and formatting, lists, tables, pictures,
   links and pop-up footnotes come through. Text in older code pages (Cyrillic, Japanese and
