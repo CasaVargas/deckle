@@ -20,6 +20,7 @@ deckle-cli = { path = "crates/deckle-cli" }
 deckle-docx = { path = "crates/deckle-docx" }
 deckle-markdown = { path = "crates/deckle-markdown" }
 deckle-txt = { path = "crates/deckle-txt" }
+deckle-fb2 = { path = "crates/deckle-fb2" }
 deckle-pdf = { path = "crates/deckle-pdf" }
 deckle-library = { path = "crates/deckle-library" }
 deckle-readership = { path = "crates/deckle-readership" }

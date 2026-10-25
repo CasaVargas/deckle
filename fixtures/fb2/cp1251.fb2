@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="windows-1251"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+ <description><title-info>
+  <genre>prose_rus_classic</genre>
+  <author><first-name>Иван</first-name><last-name>Наборщиков</last-name></author>
+  <book-title>Типография</book-title>
+  <lang>ru</lang>
+ </title-info></description>
+ <body>
+  <section><title><p>Глава первая</p></title><p>Утро в типографии было холодным.</p></section>
+  <section><title><p>Глава вторая</p></title><p>Краска терпелива.</p></section>
+ </body>
+</FictionBook>

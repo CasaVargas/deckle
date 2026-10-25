@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+ <description>
+  <title-info>
+   <genre>sf_fantasy</genre>
+   <genre>prose_classic</genre>
+   <author><first-name>Ada</first-name><middle-name>K.</middle-name><last-name>Testwright</last-name></author>
+   <author><nickname>Typesetter</nickname></author>
+   <book-title>The Deckle FB2 Mini</book-title>
+   <annotation><p>A small book about a print shop.</p><p>Second paragraph &amp; more.</p></annotation>
+   <coverpage><image l:href="#cover.png"/></coverpage>
+   <lang>en</lang>
+   <sequence name="Deckle Fixtures" number="2"/>
+  </title-info>
+  <document-info><id>deckle-fb2-mini</id><version>1.0</version></document-info>
+ </description>
+ <body>
+  <title><p>The Deckle FB2 Mini</p><p>A Novel</p></title>
+  <epigraph><p>Ink is patient.</p><text-author>Old proverb</text-author></epigraph>
+  <section id="part1">
+   <title><p>Part One</p></title>
+   <section id="ch1">
+    <title><p>Chapter 1</p><p>The Cold Press</p></title>
+    <p>The press was cold that morning, and the type sat in its cases like rain waiting to fall. Nobody in the shop said a word about the proofs, which were late again.</p>
+    <p>It was <emphasis>very</emphasis> cold, and <strong>nobody</strong> spoke.<a l:href="#n1" type="note">[1]</a></p>
+    <empty-line/>
+    <image l:href="#plate.png" alt="A grey plate"/>
+    <p>See <a l:href="#ch3">the third chapter</a> or <a l:href="https://example.com/press">the press site</a>.</p>
+   </section>
+   <section id="ch2">
+    <title><p>Chapter 2</p></title>
+    <poem>
+     <title><p>The Compositor's Song</p></title>
+     <stanza><v>Set the line and lock the forme,</v><v>Ink the roller, keep it warm.</v></stanza>
+     <stanza><v>Pull the sheet and hang it dry,</v><v>Let the morning paper fly.</v></stanza>
+     <text-author>Anonymous</text-author>
+    </poem>
+    <p>A dot<image l:href="#dot.gif"/> in the middle of a line.<a l:href="#n2">[2]</a></p>
+   </section>
+  </section>
+  <section>
+   <title><p>Part Two</p></title>
+   <section id="ch3">
+    <title><p>Chapter 3</p></title>
+    <subtitle>* * *</subtitle>
+    <table>
+     <tr><th>Face</th><th>Size</th></tr>
+     <tr><td>Caslon</td><td align="right">12</td></tr>
+     <tr><td colspan="2">Garamond, all sizes</td></tr>
+    </table>
+    <cite><p>Quoted from the foreman's notebook.</p></cite>
+    <p>H<sub>2</sub>O and E=mc<sup>2</sup>, <strikethrough>struck</strikethrough>, <code>lock()</code>.</p>
+   </section>
+   <section id="ch4">
+    <title><p>Chapter 4</p></title>
+    <p>The press was cold that morning, and the type sat in its cases like rain waiting to fall. Nobody in the shop said a word about the proofs, which were late again.</p>
+    <p>The end.</p>
+   </section>
+  </section>
+ </body>
+ <body name="notes">
+  <title><p>Notes</p></title>
+  <section id="n1"><title><p>1</p></title><p>Colder than the previous winter.</p></section>
+  <section id="n2"><title><p>2</p></title><p>A full stop, cast in lead.</p></section>
+ </body>
+ <binary id="cover.png" content-type="image/png">iVBORw0KGgoAAAANSUhEUgAAADwAAABaCAIAAABrM6JiAAAAX0lEQVR42u3OAQkAAAgDsMcxhEns
+H8QWgjBYgKV63om0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0
+tLS0tLS0tLS0tLS0tLS09LUFgr+osseltFwAAAAASUVORK5CYII=</binary>
+ <binary id="plate.png" content-type="image/jpeg">iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAD0lEQVR42mNowAEYhpYEAILzYAEl
+lbNjAAAAAElFTkSuQmCC</binary>
+ <binary id="dot.gif" content-type="image/gif">R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==</binary>
+ <binary id="unused.png" content-type="image/png">iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAC0lEQVR42mNgQAYAAA4AATo1BFYA
+AAAASUVORK5CYII=</binary>
+</FictionBook>

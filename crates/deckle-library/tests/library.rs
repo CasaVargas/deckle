@@ -578,3 +578,23 @@ fn markdown_library_snapshot_retains_assets_and_updates_identity() {
     let mut epub = deckle_core::epub::EpubReader::open(&second.book.source_path()).unwrap();
     assert!(epub.read_bytes("OEBPS/images/image-001.png").is_ok());
 }
+
+#[test]
+fn fb2_is_a_source_and_reads_its_metadata() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/fb2/mini.fb2.zip");
+    assert!(deckle_library::is_source(&fixture));
+    let temp = tempfile::tempdir().unwrap();
+    let library = Library::new(temp.path().join("library"));
+    let added = library.add(&fixture).unwrap();
+    assert!(added.new);
+    assert!(
+        added
+            .book
+            .source_path()
+            .to_string_lossy()
+            .ends_with(".fb2.zip")
+    );
+    let info = deckle_library::book_info(&added.book.source_path()).unwrap();
+    assert_eq!(info.title, "The Deckle FB2 Mini");
+    assert_eq!(info.series.unwrap().name, "Deckle Fixtures");
+}

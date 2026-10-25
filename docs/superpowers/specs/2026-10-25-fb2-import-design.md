@@ -149,3 +149,23 @@ The pipeline and CLI tests run `mini.fb2` and `mini.fb2.zip` end to end through 
 Previewer. The library test adds an FB2 and reads its metadata back. An opt-in
 `fb2_real_previewer_smoke` test, like the Markdown one, runs the fixtures through real Kindle
 Previewer.
+
+## 5. Implementation notes (2026-10-25, #166)
+
+These are the calls made where §2 left room, so the code and this document agree:
+
+- **Contents labels.** A multi-line `<title>` becomes one heading, with its lines joined by
+  `<br/>`. Its contents label joins the lines with ` — ` (`Chapter 1 — The Cold Press`), as TXT
+  does for subtitles.
+- **Heading levels** count titled ancestors rather than raw nesting, so an untitled wrapper
+  section doesn't skip a level in the contents. The body title is an `<h1 class="book-title">` on
+  the title page. It has no contents entry.
+- **Language.** The `lang` must start with a two- or three-letter subtag. `Russian` or `RU_ru`
+  falls back to `en`, with a warning.
+- **Link fallback.** A `#id` that exists in a body but whose element wasn't kept points at the
+  first page, with a warning. Every element the renderer emits carries its id, so this is a
+  safety net.
+- **Desktop picker.** It offers `zip` so that `.fb2.zip` can be chosen. A zip that isn't
+  `.fb2.zip` is dropped by `expand_book_paths`, like any other file type it doesn't take.
+- **Checked:** `fb2_real_previewer_smoke` passed with Kindle Previewer 4 on macOS on 2026-10-25,
+  for `mini.fb2` and `cp1251.fb2`. Reading on physical hardware remains untested.
