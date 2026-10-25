@@ -28,6 +28,7 @@ pub mod next;
 pub mod papers;
 pub mod pdf;
 pub mod press;
+pub mod publisher;
 pub mod puzzle;
 pub mod reading;
 pub mod render;
@@ -50,6 +51,7 @@ pub use chrono;
 pub use chrono_tz;
 pub use config::{Config, SectionKind};
 pub use fetch::{Http, Net};
+pub use publisher::Access;
 pub use url;
 pub use zeroize;
 

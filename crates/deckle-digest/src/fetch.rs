@@ -14,6 +14,12 @@ pub trait Net: Sync {
         self.get(url)
     }
 
+    /// A page fetched with any signed-in session, and how it was got. Plain nets are open.
+    fn get_page_as(&self, url: &str) -> Result<(Vec<u8>, crate::publisher::Access), String> {
+        self.get_page(url)
+            .map(|b| (b, crate::publisher::Access::Open))
+    }
+
     /// A form POST (Google News link decoding).
     fn post_form(&self, url: &str, _body: &str) -> Result<Vec<u8>, String> {
         Err(format!("POST not supported: {url}"))
