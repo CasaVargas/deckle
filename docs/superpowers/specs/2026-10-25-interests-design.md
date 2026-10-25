@@ -1,6 +1,6 @@
 # Your interests: sections that hunt, and a paper that notices — design
 
-**Status:** draft for owner review · **Date:** 2026-10-25 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** approved by the owner on 2026-10-25 ("Spec approved. Write the implementation plan and start on increment 1.") · **Date:** 2026-10-25 · **Owner:** Jonathan (CasaVargas LLC)
 · **Builds on:** `2026-10-22-newspaper-sections-design.md` (merged sources, `"lead"` full text,
 section keys), `2026-10-22-local-places-design.md` (Google News search with `when:`),
 `2026-10-22-readership-report-design.md` (`.yjf` read-back, suggestions applied with one click),
