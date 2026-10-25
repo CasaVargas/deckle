@@ -1190,13 +1190,27 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     let cfg = &cfg;
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => STARTER.to_owned(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match cfg.paper {
+            None => STARTER.to_owned(),
+            Some(_) => String::new(),
+        },
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    let new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
+    let mut new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
+    // Another paper's file never holds the household settings it inherits (many papers §3).
+    if cfg.paper.is_some() {
+        let t = new.as_table_mut();
+        t.remove("sync");
+        t.remove("reading");
+        if let Some(email) = t.get_mut("email").and_then(|e| e.as_table_like_mut()) {
+            for key in ["from", "smtp_host", "smtp_port", "username"] {
+                email.remove(key);
+            }
+        }
+    }
     merge_table(doc.as_table_mut(), new.as_table());
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

@@ -221,3 +221,26 @@ fn stems_and_exact_edition_names_per_paper() {
     assert_eq!(first.work_dir(cache), cache.join("digest"));
     assert_eq!(kid.work_dir(cache), cache.join("digest/papers/kid-courier"));
 }
+
+#[test]
+fn saving_an_extra_paper_keeps_household_settings_out() {
+    let (_d, main) = home();
+    paper(
+        &main,
+        "lakeside",
+        "# Dad's paper\ntitle = \"The Lakeside Gazette\"\n",
+    );
+    let mut c = load_one(&main, "lakeside").unwrap();
+    c.large_print = true;
+    c.email.to = "dad@kindle.com".into();
+    papers::save(&main, &c).unwrap();
+    let text = std::fs::read_to_string(papers::paper_path(&main, "lakeside")).unwrap();
+    assert!(text.starts_with("# Dad's paper"), "{text}");
+    for key in ["[sync]", "[reading]", "smtp_host", "username", "from ="] {
+        assert!(!text.contains(key), "{key} in\n{text}");
+    }
+    let back = load_one(&main, "lakeside").unwrap();
+    assert!(back.large_print);
+    assert_eq!(back.email.to, "dad@kindle.com");
+    assert_eq!(back.email.smtp_host, "smtp.example.com", "still inherited");
+}

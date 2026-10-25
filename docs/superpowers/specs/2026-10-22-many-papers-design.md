@@ -318,3 +318,23 @@ The build ships as four PRs, each usable alone and merged before the next:
 Until 2 lands, an extra paper is built by hand (`digest run --paper <slug>`) or by the user's
 own scheduler. Until 4 lands, papers are managed in their files and the CLI.
 
+
+## 12. Implementation notes, PR 1 (2026-10-25)
+
+These are the calls made where the spec left room, so the code and this document agree:
+
+- **`kindle =` must name a Kindle Deckle knows**, by its `[sync.devices]` name or id. Otherwise
+  `run` fails before any work and points at `deckle devices name`, so an edition never waits
+  for a Kindle that doesn't exist.
+- **The outbox's replace** keeps prefix matching, but a prefix never supersedes a name that goes
+  on with a letter. `deckle-daily-` replaces `deckle-daily-2026-10-24.kfx` but not
+  `deckle-daily-kid-courier-…`, and the long reads' date-prefixed replaces still work.
+  `prunable` matches `<prefix>YYYY-MM-DD.kfx` exactly.
+- **The Morgue** keeps another paper's editions in `<folder>/<slug>/`, and its first-run import
+  is the main paper's. The `digest morgue` commands, and sending an edition again, are the main
+  paper's in PR 1.
+- **The puzzle's answer check** from the Kindle's notes runs for the main paper. An extra
+  paper's puzzles are kept in its own `puzzles.json` but not checked yet.
+- **`digest schedule --paper`** is refused until PR 2.
+- **Saving an extra paper** (readership "apply", later the app) never writes the household
+  settings into its file.

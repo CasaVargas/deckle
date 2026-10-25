@@ -7,7 +7,7 @@ version = "0.6.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/CasaVargas/deckle"
-rust-version = "1.85"
+rust-version = "1.89"
 
 [workspace.dependencies]
 deckle-kfx = { path = "crates/deckle-kfx" }

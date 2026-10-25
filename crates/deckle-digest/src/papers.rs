@@ -191,3 +191,17 @@ pub fn create(main: &Path, slug: &str, title: &str, reader: &str) -> Result<Path
     std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(path)
 }
+
+/// The file `cfg` was loaded from: `main` for the main paper, `papers/<slug>.toml` for another.
+pub fn file_of(main: &Path, cfg: &Config) -> PathBuf {
+    match &cfg.paper {
+        None => main.to_path_buf(),
+        Some(p) => paper_path(main, &p.slug),
+    }
+}
+
+/// Saves `cfg` to its own file, comments kept. Another paper's file never gets the household
+/// settings it inherits.
+pub fn save(main: &Path, cfg: &Config) -> Result<(), String> {
+    crate::config::save(&file_of(main, cfg), cfg)
+}
