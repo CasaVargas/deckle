@@ -1200,7 +1200,9 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
     let mut new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
-    // Another paper's file never holds the household settings it inherits (many papers §3).
+    // Another paper's file never holds the household settings it inherits (many papers §3),
+    // and stays as short as it was written: a key it lacks is added only when it isn't the
+    // default.
     if cfg.paper.is_some() {
         let t = new.as_table_mut();
         t.remove("sync");
@@ -1208,6 +1210,18 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
         if let Some(email) = t.get_mut("email").and_then(|e| e.as_table_like_mut()) {
             for key in ["from", "smtp_host", "smtp_port", "username"] {
                 email.remove(key);
+            }
+        }
+        let defaults =
+            toml_edit::ser::to_document(&Config::default()).map_err(|e| e.to_string())?;
+        let keys: Vec<String> = t.iter().map(|(k, _)| k.to_owned()).collect();
+        for key in keys {
+            let unchanged = defaults
+                .get(&key)
+                .zip(t.get(&key))
+                .is_some_and(|(d, n)| d.to_string().trim() == n.to_string().trim());
+            if unchanged && !doc.contains_key(&key) {
+                t.remove(&key);
             }
         }
     }

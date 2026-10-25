@@ -491,10 +491,14 @@ pub enum DigestCommand {
     /// Make the paper arrive by itself: the edition daily at a time, and the watcher from
     /// login on (macOS LaunchAgents, Windows Task Scheduler). No option: show what's set.
     Schedule {
-        /// Daily time for the edition, 24-hour, e.g. 05:30.
+        /// Time for the edition, 24-hour, e.g. 05:30. Saved in the paper's file as
+        /// `[schedule] at`; every paper's job is then installed.
         #[arg(long, conflicts_with = "off")]
         at: Option<String>,
-        /// Remove both jobs.
+        /// With --at: the days it runs, e.g. `sat,sun` (default: every day).
+        #[arg(long, requires = "at")]
+        days: Option<String>,
+        /// Remove every paper's job and the watcher; with --paper, only that paper's job.
         #[arg(long)]
         off: bool,
     },

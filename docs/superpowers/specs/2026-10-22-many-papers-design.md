@@ -338,3 +338,18 @@ These are the calls made where the spec left room, so the code and this document
 - **`digest schedule --paper`** is refused until PR 2.
 - **Saving an extra paper** (readership "apply", later the app) never writes the household
   settings into its file.
+
+## 13. Implementation notes, PR 2 (2026-10-25)
+
+- **`schedule --at`** writes `[schedule]` into the paper's own file, then installs every paper
+  that has `at`, plus the watcher. Jobs for papers that are gone are removed. The main
+  paper's job is replaced only when `digest.toml` has `at`, so an existing user's job stays
+  until they set a time again.
+- **`schedule --off --paper <slug>`** removes that paper's job and its `at`. The watcher is
+  removed only when no edition job is left. Plain `--off` removes everything, as before. The
+  app's "off" switch for the main paper uses the per-paper removal.
+- **Linux** prints one cron line per paper, with days as cron weekdays.
+- **`DECKLE_SCHEDULE_DRY_RUN`** makes install and remove report what they would do, for tests:
+  a real install loads jobs into the login session whatever `HOME` is.
+- **Saving an extra paper** adds a key the file lacks only when it isn't the default, so a
+  hand-written paper file stays short.

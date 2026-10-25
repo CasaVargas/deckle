@@ -369,15 +369,21 @@ pub fn schedule_get() -> deckle_digest::schedule::Status {
 pub fn schedule_set(at: Option<String>) -> Result<deckle_digest::schedule::Status, String> {
     use deckle_digest::schedule;
     match at {
+        // The main paper's job only: other papers' jobs, and the watcher they need, stay.
         None => {
-            schedule::remove()?;
+            schedule::remove_paper(deckle_digest::papers::MAIN)?;
         }
         Some(at) => {
             let (hour, minute) = schedule::parse_at(&at)?;
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+            let days = deckle_digest::Config::load(&config_path())
+                .map(|c| c.schedule.days)
+                .unwrap_or_default();
             schedule::install(&schedule::Schedule {
                 hour,
                 minute,
+                days,
+                slug: deckle_digest::papers::MAIN.into(),
                 exe: exe.canonicalize().unwrap_or(exe),
                 config: None,
             })?;
