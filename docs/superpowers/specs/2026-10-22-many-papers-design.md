@@ -368,3 +368,27 @@ These are the calls made where the spec left room, so the code and this document
 - **Photos:** gather prints with `max_photos` capped at 1 (`print_config`).
 - **`body { font-size: 1.25em }`** is not added: it waits on the device check on the
   Paperwhite and the Scribe (§6).
+
+## 15. Implementation notes, PR 4 (2026-10-25)
+
+The Daily tab has grown rooms since §7 was written (Today, Editions, Reading, Delivery, The
+paper). Your papers fits them like this:
+
+- **Your papers** is a row of cards above the rooms, shown once `digest.toml` exists. Picking a
+  card (Edit) selects that paper, and every room then works on it. Preview builds that paper.
+- **The paper** room gets Reader, Kindle (Any Kindle, or a named Kindle from the device list),
+  Large print (with the Aa line) and Days. A Kindle is saved by its name when it has one, else
+  by its sync id.
+- **Today:** the press bar's time and on/off are the selected paper's. Saving a time writes
+  `[schedule] at` (and its `days`) to that paper's file, then installs its job, as the CLI
+  does. Stop the presses stays household-wide (one `press.json`, as in the CLI).
+- **Reading:** an extra paper shows "Saved articles go to <main title>." instead of Your
+  Reading and the Shelf.
+- **Editions:** How far you read uses the paper's own readership file. Every edition (the
+  Morgue) stays on the main paper in the app for now, as `digest morgue` does in the CLI; an
+  extra paper says so.
+- **Delivery → Email:** an extra paper shows only on/off, Send to and Also by USB; the account
+  stays on the main paper. The password is the household's.
+- **Commands** take `paper: Option<String>` (`None` is the main paper). `papers_list` returns
+  the cards and `paper_create(title, reader)` the new slug. Tomorrow's paper reads the paper's
+  work folder, so "sent" days in This week are that paper's.
