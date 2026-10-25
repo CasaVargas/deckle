@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -83,9 +83,9 @@ export const api = {
   highlightsWrite: (target: RunTarget) => invoke<HighlightsReport>("highlights_write", { target }),
   /** Every looked-up word as an Anki CSV at `to`; resolves to how many words. */
   wordsAnki: (target: RunTarget, to: string) => invoke<number>("words_anki", { target, to }),
-  readershipReport: () => invoke<ReadershipView>("readership_report"),
-  readershipApply: (id: string) => invoke<ReadershipView>("readership_apply", { id }),
-  readershipDismiss: (id: string) => invoke<ReadershipView>("readership_dismiss", { id }),
+  readershipReport: (paper: string | null = null) => invoke<ReadershipView>("readership_report", { paper }),
+  readershipApply: (id: string, paper: string | null = null) => invoke<ReadershipView>("readership_apply", { id, paper }),
+  readershipDismiss: (id: string, paper: string | null = null) => invoke<ReadershipView>("readership_dismiss", { id, paper }),
   readershipSet: (on: boolean) => invoke<ReadershipView>("readership_set", { on }),
   morgueMonth: (year: number, month: number) => invoke<MorgueMonth>("morgue_month", { year, month }),
   morgueSearch: (query: string) => invoke<MorgueHit[]>("morgue_search", { query }),
@@ -103,26 +103,30 @@ export const api = {
   onRunFinished: (cb: () => void): Promise<UnlistenFn> => listen("run-finished", () => cb()),
 
   // The Daily tab
-  dailyState: () => invoke<DailyState>("daily_state"),
+  dailyState: (paper: string | null = null) => invoke<DailyState>("daily_state", { paper }),
+  /** Your papers: every paper's card, main first, and the household's named Kindles. */
+  papersList: () => invoke<PapersView>("papers_list"),
+  /** Writes papers/<slug>.toml; resolves to the slug. */
+  paperCreate: (title: string, reader: string) => invoke<string>("paper_create", { title, reader }),
   dailySetup: () => invoke<DailyState>("daily_setup"),
-  dailySave: (config: DailyConfig) => invoke<DailyState>("daily_save", { config }),
+  dailySave: (config: DailyConfig, paper: string | null = null) => invoke<DailyState>("daily_save", { config, paper }),
   dailyDayPreview: (day: DayConfig) => invoke<DayPreview>("daily_day_preview", { day }),
   geocode: (query: string) => invoke<PlaceRow[]>("geocode", { query }),
   readingList: () => invoke<ReadingEntry[]>("reading_list"),
   readingSave: (url: string) => invoke<string>("reading_save", { url }),
   readingRemove: (id: string) => invoke<boolean>("reading_remove", { id }),
   bookmarklet: () => invoke<string>("bookmarklet"),
-  editionPreview: () => invoke<EditionPreview | null>("edition_preview"),
-  dailyRun: (send: boolean) => invoke<void>("daily_run", { send }),
+  editionPreview: (paper: string | null = null) => invoke<EditionPreview | null>("edition_preview", { paper }),
+  dailyRun: (send: boolean, paper: string | null = null) => invoke<void>("daily_run", { send, paper }),
   onDailyFinished: (cb: (r: RunResult) => void): Promise<UnlistenFn> =>
     listen<RunResult>("daily-finished", (ev) => cb(ev.payload)),
   scheduleGet: () => invoke<ScheduleStatus>("schedule_get"),
-  scheduleSet: (at: string | null) => invoke<ScheduleStatus>("schedule_set", { at }),
-  dailyNext: () => invoke<NextPaper>("daily_next"),
-  dailyNextRefresh: () => invoke<NextPaper>("daily_next_refresh"),
-  pressStop: (on: boolean) => invoke<NextPaper>("press_stop", { on }),
-  emailStatus: () => invoke<EmailStatus>("email_status"),
+  scheduleSet: (at: string | null, paper: string | null = null) => invoke<ScheduleStatus>("schedule_set", { at, paper }),
+  dailyNext: (paper: string | null = null) => invoke<NextPaper>("daily_next", { paper }),
+  dailyNextRefresh: (paper: string | null = null) => invoke<NextPaper>("daily_next_refresh", { paper }),
+  pressStop: (on: boolean, paper: string | null = null) => invoke<NextPaper>("press_stop", { on, paper }),
+  emailStatus: (paper: string | null = null) => invoke<EmailStatus>("email_status", { paper }),
   /** Write-only: the keychain keeps it, nothing reads it back. */
   emailSetPassword: (password: string) => invoke<EmailStatus>("email_set_password", { password }),
-  emailTest: () => invoke<string>("email_test"),
+  emailTest: (paper: string | null = null) => invoke<string>("email_test", { paper }),
 };
