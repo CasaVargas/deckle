@@ -207,30 +207,31 @@ pub fn run(
     queue: &Queue,
     conn: &mut Conn<'_>,
     plan: Plan,
-    prune: &Prune,
+    prunes: &[Prune],
     stems: &[String],
 ) -> Result<FlushReport, DeliverError> {
     run_with(
         queue,
         conn,
         plan,
-        prune,
+        prunes,
         &Finishing::default(),
         &mut |_, _, _| {},
         stems,
-        &prune.prefix,
+        prunes.first().map_or("", |p| p.prefix.as_str()),
     )
 }
 
 /// [`run`], finishing prepared books for this Kindle with `finishing` (its profile) and
 /// reporting each entry to `progress`. The Word Wise probe shares the session too. Books whose
-/// file starts with `skip_prefix` (the editions) are left off the shelf.
+/// file starts with `skip_prefix` (the editions) are left off the shelf. Each of `prunes` (one
+/// per paper that goes to this Kindle) runs after the deliveries (many papers §4).
 #[allow(clippy::too_many_arguments)]
 pub fn run_with(
     queue: &Queue,
     conn: &mut Conn<'_>,
     plan: Plan,
-    prune: &Prune,
+    prunes: &[Prune],
     finishing: &Finishing,
     progress: &mut Progress<'_>,
     stems: &[String],
@@ -246,12 +247,16 @@ pub fn run_with(
         false => (Vec::new(), None),
     };
     let mut report = if plan.push {
-        queue.flush_with(conn, plan.prune.then_some(prune), finishing, progress)?
+        queue.flush_with(conn, None, finishing, progress)?
     } else {
         FlushReport::default()
     };
-    if plan.prune && !plan.push {
-        report.pruned = prune_named_on_except(conn, &prune.prefix, prune.keep, &prune.exempt)?;
+    if plan.prune {
+        for p in prunes {
+            report
+                .pruned
+                .extend(prune_named_on_except(conn, &p.prefix, p.keep, &p.exempt)?);
+        }
     }
     // A failed read doesn't undo a delivery: it's reported beside it.
     if plan.shelf {
@@ -641,12 +646,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let (q, kindle) = outbox_and_folder(tmp.path());
         let target = Target::Folder(kindle.clone());
-        let r = run(&q, &mut Conn::new(&target), PUSH, &prune(), &[]).unwrap();
+        let r = run(&q, &mut Conn::new(&target), PUSH, &[prune()], &[]).unwrap();
         assert_eq!(r.delivered.len(), 1);
         assert!(r.pruned.is_empty());
         assert!(kindle.join("deckle-daily-2026-10-17.kfx").exists());
 
-        let r = run(&q, &mut Conn::new(&target), PRUNE, &prune(), &[]).unwrap();
+        let r = run(&q, &mut Conn::new(&target), PRUNE, &[prune()], &[]).unwrap();
         assert!(r.delivered.is_empty());
         assert_eq!(r.pruned, ["deckle-daily-2026-10-17.kfx"]);
     }
@@ -680,7 +685,7 @@ mod tests {
         let target = mtp(Some("G0001"), Some("Kindle"));
         let r = {
             let mut conn = Conn::with_opener(&target, fake::open);
-            run(&q, &mut conn, BOTH, &prune(), &[]).unwrap()
+            run(&q, &mut conn, BOTH, &[prune()], &[]).unwrap()
         };
         assert_eq!(
             r.delivered,
@@ -716,7 +721,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             PRUNE,
-            &prune(),
+            &[prune()],
             &[],
         )
         .unwrap();
@@ -818,7 +823,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
-            &prune(),
+            &[prune()],
             &[],
         )
         .unwrap();
@@ -838,7 +843,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             alone,
-            &prune(),
+            &[prune()],
             &[],
         )
         .unwrap();
@@ -865,7 +870,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
-            &prune(),
+            &[prune()],
             &[],
         )
         .expect("the push succeeded");
@@ -938,7 +943,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
-            &prune(),
+            &[prune()],
             &stems,
         )
         .unwrap();
@@ -979,7 +984,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
-            &prune(),
+            &[prune()],
             &["deckle-daily-2026-10-18".to_owned()],
         )
         .expect("the push succeeded");
@@ -1041,7 +1046,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
-            &prune(),
+            &[prune()],
             &[],
         )
         .unwrap();
@@ -1087,7 +1092,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             plan,
-            &prune(),
+            &[prune()],
             &[],
         )
         .expect("the push succeeded");
@@ -1107,7 +1112,7 @@ mod tests {
             &q,
             &mut Conn::with_opener(&target, fake::open),
             NONE,
-            &prune(),
+            &[prune()],
             &[],
         )
         .unwrap();

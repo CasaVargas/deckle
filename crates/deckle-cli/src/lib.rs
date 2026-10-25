@@ -3483,7 +3483,7 @@ fn sync_to(
         queue,
         &mut conn,
         plan,
-        &digest_prune(cfg),
+        &[digest_prune(cfg)],
         &finishing,
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
         &stems,

@@ -445,6 +445,21 @@ fn deliver_mtp(
 
 /// The names to remove so that only the `keep` greatest (by name) `<prefix>….kfx` files are
 /// left. Dated editions named `<prefix>YYYY-MM-DD.kfx` sort oldest first.
+/// `<prefix>YYYY-MM-DD.<ext>`, exactly: one paper's dated edition. Another paper's
+/// (`deckle-daily-kid-courier-2026-10-24.kfx` for prefix `deckle-daily-`) and an undated name
+/// (`deckle-daily-email-test.kfx`) aren't (many papers §4).
+pub fn is_dated(name: &str, prefix: &str) -> bool {
+    let Some((date, ext)) = name.strip_prefix(prefix).and_then(|r| r.split_once('.')) else {
+        return false;
+    };
+    !ext.is_empty()
+        && date.len() == 10
+        && date.char_indices().all(|(i, c)| match i {
+            4 | 7 => c == '-',
+            _ => c.is_ascii_digit(),
+        })
+}
+
 pub fn prunable<I: IntoIterator<Item = String>>(
     names: I,
     prefix: &str,
@@ -463,7 +478,7 @@ pub fn prunable_except<I: IntoIterator<Item = String>>(
 ) -> Vec<String> {
     let mut matching: Vec<String> = names
         .into_iter()
-        .filter(|n| n.starts_with(prefix) && n.ends_with(".kfx") && !exempt.contains(n))
+        .filter(|n| is_dated(n, prefix) && n.ends_with(".kfx") && !exempt.contains(n))
         .collect();
     matching.sort_unstable_by(|a, b| b.cmp(a));
     matching.into_iter().skip(keep).collect()
@@ -629,5 +644,36 @@ mod tests {
     fn a_folder_conn_has_no_mtp_session() {
         let target = Target::Folder(PathBuf::from("/nowhere"));
         assert!(Conn::new(&target).mtp().is_none());
+    }
+}
+
+#[cfg(test)]
+mod dated_tests {
+    use super::{is_dated, prunable};
+
+    #[test]
+    fn prunable_ignores_other_papers_and_undated_names() {
+        let names: Vec<String> = [
+            "deckle-daily-2026-10-20.kfx",
+            "deckle-daily-2026-10-21.kfx",
+            "deckle-daily-2026-10-22.kfx",
+            "deckle-daily-2026-10-23.kfx",
+            "deckle-daily-kid-courier-2026-10-17.kfx",
+            "deckle-daily-kid-courier-2026-10-24.kfx",
+            "deckle-daily-email-test.kfx",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            prunable(names.clone(), "deckle-daily-", 2),
+            ["deckle-daily-2026-10-21.kfx", "deckle-daily-2026-10-20.kfx"]
+        );
+        assert_eq!(
+            prunable(names, "deckle-daily-kid-courier-", 1),
+            ["deckle-daily-kid-courier-2026-10-17.kfx"]
+        );
+        assert!(is_dated("deckle-daily-2026-10-24.epub", "deckle-daily-"));
+        assert!(!is_dated("deckle-daily-2026-10-24", "deckle-daily-"));
+        assert!(!is_dated("deckle-daily-2026-1-024.kfx", "deckle-daily-"));
     }
 }
