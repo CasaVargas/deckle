@@ -824,10 +824,9 @@ mod tests {
         let before = std::fs::read_to_string(&main).unwrap();
 
         let st = paper_state_at(&main, Some(&slug));
-        assert!(
-            st.config_path.ends_with("papers/kid-courier.toml"),
-            "{}",
-            st.config_path
+        assert_eq!(
+            Path::new(&st.config_path),
+            deckle_digest::papers::paper_path(&main, &slug)
         );
         let mut cfg = st.config.unwrap();
         assert_eq!(cfg.title, "Kid Courier");
