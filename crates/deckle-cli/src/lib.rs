@@ -4700,8 +4700,12 @@ mod email_tests {
 
     fn keys() -> MemoryKeyring {
         let k = MemoryKeyring::default();
-        k.set(&deckle_digest::secret::account(&cfg(false)), PW)
-            .unwrap();
+        k.set(
+            deckle_digest::secret::SERVICE,
+            &deckle_digest::secret::account(&cfg(false)),
+            PW,
+        )
+        .unwrap();
         k
     }
 
