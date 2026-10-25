@@ -12,7 +12,7 @@ use serde::Serialize;
 use zeroize::Zeroizing;
 
 use crate::config::SubscriptionConfig;
-use crate::fetch::{BROWSER_AGENT, Http, Net, agent, read};
+use crate::fetch::{BROWSER_AGENT, Http, Net, agent, encode, read};
 use crate::publisher::{Access, Entitlement, Publisher, SiteClient, Walled, registry};
 use crate::secret::{Keyring, Source, site_password};
 
@@ -150,6 +150,9 @@ impl std::fmt::Debug for SiteAccount {
     }
 }
 
+/// A login the adapter reported as fine, followed by a stranger's page anyway.
+const NOT_STUCK: &str = "signed in, but the site still served a stranger's page";
+
 /// Where a site's session stands in this run.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum SessionState {
@@ -174,9 +177,10 @@ pub struct SiteStatus {
 /// What changes during a run, behind the site's short-held lock.
 struct Run {
     state: SessionState,
-    failures: u8,
+    /// Login attempts this run, successes included; two stop further logins.
+    attempts: u8,
     last_failure: String,
-    /// Successful logins so far: a fetch that saw a stranger's page knows whether
+    /// Logins that stuck so far: a fetch that saw a stranger's page knows whether
     /// someone signed in after it looked.
     logins: u32,
 }
@@ -352,7 +356,7 @@ impl SessionNet {
     }
 
     /// Signs in now (the "test sign-in"), whatever the jar holds. Counts toward the two
-    /// failures that stop logins for the run.
+    /// two attempts that stop logins for the run.
     pub fn sign_in(&self, site: &str) -> SessionState {
         let Some(s) = self.sites.get(site) else {
             return SessionState::NoAdapter;
@@ -361,8 +365,13 @@ impl SessionNet {
             s.run().state = SessionState::NoAdapter;
             return SessionState::NoAdapter;
         };
-        let _login = s.login.lock().unwrap_or_else(|e| e.into_inner());
-        match self.log_in(s, adapter) {
+        let login = s.login.lock().unwrap_or_else(|e| e.into_inner());
+        let tried = self.log_in(s, adapter);
+        if tried.is_ok() {
+            s.run().logins += 1;
+        }
+        drop(login);
+        match tried {
             Err(why) => match why {
                 Walled::NotSignedIn => SessionState::NoPassword(s.no_password_note()),
                 Walled::LoginFailed(e) => SessionState::LoginFailed(e),
@@ -404,13 +413,17 @@ impl SessionNet {
             .clone()
     }
 
-    /// One login attempt, unless two have failed or there is no password. The caller holds
-    /// `s.login`.
+    /// One login attempt, unless two have been made this run or there is no password. The
+    /// caller holds `s.login`, and on `Ok` confirms the login stuck (or records that it didn't
+    /// with [`Self::failed`]) before counting it in `logins`.
     fn log_in(&self, s: &Site, adapter: &dyn Publisher) -> Result<(), Walled> {
         {
-            let run = s.run();
-            if run.failures >= 2 {
+            let mut run = s.run();
+            if run.attempts >= 2 {
                 return Err(Walled::LoginFailed(run.last_failure.clone()));
+            }
+            if s.account.password.is_some() {
+                run.attempts += 1;
             }
         }
         let Some(pw) = s.account.password.as_ref() else {
@@ -419,25 +432,28 @@ impl SessionNet {
         };
         match adapter.login(&s.account.site, &s.account.username, pw, s.client.as_ref()) {
             Ok(()) => {
-                let mut run = s.run();
-                run.logins += 1;
-                run.state = SessionState::SignedIn { service: None };
+                s.run().state = SessionState::SignedIn { service: None };
                 Ok(())
             }
             Err(e) => {
-                // The adapter's message should never hold the password; make sure.
+                // The adapter's message should never hold the password, plain or as posted.
                 let e = if pw.is_empty() {
                     e
                 } else {
                     e.replace(pw.as_str(), "<redacted>")
+                        .replace(&encode(pw), "<redacted>")
                 };
-                let mut run = s.run();
-                run.failures = run.failures.saturating_add(1);
-                run.last_failure = e.clone();
-                run.state = SessionState::LoginFailed(e.clone());
-                Err(Walled::LoginFailed(e))
+                Err(Self::failed(s, e))
             }
         }
+    }
+
+    /// Records a failed login and the note every later stranger's page will carry.
+    fn failed(s: &Site, e: String) -> Walled {
+        let mut run = s.run();
+        run.last_failure = e.clone();
+        run.state = SessionState::LoginFailed(e.clone());
+        Walled::LoginFailed(e)
     }
 
     /// The dance (design §5): fetch, sign in if a stranger's page, refetch, unlock.
@@ -461,12 +477,22 @@ impl SessionNet {
         if !adapter.signed_in(&String::from_utf8_lossy(&body)) {
             let login = s.login.lock().unwrap_or_else(|e| e.into_inner());
             // Another fetch may have signed in while this one waited for the lock.
-            let raced = s.run().logins != seen;
-            if !raced && let Err(why) = self.log_in(s, adapter) {
-                return walled(body, why);
+            if s.run().logins != seen {
+                drop(login);
+                body = s.client.get(url)?;
+            } else {
+                if let Err(why) = self.log_in(s, adapter) {
+                    return walled(body, why);
+                }
+                // The one refetch, still inside the critical section: did the login stick?
+                body = s.client.get(url)?;
+                if !adapter.signed_in(&String::from_utf8_lossy(&body)) {
+                    let why = Self::failed(s, NOT_STUCK.into());
+                    return walled(body, why);
+                }
+                s.run().logins += 1;
+                drop(login);
             }
-            drop(login);
-            body = s.client.get(url)?;
         }
         let ent = self.entitlement(s, adapter);
         let service = ent.services.first().cloned();
@@ -494,6 +520,8 @@ impl Site {
         jar: Option<(PathBuf, Arc<UreqSite>)>,
         jar_note: Option<String>,
     ) -> Self {
+        let mut account = account;
+        account.site = account.site.trim().to_lowercase();
         let state = if account.password.is_some() {
             SessionState::NotTried
         } else {
@@ -512,7 +540,7 @@ impl Site {
             login: Mutex::new(()),
             run: Mutex::new(Run {
                 state,
-                failures: 0,
+                attempts: 0,
                 last_failure: String::new(),
                 logins: 0,
             }),
@@ -672,6 +700,8 @@ mod net_tests {
         signed_in: bool,
         logins: Vec<(String, String)>,
         accept: bool,
+        /// The login "works" (a member's page comes back) but no session sticks.
+        fickle: bool,
         gets: Vec<String>,
     }
 
@@ -713,6 +743,9 @@ mod net_tests {
             {
                 let mut s = self.0.lock().unwrap();
                 s.logins.push((url.to_string(), body.to_string()));
+                if s.fickle {
+                    return Ok(b"<html>USER</html>".to_vec());
+                }
                 if s.accept {
                     s.signed_in = true;
                 }
@@ -868,6 +901,47 @@ mod net_tests {
     }
 
     #[test]
+    fn a_login_that_never_sticks_stops_after_two_attempts() {
+        let site = FakeSite::new(false, true);
+        site.0.lock().unwrap().fickle = true;
+        let n = net(&site, account("me", Some(PW), Some("fake")));
+        for _ in 0..5 {
+            let (body, access) = n.get_page_as(STORY).unwrap();
+            assert_eq!(body, b"<html>LOGIN</html>");
+            assert_eq!(
+                access,
+                Access::Walled {
+                    site: "thepilot.com".into(),
+                    why: Walled::LoginFailed(
+                        "signed in, but the site still served a stranger's page".into()
+                    )
+                }
+            );
+        }
+        assert_eq!(site.logins().len(), 2);
+    }
+
+    #[test]
+    fn eight_parallel_failures_still_stop_at_two_logins() {
+        let site = FakeSite::new(false, false);
+        let n = net(&site, account("me", Some(PW), Some("fake")));
+        let urls: Vec<String> = (0..8)
+            .map(|i| format!("https://www.thepilot.com/news/{i}.html"))
+            .collect();
+        let got = crate::sources::feeds::par_map(&urls, |u| n.get_page_as(u).unwrap().1);
+        assert_eq!(site.logins().len(), 2);
+        for a in got {
+            assert_eq!(
+                a,
+                Access::Walled {
+                    site: "thepilot.com".into(),
+                    why: Walled::LoginFailed("bad password".into())
+                }
+            );
+        }
+    }
+
+    #[test]
     fn no_password_means_not_signed_in_without_a_login_attempt() {
         let site = FakeSite::new(false, true);
         let n = net(&site, account("me", None, Some("fake")));
@@ -943,6 +1017,13 @@ mod net_tests {
             None
         );
         assert_eq!(n.site_for("not a url"), None);
+        let mut acct = account("me", Some(PW), Some("fake"));
+        acct.site = " ThePilot.com ".into();
+        let mixed = net(&site, acct);
+        assert_eq!(
+            mixed.site_for("https://www.thepilot.com/a").as_deref(),
+            Some("thepilot.com")
+        );
         // Another host goes through the anonymous client (a local server here).
         let (url, _) = super::tests::fixture(1);
         let (body, access) = n.get_page_as(&url).unwrap();
@@ -993,6 +1074,8 @@ mod net_tests {
 
     #[test]
     fn a_login_error_echoing_the_password_is_scrubbed() {
+        const LEAKY_PW: &str = "s3cret p+w&d!";
+        assert_ne!(encode(LEAKY_PW), LEAKY_PW);
         struct Leaky;
         impl Publisher for Leaky {
             fn kind(&self) -> &'static str {
@@ -1005,7 +1088,7 @@ mod net_tests {
                 false
             }
             fn login(&self, _: &str, _: &str, pw: &str, _: &dyn SiteClient) -> Result<(), String> {
-                Err(format!("rejected {pw}"))
+                Err(format!("rejected {pw}; posted password={}", encode(pw)))
             }
             fn entitlement(&self, _: &str, _: &dyn SiteClient) -> Result<Entitlement, String> {
                 Err("no".into())
@@ -1024,14 +1107,16 @@ mod net_tests {
         let n = SessionNet::with_clients(
             Http,
             vec![(
-                account("me", Some(PW), Some("fake")),
+                account("me", Some(LEAKY_PW), Some("fake")),
                 Box::new(site.clone()) as Box<dyn SiteClient>,
             )],
             vec![Box::new(Leaky)],
         );
         let (_, access) = n.get_page_as(STORY).unwrap();
         let shown = format!("{access:?} {:?}", n.status());
-        assert!(!shown.contains(PW), "{shown}");
+        assert!(!shown.contains(LEAKY_PW), "{shown}");
+        assert!(!shown.contains(&encode(LEAKY_PW)), "{shown}");
+        assert!(shown.contains("<redacted>"), "{shown}");
     }
 
     #[test]
