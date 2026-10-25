@@ -109,6 +109,10 @@ Designed, with a written plan, and waiting for code: **One Mac, many papers**
   FictionBook (`.fb2`, `.fb2.zip`), DRM-free Kindle books (`.mobi`, `.azw`, `.azw3`, `.prc`),
   web articles (a URL, `.webloc`/`.url`, or a saved `.html`) go through the same pipeline. A
   finished `.kfx` is sent as is. DRM-protected files are refused, never decrypted.
+- **Several Kindles in one home.** Name each Kindle, then send a book to *Mom's Kindle* by
+  name, even when it's in her bag: it waits in the outbox until that Kindle connects, and no
+  other Kindle takes it. A book dropped in `Inbox/Mom's Kindle/` does the same. With one
+  Kindle nothing changes.
 - **Bind several files into one book.** EPUBs, Word, OpenDocument and RTF files, DRM-free
   Kindle books, text files, FB2, PDFs and web articles become one book, in your order, each
   with its own entry in the contents: a course packet, a week of saved long reads, a report in
@@ -209,6 +213,8 @@ skipped and the book and X-Ray still ship.
 ```sh
 cargo build --release -p deckle-cli               # binary at target/release/deckle
 deckle devices                                    # connected Kindles (mass storage and MTP)
+deckle devices name "Mom's Kindle"                # name the connected Kindle
+deckle run book.epub --kindle "Mom's Kindle"      # to that Kindle; queued until it connects
 deckle run book.epub --to device                  # convert, enrich, send
 deckle run book.epub --to ./out --cde pdoc        # export to a folder, cover-first
 deckle run book.epub --to device --cde ebok --asin B0XXXXXXXX   # real ASIN: store cover on MTP Kindles

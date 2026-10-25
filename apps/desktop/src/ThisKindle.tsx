@@ -3,15 +3,19 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { defaultSpare, size, spaceSlices, spareLine } from "./kindleRooms";
-import type { BackupReport, DeviceShelf, RunTarget } from "./types";
+import type { BackupReport, DeviceRow, DeviceShelf, RunTarget } from "./types";
 
 interface Props {
   target: RunTarget;
+  /** The Kindle's row, for its name; null when the footer has none. */
+  device: DeviceRow | null;
   shelf: DeviceShelf;
   busy: boolean;
   /** After something changed the Kindle or the backups. */
   onChanged: () => Promise<void>;
   onNotice: (msg: string | null) => void;
+  /** After the Kindle was named. */
+  onRenamed: () => Promise<void>;
 }
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -20,7 +24,23 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * This Kindle (Books and Kindle design §7): where the space goes, what could make room, and a
  * backup of every DRM-free book with its reading position and highlights.
  */
-export default function ThisKindle({ target, shelf, busy, onChanged, onNotice }: Props) {
+export default function ThisKindle({ target, device, shelf, busy, onChanged, onNotice, onRenamed }: Props) {
+  const [name, setName] = useState(device?.name ?? "");
+  const [naming, setNaming] = useState(false);
+  useEffect(() => setName(device?.name ?? ""), [device?.sync_id, device?.name]);
+  const saveName = async () => {
+    if (!device) return;
+    setNaming(true);
+    try {
+      await api.nameKindle(device.sync_id, name);
+      await onRenamed();
+      onNotice(name.trim() ? `This Kindle is now "${name.trim()}". Send to it by name, even when it's not plugged in.` : "Name cleared.");
+    } catch (e) {
+      onNotice(String(e));
+    } finally {
+      setNaming(false);
+    }
+  };
   const [ticked, setTicked] = useState<Set<string>>(() => defaultSpare(shelf.spare));
   const [confirming, setConfirming] = useState(false);
   const [working, setWorking] = useState<"removing" | "backing-up" | "restoring" | null>(null);
@@ -97,6 +117,18 @@ export default function ThisKindle({ target, shelf, busy, onChanged, onNotice }:
   const idle = !busy && working === null;
   return (
     <div className="this-kindle">
+      {device && (
+        <section className="card" aria-label="Name">
+          <h3>Name</h3>
+          <p className="muted small">A name tells this Kindle apart from the others in the house. Books can be sent to it by name with the CLI, or by dropping them in a folder of that name in the Inbox, and they wait for it when it isn't plugged in.</p>
+          <div className="button-row">
+            <input type="text" value={name} placeholder={device.model_hint} onChange={(e) => setName(e.target.value)} aria-label="Kindle name" />
+            <button className="ghost" disabled={busy || naming || name.trim() === (device.name ?? "")} onClick={saveName}>
+              {naming ? "Saving…" : "Save name"}
+            </button>
+          </div>
+        </section>
+      )}
       {shelf.split ? (
         <section className="card" aria-label="Space">
           <h3>

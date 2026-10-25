@@ -4,6 +4,7 @@ import { flushSync } from "react-dom";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, coverRequest } from "./api";
+import { deviceLabel } from "./deviceLabel";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
 import BeforeYouSend from "./BeforeYouSend";
@@ -503,7 +504,7 @@ export default function App() {
         </header>
 
         {tab === "daily" && <DailyView onNotice={setNotice} />}
-        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} />}
+        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} />}
         {tab === "books" && articleOpen && (
           <ArticleField
             ref={articleInput}
@@ -599,12 +600,12 @@ export default function App() {
             {devices.length === 0 ? (
               "No Kindle connected"
             ) : devices.length === 1 ? (
-              <span title={device?.root ?? undefined}>{device?.model_hint}</span>
+              <span title={device?.root ?? undefined}>{device && deviceLabel(device)}</span>
             ) : (
               <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
                 {devices.map((d) => (
                   <option key={d.key} value={d.key}>
-                    {d.model_hint}
+                    {deviceLabel(d)}
                   </option>
                 ))}
               </select>

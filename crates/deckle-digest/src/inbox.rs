@@ -137,6 +137,9 @@ pub fn scan_with_books(
     scan_for_kindles(dir, queue, now, &[], &mut |book, _| send_later(book))
 }
 
+/// Takes a settled book, with the id of the Kindle it's meant for (from its folder), if any.
+pub type SendLater<'a> = dyn FnMut(&Path, Option<&str>) -> Result<(), Skip> + 'a;
+
 /// Folders the Inbox makes itself, never a Kindle's.
 const OWN_FOLDERS: [&str; 3] = ["Sent", "Saved", "Unreadable"];
 
@@ -149,7 +152,7 @@ pub fn scan_for_kindles(
     queue: &ReadingQueue,
     now: SystemTime,
     kindles: &[(String, String)],
-    send_later: &mut dyn FnMut(&Path, Option<&str>) -> Result<(), Skip>,
+    send_later: &mut SendLater,
 ) -> ScanReport {
     let mut report = ScanReport::default();
     if std::fs::create_dir_all(dir).is_err() {
@@ -193,7 +196,7 @@ fn scan_files(
     queue: &ReadingQueue,
     now: SystemTime,
     owner: Option<&str>,
-    send_later: &mut dyn FnMut(&Path, Option<&str>) -> Result<(), Skip>,
+    send_later: &mut SendLater,
     report: &mut ScanReport,
 ) {
     let Ok(entries) = std::fs::read_dir(dir) else {

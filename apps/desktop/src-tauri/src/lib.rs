@@ -54,6 +54,7 @@ pub fn run() {
             commands::import_articles,
             commands::list_devices,
             commands::set_device_options,
+            commands::name_kindle,
             commands::plan_books,
             commands::previewer_status,
             commands::get_settings,

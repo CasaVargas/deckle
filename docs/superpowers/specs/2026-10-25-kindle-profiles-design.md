@@ -112,3 +112,22 @@ folder name matched like `--kindle`) is queued for that Kindle.
 - **Desktop:** the picker label and naming command have unit tests; the This Kindle field is
   checked in the running app.
 - **Unchanged:** one Kindle and no names behave exactly as before; all existing tests pass.
+
+## 5. Implementation notes (2026-10-25, #37)
+
+These are the calls made where §2 left room, so the code and this document agree:
+
+- **Inbox folders keep their own `Sent/`, `Saved/` and `Unreadable/`** beside the books, rather
+  than moving them up to the Inbox's own, so each Kindle's folder reads on its own.
+- **Ownership is written before an entry appears.** A prepared book's `.for` file goes in before
+  its folder is renamed into place. A KFX's goes in before its `.part` copy is renamed. A
+  `watch` running alongside can never hand the entry to another Kindle.
+- **A flush to a folder target** (`digest push --to <folder>`) counts the folder as its own
+  Kindle, so owned entries wait for their real Kindle.
+- **`run --to device` without `--kindle`** and with several Kindles connected sends to the
+  first, as before, and says so on stderr.
+- **Known limitation, outside this change.** The desktop's device registry keys a
+  mass-storage Kindle by `ms:<model>[#serial]`. Two Kindles of one model whose USB serial the
+  OS doesn't report share a key, and the app's picker can't tell them apart (seen with two fake
+  Kindles). Real Kindles normally report their serial. Changing the key orphans saved
+  profiles, so it gets its own issue.
