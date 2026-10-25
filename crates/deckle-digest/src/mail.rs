@@ -99,13 +99,35 @@ impl EmailReport {
 
 /// `Deckle Daily — Wednesday, October 21, 2026`, with `deckle-daily-2026-10-21.epub`.
 pub fn edition_message(cfg: &EmailConfig, date: NaiveDate, epub: Vec<u8>) -> Outgoing {
+    paper_message(
+        cfg,
+        None,
+        &format!("{}{date}", crate::EDITION_PREFIX),
+        date,
+        epub,
+    )
+}
+
+/// One paper's edition (many papers §4): the main paper (`title` `None`) as
+/// [`edition_message`]; another as `<title> — <date>`, with `<stem>.epub`.
+pub fn paper_message(
+    cfg: &EmailConfig,
+    title: Option<&str>,
+    stem: &str,
+    date: NaiveDate,
+    epub: Vec<u8>,
+) -> Outgoing {
     Outgoing {
         to: cfg.to.trim().to_owned(),
         from: cfg.from.trim().to_owned(),
-        subject: format!("Deckle Daily — {}", crate::long_date(date)),
+        subject: format!(
+            "{} — {}",
+            title.unwrap_or("Deckle Daily"),
+            crate::long_date(date)
+        ),
         body: "Today's Deckle Daily is attached; Send-to-Kindle puts it in your Kindle's Docs."
             .into(),
-        attachment: (format!("{}{date}.epub", crate::EDITION_PREFIX), epub),
+        attachment: (format!("{stem}.epub"), epub),
     }
 }
 
@@ -119,11 +141,28 @@ pub fn email_edition<M: Mailer>(
     env: &dyn Fn(&str) -> Option<String>,
     connect: impl FnOnce(Zeroizing<String>) -> M,
 ) -> Option<EmailReport> {
+    let stem = format!("{}{date}", crate::EDITION_PREFIX);
+    email_paper(cfg, None, &stem, date, epub, keys, env, connect)
+}
+
+/// [`email_edition`] for one paper (many papers §4): its own `to`, on the account `cfg`
+/// carries; `title` `None` for the main paper.
+#[allow(clippy::too_many_arguments)]
+pub fn email_paper<M: Mailer>(
+    cfg: &EmailConfig,
+    title: Option<&str>,
+    stem: &str,
+    date: NaiveDate,
+    epub: &Path,
+    keys: &dyn Keyring,
+    env: &dyn Fn(&str) -> Option<String>,
+    connect: impl FnOnce(Zeroizing<String>) -> M,
+) -> Option<EmailReport> {
     if !cfg.enabled {
         return None;
     }
     let sent = send_file(cfg, epub, keys, env, connect, |bytes| {
-        edition_message(cfg, date, bytes)
+        paper_message(cfg, title, stem, date, bytes)
     });
     Some(match sent {
         Ok(src) => EmailReport {
@@ -333,6 +372,22 @@ mod tests {
             username: "me@example.com".into(),
             usb_too: false,
         }
+    }
+
+    #[test]
+    fn each_paper_has_its_subject_and_attachment() {
+        let m = edition_message(&cfg(), date(), Vec::new());
+        assert_eq!(m.subject, "Deckle Daily — Wednesday, October 21, 2026");
+        assert_eq!(m.attachment.0, "deckle-daily-2026-10-21.epub");
+        let m = paper_message(
+            &cfg(),
+            Some("The Kid Courier"),
+            "deckle-daily-kid-courier-2026-10-21",
+            date(),
+            Vec::new(),
+        );
+        assert_eq!(m.subject, "The Kid Courier — Wednesday, October 21, 2026");
+        assert_eq!(m.attachment.0, "deckle-daily-kid-courier-2026-10-21.epub");
     }
 
     fn date() -> NaiveDate {

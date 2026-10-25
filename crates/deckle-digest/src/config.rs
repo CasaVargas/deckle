@@ -60,6 +60,18 @@ pub struct Config {
     #[serde(skip_serializing_if = "crate::editor::EditorConfig::is_default")]
     pub llm: crate::editor::EditorConfig,
     pub title: String,
+    /// Who the paper is for, on its card: "for Dad, in Ohio" (many papers §3).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub reader: String,
+    /// The Kindle this paper goes to, by its name or sync id; empty: any Kindle (many papers §4).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub kindle: String,
+    /// A layout made for big type (many papers §6).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub large_print: bool,
+    /// When the paper is built (many papers §5). Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "ScheduleConfig::is_default")]
+    pub schedule: ScheduleConfig,
     /// The face the paper's name is drawn in (masthead design §1). Left out of a save while it's
     /// the default.
     #[serde(skip_serializing_if = "crate::masthead::MastheadFont::is_default")]
@@ -124,6 +136,85 @@ pub struct Config {
     /// What the Kindles shared (tests); the default is `shelf.json` beside `digest.toml`.
     #[serde(skip)]
     pub shelf_path: Option<PathBuf>,
+    /// Which paper this is (many papers §3): `None` for `digest.toml`'s, the main paper.
+    #[serde(skip)]
+    pub paper: Option<PaperRef>,
+}
+
+/// An extra paper: its slug (the file stem in `papers/`) and the folder its state lives in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PaperRef {
+    pub slug: String,
+    pub state_dir: PathBuf,
+}
+
+/// A day of the week, for `[schedule] days`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Day {
+    Mon,
+    Tue,
+    Wed,
+    Thu,
+    Fri,
+    Sat,
+    Sun,
+}
+
+impl Day {
+    pub const ALL: [Day; 7] = [
+        Day::Mon,
+        Day::Tue,
+        Day::Wed,
+        Day::Thu,
+        Day::Fri,
+        Day::Sat,
+        Day::Sun,
+    ];
+
+    /// `mon` … `sun`, as written in the config.
+    pub fn key(self) -> &'static str {
+        match self {
+            Day::Mon => "mon",
+            Day::Tue => "tue",
+            Day::Wed => "wed",
+            Day::Thu => "thu",
+            Day::Fri => "fri",
+            Day::Sat => "sat",
+            Day::Sun => "sun",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Day> {
+        Day::ALL
+            .into_iter()
+            .find(|d| d.key().eq_ignore_ascii_case(s.trim()))
+    }
+}
+
+/// `[schedule]`: when the paper is built (many papers §5).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScheduleConfig {
+    /// 24-hour time, e.g. "05:30"; unset: not scheduled from this file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<String>,
+    /// Empty: every day.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub days: Vec<Day>,
+}
+
+impl ScheduleConfig {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(at) = &self.at {
+            crate::schedule::parse_at(at).map_err(|e| format!("[schedule] at: {e}"))?;
+        }
+        Ok(())
+    }
 }
 
 impl Default for Config {
@@ -169,6 +260,11 @@ impl Default for Config {
             puzzle_path: None,
             force_color: false,
             shelf_path: None,
+            reader: String::new(),
+            kindle: String::new(),
+            large_print: false,
+            schedule: ScheduleConfig::default(),
+            paper: None,
         }
     }
 }
@@ -874,6 +970,9 @@ pub const STARTER: &str = r#"# Deckle Daily — your morning paper, built on thi
 # Edit freely; `deckle digest build` shows what a change does.
 
 title = "The Deckle Daily"
+# reader = "the whole house"      # who it's for, on its card in the Daily tab
+# kindle = "Mom's Kindle"         # only this Kindle gets it (its name or sync id); unset: any
+# large_print = true              # a layout for big type; set the size itself on the Kindle (Aa)
 # masthead = "blackletter"        # the title's typeface: "serif", "sans", or the path to a .ttf
 place = "New York, NY"            # shown on the masthead and the weather page
 latitude = 40.71                  # for the forecast (Open-Meteo, no key)
@@ -973,6 +1072,11 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # username = "you@example.com"
 # usb_too = false            # also queue the paper for USB when the email succeeds
 
+# When the paper is built, once `deckle digest schedule` is installed.
+# [schedule]
+# at = "05:30"                    # 24-hour
+# days = ["sat", "sun"]           # mon … sun; leave out for every day
+
 # Also put each edition in a folder, plugged in or not: an iCloud Drive folder reaches an
 # iPad's Files app (open it in Books), Dropbox reaches a Boox. Add one block per folder.
 # [[export]]
@@ -994,14 +1098,67 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # books = false                   # also the long reads, as EPUBs
 "#;
 
+/// A new extra paper (`deckle digest papers new`, the app's New paper): `{title}`, `{reader}`
+/// and `{place}` are filled in as TOML strings, and `{location}` with the main paper's latitude
+/// and longitude lines (empty when it has none).
+pub const PAPER_STARTER: &str = r#"# A Deckle Daily paper of its own (many papers). The household settings, [sync], [reading]
+# and the email account, are set in digest.toml for every paper.
+
+title = {title}
+reader = {reader}                 # who it's for, on its card in the Daily tab
+# kindle = "Mom's Kindle"         # only this Kindle gets it (its name or sync id); unset: any
+# large_print = true              # a layout for big type; set the size itself on the Kindle (Aa)
+place = {place}
+{location}units = "imperial"                # or "metric"
+keep = 3                          # editions kept on the Kindle
+
+sections = ["weather", "local", "feeds"]
+
+[local]
+google_news = ""                  # a Google News search, e.g. "Toledo OH"
+feeds = []
+
+# [schedule]
+# at = "06:00"                    # 24-hour
+# days = ["sat"]                  # mon … sun; leave out for every day
+
+# Email this paper to its own Kindle address, on the account set in digest.toml.
+# [email]
+# enabled = true
+# to = "dad_ABC123@kindle.com"
+# usb_too = false
+"#;
+
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
         let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
         cfg.normalize();
         cfg.email.validate()?;
         cfg.llm.validate()?;
+        cfg.schedule.validate()?;
         validate_exports(&cfg.export)?;
         Ok(cfg)
+    }
+
+    /// Where an extra paper keeps a state file (`papers/<slug>/<name>`); `None` for the main
+    /// paper, which keeps today's paths.
+    pub fn state_file(&self, name: &str) -> Option<PathBuf> {
+        self.paper.as_ref().map(|p| p.state_dir.join(name))
+    }
+
+    /// The build's work folder under `cache`: `digest`, or `digest/papers/<slug>`.
+    pub fn work_dir(&self, cache: &Path) -> PathBuf {
+        match &self.paper {
+            None => cache.join("digest"),
+            Some(p) => cache.join("digest").join("papers").join(&p.slug),
+        }
+    }
+
+    /// `main` for `digest.toml`'s paper, else the extra paper's slug.
+    pub fn slug(&self) -> &str {
+        self.paper
+            .as_ref()
+            .map_or(crate::papers::MAIN, |p| p.slug.as_str())
     }
 
     /// Fills in what a person (or the app's "Add feed") left unset: a feed's `max_items` of 0
@@ -1026,19 +1183,34 @@ impl Config {
 pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     cfg.email.validate()?;
     cfg.llm.validate()?;
+    cfg.schedule.validate()?;
     validate_exports(&cfg.export)?;
     let mut cfg = cfg.clone();
     cfg.normalize();
     let cfg = &cfg;
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => STARTER.to_owned(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match cfg.paper {
+            None => STARTER.to_owned(),
+            Some(_) => String::new(),
+        },
         Err(e) => return Err(format!("{}: {e}", path.display())),
     };
     let mut doc: toml_edit::DocumentMut = text
         .parse()
         .map_err(|e| format!("{}: {e}", path.display()))?;
-    let new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
+    let mut new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
+    // Another paper's file never holds the household settings it inherits (many papers §3).
+    if cfg.paper.is_some() {
+        let t = new.as_table_mut();
+        t.remove("sync");
+        t.remove("reading");
+        if let Some(email) = t.get_mut("email").and_then(|e| e.as_table_like_mut()) {
+            for key in ["from", "smtp_host", "smtp_port", "username"] {
+                email.remove(key);
+            }
+        }
+    }
     merge_table(doc.as_table_mut(), new.as_table());
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;

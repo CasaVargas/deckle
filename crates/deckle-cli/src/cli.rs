@@ -286,6 +286,10 @@ pub enum Command {
         /// The digest config (default: `digest.toml` in Deckle's config folder).
         #[arg(long, global = true)]
         config: Option<PathBuf>,
+        /// Which paper (`deckle digest papers`): `main` is digest.toml's, else
+        /// `papers/<slug>.toml`. `push` and `watch` always serve every paper.
+        #[arg(long, global = true)]
+        paper: Option<String>,
         #[command(subcommand)]
         action: DigestCommand,
     },
@@ -522,6 +526,27 @@ pub enum DigestCommand {
     Readership {
         #[command(subcommand)]
         action: Option<ReadershipCommand>,
+    },
+    /// The papers this Mac prints (many papers): digest.toml's and each `papers/<slug>.toml`.
+    Papers {
+        #[command(subcommand)]
+        action: Option<PapersCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PapersCommand {
+    /// Start another paper, `papers/<slug>.toml`, from the main paper's place.
+    New {
+        /// Its name, e.g. "The Kid Courier".
+        #[arg(long)]
+        title: String,
+        /// Its file name (default: made from the title, "kid-courier").
+        #[arg(long)]
+        slug: Option<String>,
+        /// Who it's for, e.g. "Maya".
+        #[arg(long = "for")]
+        reader: Option<String>,
     },
 }
 

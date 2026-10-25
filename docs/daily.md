@@ -352,6 +352,45 @@ shelf = true      # read the books (and what the Kindle shares) when it connects
 
 Unlike books, the digest goes online by design: each edition fetches the sources in your config.
 
+## Many papers: one for each Kindle
+
+One Mac can print a separate paper for each Kindle in the house. `digest.toml` stays the main
+paper. Each other paper is a file of its own in `papers/` beside it:
+
+```bash
+deckle digest papers new --title "The Kid Courier" --for "Maya"   # writes papers/kid-courier.toml
+deckle digest papers                                              # lists every paper
+deckle digest --paper kid-courier run                             # builds that one now
+```
+
+A paper's file name, its *slug*, is lowercase letters, digits and dashes (`kid-courier`). Each
+paper has its own title, sections, feeds, place, `keep`, export folders, reMarkable and email
+`to`, plus three new keys:
+
+```toml
+reader = "Maya"                   # who it's for
+kindle = "Mom's Kindle"           # only this Kindle gets it (its name or sync id); leave out for any
+large_print = true                # (a layout for big type; coming)
+```
+
+- **Shared settings.** `[sync]`, `[reading]` (the Inbox and saved articles) and the email
+  account (`from`, `smtp_host`, `smtp_port`, `username`) are household settings. They're set
+  in `digest.toml` only, and every paper uses them. A paper file that sets one is refused,
+  with a message saying which.
+- **Saved articles** print in the main paper only.
+- **Bound papers.** A paper with `kindle` set waits in the outbox until that Kindle connects,
+  and no other Kindle takes it. `push` says "1 book waits for Mom's Kindle". Name a Kindle
+  first with `deckle devices name`. A bound paper doesn't go to a Kobo, PocketBook, reMarkable
+  or export folder.
+- **Pruning.** Each paper's editions are named `deckle-daily-<slug>-YYYY-MM-DD`. Each paper is
+  pruned by its own `keep`, so one paper never removes another's.
+- **Per-paper state.** Each paper keeps its own readership and puzzles in `papers/<slug>/`, and
+  its Morgue editions in a `<slug>/` folder inside the Morgue.
+- **For now:** the `digest morgue` commands and `digest schedule` work on the main paper only.
+  Schedule an extra paper with your own scheduler (`deckle digest --paper <slug> run`).
+  Per-paper schedules, large print and the app's Your papers are coming.
+- **Removing a paper:** delete its file.
+
 ## The title's typeface
 
 The paper's name is drawn on the cover, and at the top of the PDF edition, in a blackletter face

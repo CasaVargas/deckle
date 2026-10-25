@@ -78,7 +78,7 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
         (_, Some(c), true) => c.clone(),
         _ => built.epub.clone(),
     };
-    let name = format!("{EDITION_PREFIX}{date}.{}", extension(e.format));
+    let name = format!("{}{date}.{}", built.prefix, extension(e.format));
     let mut files = vec![(paper, name)];
     if e.books {
         let reads = match color && built.color_long_reads.len() == built.long_reads.len() {
@@ -103,7 +103,7 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
             }
         }
     }
-    match prune_ext(&dir, e.keep, extension(e.format)) {
+    match prune_ext_for(&dir, e.keep, extension(e.format), &built.prefix) {
         Ok(gone) => report.pruned = gone,
         Err(why) => report.error = Some(why),
     }
@@ -123,7 +123,7 @@ fn export_bundle(
         report.error = Some("the edition bundle wasn't built".into());
         return report;
     };
-    let name = crate::bundle::bundle_name(date);
+    let name = format!("{}{date}.deckle", built.prefix);
     let tmp = dir.join(format!(".{name}.tmp"));
     let to = dir.join(&name);
     let copied = (|| -> std::io::Result<()> {
@@ -140,7 +140,7 @@ fn export_bundle(
         return report;
     }
     report.written.push(to);
-    match prune_dirs(&dir, e.keep) {
+    match prune_dirs(&dir, e.keep, &built.prefix) {
         Ok(gone) => report.pruned = gone,
         Err(why) => report.error = Some(why),
     }
@@ -164,7 +164,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Removes all but the newest `keep` bundles (`deckle-daily-YYYY-MM-DD.deckle` folders) in
 /// `dir`; 0 keeps all. A bundle still being written has a hidden name and never counts.
-fn prune_dirs(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
+fn prune_dirs(dir: &Path, keep: usize, prefix: &str) -> Result<Vec<PathBuf>, String> {
     if keep == 0 {
         return Ok(Vec::new());
     }
@@ -174,7 +174,7 @@ fn prune_dirs(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
         .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let date = name.strip_prefix(EDITION_PREFIX)?.strip_suffix(".deckle")?;
+            let date = name.strip_prefix(prefix)?.strip_suffix(".deckle")?;
             let date = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
             Some((date, entry.path()))
         })
@@ -223,6 +223,17 @@ pub fn prune(dir: &Path, keep: usize) -> Result<Vec<PathBuf>, String> {
 
 /// [`prune`] for editions with extension `ext` (`deckle-daily-YYYY-MM-DD.<ext>`).
 pub fn prune_ext(dir: &Path, keep: usize, ext: &str) -> Result<Vec<PathBuf>, String> {
+    prune_ext_for(dir, keep, ext, EDITION_PREFIX)
+}
+
+/// [`prune_ext`] for one paper's editions, `<prefix>YYYY-MM-DD.<ext>`: another paper's in the
+/// same folder are left alone (many papers §4).
+pub fn prune_ext_for(
+    dir: &Path,
+    keep: usize,
+    ext: &str,
+    prefix: &str,
+) -> Result<Vec<PathBuf>, String> {
     if keep == 0 {
         return Ok(Vec::new());
     }
@@ -232,7 +243,7 @@ pub fn prune_ext(dir: &Path, keep: usize, ext: &str) -> Result<Vec<PathBuf>, Str
         .filter_map(|entry| {
             let name = entry.file_name().to_string_lossy().into_owned();
             let date = name
-                .strip_prefix(EDITION_PREFIX)?
+                .strip_prefix(prefix)?
                 .strip_suffix(ext)?
                 .strip_suffix('.')?;
             let date = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
@@ -303,6 +314,7 @@ mod tests {
             bundles: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
+            prefix: EDITION_PREFIX.to_owned(),
         }
     }
 

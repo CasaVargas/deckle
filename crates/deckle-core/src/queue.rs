@@ -127,6 +127,15 @@ fn queue_name(entry: &Path) -> String {
     }
 }
 
+/// Whether `replaces` (a prefix) supersedes queued `file`: it starts with the prefix and
+/// doesn't go on with a letter. `deckle-daily-` replaces `deckle-daily-2026-10-24.kfx` but not
+/// another paper's `deckle-daily-kid-courier-2026-10-24.kfx`, whose slug starts with a letter
+/// (many papers §4).
+fn replaced_by(file: &str, replaces: &str) -> bool {
+    file.strip_prefix(replaces)
+        .is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_alphabetic()))
+}
+
 /// `<entry>.for`: the id of the Kindle an entry is meant for.
 fn owner_file(entry: &Path) -> PathBuf {
     let mut name = entry.as_os_str().to_owned();
@@ -201,7 +210,8 @@ impl Queue {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
-            let superseded = replaces.is_some_and(|p| file.starts_with(p)) && !keep.contains(&file);
+            let superseded =
+                replaces.is_some_and(|p| replaced_by(&file, p)) && !keep.contains(&file);
             if superseded || queue_name(&old) == name {
                 remove_entry(&old)?;
             }
@@ -226,6 +236,28 @@ impl Queue {
         self.make_room(name, replaces, keep)?;
         let dest = self.dir.join(name);
         std::fs::copy(kfx, &dest)?;
+        Ok(dest)
+    }
+
+    /// [`Queue::add_keeping`], meant for the Kindle `owner` (its id) when given: a paper bound to
+    /// one Kindle (many papers §4).
+    pub fn add_keeping_for(
+        &self,
+        kfx: &Path,
+        name: &str,
+        replaces: Option<&str>,
+        keep: &[String],
+        owner: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
+        let Some(owner) = owner else {
+            return self.add_keeping(kfx, name, replaces, keep);
+        };
+        self.make_room(name, replaces, keep)?;
+        let dest = self.dir.join(name);
+        std::fs::write(owner_file(&dest), owner)?;
+        let part = self.dir.join(format!("{name}.part"));
+        std::fs::copy(kfx, &part)?;
+        std::fs::rename(&part, &dest)?;
         Ok(dest)
     }
 
@@ -583,6 +615,105 @@ mod tests {
         assert!(q.pending().is_empty());
         assert!(kindle.join("deckle-daily-2026-10-20.kfx").exists());
         assert!(kindle.join("other.kfx").exists());
+    }
+
+    #[test]
+    fn replace_keeps_other_papers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("p.kfx");
+        std::fs::write(&src, b"KFX").unwrap();
+        q.add(
+            &src,
+            "deckle-daily-kid-courier-2026-10-24.kfx",
+            Some("deckle-daily-kid-courier-"),
+        )
+        .unwrap();
+        q.add(&src, "deckle-daily-2026-10-24.kfx", Some("deckle-daily-"))
+            .unwrap();
+        q.add(&src, "deckle-daily-2026-10-25.kfx", Some("deckle-daily-"))
+            .unwrap();
+        let names: Vec<String> = q
+            .pending()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "deckle-daily-2026-10-25.kfx",
+                "deckle-daily-kid-courier-2026-10-24.kfx"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_bound_edition_waits_for_its_kindle_and_two_prunes_keep_their_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("p.kfx");
+        std::fs::write(&src, b"KFX").unwrap();
+        let mine = tmp.path().join("mine");
+        let other = tmp.path().join("other");
+        q.add_keeping_for(
+            &src,
+            "deckle-daily-kid-courier-2026-10-24.kfx",
+            Some("deckle-daily-kid-courier-"),
+            &[],
+            Some(&mine.display().to_string()),
+        )
+        .unwrap();
+        let r = q.flush(&Target::Folder(other.clone()), None).unwrap();
+        assert!(r.delivered.is_empty());
+        assert_eq!(r.waiting.len(), 1);
+
+        // On its own Kindle: delivered, then each paper pruned to its own keep.
+        std::fs::create_dir_all(&mine).unwrap();
+        for d in 20..=23 {
+            std::fs::write(mine.join(format!("deckle-daily-2026-10-{d}.kfx")), b"K").unwrap();
+        }
+        for d in [17, 18, 19] {
+            std::fs::write(
+                mine.join(format!("deckle-daily-kid-courier-2026-10-{d}.kfx")),
+                b"K",
+            )
+            .unwrap();
+        }
+        let prunes = [
+            Prune {
+                prefix: "deckle-daily-".into(),
+                keep: 3,
+                ..Default::default()
+            },
+            Prune {
+                prefix: "deckle-daily-kid-courier-".into(),
+                keep: 2,
+                ..Default::default()
+            },
+        ];
+        let r = crate::sync::run(
+            &q,
+            &mut Conn::new(&Target::Folder(mine.clone())),
+            crate::sync::Plan {
+                push: true,
+                prune: true,
+                ..Default::default()
+            },
+            &prunes,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(r.delivered.len(), 1);
+        let mut pruned = r.pruned.clone();
+        pruned.sort();
+        assert_eq!(
+            pruned,
+            [
+                "deckle-daily-2026-10-20.kfx",
+                "deckle-daily-kid-courier-2026-10-17.kfx",
+                "deckle-daily-kid-courier-2026-10-18.kfx",
+            ]
+        );
     }
 
     #[test]

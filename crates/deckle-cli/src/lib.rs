@@ -369,7 +369,11 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             })?;
             Ok(ExitCode::SUCCESS)
         }
-        cli::Command::Digest { config, action } => digest(json, config, action),
+        cli::Command::Digest {
+            config,
+            paper,
+            action,
+        } => digest(json, config, paper, action),
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
@@ -2048,6 +2052,176 @@ fn load_digest_config(path: &Path) -> Result<deckle_digest::Config, String> {
     deckle_digest::Config::load(path)
 }
 
+/// The paper `--paper` names (many papers §3): `None` or `main` is digest.toml's.
+fn paper_config(path: &Path, paper: Option<&str>) -> Result<deckle_digest::Config, String> {
+    match paper {
+        None => load_digest_config(path),
+        Some(slug) => {
+            load_digest_config(path)?;
+            deckle_digest::papers::load_one(path, slug)
+        }
+    }
+}
+
+/// Every paper, main first. What was skipped is said on stderr.
+fn all_papers(path: &Path) -> Result<Vec<deckle_digest::Config>, String> {
+    load_digest_config(path)?;
+    let loaded = deckle_digest::papers::load_all(path)?;
+    for note in &loaded.notes {
+        eprintln!("papers: {note}");
+    }
+    Ok(loaded.papers)
+}
+
+/// A command that works on the main paper only, for now.
+fn main_paper_only(paper: Option<&str>, what: &str) -> Result<(), String> {
+    match paper {
+        None => Ok(()),
+        Some(p) if p == deckle_digest::papers::MAIN => Ok(()),
+        Some(_) => Err(format!(
+            "{what} works on the main paper (digest.toml) for now; leave out --paper"
+        )),
+    }
+}
+
+/// The sync id of the Kindle a paper is bound to (`kindle =`, a name or a sync id), `None` for
+/// any Kindle. A name no Kindle has is an error, so an edition never waits for nobody.
+fn paper_owner(cfg: &deckle_digest::Config) -> Result<Option<String>, String> {
+    let want = cfg.kindle.trim();
+    if want.is_empty() {
+        return Ok(None);
+    }
+    cfg.sync.find_device(want).map(Some).ok_or_else(|| {
+        let file = match &cfg.paper {
+            None => "digest.toml".to_owned(),
+            Some(p) => format!("papers/{}.toml", p.slug),
+        };
+        format!(
+            "{file}: kindle = \"{want}\", but no Kindle is called that; plug it in and name it \
+             with `deckle devices name`"
+        )
+    })
+}
+
+/// A paper's `readership.json`: today's file for the main paper, `papers/<slug>/` for another.
+fn readership_path(cfg: &deckle_digest::Config) -> PathBuf {
+    cfg.state_file("readership.json")
+        .unwrap_or_else(deckle_readership::state_path)
+}
+
+/// Waits for, then holds, the run lock (`<cache>/digest/run.lock`): two papers due at the same
+/// minute convert one after the other, since two Kindle Previewer runs at once are unsafe.
+fn run_lock() -> Result<std::fs::File, String> {
+    let dir = deckle_core::wordwise::default_cache_dir().join("digest");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join("run.lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    file.lock()
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(file)
+}
+
+/// `digest papers` (list) and `digest papers new`.
+fn digest_papers(
+    json: bool,
+    path: &Path,
+    action: Option<cli::PapersCommand>,
+) -> Result<ExitCode, String> {
+    load_digest_config(path)?;
+    if let Some(cli::PapersCommand::New {
+        title,
+        slug,
+        reader,
+    }) = action
+    {
+        let slug = slug.unwrap_or_else(|| deckle_digest::papers::slug_from_title(&title));
+        let file =
+            deckle_digest::papers::create(path, &slug, &title, reader.as_deref().unwrap_or(""))?;
+        emit(json, &file, || format!("wrote {}", file.display()))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    let loaded = deckle_digest::papers::load_all(path)?;
+    #[derive(serde::Serialize)]
+    struct Row {
+        slug: String,
+        title: String,
+        reader: String,
+        kindle: String,
+        delivery: String,
+        large_print: bool,
+    }
+    let rows: Vec<Row> = loaded
+        .papers
+        .iter()
+        .map(|p| {
+            let at = p.schedule.at.as_deref();
+            let days: Vec<&str> = p.schedule.days.iter().map(|d| d.key()).collect();
+            let when = match (at, days.is_empty()) {
+                (Some(at), true) => format!(" at {at}"),
+                (Some(at), false) => format!(" ({}) at {at}", days.join(", ")),
+                (None, _) => String::new(),
+            };
+            let how = match (p.email.enabled, p.email.usb_too) {
+                (true, false) => "email",
+                (true, true) => "email and USB",
+                _ => "USB",
+            };
+            Row {
+                slug: p.slug().to_owned(),
+                title: p.title.clone(),
+                reader: p.reader.clone(),
+                kindle: p.kindle.clone(),
+                delivery: format!("{how}{when}"),
+                large_print: p.large_print,
+            }
+        })
+        .collect();
+    #[derive(serde::Serialize)]
+    struct Out<'a> {
+        papers: &'a [Row],
+        notes: &'a [String],
+    }
+    emit(
+        json,
+        &Out {
+            papers: &rows,
+            notes: &loaded.notes,
+        },
+        || {
+            let mut lines: Vec<String> = rows
+                .iter()
+                .map(|r| {
+                    let reader = match r.reader.is_empty() {
+                        true => String::new(),
+                        false => format!(" · for {}", r.reader),
+                    };
+                    let kindle = match r.kindle.is_empty() {
+                        true => "any Kindle".to_owned(),
+                        false => r.kindle.clone(),
+                    };
+                    let kind = if r.large_print {
+                        "Large print"
+                    } else {
+                        "Regular"
+                    };
+                    format!(
+                        "{} · {}{reader} · {kindle} · {} · {kind}",
+                        r.slug, r.title, r.delivery
+                    )
+                })
+                .collect();
+            lines.extend(loaded.notes.iter().map(|n| format!("note: {n}")));
+            lines.join("\n")
+        },
+    )?;
+    Ok(ExitCode::SUCCESS)
+}
+
 fn section_lines(r: &deckle_digest::BuildReport) -> String {
     r.sections
         .iter()
@@ -2063,10 +2237,12 @@ fn section_lines(r: &deckle_digest::BuildReport) -> String {
 fn digest(
     json: bool,
     config: Option<PathBuf>,
+    paper: Option<String>,
     action: cli::DigestCommand,
 ) -> Result<ExitCode, String> {
     let explicit_config = config.clone();
     let path = config.unwrap_or_else(deckle_digest::config::default_path);
+    let paper = paper.as_deref();
     match action {
         cli::DigestCommand::Init { force } => {
             if path.exists() && !force {
@@ -2087,7 +2263,7 @@ fn digest(
             date,
             bundle,
         } => {
-            let mut cfg = load_digest_config(&path)?;
+            let mut cfg = paper_config(&path, paper)?;
             cfg.force_color = bundle;
             let date = parse_date(date.as_deref())?;
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
@@ -2143,8 +2319,10 @@ fn digest(
             keep_work_dir,
             force,
         } => {
-            let mut cfg = load_digest_config(&path)?;
+            let mut cfg = paper_config(&path, paper)?;
             let date = parse_date(date.as_deref())?;
+            // A paper bound to a Kindle names one that exists, before any work.
+            let bound = paper_owner(&cfg)?;
             // Before anything is located or touched: a stopped morning builds nothing.
             let today = deckle_digest::chrono::Local::now().date_naive();
             let stop = deckle_digest::press::read_stop(&cfg.press_state(), today);
@@ -2159,6 +2337,8 @@ fn digest(
                 })?;
                 return Ok(ExitCode::SUCCESS);
             }
+            // Two papers due at the same minute convert one after the other (many papers §5).
+            let _lock = run_lock()?;
             let mut no_kindle = None;
             // Export folders need no Previewer (other readers design §6): without one, the
             // paper still goes to them, and nothing is converted or queued for a Kindle.
@@ -2195,7 +2375,7 @@ fn digest(
             // A folder target must exist (and is created) before any work; `device` may be
             // absent: the edition then waits in the outbox.
             let folder = (to != "device").then(|| resolve_target(&to)).transpose()?;
-            let work = deckle_core::wordwise::default_cache_dir().join("digest");
+            let work = cfg.work_dir(&deckle_core::wordwise::default_cache_dir());
             let converted = work.join("kfx");
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
@@ -2240,15 +2420,17 @@ fn digest(
             built.notes.extend(note);
             built.notes.extend(no_kindle);
             // Export folders, like email, belong to the morning run, not to `--to <folder>`.
-            let exports = match &folder {
-                Some(_) => Vec::new(),
-                None => deckle_digest::export::export_all(&cfg.export, date, &built),
+            // A paper bound to one Kindle goes only there (many papers §4).
+            let exports = match (&folder, &bound) {
+                (None, None) => deckle_digest::export::export_all(&cfg.export, date, &built),
+                _ => Vec::new(),
             };
             let exported = exports.iter().any(|x| x.error.is_none());
             // The EPUB outbox, for a Kobo or a PocketBook: when one has been seen, or there is
             // no Previewer.
             let kobo_queue = epub_queue();
             let epub_queued = folder.is_none()
+                && bound.is_none()
                 && epub_wanted(located.is_some())
                 && match queue_epubs(&kobo_queue, &built, date) {
                     Ok(()) => true,
@@ -2263,6 +2445,8 @@ fn digest(
                 Some(_) => (None, true),
                 None => email_paper(
                     &cfg.email,
+                    cfg.paper.as_ref().map(|_| cfg.title.as_str()),
+                    &deckle_digest::edition_stem(&cfg, date),
                     date,
                     &built.epub,
                     &deckle_digest::secret::SystemKeyring,
@@ -2285,7 +2469,7 @@ fn digest(
             let mut outcome = DigestOutcome::default();
             let reading_outcomes = built.reading_outcomes.clone();
             if let Some(k) = kfx {
-                record_layout(k, date, &built);
+                record_layout(k, date, &built, &cfg);
                 if is_today(date) {
                     let note = keep_kfx_in_morgue(&cfg, date, k);
                     built.notes.extend(note);
@@ -2294,6 +2478,7 @@ fn digest(
             // The reMarkable's PDF, from its own outbox.
             let rm_queue = remarkable_queue();
             let rm_queued = folder.is_none()
+                && bound.is_none()
                 && cfg.remarkable.enabled
                 && match queue_remarkable(&rm_queue, &cfg, &built, date) {
                     Ok(()) => true,
@@ -2313,28 +2498,33 @@ fn digest(
                         .map_err(|e| format!("reading queue: {e}"))?;
                 }
             } else if kfx.is_some() || !to_usb {
-                let name = deckle_digest::edition_filename(date);
+                let name = deckle_digest::edition_file(&cfg, date);
                 match &folder {
                     Some(target) => {
                         let one = deckle_core::queue::Queue::new(work.join("to-folder"));
                         let _ = std::fs::remove_dir_all(&one.dir);
-                        queue_edition(&one, kfx, &name, None, &long_reads, &[])?;
+                        queue_edition(&one, kfx, &name, None, &long_reads, &[], None)?;
                         outcome.flush = Some(
                             one.flush(target, Some(&digest_prune(&cfg)))
                                 .map_err(|e| e.to_string())?,
                         );
                     }
                     None => {
+                        let exempt = match cfg.paper {
+                            // an edition sent again from the Morgue outlives the morning's paper
+                            None => morgue_exempt(),
+                            Some(_) => Vec::new(),
+                        };
                         queue_edition(
                             &queue,
                             kfx,
                             &name,
-                            Some(deckle_digest::EDITION_PREFIX),
+                            Some(&deckle_digest::edition_prefix(&cfg)),
                             &long_reads,
-                            // an edition sent again from the Morgue outlives the morning's paper
-                            &morgue_exempt(),
+                            &exempt,
+                            bound.as_deref(),
                         )?;
-                        outcome = push_queued(&queue, &cfg, detect_kindle())?;
+                        outcome = push_queued(&queue, &all_papers(&path)?, detect_kindle())?;
                     }
                 }
                 // Only a run that shipped (or queued) the edition uses up the saved articles.
@@ -2435,6 +2625,7 @@ fn digest(
             })
         }
         cli::DigestCommand::Schedule { at, off } => {
+            main_paper_only(paper, "A schedule")?;
             use deckle_digest::schedule;
             if off {
                 let done = schedule::remove()?;
@@ -2490,7 +2681,8 @@ fn digest(
             })?;
             Ok(ExitCode::SUCCESS)
         }
-        cli::DigestCommand::Readership { action } => digest_readership(json, &path, action),
+        cli::DigestCommand::Readership { action } => digest_readership(json, &path, paper, action),
+        cli::DigestCommand::Papers { action } => digest_papers(json, &path, action),
         cli::DigestCommand::Lint { page } => digest_lint(json, &page, &deckle_digest::Http),
         cli::DigestCommand::Next { fetch } => {
             let cfg = load_digest_config(&path)?;
@@ -2537,15 +2729,19 @@ fn digest(
             })?;
             Ok(ExitCode::SUCCESS)
         }
-        cli::DigestCommand::Puzzle => digest_puzzle(json, &path),
+        cli::DigestCommand::Puzzle => digest_puzzle(json, &paper_config(&path, paper)?),
         cli::DigestCommand::Shelf { forget } => digest_shelf(json, &path, forget),
-        cli::DigestCommand::Morgue { action } => digest_morgue(json, &path, action),
+        cli::DigestCommand::Morgue { action } => {
+            main_paper_only(paper, "The Morgue commands")?;
+            digest_morgue(json, &path, action)
+        }
         cli::DigestCommand::Email { action } => {
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
         }
         cli::DigestCommand::Push { to } => {
-            let cfg = load_digest_config(&path)?;
+            let papers = all_papers(&path)?;
+            let cfg = papers[0].clone();
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             let target = match to.as_str() {
                 "device" => detect_kindle(),
@@ -2579,13 +2775,15 @@ fn digest(
                 })?;
                 return Ok(ExitCode::SUCCESS);
             }
-            let mut outcome = push_queued(&queue, &cfg, target)?;
+            let mut outcome = push_queued(&queue, &papers, target)?;
             outcome.remarkable = remarkable;
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Watch { interval } => {
-            let cfg = load_digest_config(&path)?;
+            let mut papers = all_papers(&path)?;
+            let mut cfg = papers[0].clone();
+            let mut papers_error: Option<String> = None;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             eprintln!(
                 "watching for a Kindle, a Kobo, a PocketBook or a reMarkable every {interval}s; \
@@ -2629,6 +2827,20 @@ fn digest(
             let rm_queue = remarkable_queue();
             let mut rm_watcher = deckle_core::sync::Watcher::default();
             loop {
+                // A new or edited paper applies without a restart; a file that fails keeps the
+                // last good set, and its error is said once (many papers plan).
+                match deckle_digest::papers::load_all(&path) {
+                    Ok(l) => {
+                        papers = l.papers;
+                        cfg = papers[0].clone();
+                        papers_error = None;
+                    }
+                    Err(e) if papers_error.as_ref() != Some(&e) => {
+                        eprintln!("papers: {e}");
+                        papers_error = Some(e);
+                    }
+                    Err(_) => {}
+                }
                 scan_inbox(&cfg);
                 let pending = queue.pending();
                 let kindle = detect_kindle();
@@ -2639,7 +2851,7 @@ fn digest(
                     .unwrap_or_default();
                 let plan = watcher.tick(id.as_deref(), &pending, actions);
                 if let (Some(target), false) = (&kindle, plan.is_empty()) {
-                    match sync_to(&queue, &cfg, target, plan) {
+                    match sync_to(&queue, &papers, target, plan) {
                         Ok(o) => emit(json, &o, || o.describe(&queue))?,
                         Err(e) => eprintln!("error: {e}"),
                     }
@@ -2921,20 +3133,24 @@ impl EmailRun {
 
 /// Emails the paper when `[email]` is on (email design §7), and says whether it still goes to
 /// USB: after a failure always, after a success only with `usb_too`.
+#[allow(clippy::too_many_arguments)]
 fn email_paper<M: deckle_digest::mail::Mailer>(
     cfg: &deckle_digest::config::EmailConfig,
+    title: Option<&str>,
+    stem: &str,
     date: deckle_digest::chrono::NaiveDate,
     epub: &Path,
     keys: &dyn deckle_digest::secret::Keyring,
     env: &dyn Fn(&str) -> Option<String>,
     connect: impl FnOnce(deckle_digest::zeroize::Zeroizing<String>) -> M,
 ) -> (Option<deckle_digest::mail::EmailReport>, bool) {
-    let report = deckle_digest::mail::email_edition(cfg, date, epub, keys, env, connect);
+    let report = deckle_digest::mail::email_paper(cfg, title, stem, date, epub, keys, env, connect);
     let to_usb = report.as_ref().is_none_or(|r| r.to_usb(cfg));
     (report, to_usb)
 }
 
-/// Puts the paper's KFX (`None`: it went by email) and the long reads in `queue`.
+/// Puts the paper's KFX (`None`: it went by email) and the long reads in `queue`, meant for
+/// the Kindle `owner` when the paper is bound to one (many papers §4).
 fn queue_edition(
     queue: &deckle_core::queue::Queue,
     paper: Option<&Path>,
@@ -2942,15 +3158,16 @@ fn queue_edition(
     replaces: Option<&str>,
     long_reads: &[LongRead],
     keep: &[String],
+    owner: Option<&str>,
 ) -> Result<(), String> {
     if let Some(kfx) = paper {
         queue
-            .add_keeping(kfx, name, replaces, keep)
+            .add_keeping_for(kfx, name, replaces, keep, owner)
             .map_err(|e| e.to_string())?;
     }
     for (n, p, fallback) in long_reads {
         queue
-            .add_prepared_with(p, fallback, n, None)
+            .add_prepared_for(p, fallback, n, None, owner)
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -3026,10 +3243,28 @@ fn prepare_long_reads(
 
 fn digest_prune(cfg: &deckle_digest::Config) -> deckle_core::queue::Prune {
     deckle_core::queue::Prune {
-        prefix: deckle_digest::EDITION_PREFIX.into(),
+        prefix: deckle_digest::edition_prefix(cfg),
         keep: cfg.keep.max(1),
-        exempt: morgue_exempt(),
+        // Editions sent again from the Morgue are the main paper's.
+        exempt: match cfg.paper {
+            None => morgue_exempt(),
+            Some(_) => Vec::new(),
+        },
     }
+}
+
+/// One prune per paper that goes to the Kindle `id`: those for any Kindle and those bound to
+/// it, each by its own prefix and `keep` (many papers §4).
+fn prunes_for(papers: &[deckle_digest::Config], id: &str) -> Vec<deckle_core::queue::Prune> {
+    papers
+        .iter()
+        .filter(|p| match paper_owner(p) {
+            Ok(None) => true,
+            Ok(Some(owner)) => deckle_core::sync::same_kindle(&owner, id),
+            Err(_) => false,
+        })
+        .map(digest_prune)
+        .collect()
 }
 
 /// How long an edition sent again from the Morgue stays on the Kindle past `keep`.
@@ -3149,9 +3384,9 @@ fn queue_remarkable(
     let pdf = built
         .pdf(rm.screen, rm.photos())
         .ok_or("the PDF edition wasn't built")?;
-    let name = format!("{}{date}.pdf", deckle_digest::EDITION_PREFIX);
+    let name = format!("{}{date}.pdf", built.prefix);
     queue
-        .add(pdf, &name, Some(deckle_digest::EDITION_PREFIX))
+        .add(pdf, &name, Some(&built.prefix))
         .map_err(|e| e.to_string())?;
     if rm.books {
         for p in &built.long_reads {
@@ -3201,9 +3436,9 @@ fn queue_epubs(
     built: &deckle_digest::BuildReport,
     date: deckle_digest::chrono::NaiveDate,
 ) -> Result<(), String> {
-    let name = deckle_digest::export::export_filename(date);
+    let name = format!("{}{date}.epub", built.prefix);
     queue
-        .add(&built.epub, &name, Some(deckle_digest::EDITION_PREFIX))
+        .add(&built.epub, &name, Some(&built.prefix))
         .map_err(|e| e.to_string())?;
     for p in &built.long_reads {
         let name = p
@@ -3380,9 +3615,10 @@ fn send_to_reader(
 /// Flushes the outbox to `target` (a connected Kindle, or a folder), or reports it queued.
 fn push_queued(
     queue: &deckle_core::queue::Queue,
-    cfg: &deckle_digest::Config,
+    papers: &[deckle_digest::Config],
     target: Option<Target>,
 ) -> Result<DigestOutcome, String> {
+    let cfg = &papers[0];
     let empty = queue.pending().is_empty();
     let Some(target) = target else {
         return Ok(DigestOutcome {
@@ -3399,7 +3635,7 @@ fn push_queued(
             ..Default::default()
         });
     };
-    sync_to(queue, cfg, &target, plan)
+    sync_to(queue, papers, &target, plan)
 }
 
 /// What `digest push` runs: the outbox with the device's actions, or (empty outbox) just the
@@ -3460,10 +3696,13 @@ fn puzzle_on(cfg: &deckle_digest::Config) -> bool {
 /// Runs `plan` on `target` over one connection.
 fn sync_to(
     queue: &deckle_core::queue::Queue,
-    cfg: &deckle_digest::Config,
+    papers: &[deckle_digest::Config],
     target: &Target,
     plan: deckle_core::sync::Plan,
 ) -> Result<DigestOutcome, String> {
+    // The household settings (`[sync]`, the puzzle's checks, the shelf) are the main paper's.
+    let cfg = &papers[0];
+    let id = deckle_core::sync::device_id(target);
     // Prepared books are finished for this Kindle: its class from the connection, the owner's
     // choices for it from the app's devices.json (device-aware build §4.3).
     let registry =
@@ -3472,10 +3711,18 @@ fn sync_to(
         profile: deckle_core::devices::profile_for(target, &registry),
         ..Default::default()
     };
-    let readership_path = deckle_readership::state_path();
-    let mut readership = deckle_readership::State::load(&readership_path);
-    let stems = match plan.readership {
-        true => readership.stems(),
+    // Each paper keeps its own readership (many papers §4): every paper's stems are read in
+    // the one session, and each read is recorded where its stem came from.
+    let mut states: Vec<(PathBuf, deckle_readership::State)> = papers
+        .iter()
+        .map(|p| {
+            let path = readership_path(p);
+            let state = deckle_readership::State::load(&path);
+            (path, state)
+        })
+        .collect();
+    let stems: Vec<String> = match plan.readership {
+        true => states.iter().flat_map(|(_, s)| s.stems()).collect(),
         false => Vec::new(),
     };
     let mut conn = deckle_core::deliver::Conn::new(target);
@@ -3483,7 +3730,7 @@ fn sync_to(
         queue,
         &mut conn,
         plan,
-        &digest_prune(cfg),
+        &prunes_for(papers, &id),
         &finishing,
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
         &stems,
@@ -3527,19 +3774,30 @@ fn sync_to(
         None => None,
     };
     let recorded = (plan.readership && !flush.positions.is_empty()).then(|| {
-        let found: Vec<_> = flush
-            .positions
-            .iter()
-            .map(|(stem, on)| (stem.clone(), on_device(on)))
-            .collect();
         let now = deckle_digest::chrono::Utc::now()
             .format("%Y-%m-%dT%H:%M:%SZ")
             .to_string();
-        let r = readership.record_reads(&deckle_core::sync::device_id(target), &found, &now);
-        if let Err(e) = readership.save(&readership_path) {
-            eprintln!("readership: {e}");
+        let mut all = deckle_readership::Recorded::default();
+        for (path, state) in &mut states {
+            let mine = state.stems();
+            let found: Vec<_> = flush
+                .positions
+                .iter()
+                .filter(|(stem, _)| mine.contains(stem))
+                .map(|(stem, on)| (stem.clone(), on_device(on)))
+                .collect();
+            if found.is_empty() {
+                continue;
+            }
+            let r = state.record_reads(&id, &found, &now);
+            if let Err(e) = state.save(path) {
+                eprintln!("readership: {e}");
+            }
+            all.opened += r.opened;
+            all.unopened += r.unopened;
+            all.errors.extend(r.errors);
         }
-        r
+        all
     });
     record_morgue(&flush);
     let shelf = record_shelf(cfg, target, &flush);
@@ -3623,21 +3881,22 @@ fn record_layout(
     kfx: &Path,
     date: deckle_digest::chrono::NaiveDate,
     built: &deckle_digest::BuildReport,
+    cfg: &deckle_digest::Config,
 ) {
     let sections: Vec<(String, String)> = built
         .sections
         .iter()
         .map(|s| (s.key.clone(), s.title.clone()))
         .collect();
-    let name = deckle_digest::edition_filename(date);
-    let stem = name.trim_end_matches(".kfx");
+    let stem = deckle_digest::edition_stem(cfg, date);
+    let stem = stem.as_str();
     let layout = std::fs::read(kfx)
         .map_err(|e| format!("{}: {e}", kfx.display()))
         .and_then(|bytes| {
             deckle_readership::layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)
         })
         .map(|l| with_items(l, built));
-    let path = deckle_readership::state_path();
+    let path = readership_path(cfg);
     let saved = layout.and_then(|l| {
         let mut state = deckle_readership::State::load(&path);
         state.record_layout(l);
@@ -3674,9 +3933,8 @@ struct PuzzleOut {
 }
 
 /// `digest puzzle` (puzzle design goal 8): the same puzzle the paper prints today.
-fn digest_puzzle(json: bool, path: &Path) -> Result<ExitCode, String> {
+fn digest_puzzle(json: bool, cfg: &deckle_digest::Config) -> Result<ExitCode, String> {
     use deckle_digest::puzzle;
-    let cfg = load_digest_config(path)?;
     let date = deckle_digest::chrono::Local::now().date_naive();
     let store_path = cfg.puzzle_store();
     let mut store = puzzle::store::Store::load(&store_path);
@@ -3771,6 +4029,13 @@ fn archive_to_morgue(
         ));
     }
     let morgue = deckle_morgue::Morgue::from_config(cfg);
+    // The first-run import of old editions is the main paper's: another paper's are new.
+    if cfg.paper.is_some() {
+        return morgue
+            .archive_edition(epub, &deckle_morgue::from_gathered(gathered))
+            .err()
+            .map(|e| format!("Morgue: couldn't save the edition ({e})"));
+    }
     let state_path = deckle_morgue::state::state_path();
     let mut state = deckle_morgue::MorgueState::load(&state_path);
     let cache = deckle_core::wordwise::default_cache_dir().join("digest");
@@ -4123,10 +4388,11 @@ fn shelf_text(out: &ShelfOut) -> String {
 fn digest_readership(
     json: bool,
     path: &Path,
+    paper: Option<&str>,
     action: Option<cli::ReadershipCommand>,
 ) -> Result<ExitCode, String> {
-    let mut cfg = load_digest_config(path)?;
-    let state_path = deckle_readership::state_path();
+    let mut cfg = paper_config(path, paper)?;
+    let state_path = readership_path(&cfg);
     let mut state = deckle_readership::State::load(&state_path);
     let report = deckle_readership::report(&state, &cfg);
     let Some(action) = action else {
@@ -4150,7 +4416,7 @@ fn digest_readership(
     match action {
         cli::ReadershipCommand::Apply { .. } => {
             deckle_readership::apply(s, &mut cfg)?;
-            deckle_digest::config::save(path, &cfg)?;
+            deckle_digest::papers::save(path, &cfg)?;
             // Set aside, or a Move up would come straight back from the same editions.
             deckle_readership::dismiss(&mut state, s);
             state.save(&state_path)?;
@@ -4371,6 +4637,7 @@ mod tests {
                 ("c3".into(), Outcome::Book),
             ],
             notes: Vec::new(),
+            prefix: deckle_digest::EDITION_PREFIX.to_owned(),
         };
         let opts = paper_options(Some(fake_previewer()), false, tmp.path());
         let (ok, failed) = prepare_long_reads(&built, &opts);
@@ -4471,7 +4738,9 @@ mod email_tests {
 
     /// The run's delivery step: email, then the outbox for what still goes by USB.
     fn deliver(run: &Run, cfg: &EmailConfig, keys: &dyn Keyring, rec: &Recording) -> EmailRun {
-        let (email, to_usb) = email_paper(cfg, date(), &run.epub, keys, &no_env, |_| rec);
+        let stem = format!("{}{}", deckle_digest::EDITION_PREFIX, date());
+        let (email, to_usb) =
+            email_paper(cfg, None, &stem, date(), &run.epub, keys, &no_env, |_| rec);
         queue_edition(
             &run.queue,
             to_usb.then_some(run.kfx.as_path()),
@@ -4479,6 +4748,7 @@ mod email_tests {
             Some(deckle_digest::EDITION_PREFIX),
             &[],
             &[],
+            None,
         )
         .unwrap();
         EmailRun {
@@ -4501,6 +4771,7 @@ mod email_tests {
             Some(deckle_digest::EDITION_PREFIX),
             &[],
             &[old.to_owned()],
+            None,
         )
         .unwrap();
         let names: Vec<String> = run
@@ -4723,6 +4994,7 @@ mod layout_tests {
             bundles: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
+            prefix: deckle_digest::EDITION_PREFIX.to_owned(),
         };
         let items: Vec<Option<u32>> = with_items(layout, &built)
             .sections

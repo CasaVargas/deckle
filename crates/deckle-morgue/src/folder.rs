@@ -93,9 +93,15 @@ fn strict_date(name: &str) -> Option<NaiveDate> {
 }
 
 impl Morgue {
+    /// The Morgue `cfg` names. Another paper's editions are kept in a folder of their own,
+    /// `<folder>/<slug>/`, since every paper's are named by date (many papers §3).
     pub fn from_config(cfg: &Config) -> Morgue {
+        let root = deckle_digest::inbox::expand_home(&cfg.morgue.folder);
         Morgue {
-            root: deckle_digest::inbox::expand_home(&cfg.morgue.folder),
+            root: match &cfg.paper {
+                None => root,
+                Some(p) => root.join(&p.slug),
+            },
             keep_days: cfg.morgue.keep_days,
         }
     }
