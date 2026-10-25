@@ -53,6 +53,7 @@ pub use chrono_tz;
 pub use config::{Config, SectionKind};
 pub use fetch::{Http, Net};
 pub use publisher::Access;
+pub use session::SessionNet;
 pub use url;
 pub use zeroize;
 
