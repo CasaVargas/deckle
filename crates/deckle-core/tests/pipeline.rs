@@ -1511,3 +1511,39 @@ fn odt_real_previewer_smoke() {
         assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
     }
 }
+
+#[test]
+#[cfg(unix)]
+fn rtf_runs_through_import_and_delivery() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/rtf");
+    let out = tempfile::tempdir().unwrap();
+    let opts = fill_opts(out.path(), false);
+    let mut stages = Vec::new();
+    let r = deckle_core::pipeline::run_with_progress(&fixtures.join("mini.rtf"), &opts, &mut |s| {
+        stages.push(s)
+    });
+    assert_eq!(r.error, None, "{r:?}");
+    assert_eq!(r.info.title, "The Deckle RTF Mini");
+    assert_eq!(r.info.creators[0].name, "Ada Testwright");
+    assert_eq!(r.info.language, "en-GB");
+    assert_eq!(stages.first(), Some(&"import"));
+    assert!(r.delivered.as_ref().unwrap().exists());
+    std::fs::remove_dir_all(r.work_dir.unwrap()).unwrap();
+}
+
+#[test]
+#[cfg(unix)]
+#[ignore = "requires installed Kindle Previewer; run explicitly for import validation"]
+fn rtf_real_previewer_smoke() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/rtf");
+    for source in ["mini.rtf", "cyrillic.rtf", "japanese.rtf"] {
+        let out = tempfile::tempdir().unwrap();
+        let mut opts = fill_opts(out.path(), false);
+        opts.previewer = None;
+        opts.keep_work_dir = false;
+        let report = run(&fixtures.join(source), &opts);
+        assert_eq!(report.error, None, "{source}: {report:?}");
+        let bytes = std::fs::read(report.delivered.unwrap()).unwrap();
+        assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
+    }
+}

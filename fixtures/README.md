@@ -77,6 +77,18 @@ Made by `python3 -I tools/ref/make_odt_fixtures.py fixtures/odt` (standard libra
 | `sheet.ods` | A spreadsheet mimetype |
 | `encrypted.odt` | A manifest with `encryption-data` |
 
+## `rtf/`
+
+Made by `python3 -I tools/ref/make_rtf_fixtures.py fixtures/rtf` (standard library only; the 8×8
+JPEG inside was made once with macOS `sips` and is embedded in the script as hex).
+
+| File | What |
+|---|---|
+| `mini.rtf` | `\info` (title, author, subject, keywords, revision time); a stylesheet with Title, Quote and heading 1–4; an `\outlinelevel0` heading; every character format, alignment, `\line`, `\tab`; `\'e9`, `\u8364?`, curly quotes and dashes; a numbered list starting at 3 with a nested bullet list via `\listtable`; a header-row table with a horizontal merge; a hex PNG in `\shppict` with alt text and a `\nonshppict` WMF copy, and a JPEG as `\bin`; a bookmark, a link to it, a web link and a PAGE field; two footnotes and an endnote; a header, a hidden run, a deleted revision, a comment and a stored TOC field that must not appear |
+| `cyrillic.rtf` | `\ansicpg1251`, `\fcharset204`, `\deflang1049`, Cyrillic as `\'hh`, author in `\info` |
+| `japanese.rtf` | A `\fcharset128` font with Shift-JIS `\'hh` pairs, `\deflang1041` |
+| `unclosed.rtf` | Missing its final brace |
+
 ## Not in the repo
 
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB

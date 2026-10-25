@@ -13,6 +13,7 @@ deckle-docx.workspace = true
 deckle-txt.workspace = true
 deckle-fb2.workspace = true
 deckle-odt.workspace = true
+deckle-rtf.workspace = true
 deckle-markdown.workspace = true
 deckle-pdf.workspace = true
 deckle-kfx.workspace = true
