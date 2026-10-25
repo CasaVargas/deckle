@@ -84,11 +84,12 @@ pub struct Library {
     pub root: PathBuf,
 }
 
-/// EPUB, Word document, plain text, FB2, PDF or Markdown (kept as an EPUB snapshot).
+/// EPUB, Word or OpenDocument file, plain text, FB2, PDF or Markdown (kept as an EPUB snapshot).
 pub fn is_source(path: &Path) -> bool {
     deckle_docx::is_word(path)
         || deckle_txt::is_text(path)
         || deckle_fb2::is_fb2(path)
+        || deckle_odt::is_odt(path)
         || deckle_markdown::is_markdown(path)
         || deckle_pdf::is_pdf(path)
         || path
@@ -114,6 +115,12 @@ pub fn book_info(path: &Path) -> Result<BookInfo, String> {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let epub = dir.path().join("imported.epub");
         deckle_pdf::convert(path, &epub).map_err(|e| e.to_string())?;
+        return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
+    }
+    if deckle_odt::is_odt(path) {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let epub = dir.path().join("imported.epub");
+        deckle_odt::convert(path, &epub).map_err(|e| e.to_string())?;
         return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
     }
     if deckle_fb2::is_fb2(path) {
@@ -328,7 +335,7 @@ impl Library {
         }
         if !is_source(source) {
             return Err(format!(
-                "{}: the library takes EPUBs, Word documents, text, FB2, PDFs and Markdown",
+                "{}: the library takes EPUBs, Word and OpenDocument files, text, FB2, PDFs and Markdown",
                 source.display()
             ));
         }

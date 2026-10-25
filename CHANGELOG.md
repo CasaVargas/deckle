@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **OpenDocument text becomes a book.** Import `.odt`, `.ott` or flat `.fodt` from LibreOffice
+  and friends, the same way as Word documents: headings become the contents, styles become bold,
+  italics and the rest, and lists, tables, pictures and pop-up footnotes come through.
 - **FictionBook (FB2) becomes a book.** Import `.fb2` or `.fb2.zip` with its chapters and
   contents, pop-up footnotes, poems, tables, embedded cover and illustrations, and the authors,
   series and language it declares. Files in windows-1251 and other declared encodings work.

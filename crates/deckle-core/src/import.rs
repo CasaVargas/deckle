@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The `import` stage: a Word document, text file, FB2 or PDF becomes an EPUB first, and every
-//! later stage runs on that (DOCX spec §3, TXT spec §3, FB2 spec §3, PDF spec §6). Shared by the pipeline and bind.
+//! The `import` stage: a Word or OpenDocument file, text file, FB2 or PDF becomes an EPUB first,
+//! and every later stage runs on that (DOCX spec §3, ODT spec §3, TXT spec §3, FB2 spec §3, PDF
+//! spec §6). Shared by the pipeline and bind.
 
 use std::path::{Path, PathBuf};
 
@@ -16,6 +17,7 @@ pub fn needs_import(path: &Path) -> bool {
         || deckle_pdf::is_pdf(path)
         || deckle_txt::is_text(path)
         || deckle_fb2::is_fb2(path)
+        || deckle_odt::is_odt(path)
         || deckle_markdown::is_markdown_file(path)
         || path.is_dir()
 }
@@ -34,6 +36,10 @@ pub fn import(source: &Path, dir: &Path, name: &str) -> Option<Result<Imported, 
             .map_err(|e| e.to_string())
     } else if deckle_pdf::is_pdf(source) {
         deckle_pdf::convert(source, &epub)
+            .map(|r| r.warnings)
+            .map_err(|e| e.to_string())
+    } else if deckle_odt::is_odt(source) {
+        deckle_odt::convert(source, &epub)
             .map(|r| r.warnings)
             .map_err(|e| e.to_string())
     } else if deckle_fb2::is_fb2(source) {

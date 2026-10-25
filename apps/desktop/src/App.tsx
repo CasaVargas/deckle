@@ -280,7 +280,7 @@ export default function App() {
   };
 
   const pickBooks = async () => {
-    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] }] });
+    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "odt", "ott", "fodt", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] }] });
     if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
   };
 
@@ -534,7 +534,7 @@ export default function App() {
               </div>
               <h1>Drop books or notes here</h1>
               <p>They become Kindle books with covers, page numbers, X-Ray and Word Wise.</p>
-              <p className="muted small">EPUBs, PDFs, Word documents, text, FB2, Markdown notes, .kfx, web links and saved pages</p>
+              <p className="muted small">EPUBs, PDFs, Word and OpenDocument files, text, FB2, Markdown notes, .kfx, web links and saved pages</p>
               <div className="empty-actions">
                 <button className="ghost" onClick={pickBooks}>
                   Choose files…

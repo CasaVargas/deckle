@@ -1046,6 +1046,7 @@ dependencies = [
  "deckle-kfx",
  "deckle-markdown",
  "deckle-mobi",
+ "deckle-odt",
  "deckle-pdf",
  "deckle-transport",
  "deckle-txt",
@@ -1092,6 +1093,7 @@ dependencies = [
  "deckle-markdown",
  "deckle-mobi",
  "deckle-morgue",
+ "deckle-odt",
  "deckle-pdf",
  "deckle-readership",
  "deckle-shelf",
@@ -1210,6 +1212,7 @@ dependencies = [
  "deckle-kfx",
  "deckle-markdown",
  "deckle-mobi",
+ "deckle-odt",
  "deckle-pdf",
  "deckle-txt",
  "deckle-xray",
@@ -1265,6 +1268,18 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml 1.1.8+spec-1.1.0",
+ "zip 9.0.5",
+]
+
+[[package]]
+name = "deckle-odt"
+version = "0.6.0"
+dependencies = [
+ "base64 0.22.1",
+ "roxmltree",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
  "zip 9.0.5",
 ]
 
