@@ -475,6 +475,72 @@ fn digest_email_needs_the_email_table_first() {
     }
 }
 
+#[test]
+fn digest_subscribe_is_listed_with_its_flags() {
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["digest", "subscribe", "--help"])
+        .output()
+        .unwrap();
+    let s = String::from_utf8(out.stdout).unwrap();
+    for flag in ["username", "stdin", "test", "forget"] {
+        assert!(s.contains(flag), "missing {flag} in:\n{s}");
+    }
+}
+
+/// `digest subscribe` on a starter config in a temp folder; nothing here reaches the keychain
+/// or the network.
+fn subscribe_with_starter(args: &[&str], stdin: &str) -> (bool, String, String) {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("digest.toml");
+    std::fs::write(&cfg, deckle_digest::config::STARTER).unwrap();
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["digest", "--config"])
+        .arg(&cfg)
+        .arg("subscribe")
+        .args(args)
+        .write_stdin(stdin)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn digest_subscribe_lists_none_on_a_starter_config() {
+    let (ok, out, err) = subscribe_with_starter(&[], "");
+    assert!(ok, "{err}");
+    assert!(out.contains("no subscriptions"), "{out}");
+}
+
+#[test]
+fn digest_subscribe_needs_a_username_for_a_new_site() {
+    let (ok, _, err) =
+        subscribe_with_starter(&["thepilot.com", "--stdin"], "not-a-real-password\n");
+    assert!(!ok);
+    assert!(err.contains("--username"), "{err}");
+    assert!(!err.contains("not-a-real-password"), "{err}");
+}
+
+#[test]
+fn digest_subscribe_normalizes_the_site_in_the_config() {
+    let (ok, _, err) = subscribe_with_starter(
+        &[
+            "https://www.ThePilot.com/",
+            "--username",
+            "me@x.test",
+            "--forget",
+        ],
+        "",
+    );
+    assert!(!ok);
+    assert!(err.contains("no subscription for thepilot.com"), "{err}");
+}
+
 /// `deckle` with HOME (so the config and cache folders) under `home`.
 fn deckle_at(home: &std::path::Path) -> Command {
     let mut c = Command::cargo_bin("deckle").unwrap();

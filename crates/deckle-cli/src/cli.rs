@@ -509,6 +509,22 @@ pub enum DigestCommand {
         #[command(subcommand)]
         action: EmailCommand,
     },
+    /// Papers you subscribe to: sign Deckle in with your own account.
+    Subscribe {
+        /// The paper's site, e.g. thepilot.com. Alone: list every subscription and its state.
+        site: Option<String>,
+        #[arg(long)]
+        username: Option<String>,
+        /// Read the password from one line of stdin instead of asking.
+        #[arg(long)]
+        stdin: bool,
+        /// Sign in now and report the result, without changing anything.
+        #[arg(long)]
+        test: bool,
+        /// Remove the account and its keychain entry.
+        #[arg(long)]
+        forget: bool,
+    },
     /// Today's puzzle (made and kept if there's none yet) and yesterday's answers.
     Puzzle,
     /// What From Your Shelf would print now, from the Kindle snapshots (`--forget` deletes them).

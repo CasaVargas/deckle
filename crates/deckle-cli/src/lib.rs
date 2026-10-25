@@ -1047,9 +1047,28 @@ fn highlights_cmd(
 }
 
 /// `digest lint`: the story as the paper would keep it, and what it drops.
-fn digest_lint(json: bool, page: &str, net: &dyn deckle_digest::Net) -> Result<ExitCode, String> {
+fn digest_lint(
+    json: bool,
+    page: &str,
+    net: &dyn deckle_digest::Net,
+    subs: &[deckle_digest::config::SubscriptionConfig],
+) -> Result<ExitCode, String> {
+    let mut access_line: Option<String> = None;
     let (html, base) = if page.starts_with("http://") || page.starts_with("https://") {
-        let bytes = net.get_page(page)?;
+        let (bytes, access) = net.get_page_as(page)?;
+        access_line = match &access {
+            deckle_digest::Access::Open => None,
+            deckle_digest::Access::Subscription { site, .. } => Some(
+                match subs
+                    .iter()
+                    .find(|s| s.site.trim().eq_ignore_ascii_case(site))
+                {
+                    Some(s) => format!("signed in as {} at {site}", s.username.trim()),
+                    None => format!("signed in at {site}"),
+                },
+            ),
+            deckle_digest::Access::Walled { site, why } => Some(why.note(site)),
+        };
         (
             String::from_utf8_lossy(&bytes).into_owned(),
             page.to_owned(),
@@ -1077,10 +1096,11 @@ fn digest_lint(json: bool, page: &str, net: &dyn deckle_digest::Net) -> Result<E
         json,
         &serde_json::json!({
             "title": x.title, "byline": x.byline, "published": x.published, "words": x.words,
-            "dropped": dropped, "photos": photos,
+            "dropped": dropped, "photos": photos, "access": access_line,
         }),
         || {
-            let mut lines = vec![format!(
+            let mut lines: Vec<String> = access_line.iter().cloned().collect();
+            lines.push(format!(
                 "{} · {} words{}",
                 x.title.as_deref().unwrap_or("(no title)"),
                 x.words,
@@ -1088,7 +1108,7 @@ fn digest_lint(json: bool, page: &str, net: &dyn deckle_digest::Net) -> Result<E
                     .as_deref()
                     .map(|b| format!(" · {b}"))
                     .unwrap_or_default()
-            )];
+            ));
             if dropped.is_empty() {
                 lines.push("nothing dropped".into());
             }
@@ -2269,14 +2289,11 @@ fn digest(
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let (mut report, gathered) = deckle_digest::build_gathered(
-                &cfg,
-                date,
-                now,
-                &output,
-                &deckle_digest::Http,
-                &gather_options(),
-            )?;
+            let net = household_net(&path, &cfg);
+            let built =
+                deckle_digest::build_gathered(&cfg, date, now, &output, &net, &gather_options());
+            save_jars_noted(&net);
+            let (mut report, gathered) = built?;
             report
                 .notes
                 .extend(archive_to_morgue(&cfg, date, &report.epub, &gathered));
@@ -2380,14 +2397,16 @@ fn digest(
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
             scan_inbox(&cfg);
-            let (mut built, mut gathered) = deckle_digest::build_gathered(
-                &cfg,
-                date,
-                now,
-                &work,
-                &deckle_digest::Http,
-                &gather_options(),
-            )?;
+            let net = household_net(&path, &cfg);
+            let first =
+                deckle_digest::build_gathered(&cfg, date, now, &work, &net, &gather_options());
+            let (mut built, mut gathered) = match first {
+                Ok(b) => b,
+                Err(e) => {
+                    save_jars_noted(&net);
+                    return Err(e);
+                }
+            };
             let opts = paper_options(
                 located.as_ref().map(|l| l.path.clone()),
                 keep_work_dir,
@@ -2405,14 +2424,10 @@ fn digest(
                     ));
                 }
                 cfg.reading.inline = failed.into_iter().map(|(id, _)| id).collect();
-                (built, gathered) = deckle_digest::build_gathered(
-                    &cfg,
-                    date,
-                    now,
-                    &work,
-                    &deckle_digest::Http,
-                    &gather_options(),
-                )?;
+                let again =
+                    deckle_digest::build_gathered(&cfg, date, now, &work, &net, &gather_options());
+                save_jars_noted(&net);
+                (built, gathered) = again?;
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
             // Keep the paper in the Morgue whatever happens to its conversion.
@@ -2683,7 +2698,25 @@ fn digest(
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, paper, action),
         cli::DigestCommand::Papers { action } => digest_papers(json, &path, action),
-        cli::DigestCommand::Lint { page } => digest_lint(json, &page, &deckle_digest::Http),
+        cli::DigestCommand::Lint { page } => {
+            // The household's sessions when there's a config, so a subscriber page reads.
+            if path.exists() {
+                let cfg = load_digest_config(&path)?;
+                let net = household_net(&path, &cfg);
+                let r = digest_lint(json, &page, &net, &cfg.subscriptions);
+                save_jars_noted(&net);
+                r
+            } else {
+                digest_lint(json, &page, &deckle_digest::Http, &[])
+            }
+        }
+        cli::DigestCommand::Subscribe {
+            site,
+            username,
+            stdin,
+            test,
+            forget,
+        } => digest_subscribe(json, &path, site, username, stdin, test, forget),
         cli::DigestCommand::Next { fetch } => {
             let cfg = load_digest_config(&path)?;
             let now =
@@ -2691,12 +2724,9 @@ fn digest(
             if fetch {
                 let path = next_cache();
                 let mut cache = deckle_digest::next::live::LiveCache::load(&path);
-                deckle_digest::next::live::refresh(
-                    &cfg,
-                    &mut cache,
-                    now.to_utc(),
-                    &deckle_digest::Http,
-                );
+                let net = household_net(&path, &cfg);
+                deckle_digest::next::live::refresh(&cfg, &mut cache, now.to_utc(), &net);
+                save_jars_noted(&net);
                 cache.save(&path)?;
             }
             let paper = next_paper(&cfg, now);
@@ -3028,6 +3058,161 @@ impl DigestOutcome {
             None => String::new(),
         }
     }
+}
+
+/// The household's subscriptions as a net: passwords from the keychain (or the environment),
+/// sessions kept beside the config.
+fn household_net(path: &Path, cfg: &deckle_digest::Config) -> deckle_digest::SessionNet {
+    deckle_digest::SessionNet::from_config(
+        path,
+        &cfg.subscriptions,
+        &deckle_digest::secret::SystemKeyring,
+        &|k| std::env::var(k).ok(),
+    )
+}
+
+/// Keeps the sessions after a run and says on stderr what couldn't be kept.
+fn save_jars_noted(net: &deckle_digest::SessionNet) {
+    for note in net.save_jars() {
+        eprintln!("{note}");
+    }
+}
+
+fn session_text(state: &deckle_digest::session::SessionState) -> String {
+    use deckle_digest::session::SessionState as S;
+    match state {
+        S::NotTried => "not tried".into(),
+        S::SignedIn { service: Some(s) } => format!("signed in ({s})"),
+        S::SignedIn { service: None } => "signed in".into(),
+        S::LoginFailed(m) => format!("sign-in failed: {m}"),
+        S::NoAdapter => "no adapter".into(),
+        S::NoPassword(m) => format!("no password: {m}"),
+    }
+}
+
+/// `digest subscribe [site]`: list the subscriptions, or add, test or forget one.
+fn digest_subscribe(
+    json: bool,
+    path: &Path,
+    site: Option<String>,
+    username: Option<String>,
+    stdin: bool,
+    test: bool,
+    forget: bool,
+) -> Result<ExitCode, String> {
+    use deckle_digest::config::SubscriptionConfig;
+    use deckle_digest::secret::{self, SystemKeyring};
+    use deckle_digest::zeroize::Zeroizing;
+    let mut cfg = load_digest_config(path)?;
+    let Some(raw) = site else {
+        if username.is_some() || stdin || test || forget {
+            return Err("name the site, e.g. `deckle digest subscribe thepilot.com`".into());
+        }
+        let statuses = household_net(path, &cfg).status();
+        emit(json, &statuses, || {
+            if statuses.is_empty() {
+                return "no subscriptions; add one with `deckle digest subscribe <site> --username <you>`".to_owned();
+            }
+            statuses
+                .iter()
+                .map(|s| {
+                    format!(
+                        "{}  {}  password: {}  session: {}",
+                        s.site,
+                        s.username,
+                        if s.has_password { "yes" } else { "no" },
+                        session_text(&s.state)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    };
+    if test && forget {
+        return Err("--test and --forget don't go together".into());
+    }
+    let site = SubscriptionConfig::normalized_site(&raw)?;
+    let existing = cfg.subscriptions.iter().position(|s| s.site == site);
+    if forget {
+        let i = existing.ok_or_else(|| format!("no subscription for {site}"))?;
+        let sub = cfg.subscriptions.remove(i);
+        let had = secret::forget_site(&sub, &SystemKeyring).map_err(|e| e.to_string())?;
+        deckle_digest::config::save(path, &cfg)?;
+        emit(json, &had, || {
+            format!(
+                "removed the subscription to {site}{}",
+                if had { " and its keychain entry" } else { "" }
+            )
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if test {
+        let i = existing.ok_or_else(|| format!("no subscription for {site}"))?;
+        let net = household_net(path, &cfg);
+        let state = net.sign_in(&site);
+        let user = cfg.subscriptions[i].username.clone();
+        save_jars_noted(&net);
+        return report_sign_in(json, &site, &user, &state);
+    }
+    let username = username
+        .map(|u| u.trim().to_owned())
+        .filter(|u| !u.is_empty());
+    let sub = match (existing, username) {
+        (None, None) => {
+            return Err(format!(
+                "a new subscription needs --username (the account you sign in to {site} with)"
+            ));
+        }
+        (None, Some(username)) => {
+            let sub = SubscriptionConfig {
+                site: site.clone(),
+                username,
+                kind: None,
+            };
+            cfg.subscriptions.push(sub.clone());
+            sub
+        }
+        (Some(i), Some(username)) => {
+            cfg.subscriptions[i].username = username;
+            cfg.subscriptions[i].clone()
+        }
+        (Some(i), None) => cfg.subscriptions[i].clone(),
+    };
+    deckle_digest::config::save(path, &cfg)?;
+    let password = Zeroizing::new(if stdin {
+        let mut line = String::new();
+        std::io::stdin()
+            .read_line(&mut line)
+            .map_err(|e| format!("stdin: {e}"))?;
+        let pw = line.trim_end_matches(['\r', '\n']).to_owned();
+        deckle_digest::zeroize::Zeroize::zeroize(&mut line);
+        pw
+    } else {
+        rpassword::prompt_password(format!("Password for {} at {site}: ", sub.username))
+            .map_err(|e| format!("couldn't read the password: {e}"))?
+    });
+    secret::set_site(&sub, &SystemKeyring, &password).map_err(|e| e.to_string())?;
+    let net = household_net(path, &cfg);
+    let state = net.sign_in(&site);
+    save_jars_noted(&net);
+    report_sign_in(json, &site, &sub.username, &state)
+}
+
+fn report_sign_in(
+    json: bool,
+    site: &str,
+    username: &str,
+    state: &deckle_digest::session::SessionState,
+) -> Result<ExitCode, String> {
+    use deckle_digest::session::SessionState as S;
+    emit(json, state, || {
+        format!("{site}  {username}  session: {}", session_text(state))
+    })?;
+    Ok(match state {
+        S::SignedIn { .. } => ExitCode::SUCCESS,
+        _ => ExitCode::from(1),
+    })
 }
 
 /// `digest email password|test|forget` (email design §8), on the system keychain.
