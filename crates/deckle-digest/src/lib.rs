@@ -25,6 +25,7 @@ pub mod mail;
 pub mod masthead;
 pub mod moon;
 pub mod next;
+pub mod papers;
 pub mod pdf;
 pub mod press;
 pub mod puzzle;
