@@ -10,27 +10,35 @@ use std::time::SystemTime;
 use deckle_core::deliver::{Target, device_filename};
 use deckle_core::pipeline::{RunOptions, XRayMode, prepare};
 use deckle_core::queue::Queue;
-use deckle_digest::inbox::{ScanReport, Skip, scan_with_books};
+use deckle_digest::inbox::{ScanReport, Skip, scan_for_kindles};
 use deckle_digest::reading::ReadingQueue;
 
-/// Puts a book (not a KFX) into the outbox; the real one is [`pipeline`].
-pub(crate) type Convert<'a> = dyn FnMut(&Path, &Queue) -> Result<(), Skip> + 'a;
+/// Puts a book (not a KFX) into the outbox, meant for the Kindle whose id is given (else for
+/// any); the real one is [`pipeline`].
+pub(crate) type Convert<'a> = dyn FnMut(&Path, &Queue, Option<&str>) -> Result<(), Skip> + 'a;
 
-/// Scans `dir`: articles into `reading`, books into `outbox` through `convert`.
+/// Scans `dir`: articles into `reading`, books into `outbox` through `convert`. A book in a
+/// subfolder named after one of `kindles` ((name, id)) is meant for that Kindle.
 pub(crate) fn scan(
     dir: &Path,
     reading: &ReadingQueue,
     outbox: &Queue,
     now: SystemTime,
+    kindles: &[(String, String)],
     convert: &mut Convert,
 ) -> ScanReport {
-    scan_with_books(dir, reading, now, &mut |book| {
-        send_later(book, outbox, convert)
+    scan_for_kindles(dir, reading, now, kindles, &mut |book, owner| {
+        send_later(book, outbox, owner, convert)
     })
 }
 
 /// Adds one book to the outbox: a KFX as it is, anything else converted first.
-fn send_later(book: &Path, outbox: &Queue, convert: &mut Convert) -> Result<(), Skip> {
+fn send_later(
+    book: &Path,
+    outbox: &Queue,
+    owner: Option<&str>,
+    convert: &mut Convert,
+) -> Result<(), Skip> {
     let retry = |e: std::io::Error| Skip::Retry(format!("outbox: {e}"));
     let is_kfx = book
         .extension()
@@ -39,27 +47,27 @@ fn send_later(book: &Path, outbox: &Queue, convert: &mut Convert) -> Result<(), 
         // The outbox only holds `*.kfx`, so `Book.KFX` is queued as `Book.kfx`.
         let stem = book.file_stem().unwrap_or_default().to_string_lossy();
         outbox
-            .add(book, &format!("{stem}.kfx"), None)
+            .add_for(book, &format!("{stem}.kfx"), None, owner)
             .map_err(retry)?;
         return Ok(());
     }
-    convert(book, outbox)
+    convert(book, outbox, owner)
 }
 
 /// The `deckle run` pipeline up to the KPF, queued as a prepared book named like `deckle run`
 /// names it. At push it gets the cover rule's choice for that Kindle, X-Ray and Word Wise at
 /// the default level (device-aware build §4.5). Kindle Previewer is looked for once, at the
 /// first book; without it books wait in the Inbox.
-pub(crate) fn pipeline() -> impl FnMut(&Path, &Queue) -> Result<(), Skip> {
+pub(crate) fn pipeline() -> impl FnMut(&Path, &Queue, Option<&str>) -> Result<(), Skip> {
     pipeline_with(None)
 }
 
 /// [`pipeline`] with Kindle Previewer at `previewer` (else found as `deckle run` finds it).
 pub(crate) fn pipeline_with(
     previewer: Option<PathBuf>,
-) -> impl FnMut(&Path, &Queue) -> Result<(), Skip> {
+) -> impl FnMut(&Path, &Queue, Option<&str>) -> Result<(), Skip> {
     let mut located: Option<Result<PathBuf, String>> = None;
-    move |book, outbox| {
+    move |book, outbox, owner| {
         let pv = located
             .get_or_insert_with(|| {
                 deckle_core::previewer::locate(previewer.as_deref())
@@ -96,7 +104,7 @@ pub(crate) fn pipeline_with(
             .map_err(|r| Skip::Unreadable(r.error.unwrap_or_else(|| "not converted".into())))?;
         let name = device_filename(&prepared.report.info);
         outbox
-            .add_prepared(&prepared, &name, None)
+            .add_prepared_owned(&prepared, &name, None, owner)
             .map_err(|e| match e.kind() {
                 // the book converted but can't build even for a folder
                 std::io::ErrorKind::InvalidData => Skip::Unreadable(e.to_string()),
@@ -111,11 +119,11 @@ pub(crate) fn pipeline_with(
 /// e-reader outbox took leaves the Inbox even when the Kindle's copy has to wait for Previewer.
 pub(crate) fn with_readers(
     kobo: Option<Queue>,
-    mut kindle: impl FnMut(&Path, &Queue) -> Result<(), Skip>,
-) -> impl FnMut(&Path, &Queue) -> Result<(), Skip> {
-    move |book, outbox| {
+    mut kindle: impl FnMut(&Path, &Queue, Option<&str>) -> Result<(), Skip>,
+) -> impl FnMut(&Path, &Queue, Option<&str>) -> Result<(), Skip> {
+    move |book, outbox, owner| {
         let Some(k) = &kobo else {
-            return kindle(book, outbox);
+            return kindle(book, outbox, owner);
         };
         let bytes = deckle_core::reader::book_epub(book).map_err(Skip::Unreadable)?;
         let stem = book.file_stem().unwrap_or_default().to_string_lossy();
@@ -127,7 +135,7 @@ pub(crate) fn with_readers(
             std::fs::rename(&tmp, k.dir.join(&name))
         };
         write().map_err(|e| Skip::Retry(format!("e-reader outbox: {e}")))?;
-        match kindle(book, outbox) {
+        match kindle(book, outbox, owner) {
             Err(Skip::Retry(_)) => Ok(()),
             other => other,
         }
@@ -163,8 +171,10 @@ mod tests {
     }
 
     /// Stands in for Previewer: queues `<stem>.kfx` and counts its calls.
-    fn fake(calls: &mut Vec<PathBuf>) -> impl FnMut(&Path, &Queue) -> Result<(), Skip> + '_ {
-        |book, outbox| {
+    fn fake(
+        calls: &mut Vec<PathBuf>,
+    ) -> impl FnMut(&Path, &Queue, Option<&str>) -> Result<(), Skip> + '_ {
+        |book, outbox, _| {
             calls.push(book.to_path_buf());
             let stem = book.file_stem().unwrap().to_string_lossy().into_owned();
             let work = tempfile::tempdir().unwrap();
@@ -183,6 +193,41 @@ mod tests {
     }
 
     #[test]
+    fn a_book_in_a_kindles_folder_is_queued_for_that_kindle() {
+        let s = setup();
+        let mom = s.inbox.join("Mom's Kindle");
+        std::fs::create_dir_all(&mom).unwrap();
+        std::fs::write(mom.join("Ready.kfx"), b"KFX").unwrap();
+        std::fs::write(mom.join("Dune.epub"), b"epub").unwrap();
+        let kindles = [("Mom's Kindle".to_owned(), "G000AAAA".to_owned())];
+        let mut owners = Vec::new();
+        let r = scan(
+            &s.inbox,
+            &s.reading,
+            &s.outbox,
+            later(),
+            &kindles,
+            &mut |book: &Path, outbox: &Queue, owner: Option<&str>| {
+                owners.push(owner.map(str::to_owned));
+                let kfx = book.with_extension("built");
+                std::fs::write(&kfx, b"converted").unwrap();
+                outbox.add_for(&kfx, "Dune.kfx", None, owner).unwrap();
+                Ok(())
+            },
+        );
+        assert_eq!(r.sent.len(), 2, "{:?}", r.retry);
+        assert_eq!(owners, [Some("G000AAAA".to_owned())]);
+        for entry in s.outbox.pending() {
+            assert_eq!(
+                Queue::owner(&entry).as_deref(),
+                Some("G000AAAA"),
+                "{entry:?}"
+            );
+        }
+        assert_eq!(names(&s.outbox), ["Dune.kfx", "Ready.kfx"]);
+    }
+
+    #[test]
     fn an_epub_is_converted_into_the_outbox_in_one_scan() {
         let s = setup();
         std::fs::write(s.inbox.join("Dune.epub"), b"epub").unwrap();
@@ -193,6 +238,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             later(),
+            &[],
             &mut fake(&mut calls),
         );
         assert_eq!(calls.len(), 2);
@@ -213,6 +259,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             later(),
+            &[],
             &mut fake(&mut calls),
         );
         assert!(calls.is_empty(), "no conversion for a KFX");
@@ -226,10 +273,10 @@ mod tests {
     fn a_failed_conversion_goes_to_unreadable_with_the_reason() {
         let s = setup();
         std::fs::write(s.inbox.join("Broken.epub"), b"junk").unwrap();
-        let mut failing = |_: &Path, _: &Queue| -> Result<(), Skip> {
+        let mut failing = |_: &Path, _: &Queue, _: Option<&str>| -> Result<(), Skip> {
             Err(Skip::Unreadable("inspect: not a zip".into()))
         };
-        let r = scan(&s.inbox, &s.reading, &s.outbox, later(), &mut failing);
+        let r = scan(&s.inbox, &s.reading, &s.outbox, later(), &[], &mut failing);
         assert!(r.sent.is_empty());
         assert!(s.outbox.pending().is_empty());
         assert!(s.inbox.join("Unreadable/Broken.epub").exists());
@@ -241,10 +288,10 @@ mod tests {
     fn without_previewer_a_book_waits_in_the_inbox() {
         let s = setup();
         std::fs::write(s.inbox.join("Later.epub"), b"epub").unwrap();
-        let mut missing = |_: &Path, _: &Queue| -> Result<(), Skip> {
+        let mut missing = |_: &Path, _: &Queue, _: Option<&str>| -> Result<(), Skip> {
             Err(Skip::Retry("Kindle Previewer not found".into()))
         };
-        let r = scan(&s.inbox, &s.reading, &s.outbox, later(), &mut missing);
+        let r = scan(&s.inbox, &s.reading, &s.outbox, later(), &[], &mut missing);
         assert_eq!(r.retry.len(), 1);
         assert!(s.inbox.join("Later.epub").exists());
         assert!(s.outbox.pending().is_empty());
@@ -260,6 +307,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             SystemTime::now(),
+            &[],
             &mut fake(&mut calls),
         );
         assert!(calls.is_empty());
@@ -270,6 +318,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             later(),
+            &[],
             &mut fake(&mut calls),
         );
         assert_eq!(r.sent.len(), 1);
@@ -290,6 +339,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             later(),
+            &[],
             &mut fake(&mut calls),
         );
         assert_eq!(r.queued, 1);
@@ -315,6 +365,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             later(),
+            &[],
             &mut pipeline_with(Some(crate::tests::fake_previewer())),
         );
         assert_eq!(r.sent.len(), 1, "{:?} {:?}", r.unreadable, r.retry);
@@ -352,6 +403,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             later(),
+            &[],
             &mut fake(&mut calls),
         );
         scan(
@@ -359,6 +411,7 @@ mod tests {
             &s.reading,
             &s.outbox,
             later(),
+            &[],
             &mut fake(&mut calls),
         );
         assert_eq!(names(&s.outbox), ["Queued.kfx"]);

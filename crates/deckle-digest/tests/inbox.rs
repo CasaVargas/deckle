@@ -4,7 +4,7 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use deckle_digest::inbox::{Skip, scan, scan_with_books};
+use deckle_digest::inbox::{Skip, scan, scan_for_kindles, scan_with_books};
 use deckle_digest::reading::ReadingQueue;
 
 fn later() -> SystemTime {
@@ -184,4 +184,41 @@ fn plain_scan_leaves_books_for_a_scan_that_can_send_them() {
     assert!(r.unreadable.is_empty());
     assert_eq!(r.retry.len(), 1);
     assert!(inbox.join("book.epub").exists());
+}
+
+#[test]
+fn a_book_in_a_kindles_folder_is_meant_for_that_kindle() {
+    let (_d, q, inbox) = setup();
+    let mom = inbox.join("mom's kindle");
+    std::fs::create_dir_all(&mom).unwrap();
+    std::fs::create_dir_all(inbox.join("Holiday")).unwrap();
+    std::fs::create_dir_all(inbox.join("Sent")).unwrap();
+    std::fs::write(mom.join("Dune.epub"), b"book").unwrap();
+    std::fs::write(inbox.join("Holiday/Left.epub"), b"book").unwrap();
+    std::fs::write(inbox.join("Anyone.epub"), b"book").unwrap();
+    write(&mom.join("a.txt"), "https://ex.com/for-the-paper\n");
+    let kindles = [("Mom's Kindle".to_owned(), "G000AAAA".to_owned())];
+    let mut seen = Vec::new();
+    let r = scan_for_kindles(&inbox, &q, later(), &kindles, &mut |p, owner| {
+        seen.push((
+            p.file_name().unwrap().to_string_lossy().into_owned(),
+            owner.map(str::to_owned),
+        ));
+        Ok(())
+    });
+    assert_eq!(
+        seen,
+        [
+            ("Anyone.epub".to_owned(), None),
+            ("Dune.epub".to_owned(), Some("G000AAAA".to_owned())),
+        ]
+    );
+    assert!(mom.join("Sent/Dune.epub").exists());
+    // Articles in a Kindle's folder still go to the paper.
+    assert_eq!(r.queued, 1);
+    assert_eq!(r.other_folders, [inbox.join("Holiday")]);
+    assert!(
+        inbox.join("Holiday/Left.epub").exists(),
+        "other folders are left alone"
+    );
 }

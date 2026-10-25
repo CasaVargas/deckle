@@ -28,6 +28,8 @@ pub struct ScanReport {
     pub unreadable: Vec<(PathBuf, String)>,
     /// Left in place for the next scan (the queue was busy, a disk error).
     pub retry: Vec<(PathBuf, String)>,
+    /// Subfolders that aren't the Inbox's own and aren't named after a Kindle: left alone.
+    pub other_folders: Vec<PathBuf>,
 }
 
 /// Why a file wasn't queued: its content (moved aside) or the moment (left for later).
@@ -132,12 +134,70 @@ pub fn scan_with_books(
     now: SystemTime,
     send_later: &mut dyn FnMut(&Path) -> Result<(), Skip>,
 ) -> ScanReport {
+    scan_for_kindles(dir, queue, now, &[], &mut |book, _| send_later(book))
+}
+
+/// Folders the Inbox makes itself, never a Kindle's.
+const OWN_FOLDERS: [&str; 3] = ["Sent", "Saved", "Unreadable"];
+
+/// Like [`scan_with_books`], also scanning each subfolder named after a Kindle in `kindles`
+/// ((name, id), names matched ignoring case): its books go to `send_later` with that Kindle's
+/// id (Kindle profiles design §2). Each folder keeps its own `Sent/`, `Saved/` and
+/// `Unreadable/`. Other folders are left alone and listed in the report.
+pub fn scan_for_kindles(
+    dir: &Path,
+    queue: &ReadingQueue,
+    now: SystemTime,
+    kindles: &[(String, String)],
+    send_later: &mut dyn FnMut(&Path, Option<&str>) -> Result<(), Skip>,
+) -> ScanReport {
     let mut report = ScanReport::default();
     if std::fs::create_dir_all(dir).is_err() {
         return report;
     }
+    scan_files(dir, queue, now, None, send_later, &mut report);
     let Ok(entries) = std::fs::read_dir(dir) else {
         return report;
+    };
+    let mut folders: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+        .filter(|p| {
+            let name = p.file_name().unwrap_or_default().to_string_lossy();
+            !name.starts_with('.') && !OWN_FOLDERS.iter().any(|o| o.eq_ignore_ascii_case(&name))
+        })
+        .collect();
+    folders.sort();
+    for folder in folders {
+        let name = folder
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .trim()
+            .to_owned();
+        match kindles
+            .iter()
+            .find(|(n, _)| n.trim().eq_ignore_ascii_case(&name))
+        {
+            Some((_, id)) => scan_files(&folder, queue, now, Some(id), send_later, &mut report),
+            None => report.other_folders.push(folder),
+        }
+    }
+    report
+}
+
+/// The settled files directly in `dir`: books to `send_later` (with `owner`), articles queued.
+fn scan_files(
+    dir: &Path,
+    queue: &ReadingQueue,
+    now: SystemTime,
+    owner: Option<&str>,
+    send_later: &mut dyn FnMut(&Path, Option<&str>) -> Result<(), Skip>,
+    report: &mut ScanReport,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
     let mut files: Vec<PathBuf> = entries
         .flatten()
@@ -161,7 +221,7 @@ pub fn scan_with_books(
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
         if is_book(&file) {
-            match send_later(&file) {
+            match send_later(&file, owner) {
                 Ok(()) => {
                     move_to(&file, "Sent");
                     report.sent.push(file);
@@ -202,7 +262,6 @@ pub fn scan_with_books(
             Err(skip) => report.skip(file, skip),
         }
     }
-    report
 }
 
 impl ScanReport {

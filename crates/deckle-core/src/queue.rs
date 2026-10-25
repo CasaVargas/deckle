@@ -229,6 +229,41 @@ impl Queue {
         Ok(dest)
     }
 
+    /// [`Queue::add`], meant for the Kindle `owner` (its id) when given. The owner is written
+    /// first and the file copied aside and renamed, so a `watch` never hands it to another
+    /// Kindle.
+    pub fn add_for(
+        &self,
+        kfx: &Path,
+        name: &str,
+        replaces: Option<&str>,
+        owner: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
+        let Some(owner) = owner else {
+            return self.add(kfx, name, replaces);
+        };
+        self.make_room(name, replaces, &[])?;
+        let dest = self.dir.join(name);
+        std::fs::write(owner_file(&dest), owner)?;
+        let part = self.dir.join(format!("{name}.part"));
+        std::fs::copy(kfx, &part)?;
+        std::fs::rename(&part, &dest)?;
+        Ok(dest)
+    }
+
+    /// [`Queue::add_prepared`], meant for the Kindle `owner` (its id) when given.
+    pub fn add_prepared_owned(
+        &self,
+        prepared: &Prepared,
+        name: &str,
+        replaces: Option<&str>,
+        owner: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
+        let fallback = fallback_kfx(prepared)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.add_prepared_for(prepared, &fallback, name, replaces, owner)
+    }
+
     /// Queues a prepared book to be delivered as `name` (`<stem>.kfx`), finished at push for
     /// the Kindle that takes it. Builds its fallback first: a book that can't even build that
     /// fails here (`InvalidData`), not at push.

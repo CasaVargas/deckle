@@ -3946,13 +3946,25 @@ fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::Reading
 fn scan_inbox(cfg: &deckle_digest::Config) {
     let dir = deckle_digest::inbox::expand_home(&cfg.reading.inbox);
     let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+    let kindles: Vec<(String, String)> = cfg
+        .sync
+        .named()
+        .map(|(id, name)| (name.to_owned(), id.to_owned()))
+        .collect();
     let r = inbox::scan(
         &dir,
         &reading_queue(cfg),
         &outbox,
         std::time::SystemTime::now(),
+        &kindles,
         &mut inbox::with_readers(reader_seen().then(epub_queue), inbox::pipeline()),
     );
+    for folder in &r.other_folders {
+        eprintln!(
+            "inbox: left {} alone: no Kindle is called that (name one with `deckle devices name`)",
+            folder.display()
+        );
+    }
     if r.queued > 0 {
         eprintln!(
             "inbox: saved {} article(s) from {}",
