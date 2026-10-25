@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **FictionBook (FB2) becomes a book.** Import `.fb2` or `.fb2.zip` with its chapters and
+  contents, pop-up footnotes, poems, tables, embedded cover and illustrations, and the authors,
+  series and language it declares. Files in windows-1251 and other declared encodings work.
+
 ## 0.6.0 — notes become books, and a more personal paper
 
 - **Markdown becomes a book.** Import a Markdown file or a folder of notes, including local

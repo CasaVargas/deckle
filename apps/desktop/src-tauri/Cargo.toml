@@ -27,6 +27,7 @@ deckle-cli.workspace = true
 deckle-library.workspace = true
 deckle-docx.workspace = true
 deckle-txt.workspace = true
+deckle-fb2.workspace = true
 deckle-markdown.workspace = true
 deckle-pdf.workspace = true
 deckle-readership.workspace = true

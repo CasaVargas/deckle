@@ -1428,3 +1428,47 @@ fn built_in_presets_reach_normalization_and_select_stage_defaults() {
         assert!(report.pages.is_some());
     }
 }
+
+#[test]
+#[cfg(unix)]
+fn fb2_and_zipped_fb2_run_through_import_and_delivery() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/fb2");
+    for source in ["mini.fb2", "mini.fb2.zip"] {
+        let out = tempfile::tempdir().unwrap();
+        let opts = fill_opts(out.path(), false);
+        let mut stages = Vec::new();
+        let r = deckle_core::pipeline::run_with_progress(&fixtures.join(source), &opts, &mut |s| {
+            stages.push(s)
+        });
+        assert_eq!(r.error, None, "{r:?}");
+        assert_eq!(r.info.title, "The Deckle FB2 Mini");
+        let creators: Vec<&str> = r.info.creators.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(creators, ["Ada K. Testwright", "Typesetter"]);
+        let series = r.info.series.as_ref().unwrap();
+        assert_eq!(
+            (series.name.as_str(), series.index),
+            ("Deckle Fixtures", Some(2.0))
+        );
+        assert!(r.info.cover_href.is_some());
+        assert_eq!(stages.first(), Some(&"import"));
+        assert!(r.delivered.as_ref().unwrap().exists());
+        std::fs::remove_dir_all(r.work_dir.unwrap()).unwrap();
+    }
+}
+
+#[test]
+#[cfg(unix)]
+#[ignore = "requires installed Kindle Previewer; run explicitly for import validation"]
+fn fb2_real_previewer_smoke() {
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/fb2");
+    for source in ["mini.fb2", "cp1251.fb2"] {
+        let out = tempfile::tempdir().unwrap();
+        let mut opts = fill_opts(out.path(), false);
+        opts.previewer = None;
+        opts.keep_work_dir = false;
+        let report = run(&fixtures.join(source), &opts);
+        assert_eq!(report.error, None, "{source}: {report:?}");
+        let bytes = std::fs::read(report.delivered.unwrap()).unwrap();
+        assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
+    }
+}

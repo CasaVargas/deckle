@@ -1042,6 +1042,7 @@ dependencies = [
  "csv",
  "deckle-cover",
  "deckle-docx",
+ "deckle-fb2",
  "deckle-kfx",
  "deckle-markdown",
  "deckle-mobi",
@@ -1084,6 +1085,7 @@ dependencies = [
  "deckle-core",
  "deckle-digest",
  "deckle-docx",
+ "deckle-fb2",
  "deckle-highlights",
  "deckle-kfx",
  "deckle-library",
@@ -1160,6 +1162,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-fb2"
+version = "0.6.0"
+dependencies = [
+ "base64 0.22.1",
+ "encoding_rs",
+ "roxmltree",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zip 9.0.5",
+]
+
+[[package]]
 name = "deckle-highlights"
 version = "0.6.0"
 dependencies = [
@@ -1191,6 +1206,7 @@ version = "0.6.0"
 dependencies = [
  "deckle-core",
  "deckle-docx",
+ "deckle-fb2",
  "deckle-kfx",
  "deckle-markdown",
  "deckle-mobi",

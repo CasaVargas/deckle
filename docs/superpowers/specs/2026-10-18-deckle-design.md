@@ -44,7 +44,8 @@ so the research that went into it stops being re-derived on MobileRead every yea
   (A plain-folder library and a view of each Kindle's books came later:
   `2026-10-21-library-and-device-view-design.md`.)
 - DRM removal of any kind. Input started as DRM-free EPUB only. Markdown and notes folders
-  now use the import stage: `2026-10-24-markdown-import-design.md`.
+  now use the import stage: `2026-10-24-markdown-import-design.md`; FictionBook too:
+  `2026-10-25-fb2-import-design.md`.
 - Send-to-Kindle email or Amazon cloud delivery. Deckle is USB/MTP only.
 - Comics, manga, fixed-layout, PDFs, dictionaries. (Word documents came later as an import
   stage in front of the pipeline: `2026-10-21-docx-import-design.md`; text PDFs, reflowed, the

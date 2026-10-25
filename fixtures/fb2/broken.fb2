@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0" xmlns:l="http://www.w3.org/1999/xlink">
+ <description>
+  <title-info>
+   <genre>sf_fantasy</genre>
+   <genre>prose_classic</genre>
+   <author><first-name>Ada</first-name><middle-name>K.</middle-name><last-name>Testwright</last-name></author>
+   <author><nickname>Typesetter</nickname></author>
+   <book-title>The Deckle FB2 Mini</book-title>
+   <annotation><p>A small book about a print shop.</p><p>Second paragraph &amp; more.</p></annotation>
+   <coverpage><image l:href="#cover.png"/></coverpage>
+   <lang>en</lang>
+   <sequence name="Deckle Fixtures" number="2"/>
+  </title-info>
+  <document-info><id>deckle-fb2-mini</id><version>1.0</version></document-info>
+ </description>
+ <body>
+  <title><p>The Deckle FB2 Mini</p><p>A Novel</p></title>
+  <epigraph><p>Ink is patient.</p><text-author>Old proverb</text-author></epigraph>
+  <section id="part1">
+   <title><p>Part One</p></title>
+   <section id="ch1">
+    <title><p>Chapter 1</p><p>The Cold Press</p></title>
+    <p>The press was cold that morning, and the type sat in its cases like rain waiting to fall. Nobody in the shop said a word about the proofs, which were late again.</p>
+    <p>It was <emphasis>very</emphasis> cold, and <strong>nobody</strong> spoke.<a l:href="#n1" type="note">[1]</a></p>
+    <empty-line/>
+    <image l:href="#plate.png" alt="A grey plate"/>
+    <p>See <a l:href="#ch3">the third chapter</a> or <a l:href="https://example.com/press">the press site</a>.</p>
+   </section>
+   <section id="ch2">
+    <title><p>Chapter

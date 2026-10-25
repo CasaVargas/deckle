@@ -55,6 +55,17 @@ Made by `python3 -I tools/ref/make_txt_fixtures.py fixtures/txt` (standard libra
 | `utf16.txt` | UTF-16 LE with a BOM, accented letters |
 | `noheadings.txt` | About 500 KB of hard-wrapped paragraphs with no headings |
 
+## `fb2/`
+
+Made by `python3 -I tools/ref/make_fb2_fixtures.py fixtures/fb2` (standard library only).
+
+| File | What |
+|---|---|
+| `mini.fb2` | UTF-8 FictionBook: two authors (one by nickname), series #2, two genres, an annotation, a PNG cover; a body title and epigraph; two parts of two chapters; a poem, a table, a cite, sub/sup/strikethrough/code; a block image whose `content-type` lies, an inline GIF, an internal link, an external link, two notes (one link without `type="note"`); an unused binary |
+| `mini.fb2.zip` | `mini.fb2`, zipped |
+| `cp1251.fb2` | A short Russian book declared and encoded `windows-1251` |
+| `broken.fb2` | `mini.fb2` cut off mid-section |
+
 ## Not in the repo
 
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB
