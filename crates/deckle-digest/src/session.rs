@@ -56,19 +56,26 @@ impl UreqSite {
         let mut tmp_name = path.as_os_str().to_owned();
         tmp_name.push(".tmp");
         let tmp = PathBuf::from(tmp_name);
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-        let mut file = opts.open(&tmp).map_err(err)?;
-        {
-            let jar = self.agent.cookie_jar_lock();
-            jar.save_json(&mut file)
+        // A stale temp file would keep its old mode; start from nothing.
+        let _ = std::fs::remove_file(&tmp);
+        let written = (|| -> Result<(), String> {
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            #[cfg(unix)]
+            std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+            let mut file = opts.open(&tmp).map_err(err)?;
+            self.agent
+                .cookie_jar_lock()
+                .save_json(&mut file)
                 .map_err(|e| format!("{}: {e}", path.display()))?;
+            file.flush().map_err(err)?;
+            drop(file);
+            std::fs::rename(&tmp, path).map_err(err)
+        })();
+        if written.is_err() {
+            let _ = std::fs::remove_file(&tmp);
         }
-        file.flush().map_err(err)?;
-        drop(file);
-        std::fs::rename(&tmp, path).map_err(err)
+        written
     }
 
     pub fn clear_jar(&self) {
@@ -159,7 +166,16 @@ mod tests {
         assert_eq!(a.cookie_names(), ["sess"]);
         let dir = tempdir("rt");
         let path = jar_path(&dir, "a");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path.with_extension("json.tmp"), "stale").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let tmp = path.with_extension("json.tmp");
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
         a.save_jar(&path).unwrap();
+        assert!(!path.with_extension("json.tmp").exists());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -191,15 +207,19 @@ mod tests {
 
     #[test]
     fn the_cookie_goes_back_only_to_its_host() {
-        let (url, seen) = fixture(3);
+        let (url, seen) = fixture(2);
+        let (other, other_seen) = fixture(1);
         let a = UreqSite::new("a");
         a.get(&url).unwrap();
         a.get(&url).unwrap();
-        UreqSite::new("b").get(&url).unwrap();
-        let seen = seen.lock().unwrap();
+        // The same agent, holding the cookie, asks a different host name.
+        let port = other.rsplit(':').next().unwrap();
+        a.get(&format!("http://localhost:{port}")).unwrap();
         let has = |r: &str| r.to_lowercase().contains("cookie: sess=abc");
+        let seen = seen.lock().unwrap();
         assert!(!has(&seen[0]));
         assert!(has(&seen[1]), "{}", seen[1]);
-        assert!(!has(&seen[2]), "{}", seen[2]);
+        let other_seen = other_seen.lock().unwrap();
+        assert!(!has(&other_seen[0]), "{}", other_seen[0]);
     }
 }
