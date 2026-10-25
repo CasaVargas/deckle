@@ -203,3 +203,25 @@ Crate tests cover:
 The pipeline and CLI tests run `mini.rtf` through the fake Previewer. A library test adds an RTF
 and reads its metadata back. An opt-in `rtf_real_previewer_smoke` test runs the fixtures through
 real Kindle Previewer.
+
+## 5. Implementation notes (2026-10-25, #170)
+
+These are the calls made where §2 left room, so the code and this document agree:
+
+- **Tree first.** The lexer builds the whole group tree before the walk, so destinations can be
+  recognised from their first tokens and skipped whole. The walk saves and restores character
+  and paragraph state at each group.
+- **Stored contents.** A `TOC` field is dropped along with its result, because Word stores its
+  generated table of contents that way and Deckle builds its own. Other fields keep their
+  result.
+- **Note numbers.** Footnotes and endnotes are numbered separately, from 1, as in DOCX.
+  `\chftn` and custom marks are ignored.
+- **Shapes.** A `\shp` keeps its `\shptxt` text-box text and its picture. A shape with neither
+  warns.
+- **`\plain`** resets character formatting but keeps the current font, so the code page for
+  `\'hh` doesn't change mid-run.
+- **Links** wrap the field result only when it stays within one paragraph. A result that
+  spans paragraphs keeps its text, unlinked.
+- **Checked:** `rtf_real_previewer_smoke` passed with Kindle Previewer 4 on macOS on 2026-10-25,
+  for `mini.rtf`, `cyrillic.rtf` and `japanese.rtf`. Reading on physical hardware remains
+  untested.

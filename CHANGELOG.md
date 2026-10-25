@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **RTF becomes a book.** Import `.rtf` from TextEdit, WordPad, Scrivener or older Word, the same
+  way as Word documents: headings become the contents, and formatting, lists, tables, pictures,
+  links and pop-up footnotes come through. Text in older code pages (Cyrillic, Japanese and
+  others) decodes correctly.
 - **OpenDocument text becomes a book.** Import `.odt`, `.ott` or flat `.fodt` from LibreOffice
   and friends, the same way as Word documents: headings become the contents, styles become bold,
   italics and the rest, and lists, tables, pictures and pop-up footnotes come through.

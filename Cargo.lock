@@ -1048,6 +1048,7 @@ dependencies = [
  "deckle-mobi",
  "deckle-odt",
  "deckle-pdf",
+ "deckle-rtf",
  "deckle-transport",
  "deckle-txt",
  "deckle-wordwise",
@@ -1096,6 +1097,7 @@ dependencies = [
  "deckle-odt",
  "deckle-pdf",
  "deckle-readership",
+ "deckle-rtf",
  "deckle-shelf",
  "deckle-transport",
  "deckle-txt",
@@ -1214,6 +1216,7 @@ dependencies = [
  "deckle-mobi",
  "deckle-odt",
  "deckle-pdf",
+ "deckle-rtf",
  "deckle-txt",
  "deckle-xray",
  "regex",
@@ -1308,6 +1311,18 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "deckle-rtf"
+version = "0.6.0"
+dependencies = [
+ "encoding_rs",
+ "roxmltree",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zip 9.0.5",
 ]
 
 [[package]]
