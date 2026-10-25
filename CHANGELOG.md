@@ -7,6 +7,9 @@
   sends a paper only to that Kindle. `deckle digest papers` lists them, and `--paper <slug>`
   works on one. Each paper is pruned by its own `keep` and keeps its own readership, puzzles
   and Morgue folder.
+- **A schedule per paper, with days.** `deckle digest --paper kid-courier schedule --at 07:00
+  --days sat` builds that paper on Saturdays only. Every paper gets its own job, and a removed
+  paper's job goes the next time the schedule is set.
 - **Several Kindles in one home.** Name each Kindle (`deckle devices name`, or This Kindle in
   the app) and send to it by name with `deckle run --kindle`, or drop books in an Inbox folder
   named after it. A book for a Kindle that isn't plugged in waits in the outbox, and no other

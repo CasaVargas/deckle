@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Scheduling (design §5b): the edition every morning, and the watcher from login on.
-//! macOS: two LaunchAgents. Windows: two Task Scheduler tasks. Linux: printed instructions.
+//! Scheduling (design §5b): each paper's edition at its time (many papers §5), and the watcher
+//! from login on. macOS: LaunchAgents. Windows: Task Scheduler tasks. Linux: printed
+//! instructions. The main paper keeps today's job names; another paper's carry its slug.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,30 +10,121 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
 
+use crate::config::{Config, Day};
 use crate::esc;
+use crate::papers::MAIN;
 
 pub const DIGEST_LABEL: &str = "com.casavargas.deckle.digest";
 pub const WATCH_LABEL: &str = "com.casavargas.deckle.watch";
 const TASK_FOLDER: &str = "Deckle";
 
-/// What the jobs run.
+/// What one paper's edition job runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Schedule {
     pub hour: u8,
     pub minute: u8,
+    /// Empty: every day.
+    pub days: Vec<Day>,
+    /// The paper (`main` for digest.toml's).
+    pub slug: String,
     /// The `deckle` binary, absolute.
     pub exe: PathBuf,
-    /// `--config`, carried into both jobs.
+    /// `--config`, carried into the jobs.
     pub config: Option<PathBuf>,
+}
+
+/// What's installed for one paper.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct PaperStatus {
+    pub slug: String,
+    /// `HH:MM`.
+    pub at: Option<String>,
+    pub days: Vec<Day>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct Status {
-    /// `HH:MM` of the installed edition job.
+    /// `HH:MM` of the main paper's installed edition job.
     pub at: Option<String>,
     pub watch: bool,
     /// The binary the installed jobs run.
     pub exe: Option<String>,
+    /// Every paper's installed edition job, main first.
+    pub papers: Vec<PaperStatus>,
+}
+
+/// A paper's LaunchAgent label: `…digest` for the main paper, `…digest.<slug>` for another.
+pub fn label(slug: &str) -> String {
+    match slug {
+        MAIN => DIGEST_LABEL.to_owned(),
+        s => format!("{DIGEST_LABEL}.{s}"),
+    }
+}
+
+/// A paper's Windows task: `\Deckle\Digest`, or `\Deckle\Digest-<slug>`.
+pub fn task_name_for(slug: &str) -> String {
+    match slug {
+        MAIN => format!("\\{TASK_FOLDER}\\Digest"),
+        s => format!("\\{TASK_FOLDER}\\Digest-{s}"),
+    }
+}
+
+/// launchd's weekday: 0 is Sunday.
+fn weekday(d: Day) -> u8 {
+    match d {
+        Day::Sun => 0,
+        Day::Mon => 1,
+        Day::Tue => 2,
+        Day::Wed => 3,
+        Day::Thu => 4,
+        Day::Fri => 5,
+        Day::Sat => 6,
+    }
+}
+
+/// Task Scheduler's day element.
+fn task_day(d: Day) -> &'static str {
+    match d {
+        Day::Mon => "Monday",
+        Day::Tue => "Tuesday",
+        Day::Wed => "Wednesday",
+        Day::Thu => "Thursday",
+        Day::Fri => "Friday",
+        Day::Sat => "Saturday",
+        Day::Sun => "Sunday",
+    }
+}
+
+/// One job per paper whose file has `[schedule] at` (many papers §5).
+pub fn jobs_for(papers: &[Config], exe: &Path, config: Option<&Path>) -> Vec<Schedule> {
+    papers
+        .iter()
+        .filter_map(|p| {
+            let (hour, minute) = parse_at(p.schedule.at.as_deref()?).ok()?;
+            let mut days = p.schedule.days.clone();
+            days.sort();
+            days.dedup();
+            Some(Schedule {
+                hour,
+                minute,
+                days,
+                slug: p.slug().to_owned(),
+                exe: exe.to_path_buf(),
+                config: config.map(Path::to_path_buf),
+            })
+        })
+        .collect()
+}
+
+/// Installed per-paper labels (`…digest.<slug>`) no wanted job has. Never the main paper's:
+/// a main paper with no `[schedule] at` keeps whatever is installed.
+pub fn stale_labels(installed: &[String], wanted: &[Schedule]) -> Vec<String> {
+    installed
+        .iter()
+        .filter(|l| l.starts_with(&format!("{DIGEST_LABEL}.")))
+        .filter(|l| !wanted.iter().any(|s| label(&s.slug) == **l))
+        .cloned()
+        .collect()
 }
 
 /// `HH:MM` (24-hour) → (hour, minute).
@@ -66,6 +158,10 @@ impl Schedule {
         if let Some(c) = &self.config {
             a.push("--config".into());
             a.push(c.to_string_lossy().into_owned());
+        }
+        if job == "run" && self.slug != MAIN {
+            a.push("--paper".into());
+            a.push(self.slug.clone());
         }
         a.push(job.into());
         if job == "run" {
@@ -102,38 +198,71 @@ fn plist(label: &str, program: &[String], log: &Path, schedule: &str) -> String 
     )
 }
 
-/// The two LaunchAgents: (label, file name, XML).
-pub fn launchd_plists(s: &Schedule, logs: &Path) -> [(&'static str, String); 2] {
-    let exe = s.exe.to_string_lossy().into_owned();
-    let program = |job: &str| {
-        let mut p = vec![exe.clone()];
-        p.extend(s.args(job));
-        p
+/// A paper's edition LaunchAgent: (label, XML). Days become one calendar entry per weekday.
+pub fn launchd_digest_plist(s: &Schedule, logs: &Path) -> (String, String) {
+    let mut program = vec![s.exe.to_string_lossy().into_owned()];
+    program.extend(s.args("run"));
+    let entry = |day: Option<Day>| {
+        let weekday = day
+            .map(|d| {
+                format!(
+                    "\x20   <key>Weekday</key><integer>{}</integer>\n",
+                    weekday(d)
+                )
+            })
+            .unwrap_or_default();
+        format!(
+            "  <dict>\n\
+             \x20   <key>Hour</key><integer>{}</integer>\n\
+             \x20   <key>Minute</key><integer>{}</integer>\n\
+             {weekday}  </dict>\n",
+            s.hour, s.minute
+        )
     };
-    [
-        (
-            DIGEST_LABEL,
-            plist(
-                DIGEST_LABEL,
-                &program("run"),
-                &logs.join("digest.log"),
-                &format!(
-                    "  <key>StartCalendarInterval</key>\n  <dict>\n\
-                     \x20   <key>Hour</key><integer>{}</integer>\n\
-                     \x20   <key>Minute</key><integer>{}</integer>\n  </dict>\n",
-                    s.hour, s.minute
-                ),
-            ),
+    let calendar = match s.days.is_empty() {
+        true => format!("  <key>StartCalendarInterval</key>\n{}", entry(None)),
+        false => format!(
+            "  <key>StartCalendarInterval</key>\n  <array>\n{}  </array>\n",
+            s.days.iter().map(|d| entry(Some(*d))).collect::<String>()
         ),
-        (
+    };
+    let label = label(&s.slug);
+    let log = match s.slug.as_str() {
+        MAIN => logs.join("digest.log"),
+        slug => logs.join(format!("digest-{slug}.log")),
+    };
+    let xml = plist(&label, &program, &log, &calendar);
+    (label, xml)
+}
+
+/// The watcher's LaunchAgent: (label, XML).
+pub fn launchd_watch_plist(exe: &Path, config: Option<&Path>, logs: &Path) -> (String, String) {
+    let s = Schedule {
+        hour: 0,
+        minute: 0,
+        days: Vec::new(),
+        slug: MAIN.to_owned(),
+        exe: exe.to_path_buf(),
+        config: config.map(Path::to_path_buf),
+    };
+    let mut program = vec![exe.to_string_lossy().into_owned()];
+    program.extend(s.args("watch"));
+    (
+        WATCH_LABEL.to_owned(),
+        plist(
             WATCH_LABEL,
-            plist(
-                WATCH_LABEL,
-                &program("watch"),
-                &logs.join("watch.log"),
-                "  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n",
-            ),
+            &program,
+            &logs.join("watch.log"),
+            "  <key>RunAtLoad</key><true/>\n  <key>KeepAlive</key><true/>\n",
         ),
+    )
+}
+
+/// The main paper's job and the watcher, as before many papers: (label, XML) each.
+pub fn launchd_plists(s: &Schedule, logs: &Path) -> [(String, String); 2] {
+    [
+        launchd_digest_plist(s, logs),
+        launchd_watch_plist(&s.exe, s.config.as_deref(), logs),
     ]
 }
 
@@ -141,6 +270,8 @@ static PLIST_HOUR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<key>Hour</key><integer>(\d+)</integer>").unwrap());
 static PLIST_MINUTE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<key>Minute</key><integer>(\d+)</integer>").unwrap());
+static PLIST_WEEKDAY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<key>Weekday</key><integer>(\d+)</integer>").unwrap());
 static PLIST_EXE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"<key>ProgramArguments</key>\s*<array>\s*<string>([^<]+)</string>").unwrap()
 });
@@ -182,17 +313,15 @@ fn gui_domain() -> Result<String, String> {
     Ok(format!("gui/{}", run(Command::new("id").arg("-u"))?.trim()))
 }
 
-fn macos_install(s: &Schedule) -> Result<Vec<String>, String> {
+/// Writes and (re)loads LaunchAgents: unload (ignoring "not loaded"), write, load.
+fn macos_load(jobs: &[(String, String)]) -> Result<Vec<String>, String> {
     let home = home()?;
     let agents = home.join("Library/LaunchAgents");
-    let logs = home.join("Library/Logs/Deckle");
     std::fs::create_dir_all(&agents).map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
     let domain = gui_domain()?;
     let mut done = Vec::new();
-    for (label, xml) in launchd_plists(s, &logs) {
+    for (label, xml) in jobs {
         let path = agents.join(format!("{label}.plist"));
-        // Replace a running job: unload (ignoring "not loaded"), write, load.
         let _ = run(Command::new("launchctl").args(["bootout", &format!("{domain}/{label}")]));
         std::fs::write(&path, xml).map_err(|e| format!("{}: {e}", path.display()))?;
         run(Command::new("launchctl")
@@ -203,11 +332,23 @@ fn macos_install(s: &Schedule) -> Result<Vec<String>, String> {
     Ok(done)
 }
 
-fn macos_remove() -> Result<Vec<String>, String> {
+fn macos_logs() -> Result<PathBuf, String> {
+    let logs = home()?.join("Library/Logs/Deckle");
+    std::fs::create_dir_all(&logs).map_err(|e| e.to_string())?;
+    Ok(logs)
+}
+
+fn macos_install(s: &Schedule) -> Result<Vec<String>, String> {
+    let logs = macos_logs()?;
+    macos_load(&launchd_plists(s, &logs))
+}
+
+/// Unloads and deletes the LaunchAgents `labels`.
+fn macos_unload(labels: &[String]) -> Result<Vec<String>, String> {
     let agents = home()?.join("Library/LaunchAgents");
     let domain = gui_domain()?;
     let mut done = Vec::new();
-    for label in [DIGEST_LABEL, WATCH_LABEL] {
+    for label in labels {
         let _ = run(Command::new("launchctl").args(["bootout", &format!("{domain}/{label}")]));
         let path = agents.join(format!("{label}.plist"));
         if path.exists() {
@@ -218,17 +359,75 @@ fn macos_remove() -> Result<Vec<String>, String> {
     Ok(done)
 }
 
+/// Every installed edition LaunchAgent's label, main and per paper.
+fn macos_digest_labels() -> Vec<String> {
+    let Ok(agents) = home().map(|h| h.join("Library/LaunchAgents")) else {
+        return Vec::new();
+    };
+    let mut labels: Vec<String> = std::fs::read_dir(agents)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| {
+                    let name = e.file_name().to_string_lossy().into_owned();
+                    let label = name.strip_suffix(".plist")?;
+                    (label == DIGEST_LABEL || label.starts_with(&format!("{DIGEST_LABEL}.")))
+                        .then(|| label.to_owned())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    labels.sort();
+    labels
+}
+
+fn macos_remove() -> Result<Vec<String>, String> {
+    let mut labels = macos_digest_labels();
+    labels.push(WATCH_LABEL.to_owned());
+    macos_unload(&labels)
+}
+
+/// The days an installed plist runs on (empty: every day).
+fn plist_days(xml: &str) -> Vec<Day> {
+    let mut days: Vec<Day> = PLIST_WEEKDAY
+        .captures_iter(xml)
+        .filter_map(|c| c[1].parse::<u8>().ok())
+        .filter_map(|n| Day::ALL.into_iter().find(|d| weekday(*d) == n % 7))
+        .collect();
+    days.sort();
+    days.dedup();
+    days
+}
+
 fn macos_status() -> Status {
     let Ok(agents) = home().map(|h| h.join("Library/LaunchAgents")) else {
         return Status::default();
     };
-    let (at, exe) = std::fs::read_to_string(agents.join(format!("{DIGEST_LABEL}.plist")))
-        .map(|x| parse_digest_plist(&x))
-        .unwrap_or((None, None));
+    let mut papers = Vec::new();
+    let mut main = (None, None);
+    for l in macos_digest_labels() {
+        let Ok(xml) = std::fs::read_to_string(agents.join(format!("{l}.plist"))) else {
+            continue;
+        };
+        let (at, exe) = parse_digest_plist(&xml);
+        let slug = l
+            .strip_prefix(&format!("{DIGEST_LABEL}."))
+            .unwrap_or(MAIN)
+            .to_owned();
+        if slug == MAIN {
+            main = (at.clone(), exe);
+        }
+        papers.push(PaperStatus {
+            slug,
+            at,
+            days: plist_days(&xml),
+        });
+    }
+    papers.sort_by_key(|p| (p.slug != MAIN, p.slug.clone()));
     Status {
-        at,
+        at: main.0,
         watch: agents.join(format!("{WATCH_LABEL}.plist")).exists(),
-        exe,
+        exe: main.1,
+        papers,
     }
 }
 
@@ -237,9 +436,19 @@ fn macos_status() -> Status {
 /// A Task Scheduler definition (XML, as `schtasks /Create /XML` takes it).
 pub fn task_xml(s: &Schedule, job: &str) -> String {
     let trigger = if job == "run" {
+        let by = match s.days.is_empty() {
+            true => "<ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay>".to_owned(),
+            false => format!(
+                "<ScheduleByWeek><DaysOfWeek>{}</DaysOfWeek><WeeksInterval>1</WeeksInterval></ScheduleByWeek>",
+                s.days
+                    .iter()
+                    .map(|d| format!("<{}/>", task_day(*d)))
+                    .collect::<String>()
+            ),
+        };
         format!(
             "<CalendarTrigger><StartBoundary>2026-01-01T{}:00</StartBoundary><Enabled>true</Enabled>\
-             <ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger>",
+             {by}</CalendarTrigger>",
             s.at()
         )
     } else {
@@ -277,76 +486,228 @@ pub fn task_xml(s: &Schedule, job: &str) -> String {
 }
 
 fn task_name(job: &str) -> String {
-    let name = if job == "run" { "Digest" } else { "Watch" };
-    format!("\\{TASK_FOLDER}\\{name}")
+    match job {
+        "run" => task_name_for(MAIN),
+        _ => format!("\\{TASK_FOLDER}\\Watch"),
+    }
+}
+
+/// Creates (or replaces) the task `name` from `xml`.
+fn windows_create(name: &str, xml_text: &str) -> Result<String, String> {
+    let xml = std::env::temp_dir().join(format!("deckle-{}.xml", name.replace('\\', "_")));
+    // schtasks reads the file in the encoding it declares: UTF-16LE with a BOM.
+    let mut bytes = vec![0xFF, 0xFE];
+    for u in xml_text.encode_utf16() {
+        bytes.extend(u.to_le_bytes());
+    }
+    std::fs::write(&xml, bytes).map_err(|e| e.to_string())?;
+    let created = run(Command::new("schtasks")
+        .args(["/Create", "/F", "/TN", name, "/XML"])
+        .arg(&xml));
+    let _ = std::fs::remove_file(&xml);
+    created?;
+    Ok(format!("created task {name}"))
 }
 
 fn windows_install(s: &Schedule) -> Result<Vec<String>, String> {
-    let mut done = Vec::new();
-    for job in ["run", "watch"] {
-        let xml = std::env::temp_dir().join(format!("deckle-{job}.xml"));
-        // schtasks reads the file in the encoding it declares: UTF-16LE with a BOM.
-        let mut bytes = vec![0xFF, 0xFE];
-        for u in task_xml(s, job).encode_utf16() {
-            bytes.extend(u.to_le_bytes());
-        }
-        std::fs::write(&xml, bytes).map_err(|e| e.to_string())?;
-        run(Command::new("schtasks")
-            .args(["/Create", "/F", "/TN", &task_name(job), "/XML"])
-            .arg(&xml))?;
-        let _ = std::fs::remove_file(&xml);
-        done.push(format!("created task {}", task_name(job)));
-    }
+    let done = vec![
+        windows_create(&task_name_for(&s.slug), &task_xml(s, "run"))?,
+        windows_create(&task_name("watch"), &task_xml(s, "watch"))?,
+    ];
     // Start the watcher now rather than at the next logon.
     let _ = run(Command::new("schtasks").args(["/Run", "/TN", &task_name("watch")]));
     Ok(done)
 }
 
-fn windows_remove() -> Result<Vec<String>, String> {
+fn windows_delete(names: &[String]) -> Vec<String> {
     let mut done = Vec::new();
-    for job in ["run", "watch"] {
-        let _ = run(Command::new("schtasks").args(["/End", "/TN", &task_name(job)]));
-        if run(Command::new("schtasks").args(["/Delete", "/F", "/TN", &task_name(job)])).is_ok() {
-            done.push(format!("deleted task {}", task_name(job)));
+    for name in names {
+        let _ = run(Command::new("schtasks").args(["/End", "/TN", name]));
+        if run(Command::new("schtasks").args(["/Delete", "/F", "/TN", name])).is_ok() {
+            done.push(format!("deleted task {name}"));
         }
     }
-    Ok(done)
+    done
+}
+
+/// Every edition task under `\Deckle\`, main and per paper.
+fn windows_digest_tasks() -> Vec<String> {
+    let Ok(csv) = run(Command::new("schtasks").args(["/Query", "/FO", "CSV", "/NH"])) else {
+        return Vec::new();
+    };
+    let main = task_name_for(MAIN);
+    let mut names: Vec<String> = csv
+        .lines()
+        .filter_map(|l| l.split(',').next())
+        .map(|n| n.trim_matches('"').to_owned())
+        .filter(|n| *n == main || n.starts_with(&format!("{main}-")))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+fn windows_remove() -> Result<Vec<String>, String> {
+    let mut names = windows_digest_tasks();
+    names.push(task_name("watch"));
+    Ok(windows_delete(&names))
 }
 
 static TASK_TIME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"StartBoundary>\d{4}-\d\d-\d\dT(\d\d:\d\d)").unwrap());
 
 fn windows_status() -> Status {
-    let xml = run(Command::new("schtasks").args(["/Query", "/XML", "/TN", &task_name("run")]));
-    let at = xml
-        .as_ref()
-        .ok()
-        .and_then(|x| TASK_TIME.captures(x).map(|c| c[1].to_owned()));
+    let main = task_name_for(MAIN);
+    let mut papers = Vec::new();
+    for name in windows_digest_tasks() {
+        let xml = run(Command::new("schtasks").args(["/Query", "/XML", "/TN", &name]));
+        let at = xml
+            .as_ref()
+            .ok()
+            .and_then(|x| TASK_TIME.captures(x).map(|c| c[1].to_owned()));
+        let days = xml
+            .as_ref()
+            .map(|x| {
+                Day::ALL
+                    .into_iter()
+                    .filter(|d| x.contains(&format!("<{}", task_day(*d))))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let slug = name
+            .strip_prefix(&format!("{main}-"))
+            .unwrap_or(MAIN)
+            .to_owned();
+        papers.push(PaperStatus { slug, at, days });
+    }
+    papers.sort_by_key(|p| (p.slug != MAIN, p.slug.clone()));
     Status {
-        at,
+        at: papers
+            .iter()
+            .find(|p| p.slug == MAIN)
+            .and_then(|p| p.at.clone()),
         watch: run(Command::new("schtasks").args(["/Query", "/TN", &task_name("watch")])).is_ok(),
         exe: None,
+        papers,
     }
 }
 
 // ---- Entry points -----------------------------------------------------------------------
 
+/// A cron line for one paper's edition: `M H * * D cmd`.
+fn cron_line(s: &Schedule) -> String {
+    let mut parts = vec![s.exe.to_string_lossy().into_owned()];
+    parts.extend(s.args("run"));
+    let days = match s.days.is_empty() {
+        true => "*".to_owned(),
+        false => s
+            .days
+            .iter()
+            .map(|d| weekday(*d).to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+    };
+    format!("{} {} * * {days} {}", s.minute, s.hour, parts.join(" "))
+}
+
+/// `DECKLE_SCHEDULE_DRY_RUN` set: say what would be installed or removed, and touch nothing
+/// (tests; a real install loads jobs into the login session whatever `HOME` says).
+fn dry_run() -> bool {
+    std::env::var_os("DECKLE_SCHEDULE_DRY_RUN").is_some_and(|v| !v.is_empty())
+}
+
 /// The lines to use on Linux, where Deckle doesn't install jobs itself.
 pub fn linux_instructions(s: &Schedule) -> String {
-    let cmd = |job: &str| {
-        let mut parts = vec![s.exe.to_string_lossy().into_owned()];
-        parts.extend(s.args(job));
-        parts.join(" ")
+    linux_instructions_all(std::slice::from_ref(s), &s.exe, s.config.as_deref())
+}
+
+/// [`linux_instructions`] for every paper's job.
+fn linux_instructions_all(jobs: &[Schedule], exe: &Path, config: Option<&Path>) -> String {
+    let watch = Schedule {
+        hour: 0,
+        minute: 0,
+        days: Vec::new(),
+        slug: MAIN.to_owned(),
+        exe: exe.to_path_buf(),
+        config: config.map(Path::to_path_buf),
     };
+    let mut w = vec![exe.to_string_lossy().into_owned()];
+    w.extend(watch.args("watch"));
     format!(
-        "Deckle doesn't install jobs on Linux. Add this to `crontab -e`:\n\n\
-         {} {} * * * {}\n\n\
+        "Deckle doesn't install jobs on Linux. Add this to `crontab -e`:\n\n{}\n\n\
          and run the watcher at login (e.g. a systemd user service with ExecStart={}).",
-        s.minute,
-        s.hour,
-        cmd("run"),
-        cmd("watch")
+        jobs.iter().map(cron_line).collect::<Vec<_>>().join("\n"),
+        w.join(" ")
     )
+}
+
+/// Installs every paper's job in `jobs` and the watcher, then removes the jobs of papers that
+/// are gone (many papers §5). The main paper's job is replaced only when `jobs` has one for it.
+pub fn install_all(
+    jobs: &[Schedule],
+    exe: &Path,
+    config: Option<&Path>,
+) -> Result<Vec<String>, String> {
+    if dry_run() {
+        let mut done: Vec<String> = jobs
+            .iter()
+            .map(|s| {
+                let days: Vec<&str> = s.days.iter().map(|d| d.key()).collect();
+                format!(
+                    "would install {} at {} {}",
+                    label(&s.slug),
+                    s.at(),
+                    days.join(",")
+                )
+                .trim_end()
+                .to_owned()
+            })
+            .collect();
+        done.push(format!("would install {WATCH_LABEL}"));
+        return Ok(done);
+    }
+    if cfg!(target_os = "macos") {
+        let logs = macos_logs()?;
+        let mut plists: Vec<(String, String)> = jobs
+            .iter()
+            .map(|s| launchd_digest_plist(s, &logs))
+            .collect();
+        plists.push(launchd_watch_plist(exe, config, &logs));
+        let mut done = macos_load(&plists)?;
+        done.extend(macos_unload(&stale_labels(&macos_digest_labels(), jobs))?);
+        Ok(done)
+    } else if cfg!(target_os = "windows") {
+        let mut done = Vec::new();
+        for s in jobs {
+            done.push(windows_create(
+                &task_name_for(&s.slug),
+                &task_xml(s, "run"),
+            )?);
+        }
+        let watch = Schedule {
+            hour: 0,
+            minute: 0,
+            days: Vec::new(),
+            slug: MAIN.to_owned(),
+            exe: exe.to_path_buf(),
+            config: config.map(Path::to_path_buf),
+        };
+        done.push(windows_create(
+            &task_name("watch"),
+            &task_xml(&watch, "watch"),
+        )?);
+        let _ = run(Command::new("schtasks").args(["/Run", "/TN", &task_name("watch")]));
+        let main = task_name_for(MAIN);
+        let stale: Vec<String> = windows_digest_tasks()
+            .into_iter()
+            .filter(|n| n.starts_with(&format!("{main}-")))
+            .filter(|n| !jobs.iter().any(|s| task_name_for(&s.slug) == *n))
+            .collect();
+        done.extend(windows_delete(&stale));
+        Ok(done)
+    } else {
+        Err(linux_instructions_all(jobs, exe, config))
+    }
 }
 
 /// Installs (or replaces) both jobs; returns what was done.
@@ -360,7 +721,30 @@ pub fn install(s: &Schedule) -> Result<Vec<String>, String> {
     }
 }
 
-/// Removes both jobs; returns what was removed.
+/// Removes one paper's edition job, and the watcher too when no edition job is left (the
+/// watcher delivers what the other papers' jobs build).
+pub fn remove_paper(slug: &str) -> Result<Vec<String>, String> {
+    if dry_run() {
+        return Ok(vec![format!("would remove {}", label(slug))]);
+    }
+    if cfg!(target_os = "macos") {
+        let mut done = macos_unload(&[label(slug)])?;
+        if macos_digest_labels().is_empty() {
+            done.extend(macos_unload(&[WATCH_LABEL.to_owned()])?);
+        }
+        Ok(done)
+    } else if cfg!(target_os = "windows") {
+        let mut done = windows_delete(&[task_name_for(slug)]);
+        if windows_digest_tasks().is_empty() {
+            done.extend(windows_delete(&[task_name("watch")]));
+        }
+        Ok(done)
+    } else {
+        Ok(Vec::new())
+    }
+}
+
+/// Removes every edition job and the watcher; returns what was removed.
 pub fn remove() -> Result<Vec<String>, String> {
     if cfg!(target_os = "macos") {
         macos_remove()
@@ -389,9 +773,119 @@ mod tests {
         Schedule {
             hour: 5,
             minute: 30,
+            days: Vec::new(),
+            slug: MAIN.into(),
             exe: PathBuf::from("/Users/me/.cargo/bin/deckle"),
             config: config.map(PathBuf::from),
         }
+    }
+
+    fn courier(days: &[Day]) -> Schedule {
+        Schedule {
+            hour: 7,
+            minute: 0,
+            days: days.to_vec(),
+            slug: "kid-courier".into(),
+            ..sched(None)
+        }
+    }
+
+    #[test]
+    fn a_paper_on_days_gets_one_calendar_entry_per_weekday() {
+        let (l, xml) = launchd_digest_plist(&courier(&[Day::Sat]), Path::new("/L"));
+        assert_eq!(l, "com.casavargas.deckle.digest.kid-courier");
+        assert!(
+            xml.contains("<key>StartCalendarInterval</key>\n  <array>"),
+            "{xml}"
+        );
+        assert!(xml.contains("<key>Weekday</key><integer>6</integer>"));
+        assert!(xml.contains("<key>Hour</key><integer>7</integer>"));
+        assert_eq!(xml.matches("<key>Weekday</key>").count(), 1);
+        assert_eq!(plist_days(&xml), [Day::Sat]);
+        let (_, two) = launchd_digest_plist(&courier(&[Day::Mon, Day::Wed]), Path::new("/L"));
+        assert_eq!(two.matches("<key>Weekday</key>").count(), 2);
+        assert_eq!(plist_days(&two), [Day::Mon, Day::Wed]);
+        assert!(xml.ends_with("</plist>\n"));
+        // The job builds that paper.
+        let args: Vec<String> = courier(&[]).args("run");
+        assert_eq!(
+            args,
+            ["digest", "--paper", "kid-courier", "run", "--to", "device"]
+        );
+        assert!(xml.contains("digest-kid-courier.log"));
+    }
+
+    #[test]
+    fn the_main_papers_daily_plist_is_unchanged() {
+        let (l, xml) = launchd_digest_plist(&sched(None), Path::new("/L"));
+        assert_eq!(l, DIGEST_LABEL);
+        assert!(xml.contains(
+            "<key>StartCalendarInterval</key>\n  <dict>\n    <key>Hour</key><integer>5</integer>\n    \
+             <key>Minute</key><integer>30</integer>\n  </dict>\n"
+        ), "{xml}");
+        assert!(!xml.contains("--paper") && !xml.contains("Weekday"));
+        assert_eq!(plist_days(&xml), []);
+    }
+
+    #[test]
+    fn weekly_task_xml_and_names_per_paper() {
+        let xml = task_xml(&courier(&[Day::Sat]), "run");
+        assert!(xml.contains(
+            "<ScheduleByWeek><DaysOfWeek><Saturday/></DaysOfWeek><WeeksInterval>1</WeeksInterval></ScheduleByWeek>"
+        ), "{xml}");
+        assert!(xml.contains("<Arguments>digest --paper kid-courier run --to device</Arguments>"));
+        assert_eq!(task_name_for(MAIN), "\\Deckle\\Digest");
+        assert_eq!(task_name_for("kid-courier"), "\\Deckle\\Digest-kid-courier");
+        assert_eq!(label(MAIN), DIGEST_LABEL);
+    }
+
+    #[test]
+    fn stale_labels_keep_main_and_wanted_papers() {
+        let installed = [
+            DIGEST_LABEL.to_owned(),
+            label("lakeside"),
+            label("old"),
+            WATCH_LABEL.to_owned(),
+        ];
+        let lakeside = Schedule {
+            slug: "lakeside".into(),
+            ..sched(None)
+        };
+        assert_eq!(stale_labels(&installed, &[lakeside]), [label("old")]);
+        assert_eq!(
+            stale_labels(&installed, &[]),
+            [label("lakeside"), label("old")]
+        );
+    }
+
+    #[test]
+    fn jobs_for_takes_papers_with_a_time_only() {
+        let mut main = Config::default();
+        let kid = Config {
+            paper: Some(crate::config::PaperRef {
+                slug: "kid".into(),
+                state_dir: PathBuf::from("/x"),
+            }),
+            schedule: crate::config::ScheduleConfig {
+                at: Some("07:00".into()),
+                days: vec![Day::Sun, Day::Sat, Day::Sat],
+            },
+            ..Config::default()
+        };
+        let jobs = jobs_for(&[main.clone(), kid.clone()], Path::new("/d"), None);
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].slug, "kid");
+        assert_eq!(jobs[0].days, [Day::Sat, Day::Sun]);
+        main.schedule.at = Some("05:30".into());
+        assert_eq!(jobs_for(&[main, kid], Path::new("/d"), None).len(), 2);
+    }
+
+    #[test]
+    fn cron_lines_carry_days_and_paper() {
+        assert_eq!(
+            cron_line(&courier(&[Day::Sat, Day::Sun])),
+            "0 7 * * 6,0 /Users/me/.cargo/bin/deckle digest --paper kid-courier run --to device"
+        );
     }
 
     #[test]
@@ -407,7 +901,7 @@ mod tests {
     fn plists_run_the_edition_daily_and_keep_the_watcher_alive() {
         let [(dl, digest), (wl, watch)] =
             launchd_plists(&sched(Some("/tmp/my config.toml")), Path::new("/L"));
-        assert_eq!((dl, wl), (DIGEST_LABEL, WATCH_LABEL));
+        assert_eq!((dl.as_str(), wl.as_str()), (DIGEST_LABEL, WATCH_LABEL));
         assert!(digest.contains("<key>Hour</key><integer>5</integer>"));
         assert!(digest.contains("<key>Minute</key><integer>30</integer>"));
         for arg in [
