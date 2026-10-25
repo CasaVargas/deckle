@@ -90,6 +90,31 @@ pub fn device_id(target: &Target) -> String {
     }
 }
 
+/// The serial in a Kindle id: all of an MTP id, or what follows `#` in a mass-storage one.
+fn id_serial(id: &str) -> Option<&str> {
+    match id.rsplit_once('#') {
+        Some((_, serial)) => Some(serial).filter(|s| !s.is_empty()),
+        None if !id.contains('/') && !id.is_empty() => Some(id),
+        None => None,
+    }
+}
+
+/// Whether two Kindle ids name the same Kindle: equal, or the same serial (one Kindle seen over
+/// MTP and over mass storage), or the same model and volume when either lacks the serial (an id
+/// written before serials were read).
+pub fn same_kindle(a: &str, b: &str) -> bool {
+    if a.eq_ignore_ascii_case(b) {
+        return true;
+    }
+    match (id_serial(a), id_serial(b)) {
+        (Some(x), Some(y)) => x.eq_ignore_ascii_case(y),
+        _ => {
+            let base = |id: &str| id.split('#').next().unwrap_or(id).to_owned();
+            a.contains('/') && b.contains('/') && base(a).eq_ignore_ascii_case(&base(b))
+        }
+    }
+}
+
 /// Remembers the current connection between checks, so each action runs once per connection.
 #[derive(Debug, Default)]
 pub struct Watcher {
@@ -1234,5 +1259,28 @@ mod pocketbook_tests {
         assert_eq!(r.delivered, std::slice::from_ref(&sent));
         assert_eq!(std::fs::read(sent).unwrap(), epub);
         assert!(r.kobo_books.is_none() && r.clippings.is_none() && r.clippings_error.is_none());
+    }
+}
+
+#[cfg(test)]
+mod same_kindle_tests {
+    use super::same_kindle;
+
+    #[test]
+    fn one_kindle_by_id_serial_or_older_id() {
+        // Equal, ignoring case.
+        assert!(same_kindle("G000AAAA", "g000aaaa"));
+        // MTP serial and the same Kindle on mass storage.
+        assert!(same_kindle("G000AAAA", "Kindle/Kindle#G000AAAA"));
+        // An id written before serials were read.
+        assert!(same_kindle("Kindle/Kindle", "Kindle/Kindle#G000AAAA"));
+        // Different serials, volumes or kinds.
+        assert!(!same_kindle(
+            "Kindle/Kindle#G000AAAA",
+            "Kindle/Kindle#G000BBBB"
+        ));
+        assert!(!same_kindle("G000AAAA", "G000BBBB"));
+        assert!(!same_kindle("Kindle/Mom", "Kindle/Dad"));
+        assert!(!same_kindle("G000AAAA", "Kindle/Kindle"));
     }
 }
