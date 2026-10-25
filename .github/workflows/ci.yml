@@ -8,11 +8,14 @@ on:
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+# Every job runs on the org's self-hosted runners (a Mac, a Windows PC and a Linux box).
+# They are persistent and shared with other repos' builds: GitHub-hosted macOS and
+# Windows minutes were most of the org's Actions bill.
 jobs:
   # Which parts a pull request touches. A job it doesn't touch is skipped, and a skipped job
   # counts as passed for required checks. A push to main runs everything.
   changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     permissions:
       pull-requests: read
     outputs:
@@ -48,8 +51,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - os: macos
+            runner: [self-hosted, macOS]
+          - os: windows
+            runner: [self-hosted, Windows]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -67,7 +74,7 @@ jobs:
   frontend:
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.frontend == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     defaults:
       run:
         working-directory: apps/desktop
