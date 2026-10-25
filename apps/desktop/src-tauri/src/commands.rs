@@ -216,6 +216,10 @@ pub struct DeviceRow {
     pub firmware: Option<String>,
     /// Known issues for this model, transport and firmware (`compat::RULES`).
     pub compat: Vec<String>,
+    /// The id the Daily and the outbox know this Kindle by (`sync::device_id`).
+    pub sync_id: String,
+    /// The name the owner gave it (`[sync.devices."<id>"] name`), if any.
+    pub name: Option<String>,
 }
 
 fn compat_messages(p: &DeviceProfile) -> Vec<String> {
@@ -228,11 +232,17 @@ fn compat_messages(p: &DeviceProfile) -> Vec<String> {
 /// All connected Kindles, recorded in the device registry.
 pub fn device_rows(registry_file: &Path) -> Vec<DeviceRow> {
     let mut reg = DeviceRegistry::load(registry_file);
+    let names = deckle_digest::Config::load(&deckle_digest::config::default_path())
+        .map(|c| c.sync)
+        .unwrap_or_default();
     let mut rows = Vec::new();
     for d in detect_mass_storage() {
         let p = reg.remember(&seen_mass_storage(&d));
         let compat = compat_messages(&p);
+        let sync_id = deckle_core::sync::device_id(&Target::MassStorage(d.clone()));
         rows.push(DeviceRow {
+            name: names.device_name(&sync_id),
+            sync_id,
             compat,
             firmware: p.firmware,
             key: p.key,
@@ -249,7 +259,10 @@ pub fn device_rows(registry_file: &Path) -> Vec<DeviceRow> {
     for m in deckle_transport::usb::detect() {
         let p = reg.remember(&seen_mtp(&m));
         let compat = compat_messages(&p);
+        let sync_id = deckle_core::sync::device_id(&Target::Mtp(m.clone()));
         rows.push(DeviceRow {
+            name: names.device_name(&sync_id),
+            sync_id,
             compat,
             firmware: p.firmware,
             key: p.key,
@@ -989,6 +1002,23 @@ pub fn list_devices(state: State<'_, AppState>) -> Vec<DeviceRow> {
     device_rows(&state.devices_file)
 }
 
+/// Names the Kindle `sync_id` in the Daily's config at `path` (Kindle profiles design §2); an
+/// empty name clears it.
+pub fn name_kindle_at(path: &Path, sync_id: &str, name: &str) -> Result<(), String> {
+    let mut cfg = match deckle_digest::Config::load(path) {
+        Ok(c) => c,
+        Err(_) if !path.exists() => deckle_digest::Config::default(),
+        Err(e) => return Err(e.to_string()),
+    };
+    cfg.sync.set_device_name(sync_id, name)?;
+    deckle_digest::config::save(path, &cfg)
+}
+
+#[tauri::command]
+pub fn name_kindle(sync_id: String, name: String) -> Result<(), String> {
+    name_kindle_at(&deckle_digest::config::default_path(), &sync_id, &name)
+}
+
 #[tauri::command]
 pub fn set_device_options(
     state: State<'_, AppState>,
@@ -1159,6 +1189,25 @@ pub fn devices_file(app: &AppHandle) -> PathBuf {
 mod tests {
     use super::*;
     use deckle_transport::usb::MtpInfo;
+
+    #[test]
+    fn naming_a_kindle_writes_the_daily_config_and_refuses_a_clash() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("digest.toml");
+        name_kindle_at(&path, "G000AAAA", "Mom's Kindle").unwrap();
+        name_kindle_at(&path, "Kindle/Kindle#G000BBBB", "Dad's Kindle").unwrap();
+        let err = name_kindle_at(&path, "Kindle/Kindle#G000BBBB", "MOM'S KINDLE").unwrap_err();
+        assert!(err.contains("already called"), "{err}");
+        let cfg = deckle_digest::Config::load(&path).unwrap();
+        assert_eq!(
+            cfg.sync.device_name("G000AAAA").as_deref(),
+            Some("Mom's Kindle")
+        );
+        assert_eq!(
+            cfg.sync.find_device("dad's kindle").as_deref(),
+            Some("Kindle/Kindle#G000BBBB")
+        );
+    }
 
     #[test]
     fn kindle_files_are_books_in_a_folder_walk() {

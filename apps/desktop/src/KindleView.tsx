@@ -11,17 +11,21 @@ import type { KindleRoom, ShelfFilter, ShelfSort } from "./kindleRooms";
 import ThisKindle from "./ThisKindle";
 import Upgrades from "./Upgrades";
 import WordsAnki from "./WordsAnki";
-import type { DeviceBookRow, DeviceShelf, RunTarget, UpgradeClass, UpgradeOf } from "./types";
+import type { DeviceBookRow, DeviceRow, DeviceShelf, RunTarget, UpgradeClass, UpgradeOf } from "./types";
 
 interface Props {
   /** The Kindle picked in the footer; null when none is connected. */
   target: RunTarget | null;
   targetKey: string | null;
+  /** That Kindle's row: its name and sync id, for This Kindle's Name field. */
+  device: DeviceRow | null;
   busy: boolean;
   /** Put library copies on the Books tab for this Kindle, each with its mode; `what` opens
    * the notice. */
   onResend: (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf }[], what: string) => void;
   onNotice: (msg: string | null) => void;
+  /** After the Kindle was named. */
+  onRenamed: () => Promise<void>;
 }
 
 /** The class badge a book on the Shelf wears, when its class says something. */
@@ -180,7 +184,7 @@ function BookLine({ book, busy, now, onResend, onRemove }: { book: DeviceBookRow
   );
 }
 
-export default function KindleView({ target, targetKey, busy, onResend, onNotice }: Props) {
+export default function KindleView({ target, targetKey, device, busy, onResend, onNotice, onRenamed }: Props) {
   const [shelf, setShelf] = useState<DeviceShelf | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -337,7 +341,7 @@ export default function KindleView({ target, targetKey, busy, onResend, onNotice
 
         {room === "words" && shelf && <WordsAnki target={target} busy={busy || loading} />}
 
-        {room === "device" && shelf && <ThisKindle target={target} shelf={shelf} busy={busy || loading} onChanged={load} onNotice={onNotice} />}
+        {room === "device" && shelf && <ThisKindle target={target} device={device} shelf={shelf} busy={busy || loading} onChanged={load} onNotice={onNotice} onRenamed={onRenamed} />}
       </main>
     </div>
   );

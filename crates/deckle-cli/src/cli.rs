@@ -126,8 +126,11 @@ pub enum Command {
         #[arg(long)]
         to: String,
     },
-    /// List connected Kindles.
-    Devices,
+    /// List connected Kindles with their names and sync ids, or name one.
+    Devices {
+        #[command(subcommand)]
+        action: Option<DevicesCommand>,
+    },
     /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), OpenDocument text (.odt), RTF (.rtf), DRM-free Kindle books (.mobi, .azw, .azw3, .prc), text files (.txt), FictionBook (.fb2, .fb2.zip), Markdown files or notes folders,
     /// text PDFs (.pdf, reflowed; needs PDFium) or web articles.
     Run {
@@ -141,6 +144,11 @@ pub enum Command {
         /// A folder path, or `device` for the first connected Kindle.
         #[arg(long, default_value = "device")]
         to: String,
+        /// The Kindle to send to, by its name (`deckle devices name`) or sync id. When it isn't
+        /// connected the books wait in the outbox for it: `deckle digest push` or `watch`
+        /// delivers them when it is.
+        #[arg(long)]
+        kindle: Option<String>,
         /// `auto` lets the cover rule decide; `pdoc`/`ebok` override it.
         #[arg(long, value_enum, default_value_t = CdeArg::Auto)]
         cde: CdeArg,
@@ -349,6 +357,18 @@ pub enum WordsCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum DevicesCommand {
+    /// Name the connected Kindle ("Mom's Kindle"), so books can be sent to it by name. An empty
+    /// name clears it.
+    Name {
+        name: String,
+        /// With several Kindles connected: the one to name, by its current name or sync id.
+        #[arg(long)]
+        kindle: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub enum LibraryCommand {
     /// Search titles, authors and series in the library and connected Kindles.
     Search {

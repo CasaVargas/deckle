@@ -45,6 +45,7 @@ export const api = {
   /** Web addresses, .webloc/.url link files or saved pages, each built into a book (slow: fetches). */
   importArticles: (targets: string[]) => invoke<BookRow[]>("import_articles", { targets }),
   listDevices: () => invoke<DeviceRow[]>("list_devices"),
+  nameKindle: (syncId: string, name: string) => invoke<void>("name_kindle", { syncId, name }),
   previewerStatus: () => invoke<PreviewerStatus>("previewer_status"),
   getSettings: () => invoke<Settings>("get_settings"),
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),

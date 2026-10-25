@@ -142,6 +142,10 @@ export interface DeviceRow {
   firmware: string | null;
   /** Known issues for this model, transport and firmware (warnings, never refusals). */
   compat: string[];
+  /** The id the Daily and the outbox know this Kindle by. */
+  sync_id: string;
+  /** The name its owner gave it, if any. */
+  name: string | null;
 }
 
 export interface PlanRow {

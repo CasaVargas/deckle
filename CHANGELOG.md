@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Several Kindles in one home.** Name each Kindle (`deckle devices name`, or This Kindle in
+  the app) and send to it by name with `deckle run --kindle`, or drop books in an Inbox folder
+  named after it. A book for a Kindle that isn't plugged in waits in the outbox, and no other
+  Kindle takes it; `push` and `watch` say what's waiting and for whom. The app's Kindle picker
+  shows the names.
 - **DRM-free Kindle books become real KFX.** Import `.mobi`, `.azw`, `.azw3` or `.prc`. AZW3
   books are rebuilt from their KF8 part. Older MOBI files have their Mobipocket HTML cleaned
   up: links, pictures and the contents come through, and HUFF/CDIC-compressed text is read.

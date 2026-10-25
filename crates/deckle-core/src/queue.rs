@@ -3,6 +3,10 @@
 //! next `push` (or `watch`) over one connection, which also prunes old editions in that same
 //! session.
 //!
+//! An entry can be meant for one Kindle: a `<entry>.for` file beside it holds that Kindle's id
+//! ([`crate::sync::device_id`]), and a flush to any other Kindle leaves it queued (Kindle
+//! profiles design §2). An entry without one is anyone's.
+//!
 //! An entry is a finished `<name>.kfx`, delivered as is (the paper), or a prepared book
 //! `<name>.book/` converted up to the KPF and finished at push for the Kindle that takes it
 //! (device-aware build §4.2):
@@ -63,6 +67,9 @@ pub struct FlushReport {
     /// Why the shelf read failed; the delivery stands.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shelf_error: Option<String>,
+    /// Entries left queued because they're meant for another Kindle: (queue name, its id).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub waiting: Vec<(String, String)>,
 }
 
 /// After a flush, editions named `<prefix>…` beyond the newest `keep` are removed.
@@ -120,11 +127,22 @@ fn queue_name(entry: &Path) -> String {
     }
 }
 
+/// `<entry>.for`: the id of the Kindle an entry is meant for.
+fn owner_file(entry: &Path) -> PathBuf {
+    let mut name = entry.as_os_str().to_owned();
+    name.push(".for");
+    PathBuf::from(name)
+}
+
 fn remove_entry(entry: &Path) -> std::io::Result<()> {
     if entry.is_dir() {
-        std::fs::remove_dir_all(entry)
+        std::fs::remove_dir_all(entry)?;
     } else {
-        std::fs::remove_file(entry)
+        std::fs::remove_file(entry)?;
+    }
+    match std::fs::remove_file(owner_file(entry)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
     }
 }
 
@@ -211,6 +229,41 @@ impl Queue {
         Ok(dest)
     }
 
+    /// [`Queue::add`], meant for the Kindle `owner` (its id) when given. The owner is written
+    /// first and the file copied aside and renamed, so a `watch` never hands it to another
+    /// Kindle.
+    pub fn add_for(
+        &self,
+        kfx: &Path,
+        name: &str,
+        replaces: Option<&str>,
+        owner: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
+        let Some(owner) = owner else {
+            return self.add(kfx, name, replaces);
+        };
+        self.make_room(name, replaces, &[])?;
+        let dest = self.dir.join(name);
+        std::fs::write(owner_file(&dest), owner)?;
+        let part = self.dir.join(format!("{name}.part"));
+        std::fs::copy(kfx, &part)?;
+        std::fs::rename(&part, &dest)?;
+        Ok(dest)
+    }
+
+    /// [`Queue::add_prepared`], meant for the Kindle `owner` (its id) when given.
+    pub fn add_prepared_owned(
+        &self,
+        prepared: &Prepared,
+        name: &str,
+        replaces: Option<&str>,
+        owner: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
+        let fallback = fallback_kfx(prepared)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.add_prepared_for(prepared, &fallback, name, replaces, owner)
+    }
+
     /// Queues a prepared book to be delivered as `name` (`<stem>.kfx`), finished at push for
     /// the Kindle that takes it. Builds its fallback first: a book that can't even build that
     /// fails here (`InvalidData`), not at push.
@@ -233,6 +286,19 @@ impl Queue {
         name: &str,
         replaces: Option<&str>,
     ) -> std::io::Result<PathBuf> {
+        self.add_prepared_for(prepared, fallback, name, replaces, None)
+    }
+
+    /// [`Queue::add_prepared_with`], meant for the Kindle `owner` (its id) when given. The owner
+    /// is written before the entry appears, so a `watch` never hands it to another Kindle.
+    pub fn add_prepared_for(
+        &self,
+        prepared: &Prepared,
+        fallback: &[u8],
+        name: &str,
+        replaces: Option<&str>,
+        owner: Option<&str>,
+    ) -> std::io::Result<PathBuf> {
         self.make_room(name, replaces, &[])?;
         let stem = name.strip_suffix(".kfx").unwrap_or(name);
         // Written aside and renamed, so a `watch` never sees half an entry.
@@ -252,8 +318,31 @@ impl Queue {
             serde_json::to_vec_pretty(&file).map_err(std::io::Error::other)?,
         )?;
         let dest = self.dir.join(format!("{stem}.{PREPARED_EXT}"));
+        if let Some(owner) = owner {
+            std::fs::write(owner_file(&dest), owner)?;
+        }
         std::fs::rename(&part, &dest)?;
         Ok(dest)
+    }
+
+    /// The id of the Kindle `entry` is meant for; `None` when it's anyone's.
+    pub fn owner(entry: &Path) -> Option<String> {
+        std::fs::read_to_string(owner_file(entry))
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// Queued entries meant for another Kindle than `kindle` (an id): (queue name, owner id).
+    pub fn waiting_for_others(&self, kindle: Option<&str>) -> Vec<(String, String)> {
+        self.pending()
+            .iter()
+            .filter_map(|e| {
+                let owner = Self::owner(e)?;
+                (!kindle.is_some_and(|k| crate::sync::same_kindle(&owner, k)))
+                    .then(|| (queue_name(e), owner))
+            })
+            .collect()
     }
 
     /// Delivers every queued entry to `target` over one connection, then prunes, then removes
@@ -285,7 +374,16 @@ impl Queue {
         progress: &mut Progress<'_>,
     ) -> Result<FlushReport, DeliverError> {
         let mut report = FlushReport::default();
-        let pending = self.pending();
+        let here = crate::sync::device_id(conn.target);
+        let mut pending = Vec::new();
+        for entry in self.pending() {
+            match Self::owner(&entry) {
+                Some(owner) if !crate::sync::same_kindle(&owner, &here) => {
+                    report.waiting.push((queue_name(&entry), owner));
+                }
+                _ => pending.push(entry),
+            }
+        }
         for (i, entry) in pending.iter().enumerate() {
             let io = |source| DeliverError::Io {
                 path: entry.clone(),
@@ -485,6 +583,43 @@ mod tests {
         assert!(q.pending().is_empty());
         assert!(kindle.join("deckle-daily-2026-10-20.kfx").exists());
         assert!(kindle.join("other.kfx").exists());
+    }
+
+    #[test]
+    fn an_entry_meant_for_another_kindle_waits_and_its_owner_goes_with_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("b.kfx");
+        std::fs::write(&src, b"KFX").unwrap();
+        let mom = tmp.path().join("mom");
+        let dad = tmp.path().join("dad");
+        let mine = q.add(&src, "for-mom.kfx", None).unwrap();
+        std::fs::write(owner_file(&mine), mom.display().to_string()).unwrap();
+        q.add(&src, "anyone.kfx", None).unwrap();
+        assert_eq!(Queue::owner(&mine), Some(mom.display().to_string()));
+        assert_eq!(
+            q.waiting_for_others(None),
+            [("for-mom.kfx".to_owned(), mom.display().to_string())]
+        );
+
+        let r = q.flush(&Target::Folder(dad.clone()), None).unwrap();
+        assert_eq!(r.delivered, [dad.join("anyone.kfx")]);
+        assert_eq!(
+            r.waiting,
+            [("for-mom.kfx".to_owned(), mom.display().to_string())]
+        );
+        assert_eq!(q.pending(), std::slice::from_ref(&mine));
+
+        let r = q.flush(&Target::Folder(mom.clone()), None).unwrap();
+        assert_eq!(r.delivered, [mom.join("for-mom.kfx")]);
+        assert!(r.waiting.is_empty());
+        assert!(!owner_file(&mine).exists(), "the owner goes with the entry");
+
+        // Replacing an owned entry drops its owner too.
+        let again = q.add(&src, "x.kfx", None).unwrap();
+        std::fs::write(owner_file(&again), "someone").unwrap();
+        q.add(&src, "x.kfx", None).unwrap();
+        assert_eq!(Queue::owner(&again), None);
     }
 
     // Device-aware build (§7): prepared books are finished for the Kindle that takes them.
@@ -802,6 +937,45 @@ mod tests {
                 "{:?}",
                 r.warnings
             );
+        }
+
+        #[test]
+        fn a_book_queued_for_one_kindle_goes_only_to_that_kindle() {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            let mom = mass_storage_kindle(&tmp.path().join("Mom"));
+            let dad = mass_storage_kindle(&tmp.path().join("Dad"));
+            let p = prepared_mini();
+            let fallback = fallback_kfx(&p).unwrap();
+            let mom_id = crate::sync::device_id(&mom);
+            q.add_prepared_for(&p, &fallback, LONG_READ, None, Some(&mom_id))
+                .unwrap();
+
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&dad),
+                    None,
+                    &uncached(tmp.path()),
+                    &mut |_, _, _| {},
+                )
+                .unwrap();
+            assert!(r.delivered.is_empty());
+            assert_eq!(r.waiting, [(LONG_READ.to_owned(), mom_id.clone())]);
+            assert_eq!(q.pending().len(), 1);
+
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&mom),
+                    None,
+                    &uncached(tmp.path()),
+                    &mut |_, _, _| {},
+                )
+                .unwrap();
+            assert_eq!(
+                r.delivered,
+                [tmp.path().join("Mom/documents").join(LONG_READ)]
+            );
+            assert!(q.pending().is_empty());
         }
 
         #[test]

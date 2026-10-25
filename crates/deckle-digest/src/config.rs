@@ -648,6 +648,52 @@ impl SyncConfig {
         }
     }
 
+    /// Every named Kindle: (id, name).
+    pub fn named(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.devices.iter().filter_map(|(id, d)| {
+            d.name
+                .as_deref()
+                .map(str::trim)
+                .filter(|n| !n.is_empty())
+                .map(|n| (id.as_str(), n))
+        })
+    }
+
+    /// Names the Kindle `id` (Kindle profiles design §2); an empty name clears it. Refused when
+    /// another Kindle already has the name, ignoring case.
+    pub fn set_device_name(&mut self, id: &str, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if !name.is_empty()
+            && let Some((other, _)) = self.named().find(|(other, n)| {
+                n.eq_ignore_ascii_case(name) && !deckle_core::sync::same_kindle(other, id)
+            })
+        {
+            return Err(format!(
+                "another Kindle ({other}) is already called \"{name}\""
+            ));
+        }
+        // The exact entry wins over one written before serials, so that one is left alone: other
+        // Kindles of the model may still go by it.
+        self.devices.entry(id.to_owned()).or_default().name =
+            (!name.is_empty()).then(|| name.to_owned());
+        Ok(())
+    }
+
+    /// The id of the Kindle called `name_or_id`, ignoring case; else the id itself when a Kindle
+    /// with that id is configured.
+    pub fn find_device(&self, name_or_id: &str) -> Option<String> {
+        let want = name_or_id.trim();
+        self.named()
+            .find(|(_, n)| n.eq_ignore_ascii_case(want))
+            .or_else(|| {
+                self.devices
+                    .keys()
+                    .find(|id| deckle_core::sync::same_kindle(id, want))
+                    .map(|id| (id.as_str(), ""))
+            })
+            .map(|(id, _)| id.to_owned())
+    }
+
     /// Clippings asked for anywhere.
     pub fn any_clippings(&self) -> bool {
         self.clippings || self.devices.values().any(|d| d.clippings == Some(true))
@@ -1423,6 +1469,56 @@ mod tests {
             Some("Den")
         );
         assert_eq!(c.sync.device_name("Other/Kindle"), None);
+    }
+
+    #[test]
+    fn kindles_are_named_uniquely_found_by_name_and_saved_with_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, STARTER).unwrap();
+        let mut c = Config::load(&path).unwrap();
+        c.sync
+            .set_device_name("G000AAAA", " Mom's Kindle ")
+            .unwrap();
+        c.sync
+            .set_device_name("Kindle/Kindle#G000BBBB", "Dad's Kindle")
+            .unwrap();
+        // A clash is refused, ignoring case; renaming the same Kindle isn't a clash.
+        let err = c
+            .sync
+            .set_device_name("Kindle/Kindle#G000BBBB", "mom's kindle")
+            .unwrap_err();
+        assert!(err.contains("already called"), "{err}");
+        c.sync
+            .set_device_name("Kindle/Kindle#G000AAAA", "Mom's Kindle")
+            .unwrap();
+        save(&path, &c).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.starts_with("# Deckle Daily"), "comments stay");
+        let c = Config::load(&path).unwrap();
+        assert_eq!(
+            c.sync.find_device("MOM'S KINDLE").as_deref(),
+            Some("G000AAAA")
+        );
+        assert_eq!(
+            c.sync.find_device("dad's kindle").as_deref(),
+            Some("Kindle/Kindle#G000BBBB")
+        );
+        // An id finds itself, as does the same Kindle by its serial.
+        assert_eq!(
+            c.sync.find_device("g000bbbb").as_deref(),
+            Some("Kindle/Kindle#G000BBBB")
+        );
+        assert_eq!(c.sync.find_device("Nobody"), None);
+        // Mom's Kindle was named over MTP and over mass storage: one Kindle, two entries.
+        let mut names: Vec<&str> = c.sync.named().map(|(_, n)| n).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names, ["Dad's Kindle", "Mom's Kindle"]);
+        // An empty name clears it.
+        let mut c = c;
+        c.sync.set_device_name("G000AAAA", "  ").unwrap();
+        assert_eq!(c.sync.device_name("G000AAAA"), None);
     }
 
     #[test]
