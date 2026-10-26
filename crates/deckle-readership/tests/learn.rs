@@ -362,3 +362,15 @@ fn learning_file_round_trips_and_lives_beside_readership() {
         tmp.path().join("papers/kid/interests.json")
     );
 }
+
+#[test]
+fn renaming_moves_the_acceptance_and_the_candidate() {
+    let mut l = seeded();
+    let mut c = cfg();
+    accept(&mut l, &mut c, "bryce young", today()).unwrap();
+    assert!(l.rename("bryce young", "bryce young (qb)"));
+    assert!(l.accepted.contains_key("bryce young (qb)"));
+    assert!(!l.accepted.contains_key("bryce young"));
+    assert_eq!(l.candidates["bryce young (qb)"].display, "Bryce Young");
+    assert!(!l.rename("nobody", "x"));
+}

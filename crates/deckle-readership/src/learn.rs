@@ -86,6 +86,25 @@ impl Learning {
         std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
     }
 
+    /// Moves a candidate and its acceptance or dismissal to a new key (a renamed interest).
+    /// Returns whether anything was there to move.
+    pub fn rename(&mut self, old: &str, new: &str) -> bool {
+        let mut moved = false;
+        if let Some(c) = self.candidates.remove(old) {
+            self.candidates.insert(new.to_owned(), c);
+            moved = true;
+        }
+        if let Some(d) = self.accepted.remove(old) {
+            self.accepted.insert(new.to_owned(), d);
+            moved = true;
+        }
+        if let Some(d) = self.dismissed.remove(old) {
+            self.dismissed.insert(new.to_owned(), d);
+            moved = true;
+        }
+        moved
+    }
+
     /// Beside the paper's `readership.json`: `papers/<slug>/interests.json`, or next to the
     /// main paper's state.
     pub fn path_for(cfg: &Config) -> PathBuf {
