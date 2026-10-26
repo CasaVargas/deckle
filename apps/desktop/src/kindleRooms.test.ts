@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { better, canBeBetter, continueReading, coverLine, highlightsOf, onKindle, defaultSpare, kindWord, lastOpened, progressLine, shelfBooks, showCounts, spaceSlices, spareLine, tabCounts, worthALook } from "./kindleRooms";
+import { better, canBeBetter, connectedBy, continueReading, coverLine, freesLine, spareGroups, highlightsOf, onKindle, defaultSpare, kindWord, lastOpened, progressLine, shelfBooks, showCounts, spaceSlices, spareLine, tabCounts, worthALook } from "./kindleRooms";
 import type { DeviceBookRow, DeviceShelf, Spare } from "./types";
 
 function book(over: Partial<DeviceBookRow>): DeviceBookRow {
@@ -187,5 +187,33 @@ describe("a book's drawer", () => {
     const h = { key: "k", title: "anathem ", author: "", file: "", total: 2, new: 1, markdown: "" };
     expect(highlightsOf(books[0], [h])).toBe(h);
     expect(highlightsOf(books[2], [h])).toBeNull();
+  });
+});
+
+describe("This Kindle, redesigned", () => {
+  const spare: Spare[] = [
+    { file: "f", title: "F", size: 300e6, has_sdr: true, why: "finished" },
+    { file: "d1", title: "D", size: 24e6, has_sdr: true, why: "duplicate", keeping: "x" },
+    { file: "p", title: "P", size: 12e6, has_sdr: false, why: "old-paper" },
+    { file: "d2", title: "E", size: 22e6, has_sdr: false, why: "duplicate", keeping: "y" },
+  ];
+
+  it("groups Make room by why, with totals, finished last", () => {
+    expect(spareGroups(spare).map((g) => [g.title, g.total, g.items.map((s) => s.file)])).toEqual([
+      ["Duplicates", 46e6, ["d1", "d2"]],
+      ["Old papers", 12e6, ["p"]],
+      ["Finished, over 10 MB", 300e6, ["f"]],
+    ]);
+    expect(spareGroups([])).toEqual([]);
+  });
+
+  it("says what the ticked ones free", () => {
+    expect(freesLine(spare, defaultSpare(spare))).toBe("3 ticked · frees 58.0 MB");
+    expect(freesLine(spare, new Set())).toBe("Nothing ticked");
+  });
+
+  it("says how it's connected", () => {
+    expect(connectedBy("mass_storage")).toBe("Connected over USB as a drive");
+    expect(connectedBy("mtp")).toBe("Connected over USB as a media device");
   });
 });
