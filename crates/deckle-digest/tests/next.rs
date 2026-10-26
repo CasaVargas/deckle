@@ -894,7 +894,10 @@ fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
     let net = Counting::new();
     let mut cache = LiveCache::default();
     assert_eq!(refresh(&s.cfg, &mut cache, t0(), &net), 2);
-    assert_eq!(refresh(&s.cfg, &mut cache, t0() + Duration::minutes(10), &net), 0);
+    assert_eq!(
+        refresh(&s.cfg, &mut cache, t0() + Duration::minutes(10), &net),
+        0
+    );
     s.live.feeds.insert(
         news.into(),
         fetched(&[("Council votes", local(2026, 10, 22, 13, 0))]),
@@ -913,7 +916,10 @@ fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
     let r = rows[0].subscribed.as_ref().unwrap();
     assert_eq!((r.site.as_str(), r.slug.as_str()), ("thepilot.com", "news"));
     // the fetched headline leads (nothing local), and the other slug is a dashed slot
-    assert_eq!(p.lead.clone().unwrap().title.as_deref(), Some("Council votes"));
+    assert_eq!(
+        p.lead.clone().unwrap().title.as_deref(),
+        Some("Council votes")
+    );
     assert!(labels(&p).contains(&"The Pilot · Sports · 5 slots".to_owned()));
     let json = serde_json::to_string(&p.plan[0]).unwrap();
     assert!(!json.contains("subscribed"), "{json}");

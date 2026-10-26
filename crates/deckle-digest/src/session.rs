@@ -595,7 +595,8 @@ impl SessionNet {
                 // decode (the adapter unlocks it with no services) is free and reads as
                 // served; a premium one prints as a stranger sees it, with the reason.
                 s.run().state = SessionState::EntitlementUnknown(e);
-                return match adapter.unlock(&String::from_utf8_lossy(&body), &Entitlement::default())
+                return match adapter
+                    .unlock(&String::from_utf8_lossy(&body), &Entitlement::default())
                 {
                     Some(page) => Ok((page.into_bytes(), Access::Open)),
                     None => walled(body, Walled::PlanUnknown),

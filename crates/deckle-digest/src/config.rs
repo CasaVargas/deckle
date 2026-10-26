@@ -2219,7 +2219,10 @@ mod tests {
             "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\", \"sports\", \"news\"]\n",
         )
         .unwrap_err();
-        assert_eq!(e, "[[subscribed]] thepilot.com: section \"news\" is listed twice");
+        assert_eq!(
+            e,
+            "[[subscribed]] thepilot.com: section \"news\" is listed twice"
+        );
         // the same site twice, however it's spelled
         let e = Config::parse(
             "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\n\n[[subscribed]]\nsite = \"https://www.ThePilot.com/\"\nsections = [\"sports\"]\n",
@@ -2230,7 +2233,10 @@ mod tests {
             "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 0\n",
         )
         .unwrap_err();
-        assert_eq!(e, "[[subscribed]] thepilot.com: max_items must be at least 1");
+        assert_eq!(
+            e,
+            "[[subscribed]] thepilot.com: max_items must be at least 1"
+        );
         // two different sites are fine
         assert!(
             Config::parse(

@@ -640,7 +640,10 @@ pub fn plan(i: &Inputs) -> NextPaper {
                     });
                 }
             }
-            SectionKind::Local | SectionKind::Feeds | SectionKind::Subscribed => match r.stories.as_deref() {
+            SectionKind::Local | SectionKind::Feeds | SectionKind::Subscribed => match r
+                .stories
+                .as_deref()
+            {
                 Some(items) if !items.is_empty() => {
                     // its newest headline, unless that one leads the paper
                     if let Some((_, item)) = items.iter().enumerate().find(|(a, _)| !is_lead(*a)) {
