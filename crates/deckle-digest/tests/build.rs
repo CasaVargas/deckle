@@ -674,7 +674,11 @@ mod front {
             .filter_map(|m| m.text().map(String::from))
             .collect();
         assert_eq!(metas.len(), plan.tiles.len());
-        assert!(metas.iter().all(|m| m == "meta"), "{metas:?}");
+        // each tile's page label, then its meta (print layout design §5.1)
+        assert!(
+            metas.iter().all(|m| m == "A2 · meta" || m == "A3 · meta"),
+            "{metas:?}"
+        );
         // the lead keeps the section name
         assert!(x.contains("local · meta"));
     }
@@ -686,7 +690,7 @@ mod front {
         g.edition.sections[2].unavailable = Some("Unavailable today (offline).".into());
         let x = front_xhtml(&g);
         assert!(x.contains("no new stories"), "{x}");
-        assert_eq!(x.matches(">unavailable<").count(), 1);
+        assert_eq!(x.matches(" · unavailable<").count(), 1);
     }
 
     #[test]
@@ -814,6 +818,193 @@ mod front {
         let x = section_xhtml(&g, 1);
         roxmltree::Document::parse(&x).unwrap();
         assert!(x.contains("A &amp; B &lt;c&gt;"));
+    }
+
+    // ---- The print language (print layout design §5) ----
+
+    fn para(words: usize, word: &str) -> String {
+        format!("<p>{}</p>\n", vec![word; words].join(" "))
+    }
+
+    /// A lead long enough to jump: a 120-word opening, then a second paragraph.
+    fn jumping() -> Gathered {
+        let mut g = paper(&[
+            ("local", &["Mill Yard Will Be a Market Again", "Two"]),
+            ("feeds:A", &["F0"]),
+        ]);
+        g.edition.sections[0].articles[0].body =
+            format!("{}{}", para(120, "opening"), para(20, "later"));
+        g
+    }
+
+    #[test]
+    fn the_lead_jumps_to_its_section() {
+        let g = jumping();
+        let front = front_xhtml(&g);
+        roxmltree::Document::parse(&front).unwrap();
+        assert!(front.contains("<p>opening opening"), "{front}");
+        assert!(!front.contains("later"), "{front}");
+        assert!(
+            front.contains(
+                "<p class=\"jump\" id=\"jump\"><a href=\"s1.xhtml#a1\">Continued on A2: MILL \u{203a}</a></p>"
+            ),
+            "{front}"
+        );
+        let s = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&s).unwrap();
+        assert!(
+            s.contains(
+                "<p class=\"jumphead\" id=\"a1\"><b>MILL</b> · <a href=\"front.xhtml#jump\">Continued from A1</a></p>"
+            ),
+            "{s}"
+        );
+        assert!(s.contains("<p class=\"jumptitle\">Mill Yard Will Be a Market Again</p>"));
+        assert!(!s.contains("opening"), "the opening isn't printed twice");
+        assert!(s.contains("<p>later later"));
+        assert!(!s.contains("<h2 class=\"headline\" id=\"a1\""));
+        // the second story is as it was
+        assert!(s.contains("<h2 class=\"headline\" id=\"a2\">Two</h2>"));
+    }
+
+    #[test]
+    fn a_short_lead_prints_whole_and_its_section_refers_to_it() {
+        let mut g = paper(&[("local", &["Short", "Two"])]);
+        g.edition.sections[0].articles[0].body = para(30, "whole");
+        let front = front_xhtml(&g);
+        assert!(front.contains("<p>whole whole"));
+        assert!(!front.contains("class=\"jump\""));
+        let s = section_xhtml(&g, 1);
+        roxmltree::Document::parse(&s).unwrap();
+        assert!(
+            s.contains(
+                "<p class=\"refer\" id=\"a1\"><a href=\"front.xhtml#t0-0\">Short</a> — on A1</p>"
+            ),
+            "{s}"
+        );
+        assert!(!s.contains("whole whole"));
+        // the refer has no back links of its own; the second story keeps its two
+        assert_eq!(hrefs(&s, "back").len(), 2);
+    }
+
+    #[test]
+    fn the_skybox_links_sections_not_on_the_front() {
+        let mut g = paper(&[
+            ("local", &["L0"]),
+            ("puzzle", &["Crossword"]),
+            ("reading", &["Saved"]),
+        ]);
+        g.news = vec![0];
+        let front = front_xhtml(&g);
+        assert!(
+            front.contains(
+                "<p class=\"skybox\"><a href=\"s2.xhtml\">PUZZLE B1</a> · <a href=\"s3.xhtml\">READING B2</a></p>"
+            ),
+            "{front}"
+        );
+        assert!(front.find("class=\"skybox\"") < front.find("class=\"masthead\""));
+        // one candidate is no skybox
+        let mut g = paper(&[("local", &["L0"]), ("puzzle", &["Crossword"])]);
+        g.news = vec![0];
+        assert!(!front_xhtml(&g).contains("skybox"));
+    }
+
+    #[test]
+    fn folios_head_sections_and_labels_reach_the_index() {
+        let g = with(2, 2);
+        let s = section_xhtml(&g, 2);
+        assert!(
+            s.starts_with("<?xml")
+                && s.contains(
+                    "<body>\n<p class=\"folio\"><b>A3</b> · feeds:A · The Deckle Daily · Fri, Oct 23</p>\n<h1"
+                ),
+            "{s}"
+        );
+        let front = front_xhtml(&g);
+        assert!(front.contains("s1.xhtml\">local</a> <span class=\"meta\">A2 · 2 items</span>"));
+    }
+
+    #[test]
+    fn a_pull_quote_sits_two_paragraphs_after_its_source() {
+        let mut g = paper(&[("local", &["Lead"]), ("feeds:A", &["Quoted"])]);
+        let quote = "\u{201c}We have waited forty years for somebody to do something with that yard,\u{201d}";
+        g.edition.sections[1].articles[0].body = (0..7)
+            .map(|i| {
+                if i == 2 {
+                    format!("<p>{quote} said one stall holder.</p>\n")
+                } else {
+                    format!("<p>paragraph{i}</p>\n")
+                }
+            })
+            .collect();
+        let s = section_xhtml(&g, 2);
+        roxmltree::Document::parse(&s).unwrap();
+        let pull = s
+            .find(&format!("<p class=\"pull\">{quote}</p>"))
+            .unwrap_or_else(|| panic!("{s}"));
+        assert!(s.find("paragraph4").unwrap() < pull);
+        assert!(pull < s.find("paragraph5").unwrap());
+    }
+
+    #[test]
+    fn every_link_in_the_epub_resolves() {
+        let mut g = jumping();
+        g.edition.sections.push(Section {
+            key: "puzzle".into(),
+            title: "Puzzles".into(),
+            articles: vec![Article {
+                title: "Crossword".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        g.edition.sections.push(Section {
+            key: "reading".into(),
+            title: "Your Reading".into(),
+            articles: vec![Article {
+                title: "Saved".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        g.news = vec![0, 1];
+        let files = deckle_digest::render::render(&g, Vec::new());
+        let pages: Vec<(String, String)> = files
+            .iter()
+            .filter(|(p, _)| p.ends_with(".xhtml"))
+            .map(|(p, b)| {
+                (
+                    p.trim_start_matches("OEBPS/").to_owned(),
+                    String::from_utf8(b.clone()).unwrap(),
+                )
+            })
+            .collect();
+        let ids = |x: &str| -> Vec<String> {
+            roxmltree::Document::parse(x)
+                .unwrap()
+                .descendants()
+                .filter_map(|n| n.attribute("id").map(String::from))
+                .collect()
+        };
+        let mut checked = 0;
+        for (name, x) in &pages {
+            let doc = roxmltree::Document::parse(x).unwrap();
+            for href in doc.descendants().filter_map(|n| n.attribute("href")) {
+                if href == "style.css" {
+                    continue;
+                }
+                let (file, frag) = href.split_once('#').unwrap_or((href, ""));
+                let target = if file.is_empty() { name.as_str() } else { file };
+                let (_, page) = pages
+                    .iter()
+                    .find(|(p, _)| p == target)
+                    .unwrap_or_else(|| panic!("{name}: {href} has no file"));
+                if !frag.is_empty() {
+                    assert!(ids(page).iter().any(|i| i == frag), "{name}: {href}");
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 20, "{checked}");
     }
 }
 

@@ -673,15 +673,15 @@ mod tests {
 
     #[test]
     fn straight_and_escaped_marks_work_too() {
-        let straight = format!("\"{}\"", vec!["s"; 9].join(" "));
+        let straight = format!("\"{}\"", ["s"; 9].join(" "));
         assert_eq!(
             pull_quote(&paras_with(3, &straight, 7)).map(|p| p.text),
             Some(straight.clone())
         );
-        let escaped = format!("&quot;{}&quot;", vec!["e"; 9].join(" "));
+        let escaped = format!("&quot;{}&quot;", ["e"; 9].join(" "));
         assert_eq!(
             pull_quote(&paras_with(3, &escaped, 7)).map(|p| p.text),
-            Some(format!("\"{}\"", vec!["e"; 9].join(" ")))
+            Some(format!("\"{}\"", ["e"; 9].join(" ")))
         );
         // a short quote first, then one that fits
         let both = format!("{} and {}", quote(3), quote(12));
