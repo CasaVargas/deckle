@@ -91,17 +91,26 @@ export function setMaxItems(cfg: DailyConfig, site: string, value: string): Dail
   return withGroups(cfg, (cfg.subscribed ?? []).map((x) => (x === g ? next : x)));
 }
 
-/** Drops a site's group (its account is gone); `subscribed` leaves `sections` with the last one. */
-export function removeGroup(cfg: DailyConfig, site: string): DailyConfig {
+/**
+ * Drops a site's group (its account is gone); `subscribed` leaves `sections` with the last one.
+ * `others` are the sites of the other subscription rows: while one of them still has this site,
+ * the group stays.
+ */
+export function removeGroup(cfg: DailyConfig, site: string, others: string[] = []): DailyConfig {
   const key = statusKey(site);
+  if (others.some((o) => statusKey(o) === key)) return cfg;
   return withGroups(cfg, (cfg.subscribed ?? []).filter((g) => statusKey(g.site) !== key));
 }
 
-/** Re-keys a group to a renamed site; if the new site already has a group, that one stays and the old is dropped. */
-export function renameGroup(cfg: DailyConfig, from: string, to: string): DailyConfig {
+/**
+ * Re-keys a group to a renamed site; if the new site already has a group, that one stays and the
+ * old is dropped. While another row (`others`) still has the old site, its group stays put.
+ */
+export function renameGroup(cfg: DailyConfig, from: string, to: string, others: string[] = []): DailyConfig {
   const a = statusKey(from);
   const b = statusKey(to);
   if (a === b) return cfg;
+  if (others.some((o) => statusKey(o) === a)) return cfg;
   const groups = cfg.subscribed ?? [];
   if (!groups.some((g) => statusKey(g.site) === a)) return cfg;
   if (groups.some((g) => statusKey(g.site) === b)) return removeGroup(cfg, from);

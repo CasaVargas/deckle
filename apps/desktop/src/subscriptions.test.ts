@@ -100,6 +100,16 @@ test("renaming a site moves its group", () => {
   expect(c.sections).toEqual(["local", "subscribed"]);
 });
 
+test("a group stays while another row still has its site", () => {
+  const c = toggleSlug(toggleGroup(cfgOf(["local"]), "a.com"), "a.com", "sports");
+  // two rows for a.com: removing or renaming one leaves the other's group alone
+  expect(removeGroup(c, "a.com", ["https://www.A.com/"])).toBe(c);
+  expect(renameGroup(c, "a.com", "b.com", ["a.com"])).toBe(c);
+  // no other row has it: the group goes, or moves
+  expect(removeGroup(c, "a.com", ["b.com"]).subscribed).toEqual([]);
+  expect(groupFor(renameGroup(c, "a.com", "b.com", ["c.com"]), "b.com")?.sections).toEqual(["news", "sports"]);
+});
+
 test("renaming onto a site that already has a group keeps that one", () => {
   let c = toggleGroup(toggleGroup(cfgOf(["local"]), "a.com"), "b.com");
   c = toggleSlug(c, "b.com", "opinion");
