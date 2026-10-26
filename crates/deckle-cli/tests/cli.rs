@@ -527,6 +527,33 @@ fn digest_subscribe_needs_a_username_for_a_new_site() {
 }
 
 #[test]
+fn digest_subscribe_refuses_an_empty_password_and_saves_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = dir.path().join("digest.toml");
+    std::fs::write(&cfg, deckle_digest::config::STARTER).unwrap();
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["digest", "--config"])
+        .arg(&cfg)
+        .args([
+            "subscribe",
+            "thepilot.com",
+            "--username",
+            "me@x.test",
+            "--stdin",
+        ])
+        .write_stdin("\n")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("the password is empty"));
+    assert_eq!(
+        std::fs::read_to_string(&cfg).unwrap(),
+        deckle_digest::config::STARTER
+    );
+}
+
+#[test]
 fn digest_subscribe_normalizes_the_site_in_the_config() {
     let (ok, _, err) = subscribe_with_starter(
         &[

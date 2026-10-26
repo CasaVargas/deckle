@@ -1054,6 +1054,7 @@ fn digest_lint(
     subs: &[deckle_digest::config::SubscriptionConfig],
 ) -> Result<ExitCode, String> {
     let mut access_line: Option<String> = None;
+    let mut walled = false;
     let (html, base) = if page.starts_with("http://") || page.starts_with("https://") {
         let (bytes, access) = net.get_page_as(page)?;
         access_line = match &access {
@@ -1067,7 +1068,10 @@ fn digest_lint(
                     None => format!("signed in at {site}"),
                 },
             ),
-            deckle_digest::Access::Walled { site, why } => Some(why.note(site)),
+            deckle_digest::Access::Walled { site, why } => {
+                walled = true;
+                Some(why.note(site))
+            }
         };
         (
             String::from_utf8_lossy(&bytes).into_owned(),
@@ -1084,8 +1088,13 @@ fn digest_lint(
             .to_string();
         (html, base)
     };
-    let (x, dropped) = deckle_digest::article::extract_linted(&html, &base, None)
-        .ok_or("no readable story here (a paywall, a sign-in page, or a video)")?;
+    let (x, dropped) =
+        deckle_digest::article::extract_linted(&html, &base, None).ok_or_else(|| {
+            match (&access_line, &walled) {
+                (Some(note), true) => format!("no readable story here: {note}"),
+                _ => "no readable story here (a paywall, a sign-in page, or a video)".to_owned(),
+            }
+        })?;
     let photos: Vec<_> = x
         .photos
         .iter()
@@ -2400,13 +2409,8 @@ fn digest(
             let net = household_net(&path, &cfg);
             let first =
                 deckle_digest::build_gathered(&cfg, date, now, &work, &net, &gather_options());
-            let (mut built, mut gathered) = match first {
-                Ok(b) => b,
-                Err(e) => {
-                    save_jars_noted(&net);
-                    return Err(e);
-                }
-            };
+            save_jars_noted(&net);
+            let (mut built, mut gathered) = first?;
             let opts = paper_options(
                 located.as_ref().map(|l| l.path.clone()),
                 keep_work_dir,
@@ -2722,12 +2726,12 @@ fn digest(
             let now =
                 deckle_digest::chrono::Utc::now().with_timezone(&deckle_digest::tz::local_tz());
             if fetch {
-                let path = next_cache();
-                let mut cache = deckle_digest::next::live::LiveCache::load(&path);
+                let cache_path = next_cache();
+                let mut cache = deckle_digest::next::live::LiveCache::load(&cache_path);
                 let net = household_net(&path, &cfg);
                 deckle_digest::next::live::refresh(&cfg, &mut cache, now.to_utc(), &net);
                 save_jars_noted(&net);
-                cache.save(&path)?;
+                cache.save(&cache_path)?;
             }
             let paper = next_paper(&cfg, now);
             emit(json, &paper, || next_text(&paper, now.to_utc()))?;
@@ -3139,6 +3143,12 @@ fn digest_subscribe(
         let sub = cfg.subscriptions.remove(i);
         let had = secret::forget_site(&sub, &SystemKeyring).map_err(|e| e.to_string())?;
         deckle_digest::config::save(path, &cfg)?;
+        let jar = deckle_digest::session::jar_path(path.parent().unwrap_or(Path::new("")), &site);
+        if let Err(e) = std::fs::remove_file(&jar)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!("couldn't remove {}: {e}", jar.display());
+        }
         emit(json, &had, || {
             format!(
                 "removed the subscription to {site}{}",
@@ -3179,7 +3189,6 @@ fn digest_subscribe(
         }
         (Some(i), None) => cfg.subscriptions[i].clone(),
     };
-    deckle_digest::config::save(path, &cfg)?;
     let password = Zeroizing::new(if stdin {
         let mut line = String::new();
         std::io::stdin()
@@ -3192,6 +3201,10 @@ fn digest_subscribe(
         rpassword::prompt_password(format!("Password for {} at {site}: ", sub.username))
             .map_err(|e| format!("couldn't read the password: {e}"))?
     });
+    if password.is_empty() {
+        return Err("the password is empty".into());
+    }
+    deckle_digest::config::save(path, &cfg)?;
     secret::set_site(&sub, &SystemKeyring, &password).map_err(|e| e.to_string())?;
     let net = household_net(path, &cfg);
     let state = net.sign_in(&site);
