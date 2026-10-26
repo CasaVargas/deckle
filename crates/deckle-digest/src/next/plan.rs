@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use super::live::{LiveCache, LiveItem};
 use super::{History, WeekDay};
-use crate::config::{Config, SectionKind, Units, section_key};
+use crate::config::{Config, SectionKind, Units, section_key, subscribed_key, subscribed_sections};
 use crate::front::{Candidate, Tier, lead};
 use crate::press::{Press, press};
 use crate::reading::{Entry, State};
@@ -49,6 +49,13 @@ pub struct Tile {
     pub dashed: bool,
 }
 
+/// Which `[[subscribed]]` section a row is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct SubscribedRef {
+    pub site: String,
+    pub slug: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanRow {
@@ -58,6 +65,9 @@ pub struct PlanRow {
     pub feed: Option<usize>,
     /// The `[[local.places]]` index of another place's row.
     pub place: Option<usize>,
+    /// The `[[subscribed]]` group and slug of a subscribed paper's row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subscribed: Option<SubscribedRef>,
     pub name: String,
     pub detail: String,
     pub budget: String,
@@ -87,11 +97,12 @@ pub struct NextPaper {
 }
 
 /// Every kind, in the starter's order: where an off section is listed.
-const KINDS: [SectionKind; 9] = [
+const KINDS: [SectionKind; 10] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
     SectionKind::Feeds,
+    SectionKind::Subscribed,
     SectionKind::Shelf,
     SectionKind::Lottery,
     SectionKind::Horoscope,
@@ -182,6 +193,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             kind,
             feed: None,
             place: None,
+            subscribed: None,
             name: name.into(),
             detail,
             budget,
@@ -203,6 +215,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     kind,
                     feed,
                     place,
+                    subscribed: None,
                     name: name.into(),
                     detail,
                     budget: format!("{max} stories"),
@@ -238,6 +251,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     kind,
                     feed: None,
                     place: None,
+                    subscribed: None,
                     name: "Your Reading".into(),
                     detail,
                     budget: if n <= max {
@@ -368,8 +382,40 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             "From Wikipedia".into(),
             "1 page".into(),
         )],
-        // The page plan rows for subscribed groups arrive with the gather wiring.
-        SectionKind::Subscribed => Vec::new(),
+        // one row per group slug, fetched like a feed (the press's own URL)
+        SectionKind::Subscribed => subscribed_sections(cfg)
+            .into_iter()
+            .map(|(g, slug, display)| {
+                let max = g.max_items.unwrap_or(cfg.local.max_items);
+                let url = super::live::subscribed_url(cfg, g, slug);
+                let stories = i
+                    .live
+                    .feeds
+                    .get(&url)
+                    .filter(|x| x.error.is_none())
+                    .map(|x| {
+                        let mut items = x.items.clone();
+                        items.sort_by_key(|i| std::cmp::Reverse(i.published));
+                        let mut seen = HashSet::new();
+                        items.retain(|i| seen.insert(title_key(&i.title)));
+                        items
+                    });
+                let mut row = stories_row(
+                    subscribed_key(&g.site, slug),
+                    None,
+                    None,
+                    &format!("{} · {display}", g.title()),
+                    format!("{} · {slug}", g.site),
+                    max,
+                    stories,
+                );
+                row.row.subscribed = Some(SubscribedRef {
+                    site: g.site.clone(),
+                    slug: slug.to_owned(),
+                });
+                row
+            })
+            .collect(),
     }
 }
 
@@ -491,7 +537,7 @@ pub fn plan(i: &Inputs) -> NextPaper {
     for r in &mut on {
         match (r.row.kind, r.stories.as_mut()) {
             (SectionKind::Local, Some(s)) => taken.extend(s.iter().map(|i| title_key(&i.title))),
-            (SectionKind::Feeds, Some(s)) => {
+            (SectionKind::Feeds | SectionKind::Subscribed, Some(s)) => {
                 s.retain(|i| !taken.contains(&title_key(&i.title)));
                 s.truncate(r.row.items.unwrap_or(usize::MAX));
                 taken.extend(s.iter().map(|i| title_key(&i.title)));
@@ -521,7 +567,9 @@ pub fn plan(i: &Inputs) -> NextPaper {
                 (Tier::Local, r.stories.as_ref().map_or(0, Vec::len))
             }
             SectionKind::Local => (Tier::Feed, r.stories.as_ref().map_or(0, Vec::len)),
-            SectionKind::Feeds => (Tier::Feed, r.stories.as_ref().map_or(0, Vec::len)),
+            SectionKind::Feeds | SectionKind::Subscribed => {
+                (Tier::Feed, r.stories.as_ref().map_or(0, Vec::len))
+            }
             _ => continue,
         };
         candidates.extend((0..n).map(|article| Candidate {
@@ -590,7 +638,7 @@ pub fn plan(i: &Inputs) -> NextPaper {
                     });
                 }
             }
-            SectionKind::Local | SectionKind::Feeds => match r.stories.as_deref() {
+            SectionKind::Local | SectionKind::Feeds | SectionKind::Subscribed => match r.stories.as_deref() {
                 Some(items) if !items.is_empty() => {
                     // its newest headline, unless that one leads the paper
                     if let Some((_, item)) = items.iter().enumerate().find(|(a, _)| !is_lead(*a)) {

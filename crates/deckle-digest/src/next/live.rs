@@ -70,6 +70,13 @@ struct Source {
     briefs: bool,
 }
 
+/// The feed URL the press reads for one `[[subscribed]]` slug, so the preview shares its cache.
+pub fn subscribed_url(cfg: &Config, group: &crate::config::SubscribedConfig, slug: &str) -> String {
+    use crate::publisher::Publisher;
+    let n = group.max_items.unwrap_or(cfg.local.max_items);
+    crate::publisher::blox::Blox.feed_url(&group.site, slug, n)
+}
+
 fn sources(cfg: &Config) -> Vec<Source> {
     let mut out: Vec<Source> = Vec::new();
     let mut push = |s: Source| {
@@ -126,11 +133,21 @@ fn sources(cfg: &Config) -> Vec<Source> {
             });
         }
     }
+    // each subscribed slug, under its group's age window
+    for (g, slug, _) in crate::config::subscribed_sections(cfg) {
+        let max_items = g.max_items.unwrap_or(cfg.local.max_items);
+        push(Source {
+            url: subscribed_url(cfg, g, slug),
+            max_age_hours: g.max_age_hours.unwrap_or(cfg.local.max_age_hours),
+            max_items: max_items.saturating_add(SPARE),
+            briefs: false,
+        });
+    }
     out
 }
 
 /// The URLs the front page reads: the Google News search, `[local] feeds`, other places' searches
-/// and feeds, then `[[feeds]]`.
+/// and feeds, then `[[feeds]]` and `[[subscribed]]`.
 pub fn live_urls(cfg: &Config) -> Vec<String> {
     sources(cfg).into_iter().map(|s| s.url).collect()
 }

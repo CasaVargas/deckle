@@ -721,6 +721,8 @@ export interface PagePlanRow {
   feed: number | null;
   /** The `[[local.places]]` index of another place's row. */
   place: number | null;
+  /** The `[[subscribed]]` group and slug of a subscribed paper's row. */
+  subscribed?: { site: string; slug: string };
   name: string;
   detail: string;
   budget: string;

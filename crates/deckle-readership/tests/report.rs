@@ -480,3 +480,61 @@ fn other_places_are_their_own_rows_and_drop_alone() {
     );
     assert!(apply(&drop, &mut c).is_err(), "already gone");
 }
+
+fn subscribed_cfg(sections: &str) -> Config {
+    Config::parse(&format!(
+        "sections = [{sections}]\n\n[[subscribed]]\nsite = \"thepilot.com\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\n\n[[subscribed]]\nsite = \"other.com\"\nsections = [\"opinion\"]\n"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn a_subscribed_paper_is_a_row_per_slug_with_the_papers_name() {
+    let r = report(
+        &papers(&[Some(9000); 3]),
+        &subscribed_cfg("\"weather\", \"subscribed\", \"lottery\""),
+    );
+    let rows: Vec<_> = r
+        .sections
+        .iter()
+        .map(|s| (s.key.as_str(), s.name.as_str()))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("weather", "Weather"),
+            ("subscribed:thepilot.com:news", "The Pilot · News"),
+            ("subscribed:thepilot.com:sports", "The Pilot · Sports"),
+            ("subscribed:other.com:opinion", "other.com · Opinion"),
+            ("lottery", "Lottery"),
+        ]
+    );
+}
+
+#[test]
+fn a_subscribed_slug_drops_alone_and_the_last_one_takes_the_group_and_kind() {
+    let drop = |key: &str| deckle_readership::report::Suggestion {
+        id: format!("drop:{key}"),
+        kind: SuggestionKind::Drop,
+        key: key.into(),
+        title: String::new(),
+        why: String::new(),
+    };
+    let mut c = subscribed_cfg("\"weather\", \"subscribed\"");
+    apply(&drop("subscribed:thepilot.com:sports"), &mut c).unwrap();
+    assert_eq!(c.subscribed[0].sections, ["news"]);
+    assert_eq!(c.subscribed.len(), 2);
+    apply(&drop("subscribed:thepilot.com:news"), &mut c).unwrap();
+    assert_eq!(c.subscribed.len(), 1);
+    assert_eq!(c.subscribed[0].site, "other.com");
+    assert!(c.sections.contains(&SectionKind::Subscribed));
+    apply(&drop("subscribed:other.com:opinion"), &mut c).unwrap();
+    assert!(c.subscribed.is_empty());
+    assert!(!c.sections.contains(&SectionKind::Subscribed));
+    assert!(apply(&drop("subscribed:other.com:opinion"), &mut c).is_err());
+    let up = deckle_readership::report::Suggestion {
+        kind: SuggestionKind::MoveUp,
+        ..drop("subscribed:thepilot.com:news")
+    };
+    assert!(apply(&up, &mut subscribed_cfg("\"subscribed\"")).is_err());
+}

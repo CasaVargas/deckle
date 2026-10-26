@@ -877,3 +877,50 @@ fn url_only_feed_row_unchanged() {
     assert_eq!(row.detail, "Science Daily Brief");
     assert_eq!(row.budget, "10 stories");
 }
+
+// --- subscribed papers ---
+
+#[test]
+fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
+    let mut s = Setup::new();
+    s.cfg = Config::parse(
+        "sections = [\"weather\", \"subscribed\"]\n\n[[subscribed]]\nsite = \"thepilot.com\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\nmax_items = 5\n",
+    )
+    .unwrap();
+    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=5&s=start_time&sd=desc";
+    assert!(live_urls(&s.cfg).contains(&news.to_owned()));
+    // the same twice-an-hour limit as a feed's
+    let net = Counting::new();
+    let mut cache = LiveCache::default();
+    assert_eq!(refresh(&s.cfg, &mut cache, t0(), &net), 2);
+    assert_eq!(refresh(&s.cfg, &mut cache, t0() + Duration::minutes(10), &net), 0);
+    s.live.feeds.insert(
+        news.into(),
+        fetched(&[("Council votes", local(2026, 10, 22, 13, 0))]),
+    );
+    let p = s.plan();
+    let rows: Vec<_> = p
+        .plan
+        .iter()
+        .filter(|r| r.kind == SectionKind::Subscribed)
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].key, "subscribed:thepilot.com:news");
+    assert_eq!(rows[0].name, "The Pilot · News");
+    assert_eq!(rows[0].detail, "thepilot.com · news");
+    assert_eq!(rows[0].items, Some(5));
+    let r = rows[0].subscribed.as_ref().unwrap();
+    assert_eq!((r.site.as_str(), r.slug.as_str()), ("thepilot.com", "news"));
+    // the fetched headline leads (nothing local), and the other slug is a dashed slot
+    assert_eq!(p.lead.clone().unwrap().title.as_deref(), Some("Council votes"));
+    assert!(labels(&p).contains(&"The Pilot · Sports · 5 slots".to_owned()));
+    let json = serde_json::to_string(&p.plan[0]).unwrap();
+    assert!(!json.contains("subscribed"), "{json}");
+}
+
+#[test]
+fn subscribed_is_off_when_no_group_exists() {
+    let p = Setup::new().plan();
+    assert!(p.plan.iter().all(|r| r.kind != SectionKind::Subscribed));
+    assert!(p.off.iter().all(|r| r.kind != SectionKind::Subscribed));
+}
