@@ -902,6 +902,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
               <div className="label">Your interests</div>
               <p className="muted small">Things you care about, each its own section: Deckle searches the news for them every morning.</p>
+              <div className="learning">
               <label className="check">
                 <input
                   type="checkbox"
@@ -919,6 +920,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                 />
                 Also print what Deckle noticed in the paper, as pages you can tap to accept.
               </label>
+              </div>
               <div className="feeds">
                 {(draft.interests ?? []).map((it, i) => (
                   <div key={i} className="feed interest">
