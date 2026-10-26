@@ -229,8 +229,8 @@ generated ASIN never changes either (`generate_asin(asin_seed(...))`, the same m
 that makes a re-sent article replace itself). **The file name on the Kindle is fixed too**,
 `Deckle Kitchen Book.kfx` (`.azw3`/`.epub` for other readers), whatever the book's title.
 `deliver::device_filename` normally derives the name from title and author, so renaming the
-book in Book settings would otherwise leave two cookbooks on the Kindle. Add a file-name override to
-the delivery path for this one book. A title change still shows in the Kindle library,
+book in Book settings would otherwise leave two cookbooks on the Kindle. Set it through the existing
+`Prepared.name` (the device file name a queued book carries), so `deliver` needs no change. A title change still shows in the Kindle library,
 because the title comes from the metadata, not the file name. The book has, in order:
 
 1. **Cover**, generated each build (§6.3).
@@ -569,7 +569,7 @@ both ways.)*
 - **Filing:** a table test of category arrays and titles against the default chapters,
   including no match → Everything else, and a deleted chapter → Everything else at build.
 - **Index:** the normalizer on a table of ingredient lines; the 20 fixtures' index snapshot.
-- **Build:** a fixture store builds a valid EPUB (epubcheck as other book writers do) with
+- **Build:** a fixture store builds a valid EPUB (read back with `zip` and `roxmltree`: every XHTML, the OPF and the NCX well-formed, and every manifest `href` present, as the other book writers' tests check) with
   the identifier `urn:deckle:cookbook:default` every time, chapters in config order, empty
   chapters omitted, stars on recipes newer than 7 days (with an injected clock), and the
   index links resolving. Building makes no network calls (a `Net` that panics if used).
