@@ -8,7 +8,7 @@ function day(date: string): string {
 }
 
 /** The last six papers, read or not (tomorrow's paper design §7). "All editions" opens the Editions room. */
-export default function ThisWeek({ week, onAllEditions }: { week: WeekDay[]; onAllEditions: () => void }) {
+export default function ThisWeek({ week, stop, onAllEditions }: { week: WeekDay[]; stop?: string | null; onAllEditions: () => void }) {
   return (
     <section className="card this-week">
       <div className="card-head">
@@ -30,6 +30,14 @@ export default function ThisWeek({ week, onAllEditions }: { week: WeekDay[]; onA
           </li>
         ))}
       </ol>
+      {stop && (
+        <p className="muted small">
+          {stop}.{" "}
+          <button className="link" onClick={onAllEditions}>
+            How far you read
+          </button>
+        </p>
+      )}
     </section>
   );
 }
