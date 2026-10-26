@@ -552,13 +552,7 @@ impl SessionNet {
                 // That login stuck for its fetch; if this page is still a stranger's, the
                 // session didn't hold. No second login here: the cap is the other branch's.
                 if !adapter.signed_in(&String::from_utf8_lossy(&body)) {
-                    let last = s.run().last_failure.clone();
-                    let e = if last.is_empty() {
-                        NOT_STUCK.into()
-                    } else {
-                        last
-                    };
-                    let why = Self::failed(s, e);
+                    let why = Self::failed(s, NOT_STUCK.into());
                     return walled(body, why);
                 }
             } else {

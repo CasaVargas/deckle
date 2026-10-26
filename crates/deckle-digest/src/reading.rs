@@ -12,6 +12,8 @@ use serde::{Deserialize, Serialize};
 
 /// Failed extractions before a saved article prints as a headline and is given up on.
 pub const MAX_TRIES: u32 = 3;
+/// Editions a withheld entry ([`Outcome::Waiting`]) may wait before it counts as failing.
+pub const MAX_WAITS: u32 = 14;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -40,6 +42,13 @@ pub struct Entry {
     /// The edition date of the last failed try (a same-day rebuild doesn't count twice).
     #[serde(default)]
     pub tried_on: Option<NaiveDate>,
+    /// Editions spent waiting on a page its site withheld ([`Outcome::Waiting`]).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub waits: u32,
+}
+
+fn is_zero(n: &u32) -> bool {
+    *n == 0
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -290,6 +299,7 @@ impl ReadingQueue {
             printed_in: None,
             note: None,
             tried_on: None,
+            waits: 0,
         };
         self.append(lines, entry)?;
         Ok(Added::New(id))
@@ -352,6 +362,7 @@ impl ReadingQueue {
             printed_in: None,
             note: None,
             tried_on: None,
+            waits: 0,
         };
         self.append(lines, entry)?;
         Ok(Added::New(id))
@@ -384,15 +395,19 @@ impl ReadingQueue {
     }
 
     /// What an edition for `date` carries: pending entries plus those already in an edition
-    /// for `date` (a same-day rebuild reprints them), oldest first, at most `max`.
+    /// for `date` (a same-day rebuild reprints them), oldest first, at most `max`. Entries
+    /// waiting on a withheld page only fill slots left over: they never displace a fresh save.
     pub fn for_edition(&self, date: NaiveDate, max: usize) -> Vec<Entry> {
-        let mut out: Vec<Entry> = self
+        let (mut waiting, mut out): (Vec<Entry>, Vec<Entry>) = self
             .load()
             .into_iter()
             .filter(|e| e.state == State::Pending || e.printed_in == Some(date))
-            .collect();
+            .partition(|e| e.state == State::Pending && e.waits > 0);
         out.sort_by_key(|e| e.saved_at);
         out.truncate(max);
+        waiting.sort_by_key(|e| e.saved_at);
+        let left = max - out.len();
+        out.extend(waiting.into_iter().take(left));
         out
     }
 
@@ -414,8 +429,12 @@ impl ReadingQueue {
                     e.state = State::Book;
                     e.printed_in = Some(date);
                 }
-                Outcome::Waiting(why) => e.note = Some(why.clone()),
-                Outcome::Failed(why) => {
+                Outcome::Waiting(why) if e.waits < MAX_WAITS => {
+                    e.waits += 1;
+                    e.note = Some(why.clone());
+                }
+                // Waited long enough: from now on it's a failed try like any other.
+                Outcome::Waiting(why) | Outcome::Failed(why) => {
                     if e.tried_on != Some(date) {
                         e.tries += 1;
                         e.tried_on = Some(date);

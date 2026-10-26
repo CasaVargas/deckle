@@ -2,7 +2,7 @@
 //! The reading queue: a JSONL file of saved articles (save-to-paper design §3).
 
 use chrono::{DateTime, NaiveDate, Utc};
-use deckle_digest::reading::{Added, Outcome, ReadingQueue, State};
+use deckle_digest::reading::{Added, MAX_WAITS, Outcome, ReadingQueue, State};
 
 fn now() -> DateTime<Utc> {
     "2026-10-20T14:03:11Z".parse().unwrap()
@@ -104,6 +104,94 @@ fn a_withheld_entry_waits_with_its_reason_and_keeps_its_tries() {
     assert_eq!(e.tries, 0);
     assert_eq!(e.tried_on, None);
     assert_eq!(e.note.as_deref(), Some("subscriber story"));
+    assert_eq!(e.waits, 5);
+}
+
+/// Saves `n` URLs a second apart, oldest first; returns their ids.
+fn saved(q: &ReadingQueue, n: usize) -> Vec<String> {
+    (0..n)
+        .map(|i| {
+            let at = now() + chrono::Duration::seconds(i as i64);
+            match q
+                .add_url(&format!("https://ex.com/{i}"), None, "cli", at)
+                .unwrap()
+            {
+                Added::New(id) | Added::Duplicate(id) => id,
+            }
+        })
+        .collect()
+}
+
+fn wait(q: &ReadingQueue, id: &str, d: NaiveDate) {
+    q.commit(d, &[(id.to_owned(), Outcome::Waiting("withheld".into()))])
+        .unwrap();
+}
+
+#[test]
+fn a_waiting_entry_never_displaces_a_fresh_save() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = queue(&dir);
+    let d = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+    let ids = saved(&q, 3);
+    // The oldest is waiting on a withheld page.
+    wait(&q, &ids[0], d);
+    let got: Vec<String> = q.for_edition(d, 2).into_iter().map(|e| e.id).collect();
+    assert_eq!(got, [ids[1].clone(), ids[2].clone()]);
+}
+
+#[test]
+fn a_waiting_entry_fills_a_free_slot() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = queue(&dir);
+    let d = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+    let ids = saved(&q, 2);
+    wait(&q, &ids[0], d);
+    let got: Vec<String> = q.for_edition(d, 3).into_iter().map(|e| e.id).collect();
+    assert_eq!(got, [ids[1].clone(), ids[0].clone()]);
+}
+
+#[test]
+fn a_waiting_entry_fails_after_max_waits() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = queue(&dir);
+    let d = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+    let id = saved(&q, 1).remove(0);
+    for day in 0..u64::from(MAX_WAITS) {
+        wait(&q, &id, d + chrono::Days::new(day));
+    }
+    let e = &q.load()[0];
+    assert_eq!(
+        (e.waits, e.tries, &e.state),
+        (MAX_WAITS, 0, &State::Pending)
+    );
+    // The 15th counts as a failed try, with the same note.
+    let next = d + chrono::Days::new(u64::from(MAX_WAITS));
+    wait(&q, &id, next);
+    let e = &q.load()[0];
+    assert_eq!(e.tries, 1);
+    assert_eq!(e.tried_on, Some(next));
+    assert_eq!(e.note.as_deref(), Some("withheld"));
+    assert_eq!(e.state, State::Pending);
+    // And it fails for good after the usual tries.
+    for day in 1..3 {
+        wait(&q, &id, next + chrono::Days::new(day));
+    }
+    assert_eq!(q.load()[0].state, State::Failed);
+}
+
+#[test]
+fn an_old_line_without_waits_still_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = queue(&dir);
+    std::fs::write(
+        &q.path,
+        r#"{"id":"r-20261020-abc","url":"https://ex.com/a","file":null,"title":null,"saved_at":"2026-10-20T14:03:11Z","source":"cli","state":"pending","tries":1,"printed_in":null,"note":"paywall","tried_on":"2026-10-20"}
+"#,
+    )
+    .unwrap();
+    let e = &q.load()[0];
+    assert_eq!(e.id, "r-20261020-abc");
+    assert_eq!((e.tries, e.waits), (1, 0));
 }
 
 #[test]

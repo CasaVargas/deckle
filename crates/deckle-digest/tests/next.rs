@@ -251,6 +251,7 @@ fn saved(id: &str, url: Option<&str>, title: Option<&str>, at: DateTime<Tz>) -> 
         printed_in: None,
         note: None,
         tried_on: None,
+        waits: 0,
     }
 }
 

@@ -274,6 +274,7 @@ mod tests {
             printed_in: None,
             note: None,
             tried_on: None,
+            waits: 0,
         }
     }
 
