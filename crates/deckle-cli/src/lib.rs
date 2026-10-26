@@ -3067,6 +3067,18 @@ impl DigestOutcome {
 /// The household's subscriptions as a net: passwords from the keychain (or the environment),
 /// sessions kept beside the config.
 fn household_net(path: &Path, cfg: &deckle_digest::Config) -> deckle_digest::SessionNet {
+    let net = household_net_quiet(path, cfg);
+    // A jar that wouldn't load: the run goes on signed out, and says so.
+    for s in net.status() {
+        if let Some(note) = &s.jar_note {
+            eprintln!("{}: {note}", s.site);
+        }
+    }
+    net
+}
+
+/// [`household_net`] without the jar notes on stderr, for a caller that shows them itself.
+fn household_net_quiet(path: &Path, cfg: &deckle_digest::Config) -> deckle_digest::SessionNet {
     deckle_digest::SessionNet::from_config(
         path,
         &cfg.subscriptions,
@@ -3112,7 +3124,7 @@ fn digest_subscribe(
         if username.is_some() || stdin || test || forget {
             return Err("name the site, e.g. `deckle digest subscribe thepilot.com`".into());
         }
-        let statuses = household_net(path, &cfg).status();
+        let statuses = household_net_quiet(path, &cfg).status();
         emit(json, &statuses, || {
             if statuses.is_empty() {
                 return "no subscriptions; add one with `deckle digest subscribe <site> --username <you>`".to_owned();
@@ -3120,13 +3132,17 @@ fn digest_subscribe(
             statuses
                 .iter()
                 .map(|s| {
-                    format!(
+                    let mut line = format!(
                         "{}  {}  password: {}  session: {}",
                         s.site,
                         s.username,
                         if s.has_password { "yes" } else { "no" },
                         session_text(&s.state)
-                    )
+                    );
+                    if let Some(note) = &s.jar_note {
+                        line.push_str(&format!("\n  saved session: {note}"));
+                    }
+                    line
                 })
                 .collect::<Vec<_>>()
                 .join("\n")
@@ -3139,20 +3155,19 @@ fn digest_subscribe(
     let site = SubscriptionConfig::normalized_site(&raw)?;
     let existing = cfg.subscriptions.iter().position(|s| s.site == site);
     if forget {
-        let i = existing.ok_or_else(|| format!("no subscription for {site}"))?;
-        let sub = cfg.subscriptions.remove(i);
-        let had = secret::forget_site(&sub, &SystemKeyring).map_err(|e| e.to_string())?;
-        deckle_digest::config::save(path, &cfg)?;
-        let jar = deckle_digest::session::jar_path(path.parent().unwrap_or(Path::new("")), &site);
-        if let Err(e) = std::fs::remove_file(&jar)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!("couldn't remove {}: {e}", jar.display());
+        let gone =
+            deckle_digest::session::forget_subscription(path, &mut cfg, &site, &SystemKeyring)?;
+        for note in &gone.notes {
+            eprintln!("{note}");
         }
-        emit(json, &had, || {
+        emit(json, &gone, || {
             format!(
                 "removed the subscription to {site}{}",
-                if had { " and its keychain entry" } else { "" }
+                if gone.keychain_entry {
+                    " and its keychain entry"
+                } else {
+                    ""
+                }
             )
         })?;
         return Ok(ExitCode::SUCCESS);
@@ -3209,6 +3224,16 @@ fn digest_subscribe(
     let net = household_net(path, &cfg);
     let state = net.sign_in(&site);
     save_jars_noted(&net);
+    if state == deckle_digest::session::SessionState::NoAdapter {
+        // The account is saved; there is just nothing to sign in with yet.
+        emit(json, &state, || {
+            format!(
+                "saved {} at {site}. Deckle doesn't know how {site} signs in yet",
+                sub.username
+            )
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    }
     report_sign_in(json, &site, &sub.username, &state)
 }
 

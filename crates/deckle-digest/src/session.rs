@@ -12,13 +12,67 @@ use serde::Serialize;
 use zeroize::Zeroizing;
 
 use crate::config::SubscriptionConfig;
-use crate::fetch::{BROWSER_AGENT, Http, Net, agent, encode, read};
+use crate::fetch::{BROWSER_AGENT, Http, Net, agent_with, encode, read};
 use crate::publisher::{Access, Entitlement, Publisher, SiteClient, Walled, registry};
 use crate::secret::{Keyring, Source, site_password};
 
 /// Where a site's cookie jar lives: `household_dir/sessions/<site>.json`.
 pub fn jar_path(household_dir: &Path, site: &str) -> PathBuf {
     household_dir.join("sessions").join(format!("{site}.json"))
+}
+
+/// What [`forget_subscription`] removed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Forgotten {
+    pub site: String,
+    /// A keychain entry was there and is gone.
+    pub keychain_entry: bool,
+    /// What couldn't be done, for the person to know (no keychain, a jar file left behind).
+    pub notes: Vec<String>,
+}
+
+/// `--forget` and the card's *Forget*: the keychain entry, the `[[subscriptions]]` entry
+/// (saved to `config_path`) and the session file. A machine with no keychain has no entry to
+/// delete, so that is a note, not a stop; any other keychain error stops before anything
+/// is removed.
+pub fn forget_subscription(
+    config_path: &Path,
+    cfg: &mut crate::Config,
+    site: &str,
+    keys: &dyn Keyring,
+) -> Result<Forgotten, String> {
+    use crate::secret::{SecretError, forget_site};
+    let site = SubscriptionConfig::normalized_site(site)?;
+    let i = cfg
+        .subscriptions
+        .iter()
+        .position(|s| s.site == site)
+        .ok_or_else(|| format!("no subscription for {site}"))?;
+    let mut notes = Vec::new();
+    let keychain_entry = match forget_site(&cfg.subscriptions[i], keys) {
+        Ok(had) => had,
+        Err(SecretError::NoSiteKeychain { why, .. }) => {
+            notes.push(format!(
+                "no system keychain ({why}), so no password to delete"
+            ));
+            false
+        }
+        Err(SecretError::NoAccount) => false,
+        Err(e) => return Err(e.to_string()),
+    };
+    cfg.subscriptions.remove(i);
+    crate::config::save(config_path, cfg)?;
+    let jar = jar_path(config_path.parent().unwrap_or(Path::new("")), &site);
+    if let Err(e) = std::fs::remove_file(&jar)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        notes.push(format!("couldn't remove {}: {e}", jar.display()));
+    }
+    Ok(Forgotten {
+        site,
+        keychain_entry,
+        notes,
+    })
 }
 
 /// One site's HTTP client. With ureq's `cookies` feature every `Agent` owns its own jar,
@@ -30,10 +84,20 @@ pub struct UreqSite {
 }
 
 impl UreqSite {
+    /// HTTPS only, redirects included: the jar never travels over plain HTTP.
     pub fn new(site: &str) -> Self {
         Self {
             site: site.to_string(),
-            agent: agent(BROWSER_AGENT, 25),
+            agent: agent_with(BROWSER_AGENT, 25, true),
+        }
+    }
+
+    /// Plain HTTP allowed, for the local test servers.
+    #[cfg(test)]
+    fn plain(site: &str) -> Self {
+        Self {
+            site: site.to_string(),
+            agent: agent_with(BROWSER_AGENT, 25, false),
         }
     }
 
@@ -306,9 +370,14 @@ impl SessionNet {
         SessionNet::new(Http, accounts, registry(), Some(household))
     }
 
-    /// The account whose site is the URL's host or a parent domain of it.
+    /// The account whose site is the URL's host or a parent domain of it. Only `https` URLs
+    /// use a session: an `http` one on the same host is fetched anonymously, as a stranger,
+    /// so the jar never travels in the clear.
     pub fn site_for(&self, url: &str) -> Option<String> {
         let parsed = url::Url::parse(url).ok()?;
+        if parsed.scheme() != "https" {
+            return None;
+        }
         let host = parsed.host_str()?.trim_end_matches('.').to_lowercase();
         self.sites
             .keys()
@@ -480,6 +549,18 @@ impl SessionNet {
             if s.run().logins != seen {
                 drop(login);
                 body = s.client.get(url)?;
+                // That login stuck for its fetch; if this page is still a stranger's, the
+                // session didn't hold. No second login here: the cap is the other branch's.
+                if !adapter.signed_in(&String::from_utf8_lossy(&body)) {
+                    let last = s.run().last_failure.clone();
+                    let e = if last.is_empty() {
+                        NOT_STUCK.into()
+                    } else {
+                        last
+                    };
+                    let why = Self::failed(s, e);
+                    return walled(body, why);
+                }
             } else {
                 if let Err(why) = self.log_in(s, adapter) {
                     return walled(body, why);
@@ -623,7 +704,7 @@ mod tests {
     #[test]
     fn the_jar_round_trips_through_its_file() {
         let (url, _) = fixture(1);
-        let a = UreqSite::new("a");
+        let a = UreqSite::plain("a");
         a.get(&url).unwrap();
         assert_eq!(a.cookie_names(), ["sess"]);
         let dir = tempdir("rt");
@@ -650,6 +731,54 @@ mod tests {
     }
 
     #[test]
+    fn a_site_client_refuses_plain_http() {
+        let (url, seen) = fixture(1);
+        let err = UreqSite::new("a").get(&url).unwrap_err();
+        assert!(err.to_lowercase().contains("https"), "{err}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(
+            seen.lock().unwrap().is_empty(),
+            "nothing reached the server"
+        );
+    }
+
+    #[test]
+    fn an_expired_cookie_in_the_jar_file_is_dropped() {
+        let dir = tempdir("expired");
+        let path = jar_path(&dir, "a");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // cookie_store's serde form, as `save_json` writes it: a JSON array of cookies.
+        let jar = |name: &str, http: &str, rfc3339: &str| {
+            format!(
+                r#"[{{"raw_cookie":"{name}=v; Path=/; Expires={http}","path":["/",true],"domain":{{"HostOnly":"thepilot.com"}},"expires":{{"AtUtc":"{rfc3339}"}}}}]"#
+            )
+        };
+        let s = UreqSite::new("a");
+        std::fs::write(
+            &path,
+            jar(
+                "live",
+                "Fri, 01 Jan 2100 00:00:00 GMT",
+                "2100-01-01T00:00:00Z",
+            ),
+        )
+        .unwrap();
+        s.load_jar(&path).unwrap();
+        assert_eq!(s.cookie_names(), ["live"], "the fixture's format loads");
+        std::fs::write(
+            &path,
+            jar(
+                "dead",
+                "Sat, 01 Jan 2000 00:00:00 GMT",
+                "2000-01-01T00:00:00Z",
+            ),
+        )
+        .unwrap();
+        s.load_jar(&path).unwrap();
+        assert!(s.cookie_names().is_empty(), "{:?}", s.cookie_names());
+    }
+
+    #[test]
     fn a_bad_jar_file_is_an_error_not_a_panic() {
         let dir = tempdir("bad");
         let path = jar_path(&dir, "a");
@@ -671,7 +800,7 @@ mod tests {
     fn the_cookie_goes_back_only_to_its_host() {
         let (url, seen) = fixture(2);
         let (other, other_seen) = fixture(1);
-        let a = UreqSite::new("a");
+        let a = UreqSite::plain("a");
         a.get(&url).unwrap();
         a.get(&url).unwrap();
         // The same agent, holding the cookie, asks a different host name.
@@ -702,6 +831,10 @@ mod net_tests {
         accept: bool,
         /// The login "works" (a member's page comes back) but no session sticks.
         fickle: bool,
+        /// After a login, the member's page is served for this many fetches, then the
+        /// session drops (a login that sticks for one fetch only).
+        stick_for: Option<usize>,
+        left: usize,
         gets: Vec<String>,
     }
 
@@ -737,7 +870,15 @@ mod net_tests {
             self.0.lock().unwrap().gets.push(url.to_string());
             // Slow enough that parallel fetches overlap.
             std::thread::sleep(std::time::Duration::from_millis(5));
-            Ok(self.page())
+            let page = self.page();
+            let mut s = self.0.lock().unwrap();
+            if s.signed_in && s.stick_for.is_some() {
+                s.left = s.left.saturating_sub(1);
+                if s.left == 0 {
+                    s.signed_in = false;
+                }
+            }
+            Ok(page)
         }
         fn post_form(&self, url: &str, body: &str) -> Result<Vec<u8>, String> {
             {
@@ -748,6 +889,7 @@ mod net_tests {
                 }
                 if s.accept {
                     s.signed_in = true;
+                    s.left = s.stick_for.unwrap_or(0);
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(20));
@@ -922,6 +1064,35 @@ mod net_tests {
     }
 
     #[test]
+    fn a_fetch_that_waited_on_a_login_that_did_not_hold_is_walled() {
+        // The first login sticks for its own refetch only; the fetches that waited on it
+        // refetch a stranger's page and must say so, not unlock it, and not log in again.
+        let site = FakeSite::new(false, true);
+        site.0.lock().unwrap().stick_for = Some(1);
+        let n = net(&site, account("me", Some(PW), Some("fake")));
+        let urls: Vec<String> = (0..8)
+            .map(|i| format!("https://www.thepilot.com/news/{i}.html"))
+            .collect();
+        let got = crate::sources::feeds::par_map(&urls, |u| n.get_page_as(u).unwrap());
+        assert!(site.logins().len() <= 2, "{:?}", site.logins());
+        let mut walled = 0;
+        for (body, access) in got {
+            let body = String::from_utf8_lossy(&body).into_owned();
+            match access {
+                Access::Subscription { .. } => assert!(body.contains("USER"), "{body}"),
+                Access::Walled { why, .. } => {
+                    assert!(body.contains("LOGIN"), "{body}");
+                    // NOT_STUCK, or a second login's own failure when it raced the drop.
+                    assert!(matches!(why, Walled::LoginFailed(_)), "{why:?}");
+                    walled += 1;
+                }
+                Access::Open => panic!("open"),
+            }
+        }
+        assert!(walled >= 1, "{walled} walled");
+    }
+
+    #[test]
     fn eight_parallel_failures_still_stop_at_two_logins() {
         let site = FakeSite::new(false, false);
         let n = net(&site, account("me", Some(PW), Some("fake")));
@@ -1017,6 +1188,9 @@ mod net_tests {
             None
         );
         assert_eq!(n.site_for("not a url"), None);
+        // Plain HTTP never uses the session: fetched anonymously, as a stranger.
+        assert_eq!(n.site_for("http://www.thepilot.com/a"), None);
+        assert_eq!(n.site_for("http://thepilot.com/a"), None);
         let mut acct = account("me", Some(PW), Some("fake"));
         acct.site = " ThePilot.com ".into();
         let mixed = net(&site, acct);
@@ -1117,6 +1291,122 @@ mod net_tests {
         assert!(!shown.contains(LEAKY_PW), "{shown}");
         assert!(!shown.contains(&encode(LEAKY_PW)), "{shown}");
         assert!(shown.contains("<redacted>"), "{shown}");
+    }
+
+    #[test]
+    fn forget_without_a_keychain_still_removes_the_entry_and_the_jar() {
+        use crate::config::SubscriptionConfig;
+        use crate::secret::MemoryKeyring;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        let mut cfg = crate::Config::default();
+        for site in ["thepilot.com", "example.com"] {
+            cfg.subscriptions.push(SubscriptionConfig {
+                site: site.into(),
+                username: "me".into(),
+                kind: None,
+            });
+        }
+        crate::config::save(&path, &cfg).unwrap();
+        let jar = jar_path(dir.path(), "thepilot.com");
+        std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
+        std::fs::write(&jar, "[]").unwrap();
+        let got = forget_subscription(
+            &path,
+            &mut cfg,
+            "https://www.thepilot.com/",
+            &MemoryKeyring::unavailable(),
+        )
+        .unwrap();
+        assert_eq!(got.site, "thepilot.com");
+        assert!(!got.keychain_entry);
+        assert_eq!(got.notes.len(), 1, "{:?}", got.notes);
+        assert!(
+            got.notes[0].contains("no system keychain"),
+            "{:?}",
+            got.notes
+        );
+        assert!(!jar.exists());
+        let saved = crate::Config::load(&path).unwrap();
+        let sites: Vec<_> = saved
+            .subscriptions
+            .iter()
+            .map(|s| s.site.as_str())
+            .collect();
+        assert_eq!(sites, ["example.com"]);
+        assert_eq!(cfg.subscriptions.len(), 1);
+        // With a keychain the entry goes too; a site never added is an error.
+        let keys = MemoryKeyring::default();
+        crate::secret::set_site(&cfg.subscriptions[0], &keys, PW).unwrap();
+        let got = forget_subscription(&path, &mut cfg, "example.com", &keys).unwrap();
+        assert!(got.keychain_entry);
+        assert!(got.notes.is_empty(), "{:?}", got.notes);
+        assert!(forget_subscription(&path, &mut cfg, "example.com", &keys).is_err());
+    }
+
+    #[test]
+    fn no_keychain_and_no_variable_is_no_password_and_a_walled_story() {
+        use crate::config::SubscriptionConfig;
+        use crate::secret::MemoryKeyring;
+        let dir = tempfile::tempdir().unwrap();
+        let sub = SubscriptionConfig {
+            site: "thepilot.com".into(),
+            username: "me".into(),
+            kind: Some("fake".into()),
+        };
+        let n = SessionNet::from_config(
+            &dir.path().join("digest.toml"),
+            std::slice::from_ref(&sub),
+            &MemoryKeyring::unavailable(),
+            &|_| None,
+        );
+        match &n.status()[0].state {
+            SessionState::NoPassword(m) => assert!(m.contains("no system keychain"), "{m}"),
+            s => panic!("{s:?}"),
+        }
+        // The same account on a fake site (from_config's real client would go online).
+        let st = n.status().remove(0);
+        let site = FakeSite::new(false, true);
+        let acct = SiteAccount {
+            site: st.site,
+            username: st.username,
+            kind: st.kind,
+            password: None,
+            password_from: None,
+            password_error: match st.state {
+                SessionState::NoPassword(m) => Some(m),
+                _ => None,
+            },
+        };
+        let n = net(&site, acct);
+        let (_, access) = n.get_page_as(STORY).unwrap();
+        assert_eq!(
+            access,
+            Access::Walled {
+                site: "thepilot.com".into(),
+                why: Walled::NotSignedIn
+            }
+        );
+        assert!(site.logins().is_empty());
+    }
+
+    #[test]
+    fn non_ascii_credentials_are_posted_percent_encoded() {
+        let site = FakeSite::new(false, true);
+        let n = net(
+            &site,
+            account("ünïcode@x.test", Some("pässwörd"), Some("fake")),
+        );
+        n.get_page_as(STORY).unwrap();
+        let logins = site.logins();
+        assert_eq!(logins.len(), 1);
+        let body = &logins[0].1;
+        assert!(body.is_ascii(), "{body}");
+        assert!(
+            body.contains("username=%C3%BCn%C3%AFcode%40x.test"),
+            "{body}"
+        );
+        assert!(body.contains("password=p%C3%A4ssw%C3%B6rd"), "{body}");
     }
 
     #[test]

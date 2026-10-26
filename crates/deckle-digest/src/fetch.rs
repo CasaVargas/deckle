@@ -46,8 +46,14 @@ pub(crate) const LIMIT: u64 = 20 * 1024 * 1024;
 pub struct Http;
 
 pub(crate) fn agent(user_agent: &str, timeout_secs: u64) -> ureq::Agent {
+    agent_with(user_agent, timeout_secs, false)
+}
+
+/// [`agent`], optionally refusing any `http://` request, redirects included.
+pub(crate) fn agent_with(user_agent: &str, timeout_secs: u64, https_only: bool) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(timeout_secs)))
+        .https_only(https_only)
         .user_agent(user_agent)
         // The OS certificate store, so TLS-inspecting proxies (Zscaler, …) the machine trusts work.
         .tls_config(

@@ -527,6 +527,25 @@ fn digest_subscribe_needs_a_username_for_a_new_site() {
 }
 
 #[test]
+fn digest_subscribe_refuses_a_site_that_names_another_host() {
+    for site in [
+        "thepilot.com@evil.com",
+        "thepilot.com:8443",
+        "thepilot.com.",
+    ] {
+        let (ok, _, err) = subscribe_with_starter(
+            &[site, "--username", "me@x.test", "--stdin"],
+            "not-a-real-password\n",
+        );
+        assert!(!ok, "{site} was accepted");
+        assert!(
+            err.contains("use a host like thepilot.com"),
+            "{site}: {err}"
+        );
+    }
+}
+
+#[test]
 fn digest_subscribe_refuses_an_empty_password_and_saves_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let cfg = dir.path().join("digest.toml");

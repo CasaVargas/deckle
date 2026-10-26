@@ -525,14 +525,10 @@ pub fn subscription_forget(
     let path = config_path();
     let mut cfg = Config::load(&path)?;
     let sub = subscription_for(&cfg, &site)?;
-    secret::forget_site(&sub, &SystemKeyring).map_err(|e| e.to_string())?;
-    cfg.subscriptions.retain(|s| s.site != sub.site);
-    deckle_digest::config::save(&path, &cfg)?;
-    let jar = deckle_digest::session::jar_path(path.parent().unwrap_or(Path::new("")), &sub.site);
-    if let Err(e) = std::fs::remove_file(&jar)
-        && e.kind() != std::io::ErrorKind::NotFound
-    {
-        eprintln!("couldn't remove {}: {e}", jar.display());
+    let gone =
+        deckle_digest::session::forget_subscription(&path, &mut cfg, &sub.site, &SystemKeyring)?;
+    for note in &gone.notes {
+        eprintln!("{note}");
     }
     Ok(subscriptions_status_with(
         &cfg.subscriptions,

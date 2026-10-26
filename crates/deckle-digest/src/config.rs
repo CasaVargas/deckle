@@ -819,11 +819,11 @@ impl SubscriptionConfig {
     /// or fragment after the host is an error, as is anything that isn't a dotted host.
     pub fn normalized_site(raw: &str) -> Result<String, String> {
         let bad = |why: &str| format!("[[subscriptions]] site = {raw:?}: {why}");
-        let s = raw.trim();
-        let s = s
+        let lower = raw.trim().to_ascii_lowercase();
+        let s = lower
             .strip_prefix("https://")
-            .or_else(|| s.strip_prefix("http://"))
-            .unwrap_or(s);
+            .or_else(|| lower.strip_prefix("http://"))
+            .unwrap_or(&lower);
         let (host, rest) = match s.find(['/', '?', '#']) {
             Some(i) => (&s[..i], &s[i..]),
             None => (s, ""),
@@ -831,10 +831,25 @@ impl SubscriptionConfig {
         if !rest.is_empty() && rest != "/" {
             return Err(bad("use just the site's host, like thepilot.com"));
         }
-        let host = host.to_ascii_lowercase();
-        let host = host.strip_prefix("www.").unwrap_or(&host);
-        if host.is_empty() || host.contains(char::is_whitespace) || !host.contains('.') {
-            return Err(bad("use a host like thepilot.com"));
+        let host = host.strip_prefix("www.").unwrap_or(host);
+        let like = "use a host like thepilot.com";
+        // The session's cookies and, later, the password go to `https://{site}/`: anything that
+        // could make that URL name another host (`user@host`, a port, `\`) is refused outright.
+        if host.is_empty()
+            || !host.contains('.')
+            || host.ends_with('.')
+            || host.contains(['@', ':', '\\'])
+            || host.contains(char::is_whitespace)
+        {
+            return Err(bad(like));
+        }
+        let parsed = url::Url::parse(&format!("https://{host}/")).map_err(|_| bad(like))?;
+        if !parsed.username().is_empty()
+            || parsed.password().is_some()
+            || parsed.port().is_some()
+            || parsed.host_str() != Some(host)
+        {
+            return Err(bad(like));
         }
         Ok(host.to_owned())
     }
@@ -1904,6 +1919,41 @@ mod tests {
         assert!(SubscriptionConfig::normalized_site("").is_err());
         assert!(SubscriptionConfig::normalized_site("localhost").is_err());
         assert!(SubscriptionConfig::normalized_site("the pilot.com").is_err());
+    }
+
+    #[test]
+    fn a_site_that_could_name_another_host_is_refused() {
+        for raw in [
+            "thepilot.com@evil.com",
+            "user:pw@thepilot.com",
+            "https://thepilot.com@evil.com/",
+            "thepilot.com:8443",
+            "https://thepilot.com:443/",
+            "thepilot.com\\@evil.com",
+            "evil.com\\thepilot.com",
+            "thepilot.com.",
+            "the\tpilot.com",
+            "thepil%6ft.com",
+            "[::1]",
+            "127.0.0.1:80",
+        ] {
+            assert!(
+                SubscriptionConfig::normalized_site(raw).is_err(),
+                "{raw:?} was accepted"
+            );
+        }
+        for (raw, want) in [
+            ("HTTPS://WWW.ThePilot.com/", "thepilot.com"),
+            ("http://thepilot.com", "thepilot.com"),
+            ("  news.thepilot.com  ", "news.thepilot.com"),
+            ("my-paper.co.uk/", "my-paper.co.uk"),
+        ] {
+            assert_eq!(
+                SubscriptionConfig::normalized_site(raw).as_deref(),
+                Ok(want),
+                "{raw:?}"
+            );
+        }
         let cfg =
             Config::parse("[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"\"\n").unwrap();
         assert!(
