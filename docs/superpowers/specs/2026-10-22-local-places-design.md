@@ -24,7 +24,7 @@ feeds = []                      # local paper RSS feeds, merged in
 
 An empty `google_news` falls back to the name, as typed: a place with only a name ("Asheville,
 NC") searches Google News for it. The name isn't quoted, as Local's search isn't: "Asheville, NC"
-in quotes would miss "Asheville, N.C.". A custom search wins when there is one (#101, the Daily
+in quotes would miss "Asheville, N.C.". A custom search wins when there is one (the Daily
 tab's second box asked for both and a name alone printed nothing). Only a place with no name and
 no feeds prints "Unavailable today (give this place a name or local feeds)".
 
