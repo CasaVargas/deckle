@@ -502,22 +502,6 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   );
   const waiting = reading.filter((e) => e.state === "pending").length;
 
-  const saveBox = (
-    <form
-      className="save-row"
-      onSubmit={(e) => {
-        e.preventDefault();
-        addReading();
-      }}
-    >
-      <input type="url" placeholder="Paste a link (https://…)" value={saveUrl} onChange={(e) => setSaveUrl(e.target.value)} spellCheck={false} aria-label="A link to save" />
-      <button className="ghost" type="submit" disabled={!saveUrl.trim()}>
-        Save
-      </button>
-    </form>
-  );
-  const waiting = reading.filter((e) => e.state === "pending").length;
-
   return (
     <div className="daily-view">
       <nav className="kindle-tabs daily-tabs" aria-label="Daily">
