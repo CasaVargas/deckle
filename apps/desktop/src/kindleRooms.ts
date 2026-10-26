@@ -269,3 +269,30 @@ export function highlightsOf(b: DeviceBookRow, rows: HighlightRow[]): HighlightR
 export function sentMode(b: DeviceBookRow): "pdoc" | "ebok" | null {
   return b.cde === "EBOK" ? "ebok" : b.cde === "PDOC" ? "pdoc" : null;
 }
+
+/** Make room's groups (Kindle tab redesign §6): duplicates, old papers, then finished books, each with its total. */
+export function spareGroups(spare: Spare[]): { why: Spare["why"]; title: string; total: number; items: Spare[] }[] {
+  const titles: [Spare["why"], string][] = [
+    ["duplicate", "Duplicates"],
+    ["old-paper", "Old papers"],
+    ["finished", "Finished, over 10 MB"],
+  ];
+  return titles
+    .map(([why, title]) => {
+      const items = spare.filter((s) => s.why === why);
+      return { why, title, total: items.reduce((n, s) => n + s.size, 0), items };
+    })
+    .filter((g) => g.items.length > 0);
+}
+
+/** "5 ticked · frees 82.0 MB". */
+export function freesLine(spare: Spare[], ticked: Set<string>): string {
+  const chosen = spare.filter((s) => ticked.has(s.file));
+  if (chosen.length === 0) return "Nothing ticked";
+  return `${chosen.length} ticked · frees ${size(chosen.reduce((n, s) => n + s.size, 0))}`;
+}
+
+/** How a Kindle is connected, in plain words. */
+export function connectedBy(kind: "mass_storage" | "mtp"): string {
+  return kind === "mtp" ? "Connected over USB as a media device" : "Connected over USB as a drive";
+}
