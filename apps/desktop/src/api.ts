@@ -112,6 +112,8 @@ export const api = {
   dailyState: (paper: string | null = null) => invoke<DailyState>("daily_state", { paper }),
   /** Your papers: every paper's card, main first, and the household's named Kindles. */
   papersList: () => invoke<PapersView>("papers_list"),
+  /** The bundled masthead faces that can't draw `title`, by key. */
+  mastheadMissing: (title: string) => invoke<string[]>("masthead_missing", { title }),
   /** Writes papers/<slug>.toml; resolves to the slug. */
   paperCreate: (title: string, reader: string) => invoke<string>("paper_create", { title, reader }),
   dailySetup: () => invoke<DailyState>("daily_setup"),

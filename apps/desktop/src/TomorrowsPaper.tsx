@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useEffect } from "react";
+import { loadMastheadFonts } from "./mastheadFonts";
+import { faceFamily, mastheadChoice } from "./mastheadView";
 import type { NextPaper, Tile } from "./types";
 
 function longDate(date: string): string {
@@ -24,7 +27,10 @@ function TileView({ t, lead }: { t: Tile; lead?: boolean }) {
 }
 
 /** The next edition's front page as it stands (tomorrow's paper design §5, Daily tab redesign §3). */
-export default function TomorrowsPaper({ next, onSections }: { next: NextPaper | null; onSections: () => void }) {
+export default function TomorrowsPaper({ next, masthead, onSections }: { next: NextPaper | null; masthead?: string; onSections: () => void }) {
+  useEffect(loadMastheadFonts, []);
+  // The name in the paper's own face; a font file of the reader's shows in the default's place
+  const face = mastheadChoice(masthead);
   return (
     <section className="tomorrow" id="tomorrows-paper" aria-label="Tomorrow's paper, so far">
       <div className="tomorrow-head">
@@ -40,7 +46,9 @@ export default function TomorrowsPaper({ next, onSections }: { next: NextPaper |
             <span className="motto">All the news that fits</span>
             <span>{next.place.toUpperCase()}</span>
           </div>
-          <div className="masthead-name">{next.paper}</div>
+          <div className="masthead-name" style={{ fontFamily: `${faceFamily(face === "file" ? "consent" : face)}, ui-serif, Georgia, serif` }}>
+            {next.paper}
+          </div>
           <div className="dateband">{longDate(next.date)}</div>
           {next.weather && <div className="weather-slot">Weather · fills in at press time</div>}
           {next.lead && <TileView t={next.lead} lead />}

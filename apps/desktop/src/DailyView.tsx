@@ -9,8 +9,7 @@ import type { Change } from "./SectionsTab";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { ROOMS, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
-import { fontFileName, mastheadChoice, mastheadValue } from "./mastheadView";
-import type { MastheadChoice } from "./mastheadView";
+import PaperSheet from "./PaperSheet";
 import type { Place, Room } from "./dailyRooms";
 import Icon from "./Icon";
 import { reorder, setBudget } from "./pagePlan";
@@ -24,7 +23,6 @@ import TomorrowsPaper from "./TomorrowsPaper";
 import ExportFolders from "./ExportFolders";
 import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
-import DailyEditor from "./DailyEditor";
 import { anyKindleHint } from "./papersView";
 import type { DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, NextPaper, PagePlanRow, PapersView, ReadershipView, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL } from "./types";
@@ -95,6 +93,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [room, setRoom] = useState<Room>("today");
   const [openPlace, setOpenPlace] = useState<Place["key"] | null>(null);
   const [readership, setReadership] = useState<ReadershipView | null>(null);
+  const [sheetOpen, setSheetOpen] = useState(false);
   // Your papers (many papers §7): the selected paper is the one every room works on
   const [papers, setPapers] = useState<PapersView | null>(null);
   const [paper, setPaper] = useState("main");
@@ -375,7 +374,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   }
 
   const switcher = papers && (
-    <PaperSwitcher view={papers} selected={paper} onSelect={choosePaper} onSettings={() => setRoom("sections")} onCreate={createPaper} />
+    <PaperSwitcher view={papers} selected={paper} onSelect={choosePaper} onSettings={() => setSheetOpen(true)} onCreate={createPaper} />
   );
   const paperNotes = papers ? [anyKindleHint(papers.papers), ...papers.notes].filter((n): n is string => !!n) : [];
   const mainTitle = papers?.papers[0]?.title ?? "the main paper";
@@ -552,7 +551,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         ))}
         {room === "today" && (
           <div className="daily-columns">
-            <TomorrowsPaper next={next} onSections={() => setRoom("sections")} />
+            <TomorrowsPaper next={next} masthead={draft.masthead} onSections={() => setRoom("sections")} />
             <div className="daily-side">
               <PressCard
                 press={next?.press ?? null}
@@ -761,103 +760,22 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
             onToggle={planToggle}
             onReading={() => setRoom("reading")}
             onNotice={onNotice}
-            footer={
-              <section className="card settings-card" aria-label="The paper itself">
-                <h3>The paper itself</h3>
-                <div className="grid2">
-                  <label>
-                    <span className="label">Name</span>
-                    <input value={draft.title} onChange={(e) => edit((c) => (c.title = e.target.value))} onBlur={typing.flush} />
-                  </label>
-                  <label>
-                    <span className="label">For</span>
-                    <input value={draft.reader ?? ""} placeholder="Who reads it" onChange={(e) => edit((c) => (c.reader = e.target.value))} onBlur={typing.flush} />
-                  </label>
-                  <label>
-                    <span className="label">Kindle</span>
-                    <select value={draft.kindle ?? ""} onChange={(e) => edit((c) => (c.kindle = e.target.value), "now")}>
-                      <option value="">Any Kindle</option>
-                      {(papers?.kindles ?? []).map((k) => (
-                        <option key={k.sync_id} value={k.name}>
-                          {k.name}
-                        </option>
-                      ))}
-                      {draft.kindle && !(papers?.kindles ?? []).some((k) => k.name === draft.kindle) && (
-                        <option value={draft.kindle}>{draft.kindle} (not named yet)</option>
-                      )}
-                    </select>
-                  </label>
-                  <label>
-                    <span className="label">Title font</span>
-                    <select
-                      value={mastheadChoice(draft.masthead)}
-                      onChange={async (e) => {
-                        const choice = e.target.value as MastheadChoice;
-                        if (choice !== "file") {
-                          edit((c) => (c.masthead = mastheadValue(choice)), "now");
-                          return;
-                        }
-                        const picked = await openDialog({ multiple: false, filters: [{ name: "TrueType font", extensions: ["ttf"] }] });
-                        if (typeof picked === "string") edit((c) => (c.masthead = picked), "now");
-                      }}
-                    >
-                      <option value="blackletter">Blackletter</option>
-                      <option value="serif">Serif</option>
-                      <option value="sans">Sans</option>
-                      <option value="file">
-                        {mastheadChoice(draft.masthead) === "file" && draft.masthead ? `Custom: ${fontFileName(draft.masthead)}` : "Choose a .ttf file…"}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-                {(papers?.kindles.length ?? 0) === 0 && <p className="muted small">To send this paper to one Kindle only, name your Kindles in the Kindle tab.</p>}
-                <div className="sec-checks">
-                  <label className="check">
-                    <input type="checkbox" checked={draft.full_text} onChange={(e) => edit((c) => (c.full_text = e.target.checked), "now")} />
-                    Whole stories, not summaries
-                  </label>
-                  <label className="check">
-                    <input type="checkbox" checked={draft.photos} disabled={!draft.full_text} onChange={(e) => edit((c) => (c.photos = e.target.checked), "now")} />
-                    With their photos
-                  </label>
-                  <label className="check">
-                    <input type="checkbox" checked={!!draft.large_print} onChange={(e) => edit((c) => (c.large_print = e.target.checked), "now")} />
-                    Large print: nothing smaller than the body text, bigger headlines, one photo a story
-                  </label>
-                  <label className="inline">
-                    Keep the last
-                    <input type="number" min={1} max={14} value={draft.keep} onChange={(e) => edit((c) => (c.keep = Math.max(1, Number(e.target.value) || 1)), "now")} />
-                    editions on the Kindle
-                  </label>
-                </div>
-                <div className="sec-checks">
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={draft.learning?.enabled ?? true}
-                      onChange={(e) => edit((c) => (c.learning = { window_days: 14, min_stories: 3, nudges: false, ...(c.learning ?? {}), enabled: e.target.checked }), "now")}
-                    />
-                    Notice what I tap and highlight in the paper, on this Mac, to suggest new things to follow
-                  </label>
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={(draft.learning?.enabled ?? true) && (draft.learning?.nudges ?? false)}
-                      disabled={!(draft.learning?.enabled ?? true)}
-                      onChange={(e) => edit((c) => (c.learning = { enabled: true, window_days: 14, min_stories: 3, ...(c.learning ?? {}), nudges: e.target.checked }), "now")}
-                    />
-                    Also print what Deckle noticed, as pages you can tap to accept
-                  </label>
-                </div>
-                <DailyEditor value={draft.llm} onChange={(value) => edit((c) => { c.llm = value; })} />
-                <p className="muted small">
-                  Saved as you go to <span className="mono">{state.config_path}</span>; your own comments in that file are kept.
-                </p>
-              </section>
-            }
           />
         )}
       </div>
+      {sheetOpen && (
+        <PaperSheet
+          draft={draft}
+          kindles={papers?.kindles ?? []}
+          configPath={state.config_path}
+          edit={edit}
+          flush={typing.flush}
+          onClose={() => {
+            typing.flush();
+            setSheetOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

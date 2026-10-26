@@ -1484,11 +1484,7 @@ fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, footer: &str) -> Vec<u8> {
         "OldStandard-Regular",
         "OldStandard-Bold",
         "OldStandard-Italic",
-        if fonts.masthead.is_blackletter() {
-            "UnifrakturMaguntia-Book"
-        } else {
-            "Masthead"
-        },
+        fonts.masthead.name(),
     ];
     let files = [REGULAR, BOLD, ITALIC, fonts.masthead.bytes()];
     let info = SystemInfo {
