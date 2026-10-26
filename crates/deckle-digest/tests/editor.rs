@@ -80,6 +80,7 @@ fn disabled_is_byte_identical_and_never_calls_a_provider() {
         "secret",
         &mut |_, _, _| panic!("called"),
         &[],
+        &[],
     );
     assert_eq!(before, snapshot(&g));
     assert!(g.notes.is_empty());
@@ -183,6 +184,7 @@ fn invalid_plans_and_transport_failures_leave_the_whole_edition_intact() {
             "secret",
             &mut |_, _, _| response.clone(),
             &[],
+            &[],
         );
         assert_eq!(snapshot(&g), before);
         assert_eq!(
@@ -226,6 +228,7 @@ fn private_sections_urls_and_images_do_not_enter_the_prompt() {
             Ok(envelope(answer()))
         },
         &[],
+        &[],
     );
     assert!(g.notes.is_empty());
     assert_eq!(g.edition.sections[3].articles[0].body, "PRIVATE BODY");
@@ -241,6 +244,7 @@ fn credentials_and_input_limits_fail_without_a_request() {
         "",
         &mut |_, _, _| panic!("missing credential called provider"),
         &[],
+        &[],
     );
     assert_eq!(snapshot(&g), before);
     assert_eq!(g.notes.len(), 1);
@@ -251,6 +255,7 @@ fn credentials_and_input_limits_fail_without_a_request() {
         &on(),
         "secret",
         &mut |_, _, _| panic!("oversized input called provider"),
+        &[],
         &[],
     );
     assert_eq!(g.edition.sections[0].articles.len(), 81);
@@ -292,6 +297,7 @@ fn anthropic_and_local_compatible_servers_share_the_transport() {
                     Ok(envelope(answer()))
                 }
             },
+            &[],
             &[],
         );
         assert!(g.notes.is_empty());
@@ -403,6 +409,15 @@ fn titles(g: &Gathered, s: usize) -> Vec<String> {
 }
 
 fn edit_interest(g: &mut Gathered, body_check: impl Fn(&str), answer: Value) {
+    edit_naming(g, body_check, answer, &[]);
+}
+
+fn edit_naming(
+    g: &mut Gathered,
+    body_check: impl Fn(&str),
+    answer: Value,
+    naming: &[deckle_digest::NamingCandidate],
+) {
     let cfg = config_with_interest();
     deckle_digest::editor::edit(
         g,
@@ -413,6 +428,7 @@ fn edit_interest(g: &mut Gathered, body_check: impl Fn(&str), answer: Value) {
             Ok(envelope(answer.clone()))
         },
         &cfg.interests,
+        naming,
     );
 }
 
@@ -530,4 +546,112 @@ fn a_duplicate_removal_and_a_score_on_the_same_story_do_not_panic() {
     edit_interest(&mut g, |_| {}, answer);
     assert!(g.notes.is_empty(), "{:?}", g.notes);
     assert_eq!(titles(&g, 2), ["Rust Belt voters"]);
+}
+
+// ---- naming what Deckle noticed (interests design §6) ----
+
+fn candidate(key: &str, phrase: &str, headlines: &[&str]) -> deckle_digest::NamingCandidate {
+    deckle_digest::NamingCandidate {
+        key: key.into(),
+        phrase: phrase.into(),
+        headlines: headlines.iter().map(|h| (*h).to_owned()).collect(),
+    }
+}
+
+#[test]
+fn candidates_go_in_and_names_come_out() {
+    let naming = [
+        candidate("young", "Young", &["Young throws four", "Young benched"]),
+        candidate("panthers", "Panthers", &["Panthers sign a kicker"]),
+    ];
+    let mut g = original_with_interest();
+    let mut answer = answer_with_interest(json!([]));
+    answer["names"] = json!([
+        {"key":"young","name":"Bryce Young","query":"\"Bryce Young\" Panthers"},
+        {"key":"panthers","name":"Carolina Panthers","query":"\"Carolina Panthers\""}
+    ]);
+    edit_naming(
+        &mut g,
+        |body| {
+            let b: Value = serde_json::from_str(body).unwrap();
+            let user = b["messages"][1]["content"].as_str().unwrap().to_owned();
+            assert!(user.contains("\"candidates\":["), "{user}");
+            assert!(
+                user.contains("Young throws four") && user.contains("\"phrase\":\"Panthers\""),
+                "{user}"
+            );
+        },
+        answer,
+        &naming,
+    );
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert_eq!(
+        g.names,
+        [
+            deckle_digest::Naming {
+                key: "young".into(),
+                name: "Bryce Young".into(),
+                query: "\"Bryce Young\" Panthers".into()
+            },
+            deckle_digest::Naming {
+                key: "panthers".into(),
+                name: "Carolina Panthers".into(),
+                query: "\"Carolina Panthers\"".into()
+            },
+        ]
+    );
+    // an unknown key, a duplicate, or an empty name invalidates everything: no names, no edits
+    for names in [
+        json!([{"key":"nobody","name":"X","query":"x"}]),
+        json!([{"key":"young","name":"A","query":"a"},{"key":"young","name":"B","query":"b"}]),
+        json!([{"key":"young","name":"","query":"a"}]),
+    ] {
+        let before = original_with_interest();
+        let mut g = original_with_interest();
+        let mut answer = answer_with_interest(json!([]));
+        answer["names"] = names;
+        edit_naming(&mut g, |_| {}, answer, &naming);
+        assert_eq!(g.notes.len(), 1);
+        assert!(g.names.is_empty());
+        assert_eq!(snapshot(&g), snapshot(&before));
+    }
+}
+
+#[test]
+fn more_than_ten_candidates_send_the_first_ten_and_no_candidates_send_none() {
+    let naming: Vec<_> = (0..12)
+        .map(|n| candidate(&format!("k{n}"), &format!("Phrase{n}"), &["h"]))
+        .collect();
+    let mut g = original_with_interest();
+    edit_naming(
+        &mut g,
+        |body| {
+            let b: Value = serde_json::from_str(body).unwrap();
+            let user = b["messages"][1]["content"].as_str().unwrap().to_owned();
+            assert!(
+                user.contains("\"key\":\"k9\"") && !user.contains("\"key\":\"k10\""),
+                "{user}"
+            );
+        },
+        answer_with_interest(json!([])),
+        &naming,
+    );
+    assert!(g.notes.is_empty());
+    let mut g = original_with_interest();
+    edit_naming(
+        &mut g,
+        |body| assert!(!body.contains("candidates"), "{body}"),
+        answer_with_interest(json!([])),
+        &[],
+    );
+    assert!(g.notes.is_empty() && g.names.is_empty());
+}
+
+#[test]
+fn an_answer_without_names_leaves_names_empty() {
+    let naming = [candidate("young", "Young", &["Young throws four"])];
+    let mut g = original_with_interest();
+    edit_naming(&mut g, |_| {}, answer_with_interest(json!([])), &naming);
+    assert!(g.notes.is_empty());
+    assert!(g.names.is_empty());
 }

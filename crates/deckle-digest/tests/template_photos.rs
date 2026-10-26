@@ -159,6 +159,7 @@ fn the_rendered_paper_grays_its_photos_and_the_color_edition_keeps_them() {
         long_reads: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
+        names: Vec::new(),
     };
     let photo_of = |files: Vec<(String, Vec<u8>)>| {
         files
