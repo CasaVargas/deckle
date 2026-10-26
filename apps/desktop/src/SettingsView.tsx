@@ -11,6 +11,7 @@ import Books from "./settings/Books";
 import General from "./settings/General";
 import Kindles from "./settings/Kindles";
 import Overview from "./settings/Overview";
+import Sending from "./settings/Sending";
 import WordWise from "./settings/WordWise";
 import XRay from "./settings/XRay";
 import type { DeviceRow, HighlightsStatus, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
@@ -132,6 +133,9 @@ export default function SettingsView(props: Props) {
           <h2>{title}</h2>
           {page === "overview" && (
             <Overview checks={checks} online={onlineOn(settings)} summary={(p) => pageSummary(p, settings, props.library, props.devices, props.version)} onFix={fix} onPage={onPage} />
+          )}
+          {page === "sending" && (
+            <Sending settings={settings} set={set} previewer={props.previewer} onPickPreviewer={props.onPickPreviewer} devices={props.devices} onKindles={() => onPage("kindles")} />
           )}
           {page === "general" && (
             <General

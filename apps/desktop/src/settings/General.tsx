@@ -18,26 +18,6 @@ export default function General({ settings, set, previewer, onPickPreviewer, lib
   return (
     <>
       <Row
-        label="Kindle Previewer"
-        note={
-          previewer?.found ? (
-            <>Found · {previewer.version}</>
-          ) : (
-            <>
-              Not found. {previewer?.download_url ? <Link href={previewer.download_url}>Download it</Link> : "Download it"} (free, from Amazon) and restart Deckle, or
-              choose its command line tool.
-            </>
-          )
-        }
-      />
-      <div className="set-wide">
-        <input type="text" value={settings.previewer_path ?? ""} placeholder={previewer?.path ?? "Auto-detect"} onChange={(e) => set("previewer_path", e.target.value || null)} aria-label="Kindle Previewer path" />
-        <button className="ghost" onClick={onPickPreviewer}>
-          Choose…
-        </button>
-      </div>
-
-      <Row
         label="Library"
         note={
           library?.root ? (
@@ -70,13 +50,6 @@ export default function General({ settings, set, previewer, onPickPreviewer, lib
       )}
       <Originals />
 
-      <Row label="Default mode" note="Automatic lets the cover rule decide per Kindle">
-        <select value={settings.cde} onChange={(e) => set("cde", e.target.value as Settings["cde"])} aria-label="Default mode">
-          <option value="auto">Automatic</option>
-          <option value="pdoc">Cover first</option>
-          <option value="ebok">Features first</option>
-        </select>
-      </Row>
     </>
   );
 }

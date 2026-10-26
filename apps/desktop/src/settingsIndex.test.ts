@@ -10,6 +10,7 @@ describe("Search settings", () => {
     expect(searchSettings("asin").map((e) => e.label)).toEqual(["Match the store cover", "Keeps Deckle's X-Ray for real ASINs"]);
     expect(searchSettings("API key").map((e) => e.label)).toEqual(["API key"]);
     expect(searchSettings("calibre")[0].page).toBe("general");
+    expect(searchSettings("previewer")[0].page).toBe("sending");
   });
   it("needs every word, and nothing for nothing", () => {
     expect(searchSettings("word wise dictionary").map((e) => e.label)).toEqual(["How many hints"]);
@@ -52,7 +53,7 @@ describe("Overview", () => {
       ["kindles", "optional", ""],
     ]);
     expect(setupHeading(checks)).toBe("1 thing needs doing before Deckle can send books.");
-    expect(pageNotes(checks)).toEqual({ general: "to do" });
+    expect(pageNotes(checks)).toEqual({ sending: "to do" });
   });
 
   it("leaves out what hasn't loaded yet", () => {
@@ -72,7 +73,8 @@ describe("Overview", () => {
 describe("page cards", () => {
   const s = { cde: "auto", pages_auto: true, typography: true, popup_notes: false, generated_cover: true, xray: true, llm_provider: "anthropic", wikipedia: true, word_wise: true, word_wise_level: 3 } as unknown as Settings;
   it("say each page's state in a line", () => {
-    expect(pageSummary("general", s, { root: "/b", auto_add: true, books: 2 }, [], "0.7.0")).toBe("Automatic · library of 2 books");
+    expect(pageSummary("sending", s, null, [], "0.7.0")).toBe("Automatic");
+    expect(pageSummary("general", s, { root: "/b", auto_add: true, books: 2 }, [], "0.7.0")).toBe("Library of 2 books");
     expect(pageSummary("books", s, null, [], "0.7.0")).toBe("Page numbers, tidy typography and covers when missing");
     expect(pageSummary("xray", s, null, [], "0.7.0")).toBe("On, with an AI model and Wikipedia");
     expect(pageSummary("wordwise", s, null, [], "0.7.0")).toBe("On, 3 of 5");

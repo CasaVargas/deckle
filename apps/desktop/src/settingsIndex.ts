@@ -2,10 +2,11 @@
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 
 /** The Settings pages (Settings redesign §2). */
-export type SettingsPage = "overview" | "general" | "books" | "xray" | "wordwise" | "kindles" | "about";
+export type SettingsPage = "overview" | "sending" | "general" | "books" | "xray" | "wordwise" | "kindles" | "about";
 
 export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "overview", title: "Overview" },
+  { id: "sending", title: "Sending" },
   { id: "general", title: "General" },
   { id: "books", title: "Books" },
   { id: "xray", title: "X-Ray" },
@@ -22,13 +23,13 @@ export interface Entry {
 }
 
 export const INDEX: Entry[] = [
-  { label: "Kindle Previewer", page: "general", words: "previewer amazon convert kpf location path" },
+  { label: "Kindle Previewer", page: "sending", words: "previewer amazon convert kpf location path" },
   { label: "Library folder", page: "general", words: "library folder keep copy" },
   { label: "Add every book I send", page: "general", words: "library auto add" },
   { label: "Find originals in calibre", page: "general", words: "calibre originals upgrades source" },
   { label: "Find originals in folders", page: "general", words: "folders originals upgrades source epub" },
   { label: "Watch a folder", page: "general", words: "watch downloads folder inbox" },
-  { label: "How books show up", page: "general", words: "default mode cover first features first ebok pdoc document kindle book automatic" },
+  { label: "How books show up", page: "sending", words: "default mode cover first features first ebok pdoc document kindle book automatic" },
   { label: "Page numbers", page: "books", words: "pages numbers store" },
   { label: "Make a cover when missing", page: "books", words: "cover generated typographic" },
   { label: "Match the store cover", page: "books", words: "amazon cover asin store edition online" },
@@ -83,10 +84,10 @@ export function setupChecks(a: { previewer: PreviewerStatus | null; library: Lib
   const out: Check[] = [];
   out.push(
     !a.previewer
-      ? { key: "previewer", title: "Kindle Previewer", state: "looking for it…", mark: "ok", page: "general" }
+      ? { key: "previewer", title: "Kindle Previewer", state: "looking for it…", mark: "ok", page: "sending" }
       : a.previewer.found
-        ? { key: "previewer", title: "Kindle Previewer", state: "found, so books can be converted", mark: "ok", page: "general" }
-        : { key: "previewer", title: "Kindle Previewer", state: "not found: Deckle can't convert books without it", mark: "todo", fix: "Choose…", page: "general" },
+        ? { key: "previewer", title: "Kindle Previewer", state: "found, so books can be converted", mark: "ok", page: "sending" }
+        : { key: "previewer", title: "Kindle Previewer", state: "not found: Deckle can't convert books without it", mark: "todo", fix: "Choose…", page: "sending" },
   );
   if (a.library)
     out.push(
@@ -148,8 +149,10 @@ const MODE_WORD: Record<Settings["cde"], string> = { auto: "Automatic", pdoc: "D
 /** Each page's card on Overview: its state in one line. */
 export function pageSummary(page: SettingsPage, s: Settings, library: LibraryStatus | null, devices: DeviceRow[], version: string): string {
   switch (page) {
+    case "sending":
+      return MODE_WORD[s.cde];
     case "general":
-      return `${MODE_WORD[s.cde]} · ${library?.root ? `library of ${plural(library.books, "book")}` : "no library"}`;
+      return library?.root ? `Library of ${plural(library.books, "book")}` : "No library";
     case "books": {
       const on = [s.pages_auto && "page numbers", s.typography && "tidy typography", s.popup_notes && "pop-up footnotes", s.generated_cover && "covers when missing"].filter((x): x is string => !!x);
       return on.length ? list(on).replace(/^./, (c) => c.toUpperCase()) : "Books go as they are";
