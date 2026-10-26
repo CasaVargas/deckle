@@ -1437,10 +1437,11 @@ fn the_cover_is_drawn_in_the_chosen_masthead_face() {
         c.masthead = face;
         deckle_digest::cover::render(&gather(&c, date(), now(), &fake)).unwrap()
     };
-    let black = jpeg(MastheadFont::Blackletter);
-    assert_ne!(black, jpeg(MastheadFont::Serif));
-    assert_ne!(black, jpeg(MastheadFont::Sans));
-    assert_eq!(black, jpeg(MastheadFont::Blackletter), "and it is stable");
+    let consent = jpeg(MastheadFont::Consent);
+    assert_ne!(consent, jpeg(MastheadFont::Unifraktur));
+    assert_ne!(consent, jpeg(MastheadFont::Serif));
+    assert_ne!(consent, jpeg(MastheadFont::Bodoni));
+    assert_eq!(consent, jpeg(MastheadFont::Consent), "and it is stable");
 }
 
 #[test]
@@ -1449,7 +1450,7 @@ fn a_bad_masthead_file_falls_back_and_says_so() {
     let mut c = config();
     c.masthead = MastheadFont::File("/no/such/font.ttf".into());
     let g = gather(&c, date(), now(), &fake);
-    assert!(g.edition.masthead.is_blackletter());
+    assert_eq!(g.edition.masthead.name(), "ManufacturingConsent-Regular");
     assert!(
         g.notes.iter().any(|n| n.starts_with("Masthead font:")),
         "{:?}",
@@ -1470,14 +1471,24 @@ fn the_pdf_embeds_the_chosen_masthead_face() {
         Screen::Remarkable2,
         Photos::Gray,
     );
-    assert!(has(&default, b"UnifrakturMaguntia-Book"));
-    c.masthead = MastheadFont::Serif;
+    assert!(has(&default, b"ManufacturingConsent-Regular"));
+    c.masthead = MastheadFont::Unifraktur;
+    let unifraktur = render(
+        &gather(&c, date(), now(), &fake),
+        Screen::Remarkable2,
+        Photos::Gray,
+    );
+    assert!(has(&unifraktur, b"UnifrakturMaguntia-Book"));
+    c.masthead = MastheadFont::File(format!(
+        "{}/fonts/OldStandard-Italic.ttf",
+        env!("CARGO_MANIFEST_DIR")
+    ));
     let serif = render(
         &gather(&c, date(), now(), &fake),
         Screen::Remarkable2,
         Photos::Gray,
     );
-    assert!(!has(&serif, b"UnifrakturMaguntia-Book"));
+    assert!(!has(&serif, b"ManufacturingConsent-Regular"));
     assert!(has(&serif, b"/Masthead"));
 }
 

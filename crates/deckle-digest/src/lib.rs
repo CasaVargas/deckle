@@ -466,9 +466,10 @@ pub fn gather_with_editor(
     let mut long_reads = Vec::new();
     let mut reading_outcomes = Vec::new();
     let mut notes = Vec::new();
-    match cfg.masthead.resolve(&cfg.title) {
-        Ok(m) => edition.masthead = m,
-        Err(why) => notes.push(format!("Masthead font: {why}; using the blackletter.")),
+    let (masthead, why) = cfg.masthead.resolve_or_fall_back(&cfg.title);
+    edition.masthead = masthead;
+    if let Some(why) = why {
+        notes.push(format!("Masthead font: {why}."));
     }
     // Loaded when the paper has a puzzle; saved with today's headlines once all is gathered.
     let mut puzzles: Option<puzzle::store::Store> = None;

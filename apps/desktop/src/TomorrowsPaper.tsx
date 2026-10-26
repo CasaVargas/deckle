@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { ReactNode } from "react";
-import type { EditionPreview, NextPaper, Tile } from "./types";
+import { useEffect } from "react";
+import { loadMastheadFonts } from "./mastheadFonts";
+import { faceFamily, mastheadChoice } from "./mastheadView";
+import type { NextPaper, Tile } from "./types";
 
 function longDate(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
@@ -24,32 +26,17 @@ function TileView({ t, lead }: { t: Tile; lead?: boolean }) {
   );
 }
 
-/** The next edition's front page as it stands (tomorrow's paper design §5). */
-export default function TomorrowsPaper({
-  next,
-  preview,
-  running,
-  onRun,
-  onStop,
-  onShowFile,
-  children,
-}: {
-  next: NextPaper | null;
-  preview: EditionPreview | null;
-  running: null | "preview" | "send";
-  onRun: (send: boolean) => void;
-  onStop: () => void;
-  onShowFile: () => void;
-  /** The last run's result. */
-  children?: ReactNode;
-}) {
+/** The next edition's front page as it stands (tomorrow's paper design §5, Daily tab redesign §3). */
+export default function TomorrowsPaper({ next, masthead, onSections }: { next: NextPaper | null; masthead?: string; onSections: () => void }) {
+  useEffect(loadMastheadFonts, []);
+  // The name in the paper's own face; a font file of the reader's shows in the default's place
+  const face = mastheadChoice(masthead);
   return (
-    <section className="card tomorrow" id="tomorrows-paper">
-      <div className="card-head">
-        <h3>Tomorrow's paper, so far</h3>
-        <span className="live" title={next?.checked ? `Headlines checked ${clock(next.checked)}` : "Headlines not checked yet"}>
-          <span className="badge live-badge">Live</span>
-          <span className="muted small">{next?.checked ? `Headlines checked ${clock(next.checked)}` : "Headlines not checked yet"}</span>
+    <section className="tomorrow" id="tomorrows-paper" aria-label="Tomorrow's paper, so far">
+      <div className="tomorrow-head">
+        <h2 className="daily-h2">Tomorrow's paper, so far</h2>
+        <span className="muted small" title="Headlines are checked when you open the tab and when Deckle comes to the front">
+          {next?.checked ? `Headlines checked ${clock(next.checked)}` : "Headlines not checked yet"}
         </span>
       </div>
       {next && (
@@ -59,7 +46,9 @@ export default function TomorrowsPaper({
             <span className="motto">All the news that fits</span>
             <span>{next.place.toUpperCase()}</span>
           </div>
-          <div className="masthead-name">{next.paper}</div>
+          <div className="masthead-name" style={{ fontFamily: `${faceFamily(face === "file" ? "consent" : face)}, ui-serif, Georgia, serif` }}>
+            {next.paper}
+          </div>
           <div className="dateband">{longDate(next.date)}</div>
           {next.weather && <div className="weather-slot">Weather · fills in at press time</div>}
           {next.lead && <TileView t={next.lead} lead />}
@@ -68,38 +57,14 @@ export default function TomorrowsPaper({
               <TileView key={`${t.key}-${i}`} t={t} />
             ))}
           </div>
-          <p className="muted small">
-            The page lays itself out as the day goes on. Each link you save drops into a slot right away, and dashed slots fill at
-            press time.
-          </p>
         </div>
       )}
-      <div className="paper-actions">
-        <button className="primary" disabled={!!running} onClick={() => onRun(true)}>
-          {running === "send" ? "Building and sending…" : "Send now"}
-        </button>
-        <button className="ghost" disabled={!!running} onClick={() => onRun(false)}>
-          {running === "preview" ? "Building preview…" : "Preview"}
-        </button>
-        {next?.press.next && !next.press.stopped && (
-          <button className="ghost" disabled={!!running} onClick={onStop}>
-            Stop the presses
-          </button>
-        )}
-      </div>
-      {running && <p className="muted small">Fetching every story and photo takes about a minute.</p>}
-      {children}
       <p className="muted small">
-        {preview ? `Last built ${preview.title.replace(/^.*— /, "")}` : "No edition built yet."}
-        {preview && preview.outbox > 0 && ` · ${preview.outbox} waiting for your Kindle`}
-        {preview && (
-          <>
-            {" · "}
-            <button className="link" onClick={onShowFile}>
-              Show file
-            </button>
-          </>
-        )}
+        It fills in as the day goes: a link you save drops in right away, and dashed slots fill at press time. What's in it is on{" "}
+        <button className="link" onClick={onSections}>
+          Sections
+        </button>
+        .
       </p>
     </section>
   );

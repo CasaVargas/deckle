@@ -23,6 +23,12 @@ export function partwayLine(r: UpgradeRow): string | null {
 
 /** The books Deckle leaves alone, and why, as one line; null when there are none. */
 export function leftAsIs(counts: Partial<Record<UpgradeClass, number>>): string | null {
+  const parts = leftAlone(counts).parts;
+  return parts.length ? `Left as they are: ${parts.join(" · ")}.` : null;
+}
+
+/** The books Deckle leaves alone (Kindle tab redesign §5): how many, and each kind with why. */
+export function leftAlone(counts: Partial<Record<UpgradeClass, number>>): { total: number; parts: string[] } {
   const parts: string[] = [];
   const n = (c: UpgradeClass) => counts[c] ?? 0;
   if (n("amazon-own")) parts.push(`${plural(n("amazon-own"), "store book")}, which already have all of this`);
@@ -32,7 +38,27 @@ export function leftAsIs(counts: Partial<Record<UpgradeClass, number>>): string 
   if (n("no-source")) parts.push(`${n("no-source")} KFX with no original on this computer`);
   if (n("pdf")) parts.push(`${plural(n("pdf"), "PDF")}`);
   if (n("unread")) parts.push(`${n("unread")} not read yet`);
-  return parts.length ? `Left as they are: ${parts.join(" · ")}.` : null;
+  const kinds: UpgradeClass[] = ["amazon-own", "locked", "fixed-layout", "old-mobi", "no-source", "pdf", "unread"];
+  return { total: kinds.reduce((sum, c) => sum + n(c), 0), parts };
+}
+
+const list = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+
+/** What an upgrade adds, in plain words: "Gains X-Ray, Word Wise and page numbers". */
+export function gainsLine(gains: string[]): string {
+  if (gains.length === 0) return "";
+  const words = gains.map((g) => (g === "Page numbers" ? "page numbers" : g === "Cover" ? "a cover" : g === "Enhanced Typesetting" ? "Enhanced Typesetting" : g));
+  return `Gains ${list(words)}`;
+}
+
+/** The Upgrades heading: how many could be better. */
+export function upgradesHeading(n: number): string {
+  return n === 0 ? "Every book Deckle can improve is current" : `${plural(n, "book")} could be better`;
+}
+
+/** The foot bar's line: "3 of 4 selected". */
+export function selectedLine(chosen: number, of: number): string {
+  return `${chosen} of ${of} selected`;
 }
 
 /** Where Deckle looks for originals, for the panel's foot. */

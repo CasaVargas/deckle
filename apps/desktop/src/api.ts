@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -38,6 +38,10 @@ export const api = {
   /** Fetches a picked Open Library cover; resolves to its path on this computer. */
   coverFetch: (large: string) => invoke<string>("cover_fetch", { large }),
   libraryFixDetails: (dir: string, details: BookDetails) => invoke<void>("library_fix_details", { dir, details }),
+  libraryReadDetails: (dir: string) => invoke<BookDetails>("library_read_details", { dir }),
+  librarySentKindles: () => invoke<SentKindle[]>("library_sent_kindles"),
+  /** Online: only with Fill missing details on, or when the person `asked`. `null`: no record. */
+  librarySuggestDetails: (dir: string, asked: boolean) => invoke<Suggestions | null>("library_suggest_details", { dir, asked }),
   libraryWatchSet: (dir: string | null) => invoke<string | null>("library_watch_set", { dir }),
   libraryWatchScan: () => invoke<Watched>("library_watch_scan"),
   /** The files bound, in order, into one book; resolves to its row (#22). */
@@ -108,6 +112,8 @@ export const api = {
   dailyState: (paper: string | null = null) => invoke<DailyState>("daily_state", { paper }),
   /** Your papers: every paper's card, main first, and the household's named Kindles. */
   papersList: () => invoke<PapersView>("papers_list"),
+  /** The bundled masthead faces that can't draw `title`, by key. */
+  mastheadMissing: (title: string) => invoke<string[]>("masthead_missing", { title }),
   /** Writes papers/<slug>.toml; resolves to the slug. */
   paperCreate: (title: string, reader: string) => invoke<string>("paper_create", { title, reader }),
   dailySetup: () => invoke<DailyState>("daily_setup"),

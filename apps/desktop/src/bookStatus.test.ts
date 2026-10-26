@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { beforeChip, doneChips, runSummary } from "./bookStatus";
+import { beforeChip, doneChips, runSummary, statusLine } from "./bookStatus";
 import type { BookState, Mode, PlanRow, WordWiseSummary } from "./types";
 
 const on = { xray: true, word_wise: true };
@@ -45,3 +45,15 @@ test("run summary: sent and failed", () =>
   expect(runSummary([done(), done(), done({ status: "failed", runError: "x" }), done({ status: "idle" })])).toBe("Done: 2 sent, 1 failed"));
 test("run summary: exported", () => expect(runSummary([done({ exported: true })])).toBe("Done: 1 exported"));
 test("run summary: nothing ran", () => expect(runSummary([done({ status: "idle" })])).toBeNull());
+
+test("line: nothing", () => expect(statusLine([])).toBeNull());
+test("line: one plain chip", () => expect(statusLine([{ text: "Keeps cover", tone: "plain", title: "r" }])).toEqual({ text: "Keeps cover", tone: "plain", title: "r" }));
+test("line: joined, in the worst tone", () =>
+  expect(
+    statusLine([
+      { text: "Sent · 496 pages", tone: "ok" },
+      { text: "X-Ray", tone: "plain" },
+      { text: "2 warnings", tone: "warn", title: "a\nb" },
+    ]),
+  ).toEqual({ text: "Sent · 496 pages · X-Ray · 2 warnings", tone: "warn", title: "a\nb" }));
+test("line: a failure wins", () => expect(statusLine([{ text: "1 note", tone: "warn" }, { text: "Can't convert", tone: "fail" }])?.tone).toBe("fail"));

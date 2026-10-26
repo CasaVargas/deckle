@@ -1,26 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useEffect, useState } from "react";
+import { api } from "./api";
 import Icon from "./Icon";
 import { escStaysInField } from "./settingsKeys";
+import { PAGES, onlineOn, pageNotes, pageSummary, searchSettings, setupChecks } from "./settingsIndex";
+import type { Check, SettingsPage } from "./settingsIndex";
 import About from "./settings/About";
 import Books from "./settings/Books";
-import General from "./settings/General";
+import HighlightsReading from "./settings/HighlightsReading";
+import LibraryPage from "./settings/LibraryPage";
 import Kindles from "./settings/Kindles";
-import WordWise from "./settings/WordWise";
-import XRay from "./settings/XRay";
-import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings } from "./types";
+import Online from "./settings/Online";
+import Overview from "./settings/Overview";
+import ReadingAids from "./settings/ReadingAids";
+import Sending from "./settings/Sending";
+import type { DeviceRow, HighlightsStatus, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 import type { UpdateState } from "./updates";
 
-export type SettingsPage = "general" | "books" | "xray" | "wordwise" | "kindles" | "about";
-
-const PAGES: { id: SettingsPage; title: string }[] = [
-  { id: "general", title: "General" },
-  { id: "books", title: "Books" },
-  { id: "xray", title: "X-Ray" },
-  { id: "wordwise", title: "Word Wise" },
-  { id: "kindles", title: "Kindles" },
-  { id: "about", title: "About" },
-];
+export type { SettingsPage } from "./settingsIndex";
 
 interface Props {
   page: SettingsPage;
@@ -42,20 +40,40 @@ interface Props {
   busy: boolean;
 }
 
-/** Settings take over the window: pages in a sidebar, one page at a time. */
+/** Settings take over the window: pages in a sidebar, one page at a time, and a search over every setting (Settings redesign §3). */
 export default function SettingsView(props: Props) {
   const { page, onPage, onBack, settings, onChange } = props;
+  const [query, setQuery] = useState("");
+  // Overview's checklist reads where originals and highlights go; read again on each visit.
+  const [sources, setSources] = useState<SourcesStatus | null>(null);
+  const [highlights, setHighlights] = useState<HighlightsStatus | null | undefined>(undefined);
+  useEffect(() => {
+    api.librarySources().then(setSources).catch(() => setSources(null));
+    api.highlightsStatus().then(setHighlights).catch(() => setHighlights(undefined));
+  }, [page]);
+  const checks = setupChecks({ previewer: props.previewer, library: props.library, sources, highlights: highlights === undefined ? undefined : (highlights?.folder ?? null), devices: props.devices });
+  const notes = pageNotes(checks, onlineOn(settings));
+  const fix = async (c: Check) => {
+    if (c.key === "previewer") props.onPickPreviewer();
+    else if (c.key === "library") props.onPickLibrary();
+    else if (c.key === "highlights") {
+      const dir = await openDialog({ directory: true, multiple: false });
+      if (typeof dir === "string") setHighlights(await api.highlightsSet(dir, highlights?.clippings ?? false));
+    } else onPage(c.page);
+  };
+  const results = searchSettings(query);
 
   // Esc goes back, unless a field wants it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLInputElement | null;
       if (e.key !== "Escape" || (el && escStaysInField(el.tagName, el.type ?? ""))) return;
-      onBack();
+      if (query) setQuery("");
+      else onBack();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onBack]);
+  }, [onBack, query]);
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => onChange({ ...settings, [k]: v });
   const title = PAGES.find((p) => p.id === page)!.title;
@@ -64,33 +82,76 @@ export default function SettingsView(props: Props) {
     <div className="settings">
       <nav className="settings-nav" aria-label="Settings pages">
         <button className="settings-back" onClick={onBack}>
-          <Icon name="arrow-left" /> Back
+          <Icon name="arrow-left" /> Back to Deckle
         </button>
+        <label className="settings-search">
+          <span className="visually-hidden">Search settings</span>
+          <input type="search" placeholder="Search settings" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </label>
         {PAGES.map((p) => (
-          <button key={p.id} className={p.id === page ? "on" : ""} aria-current={p.id === page ? "page" : undefined} onClick={() => onPage(p.id)}>
-            {p.title}
+          <button
+            key={p.id}
+            className={p.id === page && !query ? "on" : ""}
+            aria-current={p.id === page && !query ? "page" : undefined}
+            onClick={() => {
+              setQuery("");
+              onPage(p.id);
+            }}
+          >
+            <span>{p.title}</span>
+            {notes[p.id] && <span className={`nav-note ${p.id === "online" ? "plain" : ""}`}>{notes[p.id]}</span>}
           </button>
         ))}
       </nav>
       <main className="settings-page">
         <div className="settings-inner">
+          {query ? (
+            <>
+              <h2>Search</h2>
+              {results.length === 0 ? (
+                <p className="muted">No setting matches “{query.trim()}”.</p>
+              ) : (
+                <ul className="search-results">
+                  {results.map((r) => (
+                    <li key={r.label}>
+                      <button
+                        className="search-result"
+                        onClick={() => {
+                          setQuery("");
+                          onPage(r.page);
+                        }}
+                      >
+                        <strong>{r.label}</strong>
+                        <span className="muted">{PAGES.find((p) => p.id === r.page)!.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : (
+          <>
           <h2>{title}</h2>
-          {page === "general" && (
-            <General
-              settings={settings}
-              set={set}
-              previewer={props.previewer}
-              onPickPreviewer={props.onPickPreviewer}
-              library={props.library}
+          {page === "overview" && (
+            <Overview checks={checks} online={onlineOn(settings)} summary={(p) => pageSummary(p, settings, props.library, props.devices, props.version)} onFix={fix} onPage={onPage} />
+          )}
+          {page === "sending" && (
+            <Sending settings={settings} set={set} previewer={props.previewer} onPickPreviewer={props.onPickPreviewer} devices={props.devices} onKindles={() => onPage("kindles")} />
+          )}
+          {page === "library" && (
+            <LibraryPage library={props.library}
               onLibrary={props.onLibrary}
               onPickLibrary={props.onPickLibrary}
             />
           )}
           {page === "books" && <Books settings={settings} set={set} />}
-          {page === "xray" && <XRay settings={settings} set={set} />}
-          {page === "wordwise" && <WordWise settings={settings} set={set} />}
+          {page === "reading" && <ReadingAids settings={settings} set={set} />}
           {page === "kindles" && <Kindles devices={props.devices} onDeviceOptions={props.onDeviceOptions} />}
+          {page === "highlights" && <HighlightsReading />}
+          {page === "online" && <Online settings={settings} set={set} onPage={onPage} />}
           {page === "about" && <About version={props.version} update={props.update} onUpdateState={props.onUpdateState} busy={props.busy} />}
+          </>
+          )}
         </div>
       </main>
     </div>

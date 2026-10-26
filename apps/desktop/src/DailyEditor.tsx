@@ -13,7 +13,7 @@ export default function DailyEditor({ value, onChange }: { value?: DailyEditorCo
     try {
       const settings = await api.getSettings();
       if (settings.llm_provider !== "openai" && settings.llm_provider !== "anthropic") {
-        setNote("Choose an AI provider in Settings → X-Ray first.");
+        setNote("Choose an AI model in Settings → Reading aids first.");
         return;
       }
       onChange({ ...latest.current, provider: settings.llm_provider, model: settings.llm_model, endpoint: settings.llm_endpoint });
@@ -38,7 +38,7 @@ export default function DailyEditor({ value, onChange }: { value?: DailyEditorCo
         <label><span className="label">API base URL</span><input value={config.endpoint} placeholder="Provider default, or your local server" spellCheck={false} onChange={(e) => onChange({ ...config, endpoint: e.target.value })} /></label>
       </div>
       <button className="ghost" onClick={copyProvider}>Use Books provider</button>
-      <p className="muted small">Set {config.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} in the environment that runs Deckle. Local OpenAI-compatible servers can run without a key. Save above to apply.</p>
+      <p className="muted small">Set {config.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} in the environment that runs Deckle. Local OpenAI-compatible servers can run without a key.</p>
     </>}
     {note && <p className="muted small" role="status">{note}</p>}
   </div>;

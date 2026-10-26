@@ -26,6 +26,16 @@ export function doneChips(book: BookState): Chip[] {
   return chips;
 }
 
+const RANK: Record<Chip["tone"], number> = { plain: 0, ok: 1, warn: 2, fail: 3 };
+
+/** A row's status as one sentence (Books tab redesign §3): the chips' words, in the tone of the worst. */
+export function statusLine(chips: Chip[]): Chip | null {
+  if (chips.length === 0) return null;
+  const tone = chips.reduce<Chip["tone"]>((worst, c) => (RANK[c.tone] > RANK[worst] ? c.tone : worst), "plain");
+  const title = chips.map((c) => c.title).filter(Boolean).join("\n");
+  return { text: chips.map((c) => c.text).join(" · "), tone, ...(title ? { title } : {}) };
+}
+
 /** One line for the notice bar when a run ends out of sight (Settings open): what went where. */
 export function runSummary(books: BookState[]): string | null {
   const done = books.filter((b) => b.status === "done");

@@ -1280,7 +1280,8 @@ title = "The Deckle Daily"
 # reader = "the whole house"      # who it's for, on its card in the Daily tab
 # kindle = "Mom's Kindle"         # only this Kindle gets it (its name or sync id); unset: any
 # large_print = true              # a layout for big type; set the size itself on the Kindle (Aa)
-# masthead = "blackletter"        # the title's typeface: "serif", "sans", or the path to a .ttf
+# masthead = "consent"            # the title's face: consent, grenze, pirata, texturina, unifraktur,
+#                                 # playfair, bodoni, caslon, serif, sans, or the path to a .ttf
 place = "New York, NY"            # shown on the masthead and the weather page
 latitude = 40.71                  # for the forecast (Open-Meteo, no key)
 longitude = -74.01

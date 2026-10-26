@@ -5,9 +5,10 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, coverRequest } from "./api";
 import { deviceLabel } from "./deviceLabel";
+import { size } from "./kindleRooms";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
-import BeforeYouSend from "./BeforeYouSend";
+import BookDrawer, { type DrawerTab } from "./BookDrawer";
 import { presetSettings } from "./presets";
 import BindPanel from "./BindPanel";
 import Library from "./Library";
@@ -57,11 +58,18 @@ export default function App() {
   const [previewer, setPreviewer] = useState<PreviewerStatus | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
   /** The settings page last opened this session: the gear returns to it. */
-  const lastPage = useRef<SettingsPage>("general");
+  const lastPage = useRef<SettingsPage>("overview");
   const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  /** The library search in the top bar (Books tab redesign §4). */
+  const [query, setQuery] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
+  /** The Kindle tab's search, in the same place (Kindle tab redesign §3). */
+  const [kindleQuery, setKindleQuery] = useState("");
+  /** The picked Kindle's free space, once the Kindle tab has read it. */
+  const [kindleFree, setKindleFree] = useState<number | null>(null);
   const [bindOpen, setBindOpen] = useState(false);
   const [binding, setBinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -70,8 +78,8 @@ export default function App() {
   const [library, setLibrary] = useState<LibraryStatus | null>(null);
   /** The Books tab's library (Books and Kindle design §8): Deckle's, calibre's and your folders' books. */
   const [catalog, setCatalog] = useState<CatalogView | null>(null);
-  /** The queued book Before you send is open for. */
-  const [beforeFor, setBeforeFor] = useState<string | null>(null);
+  /** The book whose drawer is open (Books tab redesign §5), by path: queued, in the library, or both. */
+  const [drawer, setDrawer] = useState<{ path: string; tab: DrawerTab; cover?: string | null } | null>(null);
   const booksRef = useRef(books);
   booksRef.current = books;
   const tabRef = useRef(tab);
@@ -258,6 +266,13 @@ export default function App() {
     // Books tab first opens and focuses the article field; the paste then lands in it.
     const onKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
+      // ⌘F (Ctrl+F) finds in the library, when there's one to search.
+      if (ev.key.toLowerCase() === "f" && (ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && tabRef.current === "books" && searchInput.current) {
+        ev.preventDefault();
+        searchInput.current.focus();
+        searchInput.current.select();
+        return;
+      }
       if (ev.key.toLowerCase() !== "v" || !(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey) return;
       if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
       flushSync(() => setArticleOpen(true));
@@ -330,7 +345,8 @@ export default function App() {
   const runnable = books.filter((b) => b.mode !== "error");
   // Library first, the queue docked beside it; with no library, the queue is the whole tab.
   const docked = !!catalog && catalog.entries.length > 0;
-  const opened = books.find((b) => b.id === beforeFor) ?? null;
+  const drawerBook = drawer ? books.find((b) => b.path === drawer.path) ?? null : null;
+  const drawerEntry = drawer ? catalog?.entries.find((e) => e.path === drawer.path) ?? null : null;
   const parts = books.filter((b) => bindable(b.path, b.mode));
 
   // The bound book takes the parts' place in the list (#22).
@@ -359,7 +375,7 @@ export default function App() {
     // A finished KFX is copied as is; only EPUBs need Kindle Previewer.
     if (!previewer?.found && runnable.some((b) => b.mode !== "ready")) {
       setNotice("Kindle Previewer is not installed. Open Settings to download it or point Deckle at it.");
-      openSettings("general");
+      openSettings("sending");
       return;
     }
     setNotice(null);
@@ -384,7 +400,6 @@ export default function App() {
   };
 
   const exportToFolder = async () => {
-    setExportOpen(false);
     const dir = await openDialog({ directory: true, multiple: false });
     if (typeof dir === "string") start({ kind: "folder", path: dir });
   };
@@ -420,6 +435,26 @@ export default function App() {
     setSettingsPage(page);
   };
   const closeSettings = useCallback(() => setSettingsPage(null), []);
+
+  /** The Kindle sends go to: the Books tray's foot and the Kindle tab's footer. */
+  const deviceControl = (
+    <div className="device">
+      <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
+      {devices.length === 0 ? (
+        "No Kindle connected"
+      ) : devices.length === 1 ? (
+        <span title={device?.root ?? undefined}>{device && deviceLabel(device)}</span>
+      ) : (
+        <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
+          {devices.map((d) => (
+            <option key={d.key} value={d.key}>
+              {deviceLabel(d)}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
 
   const noticeBar = notice && (
     <div className="notice" role="status">
@@ -475,28 +510,48 @@ export default function App() {
             </button>
           </div>
           {!previewer?.found && previewer && (
-            <button className="pill warn" onClick={() => openSettings("general")}>
+            <button className="pill warn" onClick={() => openSettings("sending")}>
               Kindle Previewer not found
             </button>
           )}
+          {hasUpdate(update) && (
+            <button className="pill" onClick={() => openSettings("about")}>
+              {update.kind === "ready" ? "Restart to update" : "Update available"}
+            </button>
+          )}
           <div className="spacer" />
-          {tab === "books" && (
-            <button className="ghost with-icon" onClick={pickBooks} disabled={busy}>
-              <Icon name="plus" /> Add books
-            </button>
+          {tab === "books" && docked && (
+            <label className="top-search">
+              <span className="visually-hidden">Search your library</span>
+              <input ref={searchInput} type="search" placeholder="Search titles, authors, series" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} />
+              <kbd aria-hidden="true">⌘F</kbd>
+            </label>
+          )}
+          {tab === "kindle" && device && (
+            <label className="top-search">
+              <span className="visually-hidden">Search this Kindle</span>
+              <input type="search" placeholder="Search this Kindle" value={kindleQuery} onChange={(e) => setKindleQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setKindleQuery("")} />
+            </label>
+          )}
+          {tab === "kindle" && (
+            <div className="device-pill">
+              {deviceControl}
+              {device && kindleFree != null && <span className="muted">{size(kindleFree)} free</span>}
+            </div>
           )}
           {tab === "books" && (
-            <button className="ghost" onClick={pickNotes} disabled={busy}>Add notes folder</button>
-          )}
-          {tab === "books" && (
-            <button className="ghost with-icon" onClick={() => setArticleOpen(true)} disabled={busy}>
-              <Icon name="link" /> Add article
-            </button>
-          )}
-          {tab === "books" && doneCount > 0 && !busy && (
-            <button className="ghost" onClick={clearDone}>
-              Clear done
-            </button>
+            <div className="split">
+              <button className="ghost with-icon" aria-haspopup="menu" aria-expanded={addOpen} onClick={() => setAddOpen((o) => !o)} disabled={busy}>
+                <Icon name="plus" /> Add <Icon name="chevron-down" size={14} />
+              </button>
+              {addOpen && (
+                <div className="menu" role="menu" onMouseLeave={() => setAddOpen(false)}>
+                  <button role="menuitem" onClick={() => { setAddOpen(false); pickBooks(); }}>Books and documents…</button>
+                  <button role="menuitem" onClick={() => { setAddOpen(false); setArticleOpen(true); }}>Web article…</button>
+                  <button role="menuitem" onClick={() => { setAddOpen(false); pickNotes(); }}>Notes folder…</button>
+                </div>
+              )}
+            </div>
           )}
           <button className="icon" aria-label="Settings" onClick={() => openSettings()}>
             <Icon name="settings" size={18} />
@@ -504,7 +559,7 @@ export default function App() {
         </header>
 
         {tab === "daily" && <DailyView onNotice={setNotice} />}
-        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} />}
+        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
         {tab === "books" && articleOpen && (
           <ArticleField
             ref={articleInput}
@@ -520,9 +575,21 @@ export default function App() {
         )}
         {tab === "books" && (
         <div className={docked ? "books-split" : "books-whole"}>
-        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
-        <main className={`list-area ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
-          {docked && <h2 className="dock-head">To send{books.length ? ` · ${books.length}` : ""}</h2>}
+        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} query={query} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} onEdit={(path, cover) => setDrawer({ path, tab: "details", cover })} />}
+        <main className={`tray ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
+          <div className="tray-scroll">
+          {(docked || books.length > 0) && (
+            <div className="tray-head">
+              <h2>To send</h2>
+              {books.length > 0 && <span className="muted">{books.length === 1 ? "1 book" : `${books.length} books`}</span>}
+              <div className="spacer" />
+              {doneCount > 0 && !busy && (
+                <button className="quiet" onClick={clearDone}>
+                  Clear done
+                </button>
+              )}
+            </div>
+          )}
           {books.length === 0 && docked ? (
             <div className="dock-empty muted">
               <p>Nothing to send yet.</p>
@@ -565,27 +632,44 @@ export default function App() {
                       .catch((e) => setNotice(String(e))).finally(() => setBusy(false));
                   }}
                   onOverride={override}
-                  onAsin={setAsin}
                   onToggleReport={toggleReport}
                   onRemove={remove}
                   onReveal={(p) => api.reveal(p)}
-                  onOpen={(id) => setBeforeFor(id)}
+                  onOpen={(_, tab) => setDrawer({ path: b.path, tab })}
                 />
               ))}
             </ul>
           )}
+          </div>
+          <div className="send-foot">
+            {deviceControl}
+            <button className="primary send" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
+              {busy ? "Working…" : runnable.length === 0 ? "Send to Kindle" : `Send ${runnable.length === 1 ? "1 book" : `${runnable.length} books`} to Kindle`}
+            </button>
+            <div className="send-more">
+              <button className="quiet" onClick={exportToFolder} disabled={busy || runnable.length === 0}>
+                Export to folder…
+              </button>
+              <button className="quiet" disabled={busy || parts.length < 2} title={parts.length < 2 ? "Add at least two files to bind them." : undefined} onClick={() => setBindOpen(true)}>
+                Bind into one book…
+              </button>
+            </div>
+          </div>
           {dragging && <div className="drop-overlay">Drop to add</div>}
         </main>
-        {opened && (
-          <BeforeYouSend
-            key={opened.id}
-            book={opened}
-            plan={plans[opened.id]}
+        {drawer && (drawerBook || drawerEntry) && (
+          <BookDrawer
+            key={drawer.path}
+            book={drawerBook}
+            entry={drawerEntry}
+            plan={drawerBook ? plans[drawerBook.id] : undefined}
             settings={settings}
-            entry={catalog?.entries.find((e) => e.path === opened.path) ?? null}
+            cover={drawerBook?.cover ?? drawer.cover ?? null}
+            initialTab={drawer.tab}
             onCover={setCoverPick}
-            onFixed={refreshRow}
-            onClose={() => setBeforeFor(null)}
+            onAsin={setAsin}
+            onFixed={(book) => (book ? refreshRow(book) : loadCatalog())}
+            onClose={() => setDrawer(null)}
           />
         )}
         </div>
@@ -593,63 +677,6 @@ export default function App() {
 
         {!settingsPage && noticeBar}
 
-        {(tab === "books" || tab === "kindle") && (
-        <footer className="bar">
-          <div className="device">
-            <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
-            {devices.length === 0 ? (
-              "No Kindle connected"
-            ) : devices.length === 1 ? (
-              <span title={device?.root ?? undefined}>{device && deviceLabel(device)}</span>
-            ) : (
-              <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
-                {devices.map((d) => (
-                  <option key={d.key} value={d.key}>
-                    {deviceLabel(d)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-          {tab === "books" && (
-          <div className="actions">
-            <button className="primary joined" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
-              {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
-            </button>
-            <div className="split">
-              <button className="secondary" aria-label="More actions" onClick={() => setExportOpen((o) => !o)} disabled={busy || runnable.length === 0}>
-                <Icon name="chevron-down" />
-              </button>
-              {exportOpen && (
-                <div className="menu up" onMouseLeave={() => setExportOpen(false)}>
-                  <button onClick={exportToFolder}>Export to folder…</button>
-                  <button
-                    disabled={parts.length < 2}
-                    title={parts.length < 2 ? "Add at least two files to bind them." : undefined}
-                    onClick={() => {
-                      setExportOpen(false);
-                      setBindOpen(true);
-                    }}
-                  >
-                    Bind into one book…
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          )}
-          {hasUpdate(update) ? (
-            <button
-              className="version link"
-              onClick={() => openSettings("about")}
-            >
-              Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
-            </button>
-          ) : (
-            <div className="version">Deckle {version}</div>
-          )}
-        </footer>
-        )}
       </div>
     </div>
   );

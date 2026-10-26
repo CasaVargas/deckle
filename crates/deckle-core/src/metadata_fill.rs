@@ -44,6 +44,16 @@ pub struct Metadata {
     pub series: Option<Series>,
     pub description: Option<String>,
     pub subjects: Vec<String>,
+    /// The edition's, found only by ISBN; suggested in the book's editor, never filled at send
+    /// time (Books tab redesign §6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// A W3C date (`1994`, `2020-09`, `2020-09-15`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published: Option<String>,
+    /// A language tag (`en`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 impl Metadata {
@@ -165,6 +175,101 @@ pub fn parse_series(s: &str) -> Option<Series> {
     })
 }
 
+const MONTHS: [&str; 12] = [
+    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+];
+
+/// Open Library's free-text `publish_date` as a W3C date: `1994`, `September 2020`,
+/// `September 15, 2020`, `15 September 2020` or `2020-9-15`. `None` when it can't be read.
+pub fn w3c_date(s: &str) -> Option<String> {
+    static ISO: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"^(\d{4})(?:-(\d{1,2})(?:-(\d{1,2}))?)?$").unwrap());
+    static WORDS: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)^(?:(\d{1,2})\s+)?([a-z]+)\.?\s+(?:(\d{1,2}),?\s+)?(\d{4})$").unwrap()
+    });
+    static YEAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[c©]?\s*(\d{4})\.?$").unwrap());
+    let s = s.trim();
+    let (y, m, d): (u32, Option<u32>, Option<u32>) = if let Some(c) = ISO.captures(s) {
+        (
+            c[1].parse().ok()?,
+            c.get(2).and_then(|m| m.as_str().parse().ok()),
+            c.get(3).and_then(|d| d.as_str().parse().ok()),
+        )
+    } else if let Some(c) = WORDS.captures(s) {
+        let word = c[2].to_lowercase();
+        let month = MONTHS.iter().position(|m| word.starts_with(m))? as u32 + 1;
+        let day = c.get(1).or(c.get(3)).and_then(|d| d.as_str().parse().ok());
+        (c[4].parse().ok()?, Some(month), day)
+    } else {
+        (YEAR.captures(s)?[1].parse().ok()?, None, None)
+    };
+    match (m, d) {
+        (None, _) => Some(format!("{y:04}")),
+        (Some(m), _) if !(1..=12).contains(&m) => None,
+        (Some(m), None) => Some(format!("{y:04}-{m:02}")),
+        (Some(m), Some(d)) => {
+            let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+            let days = [
+                31,
+                if leap { 29 } else { 28 },
+                31,
+                30,
+                31,
+                30,
+                31,
+                31,
+                30,
+                31,
+                30,
+                31,
+            ];
+            (1..=days[m as usize - 1])
+                .contains(&d)
+                .then(|| format!("{y:04}-{m:02}-{d:02}"))
+        }
+    }
+}
+
+/// Open Library's `/languages/eng` (MARC) as a language tag. `None` for a code not listed.
+pub fn marc_language(key: &str) -> Option<String> {
+    const TAGS: &[(&str, &str)] = &[
+        ("eng", "en"),
+        ("fre", "fr"),
+        ("fra", "fr"),
+        ("ger", "de"),
+        ("deu", "de"),
+        ("spa", "es"),
+        ("ita", "it"),
+        ("por", "pt"),
+        ("dut", "nl"),
+        ("nld", "nl"),
+        ("jpn", "ja"),
+        ("chi", "zh"),
+        ("zho", "zh"),
+        ("rus", "ru"),
+        ("swe", "sv"),
+        ("nor", "no"),
+        ("dan", "da"),
+        ("fin", "fi"),
+        ("pol", "pl"),
+        ("kor", "ko"),
+        ("ara", "ar"),
+        ("heb", "he"),
+        ("gre", "el"),
+        ("ell", "el"),
+        ("tur", "tr"),
+        ("cze", "cs"),
+        ("ces", "cs"),
+        ("hun", "hu"),
+        ("lat", "la"),
+        ("ukr", "uk"),
+    ];
+    let code = key.trim().trim_start_matches("/languages/");
+    TAGS.iter()
+        .find(|(m, _)| *m == code)
+        .map(|(_, t)| (*t).to_owned())
+}
+
 /// An Open Library record: its metadata and the keys of the records it points to.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Record {
@@ -189,6 +294,15 @@ pub fn parse_edition(body: &str) -> Result<Record, String> {
             .and_then(|s| parse_series(s)),
         description: text(v.get("description")),
         subjects: strings(v.get("subjects")),
+        publisher: strings(v.get("publishers")).into_iter().next(),
+        published: text(v.get("publish_date")).and_then(|d| w3c_date(&d)),
+        language: v
+            .get("languages")
+            .and_then(Value::as_array)
+            .and_then(|l| l.first())
+            .and_then(|l| l.get("key"))
+            .and_then(Value::as_str)
+            .and_then(marc_language),
     };
     let work = v
         .get("works")

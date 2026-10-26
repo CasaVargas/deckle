@@ -106,6 +106,42 @@ export interface BookDetails {
   title: string;
   authors: string[];
   series: { name: string; index: number | null } | null;
+  // The rest: left out or null leaves the book's own; empty removes it (Books tab redesign §5).
+  description?: string | null;
+  tags?: string[] | null;
+  publisher?: string | null;
+  /** A year, or a date like 2020-09-15. */
+  published?: string | null;
+  /** A language tag; empty keeps the book's own. */
+  language?: string | null;
+  isbn?: string | null;
+  title_sort?: string | null;
+  author_sort?: string | null;
+}
+
+/** What Open Library has for a library book's empty fields (Books tab redesign §6). */
+export interface Suggested {
+  authors: string[];
+  series: { name: string; index: number | null } | null;
+  description: string | null;
+  tags: string[];
+  publisher: string | null;
+  published: string | null;
+  language: string | null;
+}
+
+export interface Suggestions {
+  /** "isbn": the book's own edition; "search": the work found by title and author. */
+  source: "isbn" | "search";
+  suggested: Suggested;
+}
+
+/** A Kindle the library has sent to, for the Kindle tab when it isn't plugged in (Kindle tab redesign §7). */
+export interface SentKindle {
+  key: string;
+  name: string;
+  last: string;
+  books: { path: string; title: string; authors: string[]; at: string; cde: string | null }[];
 }
 
 /** A book on a Kindle that a send replaces with Deckle's build of its original (Books and Kindle design §6). */

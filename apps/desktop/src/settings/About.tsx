@@ -76,11 +76,8 @@ export default function About({ version, update, onUpdateState, busy }: Props) {
       <div className="set-block">
         <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} />
       </div>
-      <h3>What Deckle sends online</h3>
       <p className="set-prose">
-        Deckle checks GitHub for a newer version when it starts; the request carries nothing about you or your books. Otherwise it goes online only for: the Word
-        Wise dictionary (downloaded once from GitHub), and, when you turn them on, an AI model for X-Ray, Wikipedia summaries, Amazon edition matching and filling in
-        missing book details (both Open Library). A Kindle itself may ask Amazon about books sent with features (EBOK).
+        What Deckle sends online, and when, is under <strong>Online &amp; privacy</strong>.
       </p>
       <p className="set-prose">
         Word Wise: Kindles that already have Amazon's English Word Wise dictionary use it; others get Deckle's, shown when the Kindle's Word Wise language is set to

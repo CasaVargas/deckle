@@ -448,6 +448,20 @@ pub fn papers_at(
     })
 }
 
+/// The bundled masthead faces that can't draw `title` (Daily tab redesign §6), by their key.
+pub fn masthead_missing_for(title: &str) -> Vec<String> {
+    deckle_digest::masthead::BUNDLED
+        .iter()
+        .filter(|f| f.resolve(title).is_err())
+        .map(|f| f.as_str().to_owned())
+        .collect()
+}
+
+#[tauri::command]
+pub fn masthead_missing(title: String) -> Vec<String> {
+    masthead_missing_for(&title)
+}
+
 #[tauri::command]
 pub fn papers_list() -> Result<PapersView, String> {
     papers_at(&config_path(), &deckle_digest::schedule::status())
@@ -800,6 +814,14 @@ pub fn subscription_forget(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn every_face_draws_a_plain_name_and_some_miss_other_letters() {
+        assert!(super::masthead_missing_for("The Deckle Daily").is_empty());
+        let missing = super::masthead_missing_for("Жизнь");
+        assert!(missing.contains(&"pirata".to_string()), "{missing:?}");
+        assert!(!missing.contains(&"serif".to_string()), "{missing:?}");
+    }
+
     use super::*;
 
     #[test]

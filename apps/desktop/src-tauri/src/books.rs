@@ -5,14 +5,15 @@
 
 use std::path::{Path, PathBuf};
 
+use deckle_core::metadata_fill::{Metadata, Missing, lookup};
 use deckle_core::preflight::{Chapter, CoverSource, PreflightOptions, preflight};
 use deckle_core::typography::TypographyReport;
 use deckle_library::catalog::{Entry, catalog, cover_of};
-use deckle_library::details::{Details, fix};
+use deckle_library::details::{Details, fix, read_book};
 use deckle_library::sources::{Sources, home};
 use deckle_library::upgrade::Upgrades;
 use deckle_library::watch::{Watched, scan, seen_path};
-use deckle_library::{Library, LibraryConfig};
+use deckle_library::{Library, LibraryConfig, SeriesRef};
 use serde::Serialize;
 use tauri::State;
 
@@ -252,6 +253,206 @@ pub fn library_fix_details(dir: String, details: Details) -> Result<(), String> 
     )
 }
 
+/// The details of the library book in `dir`, as its copy's OPF has them.
+pub fn details_at(config: &Path, dir: &Path) -> Result<Details, String> {
+    let (lib, _) = Library::configured(config).ok_or("Set up a library first.")?;
+    let book = lib
+        .list()
+        .into_iter()
+        .find(|b| b.dir == dir)
+        .ok_or_else(|| format!("{}: not a book in the library", dir.display()))?;
+    read_book(&book.source_path())
+}
+
+#[tauri::command]
+pub fn library_read_details(dir: String) -> Result<Details, String> {
+    details_at(&deckle_library::config::default_path(), Path::new(&dir))
+}
+
+/// What Open Library has for the fields a book leaves empty (Books tab redesign §6). Empty
+/// fields here are ones it has nothing for, or the book already fills.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Suggested {
+    pub authors: Vec<String>,
+    pub series: Option<SeriesRef>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub publisher: Option<String>,
+    pub published: Option<String>,
+    pub language: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Suggestions {
+    /// "isbn" (the edition) or "search" (the work, by title and author).
+    pub source: &'static str,
+    pub suggested: Suggested,
+}
+
+/// Only what `own` leaves empty: the book's own details always win.
+pub fn suggest(own: &Details, found: &Metadata) -> Suggested {
+    let empty = |v: &Option<String>| v.as_deref().is_none_or(|s| s.trim().is_empty());
+    let or_none = |want: bool, v: &Option<String>| v.clone().filter(|_| want);
+    Suggested {
+        authors: if own.authors.is_empty() {
+            found.authors.clone()
+        } else {
+            vec![]
+        },
+        series: if own.series.is_none() {
+            found.series.as_ref().map(|s| SeriesRef {
+                name: s.name.clone(),
+                index: s.index,
+            })
+        } else {
+            None
+        },
+        description: or_none(empty(&own.description), &found.description),
+        tags: if own.tags.as_ref().is_none_or(Vec::is_empty) {
+            found.subjects.clone()
+        } else {
+            vec![]
+        },
+        publisher: or_none(empty(&own.publisher), &found.publisher),
+        published: or_none(empty(&own.published), &found.published),
+        language: or_none(empty(&own.language), &found.language),
+    }
+}
+
+/// Looks the library book in `dir` up on Open Library. `None`: it has no record there.
+pub fn suggest_at(
+    config: &Path,
+    dir: &Path,
+    fetch: &mut deckle_core::matcher::Fetcher,
+) -> Result<Option<Suggestions>, String> {
+    let (lib, _) = Library::configured(config).ok_or("Set up a library first.")?;
+    let book = lib
+        .list()
+        .into_iter()
+        .find(|b| b.dir == dir)
+        .ok_or_else(|| format!("{}: not a book in the library", dir.display()))?;
+    let path = book.source_path();
+    let own = read_book(&path)?;
+    let info = deckle_core::inspect::inspect(&path).map_err(|e| e.to_string())?;
+    Ok(
+        lookup(&info, Missing::of(&info), fetch)?.map(|(md, source)| Suggestions {
+            source,
+            suggested: suggest(&own, &md),
+        }),
+    )
+}
+
+/// Open Library's suggestions for a library book. Online, so only with the metadata setting on
+/// or when the person `asked` (the editor's Look up on Open Library).
+#[tauri::command]
+pub async fn library_suggest_details(
+    state: State<'_, AppState>,
+    dir: String,
+    asked: bool,
+) -> Result<Option<Suggestions>, String> {
+    if !asked && !load_settings_from(&state.settings_file).metadata_fill {
+        return Err("Fill missing details is off in Settings → Books.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut fetch = |url: &str| {
+            deckle_core::wordwise::http_get_bytes(url)
+                .and_then(|b| String::from_utf8(b).map_err(|e| e.to_string()))
+        };
+        suggest_at(
+            &deckle_library::config::default_path(),
+            Path::new(&dir),
+            &mut fetch,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// A book Deckle sent to a Kindle, for the Kindle tab when that Kindle isn't plugged in
+/// (Kindle tab redesign §7).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SentBook {
+    /// The library copy, for its cover.
+    pub path: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    /// When it was last sent there, RFC 3339.
+    pub at: String,
+    pub cde: Option<String>,
+}
+
+/// A Kindle the library has sent books to, with those books, newest first.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SentKindle {
+    /// Its profile key (`ms:…`, `mtp:…`), as a connected Kindle's `DeviceRow.key`.
+    pub key: String,
+    pub name: String,
+    /// The last send to it.
+    pub last: String,
+    pub books: Vec<SentBook>,
+}
+
+/// The Kindles in the library's send records, most recently sent to first. Exports to folders
+/// are left out; a book sent twice counts once, at its latest send.
+pub fn sent_kindles(lib: &Library) -> Vec<SentKindle> {
+    let mut out: Vec<SentKindle> = Vec::new();
+    for book in lib.list() {
+        let m = &book.sidecar.metadata;
+        for s in book
+            .sidecar
+            .sends
+            .iter()
+            .filter(|s| !s.device.is_empty() && !s.device.starts_with("folder:"))
+        {
+            let k = match out.iter_mut().position(|k| k.key == s.device) {
+                Some(i) => &mut out[i],
+                None => {
+                    out.push(SentKindle {
+                        key: s.device.clone(),
+                        name: s.device_name.clone(),
+                        last: String::new(),
+                        books: Vec::new(),
+                    });
+                    out.last_mut().unwrap()
+                }
+            };
+            if s.at > k.last {
+                k.last = s.at.clone();
+                if !s.device_name.is_empty() {
+                    k.name = s.device_name.clone();
+                }
+            }
+            let path = book.source_path().to_string_lossy().into_owned();
+            match k.books.iter_mut().find(|b| b.path == path) {
+                Some(b) if s.at > b.at => {
+                    b.at = s.at.clone();
+                    b.cde = s.cde.clone();
+                }
+                Some(_) => {}
+                None => k.books.push(SentBook {
+                    path,
+                    title: m.title.clone(),
+                    authors: m.authors.clone(),
+                    at: s.at.clone(),
+                    cde: s.cde.clone(),
+                }),
+            }
+        }
+    }
+    for k in &mut out {
+        k.books.sort_by(|a, b| b.at.cmp(&a.at));
+    }
+    out.sort_by(|a, b| b.last.cmp(&a.last));
+    out
+}
+
+#[tauri::command]
+pub fn library_sent_kindles() -> Vec<SentKindle> {
+    Library::configured(&deckle_library::config::default_path())
+        .map(|(lib, _)| sent_kindles(&lib))
+        .unwrap_or_default()
+}
+
 pub fn watch_set_at(config: &Path, dir: Option<String>) -> Result<Option<String>, String> {
     let dir = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     if let Some(d) = &dir
@@ -330,6 +531,80 @@ mod tests {
     }
 
     #[test]
+    fn sent_kindles_list_each_kindles_books_newest_first_without_exports() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = Library::new(tmp.path().join("Library"));
+        let mut book = lib
+            .add(&deckle_kfx::fixtures::path("deckle-mini.epub"))
+            .unwrap()
+            .book;
+        let send = |device: &str, name: &str, at: &str, cde: &str| deckle_library::SendRecord {
+            device: device.into(),
+            device_name: name.into(),
+            file: "x.kfx".into(),
+            at: at.into(),
+            cde: Some(cde.into()),
+            ..Default::default()
+        };
+        book.sidecar.sends = vec![
+            send("ms:a", "Kindle", "2026-10-01T10:00:00Z", "PDOC"),
+            send("ms:a", "Paperwhite", "2026-10-12T10:00:00Z", "EBOK"),
+            send("mtp:b", "Oasis", "2026-09-01T10:00:00Z", "PDOC"),
+            send("folder:/tmp/out", "", "2026-10-20T10:00:00Z", "PDOC"),
+        ];
+        lib.save(&book).unwrap();
+        let k = sent_kindles(&lib);
+        assert_eq!(
+            k.iter()
+                .map(|k| (k.key.as_str(), k.name.as_str(), k.last.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("ms:a", "Paperwhite", "2026-10-12T10:00:00Z"),
+                ("mtp:b", "Oasis", "2026-09-01T10:00:00Z")
+            ]
+        );
+        assert_eq!(k[0].books.len(), 1, "sent twice, counted once");
+        assert_eq!(
+            k[0].books[0].cde.as_deref(),
+            Some("EBOK"),
+            "its latest send"
+        );
+        assert!(sent_kindles(&Library::new(tmp.path().join("Empty"))).is_empty());
+    }
+
+    #[test]
+    fn suggestions_cover_only_what_the_book_leaves_empty() {
+        let found = Metadata {
+            authors: vec!["Ada Field".into()],
+            description: Some("A blurb".into()),
+            subjects: vec!["SF".into()],
+            publisher: Some("Orbit".into()),
+            published: Some("2011".into()),
+            language: Some("en".into()),
+            ..Default::default()
+        };
+        let own = Details {
+            title: "T".into(),
+            authors: vec!["Me".into()],
+            description: Some(String::new()),
+            tags: Some(vec![]),
+            publisher: Some("Mine".into()),
+            published: Some(" ".into()),
+            language: Some("fr".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            suggest(&own, &found),
+            Suggested {
+                description: Some("A blurb".into()),
+                tags: vec!["SF".into()],
+                published: Some("2011".into()),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn the_catalog_covers_preflight_and_fix_details_work_on_a_library_book() {
         let tmp = tempfile::tempdir().unwrap();
         let config = tmp.path().join("library.json");
@@ -376,12 +651,18 @@ mod tests {
                 title: "Mended".into(),
                 authors: vec!["A. Mender".into()],
                 series: None,
+                ..Details::default()
             },
         )
         .unwrap();
         assert_eq!(
             catalog_at(&config, None, None).entries[0].entry.title,
             "Mended"
+        );
+        let read = details_at(&config, &book.dir).unwrap();
+        assert_eq!(
+            (read.title.as_str(), read.authors.clone()),
+            ("Mended", vec!["A. Mender".to_owned()])
         );
 
         let downloads = tmp.path().join("Downloads");
