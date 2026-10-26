@@ -53,11 +53,11 @@ export function addFeed(cfg: DailyConfig, name: string, url: string): Added | nu
   return { cfg: withKind({ ...cfg, feeds }, "feeds"), row: `feeds:${feeds.length - 1}` };
 }
 
-/** Another town, after Local; its search starts as its name. */
+/** Another town, after Local; Google News is searched for its name until it has a custom search. */
 export function addTown(cfg: DailyConfig, name: string): Added | null {
   const n = name.trim();
   if (!n) return null;
-  const places = [...(cfg.local.places ?? []), { name: n, google_news: n, feeds: [] }];
+  const places = [...(cfg.local.places ?? []), { name: n, google_news: "", feeds: [] }];
   return { cfg: withKind({ ...cfg, local: { ...cfg.local, places } }, "local"), row: `town:${places.length - 1}` };
 }
 

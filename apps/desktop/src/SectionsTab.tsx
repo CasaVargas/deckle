@@ -428,11 +428,20 @@ function TownBody({ index, draft, change, flush, fresh, onRemove }: { index: num
           <input autoFocus={fresh} value={p.name} placeholder="Asheville, NC" onChange={(e) => set((x) => ({ ...x, name: e.target.value }))} onBlur={flush} />
         </label>
         <label>
-          <span className="label">Google News search</span>
-          <input value={p.google_news} placeholder={p.name || "Same as the name"} onChange={(e) => set((x) => ({ ...x, google_news: e.target.value }))} onBlur={flush} />
+          <span className="label">Custom search (optional)</span>
+          <input
+            value={p.google_news}
+            placeholder={p.name || "The name"}
+            aria-label="Custom Google News search (optional)"
+            onChange={(e) => set((x) => ({ ...x, google_news: e.target.value }))}
+            onBlur={flush}
+          />
         </label>
       </div>
-      <p className="muted small">Its own section after Local. The weather stays on your town.</p>
+      <p className="muted small">
+        Its own section after Local. Deckle searches Google News for the name unless you give a custom search. The weather stays
+        on your town.
+      </p>
       <button
         className="quiet"
         onClick={() => {

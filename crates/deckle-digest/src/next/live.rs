@@ -100,9 +100,9 @@ fn sources(cfg: &Config) -> Vec<Source> {
     // other places' local news (#102), under Local's age window
     for p in &cfg.local.places {
         let max_items = p.max_items.unwrap_or(cfg.local.max_items);
-        if !p.google_news.trim().is_empty() {
+        if !p.search().is_empty() {
             push(Source {
-                url: google_news_url(&p.google_news, cfg.local.max_age_hours),
+                url: google_news_url(p.search(), cfg.local.max_age_hours),
                 max_age_hours: cfg.local.max_age_hours,
                 max_items,
                 briefs: true,

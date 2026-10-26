@@ -70,7 +70,7 @@ The page plan leaves Today: it becomes Sections.
     calendars, mention rain).
   - **Local**: your town (the same setting as Weather, said so), stories, and "Search Google News
     for something else" (`local.google_news`), shut while it matches the town.
-  - **Another town**: its name, its search, stories, Remove.
+  - **Another town**: its name, an optional custom search (the name is searched without one), stories, Remove.
   - **Something you follow** (an interest): its name, its own search, Also, Leave out,
     stories, Remove. The learning switches stay on the paper's own settings (§6).
   - **A feed**: its name, its address, stories, Remove. A topic feed: the topic, stories, Remove.
@@ -95,7 +95,7 @@ The menu, each with a line on what it is:
 - **Something you follow**: a team, a person, a topic. Asks for its name; becomes an interest.
 - **A news topic**: the topics not yet in the paper (today's ticked Topics).
 - **A website or feed**: a name and an address.
-- **Another town**: a name; its search starts as the name (as PR #194 makes the backend do).
+- **Another town**: a name; Google News is searched for it until it has a custom search.
 - **A paper you subscribe to**: opens the subscription setup in its new row.
 - **The back pages**: Weather, From Your Shelf, Puzzles, Lottery, Horoscope, On this day, as
   switches for the ones that are off.

@@ -195,13 +195,13 @@ counts every earlier section as reached in *How far you read* (see below).
 
 Keep up with a relative's town or a trip: each extra place gets its own local news section,
 printed right after your own Local and built the same way (its Google News search and any local
-feeds, merged, newest first). Weather, the almanac and the cover stay on your place. Add places in
+feeds, merged, newest first). The search is the place's name unless you give your own. Weather, the almanac and the cover stay on your place. Add places in
 the Daily tab (**The paper → Other places**), or in `digest.toml`:
 
 ```toml
 [[local.places]]
 name = "Asheville, NC"          # the section's title
-google_news = "Asheville NC"
+google_news = "Asheville NC"    # optional; empty searches the name
 feeds = []                      # local paper RSS feeds, merged in
 # max_items = 6                 # stories; default: [local] max_items
 ```

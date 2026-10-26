@@ -455,16 +455,14 @@ pub fn place_section(
     now: DateTime<Utc>,
     net: &dyn Net,
 ) -> Section {
-    if place.google_news.trim().is_empty() && place.feeds.is_empty() {
-        return super::unavailable(
-            &place.name,
-            format!("add a Google News search or local feeds for {}", place.name),
-        );
+    // an empty search falls back to the name (local places design §1)
+    if place.search().is_empty() && place.feeds.is_empty() {
+        return super::unavailable(&place.name, "give this place a name or local feeds");
     }
     local_news(
         &place.name,
         Some(format!("News from around {}", place.name)),
-        &place.google_news,
+        place.search(),
         &place.feeds,
         place.max_items.unwrap_or(cfg.local.max_items),
         cfg,

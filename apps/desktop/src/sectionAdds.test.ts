@@ -49,9 +49,9 @@ test("a feed needs its address, and takes the site's name when it has none", () 
   expect(a?.row).toBe("feeds:1");
 });
 
-test("another town searches its own name to start with", () => {
+test("another town needs only its name: Google News is searched for it", () => {
   const a = addTown(cfg(), " Asheville, NC ");
-  expect(a?.cfg.local.places).toEqual([{ name: "Asheville, NC", google_news: "Asheville, NC", feeds: [] }]);
+  expect(a?.cfg.local.places).toEqual([{ name: "Asheville, NC", google_news: "", feeds: [] }]);
   expect(a?.row).toBe("town:0");
   expect(addTown(cfg(), "")).toBeNull();
 });
