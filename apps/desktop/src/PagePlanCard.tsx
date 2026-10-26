@@ -62,7 +62,7 @@ export default function PagePlanCard({
           >
             <span className="handle" aria-hidden="true">{r.place === null ? "⋮⋮" : ""}</span>
             {r.place === null ? (
-              <label className="check" title={r.kind === "feeds" ? "Switches all your feeds" : undefined}>
+              <label className="check" title={r.kind === "feeds" ? "Switches all your feeds" : r.kind === "interests" ? "Switches all your interests" : undefined}>
                 <input type="checkbox" checked disabled={locked} onChange={() => onToggle(r, false)} />
               </label>
             ) : (
@@ -102,7 +102,7 @@ export default function PagePlanCard({
         {next.off.map((r, i) => (
           <li key={`off-${r.key}-${i}`} className="plan-row off">
             <span className="handle" aria-hidden="true" />
-            <label className="check" title={r.kind === "feeds" ? "Switches all your feeds" : undefined}>
+            <label className="check" title={r.kind === "feeds" ? "Switches all your feeds" : r.kind === "interests" ? "Switches all your interests" : undefined}>
               <input type="checkbox" checked={false} disabled={locked} onChange={() => onToggle(r, true)} />
             </label>
             <span className="plan-name">

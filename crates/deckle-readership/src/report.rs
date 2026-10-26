@@ -68,10 +68,11 @@ pub struct Suggestion {
     pub why: String,
 }
 
-const KINDS: [SectionKind; 9] = [
+const KINDS: [SectionKind; 10] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
+    SectionKind::Interests,
     SectionKind::Feeds,
     SectionKind::Shelf,
     SectionKind::Lottery,
@@ -81,15 +82,16 @@ const KINDS: [SectionKind; 9] = [
 ];
 
 fn kind_of(key: &str) -> Option<SectionKind> {
-    KINDS
-        .into_iter()
-        .find(|k| *k != SectionKind::Feeds && section_key(*k, None) == key)
+    KINDS.into_iter().find(|k| {
+        *k != SectionKind::Feeds && *k != SectionKind::Interests && section_key(*k, None) == key
+    })
 }
 
 /// What the paper prints for a section, for one no edition in the window had yet.
 fn paper_name(key: &str) -> String {
     if let Some(name) = key
         .strip_prefix("feeds:")
+        .or_else(|| key.strip_prefix("interests:"))
         .or_else(|| key.strip_prefix("local:"))
     {
         return name.to_owned();
@@ -117,6 +119,11 @@ fn current_keys(cfg: &Config) -> Vec<String> {
                 .feeds
                 .iter()
                 .map(|f| section_key(*k, Some(&f.name)))
+                .collect(),
+            SectionKind::Interests => cfg
+                .interests
+                .iter()
+                .map(|i| section_key(*k, Some(&i.name)))
                 .collect(),
             // Local, then each other place's local news
             SectionKind::Local => std::iter::once(section_key(*k, None))
@@ -238,7 +245,7 @@ pub fn report(state: &State, cfg: &Config) -> Report {
                 continue;
             }
             let (n, m, pos, size) = stats[i];
-            if row.key.starts_with("feeds:") {
+            if row.key.starts_with("feeds:") || row.key.starts_with("interests:") {
                 let Some(prev) = i.checked_sub(1).map(|p| &rows[p]) else {
                     continue;
                 };
@@ -337,6 +344,14 @@ pub fn apply(s: &Suggestion, cfg: &mut Config) -> Result<(), String> {
                 .then_some(())
                 .ok_or_else(|| format!("no place named {name}"))
         }
+        (SuggestionKind::Drop, None) if s.key.starts_with("interests:") => {
+            let name = &s.key["interests:".len()..];
+            let before = cfg.interests.len();
+            cfg.interests.retain(|i| i.name != name);
+            (cfg.interests.len() < before)
+                .then_some(())
+                .ok_or_else(|| format!("no interest named {name}"))
+        }
         (SuggestionKind::Drop, Some(name)) => {
             let before = cfg.feeds.len();
             cfg.feeds.retain(|f| f.name != name);
@@ -367,7 +382,31 @@ pub fn apply(s: &Suggestion, cfg: &mut Config) -> Result<(), String> {
                 _ => Err(format!("{name} is already first")),
             }
         }
-        (SuggestionKind::MoveUp, None) => Err("only feeds move up".into()),
+        // an interest moves up like a feed: within [[interests]], then the block itself
+        (SuggestionKind::MoveUp, None) if s.key.starts_with("interests:") => {
+            let name = &s.key["interests:".len()..];
+            let i = cfg
+                .interests
+                .iter()
+                .position(|it| it.name == name)
+                .ok_or_else(|| format!("no interest named {name}"))?;
+            if i > 0 {
+                cfg.interests.swap(i - 1, i);
+                return Ok(());
+            }
+            match cfg
+                .sections
+                .iter()
+                .position(|k| *k == SectionKind::Interests)
+            {
+                Some(j) if j > 0 => {
+                    cfg.sections.swap(j - 1, j);
+                    Ok(())
+                }
+                _ => Err(format!("{name} is already first")),
+            }
+        }
+        (SuggestionKind::MoveUp, None) => Err("only feeds and interests move up".into()),
     }
 }
 

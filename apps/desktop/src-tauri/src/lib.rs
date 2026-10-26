@@ -113,6 +113,8 @@ pub fn run() {
             readership::readership_apply,
             readership::readership_dismiss,
             readership::readership_set,
+            readership::interests_accept,
+            readership::interests_dismiss,
             morgue::morgue_month,
             morgue::morgue_search,
             morgue::morgue_show,

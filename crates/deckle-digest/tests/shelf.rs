@@ -593,6 +593,7 @@ mod page {
             long_reads: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
+            names: Vec::new(),
         };
         let (_, bytes) = render::render(&g, Vec::new())
             .into_iter()

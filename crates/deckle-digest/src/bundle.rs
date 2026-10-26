@@ -235,6 +235,7 @@ fn kind_name(key: &str) -> &'static str {
         "weather" => "weather",
         "local" => "local",
         "feeds" => "feeds",
+        "interests" => "interests",
         "shelf" => "shelf",
         "lottery" => "lottery",
         "horoscope" => "horoscope",

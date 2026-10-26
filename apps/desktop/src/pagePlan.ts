@@ -25,20 +25,25 @@ export function pressLine(p: Press, nowMs: number): string {
   return `Goes to press at ${p.at} · ${countdown(p.next, nowMs)}`;
 }
 
+/** Kinds whose rows come from a list in the config and stay one block in the paper. */
+const GROUPED: SectionKind[] = ["feeds", "interests"];
 const isFeed = (r: PagePlanRow) => r.kind === "feeds";
+const isInterest = (r: PagePlanRow) => r.kind === "interests";
+const grouped = (r: PagePlanRow) => GROUPED.includes(r.kind);
 
-/** The rows were made from this config: each feed (and place) row names the one at its index. */
+/** The rows were made from this config: each feed, interest (and place) row names the one at its index. */
 function matches(cfg: DailyConfig, rows: PagePlanRow[]): boolean {
   return (
     rows.filter(isFeed).every((r) => r.feed !== null && cfg.feeds[r.feed]?.name === r.name) &&
+    rows.filter(isInterest).every((r) => r.interest !== null && cfg.interests?.[r.interest]?.name === r.name) &&
     rows.every((r) => r.place === null || cfg.local.places?.[r.place]?.name === r.name)
   );
 }
 
 /**
- * Moves row `from` to `to` and writes the result into `sections` and `[[feeds]]` (spec §6.2).
- * The feeds stay one block: a section dropped inside it, or a feed dropped outside it, goes to
- * the block's nearest end.
+ * Moves row `from` to `to` and writes the result into `sections`, `[[interests]]` and `[[feeds]]`
+ * (spec §6.2). Each grouped kind stays one block: a section dropped inside a block, or a grouped
+ * row dropped outside its own block, goes to the block's nearest end.
  */
 export function reorder(cfg: DailyConfig, all: PagePlanRow[], from: number, to: number): DailyConfig {
   if (!matches(cfg, all)) return cfg;
@@ -54,20 +59,23 @@ export function reorder(cfg: DailyConfig, all: PagePlanRow[], from: number, to: 
   const order = rows.slice();
   const [moved] = order.splice(from, 1);
   order.splice(Math.max(0, Math.min(to, order.length)), 0, moved);
-  const at = order.indexOf(moved);
-  const others = order.map((r, i) => (isFeed(r) && r !== moved ? i : -1)).filter((i) => i >= 0);
-  if (others.length > 0) {
+  const block = (kind: SectionKind) => order.map((r, i) => (r.kind === kind && r !== moved ? i : -1)).filter((i) => i >= 0);
+  const snap = (kind: SectionKind, end: "start" | "end") => {
+    order.splice(order.indexOf(moved), 1);
+    const b = block(kind);
+    order.splice(end === "start" ? b[0] : b[b.length - 1] + 1, 0, moved);
+  };
+  for (const kind of GROUPED) {
+    const others = block(kind);
+    if (others.length === 0) continue;
+    const at = order.indexOf(moved);
     const first = others[0];
     const last = others[others.length - 1];
-    const snap = (end: "start" | "end") => {
-      order.splice(order.indexOf(moved), 1);
-      const block = order.map((r, i) => (isFeed(r) && r !== moved ? i : -1)).filter((i) => i >= 0);
-      order.splice(end === "start" ? block[0] : block[block.length - 1] + 1, 0, moved);
-    };
     const nearest = (): "start" | "end" => (at - first < last - at ? "start" : "end");
-    if (!isFeed(moved) && at > first && at < last) snap(nearest());
-    // a feed must touch the block: next to another feed, or between them
-    if (isFeed(moved) && !(at >= first - 1 && at <= last + 1)) snap(at < first ? "start" : "end");
+    // a row of another kind must not split this block
+    if (moved.kind !== kind && at > first && at < last) snap(kind, nearest());
+    // a row of this kind must touch its block: next to another, or between them
+    if (moved.kind === kind && !(at >= first - 1 && at <= last + 1)) snap(kind, at < first ? "start" : "end");
   }
   const sections: SectionKind[] = [];
   for (const r of order) {
@@ -78,7 +86,10 @@ export function reorder(cfg: DailyConfig, all: PagePlanRow[], from: number, to: 
   for (const s of cfg.sections) if (!sections.includes(s)) sections.push(s);
   const feedRows = order.filter(isFeed);
   const feeds = feedRows.length > 0 ? feedRows.map((r) => ({ ...cfg.feeds[r.feed ?? 0] })) : cfg.feeds.slice();
-  return { ...cfg, sections, feeds };
+  const interestRows = order.filter(isInterest);
+  const interests =
+    interestRows.length > 0 && cfg.interests ? interestRows.map((r) => ({ ...cfg.interests![r.interest ?? 0] })) : cfg.interests;
+  return interests === undefined ? { ...cfg, sections, feeds } : { ...cfg, sections, feeds, interests };
 }
 
 /** Sets a row's story budget, 1–20, on its own key. */
@@ -96,6 +107,8 @@ export function setBudget(cfg: DailyConfig, row: PagePlanRow, n: number): DailyC
       return { ...cfg, local: { ...cfg.local, max_items: v } };
     case "feeds":
       return { ...cfg, feeds: cfg.feeds.map((f, i) => (i === row.feed ? { ...f, max_items: v } : f)) };
+    case "interests":
+      return { ...cfg, interests: (cfg.interests ?? []).map((it, i) => (i === row.interest ? { ...it, max_items: v } : it)) };
     default:
       return cfg;
   }

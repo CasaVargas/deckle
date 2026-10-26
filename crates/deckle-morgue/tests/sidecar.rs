@@ -63,6 +63,7 @@ fn gathered() -> Gathered {
         long_reads: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
+        names: Vec::new(),
     }
 }
 

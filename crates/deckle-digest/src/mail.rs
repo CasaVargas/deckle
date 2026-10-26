@@ -261,6 +261,7 @@ pub fn write_test_epub(path: &Path, date: NaiveDate) -> Result<(), String> {
         long_reads: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
+        names: Vec::new(),
     };
     crate::write_edition(&gathered, path)
 }

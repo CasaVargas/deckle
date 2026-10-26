@@ -106,6 +106,7 @@ fn xhtml(section: deckle_digest::Section) -> String {
         long_reads: Vec::new(),
         reading_outcomes: Vec::new(),
         notes: Vec::new(),
+        names: Vec::new(),
     };
     let files = render::render(&g, Vec::new());
     let (_, bytes) = files
@@ -241,6 +242,7 @@ fn large_print_lists_the_strip_and_ships_its_stylesheet() {
             long_reads: Vec::new(),
             reading_outcomes: Vec::new(),
             notes: Vec::new(),
+            names: Vec::new(),
         };
         let (_, css) = render::render(&g, Vec::new())
             .into_iter()

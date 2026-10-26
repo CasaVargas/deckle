@@ -423,6 +423,7 @@ fn connection_records_highlights_and_presence() {
             name: "Front page".into(),
             start: 0,
             items: None,
+            stories: Vec::new(),
         }],
     });
     readership.reads.entry(date).or_default().insert(
@@ -433,6 +434,7 @@ fn connection_records_highlights_and_presence() {
             last: None,
             last_read: None,
             seen: "x".into(),
+            history: Vec::new(),
         },
     );
     readership
@@ -498,6 +500,7 @@ fn pruned_editions_are_no_longer_on_the_kindle() {
                 name: "Front page".into(),
                 start: 0,
                 items: None,
+                stories: Vec::new(),
             }],
         });
         readership.reads.entry(date).or_default().insert(
@@ -508,6 +511,7 @@ fn pruned_editions_are_no_longer_on_the_kindle() {
                 last: None,
                 last_read: None,
                 seen: "x".into(),
+                history: Vec::new(),
             },
         );
     }
