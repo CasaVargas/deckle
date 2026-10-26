@@ -20,10 +20,13 @@ const PULL_MIN_PARAS: usize = 6;
 /// How long a quoted passage must be to stand as a pull quote, in words.
 const PULL_WORDS: RangeInclusive<usize> = 8..=30;
 
+/// Words a slug never is: small words…
 const STOPWORDS: &[&str] = &[
     "a", "an", "and", "the", "of", "to", "in", "on", "for", "at", "by", "with", "is", "are", "was",
     "will", "be", "as", "from", "after", "how", "why", "what", "new",
 ];
+/// …and the labels sites put before a headline.
+const LABELS: &str = "video watch photos live breaking update exclusive opinion analysis review";
 
 /// What the outputs print beyond the stories themselves.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -220,7 +223,10 @@ pub fn slug(title: &str) -> String {
         .collect();
     words
         .iter()
-        .find(|w| !STOPWORDS.contains(&w.to_lowercase().as_str()))
+        .find(|w| {
+            let w = w.to_lowercase();
+            !STOPWORDS.contains(&w.as_str()) && !LABELS.split(' ').any(|l| l == w)
+        })
         .or(words.first())
         .map(|w| w.to_uppercase())
         .unwrap_or_else(|| "STORY".into())
@@ -342,26 +348,38 @@ fn words(xhtml: &str) -> usize {
 
 /// `(opening, rest)`: the body's top-level paragraphs from the first, until they reach `words`
 /// words (at least one), and everything else. Whatever comes before the first paragraph (a
-/// lead figure) stays at the head of `rest`; anything but a paragraph ends the opening. `None`
-/// when the body has no top-level paragraph.
+/// lead figure) stays at the head of `rest`, and so does a figure between the opening's
+/// paragraphs; anything else (a subhead, a list, a table) ends the opening. `None` when the
+/// body has no top-level paragraph.
 pub fn split_opening(body: &str, words_wanted: usize) -> Option<(String, String)> {
     let els = top_level(body);
     let first = els.iter().position(|e| e.para)?;
+    let is_figure = |e: &Element| body[e.start..].starts_with("<div class=\"figure");
+    let (mut paras, mut figures) = (Vec::new(), Vec::new());
     let mut count = 0;
-    let mut last = first;
-    for (k, e) in els.iter().enumerate().skip(first) {
-        if !e.para {
-            break;
-        }
-        count += words(&body[e.start..e.end]);
-        last = k;
-        if count >= words_wanted {
+    let mut end = els[first].end;
+    for e in &els[first..] {
+        if e.para {
+            paras.push(&body[e.start..e.end]);
+            count += words(&body[e.start..e.end]);
+            end = e.end;
+            if count >= words_wanted {
+                break;
+            }
+        } else if is_figure(e) {
+            figures.push(*e);
+        } else {
             break;
         }
     }
-    let (a, b) = (els[first].start, els[last].end);
-    let rest = format!("{}{}", &body[..a], body[b..].trim_start());
-    Some((body[a..b].to_owned(), rest))
+    let mut rest = body[..els[first].start].to_owned();
+    // a figure after the last paragraph taken was never passed over: it stays where it is
+    for f in figures.iter().filter(|f| f.start < end) {
+        rest.push_str(&body[f.start..f.end]);
+        rest.push('\n');
+    }
+    rest.push_str(body[end..].trim_start());
+    Some((paras.join("\n"), rest))
 }
 
 fn has_paragraph_text(body: &str) -> bool {
@@ -402,7 +420,8 @@ fn quoted(text: &str) -> Option<String> {
         let close = if open == '“' { '”' } else { '"' };
         let after = &rest[k + open.len_utf8()..];
         let end = after.find(close)?;
-        let inner = after[..end].trim();
+        // the comma that led into "she said" isn't part of the quote standing alone
+        let inner = after[..end].trim().trim_end_matches([',', ';', ':']);
         if PULL_WORDS.contains(&inner.split_whitespace().count()) {
             return Some(format!("{open}{inner}{close}"));
         }
@@ -476,6 +495,12 @@ mod tests {
         assert_eq!(slug("“Herons” Stay Later"), "HERONS");
         assert_eq!(slug("The And Of"), "THE");
         assert_eq!(slug("2026"), "STORY");
+        // a site's label is never the slug (the word after it may still be a weak one)
+        assert_ne!(
+            slug("Video shows humanoid AI robot roaming NYC streets"),
+            "VIDEO"
+        );
+        assert_eq!(slug("WATCH: Robot roams Manhattan"), "ROBOT");
         assert_eq!(slug(""), "STORY");
     }
 
@@ -522,6 +547,15 @@ mod tests {
         let (opening, rest) = split_opening(&body, 110).unwrap();
         assert_eq!(opening, p(20, "a"));
         assert_eq!(rest, format!("{fig}<h3>Sub</h3>{}", p(200, "b")));
+    }
+
+    #[test]
+    fn a_photo_between_paragraphs_moves_to_the_rest() {
+        let fig = "<div class=\"figure\"><img src=\"t\" alt=\"\"/> <span class=\"caption\">c</span></div>";
+        let body = format!("{}{fig}\n{}{}", p(40, "a"), p(80, "b"), p(30, "c"));
+        let (opening, rest) = split_opening(&body, 110).unwrap();
+        assert_eq!(opening, format!("{}\n{}", p(40, "a"), p(80, "b")));
+        assert_eq!(rest, format!("{fig}\n{}", p(30, "c")));
     }
 
     #[test]
@@ -669,6 +703,20 @@ mod tests {
         assert_eq!(pull_quote(&paras_with(6, &quote(10), 8)), None);
         // fewer than six paragraphs
         assert_eq!(pull_quote(&paras_with(2, &quote(10), 5)), None);
+    }
+
+    #[test]
+    fn a_quote_loses_the_comma_that_led_into_its_attribution() {
+        let said = format!("“{},” she said", ["c"; 9].join(" "));
+        assert_eq!(
+            pull_quote(&paras_with(2, &said, 6)).map(|p| p.text),
+            Some(format!("“{}”", ["c"; 9].join(" ")))
+        );
+        let asked = format!("“{}?” he asked", ["c"; 9].join(" "));
+        assert_eq!(
+            pull_quote(&paras_with(2, &asked, 6)).map(|p| p.text),
+            Some(format!("“{}?”", ["c"; 9].join(" ")))
+        );
     }
 
     #[test]

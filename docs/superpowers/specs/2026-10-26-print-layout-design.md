@@ -102,7 +102,9 @@ An empty section keeps its letter and its place, so the letters don't shift when
 The lead (from `front_plan`) jumps when its story has more after its opening:
 
 - **Opening:** the story body's top-level `<p>` elements, in order, until they reach 110 words
-  (at least one). A leading figure (`div.figure.lead`) isn't counted as part of the opening.
+  (at least one). Figures aren't part of the opening: one before it (`div.figure.lead`) or
+  between its paragraphs moves to the head of `rest`, in order, and the opening carries on past
+  it. Anything else (a subhead, a list, a table) ends the opening.
   The PDF moves it to the front page (§4.3); the EPUB leaves it in `rest`.
 - **Rest:** everything after the opening. When it holds no paragraph text, there's no jump: the
   story prints whole on the front page, and its section lists it as a refer (§5.4).
@@ -111,7 +113,8 @@ The lead (from `front_plan`) jumps when its story has more after its opening:
   front page, the story in its section.
 - **Slug:** the headline's first word that isn't a stopword (a short fixed list: a, an, and,
   the, of, to, in, on, for, at, by, with, is, are, was, will, be, as, from, after, how, why,
-  what, new), upper-cased, letters only. "Mill Yard Will Be a Market Again" gives MILL,
+  what, new, and the labels sites put before a headline: video, watch, photos, live, breaking,
+  update, exclusive, opinion, analysis, review), upper-cased, letters only. "Mill Yard Will Be a Market Again" gives MILL,
   "Council Weighs a Night Bus to the Hospital" gives COUNCIL. When the optional editor runs
   (daily LLM editor design), it may suggest a slug. A suggestion is used only if it's one word
   from the headline, so the slug always matches what the reader sees.
@@ -135,7 +138,9 @@ at least six paragraphs:
 
 - Candidates are sentences, from the third paragraph on, that contain a passage in quotation
   marks (“…” or "…") of 8 to 30 words.
-- The pull quote is that quoted passage, the first one found, with its marks.
+- The pull quote is that quoted passage, the first one found, with its marks. A comma,
+  semicolon or colon just inside the closing mark is dropped, since it led into an attribution
+  that isn't printed with it.
 - It's printed after the paragraph two after the one it came from, so it never sits beside its
   own sentence.
 - Nothing is made up or reworded. A story with no candidate gets no pull quote.

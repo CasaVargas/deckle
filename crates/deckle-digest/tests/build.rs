@@ -938,8 +938,10 @@ mod front {
             .collect();
         let s = section_xhtml(&g, 2);
         roxmltree::Document::parse(&s).unwrap();
+        // the comma that led into "said one stall holder" is dropped
+        let printed = "\u{201c}We have waited forty years for somebody to do something with that yard\u{201d}";
         let pull = s
-            .find(&format!("<p class=\"pull\">{quote}</p>"))
+            .find(&format!("<p class=\"pull\">{printed}</p>"))
             .unwrap_or_else(|| panic!("{s}"));
         assert!(s.find("paragraph4").unwrap() < pull);
         assert!(pull < s.find("paragraph5").unwrap());

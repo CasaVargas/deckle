@@ -44,9 +44,9 @@
 
 **Files:** Modify `docs/superpowers/specs/2026-10-26-print-layout-design.md`
 
-- [ ] §2.2: add the rule "no top-level paragraph means no jump, and the paper prints as today".
-- [ ] §5.3: the jump head carries `id="a<j>"`.
-- [ ] Commit with the plan: `docs(plan): print layout phase 1`.
+- [x] §2.2: add the rule "no top-level paragraph means no jump, and the paper prints as today".
+- [x] §5.3: the jump head carries `id="a<j>"`.
+- [x] Commit with the plan: `docs(plan): print layout phase 1`.
 
 ### Task 2: `print.rs`, body scanning, slug, opening and rest
 
@@ -58,7 +58,7 @@
 - `pub fn slug(title: &str) -> String`
 - `pub fn split_opening(body: &str, words: usize) -> Option<(String, String)>`: `(opening, rest)`, or `None` when the body has no top-level `<p>`.
 
-- [ ] **Tests first:**
+- [x] **Tests first:**
   - `slug("Mill Yard Will Be a Market Again") == "MILL"`
   - `slug("Council Weighs a Night Bus to the Hospital") == "COUNCIL"`
   - `slug("The Mill's Wheel") == "MILL"`
@@ -69,7 +69,7 @@
   - a subhead after the first paragraph stops the opening
   - no `<p>` gives `None`
   - `plain` decodes the entities and strips nested tags
-- [ ] Implement; run `cargo test -p deckle-digest print::`.
+- [x] Implement; run `cargo test -p deckle-digest print::`.
 
 ### Task 3: Books, labels, skybox and pull quotes
 
@@ -84,7 +84,7 @@
 - `pub struct Jump { section, article, slug, opening, rest }`.
 - `pub struct PrintPlan { book, skybox, jump: Option<Jump>, whole: Option<(usize, usize)> /* the lead printed whole */, pulls: BTreeMap<(usize, usize), Pull> }`, and `pub fn print_plan(g: &Gathered, front: &FrontPlan) -> PrintPlan`.
 
-- [ ] **Tests first:**
+- [x] **Tests first:**
   - **books:**
     - the default plan's keys give A A A B B B C C C C;
     - a plan that alternates kinds gets a new letter at each change;
@@ -107,13 +107,13 @@
     - a one-paragraph lead gets `whole`;
     - a lead without paragraphs gets neither;
     - pulls are taken from `rest` for the jumped story.
-- [ ] Implement; run `cargo test -p deckle-digest print::`.
+- [x] Implement; run `cargo test -p deckle-digest print::`.
 
 ### Task 4: EPUB styles
 
 **Files:** `src/render.rs` (`STYLE`, `LARGE_STYLE`)
 
-- [ ] Add:
+- [x] Add:
   - `.skybox` (centered, 0.75em, small caps, letter-spaced, a rule below)
   - `.folio` (0.75em, letter-spaced, uppercase, a rule below)
   - `p.jump` (bold italic, right-aligned)
@@ -121,14 +121,14 @@
   - `p.jumptitle` (italic)
   - `p.pull` (centered, italic, 1.25em, rules above and below)
   - `p.refer` (italic)
-- [ ] `LARGE_STYLE` lists `.skybox` and `.folio` among the classes forced to 1em.
-- [ ] Run `cargo test -p deckle-digest large_print`.
+- [x] `LARGE_STYLE` lists `.skybox` and `.folio` among the classes forced to 1em.
+- [x] Run `cargo test -p deckle-digest large_print`.
 
 ### Task 5: The front page and the section pages
 
 **Files:** `src/render.rs`; `tests/build.rs` (`mod front`)
 
-- [ ] **Tests first** (in `tests/build.rs`, `mod front`, with a helper that gives articles paragraph bodies):
+- [x] **Tests first** (in `tests/build.rs`, `mod front`, with a helper that gives articles paragraph bodies):
   - **front page:**
     - a skybox line with two links when two sections qualify;
     - the lead prints the opening and a `p.jump` link to `s1.xhtml#a1` that reads "Continued on A2: <SLUG> ›";
@@ -141,18 +141,18 @@
     - the whole-printed lead's section shows a `p.refer` with `id="a1"` linking to `front.xhtml#t0-0`;
     - a pull quote appears after the paragraph two after its source;
     - every `href` in every file resolves to a file and an id in the EPUB.
-- [ ] Update the existing assertions that change by design:
+- [x] Update the existing assertions that change by design:
   - `tile_meta_leaves_out_the_section_name`: metas are "A3 · meta";
   - `inside_today_tells_empty_from_unavailable`: "· unavailable<".
-- [ ] Implement:
+- [x] Implement:
   - `render_as` builds `front_plan` and `print_plan` once;
   - `front_page(g, &plan, &print, &labels)`;
   - `section_page(e, i, &plan, &print, &labels)`.
-- [ ] Regenerate the golden pages with `UPDATE_GOLDEN=1`, and check with `git diff` that only folio lines were added.
-- [ ] Run `cargo test -p deckle-digest --test build front`, then the golden tests and the nudge tests.
+- [x] Regenerate the golden pages with `UPDATE_GOLDEN=1`, and check with `git diff` that only folio lines were added.
+- [x] Run `cargo test -p deckle-digest --test build front`, then the golden tests and the nudge tests.
 
 ### Task 6: Verify on a real edition
 
-- [ ] Run the whole suite: `cargo test -p deckle-digest --no-fail-fast` (PDFium-dependent failures in a fresh worktree are environmental; see the Tolaria gotcha).
-- [ ] Build a sample edition offline from fixtures if one is available, else from a recent gathered edition. Unzip its EPUB, and check `front.xhtml` and one section page by eye (the markup, plus a render in the built-in browser).
-- [ ] Commit per task; push; update PR #212's title and body to cover phase 1.
+- [x] Run the whole suite: `cargo test -p deckle-digest --no-fail-fast` (PDFium-dependent failures in a fresh worktree are environmental; see the Tolaria gotcha).
+- [x] Build a sample edition offline from fixtures if one is available, else from a recent gathered edition. Unzip its EPUB, and check `front.xhtml` and one section page by eye (the markup, plus a render in the built-in browser).
+- [x] Commit per task; push; update PR #212's title and body to cover phase 1.
