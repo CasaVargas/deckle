@@ -162,6 +162,10 @@ name = "Carolina Panthers"      # the section's title; the search is the name in
   as any section does.
 - Interests sit before your feeds in the starter, so your interest wins a story over Sports.
   Each is a row in the page plan (budget editable there) and in How far you read.
+- **With the AI editor on** (`[llm]`), the editor also scores each interest story: about the
+  interest, merely mentioning it, or about something else that shares the words. The last kind
+  is dropped and the rest are ordered by score; a section with nothing left prints "Nothing new
+  about Rust today." Only headlines and excerpts go to the provider, never your `not` list.
 - Interests live in each paper's own file, so Dad's paper has Dad's.
 
 ```bash
@@ -258,6 +262,11 @@ deckle digest interests why "Bryce Young"    # the stories behind it
 
 Renaming an interest in the app keeps its history: its readership rows and what Deckle noticed
 move to the new name.
+
+With the AI editor on, the morning build also asks it to name what Deckle noticed, from the
+headlines only ("Young" becomes "Bryce Young", with a search that finds him and not every
+Young), so the suggestion reads properly and **Add as interest** uses that search. Highlighted
+text and your shelf never go to the provider.
 
 ### The weather page
 

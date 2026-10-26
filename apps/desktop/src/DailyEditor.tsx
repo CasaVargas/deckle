@@ -26,7 +26,7 @@ export default function DailyEditor({ value, onChange }: { value?: DailyEditorCo
       <input type="checkbox" checked={config.enabled} onChange={(e) => onChange({ ...config, enabled: e.target.checked })} />
       Remove duplicate news, add section briefs, and write horoscopes
     </label>
-    <p className="muted small">Off by default. When enabled, feed and local-news excerpts and horoscope signs go to your provider. Saved reading, calendars, and Kindle highlights stay private. If editing fails, the original paper still ships.</p>
+    <p className="muted small">Off by default. When enabled, feed and local-news excerpts and horoscope signs go to your provider. Saved reading, calendars, and Kindle highlights stay private. With interests, the editor also judges which stories are about them and names what Deckle noticed (from headlines only). If editing fails, the original paper still ships.</p>
     {config.enabled && <>
       <div className="grid2">
         <label><span className="label">Provider</span>
