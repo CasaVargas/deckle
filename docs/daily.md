@@ -455,8 +455,10 @@ for USB as before and the run's report says why. `--to <folder>` and `digest pus
 ## Papers you subscribe to
 
 If you pay for a newspaper's website, the Daily can sign in as you and read its full articles.
-**No publisher is supported yet**; The Pilot and other BLOX papers come next. Until then a
-subscriber story still prints as a headline, with a note saying why.
+**No publisher is supported yet**; The Pilot and other BLOX papers come next. Until then the
+site's stories print as a stranger would see them: a free story in full, and a story the site
+withholds as a headline with a note saying why. A saved article the site withholds waits in Your
+Reading without using up its tries.
 (`docs/superpowers/specs/2026-10-25-publisher-subscriptions-design.md`)
 
 Add the account to `digest.toml` (one block per site; the password is not stored here):
@@ -488,8 +490,11 @@ password, **Save password**, **Test sign-in** and **Remove**. `deckle digest lin
   `DECKLE_SITE_PASSWORD_<SITE>` is read instead: the site uppercased, anything that isn't a letter
   or digit as `_` (`DECKLE_SITE_PASSWORD_THEPILOT_COM`).
 - **The session** (the cookies from signing in) is kept in `sessions/<site>.json` beside
-  `digest.toml`, one file per site, readable only by you. Delete it to sign out; the next run signs
-  in again. `--forget` deletes it too.
+  `digest.toml`, one file per site, readable only by you, and only ever sent to the site over
+  HTTPS (a plain `http://` link is fetched signed out). Delete it to sign out; the next run signs
+  in again. `--forget` deletes it too, and works without a keychain (there is just no password to
+  delete).
+- **The site** must be a bare host: no user name, port or trailing dot (`thepilot.com`).
 
 ## Export folders: an iPad, a Boox, any folder
 

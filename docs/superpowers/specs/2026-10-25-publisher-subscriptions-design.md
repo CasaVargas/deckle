@@ -422,6 +422,6 @@ check with `deckle digest subscribe thepilot.com --test` and `deckle digest eedi
 - **Network errors in `login`** count as a failed attempt (the trait can't tell them apart). Revisit in PR 2 with a typed login error.
 - **Cached failures.** A failed entitlement fetch or home-page detect is cached for the run.
 - **Keychain.** `Keyring` gained a `service` parameter; `SecretError::NotSet` carries the site so the hint names `deckle digest subscribe <site>`.
-- **No section group yet.** `[[subscribed]]`'s section group is PR 2; in PR 1 every subscriber story prints as a headline with its reason.
+- **No section group yet.** `[[subscribed]]`'s section group is PR 2; in PR 1 every story on a subscribed site is extracted as a stranger's page, as today; one that doesn't extract prints as a headline with its reason (and a saved Your Reading link waits without spending a try).
 - **`--forget`** also deletes the session file.
 - **The Subscriptions card** sits in "The paper" room, not Delivery.

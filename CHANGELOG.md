@@ -3,8 +3,8 @@
 ## Unreleased
 
 - **Papers you subscribe to.** The Daily: accounts for the papers you subscribe to (`deckle digest
-  subscribe`), with the password in the keychain. No publisher is supported yet; subscriber stories
-  still print as headlines, now saying why.
+  subscribe`), with the password in the keychain. No publisher is supported yet; stories print as a
+  stranger would see them, and one the site withholds prints as a headline saying why.
 - **Many papers.** One Mac can print a paper for each Kindle: `papers/<slug>.toml` beside
   `digest.toml`, with its own title, sections, keep and email address. `kindle = "Mom's Kindle"`
   sends a paper only to that Kindle. `deckle digest papers` lists them, and `--paper <slug>`
