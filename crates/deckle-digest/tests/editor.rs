@@ -79,6 +79,7 @@ fn disabled_is_byte_identical_and_never_calls_a_provider() {
         &EditorConfig::default(),
         "secret",
         &mut |_, _, _| panic!("called"),
+        &[],
     );
     assert_eq!(before, snapshot(&g));
     assert!(g.notes.is_empty());
@@ -176,7 +177,13 @@ fn invalid_plans_and_transport_failures_leave_the_whole_edition_intact() {
     ] {
         let mut g = original();
         let before = snapshot(&g);
-        edit(&mut g, &on(), "secret", &mut |_, _, _| response.clone());
+        edit(
+            &mut g,
+            &on(),
+            "secret",
+            &mut |_, _, _| response.clone(),
+            &[],
+        );
         assert_eq!(snapshot(&g), before);
         assert_eq!(
             g.notes,
@@ -208,12 +215,18 @@ fn private_sections_urls_and_images_do_not_enter_the_prompt() {
         });
         g.news.push(i); // Even a mistaken news index cannot disclose a personal section.
     }
-    edit(&mut g, &on(), "secret", &mut |_, _, body| {
-        assert!(!body.contains("PRIVATE"));
-        assert!(!body.contains("https://example.test"));
-        assert!(body.contains("council"));
-        Ok(envelope(answer()))
-    });
+    edit(
+        &mut g,
+        &on(),
+        "secret",
+        &mut |_, _, body| {
+            assert!(!body.contains("PRIVATE"));
+            assert!(!body.contains("https://example.test"));
+            assert!(body.contains("council"));
+            Ok(envelope(answer()))
+        },
+        &[],
+    );
     assert!(g.notes.is_empty());
     assert_eq!(g.edition.sections[3].articles[0].body, "PRIVATE BODY");
 }
@@ -222,16 +235,24 @@ fn private_sections_urls_and_images_do_not_enter_the_prompt() {
 fn credentials_and_input_limits_fail_without_a_request() {
     let mut g = original();
     let before = snapshot(&g);
-    edit(&mut g, &on(), "", &mut |_, _, _| {
-        panic!("missing credential called provider")
-    });
+    edit(
+        &mut g,
+        &on(),
+        "",
+        &mut |_, _, _| panic!("missing credential called provider"),
+        &[],
+    );
     assert_eq!(snapshot(&g), before);
     assert_eq!(g.notes.len(), 1);
     let mut g = original();
     g.edition.sections[0].articles = vec![g.edition.sections[0].articles[0].clone(); 81];
-    edit(&mut g, &on(), "secret", &mut |_, _, _| {
-        panic!("oversized input called provider")
-    });
+    edit(
+        &mut g,
+        &on(),
+        "secret",
+        &mut |_, _, _| panic!("oversized input called provider"),
+        &[],
+    );
     assert_eq!(g.edition.sections[0].articles.len(), 81);
     assert_eq!(g.notes.len(), 1);
 }
@@ -271,6 +292,7 @@ fn anthropic_and_local_compatible_servers_share_the_transport() {
                     Ok(envelope(answer()))
                 }
             },
+            &[],
         );
         assert!(g.notes.is_empty());
         assert!(g.edition.sections[1].articles.is_empty());
@@ -293,4 +315,219 @@ fn settings_roundtrip_without_credentials_and_reject_secret_fields() {
     c.llm.enabled = false;
     deckle_digest::config::save(&file, &c).unwrap();
     assert!(!Config::load(&file).unwrap().llm.enabled);
+}
+
+// ---- interests (interests design §6): relevance scores ----
+
+/// `config()` plus an interest section "Rust" between the feeds and the horoscope: sections
+/// s0 First, s1 Second, s2 Rust, s3 Horoscope.
+fn config_with_interest() -> Config {
+    let mut c = config();
+    c.sections = vec![
+        SectionKind::Feeds,
+        SectionKind::Interests,
+        SectionKind::Horoscope,
+    ];
+    c.interests = vec![deckle_digest::config::InterestConfig {
+        name: "Rust".into(),
+        also: vec!["Cargo".into()],
+        not: vec!["corrosion".into()],
+        max_items: 5,
+        max_age_hours: 72,
+        full_text: Some(deckle_digest::config::FullText::No),
+        ..Default::default()
+    }];
+    c
+}
+
+/// `feed()` plus the two Google News searches of the interest: three stories, newest first
+/// "Rust 2.0 lands", "Rust Belt voters", "Cargo workspaces".
+fn feed_with_interest(url: &str) -> Result<Vec<u8>, String> {
+    if !url.contains("news.google.com") {
+        return feed(url);
+    }
+    let items: &[(&str, &str, &str)] = if url.contains("Cargo") {
+        &[("Cargo workspaces - Outlet", "https://x.test/c", "08:00:00")]
+    } else {
+        &[
+            ("Rust 2.0 lands - Outlet", "https://x.test/a", "10:00:00"),
+            ("Rust Belt voters - Outlet", "https://x.test/b", "09:00:00"),
+        ]
+    };
+    let body: String = items
+        .iter()
+        .map(|(t, l, h)| {
+            format!(
+                "<item><title>{t}</title><link>{l}</link><pubDate>Sat, 24 Oct 2026 {h} GMT</pubDate></item>"
+            )
+        })
+        .collect();
+    Ok(
+        format!("<rss version=\"2.0\"><channel><title>G</title>{body}</channel></rss>")
+            .into_bytes(),
+    )
+}
+
+fn original_with_interest() -> Gathered {
+    gather_with_editor(
+        &config_with_interest(),
+        date(),
+        now(),
+        &feed_with_interest,
+        &GatherOptions::default(),
+        "",
+        &mut |_, _, _| panic!("disabled editor called provider"),
+    )
+}
+
+/// A valid answer for `config_with_interest()`, with the given relevance scores for s2.
+fn answer_with_interest(relevance: Value) -> Value {
+    json!({
+        "duplicate_groups": [],
+        "briefs": [
+            {"section":"s0", "lines":["A park was approved."]},
+            {"section":"s1", "lines":["The same park was approved."]},
+            {"section":"s2", "lines":["Rust news."]}
+        ],
+        "horoscopes": [{"id":"s3a0", "text":"A quiet walk."}],
+        "relevance": relevance
+    })
+}
+
+fn titles(g: &Gathered, s: usize) -> Vec<String> {
+    g.edition.sections[s]
+        .articles
+        .iter()
+        .map(|a| a.title.clone())
+        .collect()
+}
+
+fn edit_interest(g: &mut Gathered, body_check: impl Fn(&str), answer: Value) {
+    let cfg = config_with_interest();
+    deckle_digest::editor::edit(
+        g,
+        &on(),
+        "secret",
+        &mut |_, _, body| {
+            body_check(body);
+            Ok(envelope(answer.clone()))
+        },
+        &cfg.interests,
+    );
+}
+
+#[test]
+fn interest_sections_carry_their_phrases_in_the_prompt() {
+    let mut g = original_with_interest();
+    assert_eq!(
+        titles(&g, 2),
+        ["Rust 2.0 lands", "Rust Belt voters", "Cargo workspaces"]
+    );
+    edit_interest(
+        &mut g,
+        |body| {
+            // the user message is a JSON string inside the request JSON
+            let b: Value = serde_json::from_str(body).unwrap();
+            let user = b["messages"][1]["content"].as_str().unwrap().to_owned();
+            assert!(
+                user.contains("\"interest\":{\"also\":[\"Cargo\"],\"name\":\"Rust\"}"),
+                "{user}"
+            );
+            assert!(!body.contains("corrosion"), "the not list stays home");
+        },
+        answer_with_interest(json!([])),
+    );
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+}
+
+#[test]
+fn relevance_drops_zeros_and_orders_by_score_then_recency() {
+    let mut g = original_with_interest();
+    edit_interest(
+        &mut g,
+        |_| {},
+        answer_with_interest(json!([{"section":"s2","scores":[
+            {"id":"s2a0","score":1},{"id":"s2a1","score":0},{"id":"s2a2","score":2}]}])),
+    );
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert_eq!(titles(&g, 2), ["Cargo workspaces", "Rust 2.0 lands"]);
+    assert_eq!(g.edition.sections[2].brief, ["Rust news."]);
+    // an unscored story keeps 1: a lone 2 goes first, the two unscored keep their order
+    let mut g = original_with_interest();
+    edit_interest(
+        &mut g,
+        |_| {},
+        answer_with_interest(json!([{"section":"s2","scores":[{"id":"s2a2","score":2}]}])),
+    );
+    assert_eq!(
+        titles(&g, 2),
+        ["Cargo workspaces", "Rust 2.0 lands", "Rust Belt voters"]
+    );
+}
+
+#[test]
+fn all_zero_leaves_the_note_and_no_lead() {
+    let mut g = original_with_interest();
+    edit_interest(
+        &mut g,
+        |_| {},
+        answer_with_interest(json!([{"section":"s2","scores":[
+            {"id":"s2a0","score":0},{"id":"s2a1","score":0},{"id":"s2a2","score":0}]}])),
+    );
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert!(g.edition.sections[2].articles.is_empty());
+    assert_eq!(
+        g.edition.sections[2].unavailable.as_deref(),
+        Some("Nothing new about Rust today.")
+    );
+    assert!(g.edition.sections[2].brief.is_empty());
+    let front = snapshot(&g)
+        .into_iter()
+        .find(|(p, _)| p.ends_with("front.xhtml"))
+        .map(|(_, b)| String::from_utf8(b).unwrap())
+        .unwrap();
+    // section index 2 is s3.xhtml; no tile or lead may point into it
+    assert!(!front.contains("s3.xhtml#a"), "{front}");
+}
+
+#[test]
+fn scores_for_a_feed_section_or_a_foreign_story_invalidate_the_answer() {
+    for relevance in [
+        json!([{"section":"s0","scores":[{"id":"s0a0","score":2}]}]),
+        json!([{"section":"s2","scores":[{"id":"s0a0","score":2}]}]),
+        json!([{"section":"s2","scores":[{"id":"s2a0","score":3}]}]),
+        json!([{"section":"s2","scores":[{"id":"s2a0","score":1},{"id":"s2a0","score":2}]}]),
+    ] {
+        let before = original_with_interest();
+        let mut g = original_with_interest();
+        edit_interest(&mut g, |_| {}, answer_with_interest(relevance));
+        assert_eq!(g.notes.len(), 1, "{:?}", g.notes);
+        assert_eq!(snapshot(&g), snapshot(&before));
+    }
+}
+
+#[test]
+fn an_old_shaped_answer_still_applies() {
+    let mut g = original_with_interest();
+    let mut answer = answer_with_interest(json!([]));
+    answer.as_object_mut().unwrap().remove("relevance");
+    edit_interest(&mut g, |_| {}, answer);
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert_eq!(g.edition.sections[0].brief, ["A park was approved."]);
+    assert_eq!(
+        titles(&g, 2),
+        ["Rust 2.0 lands", "Rust Belt voters", "Cargo workspaces"]
+    );
+}
+
+#[test]
+fn a_duplicate_removal_and_a_score_on_the_same_story_do_not_panic() {
+    let mut g = original_with_interest();
+    let mut answer = answer_with_interest(json!([{"section":"s2","scores":[
+        {"id":"s2a0","score":2},{"id":"s2a1","score":2},{"id":"s2a2","score":0}]}]));
+    // the park story in s0 and the Rust 2.0 story in s2 "cover the same event": s2a0 is removed
+    answer["duplicate_groups"] = json!([["s0a0", "s2a0"]]);
+    edit_interest(&mut g, |_| {}, answer);
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert_eq!(titles(&g, 2), ["Rust Belt voters"]);
 }

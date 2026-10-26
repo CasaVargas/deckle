@@ -609,7 +609,7 @@ pub fn gather_with_editor(
         reading_outcomes,
         notes,
     };
-    editor::edit(&mut gathered, &cfg.llm, key, post);
+    editor::edit(&mut gathered, &cfg.llm, key, post, &cfg.interests);
     gathered
 }
 
