@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Local no longer repeats a story.** The Daily's Local section skips a story an earlier section already printed and refills with its next one.
 - **The Daily: a paper you subscribe to prints in full.** The Pilot and other BLOX (TownNews) papers: sign in once, pick its sections, and they print as their own section group. Stories your plan doesn't cover print as a stranger sees them, with the reason.
 - **Papers you subscribe to.** The Daily: accounts for the papers you subscribe to (`deckle digest
   subscribe`), with the password in the keychain. No publisher is supported yet; stories print as a

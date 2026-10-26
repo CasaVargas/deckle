@@ -123,9 +123,10 @@ full_text = "lead"              # true, false or "lead"
 - `full_text = "lead"` is the default for a topic: the top story prints whole, the rest as short
   briefs. `true` prints every story whole, `false` none. A plain `url` entry follows the global
   full-text setting unless you set it.
-- **No repeats across sections:** a `[[feeds]]` section drops a story whose title an earlier news
-  section already printed (Local, other places, and earlier feed sections). Local and other places only
-  record their titles and are never trimmed themselves; Your Reading is never trimmed or recorded.
+- **No repeats across sections:** Local, a `[[feeds]]` section and a subscribed paper's section drop
+  a story whose title an earlier news section already printed, then refill from their next-newest
+  stories. Other places keep their own stories and only record their titles; Your Reading is never
+  trimmed or recorded.
 
 ### The front page and section fronts
 
@@ -505,7 +506,12 @@ paper's name. `max_items` is stories per section and `max_age_hours` the age win
 default to `[local]`'s. The `subscribed` section sits in `sections` right after `local` (add or
 move it there like any other), and the **Print this paper** switch on the Subscriptions card adds
 the block and lets you tick its sections and set the stories per section. A story already printed
-by an earlier section is skipped, so the paper doesn't repeat itself.
+by an earlier section is skipped (other places excepted: they keep their own stories), so the paper
+doesn't repeat itself; each section asks the site for five stories beyond its budget to refill from.
+
+Removing a subscription on the card drops this paper's group only. Another paper's file under
+`papers/` keeps its `[[subscribed]]` block, and that paper then prints the group as a stranger
+sees it, with the note below.
 
 If the site has a `[[subscribed]]` block but no account in `[[subscriptions]]`, the edition says so
 ("No subscription for <site> in digest.toml") and the stories print as a stranger sees them.

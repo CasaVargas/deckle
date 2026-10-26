@@ -430,9 +430,11 @@ check with `deckle digest subscribe thepilot.com --test` and `deckle digest eedi
 
 - **Signed-in marker.** BLOX is signed in when `tn-user-screenname` is present and non-empty. Spike 1 confirms it against a live account.
 - **Plan parsing.** The services parser is lenient. A plan that can't be read is `Walled::PlanUnknown`: nothing is unlocked and the story prints as a stranger sees it, with the note "couldn't read your plan".
-- **Origin.** The canonical `www` origin comes from the login form's action, not the configured host.
+- **Origin.** The login POST goes to the login form's own `action`, wherever it points. The services URL and the section feeds use the `https://www.<site>` rule (the configured host with `www.` added unless it already starts with it), not the form's action. Spike 1 confirms that `www` is the canonical origin for a live BLOX site.
+- **Feed spares.** A subscribed slug's feed asks for `max_items` + 5 (`SUBSCRIBED_SPARE`), so a group after Local can refill after dropping what Local printed; the press and the preview share one URL (one cache key), and the cut still uses `max_items`.
+- **A withheld page that extracts.** `Walled { NotInPlan | PlanUnknown }` is premium for certain: if its clear preview still extracts, it prints with the walled note (§9). With an unreadable plan, a page with nothing encrypted is `Open`; `PlanUnknown` is only for an encrypted page.
 - **`unlock` fails closed.** If the page's id list can't be read it unlocks nothing; a page with nothing encrypted is returned unchanged.
-- **Dedupe.** By title, in `sections` order. Local skips what an earlier section printed; places keep their own.
+- **Dedupe.** By title, in `sections` order. Local skips what an earlier section printed and refills; places keep their own. The page plan does the same. A slug listed twice in a group, a site in two groups, and `max_items = 0` are config errors.
 - **One kind.** A single `subscribed` section kind covers every `[[subscribed]]` group, in file order. This supersedes the per-site entry in §3.
 - **Slugs** are validated against BLOX's list (news, sports, opinion, obituaries, business, lifestyles).
 - **Divider page deferred.** The kicker carries the paper's name instead.
