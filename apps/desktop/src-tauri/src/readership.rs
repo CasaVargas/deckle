@@ -14,6 +14,12 @@ pub struct ReadershipView {
     /// `[sync] readership` in `digest.toml`.
     pub enabled: bool,
     pub report: Report,
+    /// What Deckle noticed about your reading (interests design §5.4).
+    pub noticed: Vec<deckle_readership::Noticed>,
+}
+
+fn today() -> deckle_digest::chrono::NaiveDate {
+    deckle_digest::chrono::Local::now().date_naive()
 }
 
 /// Paper `paper`'s config (`None`: the main paper, `digest`).
@@ -28,10 +34,43 @@ fn load_config(digest: &Path, paper: Option<&str>) -> Result<deckle_digest::Conf
 
 pub fn view_at(state: &Path, digest: &Path, paper: Option<&str>) -> Result<ReadershipView, String> {
     let cfg = load_config(digest, paper)?;
+    let learning = deckle_readership::Learning::load(&deckle_readership::Learning::path_for(&cfg));
     Ok(ReadershipView {
         enabled: cfg.sync.readership,
         report: deckle_readership::report(&State::load(state), &cfg),
+        noticed: deckle_readership::learn::suggest(&learning, &cfg, today()),
     })
+}
+
+/// Makes what Deckle noticed under `key` an interest of paper `paper`: the entry goes into
+/// its file (comments kept), the acceptance into its `interests.json`.
+pub fn accept_at(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    key: &str,
+) -> Result<ReadershipView, String> {
+    let mut cfg = load_config(digest, paper)?;
+    let path = deckle_readership::Learning::path_for(&cfg);
+    let mut learning = deckle_readership::Learning::load(&path);
+    deckle_readership::learn::accept(&mut learning, &mut cfg, key, today())?;
+    deckle_digest::papers::save(digest, &cfg)?;
+    learning.save(&path)?;
+    view_at(state, digest, paper)
+}
+
+pub fn dismiss_noticed_at(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    key: &str,
+) -> Result<ReadershipView, String> {
+    let cfg = load_config(digest, paper)?;
+    let path = deckle_readership::Learning::path_for(&cfg);
+    let mut learning = deckle_readership::Learning::load(&path);
+    deckle_readership::learn::dismiss(&mut learning, key, today())?;
+    learning.save(&path)?;
+    view_at(state, digest, paper)
 }
 
 fn suggestion(
@@ -158,6 +197,18 @@ pub fn readership_apply(id: String, paper: Option<String>) -> Result<ReadershipV
 pub fn readership_dismiss(id: String, paper: Option<String>) -> Result<ReadershipView, String> {
     let (s, d) = paths(paper.as_deref())?;
     dismiss_at(&s, &d, paper.as_deref(), &id)
+}
+
+#[tauri::command]
+pub fn interests_accept(key: String, paper: Option<String>) -> Result<ReadershipView, String> {
+    let (s, d) = paths(paper.as_deref())?;
+    accept_at(&s, &d, paper.as_deref(), &key)
+}
+
+#[tauri::command]
+pub fn interests_dismiss(key: String, paper: Option<String>) -> Result<ReadershipView, String> {
+    let (s, d) = paths(paper.as_deref())?;
+    dismiss_noticed_at(&s, &d, paper.as_deref(), &key)
 }
 
 /// Turning it on or off is the household's, so the view after is the main paper's.

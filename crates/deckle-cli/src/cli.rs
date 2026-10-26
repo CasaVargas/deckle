@@ -564,6 +564,12 @@ pub enum InterestsCommand {
     },
     /// Remove one by name.
     Remove { name: String },
+    /// Make something Deckle noticed an interest (`deckle digest interests` lists them).
+    Accept { phrase: String },
+    /// Set something Deckle noticed aside for 90 days.
+    Dismiss { phrase: String },
+    /// The stories behind something Deckle noticed, or behind an interest it suggested.
+    Why { name: String },
 }
 
 #[derive(Subcommand, Debug)]

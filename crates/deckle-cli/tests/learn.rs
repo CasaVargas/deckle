@@ -128,7 +128,11 @@ fn a_push_records_taps_and_paper_highlights_into_interests_json() {
         signals.contains(&deckle_readership::learn::Signal::Highlight),
         "the clipping: {signals:?}"
     );
-    assert!(l.candidates.contains_key("panthers"), "{:?}", l.candidates.keys());
+    assert!(
+        l.candidates.contains_key("panthers"),
+        "{:?}",
+        l.candidates.keys()
+    );
 }
 
 #[test]
