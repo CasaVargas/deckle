@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { better, canBeBetter, connectedBy, continueReading, coverLine, freesLine, spareGroups, highlightsOf, onKindle, defaultSpare, kindWord, lastOpened, progressLine, shelfBooks, showCounts, spaceSlices, spareLine, tabCounts, worthALook } from "./kindleRooms";
+import { better, canBeBetter, connectedBy, sentOn, continueReading, coverLine, freesLine, spareGroups, highlightsOf, onKindle, defaultSpare, kindWord, lastOpened, progressLine, shelfBooks, showCounts, spaceSlices, spareLine, tabCounts, worthALook } from "./kindleRooms";
 import type { DeviceBookRow, DeviceShelf, Spare } from "./types";
 
 function book(over: Partial<DeviceBookRow>): DeviceBookRow {
@@ -215,5 +215,14 @@ describe("This Kindle, redesigned", () => {
   it("says how it's connected", () => {
     expect(connectedBy("mass_storage")).toBe("Connected over USB as a drive");
     expect(connectedBy("mtp")).toBe("Connected over USB as a media device");
+  });
+});
+
+describe("unplugged", () => {
+  it("dates a send, with the year when it isn't this one", () => {
+    const now = new Date("2026-10-26T12:00:00Z");
+    expect(sentOn("2026-10-12T09:00:00Z", now)).toBe("12 Oct");
+    expect(sentOn("2025-03-02T09:00:00Z", now)).toBe("2 Mar 2025");
+    expect(sentOn("nonsense", now)).toBe("");
   });
 });

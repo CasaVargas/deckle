@@ -296,3 +296,11 @@ export function freesLine(spare: Spare[], ticked: Set<string>): string {
 export function connectedBy(kind: "mass_storage" | "mtp"): string {
   return kind === "mtp" ? "Connected over USB as a media device" : "Connected over USB as a drive";
 }
+
+/** "12 Oct", or "12 Oct 2025" in another year. */
+export function sentOn(at: string, now: Date): string {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const day = d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  return d.getUTCFullYear() === now.getUTCFullYear() ? day : `${day} ${d.getUTCFullYear()}`;
+}

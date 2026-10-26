@@ -801,3 +801,14 @@ input[type=checkbox] { padding: 0; }
 .spare-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-top: 4px; font-size: 13px; }
 .spare-foot > span { flex: 1 1 200px; }
 .backup-more summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+
+/* Kindle tab redesign, part 5: unplugged (§7) */
+.unplugged-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; padding: 18px 20px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--muted); }
+.unplugged-text { flex: 999 1 360px; min-width: 0; color: var(--fg); }
+.unplugged-text h1, .unplugged-welcome h1 { font-family: ui-serif, Georgia, serif; font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+.unplugged-text p, .unplugged-welcome p { margin: 0 0 4px; line-height: 1.5; font-size: 13px; }
+.unplugged-text p:first-of-type { color: var(--muted); }
+.unplugged-empty { justify-content: center; align-items: center; }
+.unplugged-welcome { max-width: 520px; text-align: center; }
+.unplugged-welcome p { color: var(--muted); }
+.kcard-cover.faded { filter: saturate(0.75); opacity: 0.9; }
