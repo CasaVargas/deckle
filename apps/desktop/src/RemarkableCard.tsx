@@ -6,7 +6,8 @@ import type { RemarkableConfig, Screen } from "./types";
 
 /**
  * A reMarkable (other readers design §9): the paper as a PDF laid out for its screen, sent over
- * its USB web interface when it's plugged in. Each change saves at once.
+ * its USB web interface when it's plugged in. Each change saves at once. Its on switch is on
+ * its row in Delivery (Daily tab redesign §8).
  */
 export default function RemarkableCard({
   remarkable,
@@ -18,17 +19,12 @@ export default function RemarkableCard({
   const current = remarkable ?? DEFAULT_REMARKABLE;
   const change = (p: Partial<RemarkableConfig>) => onSave({ ...current, ...p });
   return (
-    <section className="card remarkable" aria-label="reMarkable">
-      <h3>reMarkable</h3>
+    <section className="remarkable" aria-label="reMarkable">
       <p className="muted small">
         The paper as a PDF laid out for your reMarkable, crossword and all, so you can write on it. Turn on Settings → Storage →
         USB web interface on the tablet; the paper goes over the next time it's plugged in. Deckle can't delete from a reMarkable,
         so older papers stay until you remove them.
       </p>
-      <div className="yourday-row">
-        <span>Send the paper to my reMarkable</span>
-        <Switch label="Send the paper to my reMarkable" checked={current.enabled} onChange={(on) => change({ enabled: on })} />
-      </div>
       {current.enabled && (
         <>
           <div className="export-row">

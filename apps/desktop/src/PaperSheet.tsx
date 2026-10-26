@@ -155,11 +155,6 @@ export default function PaperSheet({
             Large print
           </label>
           <p className="muted small">Nothing smaller than the body text, bigger headlines and one photo a story. Set the text size on the Kindle itself (Aa).</p>
-          <label className="inline">
-            Keep the last
-            <input type="number" min={1} max={14} value={draft.keep} onChange={(e) => edit((c) => (c.keep = Math.max(1, Number(e.target.value) || 1)), "now")} />
-            editions on the Kindle
-          </label>
         </div>
 
         <div className="sheet-group">

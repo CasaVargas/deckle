@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { daysLine, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
+import { daysLine, deliveryGroups, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import { newExport } from "./exportsView";
 import type { DailyConfig, ReadershipView } from "./types";
 
@@ -79,4 +79,28 @@ test("where you usually stop, once there are three editions read", () => {
   expect(stopLine(view(2, "Sports"))).toBeNull();
   expect(stopLine(view(5, null))).toBeNull();
   expect(stopLine(view(5, "Sports", false))).toBeNull();
+});
+
+test("Delivery: the Kindle by USB and email, then other readers with a row per folder", () => {
+  const plain = deliveryGroups(cfg());
+  expect(plain.kindle.map((r) => [r.key, r.status, r.on])).toEqual([
+    ["usb", "Keeps 3 papers", null],
+    ["email", "Off", false],
+  ]);
+  expect(plain.others.map((r) => r.key)).toEqual(["remarkable", "readers"]);
+  const full = deliveryGroups(
+    cfg({
+      keep: 1,
+      email: { enabled: true, to: "", from: "", smtp_host: "", smtp_port: 587, username: "", usb_too: false },
+      remarkable: { enabled: true, screen: "remarkable-paper-pro", books: false },
+      export: [newExport("/Users/me/iCloud/Deckle Daily", []), { ...newExport("/x/Boox", []), format: "pdf", photos: "gray" }],
+    }),
+  );
+  expect(full.kindle.map((r) => r.status)).toEqual(["Keeps 1 paper", "No address yet"]);
+  expect(full.others.map((r) => [r.key, r.name, r.status, r.on])).toEqual([
+    ["remarkable", "reMarkable", "reMarkable Paper Pro", true],
+    ["folder:0", "Deckle Daily", "EPUB · color", null],
+    ["folder:1", "Boox", "PDF · gray", null],
+    ["readers", "Kobo and PocketBook", "Automatic", null],
+  ]);
 });
