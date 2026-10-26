@@ -34,6 +34,10 @@ pub struct Read {
     pub last_read: Option<String>,
     /// When Deckle read it.
     pub seen: String,
+    /// `page.history.store`: the starts of the pages each jump was made from (interests
+    /// design §5.2, as amended in the learning plan).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<i64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -147,6 +151,7 @@ impl State {
                             last: p.last,
                             last_read: p.last_read,
                             seen: now.to_owned(),
+                            history: p.history,
                         }
                     }
                     Err(e) => {

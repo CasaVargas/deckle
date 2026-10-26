@@ -87,6 +87,7 @@ fn read(furthest: i64) -> Read {
         last: Some(furthest),
         last_read: None,
         seen: "x".into(),
+        history: Vec::new(),
     }
 }
 
