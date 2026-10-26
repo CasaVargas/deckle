@@ -76,8 +76,8 @@ describe("page cards", () => {
     expect(pageSummary("sending", s, null, [], "0.7.0")).toBe("Automatic");
     expect(pageSummary("general", s, { root: "/b", auto_add: true, books: 2 }, [], "0.7.0")).toBe("Library of 2 books");
     expect(pageSummary("books", s, null, [], "0.7.0")).toBe("Page numbers, tidy typography and covers when missing");
-    expect(pageSummary("xray", s, null, [], "0.7.0")).toBe("On, with an AI model and Wikipedia");
-    expect(pageSummary("wordwise", s, null, [], "0.7.0")).toBe("On, 3 of 5");
+    expect(pageSummary("reading", s, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia");
+    expect(pageSummary("reading", { ...s, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Both off");
     expect(pageSummary("kindles", s, null, [kindle], "0.7.0")).toBe("Paperwhite");
     expect(pageSummary("about", s, null, [], "0.7.0")).toBe("Deckle 0.7.0");
   });

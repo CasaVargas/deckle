@@ -11,9 +11,8 @@ import Books from "./settings/Books";
 import General from "./settings/General";
 import Kindles from "./settings/Kindles";
 import Overview from "./settings/Overview";
+import ReadingAids from "./settings/ReadingAids";
 import Sending from "./settings/Sending";
-import WordWise from "./settings/WordWise";
-import XRay from "./settings/XRay";
 import type { DeviceRow, HighlightsStatus, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 import type { UpdateState } from "./updates";
 
@@ -149,8 +148,7 @@ export default function SettingsView(props: Props) {
             />
           )}
           {page === "books" && <Books settings={settings} set={set} />}
-          {page === "xray" && <XRay settings={settings} set={set} />}
-          {page === "wordwise" && <WordWise settings={settings} set={set} />}
+          {page === "reading" && <ReadingAids settings={settings} set={set} />}
           {page === "kindles" && <Kindles devices={props.devices} onDeviceOptions={props.onDeviceOptions} />}
           {page === "about" && <About version={props.version} update={props.update} onUpdateState={props.onUpdateState} busy={props.busy} />}
           </>
