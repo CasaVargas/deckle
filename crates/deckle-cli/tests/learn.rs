@@ -190,8 +190,8 @@ fn krds_obj(name: &str, values: &[Vec<u8>]) -> Vec<u8> {
     b.push(0xff);
     b
 }
-/// A `.yjf` read to `furthest` with one jump made from the page starting at `from`.
-fn yjf_with_jump(furthest: i64, from: i64) -> Vec<u8> {
+/// A `.yjf` read to `furthest` with jumps made from the pages starting at `from`.
+fn yjf_with_jumps(furthest: i64, from: &[i64]) -> Vec<u8> {
     let p = format!("AQoEAAAAAAAA:{furthest}");
     let mut b = SIGNATURE.to_vec();
     b.extend(krds_long(1));
@@ -210,16 +210,14 @@ fn yjf_with_jump(furthest: i64, from: i64) -> Vec<u8> {
         "lpr",
         &[krds_int(2), krds_utf(&p), krds_long(1_792_620_390_980)],
     ));
-    b.extend(krds_obj(
-        "page.history.store",
-        &[
-            krds_int(1),
-            krds_obj(
-                "page.history.record",
-                &[krds_utf(&format!("AQoEAAAAAAAA:{from}")), krds_long(1)],
-            ),
-        ],
-    ));
+    let mut values = vec![krds_int(from.len() as i32)];
+    for f in from {
+        values.push(krds_obj(
+            "page.history.record",
+            &[krds_utf(&format!("AQoEAAAAAAAA:{f}")), krds_long(1)],
+        ));
+    }
+    b.extend(krds_obj("page.history.store", &values));
     b
 }
 
@@ -227,8 +225,9 @@ fn yjf_with_jump(furthest: i64, from: i64) -> Vec<u8> {
 fn a_tap_on_a_nudge_page_makes_it_an_interest_at_the_next_push() {
     let (_tmp, home, mount) = setup("");
     let dir = config_dir(&home);
-    // the recorded edition carried a nudge page for "bryce young" at 150 000; the reader
-    // tapped it (a jump from the page starting at 150 100)
+    // the recorded edition carried a nudge page for "bryce young" at 150 000 and its
+    // confirmation page at 150 400; the reader tapped the nudge (a jump from 150 100) and
+    // then Done (a jump from 150 450)
     let mut state = deckle_readership::State::load(&dir.join("readership.json"));
     let layout = state.editions.values_mut().next().unwrap();
     layout.sections.push(SectionStart {
@@ -238,12 +237,19 @@ fn a_tap_on_a_nudge_page_makes_it_an_interest_at_the_next_push() {
         items: None,
         stories: Vec::new(),
     });
+    layout.sections.push(SectionStart {
+        key: "nudge-ok:bryce young".into(),
+        name: "Noted".into(),
+        start: 150_400,
+        items: None,
+        stories: Vec::new(),
+    });
     state.save(&dir.join("readership.json")).unwrap();
     std::fs::write(
         mount
             .join("documents")
             .join(format!("{STEM}.sdr/{STEM}.yjf")),
-        yjf_with_jump(160_000, 150_100),
+        yjf_with_jumps(160_000, &[150_100, 150_450]),
     )
     .unwrap();
     let mut learning = deckle_readership::Learning::default();

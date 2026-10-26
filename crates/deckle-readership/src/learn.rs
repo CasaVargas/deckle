@@ -718,7 +718,7 @@ pub fn on_connection_at(
 }
 
 /// The suggestions to print as nudges (design §7): the top [`TOP`] when `[learning] nudges`
-/// is on, as `(key, name, why)`.
+/// is on, as `(key, name, why)`; the build prints the first three of them.
 pub fn nudges_for(
     learning: &Learning,
     cfg: &Config,
@@ -733,41 +733,83 @@ pub fn nudges_for(
         .collect()
 }
 
-/// Nudges tapped on the Kindle (design §7, §15): every page-history position of every read
-/// whose section is a `nudge:` page names a candidate, accepted as [`accept`] would, once; a
-/// tap after a dismissal on the Mac is the newer decision and still accepts. Returns the names
-/// added, for the caller to save the config and the learning file and to say so.
+/// Nudges tapped on the Kindle (design §7, §15, §17): in one read's page history, a jump made
+/// from a `nudge:` page and then one from its `nudge-ok:` page. Leaving the nudge page any
+/// other way, or paging into the confirmation page, is not a tap. Each key is accepted once,
+/// as [`accept`] does; a candidate pruned since the paper was built is taken from the page's
+/// own name; a dismissal made after the edition's day is the newer decision and wins. Nothing
+/// happens with learning off. Returns the names added, for the caller to save and to say so.
 pub fn accept_nudges(
     learning: &mut Learning,
     cfg: &mut Config,
     state: &State,
     today: NaiveDate,
 ) -> Vec<String> {
-    let mut keys: Vec<String> = Vec::new();
+    if !cfg.learning.enabled {
+        return Vec::new();
+    }
+    // key → (edition date, the nudge page's name)
+    let mut tapped: Vec<(String, NaiveDate, String)> = Vec::new();
     for (date, reads) in &state.reads {
         let Some(layout) = state.editions.get(date) else {
             continue;
         };
         for read in reads.values() {
+            let mut from_nudge: Vec<(String, String)> = Vec::new();
+            let mut from_ok: Vec<String> = Vec::new();
             for &pos in &read.history {
                 let Some(section) = crate::layout::section_at(layout, pos) else {
                     continue;
                 };
-                if let Some(key) = section.key.strip_prefix("nudge:")
-                    && !keys.iter().any(|k| k == key)
-                {
-                    keys.push(key.to_owned());
+                if let Some(key) = section.key.strip_prefix("nudge:") {
+                    from_nudge.push((key.to_owned(), section.name.clone()));
+                } else if let Some(key) = section.key.strip_prefix("nudge-ok:") {
+                    from_ok.push(key.to_owned());
+                }
+            }
+            for (key, name) in from_nudge {
+                if from_ok.contains(&key) && !tapped.iter().any(|(k, _, _)| *k == key) {
+                    tapped.push((key, *date, name));
                 }
             }
         }
     }
-    let mut added = Vec::new();
-    for key in keys {
-        if learning.accepted.contains_key(&key) {
+    let mut added: Vec<String> = Vec::new();
+    for (key, date, page_name) in tapped {
+        if learning.accepted.contains_key(&key)
+            || learning.dismissed.get(&key).is_some_and(|d| *d > date)
+        {
             continue;
         }
-        if let Ok(entry) = accept(learning, cfg, &key, today) {
-            added.push(entry.name);
+        let name = match accept(learning, cfg, &key, today) {
+            Ok(entry) => entry.name,
+            Err(_) => {
+                // pruned since the paper was built: the page said what it was
+                let name = page_name
+                    .strip_prefix("Deckle noticed: ")
+                    .unwrap_or(&page_name)
+                    .trim()
+                    .to_owned();
+                if name.is_empty() {
+                    continue;
+                }
+                if !cfg
+                    .interests
+                    .iter()
+                    .any(|i| i.name.trim().eq_ignore_ascii_case(&name))
+                {
+                    cfg.interests.push(InterestConfig {
+                        name: name.clone(),
+                        ..Default::default()
+                    });
+                }
+                cfg.ensure_section(SectionKind::Interests, SectionKind::Feeds);
+                learning.accepted.insert(key.clone(), today);
+                name
+            }
+        };
+        if !added.contains(&name) {
+            added.push(name);
         }
     }
     added

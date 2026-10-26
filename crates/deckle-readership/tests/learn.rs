@@ -591,12 +591,15 @@ fn naming_sends_only_public_headlines_inside_the_window_and_the_phrase_as_printe
 
 use deckle_readership::learn::{accept_nudges, nudges_for};
 
+/// front 0, horoscope 100, the nudge page 9000, its confirmation page 9300, end 9500.
 fn state_with_nudge(histories: &[(&str, Vec<i64>)]) -> State {
     let mut state = State::default();
-    let mut l = layout("2026-10-25", &[0, 100, 9000]);
+    let mut l = layout("2026-10-25", &[0, 100, 9000, 9300]);
     l.end = 9500;
     l.sections[1].key = "horoscope".into();
     l.sections[2].key = "nudge:bryce young".into();
+    l.sections[2].name = "Deckle noticed: Bryce Young".into();
+    l.sections[3].key = "nudge-ok:bryce young".into();
     state.record_layout(l);
     for (device, history) in histories {
         state.reads.entry(d("2026-10-25")).or_default().insert(
@@ -617,7 +620,8 @@ fn a_tap_on_a_nudge_page_accepts_it_once() {
     let mut l = seeded();
     let mut c = cfg();
     c.sections = vec![SectionKind::Local, SectionKind::Feeds];
-    let state = state_with_nudge(&[("K", vec![4, 9100]), ("K2", vec![9100])]);
+    // the tap (a jump from the nudge page) and then Done (a jump from the confirmation page)
+    let state = state_with_nudge(&[("K", vec![4, 9100, 9350]), ("K2", vec![9100, 9350])]);
     assert_eq!(
         accept_nudges(&mut l, &mut c, &state, today()),
         ["Bryce Young"]
@@ -634,28 +638,44 @@ fn a_tap_on_a_nudge_page_accepts_it_once() {
     assert_eq!(l.accepted["bryce young"], today());
     // again: nothing new
     assert!(accept_nudges(&mut l, &mut c, &state, today()).is_empty());
-    // a position elsewhere, or a nudge for a key no longer known, does nothing
+    // one step alone is not a tap: leaving the nudge page by Go To, or paging into the
+    // confirmation page and jumping from there
+    for history in [vec![150], vec![9100], vec![9350]] {
+        let mut l2 = seeded();
+        let mut c2 = cfg();
+        let one = state_with_nudge(&[("K", history.clone())]);
+        assert!(
+            accept_nudges(&mut l2, &mut c2, &one, today()).is_empty(),
+            "{history:?}"
+        );
+    }
+    // a candidate pruned since the paper was built: the page's own name stands in
     let mut l2 = seeded();
     let mut c2 = cfg();
-    assert!(
-        accept_nudges(
-            &mut l2,
-            &mut c2,
-            &state_with_nudge(&[("K", vec![150])]),
-            today()
-        )
-        .is_empty()
-    );
     l2.candidates.remove("bryce young");
+    assert_eq!(
+        accept_nudges(&mut l2, &mut c2, &state, today()),
+        ["Bryce Young"]
+    );
+    assert!(c2.interests.iter().any(|i| i.name == "Bryce Young"));
+    // learning off: nothing is written
+    let mut l2 = seeded();
+    let mut c2 = cfg();
+    c2.learning.enabled = false;
     assert!(accept_nudges(&mut l2, &mut c2, &state, today()).is_empty());
-    // dismissed on the Mac after the paper was built: the tap is the newer decision
+    // dismissed on the Mac before the paper was built: the tap is the newer decision
     let mut l3 = seeded();
     let mut c3 = cfg();
-    dismiss(&mut l3, "bryce young", today()).unwrap();
+    dismiss(&mut l3, "bryce young", d("2026-10-24")).unwrap();
     assert_eq!(
         accept_nudges(&mut l3, &mut c3, &state, today()),
         ["Bryce Young"]
     );
+    // dismissed on the Mac after the edition's day: the dismissal is the newer decision
+    let mut l4 = seeded();
+    let mut c4 = cfg();
+    dismiss(&mut l4, "bryce young", d("2026-10-26")).unwrap();
+    assert!(accept_nudges(&mut l4, &mut c4, &state, today()).is_empty());
 }
 
 #[test]

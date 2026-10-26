@@ -63,7 +63,13 @@ fn nudges_print_as_their_own_sections_after_everything() {
     let keys: Vec<&str> = g.edition.sections.iter().map(|s| s.key.as_str()).collect();
     assert_eq!(
         keys,
-        ["horoscope", "nudge:bryce young", "nudge:brandon sanderson"]
+        [
+            "horoscope",
+            "nudge:bryce young",
+            "nudge-ok:bryce young",
+            "nudge:brandon sanderson",
+            "nudge-ok:brandon sanderson"
+        ]
     );
     assert_eq!(g.edition.sections[1].title, "Deckle noticed: Bryce Young");
     assert_eq!(
@@ -71,28 +77,50 @@ fn nudges_print_as_their_own_sections_after_everything() {
         Some("Deckle noticed")
     );
     assert_eq!(g.edition.sections[1].articles.len(), 1);
-    assert!(!g.news.contains(&1) && !g.news.contains(&2), "{:?}", g.news);
-    // its own file: one link, to the front, and nothing else to tap
+    assert!(g.news.iter().all(|i| *i == 0), "{:?}", g.news);
+    // the nudge page: one link, to its confirmation page, and nothing else to tap
     let page = file(&g, "s2.xhtml");
-    assert!(page.contains("href=\"front.xhtml\""), "{page}");
+    assert!(page.contains("href=\"s3.xhtml\""), "{page}");
     assert!(
         page.contains("Tap here to make Bryce Young a section."),
-        "{page}"
-    );
-    assert!(
-        page.contains("Change your mind on the Daily tab."),
         "{page}"
     );
     assert!(!page.contains("class=\"back\""), "{page}");
     assert!(!page.contains("In this section"), "{page}");
     assert_eq!(page.matches("<a ").count(), 1, "{page}");
-    // the front's index lists it as any section
+    // the confirmation page: what happens next, and one link back to the front
+    let ok = file(&g, "s3.xhtml");
+    assert!(ok.contains("Bryce Young becomes a section"), "{ok}");
+    assert!(ok.contains("href=\"front.xhtml\""), "{ok}");
+    assert!(ok.contains("Change your mind on the Daily tab."), "{ok}");
+    assert_eq!(ok.matches("<a ").count(), 1, "{ok}");
+    // the front's index lists them as any section, with their one item
     let front = file(&g, "front.xhtml");
-    assert!(front.contains("Deckle noticed: Bryce Young"), "{front}");
+    assert!(
+        front.contains("s2.xhtml\">Deckle noticed: Bryce Young</a> <span class=\"meta\">1 item"),
+        "{front}"
+    );
     assert!(
         !front.contains("s2.xhtml#a"),
         "no tile for a nudge: {front}"
     );
+}
+
+#[test]
+fn other_outputs_get_the_paper_without_nudges() {
+    let g = gather(
+        &config(true, true),
+        vec![nudge("bryce young", "Bryce Young")],
+    );
+    let plain = g.without_nudges();
+    assert_eq!(plain.edition.sections.len(), 1);
+    assert_eq!(plain.news, g.news);
+    let pdf = deckle_digest::pdf::render(
+        &plain,
+        deckle_digest::pdf::Screen::Remarkable2,
+        deckle_digest::config::Photos::Gray,
+    );
+    assert!(!pdf.is_empty());
 }
 
 #[test]
@@ -125,5 +153,5 @@ fn at_most_three() {
         .map(|n| nudge(&format!("k{n}"), &format!("N{n}")))
         .collect();
     let g = gather(&config(true, true), nudges);
-    assert_eq!(g.edition.sections.len(), 4);
+    assert_eq!(g.edition.sections.len(), 1 + 3 * 2);
 }

@@ -2442,11 +2442,20 @@ fn digest(
                 &gather_options_for(&cfg, date),
             )?;
             record_naming(&cfg, &gathered);
-            report
-                .notes
-                .extend(archive_to_morgue(&cfg, date, &report.epub, &gathered));
+            report.notes.extend(archive_to_morgue(
+                &cfg,
+                date,
+                &report.epub,
+                &gathered.without_nudges(),
+            ));
             if bundle {
-                let path = deckle_digest::bundle::write(&gathered, &report, &output, true, now)?;
+                let path = deckle_digest::bundle::write(
+                    &gathered.without_nudges(),
+                    &report,
+                    &output,
+                    true,
+                    now,
+                )?;
                 report
                     .bundles
                     .push(deckle_digest::BundleBuild { books: true, path });
@@ -2583,7 +2592,7 @@ fn digest(
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
             // Keep the paper in the Morgue whatever happens to its conversion.
-            let note = archive_to_morgue(&cfg, date, &built.epub, &gathered);
+            let note = archive_to_morgue(&cfg, date, &built.epub, &gathered.without_nudges());
             built.notes.extend(note);
             built.notes.extend(no_kindle);
             // Export folders, like email, belong to the morning run, not to `--to <folder>`.
@@ -3934,7 +3943,11 @@ fn accept_tapped_nudges(
 ) {
     let path = deckle_readership::Learning::path_for(paper);
     let mut learning = deckle_readership::Learning::load(&path);
-    let mut cfg = paper.clone();
+    // the file as it is now, not as it was when the connection began: the app may have saved
+    let mut cfg = match deckle_digest::papers::load_one(main, paper.slug()) {
+        Ok(c) => c,
+        Err(e) => return eprintln!("learning: {e}"),
+    };
     let today = deckle_digest::chrono::Local::now().date_naive();
     let added = deckle_readership::learn::accept_nudges(&mut learning, &mut cfg, state, today);
     if added.is_empty() {

@@ -192,6 +192,19 @@ pub struct Edition {
     pub assets: Vec<(String, Vec<u8>)>,
 }
 
+impl Gathered {
+    /// The paper without its nudge pages (interests design §17): what every output but the
+    /// Kindle's gets, since only the Kindle's reading data can carry a tap. Section indexes in
+    /// `news` and `reading` are unchanged: nudges come after every other section.
+    pub fn without_nudges(&self) -> Gathered {
+        let mut g = self.clone();
+        g.edition
+            .sections
+            .retain(|s| !sources::nudges::is_nudge(&s.key));
+        g
+    }
+}
+
 impl Edition {
     /// `<paper> — Tuesday, October 20, 2026`
     pub fn full_title(&self) -> String {
@@ -324,6 +337,7 @@ impl BuildReport {
 }
 
 /// A gathered edition plus which of its sections carry news stories (for the headlines).
+#[derive(Clone)]
 pub struct Gathered {
     pub edition: Edition,
     pub news: Vec<usize>,
@@ -638,7 +652,10 @@ pub fn gather_with_editor(
     // (interests design §7, §15); never news, never in the editor's prompt.
     if cfg.learning.enabled && cfg.learning.nudges {
         for n in opts.nudges.iter().take(sources::nudges::MAX) {
-            edition.sections.push(sources::nudges::section(n));
+            // the nudge page links to its confirmation page, the next file
+            let ok_href = format!("s{}.xhtml", edition.sections.len() + 2);
+            edition.sections.push(sources::nudges::section(n, &ok_href));
+            edition.sections.push(sources::nudges::confirmation(n));
         }
     }
     edition.drop_template_photos();
@@ -707,11 +724,13 @@ pub fn build_gathered(
     let mut r = report(&gathered.edition, path);
     r.prefix = edition_prefix(cfg);
     r.long_reads = long_reads;
+    // Every other output gets the paper without its nudge pages (interests design §17).
+    let plain = gathered.without_nudges();
     // The fetch kept the photos in color for an export; the paper above grayed them.
     if cfg.wants_color() {
         let dir = out_dir.join("color");
         let color = dir.join(format!("{stem}.epub"));
-        write_edition_as(&gathered, &color, config::Photos::Color)?;
+        write_edition_as(&plain, &color, config::Photos::Color)?;
         r.color_epub = Some(color);
         for lr in &gathered.long_reads {
             let p = dir.join(format!("{}.epub", lr.file_stem));
@@ -727,7 +746,7 @@ pub fn build_gathered(
         if let Some(dir) = p.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        std::fs::write(&p, pdf::render(&gathered, screen, photos))
+        std::fs::write(&p, pdf::render(&plain, screen, photos))
             .map_err(|e| format!("{}: {e}", p.display()))?;
         r.pdfs.push(PdfBuild {
             screen,
@@ -739,7 +758,7 @@ pub fn build_gathered(
         let dir = out_dir
             .join("bundle")
             .join(if books { "books" } else { "paper" });
-        let path = bundle::write(&gathered, &r, &dir, books, now)?;
+        let path = bundle::write(&plain, &r, &dir, books, now)?;
         r.bundles.push(BundleBuild { books, path });
     }
     r.reading_outcomes = gathered.reading_outcomes.clone();
