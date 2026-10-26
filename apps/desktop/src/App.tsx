@@ -61,7 +61,7 @@ export default function App() {
   const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [bindOpen, setBindOpen] = useState(false);
   const [binding, setBinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -384,7 +384,6 @@ export default function App() {
   };
 
   const exportToFolder = async () => {
-    setExportOpen(false);
     const dir = await openDialog({ directory: true, multiple: false });
     if (typeof dir === "string") start({ kind: "folder", path: dir });
   };
@@ -420,6 +419,26 @@ export default function App() {
     setSettingsPage(page);
   };
   const closeSettings = useCallback(() => setSettingsPage(null), []);
+
+  /** The Kindle sends go to: the Books tray's foot and the Kindle tab's footer. */
+  const deviceControl = (
+    <div className="device">
+      <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
+      {devices.length === 0 ? (
+        "No Kindle connected"
+      ) : devices.length === 1 ? (
+        <span title={device?.root ?? undefined}>{device && deviceLabel(device)}</span>
+      ) : (
+        <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
+          {devices.map((d) => (
+            <option key={d.key} value={d.key}>
+              {deviceLabel(d)}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
 
   const noticeBar = notice && (
     <div className="notice" role="status">
@@ -479,24 +498,25 @@ export default function App() {
               Kindle Previewer not found
             </button>
           )}
+          {tab !== "kindle" && hasUpdate(update) && (
+            <button className="pill" onClick={() => openSettings("about")}>
+              {update.kind === "ready" ? "Restart to update" : "Update available"}
+            </button>
+          )}
           <div className="spacer" />
           {tab === "books" && (
-            <button className="ghost with-icon" onClick={pickBooks} disabled={busy}>
-              <Icon name="plus" /> Add books
-            </button>
-          )}
-          {tab === "books" && (
-            <button className="ghost" onClick={pickNotes} disabled={busy}>Add notes folder</button>
-          )}
-          {tab === "books" && (
-            <button className="ghost with-icon" onClick={() => setArticleOpen(true)} disabled={busy}>
-              <Icon name="link" /> Add article
-            </button>
-          )}
-          {tab === "books" && doneCount > 0 && !busy && (
-            <button className="ghost" onClick={clearDone}>
-              Clear done
-            </button>
+            <div className="split">
+              <button className="ghost with-icon" aria-haspopup="menu" aria-expanded={addOpen} onClick={() => setAddOpen((o) => !o)} disabled={busy}>
+                <Icon name="plus" /> Add <Icon name="chevron-down" size={14} />
+              </button>
+              {addOpen && (
+                <div className="menu" role="menu" onMouseLeave={() => setAddOpen(false)}>
+                  <button role="menuitem" onClick={() => { setAddOpen(false); pickBooks(); }}>Books and documents…</button>
+                  <button role="menuitem" onClick={() => { setAddOpen(false); setArticleOpen(true); }}>Web article…</button>
+                  <button role="menuitem" onClick={() => { setAddOpen(false); pickNotes(); }}>Notes folder…</button>
+                </div>
+              )}
+            </div>
           )}
           <button className="icon" aria-label="Settings" onClick={() => openSettings()}>
             <Icon name="settings" size={18} />
@@ -521,8 +541,20 @@ export default function App() {
         {tab === "books" && (
         <div className={docked ? "books-split" : "books-whole"}>
         {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
-        <main className={`list-area ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
-          {docked && <h2 className="dock-head">To send{books.length ? ` · ${books.length}` : ""}</h2>}
+        <main className={`tray ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
+          <div className="tray-scroll">
+          {(docked || books.length > 0) && (
+            <div className="tray-head">
+              <h2>To send</h2>
+              {books.length > 0 && <span className="muted">{books.length === 1 ? "1 book" : `${books.length} books`}</span>}
+              <div className="spacer" />
+              {doneCount > 0 && !busy && (
+                <button className="quiet" onClick={clearDone}>
+                  Clear done
+                </button>
+              )}
+            </div>
+          )}
           {books.length === 0 && docked ? (
             <div className="dock-empty muted">
               <p>Nothing to send yet.</p>
@@ -574,6 +606,21 @@ export default function App() {
               ))}
             </ul>
           )}
+          </div>
+          <div className="send-foot">
+            {deviceControl}
+            <button className="primary send" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
+              {busy ? "Working…" : runnable.length === 0 ? "Send to Kindle" : `Send ${runnable.length === 1 ? "1 book" : `${runnable.length} books`} to Kindle`}
+            </button>
+            <div className="send-more">
+              <button className="quiet" onClick={exportToFolder} disabled={busy || runnable.length === 0}>
+                Export to folder…
+              </button>
+              <button className="quiet" disabled={busy || parts.length < 2} title={parts.length < 2 ? "Add at least two files to bind them." : undefined} onClick={() => setBindOpen(true)}>
+                Bind into one book…
+              </button>
+            </div>
+          </div>
           {dragging && <div className="drop-overlay">Drop to add</div>}
         </main>
         {opened && (
@@ -593,51 +640,9 @@ export default function App() {
 
         {!settingsPage && noticeBar}
 
-        {(tab === "books" || tab === "kindle") && (
+        {tab === "kindle" && (
         <footer className="bar">
-          <div className="device">
-            <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
-            {devices.length === 0 ? (
-              "No Kindle connected"
-            ) : devices.length === 1 ? (
-              <span title={device?.root ?? undefined}>{device && deviceLabel(device)}</span>
-            ) : (
-              <select value={targetKey ?? ""} onChange={(e) => setTargetKey(e.target.value)} aria-label="Target Kindle">
-                {devices.map((d) => (
-                  <option key={d.key} value={d.key}>
-                    {deviceLabel(d)}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-          {tab === "books" && (
-          <div className="actions">
-            <button className="primary joined" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
-              {busy ? "Working…" : `Send to Kindle${runnable.length > 1 ? ` (${runnable.length})` : ""}`}
-            </button>
-            <div className="split">
-              <button className="secondary" aria-label="More actions" onClick={() => setExportOpen((o) => !o)} disabled={busy || runnable.length === 0}>
-                <Icon name="chevron-down" />
-              </button>
-              {exportOpen && (
-                <div className="menu up" onMouseLeave={() => setExportOpen(false)}>
-                  <button onClick={exportToFolder}>Export to folder…</button>
-                  <button
-                    disabled={parts.length < 2}
-                    title={parts.length < 2 ? "Add at least two files to bind them." : undefined}
-                    onClick={() => {
-                      setExportOpen(false);
-                      setBindOpen(true);
-                    }}
-                  >
-                    Bind into one book…
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-          )}
+          {deviceControl}
           {hasUpdate(update) ? (
             <button
               className="version link"
