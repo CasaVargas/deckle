@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { byOrigin, defaultTicked, leftAsIs, partwayLine, sourceLine, sourcesLine, upgradeLabel } from "./upgradesView";
-import type { RunTarget, UpgradeOf, UpgradeRow, UpgradesView } from "./types";
+import { sentMode, titleOf } from "./kindleRooms";
+import { byOrigin, defaultTicked, gainsLine, leftAlone, partwayLine, selectedLine, sourceLine, sourcesLine, upgradeLabel, upgradesHeading } from "./upgradesView";
+import type { DeviceBookRow, RunTarget, UpgradeOf, UpgradeRow, UpgradesView } from "./types";
 
 interface Props {
   target: RunTarget;
   targetKey: string | null;
   busy: boolean;
-  /** Puts the originals on the Books tab, each marked as an upgrade of the Kindle's copy. */
-  onUpgrade: (items: { source: string; cde: null; upgradeOf: UpgradeOf }[], what: string) => void;
+  /** Deckle's own books an older Deckle built (the shelf's `updatable`): a group of their own. */
+  updates: DeviceBookRow[];
+  /** Puts the originals on the Books tab: an upgrade marked as one of the Kindle's copy, an update in the mode it was sent in. */
+  onUpgrade: (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf }[], what: string) => void;
   /** After a Put back changed the Kindle. */
   onChanged: () => void;
   onNotice: (msg: string | null) => void;
@@ -22,12 +25,18 @@ interface Props {
  * ticked by default unless you're partway through, upgraded through the Books tab, with a
  * history to put any of them back.
  */
-export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged, onNotice, onCount }: Props) {
+export default function Upgrades({ target, targetKey, busy, updates, onUpgrade, onChanged, onNotice, onCount }: Props) {
   const [view, setView] = useState<UpgradesView | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [puttingBack, setPuttingBack] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // Older builds start ticked, as an upgrade you're not partway through does.
+  const updateKey = updates.map((b) => b.file).join("|");
+  useEffect(() => {
+    setTicked((t) => new Set([...t, ...updates.map((b) => b.file)]));
+  }, [updateKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -35,7 +44,7 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
     try {
       const v = await api.deviceUpgrades(target);
       setView(v);
-      setTicked(defaultTicked(v.rows));
+      setTicked(new Set([...defaultTicked(v.rows), ...updates.map((b) => b.file)]));
       onCount?.(v.rows.length);
     } catch (e) {
       setError(String(e));
@@ -60,8 +69,8 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
 
   // Books with no original here are rebuilt from the Kindle's own copy first; one that doesn't
   // come back whole stays as it is.
-  const upgrade = async (rows: UpgradeRow[]) => {
-    if (!view || rows.length === 0) return;
+  const upgrade = async (rows: UpgradeRow[], older: DeviceBookRow[]) => {
+    if (!view || rows.length + older.length === 0) return;
     const sources = new Map(rows.filter((r) => r.source).map((r) => [r.file, r.source as string]));
     const failed: string[] = [];
     const copies = rows.filter((r) => !r.source).map((r) => r.file);
@@ -80,13 +89,17 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
       }
     }
     const ready = rows.filter((r) => sources.has(r.file));
-    if (ready.length === 0) {
+    if (ready.length + older.length === 0) {
       onNotice(failed.join(" "));
       return;
     }
+    const n = ready.length + older.length;
     onUpgrade(
-      ready.map((r) => ({ source: sources.get(r.file)!, cde: null, upgradeOf: { device: view.device, file: r.file, title: r.title, origin: r.origin } })),
-      `${ready.length === 1 ? `${ready[0].title} is` : `${ready.length} books are`} ready to upgrade. The Kindle's copies are kept, so any of them can be put back.${failed.length ? ` Left as they are: ${failed.join("; ")}.` : ""}`,
+      [
+        ...ready.map((r) => ({ source: sources.get(r.file)!, cde: null, upgradeOf: { device: view.device, file: r.file, title: r.title, origin: r.origin } })),
+        ...older.map((b) => ({ source: b.library_source!, cde: sentMode(b) })),
+      ],
+      `${n === 1 ? `${ready[0]?.title ?? titleOf(older[0])} is` : `${n} books are`} ready to upgrade.${ready.length ? " The Kindle's copies are kept, so any of them can be put back." : ""}${failed.length ? ` Left as they are: ${failed.join("; ")}.` : ""}`,
     );
   };
 
@@ -111,74 +124,108 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
   if (!view) return null;
 
   const chosen = view.rows.filter((r) => ticked.has(r.file));
-  const left = leftAsIs(view.counts);
+  const chosenOlder = updates.filter((b) => ticked.has(b.file));
+  const total = view.rows.length + updates.length;
+  const picked = chosen.length + chosenOlder.length;
+  const alone = leftAlone(view.counts);
+  const groups: { key: string; title: string; note: string; files: string[]; items: React.ReactNode[] }[] = [
+    ...byOrigin(view.rows).map((g) => ({
+      key: g.origin,
+      title: g.title,
+      note: g.origin === "kindle-copy" ? "No original here, so Deckle works from what's on the Kindle" : "Deckle has the original on this computer",
+      files: g.rows.map((r) => r.file),
+      items: g.rows.map((r) => {
+        const warn = partwayLine(r);
+        return (
+          <li key={r.file} className="urow">
+            <input type="checkbox" checked={ticked.has(r.file)} onChange={(e) => toggle(r.file, e.target.checked)} aria-label={`Upgrade ${r.title}`} />
+            <span className="urow-cover" aria-hidden="true">
+              {r.cover ? <img src={r.cover} alt="" /> : <span className="cover-placeholder">{r.title.slice(0, 1)}</span>}
+            </span>
+            <span className="urow-meta">
+              <span>
+                <strong>{r.title}</strong> <span className="muted">{r.authors.join(", ")}</span>
+              </span>
+              <span className="urow-gains">{gainsLine(r.gains)}</span>
+              {warn && <span className="warn small">{warn}</span>}
+            </span>
+            <span className="urow-why" title={r.source ?? undefined}>
+              {sourceLine(r)}
+            </span>
+          </li>
+        );
+      }),
+    })),
+    ...(updates.length
+      ? [
+          {
+            key: "older",
+            title: "Built by an older Deckle",
+            note: "Deckle can build these better now, in the mode each was sent in",
+            files: updates.map((b) => b.file),
+            items: updates.map((b) => (
+              <li key={b.file} className="urow">
+                <input type="checkbox" checked={ticked.has(b.file)} onChange={(e) => toggle(b.file, e.target.checked)} aria-label={`Update ${titleOf(b)}`} />
+                <span className="urow-cover" aria-hidden="true">
+                  {b.cover ? <img src={b.cover} alt="" /> : <span className="cover-placeholder">{titleOf(b).slice(0, 1)}</span>}
+                </span>
+                <span className="urow-meta">
+                  <span>
+                    <strong>{titleOf(b)}</strong> <span className="muted">{b.authors.join(", ")}</span>
+                  </span>
+                  <span className="urow-gains">{b.updates.map((u) => u.text).join(" ")}</span>
+                </span>
+                <span className="urow-why">In your library</span>
+              </li>
+            )),
+          },
+        ]
+      : []),
+  ];
+  const tickAll = (files: string[], on: boolean) =>
+    setTicked((t) => {
+      const next = new Set(t);
+      for (const f of files) {
+        if (on) next.add(f);
+        else next.delete(f);
+      }
+      return next;
+    });
   return (
-    <section className="upgrades" aria-label="Upgrades">
-      {view.rows.length > 0 ? (
-        <div className="upgrades-head">
-          <div>
-            <h3>
-              {view.rows.length} book{view.rows.length === 1 ? "" : "s"} can be upgraded
-            </h3>
-            <p className="muted small">
-              Each comes back with what a store book has, built from its original on this computer or, failing that, from the Kindle's own copy. The Kindle's copy is kept with its highlights and
-              reading data, so any upgrade can be put back.
-            </p>
-          </div>
-          <button className="primary" disabled={busy || rebuilding || chosen.length === 0} onClick={() => upgrade(chosen)}>
-            {rebuilding ? "Rebuilding…" : upgradeLabel(chosen.length)}
-          </button>
-        </div>
-      ) : (
-        <p className="muted small">Every book on this Kindle that Deckle can upgrade is already current.</p>
+    <section className="upgrades-room" aria-label="Upgrades">
+      <div className="upgrades-intro">
+        <h2>{upgradesHeading(total)}</h2>
+        {total > 0 && (
+          <p className="muted">
+            Deckle rebuilds each one and puts it back where it was. Your place and your highlights stay. An upgraded book can be put back the way it was from History.
+          </p>
+        )}
+      </div>
+
+      {groups.map((g) => {
+        const all = g.files.every((f) => ticked.has(f));
+        return (
+          <section key={g.key} className="ugroup" aria-label={g.title}>
+            <div className="ugroup-head">
+              <label>
+                <input type="checkbox" checked={all} onChange={(e) => tickAll(g.files, e.target.checked)} aria-label={`Select all: ${g.title}`} />
+                <span className="ugroup-title">{g.title}</span>
+              </label>
+              <span className="muted small">{g.note}</span>
+            </div>
+            <ul className="urows">{g.items}</ul>
+          </section>
+        );
+      })}
+
+      {alone.total > 0 && (
+        <details className="left-alone">
+          <summary>
+            Deckle leaves {alone.total} book{alone.total === 1 ? "" : "s"} alone
+          </summary>
+          <p className="muted small">{alone.parts.join(" · ")}.</p>
+        </details>
       )}
-
-      {byOrigin(view.rows).map((g) => (
-        <div key={g.origin} className="upgrade-group">
-          <h4>
-            {g.title} <span className="muted small">· {g.rows.length}</span>
-          </h4>
-          <ul className="books upgrade-list" aria-label={g.title}>
-            {g.rows.map((r) => {
-              const warn = partwayLine(r);
-              return (
-                <li key={r.file} className="row">
-                  <label className="upgrade-tick">
-                    <input type="checkbox" checked={ticked.has(r.file)} onChange={(e) => toggle(r.file, e.target.checked)} aria-label={`Upgrade ${r.title}`} />
-                  </label>
-                  <div className="cover-thumb" aria-hidden="true">
-                    {r.cover ? <img src={r.cover} alt="" /> : <div className="cover-placeholder">{r.title.slice(0, 1)}</div>}
-                  </div>
-                  <div className="meta">
-                    <div className="title-line">
-                      <span className="title" title={r.file}>
-                        {r.title}
-                      </span>
-                    </div>
-                    <div className="byline">{r.authors.join(", ")}</div>
-                    <div className="shipped" title={r.source ?? undefined}>
-                      {sourceLine(r)}
-                    </div>
-                    <div className="gains">
-                      {r.gains.map((g) => (
-                        <span key={g} className="badge">
-                          {g}
-                        </span>
-                      ))}
-                    </div>
-                    {warn && <p className="warn small">{warn}</p>}
-                  </div>
-                  <button className="ghost" disabled={busy || rebuilding} onClick={() => upgrade([r])}>
-                    Upgrade
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
-
-      {left && <p className="muted small">{left}</p>}
       <p className="muted small">{sourcesLine(view.sources)}</p>
       {view.warnings.map((w) => (
         <p key={w} className="warn small">
@@ -187,10 +234,8 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
       ))}
 
       {view.history.length > 0 && (
-        <details className="upgrade-history">
-          <summary>
-            Upgraded on this Kindle ({view.history.length})
-          </summary>
+        <details className="upgrade-history" open={historyOpen} onToggle={(e) => setHistoryOpen((e.target as HTMLDetailsElement).open)}>
+          <summary>History: upgraded on this Kindle ({view.history.length})</summary>
           <ul>
             {view.history.map((h) => (
               <li key={`${h.old_file}-${h.at}`}>
@@ -205,6 +250,22 @@ export default function Upgrades({ target, targetKey, busy, onUpgrade, onChanged
             ))}
           </ul>
         </details>
+      )}
+
+      {total > 0 && (
+        <div className="foot-bar" role="toolbar" aria-label="Upgrade">
+          <span>
+            <strong>{selectedLine(picked, total)}</strong> <span className="foot-bar-note">· keep the Kindle plugged in while it runs</span>
+          </span>
+          {view.history.length > 0 && (
+            <button className="foot-bar-quiet" onClick={() => setHistoryOpen((o) => !o)}>
+              History
+            </button>
+          )}
+          <button className="primary" disabled={busy || rebuilding || picked === 0} onClick={() => upgrade(chosen, chosenOlder)}>
+            {rebuilding ? "Rebuilding…" : upgradeLabel(picked)}
+          </button>
+        </div>
       )}
     </section>
   );
