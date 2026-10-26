@@ -133,3 +133,37 @@ fn chapter_serializes_match_key() {
     let back: Chapter = serde_json::from_value(json).unwrap();
     assert_eq!(back, chapter);
 }
+
+#[test]
+fn plural_categories_match() {
+    for (category, want) in [
+        ("Desserts", "desserts"),
+        ("Soups", "soups"),
+        ("Cookies", "desserts"),
+        ("Salads", "salads"),
+        ("Sides", "sides"),
+        ("Drinks", "drinks"),
+        ("Sauces", "sauces"),
+        ("Smoothies", "drinks"),
+        // Whole word still: "soupy" is not a plural of "soup".
+        ("Soupy pasta", "other"),
+    ] {
+        assert_eq!(file(&[category], "Anything"), want, "{category}");
+    }
+}
+
+#[test]
+fn plural_of_y_keyword() {
+    let chapters = vec![Chapter {
+        id: "pastry".into(),
+        name: "Pastry".into(),
+        match_: vec!["pastry".into()],
+    }];
+    assert_eq!(file_into(&["Pastries".into()], "x", &chapters), "pastry");
+    assert_eq!(file_into(&["Pastrys".into()], "x", &chapters), "pastry");
+}
+
+#[test]
+fn title_fallback_when_categories_dont_match() {
+    assert_eq!(file(&["Appetizer"], "Tomato soup"), "soups");
+}

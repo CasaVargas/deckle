@@ -68,14 +68,29 @@ pub fn default_chapters() -> Vec<Chapter> {
         .collect()
 }
 
-/// A chapter's keywords as one whole-word, case-insensitive pattern; `None` when it has none.
+/// A keyword and its plurals as regex alternatives: the keyword itself, with a trailing "s" or
+/// "es", and, when it ends in "y", with the "y" swapped for "ies" ("pastry" -> "pastries").
+fn forms(keyword: &str) -> Vec<String> {
+    let mut forms = vec![
+        regex::escape(keyword),
+        regex::escape(&format!("{keyword}s")),
+        regex::escape(&format!("{keyword}es")),
+    ];
+    if let Some(stem) = keyword.strip_suffix('y') {
+        forms.push(regex::escape(&format!("{stem}ies")));
+    }
+    forms
+}
+
+/// A chapter's keywords, singular or plural, as one whole-word, case-insensitive pattern;
+/// `None` when it has none.
 fn keyword_pattern(chapter: &Chapter) -> Option<Regex> {
     let alternatives: Vec<String> = chapter
         .match_
         .iter()
         .map(|k| k.trim())
         .filter(|k| !k.is_empty())
-        .map(regex::escape)
+        .flat_map(forms)
         .collect();
     if alternatives.is_empty() {
         return None;
@@ -88,7 +103,7 @@ fn keyword_pattern(chapter: &Chapter) -> Option<Regex> {
 
 /// The id of the chapter a recipe belongs in (§6.2). The first chapter, in book order, whose
 /// keywords match a category wins; failing that, the first whose keywords match the title;
-/// failing that, [`EVERYTHING_ELSE`]. Sites often write several categories as one
+/// failing that, [`EVERYTHING_ELSE`]. Keywords match in the plural too ("Desserts"). Sites often write several categories as one
 /// comma-separated string ("Dinner, Main Course"), so each category is split on commas first.
 pub fn file_into(categories: &[String], title: &str, chapters: &[Chapter]) -> String {
     let patterns: Vec<(&Chapter, Regex)> = chapters
