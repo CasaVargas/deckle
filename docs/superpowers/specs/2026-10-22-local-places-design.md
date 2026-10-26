@@ -17,13 +17,16 @@ as before, and a save leaves it out while it's empty.
 ```toml
 [[local.places]]
 name = "Asheville, NC"          # the section's title in the paper
-google_news = "Asheville NC"    # a Google News search; "" for none
+google_news = "Asheville NC"    # a Google News search; "" searches the name
 feeds = []                      # local paper RSS feeds, merged in
 # max_items = 6                 # stories; default: [local] max_items
 ```
 
-A place with no search and no feeds prints "Unavailable today (add a Google News search or
-local feeds for <name>)", like Local does.
+An empty `google_news` falls back to the name, as typed: a place with only a name ("Asheville,
+NC") searches Google News for it. The name isn't quoted, as Local's search isn't: "Asheville, NC"
+in quotes would miss "Asheville, N.C.". A custom search wins when there is one (#101, the Daily
+tab's second box asked for both and a name alone printed nothing). Only a place with no name and
+no feeds prints "Unavailable today (give this place a name or local feeds)".
 
 ## 2. The paper
 
@@ -42,12 +45,15 @@ local feeds for <name>)", like Local does.
 - **Tomorrow's paper:** one page-plan row and one tile per place, after Local. Its headlines are
   fetched like Local's (the same twice-an-hour limit). The row's budget edits its `max_items`.
   Place rows follow Local: they aren't dragged on their own.
-- **Daily tab → The paper:** "Other places" with a name and a search per place, add and remove.
+- **Daily tab → The paper:** "Other places" with a name and an optional custom search per place
+  ("Custom search (optional)"; the hint says the name is searched by default), add and remove.
 - **Docs:** `docs/daily.md`, the starter's commented example, the CHANGELOG.
 
 ## 4. Testing
 
 - A config without places builds the same sections as before (existing tests unchanged).
+- A place with only a name searches its name; one with its own search searches that, not the
+  name.
 - Two places → two extra sections after Local, keys `local:<name>`, each requesting its own
   search URL; one failing leaves the other.
 - Config round-trip: an untouched config saves no `places`; one with places keeps them.

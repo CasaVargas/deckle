@@ -874,12 +874,12 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
               </label>
 
               <div className="label">Other places</div>
-              <p className="muted small">Local news for a relative's town or a trip, each its own section after Local. Weather stays on your place.</p>
+              <p className="muted small">Local news for a relative's town or a trip, each its own section after Local. Weather stays on your place. Deckle searches Google News for the name unless you give a custom search.</p>
               <div className="feeds">
                 {(draft.local.places ?? []).map((p, i) => (
                   <div key={i} className="feed">
                     <input value={p.name} placeholder="Name (e.g. Asheville, NC)" onChange={(e) => edit((c) => (c.local.places![i].name = e.target.value))} />
-                    <input value={p.google_news} placeholder="Google News search" onChange={(e) => edit((c) => (c.local.places![i].google_news = e.target.value))} />
+                    <input value={p.google_news} placeholder="Custom search (optional)" aria-label="Custom Google News search (optional)" onChange={(e) => edit((c) => (c.local.places![i].google_news = e.target.value))} />
                     <button className="icon small" aria-label="Remove place" onClick={() => edit((c) => c.local.places!.splice(i, 1))}>
                       <Icon name="x" size={14} />
                     </button>

@@ -469,7 +469,7 @@ fn places_print_after_local_each_from_its_own_search() {
         Some("News from around Asheville, NC")
     );
     assert!(!asheville.articles.is_empty());
-    // its own search, and only Local and Asheville search Google News
+    // its own search; Boone, with none, searches its name
     let asked = asked.lock().unwrap();
     assert!(
         asked.iter().any(|u| u.contains("q=Asheville+NC")),
@@ -479,34 +479,84 @@ fn places_print_after_local_each_from_its_own_search() {
         .iter()
         .filter(|u| u.starts_with("https://news.google.com/rss/search"))
         .count();
-    assert_eq!(searches, 2, "{asked:?}");
-    // Boone's feed is down: its section says so, and nothing else is touched
+    assert_eq!(searches, 3, "{asked:?}");
+    // Boone's feed is down: its name's search still prints, and nothing else is touched
     let boone = &g.edition.sections[at + 2];
-    assert!(
-        boone
-            .unavailable
-            .as_deref()
-            .unwrap()
-            .contains("boone.example"),
-        "{boone:?}"
-    );
+    assert!(!boone.articles.is_empty(), "{boone:?}");
     assert!(g.edition.sections[at].unavailable.is_none());
     // all three are news, but only Local is the local tier
     assert!(g.news.contains(&(at + 1)) && g.news.contains(&(at + 2)));
 }
 
+/// The Google News searches `c`'s paper asked for, and the paper.
+fn searches_for(c: &Config) -> (Vec<String>, deckle_digest::Gathered) {
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        fake(url)
+    };
+    let g = gather(c, date(), now(), &net);
+    let asked = asked.into_inner().unwrap();
+    let searches = asked
+        .into_iter()
+        .filter(|u| u.starts_with("https://news.google.com/rss/search"))
+        .collect();
+    (searches, g)
+}
+
+#[test]
+fn a_place_with_only_a_name_searches_its_name() {
+    let mut c = config();
+    c.local.places = vec![place("Pinehurst, NC", "  ")];
+    let (searches, g) = searches_for(&c);
+    assert!(
+        searches
+            .iter()
+            .any(|u| u.contains("q=Pinehurst%2C+NC+when")),
+        "{searches:?}"
+    );
+    let s = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "local:Pinehurst, NC")
+        .unwrap();
+    assert!(s.unavailable.is_none(), "{s:?}");
+    assert!(!s.articles.is_empty());
+}
+
+#[test]
+fn a_places_own_search_wins_over_its_name() {
+    let mut c = config();
+    c.local.places = vec![place("Pinehurst, NC", "Pinehurst golf")];
+    let (searches, _) = searches_for(&c);
+    assert!(
+        searches.iter().any(|u| u.contains("q=Pinehurst+golf+when")),
+        "{searches:?}"
+    );
+    assert!(
+        !searches.iter().any(|u| u.contains("q=Pinehurst%2C+NC")),
+        "{searches:?}"
+    );
+}
+
 #[test]
 fn a_place_with_nothing_to_read_says_so() {
     let mut c = config();
-    c.local.places = vec![place("Nowhere", "")];
+    c.local.places = vec![place("", "")];
     let g = gather(&c, date(), now(), &fake);
     let s = g
         .edition
         .sections
         .iter()
-        .find(|s| s.key == "local:Nowhere")
+        .find(|s| s.key == "local:")
         .unwrap();
-    assert!(s.unavailable.as_deref().unwrap().contains("for Nowhere"));
+    assert!(
+        s.unavailable
+            .as_deref()
+            .unwrap()
+            .contains("a name or local feeds")
+    );
 }
 
 #[test]
