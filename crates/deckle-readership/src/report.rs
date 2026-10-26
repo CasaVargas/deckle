@@ -382,7 +382,31 @@ pub fn apply(s: &Suggestion, cfg: &mut Config) -> Result<(), String> {
                 _ => Err(format!("{name} is already first")),
             }
         }
-        (SuggestionKind::MoveUp, None) => Err("only feeds move up".into()),
+        // an interest moves up like a feed: within [[interests]], then the block itself
+        (SuggestionKind::MoveUp, None) if s.key.starts_with("interests:") => {
+            let name = &s.key["interests:".len()..];
+            let i = cfg
+                .interests
+                .iter()
+                .position(|it| it.name == name)
+                .ok_or_else(|| format!("no interest named {name}"))?;
+            if i > 0 {
+                cfg.interests.swap(i - 1, i);
+                return Ok(());
+            }
+            match cfg
+                .sections
+                .iter()
+                .position(|k| *k == SectionKind::Interests)
+            {
+                Some(j) if j > 0 => {
+                    cfg.sections.swap(j - 1, j);
+                    Ok(())
+                }
+                _ => Err(format!("{name} is already first")),
+            }
+        }
+        (SuggestionKind::MoveUp, None) => Err("only feeds and interests move up".into()),
     }
 }
 

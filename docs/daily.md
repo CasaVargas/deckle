@@ -154,7 +154,9 @@ name = "Carolina Panthers"      # the section's title; the search is the name in
   item's description) names the interest or an `also` phrase, as whole words: "Rust" never
   matches "trust". The top story's own text is checked again after it's fetched; one that turns
   out to be about the wrong Rust is dropped and the next is tried.
-- **`not`** is the reader's word: "Florida Panthers" keeps the hockey team out.
+- **`not`** is the reader's word: "Florida Panthers" keeps the hockey team out. A one-word name
+  with everyday meanings ("Rust" is also a surname, a film and what happens to iron) wants its own
+  `query`: the card's search field, or `--query` from the terminal.
 - **A quiet day** leaves the section out of the paper rather than printing an empty one; the
   build notes "Nothing new about Rust today." A source that failed prints "Unavailable today"
   as any section does.
@@ -164,7 +166,7 @@ name = "Carolina Panthers"      # the section's title; the search is the name in
 
 ```bash
 deckle digest interests                       # list them
-deckle digest interests add "Rust" --not "Rust Belt" --also "Cargo"
+deckle digest interests add "Rust" --query '"Rust" programming' --also "Cargo"
 deckle digest interests remove "Rust"
 deckle digest --paper kid-courier interests add "Dinosaurs"
 ```

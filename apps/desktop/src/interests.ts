@@ -49,6 +49,21 @@ export function setList(cfg: DailyConfig, index: number, key: "also" | "not", te
   return { ...cfg, interests };
 }
 
+/** A custom Google News search; a blank field removes the key (the quoted name is searched). */
+export function setQuery(cfg: DailyConfig, index: number, text: string): DailyConfig {
+  const have = cfg.interests ?? [];
+  if (index < 0 || index >= have.length) return cfg;
+  const query = text.trim();
+  const interests = have.map((it, i) => {
+    if (i !== index) return it;
+    const next = { ...it };
+    if (query) next.query = query;
+    else delete next.query;
+    return next;
+  });
+  return { ...cfg, interests };
+}
+
 export function listText(v: string[] | undefined): string {
   return (v ?? []).join(", ");
 }

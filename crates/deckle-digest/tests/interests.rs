@@ -281,6 +281,98 @@ fn gather_places_interest_sections_where_the_kind_sits_and_notes_quiet_ones() {
 }
 
 #[test]
+fn a_story_shared_with_local_or_an_earlier_interest_prints_once_and_the_later_refills() {
+    let mut cfg = config();
+    cfg.sections = vec![SectionKind::Local, SectionKind::Interests];
+    cfg.local.google_news = "Moore County NC".into();
+    cfg.local.feeds.clear();
+    cfg.local.max_items = 2;
+    cfg.full_text = false;
+    let plain = |name: &str, also: Vec<String>| InterestConfig {
+        name: name.into(),
+        also,
+        max_items: 2,
+        max_age_hours: 72,
+        full_text: Some(FullText::No),
+        ..Default::default()
+    };
+    cfg.interests = vec![
+        plain("Panthers", vec!["Bryce Young".into()]),
+        plain("Bryce Young", vec![]),
+    ];
+    let local_url = google_news_url("Moore County NC", cfg.local.max_age_hours);
+    let net = Fake::new(vec![
+        (
+            local_url,
+            rss(&[
+                (
+                    "Panthers parade in Carthage - Pilot",
+                    "https://ok.example/l1",
+                    12,
+                ),
+                ("County fair opens - Pilot", "https://ok.example/l2", 11),
+            ]),
+        ),
+        (
+            search("\"Panthers\""),
+            rss(&[
+                (
+                    "Panthers parade in Carthage - Pilot",
+                    "https://ok.example/l1",
+                    12,
+                ),
+                (
+                    "Panthers sign a kicker - Outlet",
+                    "https://ok.example/p1",
+                    10,
+                ),
+                ("Panthers trade talk - Outlet", "https://ok.example/p2", 9),
+            ]),
+        ),
+        (
+            search("Bryce Young"),
+            rss(&[(
+                "Bryce Young throws four - Outlet",
+                "https://ok.example/b1",
+                8,
+            )]),
+        ),
+        (
+            search("\"Bryce Young\""),
+            rss(&[
+                (
+                    "Bryce Young throws four - Outlet",
+                    "https://ok.example/b1",
+                    8,
+                ),
+                (
+                    "Bryce Young on the bench - Outlet",
+                    "https://ok.example/b2",
+                    7,
+                ),
+                ("Bryce Young sits - Outlet", "https://ok.example/b3", 6),
+            ]),
+        ),
+    ]);
+    let g = deckle_digest::gather(&cfg, "2026-10-20".parse().unwrap(), now(), &net);
+    let section = |key: &str| g.edition.sections.iter().find(|s| s.key == key).unwrap();
+    // Local printed the parade; Panthers skips it and fills its 2 from its own next-newest;
+    // Young's story went nowhere else, so Young prints it and refills to 2.
+    assert_eq!(
+        titles(section("local")),
+        ["Panthers parade in Carthage", "County fair opens"]
+    );
+    assert_eq!(
+        titles(section("interests:Panthers")),
+        ["Panthers sign a kicker", "Panthers trade talk"]
+    );
+    assert_eq!(
+        titles(section("interests:Bryce Young")),
+        ["Bryce Young throws four", "Bryce Young on the bench"]
+    );
+}
+
+#[test]
 fn interests_without_the_kind_in_sections_are_noted_not_printed() {
     let mut cfg = config();
     cfg.sections = vec![SectionKind::Horoscope];

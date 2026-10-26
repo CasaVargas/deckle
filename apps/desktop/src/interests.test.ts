@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { addInterest, listText, removeInterest, setList } from "./interests";
+import { addInterest, listText, removeInterest, setList, setQuery } from "./interests";
 import type { DailyConfig } from "./types";
 
 const base = (over: Partial<DailyConfig>): DailyConfig => ({
@@ -36,6 +36,14 @@ test("addInterest adds the kind before feeds once and ignores duplicates", () =>
   const c = addInterest(a, "Cargo");
   expect(c.interests!.map((i) => i.name)).toEqual(["Rust", "Cargo"]);
   expect(c.sections).toEqual(["local", "interests", "feeds"]);
+});
+
+test("setQuery sets a custom search and clears it when blank", () => {
+  const cfg = addInterest(base({}), "Rust");
+  const q = setQuery(cfg, 0, ' "Rust" programming ');
+  expect(q.interests![0].query).toBe('"Rust" programming');
+  expect(setQuery(q, 0, "  ").interests![0].query).toBeUndefined();
+  expect(setQuery(q, 4, "x")).toBe(q);
 });
 
 test("removeInterest drops one by index", () => {

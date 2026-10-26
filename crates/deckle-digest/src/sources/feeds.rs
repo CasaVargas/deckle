@@ -624,6 +624,16 @@ mod tests {
     }
 
     #[test]
+    fn a_query_with_google_operators_encodes_and_gets_one_when() {
+        let url = google_news_url("\"Rust\" programming OR \"Rust language\" -game", 72);
+        assert!(
+            url.contains("q=%22Rust%22+programming+OR+%22Rust+language%22+-game+when%3A3d&"),
+            "{url}"
+        );
+        assert_eq!(url.matches("when").count(), 1);
+    }
+
+    #[test]
     fn briefs_split_the_source() {
         let items = as_briefs(vec![Item {
             title: "Standoff in Candor - WXII".into(),

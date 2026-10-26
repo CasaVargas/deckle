@@ -1057,12 +1057,15 @@ pub enum Photos {
     Color,
 }
 
-/// Each export has a name, unique, and a folder.
 /// Two interests may not share a name (ignoring case and surrounding spaces): the name is the
-/// section's key across editions.
+/// section's key across editions. Blank names (a row just added in the app) are left alone;
+/// their section says "give a name".
 pub fn validate_interests(interests: &[InterestConfig]) -> Result<(), String> {
     for (n, a) in interests.iter().enumerate() {
         let key = a.name.trim().to_lowercase();
+        if key.is_empty() {
+            continue;
+        }
         if let Some(b) = interests[n + 1..]
             .iter()
             .find(|b| b.name.trim().to_lowercase() == key)
@@ -1076,6 +1079,7 @@ pub fn validate_interests(interests: &[InterestConfig]) -> Result<(), String> {
     Ok(())
 }
 
+/// Each export has a name, unique, and a folder.
 pub fn validate_exports(exports: &[ExportConfig]) -> Result<(), String> {
     for (i, e) in exports.iter().enumerate() {
         let name = e.name.trim();
@@ -1333,6 +1337,11 @@ impl Config {
             }
         }
         for i in &mut self.interests {
+            // the name is the section's key: spaces around it would split the rows
+            let trimmed = i.name.trim();
+            if trimmed.len() != i.name.len() {
+                i.name = trimmed.to_owned();
+            }
             if i.max_items == 0 {
                 i.max_items = 5;
             }
@@ -1642,6 +1651,17 @@ mod tests {
             (3, 24, FullText::No)
         );
         assert!(c.learning.is_default() && c.learning.enabled);
+    }
+
+    #[test]
+    fn blank_interest_names_are_not_duplicates_and_names_are_trimmed() {
+        let c = Config::parse(
+            "[[interests]]\nname = \"\"\n[[interests]]\nname = \" \"\n[[interests]]\nname = \" Rust \"\n",
+        )
+        .unwrap();
+        assert_eq!(c.interests.len(), 3);
+        assert_eq!(c.interests[2].name, "Rust");
+        assert_eq!(c.interests[2].phrases(), vec!["Rust"]);
     }
 
     #[test]

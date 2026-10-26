@@ -19,7 +19,7 @@ import Shelf from "./Shelf";
 import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
 import { TOPICS, toggleTopic, topicOn, topicTitle } from "./topics";
-import { addInterest, listText, removeInterest, setList } from "./interests";
+import { addInterest, listText, removeInterest, setList, setQuery } from "./interests";
 import ExportFolders from "./ExportFolders";
 import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
@@ -744,6 +744,12 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                 {(draft.interests ?? []).map((it, i) => (
                   <div key={i} className="feed interest">
                     <input value={it.name} placeholder="e.g. Carolina Panthers" onChange={(e) => edit((c) => (c.interests![i].name = e.target.value))} />
+                    <input
+                      value={it.query ?? ""}
+                      placeholder={`Search: "${it.name || "Rust"}" programming`}
+                      title="Your own Google News search instead of the quoted name; OR and -word work"
+                      onChange={(e) => editWith((c) => setQuery(c, i, e.target.value))}
+                    />
                     <input
                       value={listText(it.also)}
                       placeholder="Also: Bryce Young, Dave Canales"

@@ -342,6 +342,26 @@ fn interest_sections_get_rows_move_up_and_drop_removes_the_entry() {
         ["Rust"]
     );
     assert!(apply(&drop, &mut c).is_err());
+    // Move up swaps within [[interests]], then moves the block ahead of the section before it
+    let up = deckle_readership::report::Suggestion {
+        id: "up:interests:Cargo".into(),
+        kind: SuggestionKind::MoveUp,
+        key: "interests:Cargo".into(),
+        title: String::new(),
+        why: String::new(),
+    };
+    let mut c = cfg.clone();
+    apply(&up, &mut c).unwrap();
+    assert_eq!(
+        c.interests
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Cargo", "Rust"]
+    );
+    apply(&up, &mut c).unwrap();
+    assert_eq!(c.sections, [SectionKind::Interests, SectionKind::Weather]);
+    assert!(apply(&up, &mut c).is_err());
 }
 
 #[test]

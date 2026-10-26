@@ -2126,7 +2126,6 @@ fn run_lock() -> Result<std::fs::File, String> {
     Ok(file)
 }
 
-/// `digest papers` (list) and `digest papers new`.
 /// `digest interests`: the paper's `[[interests]]`, listed, added to or removed from, on the
 /// paper's own file (interests design §5.5).
 fn digest_interests(
@@ -2224,6 +2223,7 @@ fn digest_interests(
     }
 }
 
+/// `digest papers` (list) and `digest papers new`.
 fn digest_papers(
     json: bool,
     path: &Path,

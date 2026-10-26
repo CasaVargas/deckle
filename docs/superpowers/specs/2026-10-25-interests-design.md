@@ -430,7 +430,13 @@ Increment 1 (§11 item 1) landed from `docs/superpowers/plans/2026-10-25-interes
 - **Desktop:** main paper only (call 9). "Your interests" card with name, also, not and an
   add field; interest rows in the page plan with budgets and block reordering.
 - **Not yet:** the `[learning]` switch in the app (increment 2), the editor's relevance scoring
-  (increment 3), nudges (increment 4).
+  (increment 3), nudges (increment 4), and the rename migration of call 11 (renaming an interest
+  in the card changes its key; its readership history stays under the old key until increment 2,
+  which adds `interests.json` and migrates both files in one save).
+- **After review (2026-10-25):** Move up applies to interests; the card has a search (`query`)
+  field; blank names are not duplicates; names are trimmed in `normalize` so the key, the page
+  plan and readership agree. `fetch_merged` changed two Local details in passing: a failing feed
+  is reported by host rather than full URL, and of a repeated story the newest copy is kept.
 - **Live check (2026-10-25):** one real build with `name = "Carolina Panthers", also =
   ["Bryce Young"]` and `name = "Rust", not = ["Rust Belt"]`. The Panthers section filled its
   five slots with stories naming the team or the quarterback; the quoted query and `when:3d`
