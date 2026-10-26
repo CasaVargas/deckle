@@ -2127,6 +2127,103 @@ fn run_lock() -> Result<std::fs::File, String> {
 }
 
 /// `digest papers` (list) and `digest papers new`.
+/// `digest interests`: the paper's `[[interests]]`, listed, added to or removed from, on the
+/// paper's own file (interests design §5.5).
+fn digest_interests(
+    json: bool,
+    path: &Path,
+    paper: Option<&str>,
+    action: Option<cli::InterestsCommand>,
+) -> Result<ExitCode, String> {
+    use deckle_digest::config::{InterestConfig, SectionKind};
+    let mut cfg = paper_config(path, paper)?;
+    match action {
+        None => {
+            #[derive(serde::Serialize)]
+            struct Out<'a> {
+                paper: &'a str,
+                interests: &'a [InterestConfig],
+            }
+            let out = Out {
+                paper: cfg.slug(),
+                interests: &cfg.interests,
+            };
+            emit(json, &out, || {
+                if cfg.interests.is_empty() {
+                    return "No interests yet: `deckle digest interests add \"Rust\"`.".to_owned();
+                }
+                cfg.interests
+                    .iter()
+                    .map(|i| {
+                        let mut line = format!(
+                            "{} — {} · {} stories",
+                            i.name,
+                            i.search_query(),
+                            i.max_items
+                        );
+                        if !i.also.is_empty() {
+                            line.push_str(&format!(" · also {}", i.also.join(", ")));
+                        }
+                        if !i.not.is_empty() {
+                            line.push_str(&format!(" · not {}", i.not.join(", ")));
+                        }
+                        line
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(cli::InterestsCommand::Add {
+            name,
+            query,
+            also,
+            not,
+            max_items,
+        }) => {
+            let name = name.trim().to_owned();
+            if name.is_empty() {
+                return Err("give the interest a name".into());
+            }
+            if cfg
+                .interests
+                .iter()
+                .any(|i| i.name.trim().eq_ignore_ascii_case(&name))
+            {
+                return Err(format!("an interest named \"{name}\" already exists"));
+            }
+            cfg.interests.push(InterestConfig {
+                name: name.clone(),
+                query: query.unwrap_or_default(),
+                also,
+                not,
+                max_items: max_items.unwrap_or(0),
+                ..Default::default()
+            });
+            let added = cfg.ensure_section(SectionKind::Interests, SectionKind::Feeds);
+            deckle_digest::papers::save(path, &cfg)?;
+            let out = serde_json::json!({ "added": name, "section_added": added });
+            emit(json, &out, || match added {
+                true => format!("added {name} (section \"interests\" added to sections)"),
+                false => format!("added {name}"),
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(cli::InterestsCommand::Remove { name }) => {
+            let before = cfg.interests.len();
+            cfg.interests
+                .retain(|i| !i.name.trim().eq_ignore_ascii_case(name.trim()));
+            if cfg.interests.len() == before {
+                return Err(format!("no interest named \"{name}\""));
+            }
+            deckle_digest::papers::save(path, &cfg)?;
+            let out = serde_json::json!({ "removed": name });
+            emit(json, &out, || format!("removed {name}"))?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
 fn digest_papers(
     json: bool,
     path: &Path,
@@ -2715,6 +2812,7 @@ fn digest(
         }
         cli::DigestCommand::Readership { action } => digest_readership(json, &path, paper, action),
         cli::DigestCommand::Papers { action } => digest_papers(json, &path, action),
+        cli::DigestCommand::Interests { action } => digest_interests(json, &path, paper, action),
         cli::DigestCommand::Lint { page } => digest_lint(json, &page, &deckle_digest::Http),
         cli::DigestCommand::Next { fetch } => {
             let cfg = load_digest_config(&path)?;

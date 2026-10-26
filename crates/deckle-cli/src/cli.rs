@@ -536,6 +536,34 @@ pub enum DigestCommand {
         #[command(subcommand)]
         action: Option<PapersCommand>,
     },
+    /// Things you care about, each its own section, hunted across the news every morning.
+    Interests {
+        #[command(subcommand)]
+        action: Option<InterestsCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum InterestsCommand {
+    /// Add one; the search is the name in quotes unless --query says otherwise.
+    Add {
+        /// The section's title, e.g. "Carolina Panthers".
+        name: String,
+        /// Your own Google News search instead of the quoted name (OR and -word work).
+        #[arg(long)]
+        query: Option<String>,
+        /// Another search, merged in; a story naming it is relevant. Repeatable.
+        #[arg(long = "also")]
+        also: Vec<String>,
+        /// A phrase that drops a story from the section. Repeatable.
+        #[arg(long = "not")]
+        not: Vec<String>,
+        /// Stories kept (default 5).
+        #[arg(long)]
+        max_items: Option<usize>,
+    },
+    /// Remove one by name.
+    Remove { name: String },
 }
 
 #[derive(Subcommand, Debug)]

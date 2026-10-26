@@ -1304,6 +1304,19 @@ impl Config {
         }
     }
 
+    /// Puts `kind` into `sections` when it's missing: right before `before`, or at the end when
+    /// `before` isn't there either. Returns whether anything changed.
+    pub fn ensure_section(&mut self, kind: SectionKind, before: SectionKind) -> bool {
+        if self.sections.contains(&kind) {
+            return false;
+        }
+        match self.sections.iter().position(|k| *k == before) {
+            Some(at) => self.sections.insert(at, kind),
+            None => self.sections.push(kind),
+        }
+        true
+    }
+
     /// `main` for `digest.toml`'s paper, else the extra paper's slug.
     pub fn slug(&self) -> &str {
         self.paper
@@ -1578,6 +1591,24 @@ mod tests {
             section_key(SectionKind::Interests, Some("Rust")),
             "interests:Rust"
         );
+    }
+
+    #[test]
+    fn ensure_section_adds_the_kind_before_another_or_at_the_end_once() {
+        let mut c = Config::parse("sections = [\"local\", \"feeds\"]\n").unwrap();
+        assert!(c.ensure_section(SectionKind::Interests, SectionKind::Feeds));
+        assert_eq!(
+            c.sections,
+            [
+                SectionKind::Local,
+                SectionKind::Interests,
+                SectionKind::Feeds
+            ]
+        );
+        assert!(!c.ensure_section(SectionKind::Interests, SectionKind::Feeds));
+        let mut c = Config::parse("sections = [\"horoscope\"]\n").unwrap();
+        assert!(c.ensure_section(SectionKind::Interests, SectionKind::Feeds));
+        assert_eq!(c.sections, [SectionKind::Horoscope, SectionKind::Interests]);
     }
 
     #[test]
