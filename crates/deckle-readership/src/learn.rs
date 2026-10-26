@@ -717,6 +717,62 @@ pub fn on_connection_at(
     Ok(added)
 }
 
+/// The suggestions to print as nudges (design §7): the top [`TOP`] when `[learning] nudges`
+/// is on, as `(key, name, why)`.
+pub fn nudges_for(
+    learning: &Learning,
+    cfg: &Config,
+    today: NaiveDate,
+) -> Vec<(String, String, String)> {
+    if !cfg.learning.nudges {
+        return Vec::new();
+    }
+    suggest(learning, cfg, today)
+        .into_iter()
+        .map(|n| (n.key, n.name, n.why))
+        .collect()
+}
+
+/// Nudges tapped on the Kindle (design §7, §15): every page-history position of every read
+/// whose section is a `nudge:` page names a candidate, accepted as [`accept`] would, once; a
+/// tap after a dismissal on the Mac is the newer decision and still accepts. Returns the names
+/// added, for the caller to save the config and the learning file and to say so.
+pub fn accept_nudges(
+    learning: &mut Learning,
+    cfg: &mut Config,
+    state: &State,
+    today: NaiveDate,
+) -> Vec<String> {
+    let mut keys: Vec<String> = Vec::new();
+    for (date, reads) in &state.reads {
+        let Some(layout) = state.editions.get(date) else {
+            continue;
+        };
+        for read in reads.values() {
+            for &pos in &read.history {
+                let Some(section) = crate::layout::section_at(layout, pos) else {
+                    continue;
+                };
+                if let Some(key) = section.key.strip_prefix("nudge:")
+                    && !keys.iter().any(|k| k == key)
+                {
+                    keys.push(key.to_owned());
+                }
+            }
+        }
+    }
+    let mut added = Vec::new();
+    for key in keys {
+        if learning.accepted.contains_key(&key) {
+            continue;
+        }
+        if let Ok(entry) = accept(learning, cfg, &key, today) {
+            added.push(entry.name);
+        }
+    }
+    added
+}
+
 /// Sets candidate `key` aside for [`DISMISSED_DAYS`].
 pub fn dismiss(learning: &mut Learning, key: &str, today: NaiveDate) -> Result<(), String> {
     if !learning.candidates.contains_key(key) {

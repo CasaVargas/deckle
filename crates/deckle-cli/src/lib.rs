@@ -2691,7 +2691,7 @@ fn digest(
                             &exempt,
                             bound.as_deref(),
                         )?;
-                        outcome = push_queued(&queue, &all_papers(&path)?, detect_kindle())?;
+                        outcome = push_queued(&path, &queue, &all_papers(&path)?, detect_kindle())?;
                     }
                 }
                 // Only a run that shipped (or queued) the edition uses up the saved articles.
@@ -2975,7 +2975,7 @@ fn digest(
                 })?;
                 return Ok(ExitCode::SUCCESS);
             }
-            let mut outcome = push_queued(&queue, &papers, target)?;
+            let mut outcome = push_queued(&path, &queue, &papers, target)?;
             outcome.remarkable = remarkable;
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
@@ -3051,7 +3051,7 @@ fn digest(
                     .unwrap_or_default();
                 let plan = watcher.tick(id.as_deref(), &pending, actions);
                 if let (Some(target), false) = (&kindle, plan.is_empty()) {
-                    match sync_to(&queue, &papers, target, plan) {
+                    match sync_to(&path, &queue, &papers, target, plan) {
                         Ok(o) => emit(json, &o, || o.describe(&queue))?,
                         Err(e) => eprintln!("error: {e}"),
                     }
@@ -3814,6 +3814,7 @@ fn send_to_reader(
 
 /// Flushes the outbox to `target` (a connected Kindle, or a folder), or reports it queued.
 fn push_queued(
+    main: &Path,
     queue: &deckle_core::queue::Queue,
     papers: &[deckle_digest::Config],
     target: Option<Target>,
@@ -3835,7 +3836,7 @@ fn push_queued(
             ..Default::default()
         });
     };
-    sync_to(queue, papers, &target, plan)
+    sync_to(main, queue, papers, &target, plan)
 }
 
 /// What `digest push` runs: the outbox with the device's actions, or (empty outbox) just the
@@ -3913,7 +3914,42 @@ fn gather_options_for(
             })
             .collect();
     }
+    if cfg.learning.enabled && cfg.learning.nudges {
+        let learning =
+            deckle_readership::Learning::load(&deckle_readership::Learning::path_for(cfg));
+        opts.nudges = deckle_readership::learn::nudges_for(&learning, cfg, date)
+            .into_iter()
+            .map(|(key, name, why)| deckle_digest::Nudge { key, name, why })
+            .collect();
+    }
     opts
+}
+
+/// Makes the nudges tapped on the Kindle interests of `paper` (interests design §7): the
+/// entry goes into its file, the acceptance into its `interests.json`. Never fails the caller.
+fn accept_tapped_nudges(
+    main: &Path,
+    paper: &deckle_digest::Config,
+    state: &deckle_readership::State,
+) {
+    let path = deckle_readership::Learning::path_for(paper);
+    let mut learning = deckle_readership::Learning::load(&path);
+    let mut cfg = paper.clone();
+    let today = deckle_digest::chrono::Local::now().date_naive();
+    let added = deckle_readership::learn::accept_nudges(&mut learning, &mut cfg, state, today);
+    if added.is_empty() {
+        return;
+    }
+    if let Err(e) = deckle_digest::papers::save(main, &cfg) {
+        eprintln!("learning: {e}");
+        return;
+    }
+    if let Err(e) = learning.save(&path) {
+        eprintln!("learning: {e}");
+    }
+    for name in added {
+        eprintln!("Added {name} to your interests (you tapped it in the paper).");
+    }
 }
 
 /// Keeps the names the editor gave (interests design §6). Never fails the build.
@@ -3942,6 +3978,7 @@ fn puzzle_on(cfg: &deckle_digest::Config) -> bool {
 
 /// Runs `plan` on `target` over one connection.
 fn sync_to(
+    main: &Path,
     queue: &deckle_core::queue::Queue,
     papers: &[deckle_digest::Config],
     target: &Target,
@@ -4061,6 +4098,8 @@ fn sync_to(
         ) {
             eprintln!("learning: {e}");
         }
+        // a nudge tapped on the Kindle is an accept (interests design §7)
+        accept_tapped_nudges(main, paper, state);
     }
     let waiting = flush
         .waiting

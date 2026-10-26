@@ -618,11 +618,18 @@ fn a_tap_on_a_nudge_page_accepts_it_once() {
     let mut c = cfg();
     c.sections = vec![SectionKind::Local, SectionKind::Feeds];
     let state = state_with_nudge(&[("K", vec![4, 9100]), ("K2", vec![9100])]);
-    assert_eq!(accept_nudges(&mut l, &mut c, &state, today()), ["Bryce Young"]);
+    assert_eq!(
+        accept_nudges(&mut l, &mut c, &state, today()),
+        ["Bryce Young"]
+    );
     assert!(c.interests.iter().any(|i| i.name == "Bryce Young"));
     assert_eq!(
         c.sections,
-        [SectionKind::Local, SectionKind::Interests, SectionKind::Feeds]
+        [
+            SectionKind::Local,
+            SectionKind::Interests,
+            SectionKind::Feeds
+        ]
     );
     assert_eq!(l.accepted["bryce young"], today());
     // again: nothing new
@@ -630,14 +637,25 @@ fn a_tap_on_a_nudge_page_accepts_it_once() {
     // a position elsewhere, or a nudge for a key no longer known, does nothing
     let mut l2 = seeded();
     let mut c2 = cfg();
-    assert!(accept_nudges(&mut l2, &mut c2, &state_with_nudge(&[("K", vec![150])]), today()).is_empty());
+    assert!(
+        accept_nudges(
+            &mut l2,
+            &mut c2,
+            &state_with_nudge(&[("K", vec![150])]),
+            today()
+        )
+        .is_empty()
+    );
     l2.candidates.remove("bryce young");
     assert!(accept_nudges(&mut l2, &mut c2, &state, today()).is_empty());
     // dismissed on the Mac after the paper was built: the tap is the newer decision
     let mut l3 = seeded();
     let mut c3 = cfg();
     dismiss(&mut l3, "bryce young", today()).unwrap();
-    assert_eq!(accept_nudges(&mut l3, &mut c3, &state, today()), ["Bryce Young"]);
+    assert_eq!(
+        accept_nudges(&mut l3, &mut c3, &state, today()),
+        ["Bryce Young"]
+    );
 }
 
 #[test]
