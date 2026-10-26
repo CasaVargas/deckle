@@ -7,7 +7,7 @@ import { api, coverRequest } from "./api";
 import { deviceLabel } from "./deviceLabel";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
-import BeforeYouSend from "./BeforeYouSend";
+import BookDrawer, { type DrawerTab } from "./BookDrawer";
 import { presetSettings } from "./presets";
 import BindPanel from "./BindPanel";
 import Library from "./Library";
@@ -73,8 +73,8 @@ export default function App() {
   const [library, setLibrary] = useState<LibraryStatus | null>(null);
   /** The Books tab's library (Books and Kindle design §8): Deckle's, calibre's and your folders' books. */
   const [catalog, setCatalog] = useState<CatalogView | null>(null);
-  /** The queued book Before you send is open for. */
-  const [beforeFor, setBeforeFor] = useState<string | null>(null);
+  /** The book whose drawer is open (Books tab redesign §5), by path: queued, in the library, or both. */
+  const [drawer, setDrawer] = useState<{ path: string; tab: DrawerTab; cover?: string | null } | null>(null);
   const booksRef = useRef(books);
   booksRef.current = books;
   const tabRef = useRef(tab);
@@ -340,7 +340,8 @@ export default function App() {
   const runnable = books.filter((b) => b.mode !== "error");
   // Library first, the queue docked beside it; with no library, the queue is the whole tab.
   const docked = !!catalog && catalog.entries.length > 0;
-  const opened = books.find((b) => b.id === beforeFor) ?? null;
+  const drawerBook = drawer ? books.find((b) => b.path === drawer.path) ?? null : null;
+  const drawerEntry = drawer ? catalog?.entries.find((e) => e.path === drawer.path) ?? null : null;
   const parts = books.filter((b) => bindable(b.path, b.mode));
 
   // The bound book takes the parts' place in the list (#22).
@@ -557,7 +558,7 @@ export default function App() {
         )}
         {tab === "books" && (
         <div className={docked ? "books-split" : "books-whole"}>
-        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} query={query} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
+        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} query={query} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} onEdit={(path, cover) => setDrawer({ path, tab: "details", cover })} />}
         <main className={`tray ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
           <div className="tray-scroll">
           {(docked || books.length > 0) && (
@@ -614,11 +615,10 @@ export default function App() {
                       .catch((e) => setNotice(String(e))).finally(() => setBusy(false));
                   }}
                   onOverride={override}
-                  onAsin={setAsin}
                   onToggleReport={toggleReport}
                   onRemove={remove}
                   onReveal={(p) => api.reveal(p)}
-                  onOpen={(id) => setBeforeFor(id)}
+                  onOpen={(_, tab) => setDrawer({ path: b.path, tab })}
                 />
               ))}
             </ul>
@@ -640,16 +640,19 @@ export default function App() {
           </div>
           {dragging && <div className="drop-overlay">Drop to add</div>}
         </main>
-        {opened && (
-          <BeforeYouSend
-            key={opened.id}
-            book={opened}
-            plan={plans[opened.id]}
+        {drawer && (drawerBook || drawerEntry) && (
+          <BookDrawer
+            key={drawer.path}
+            book={drawerBook}
+            entry={drawerEntry}
+            plan={drawerBook ? plans[drawerBook.id] : undefined}
             settings={settings}
-            entry={catalog?.entries.find((e) => e.path === opened.path) ?? null}
+            cover={drawerBook?.cover ?? drawer.cover ?? null}
+            initialTab={drawer.tab}
             onCover={setCoverPick}
-            onFixed={refreshRow}
-            onClose={() => setBeforeFor(null)}
+            onAsin={setAsin}
+            onFixed={(book) => (book ? refreshRow(book) : loadCatalog())}
+            onClose={() => setDrawer(null)}
           />
         )}
         </div>

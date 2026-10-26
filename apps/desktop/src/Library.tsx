@@ -15,6 +15,8 @@ interface Props {
   query: string;
   busy: boolean;
   onAdd: (paths: string[]) => void;
+  /** Opens one book's drawer on Details, with its cover when it's been read. */
+  onEdit: (path: string, cover: string | null) => void;
 }
 
 /** Fetches covers for the cards that scroll into view, a few at a time. */
@@ -78,7 +80,7 @@ function Card({ book, cover, selected, queued, onToggle, onSeen }: { book: Catal
  * folders as covers, searched, grouped by series with their gaps, and filtered to what isn't on
  * the Kindle yet. Picked books go to To send.
  */
-export default function Library({ catalog, hasKindle, queued, query, busy, onAdd }: Props) {
+export default function Library({ catalog, hasKindle, queued, query, busy, onAdd, onEdit }: Props) {
   const [search, setSearch] = useState<BookSearchReport | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -213,6 +215,18 @@ export default function Library({ catalog, hasKindle, queued, query, busy, onAdd
       {picked.size > 0 && (
         <div className="selection-bar" role="toolbar" aria-label="Selected books">
           <span className="selection-count">{picked.size} selected</span>
+          {picked.size === 1 && (
+            <button
+              className="quiet"
+              onClick={() => {
+                const path = [...picked][0];
+                setPicked(new Set());
+                onEdit(path, covers[path] ?? null);
+              }}
+            >
+              Edit details
+            </button>
+          )}
           <button className="quiet" onClick={() => setPicked(new Set())}>
             Clear
           </button>

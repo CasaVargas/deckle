@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from "react";
+import type { DrawerTab } from "./BookDrawer";
 import { beforeChip, doneChips, statusLine, type Chip } from "./bookStatus";
 import Icon from "./Icon";
 import { PRESETS } from "./presets";
@@ -16,12 +17,11 @@ interface Props {
   preset?: StylePreset | null;
   onPreset?: (preset: StylePreset | null) => void;
   onOverride: (id: string, cde: "pdoc" | "ebok" | null) => void;
-  onAsin: (id: string, asin: string | null) => void;
   onToggleReport: (id: string) => void;
   onRemove: (id: string) => void;
   onReveal: (path: string) => void;
-  /** Opens Before you send. */
-  onOpen?: (id: string) => void;
+  /** Opens the book's drawer (Books tab redesign §5) on a tab. */
+  onOpen?: (id: string, tab: DrawerTab) => void;
 }
 
 const MARK: Record<Chip["tone"], string> = { plain: "", ok: "✓", warn: "!", fail: "!" };
@@ -41,19 +41,8 @@ function Line({ chips, children }: { chips: Chip[]; children?: React.ReactNode }
 
 const SOURCE = { llm: "AI model", wikipedia: "Wikipedia", basic: "basic" } as const;
 
-const ASIN = /^[A-Z0-9]{10}$/;
-
-export default function BookRowView({ book, busy, plan, settings, preset, onPreset, onOverride, onAsin, onToggleReport, onRemove, onReveal, onOpen }: Props) {
+export default function BookRowView({ book, busy, plan, settings, preset, onPreset, onOverride, onToggleReport, onRemove, onReveal, onOpen }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
-  /** The ASIN field's text while it is open; `null` when closed. */
-  const [asinDraft, setAsinDraft] = useState<string | null>(null);
-  const draft = (asinDraft ?? "").trim().toUpperCase();
-  const draftValid = ASIN.test(draft);
-  const saveAsin = () => {
-    if (!draftValid) return;
-    onAsin(book.id, draft);
-    setAsinDraft(null);
-  };
   const effectiveCde = book.cdeOverride ?? plan?.cde ?? "pdoc";
   const before = beforeChip(book, plan, settings);
   const stageIndex = book.stage ? STAGES.indexOf(book.stage as (typeof STAGES)[number]) : -1;
@@ -87,7 +76,7 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
     const chips: Chip[] = [before];
     if (preset) chips.push({ text: `${PRESETS[preset]} style`, tone: "plain", title: "Saved book style" });
     if (book.coverPick && book.coverPick.kind !== "own")
-      chips.push({ text: book.coverPick.kind === "generated" ? "Typographic cover" : "Open Library cover", tone: "plain", title: "The cover picked in Before you send" });
+      chips.push({ text: book.coverPick.kind === "generated" ? "Typographic cover" : "Open Library cover", tone: "plain", title: "The cover picked in the book’s Cover tab" });
     if (notes > 0) chips.push({ text: `${notes} note${notes > 1 ? "s" : ""}`, tone: "warn", title: book.warnings.join("\n") });
     if (book.error) chips.push({ text: book.error, tone: "fail", title: book.error });
     status = <Line chips={chips} />;
@@ -100,8 +89,8 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
       </div>
       <div className="meta">
         <div className="title-line">
-          {onOpen && book.mode !== "error" && book.mode !== "ready" ? (
-            <button className="title link-title" title={`Before you send: what Deckle will do to ${book.title}`} onClick={() => onOpen(book.id)}>
+          {onOpen ? (
+            <button className="title link-title" title={`What Deckle will do to ${book.title}`} onClick={() => onOpen(book.id, "kindle")}>
               {book.title}
             </button>
           ) : (
@@ -115,38 +104,6 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
           {book.series && <span className="series"> · {book.series}</span>}
           {book.asin && <span className="series"> · ASIN {book.asin}</span>}
         </div>
-        {asinDraft !== null && (
-          <form
-            className="asin-edit"
-            onSubmit={(e) => {
-              e.preventDefault();
-              saveAsin();
-            }}
-          >
-            <input
-              type="text"
-              autoFocus
-              value={asinDraft}
-              onChange={(e) => setAsinDraft(e.target.value)}
-              onKeyDown={(e) => e.key === "Escape" && setAsinDraft(null)}
-              placeholder="B0… from the book's Amazon page"
-              aria-label="Amazon ASIN"
-              spellCheck={false}
-              maxLength={12}
-            />
-            <button type="submit" className="ghost" disabled={!draftValid}>
-              Save
-            </button>
-            <button type="button" className="ghost" onClick={() => setAsinDraft(null)}>
-              Cancel
-            </button>
-            <div className="asin-hint">
-              {asinDraft.trim() && !draftValid
-                ? "An ASIN is 10 letters or digits."
-                : "With Prefer features (EBOK), the Kindle fetches Amazon's cover for this edition."}
-            </div>
-          </form>
-        )}
         {status}
         {book.showReport && (
           <dl className="report">
@@ -221,19 +178,13 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
             {book.cdeOverride && (
               <button onClick={() => { onOverride(book.id, null); setMenuOpen(false); }}>Use default</button>
             )}
-            <button onClick={() => { setAsinDraft(book.asin ?? ""); setMenuOpen(false); }} disabled={book.mode === "error" || book.mode === "ready"}>
-              {book.asin ? "Change Amazon ASIN…" : "Set Amazon ASIN…"}
-            </button>
-            {book.asin && (
-              <button onClick={() => { onAsin(book.id, null); setMenuOpen(false); }}>Clear ASIN</button>
-            )}
             {onOpen && (
-              <button onClick={() => { onOpen(book.id); setMenuOpen(false); }} disabled={book.mode === "error" || book.mode === "ready"}>
-                Before you send…
+              <button onClick={() => { onOpen(book.id, "details"); setMenuOpen(false); }}>
+                Edit details…
               </button>
             )}
             <button onClick={() => { onToggleReport(book.id); setMenuOpen(false); }}>
-              {book.showReport ? "Hide details" : "Details"}
+              {book.showReport ? "Hide report" : "Show report"}
             </button>
             <button className="danger" onClick={() => { onRemove(book.id); setMenuOpen(false); }}>
               Remove
