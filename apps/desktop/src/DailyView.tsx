@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Daily tab (Daily design §5c, tomorrow's paper design §8), in rooms: Today (the press and
-// tomorrow's paper so far, with its page plan and week), Editions, Reading, Delivery (where the
-// paper goes) and The paper's settings, all backed by digest.toml and the CLI.
+// The Daily tab (Daily design §5c, Daily tab redesign §2–3), in tabs: Today (tomorrow's paper so
+// far, when it goes to press, a link box and the week), Sections, Reading, Editions and Delivery,
+// all backed by digest.toml and the CLI. The paper switcher picks which paper they work on.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
-import { ROOMS, destinations, roomNotes } from "./dailyRooms";
+import { ROOMS, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import { fontFileName, mastheadChoice, mastheadValue } from "./mastheadView";
 import type { MastheadChoice } from "./mastheadView";
 import type { Place, Room } from "./dailyRooms";
 import Icon from "./Icon";
 import PagePlanCard from "./PagePlanCard";
 import { reorder, setBudget } from "./pagePlan";
-import PressBar from "./PressBar";
+import PressCard from "./PressCard";
+import PaperSwitcher from "./PaperSwitcher";
 import Readership from "./Readership";
 import EveryEdition from "./EveryEdition";
 import Shelf from "./Shelf";
@@ -26,9 +27,8 @@ import RemarkableCard from "./RemarkableCard";
 import SubscriptionsCard from "./SubscriptionsCard";
 import YourDay from "./YourDay";
 import DailyEditor from "./DailyEditor";
-import Papers from "./Papers";
-import { DAYS } from "./papersView";
-import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PapersView, PlaceRow, ReadingEntry, RunResult } from "./types";
+import { anyKindleHint } from "./papersView";
+import type { DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PapersView, PlaceRow, ReadershipView, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL, SIGNS } from "./types";
 
 /** Amazon's Manage Your Content and Devices: the approved-sender list and the emailed Docs. */
@@ -94,6 +94,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [testing, setTesting] = useState(false);
   const [room, setRoom] = useState<Room>("today");
   const [openPlace, setOpenPlace] = useState<Place["key"] | null>(null);
+  const [readership, setReadership] = useState<ReadershipView | null>(null);
   // Your papers (many papers §7): the selected paper is the one every room works on
   const [papers, setPapers] = useState<PapersView | null>(null);
   const [paper, setPaper] = useState("main");
@@ -126,6 +127,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const refreshSide = useCallback(() => {
     api.editionPreview(arg).then(setPreview).catch(() => {});
     api.readingList().then(setReading).catch(() => {});
+    api.readershipReport(arg).then(setReadership).catch(() => setReadership(null));
     loadNext();
   }, [arg, loadNext]);
   const refreshSideRef = useRef(refreshSide);
@@ -303,12 +305,20 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     try {
       const slug = await api.paperCreate(title, reader);
       setPaper(slug);
-      setRoom("paper");
+      setRoom("sections");
       return true;
     } catch (e) {
       onNotice(String(e));
       return false;
     }
+  };
+
+  const toggleDayOn = (d: Day) => {
+    if (!draft) return;
+    const c = structuredClone(draft);
+    c.schedule = { ...c.schedule, days: toggleDay(c.schedule?.days ?? [], d) };
+    setDraft(c);
+    save(c);
   };
 
   const stopPresses = async (on: boolean) => {
@@ -338,27 +348,16 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     );
   }
 
-  const papersStrip = papers && (
-    <Papers
-      view={papers}
-      selected={paper}
-      busy={running !== null}
-      onSelect={choosePaper}
-      onPreview={(slug) => {
-        if (slug !== paper && dirty) return onNotice("Save your changes to this paper first.");
-        setPaper(slug);
-        setRoom("today");
-        run(false, slug);
-      }}
-      onCreate={createPaper}
-    />
+  const switcher = papers && (
+    <PaperSwitcher view={papers} selected={paper} onSelect={choosePaper} onSettings={() => setRoom("sections")} onCreate={createPaper} />
   );
+  const paperNotes = papers ? [anyKindleHint(papers.papers), ...papers.notes].filter((n): n is string => !!n) : [];
   const mainTitle = papers?.papers[0]?.title ?? "the main paper";
 
   if (!draft) {
     return (
       <div className="daily">
-        {papersStrip}
+        {switcher}
         <section className="card">
           <h2>{isMain ? "digest.toml" : `papers/${paper}.toml`} has a problem</h2>
           <p className="fail">{state.error}</p>
@@ -388,8 +387,6 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const planBudget = (row: PagePlanRow, n: number) => planSave((c) => setBudget(c, row, n));
   const planToggle = (row: PagePlanRow, on: boolean) =>
     planSave((c) => ({ ...c, sections: on ? [...c.sections, row.kind] : c.sections.filter((x) => x !== row.kind) }));
-
-  const notes = roomNotes(draft, next, reading, dirty);
 
   const emailCard = (
     <section className="card email-card">
@@ -516,31 +513,56 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     return null;
   };
 
+  const saveBox = (
+    <form
+      className="save-row"
+      onSubmit={(e) => {
+        e.preventDefault();
+        addReading();
+      }}
+    >
+      <input type="url" placeholder="Paste a link (https://…)" value={saveUrl} onChange={(e) => setSaveUrl(e.target.value)} spellCheck={false} aria-label="A link to save" />
+      <button className="ghost" type="submit" disabled={!saveUrl.trim()}>
+        Save
+      </button>
+    </form>
+  );
+  const waiting = reading.filter((e) => e.state === "pending").length;
+
   return (
-    <div className="daily-rooms">
-      <nav className="rooms" aria-label="Daily">
+    <div className="daily-view">
+      <nav className="kindle-tabs daily-tabs" aria-label="Daily">
+        {switcher}
         {ROOMS.map((r) => (
           <button key={r.key} className={room === r.key ? "on" : ""} aria-current={room === r.key ? "page" : undefined} onClick={() => setRoom(r.key)}>
-            <span className="room-title">{r.title}</span>
-            {notes[r.key] && <span className="room-note">{notes[r.key]}</span>}
+            {r.title}
           </button>
         ))}
       </nav>
 
       <div className="daily">
-        {papersStrip}
+        {paperNotes.map((n) => (
+          <p key={n} className="warn small">
+            {n}
+          </p>
+        ))}
         {room === "today" && (
-          <>
-            <PressBar press={next?.press ?? null} time={time} onTime={setTime} onSchedule={setScheduleOn} onRestart={() => stopPresses(false)} />
-
-            <div className="daily-columns">
-              <TomorrowsPaper
-                next={next}
-                preview={preview}
+          <div className="daily-columns">
+            <TomorrowsPaper next={next} onSections={() => setRoom("sections")} />
+            <div className="daily-side">
+              <PressCard
+                press={next?.press ?? null}
+                time={time}
+                days={draft.schedule?.days ?? []}
+                goes={goesLine(draft)}
                 running={running}
-                onRun={run}
+                onTime={setTime}
+                onSchedule={setScheduleOn}
+                onDay={toggleDayOn}
+                onRestart={() => stopPresses(false)}
                 onStop={() => stopPresses(true)}
-                onShowFile={() => preview && api.reveal(preview.file)}
+                onRun={run}
+                onDelivery={() => setRoom("delivery")}
               >
                 {result && (
                   <div className={`run-result ${result.r.ok ? "ok" : "fail"}`}>
@@ -555,20 +577,41 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                     {result.r.log && <pre className="log">{result.r.log}</pre>}
                   </div>
                 )}
-              </TomorrowsPaper>
-              <div className="daily-side">
-                <PagePlanCard
-                  next={next}
-                  locked={planLocked}
-                  lockedWhy={dirty ? "Save your changes first, in The paper or Email to Kindle." : undefined}
-                  onMove={planMove}
-                  onBudget={planBudget}
-                  onToggle={planToggle}
-                />
-                {next && <ThisWeek week={next.week} onAllEditions={() => setRoom("editions")} />}
-              </div>
+                <p className="muted small">
+                  {preview ? `Last built ${preview.title.replace(/^.*— /, "")}` : "No edition built yet."}
+                  {preview && preview.outbox > 0 && ` · ${preview.outbox} waiting for your Kindle`}
+                  {preview && (
+                    <>
+                      {" · "}
+                      <button className="link" onClick={() => api.reveal(preview.file)}>
+                        Show file
+                      </button>
+                    </>
+                  )}
+                </p>
+              </PressCard>
+
+              <section className="card" aria-label="Save something for tomorrow">
+                <h3>Save something for tomorrow</h3>
+                {isMain ? (
+                  <>
+                    {saveBox}
+                    {saveMsg && <p className="muted small">{saveMsg}</p>}
+                    <p className="muted small">
+                      {waiting === 0 ? "Nothing saved yet." : `${waiting} saved for tomorrow.`}{" "}
+                      <button className="link" onClick={() => setRoom("reading")}>
+                        Your Reading
+                      </button>
+                    </p>
+                  </>
+                ) : (
+                  <p className="muted small">Saved links go to {mainTitle}.</p>
+                )}
+              </section>
+
+              {next && <ThisWeek week={next.week} stop={stopLine(readership)} onAllEditions={() => setRoom("editions")} />}
             </div>
-          </>
+          </div>
         )}
 
         {room === "editions" && (
@@ -602,18 +645,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
             <section className="card">
               <h3>Your Reading</h3>
               <p className="muted small">Save an article now; it's in tomorrow's paper, whole. Over {draft.reading.long_read_words.toLocaleString()} words, it comes as its own book.</p>
-              <form
-                className="save-row"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  addReading();
-                }}
-              >
-                <input type="url" placeholder="Paste a link (https://…)" value={saveUrl} onChange={(e) => setSaveUrl(e.target.value)} spellCheck={false} />
-                <button className="ghost" type="submit" disabled={!saveUrl.trim()}>
-                  Save
-                </button>
-              </form>
+              {saveBox}
               {saveMsg && <p className="muted small">{saveMsg}</p>}
               {reading.length > 0 && (
                 <ul className="reading">
@@ -715,8 +747,16 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           </section>
         )}
 
-        {room === "paper" && (
+        {room === "sections" && (
           <>
+            <PagePlanCard
+              next={next}
+              locked={planLocked}
+              lockedWhy={dirty ? "Save your changes below first, or in Delivery's Email to Kindle." : undefined}
+              onMove={planMove}
+              onBudget={planBudget}
+              onToggle={planToggle}
+            />
             <section className="card settings-card">
               <div className="card-head">
                 <h3>The paper</h3>
@@ -800,30 +840,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                     (Aa). It applies to every book on that Kindle.
                   </p>
                 </div>
-                <div>
-                  <div className="label">Days</div>
-                  <div className="places">
-                    {DAYS.map((d) => {
-                      const days = draft.schedule?.days ?? [];
-                      return (
-                        <button
-                          key={d}
-                          className={`chip ${days.includes(d) ? "on" : ""}`}
-                          onClick={() =>
-                            edit((c) => {
-                              const cur = c.schedule?.days ?? [];
-                              const nextDays = cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d];
-                              c.schedule = { ...c.schedule, days: DAYS.filter((x) => nextDays.includes(x)) };
-                            })
-                          }
-                        >
-                          {d[0].toUpperCase() + d.slice(1)}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="muted small">{(draft.schedule?.days ?? []).length === 0 ? "None chosen: every day." : "Built on these days only."} The time is set on Today.</p>
-                </div>
+                <div />
               </div>
 
               <div className="label">Place</div>

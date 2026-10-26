@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { destinations, roomNotes } from "./dailyRooms";
+import { daysLine, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import { newExport } from "./exportsView";
-import type { DailyConfig, NextPaper, ReadingEntry, WeekState } from "./types";
+import type { DailyConfig, ReadershipView } from "./types";
 
 const cfg = (p: Partial<DailyConfig> = {}): DailyConfig => ({
   title: "T",
@@ -23,25 +23,6 @@ const cfg = (p: Partial<DailyConfig> = {}): DailyConfig => ({
   reading: { inbox: "", max_items: 10, long_read_words: 4000 },
   ...p,
 });
-
-const next = (at: string | null, week: WeekState[], stopped: string | null = null): NextPaper => ({
-  press: { at, next: at ? "2026-10-24T05:30:00-04:00" : null, edition: "2026-10-24", stopped, since: "2026-10-23T05:30:00-04:00" },
-  paper: "The Deckle Daily",
-  place: "",
-  date: "2026-10-24",
-  number: 296,
-  weather: true,
-  lead: null,
-  tiles: [],
-  checked: null,
-  plan: [],
-  off: [],
-  pages: 0,
-  week: week.map((state, i) => ({ date: `2026-10-${String(17 + i).padStart(2, "0")}`, state })),
-});
-
-const entry = (id: string, state: ReadingEntry["state"]): ReadingEntry =>
-  ({ id, url: null, file: null, title: null, saved_at: "", source: "", state, tries: 0 }) as ReadingEntry;
 
 test("a new paper goes to the Kindle and nowhere else", () => {
   const rows = destinations(cfg());
@@ -66,25 +47,36 @@ test("each place says what it's set to", () => {
   expect(destinations(cfg({ export: [one, newExport("/x/Boox", [one])] })).find((r) => r.key === "exports")?.status).toBe("2 folders");
 });
 
-test("the rooms' notes", () => {
-  const week: WeekState[] = [{ state: "read", percent: 80 }, { state: "notOpened" }, { state: "read", percent: 20 }, { state: "noPaper" }];
-  const notes = roomNotes(
-    cfg({ remarkable: { enabled: true, screen: "remarkable-2", books: false } }),
-    next("05:30", week),
-    [entry("a", "pending"), entry("b", "printed"), entry("c", "pending")],
-    false,
-  );
-  expect(notes).toEqual({
-    today: "Press at 05:30",
-    editions: "2 of the last 4 read",
-    reading: "2 saved for tomorrow",
-    delivery: "Kindle and 1 more",
-    paper: "3 sections",
-  });
+test("press days toggle in week order, and say themselves", () => {
+  expect(toggleDay([], "fri")).toEqual(["fri"]);
+  expect(toggleDay(["fri", "mon"], "wed")).toEqual(["mon", "wed", "fri"]);
+  expect(toggleDay(["mon", "wed"], "mon")).toEqual(["wed"]);
+  expect(daysLine([])).toBe("Every day");
+  expect(daysLine(["mon", "tue", "wed", "thu", "fri", "sat", "sun"])).toBe("Every day");
+  expect(daysLine(["fri", "mon", "tue", "wed", "thu"])).toBe("Weekdays");
+  expect(daysLine(["sun", "sat"])).toBe("Weekends");
+  expect(daysLine(["mon", "wed", "fri"])).toBe("Mon, Wed and Fri");
+  expect(daysLine(["sat"])).toBe("Sat");
 });
 
-test("the notes before the paper is known, and with the presses stopped or unsaved changes", () => {
-  expect(roomNotes(cfg(), null, [], true)).toEqual({ today: "", editions: "", reading: "Nothing saved", delivery: "Kindle", paper: "Unsaved changes" });
-  expect(roomNotes(cfg(), next("05:30", [], "2026-10-24"), [], false).today).toBe("Presses stopped");
-  expect(roomNotes(cfg(), next(null, []), [], false).today).toBe("No press time set");
+test("where the paper goes, in one line", () => {
+  const email = { enabled: true, to: "me@kindle.com", from: "", smtp_host: "", smtp_port: 587, username: "", usb_too: false };
+  expect(goesLine(cfg())).toBe("To your Kindle over USB");
+  expect(goesLine(cfg({ email }))).toBe("To your Kindle by email");
+  expect(goesLine(cfg({ email: { ...email, usb_too: true } }))).toBe("To your Kindle by email and over USB");
+  expect(goesLine(cfg({ email: { ...email, enabled: false } }))).toBe("To your Kindle over USB");
+  const rm = { enabled: true, screen: "remarkable-2" as const, books: false };
+  expect(goesLine(cfg({ remarkable: rm, export: [newExport("/Users/me/iCloud/Deckle Daily", [])] }))).toBe(
+    "To your Kindle over USB, and to your reMarkable and Deckle Daily",
+  );
+});
+
+test("where you usually stop, once there are three editions read", () => {
+  const view = (opened: number, stopSection: string | null, enabled = true) =>
+    ({ enabled, report: { window: 14, opened, medianPercent: 60, stopSection, sections: [] }, noticed: [] }) as unknown as ReadershipView;
+  expect(stopLine(null)).toBeNull();
+  expect(stopLine(view(5, "Sports"))).toBe("You usually stop in Sports");
+  expect(stopLine(view(2, "Sports"))).toBeNull();
+  expect(stopLine(view(5, null))).toBeNull();
+  expect(stopLine(view(5, "Sports", false))).toBeNull();
 });
