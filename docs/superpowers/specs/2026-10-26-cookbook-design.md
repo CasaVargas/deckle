@@ -1,6 +1,6 @@
 # The Kitchen Book: a cookbook that grows on your Kindle — design
 
-**Status:** draft for owner review · **Date:** 2026-10-26 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** approved by owner ("write the plan", 2026-10-26) · **Date:** 2026-10-26 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-20-save-to-paper-design.md` (the extractor, the Inbox, the bookmarklet,
 saved pages for signed-in sites), `2026-10-21-web-article-design.md` (one web page → one book
 with a stable identifier), `2026-10-20-daily-digest-design.md` (outbox and push on plug-in),
@@ -229,7 +229,7 @@ generated ASIN never changes either (`generate_asin(asin_seed(...))`, the same m
 that makes a re-sent article replace itself). **The file name on the Kindle is fixed too**,
 `Deckle Kitchen Book.kfx` (`.azw3`/`.epub` for other readers), whatever the book's title.
 `deliver::device_filename` normally derives the name from title and author, so renaming the
-book in Style would otherwise leave two cookbooks on the Kindle. Add a file-name override to
+book in Book settings would otherwise leave two cookbooks on the Kindle. Add a file-name override to
 the delivery path for this one book. A title change still shows in the Kindle library,
 because the title comes from the metadata, not the file name. The book has, in order:
 
@@ -341,7 +341,7 @@ that fails to load or decode, falls back to **none** without failing the save. T
 An engraving-style drawing of the dish, generated once per recipe and kept.
 
 - **Off by default.** It's turned on in `cookbook.toml` `[illustrations]` or in the Cookbook
-  tab's Style room, and the desktop switch explains what is sent where. Turning it on doesn't
+  tab's Book settings, and the desktop switch explains what is sent where. Turning it on doesn't
   generate anything for existing recipes until the owner chooses **Illustrate all** or
   changes a recipe's picture to Illustration.
 - **Provider:** an OpenAI-compatible image generation endpoint
@@ -380,6 +380,7 @@ deckle cookbook move <id|url> <chapter> # refile
 deckle cookbook remove <id|url>         # deletes the recipe file and its images
 deckle cookbook note <id|url> "text"    # set or clear (empty string) the note
 deckle cookbook picture <id|url> site|illustration|none|default
+deckle cookbook illustrate <id|url>|--all  # draw (or redraw) illustrations; needs [illustrations] on
 deckle cookbook build -o <dir>          # write cookbook.epub, offline
 deckle cookbook send [--to device]      # build and queue in the outbox (or send now if a Kindle is connected)
 deckle cookbook chapters                # list; add/rename/remove/reorder are done by editing cookbook.toml
@@ -390,27 +391,87 @@ the spot, so adding five recipes in a row costs one build.
 
 ### 8.2 Desktop: a Cookbook tab
 
-A fourth top-level tab, **Cookbook**, laid out in rooms down the left side like the Daily
-tab, each with a line on what's in it:
+A fourth top-level tab, **Cookbook**, built on the Daily tab redesign's frame
+(`2026-10-26-daily-tab-redesign-design.md`, PRs #206–#208) with the same look as the Books,
+Kindle, Settings and Daily tabs. It can't be built until that redesign is merged (§11).
 
-- **Add a recipe**: a link field (with ⌘V / Ctrl+V paste anywhere on the tab) and **Fetch**.
-  It shows a preview of what will be saved:
+**The frame.** Tabs under the app bar: **Add · Recipes · Delivery**. To the left of the tabs,
+where the Daily has its paper switcher, a **book menu**: the book's title and its recipe
+count, as a menu button. The menu holds **Book settings…** for now. When more cookbooks
+arrive (§12), they're listed here the way papers are.
+
+**Add** (two columns, stacked when narrow, like the Daily's Today):
+
+- **Add a recipe**: a link box (with ⌘V / Ctrl+V paste anywhere on the tab) and **Fetch**.
+  Dropping `.webloc`, `.url` or `.html` files on the tab does the same for each one. A fetched
+  recipe shows as a preview card:
   - the picture, with Site photo / Illustration / None chips;
   - the title, and a facts line with ingredient and step counts;
-  - a chapter picker, preset by §6.2;
+  - a chapter menu, preset by §6.2;
   - a note field;
   - a line saying whether it was read from recipe data or from the page text;
-  - **Add to the book**.
+  - **Add to the book**, the one action that commits. Before that, nothing is written.
 
-  Dropping `.webloc`, `.url` or `.html` files on the tab does the same for each.
-- **The book**: chapters and their recipes. Click a recipe to change its title, chapter,
-  picture or note, or to remove it. **Send now** builds and sends if a Kindle is connected.
-- **Waiting**: "N changes go on next plug-in", with the time of the last delivery.
-- **Style**: the book title and subtitle, the default picture, the chapter list
-  (rename / add / remove / drag to reorder; writes `cookbook.toml`), and the Illustrations
-  switch with its provider settings and **Illustrate all**.
+  After adding, the card says "Added to *Soups and stews*", with a link to the recipe's row on
+  Recipes. A recipe already in the book says "Updated" instead.
+- **The book card**: a small cover thumbnail (the cover as it will print), "*n* recipes in
+  *m* chapters", "Last added · *title*", and one delivery line from Delivery ("Both Kindles
+  up to date", "3 changes go to the Scribe on next plug-in"), linking to Delivery. Buttons:
+  **Send now** (builds and sends to every connected Kindle) and **Preview** (builds and opens
+  the EPUB, as the Daily's Preview does). The last build's result shows under the buttons.
 
-The Books tab's **Add ▾** menu gets **Recipe…**, which switches to Cookbook → Add a recipe.
+**Recipes**: "What's in the book", one list in book order (§6.1): a heading row per chapter
+with its count, then its recipes alphabetically. Empty chapters show as a heading with
+"Nothing yet" and are left out of the book.
+
+- A recipe row: the picture thumbnail, the title (★ while new), a one-line detail
+  (site · added date · "from the page text" when unstructured), and a chevron that opens it.
+- A row opens beneath itself, one at a time, with:
+  - title (an override; empty shows the site's title);
+  - chapter (a menu);
+  - picture (Site photo / Illustration / None / Book default chips; Illustration offers
+    **Redraw** while illustrations are on);
+  - note;
+  - the source address with **Open** (in the browser);
+  - **Remove** (asks once).
+- Moving a recipe between chapters is the chapter menu, not dragging. Recipes within a chapter
+  are always alphabetical.
+- **Every change saves at once**, using the Daily redesign's save rules and its save queue
+  (`saveQueue.ts` from #207): menus and chips straight away, text after about half a second
+  without typing and on leaving the field. Saves run one at a time against the latest saved
+  file, and a failed save shows its reason on the row and keeps the typed text. There's no
+  Save button anywhere on the tab. Each save marks the book dirty (§9).
+- A search box above the list filters by title and ingredient. *(Builder's call whether it
+  ships in this PR or after.)*
+
+**Delivery**: "Where it goes", one row per Kindle Deckle knows:
+
+- each row has the Kindle's name, its state ("Up to date", "3 changes behind", "Never sent"),
+  when it was last delivered, and a switch (on by default) that writes `cookbook = false`
+  for that Kindle (§9);
+- any phase 0 note for that kind of Kindle shows on its row ("Opens the book at the start
+  after each update");
+- while the watcher isn't installed, a note above the rows: "Updates go over when you press
+  Send now, or turn on delivery when a Kindle connects", linking to the Daily's Delivery tab
+  where that switch lives.
+
+**Book settings** opens as a sheet from the right, like the Daily's Paper settings (Esc or ×
+closes it), and saves as it changes:
+
+- **Title**, **Subtitle** (the count is added on the cover), **Default picture**.
+- **Chapters**: one list in book order. Each row has a drag handle (or Alt+↑/↓ on a focused
+  row, as on Sections), the name (editable in place), its recipe count, and Remove (shut on
+  *Everything else*). **+ Add a chapter** goes below. Removing a chapter that has recipes
+  says they'll print under *Everything else* until moved (§6.2). Match keywords are edited
+  in `cookbook.toml` only.
+- **Illustrations**: its switch, a line on exactly what is sent (title, chapter, ingredient
+  names) and where, the endpoint, model and key fields while on (the key goes to the
+  desktop's existing `llm_api_key` setting, as with the AI editor), and **Illustrate all**
+  with progress and Stop.
+- `cookbook.toml`'s path and **Show the file** at the foot.
+
+The Books tab's **Add ▾** menu gets **Recipe…**, which switches to Cookbook → Add with the
+link box focused.
 
 ### 8.3 Inbox and bookmarklet
 
@@ -449,9 +510,9 @@ both ways.)*
   id differs from the newest (or is missing), push the newest build and record it. It shares
   the plug-in connection with the paper and Inbox books. A Kindle can be left out with
   `cookbook = false` in its `[sync.devices."<sync id>"]` table in `digest.toml`, or with the
-  per-Kindle switch in **Settings → Kindles** (default on). A Kindle Deckle has never seen
-  gets the cookbook the first time it's plugged in after the first build. The Waiting room
-  lists each Kindle with "Up to date" or "N changes behind", and `deckle cookbook list`
+  per-Kindle switch on the Cookbook tab's Delivery (default on). A Kindle Deckle has never seen
+  gets the cookbook the first time it's plugged in after the first build. The Cookbook tab's
+  Delivery lists each Kindle with "Up to date" or "N changes behind", and `deckle cookbook list`
   prints the same at its foot.
 - The push treats it like an Inbox book: the Previewer step runs when it's queued, and the
   push picks PDOC or EBOK by the existing cover rule and per-Kindle mode. **The cover rule
@@ -465,7 +526,7 @@ both ways.)*
 - **Who rebuilds:** the watcher (`digest watch`, installed by the Daily's schedule or run by
   hand) rebuilds a dirty cookbook and pushes it on plug-in, the same as Inbox books. The
   desktop's **Send now** builds and sends immediately when a Kindle is connected. If the
-  watcher isn't installed, the Waiting room says so ("Updates go over when you press Send
+  watcher isn't installed, the Cookbook tab's Delivery says so ("Updates go over when you press Send
   now, or turn on delivery when a Kindle connects") and links to the Daily's delivery switch.
   The desktop app doesn't run its own watcher.
 - **Phase 0 (hardware spike, run by the owner; it blocks nothing):** on the Scribe (MTP) and the
@@ -480,7 +541,7 @@ both ways.)*
 
   Use whichever type the cover rule picks for each device. Phase 0 doesn't change the type.
   It decides only what the app tells the owner. If the position doesn't survive on a device,
-  the Waiting room says "This Kindle opens the book at the start after each update". If the
+  that Kindle's row on the Cookbook tab's Delivery says "This Kindle opens the book at the start after each update". If the
   library shows two items, that's a bug to fix before step 3 ships.
 - The cookbook is **never pruned** by the Daily's keep-newest-N rule.
 
@@ -522,20 +583,23 @@ both ways.)*
   reaches both on their next plug-ins, a Kindle already up to date gets no push, and a Kindle
   with `cookbook = false` gets nothing.
   The phase 0 results go in `docs/devices.md`.
-- **Desktop:** visually verified in the running app (Add preview, The book, Style), with the
+- **Desktop:** visually verified in the running app (Add with its preview, Recipes with a row open, Delivery, Book settings), with the
   cover and two recipe pages checked in Kindle Previewer.
 
 ## 11. Build order
 
 0. Hardware spike (§9) on Scribe and Paperwhite. The owner runs it with a hand-built book
-   from step 2. Its results only change the Waiting room's wording.
+   from step 2. Its results only change the wording on the Cookbook tab's Delivery.
 1. `deckle_digest::cookbook`: the parser (§4), the store (§5), filing (§6.2); `cookbook add / list /
    move / remove / note`.
 2. The book builder (§6) with site photos (§7.1): `cookbook build`.
 3. Delivery (§9): dirty flag, build id, per-Kindle standing delivery, `cookbook send`.
-4. The desktop Cookbook tab (§8.2).
-5. The Inbox `Recipes/` folder and the Save recipe bookmarklet (§8.3).
-6. Illustrations (§7.2).
+4. The Inbox `Recipes/` folder and the Save recipe bookmarklet (§8.3).
+5. Illustrations (§7.2), backend and CLI (`cookbook picture … illustration`,
+   `cookbook illustrate`).
+6. The desktop Cookbook tab (§8.2), including the Books tab's **Recipe…** entry. **Starts only
+   after the Daily tab redesign (#206, #207, #208) has merged**, because it reuses that
+   frame's tabs, sheet and save queue. Steps 1–5 are Rust only and don't wait for it.
 
 Each step is its own PR and works on its own: after step 2 the owner can already build and
 sideload the book by hand.
