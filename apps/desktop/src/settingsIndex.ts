@@ -2,15 +2,14 @@
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 
 /** The Settings pages (Settings redesign §2). */
-export type SettingsPage = "overview" | "sending" | "general" | "books" | "xray" | "wordwise" | "kindles" | "about";
+export type SettingsPage = "overview" | "sending" | "general" | "books" | "reading" | "kindles" | "about";
 
 export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "overview", title: "Overview" },
   { id: "sending", title: "Sending" },
   { id: "general", title: "General" },
   { id: "books", title: "Books" },
-  { id: "xray", title: "X-Ray" },
-  { id: "wordwise", title: "Word Wise" },
+  { id: "reading", title: "Reading aids" },
   { id: "kindles", title: "Kindles" },
   { id: "about", title: "About" },
 ];
@@ -36,12 +35,12 @@ export const INDEX: Entry[] = [
   { label: "Fill missing details", page: "books", words: "open library metadata details author series description online" },
   { label: "Tidy typography", page: "books", words: "typography quotes dashes ellipses" },
   { label: "Pop-up footnotes", page: "books", words: "footnotes notes popup" },
-  { label: "X-Ray", page: "xray", words: "xray characters people places terms" },
-  { label: "Wikipedia summaries", page: "xray", words: "wikipedia online" },
-  { label: "AI model for X-Ray", page: "xray", words: "ai llm model anthropic claude openai ollama lm studio online" },
-  { label: "API key", page: "xray", words: "api key token anthropic openai" },
-  { label: "Word Wise", page: "wordwise", words: "word wise hints vocabulary" },
-  { label: "How many hints", page: "wordwise", words: "word wise level slider hints dictionary" },
+  { label: "X-Ray", page: "reading", words: "xray characters people places terms" },
+  { label: "Wikipedia summaries", page: "reading", words: "wikipedia online" },
+  { label: "AI model for X-Ray", page: "reading", words: "ai llm model anthropic claude openai ollama lm studio online" },
+  { label: "API key", page: "reading", words: "api key token anthropic openai" },
+  { label: "Word Wise", page: "reading", words: "word wise hints vocabulary" },
+  { label: "How many hints", page: "reading", words: "word wise level slider hints dictionary" },
   { label: "Highlights folder", page: "kindles", words: "highlights markdown clippings notes folder" },
   { label: "Write highlights when a Kindle connects", page: "kindles", words: "highlights connect clippings schedule morning" },
   { label: "Note how far I read the paper", page: "kindles", words: "readership reading paper daily progress" },
@@ -157,10 +156,11 @@ export function pageSummary(page: SettingsPage, s: Settings, library: LibrarySta
       const on = [s.pages_auto && "page numbers", s.typography && "tidy typography", s.popup_notes && "pop-up footnotes", s.generated_cover && "covers when missing"].filter((x): x is string => !!x);
       return on.length ? list(on).replace(/^./, (c) => c.toUpperCase()) : "Books go as they are";
     }
-    case "xray":
-      return !s.xray ? "Off" : `On${s.llm_provider !== "off" ? ", with an AI model" : ", built on this Mac"}${s.wikipedia ? " and Wikipedia" : ""}`;
-    case "wordwise":
-      return s.word_wise ? (s.word_wise_level === 5 ? "On, every hint" : `On, ${s.word_wise_level} of 5`) : "Off";
+    case "reading": {
+      const ww = s.word_wise ? (s.word_wise_level === 5 ? "Word Wise, every hint" : `Word Wise, ${s.word_wise_level} of 5`) : "";
+      const xr = s.xray ? `X-Ray${s.llm_provider !== "off" ? " with an AI model" : ""}${s.wikipedia ? " and Wikipedia" : ""}` : "";
+      return [ww, xr].filter(Boolean).join(" · ") || "Both off";
+    }
     case "kindles":
       return devices.length ? list(devices.map((d) => d.name || d.model_hint)) : "None plugged in";
     case "about":
