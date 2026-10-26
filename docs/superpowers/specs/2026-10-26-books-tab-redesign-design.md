@@ -125,9 +125,18 @@ the editor looks the book up with the same Open Library code a send uses, once p
    today's fields (title, authors, series, number), dirty marks, undo and the close prompt;
    ASIN moved in.
 4. **More fields**: `Details` gains description, tags, publisher, published, language, ISBN,
-   sort title and sort author; `rewrite_opf` writes them (dc:description, dc:subject,
-   dc:publisher, dc:date, dc:language, dc:identifier with `opf:scheme="ISBN"`, and the
-   `file-as` refines); the editor shows them.
+   sort title and sort author; the editor shows them, read from the copy's OPF
+   (`library_read_details`). Built:
+   - Each new field is optional: absent leaves the book's own, empty removes it, so an older
+     caller can't wipe what it didn't send. If the OPF can't be read, the editor offers only
+     title, authors and series.
+   - `rewrite_opf` writes dc:description, dc:subject (one per tag), dc:publisher, the
+     publication dc:date (other EPUB 2 dates stay), dc:language (never removed: every EPUB
+     needs one), an ISBN as `urn:isbn:…` (valid in EPUB 2 and 3; the package's unique
+     identifier is never touched), `calibre:title_sort`, and the first author's sort name
+     (`file-as` refines in EPUB 3, `opf:file-as` in EPUB 2 when the OPF declares `opf`).
+   - The library and the editor refuse the same things: a published value that isn't a year
+     or a W3C date, a language that isn't a tag like en-GB, an ISBN that isn't 10 or 13 digits.
 5. **Suggestions**: a `library_suggest_details` command over `metadata_fill::lookup`, per-field
    **Use** and **Use all**, the off-setting link, and edition-record publisher, date, language
    and ISBN.

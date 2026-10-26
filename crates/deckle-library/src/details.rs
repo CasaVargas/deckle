@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Fix details (Books and Kindle design §8): the title, authors and series of a book in Deckle's
-//! library, written into the library copy's OPF and its sidecar. Never the original file, and
-//! never calibre. The book keeps its identity and ASIN, so its sends still match it.
+//! Fix details (Books and Kindle design §8, Books tab redesign §5): the title, authors, series
+//! and the rest of a book in Deckle's library, written into the library copy's OPF and its
+//! sidecar. Never the original file, and never calibre. The book keeps its identity and ASIN, so
+//! its sends still match it.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -12,10 +13,193 @@ use serde::{Deserialize, Serialize};
 use crate::{Book, Library, SeriesRef};
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Details {
     pub title: String,
     pub authors: Vec<String>,
     pub series: Option<SeriesRef>,
+    // The rest: `None` leaves the book's own as it is; `Some` empty removes it.
+    pub description: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub publisher: Option<String>,
+    /// A year, or a date like 2020-09-15 (W3CDTF, as the OPF wants).
+    pub published: Option<String>,
+    /// A language tag (en, en-GB). Empty keeps the book's own: every EPUB needs one.
+    pub language: Option<String>,
+    pub isbn: Option<String>,
+    pub title_sort: Option<String>,
+    /// The first author's sorting name ("Corey, James S. A.").
+    pub author_sort: Option<String>,
+}
+
+const DC: &str = "http://purl.org/dc/elements/1.1/";
+
+/// `s` trimmed, `None` when that leaves nothing.
+fn filled(s: &Option<String>) -> Option<&str> {
+    s.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// An ISBN-10 or -13 without its hyphens and spaces, the check letter upper-cased.
+pub fn normal_isbn(s: &str) -> Option<String> {
+    let n: String = s
+        .chars()
+        .filter(|c| !matches!(c, '-' | ' '))
+        .collect::<String>()
+        .to_uppercase();
+    let ok = (n.len() == 13 && n.chars().all(|c| c.is_ascii_digit()))
+        || (n.len() == 10
+            && n[..9].chars().all(|c| c.is_ascii_digit())
+            && n[9..].chars().all(|c| c.is_ascii_digit() || c == 'X'));
+    ok.then_some(n)
+}
+
+/// What stops `d` being written, in the words the editor shows.
+pub fn check(d: &Details) -> Result<(), String> {
+    if d.title.trim().is_empty() {
+        return Err("a book needs a title".into());
+    }
+    if let Some(p) = filled(&d.published)
+        && !Regex::new(r"^\d{4}(-\d{2}(-\d{2})?)?$")
+            .unwrap()
+            .is_match(p)
+    {
+        return Err("Published: a year, or a date like 2020-09-15.".into());
+    }
+    if let Some(l) = filled(&d.language)
+        && !Regex::new(r"^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$")
+            .unwrap()
+            .is_match(l)
+    {
+        return Err("Language: a code like en or en-GB.".into());
+    }
+    if let Some(i) = filled(&d.isbn)
+        && normal_isbn(i).is_none()
+    {
+        return Err("ISBN: 10 or 13 digits.".into());
+    }
+    Ok(())
+}
+
+/// Whether an identifier is an ISBN, and which.
+fn isbn_of(text: &str, scheme: Option<&str>) -> Option<String> {
+    let t = text.trim();
+    let t = t
+        .strip_prefix("urn:isbn:")
+        .or_else(|| t.strip_prefix("URN:ISBN:"))
+        .unwrap_or(t);
+    if scheme.is_some_and(|s| s.eq_ignore_ascii_case("isbn")) || t.len() != text.trim().len() {
+        return normal_isbn(t).or_else(|| Some(t.to_owned()));
+    }
+    normal_isbn(t)
+}
+
+/// A book's details as its OPF has them; every optional field is `Some`, empty when absent.
+pub fn read(opf: &str) -> Result<Details, String> {
+    let doc = roxmltree::Document::parse(opf).map_err(|e| e.to_string())?;
+    let meta = doc
+        .descendants()
+        .find(|n| n.tag_name().name() == "metadata")
+        .ok_or("the OPF has no <metadata>")?;
+    let dc = |name: &'static str| {
+        meta.children()
+            .filter(move |n| n.tag_name().namespace() == Some(DC) && n.tag_name().name() == name)
+    };
+    let text = |n: roxmltree::Node| n.text().map(str::trim).unwrap_or("").to_owned();
+    let attr = |n: roxmltree::Node, name: &str| {
+        n.attributes()
+            .find(|a| a.name() == name)
+            .map(|a| a.value().to_owned())
+    };
+    let metas: Vec<roxmltree::Node> = meta
+        .children()
+        .filter(|n| n.tag_name().name() == "meta")
+        .collect();
+    let refine = |id: Option<String>, property: &str| {
+        let id = id?;
+        metas
+            .iter()
+            .find(|m| {
+                attr(**m, "refines").as_deref() == Some(&format!("#{id}"))
+                    && attr(**m, "property").as_deref() == Some(property)
+            })
+            .map(|m| text(*m))
+    };
+    let named = |name: &str| {
+        metas
+            .iter()
+            .find(|m| attr(**m, "name").as_deref() == Some(name))
+            .and_then(|m| attr(*m, "content"))
+    };
+    let authors: Vec<roxmltree::Node> = dc("creator")
+        .filter(|c| {
+            let role = attr(*c, "role").or_else(|| refine(attr(*c, "id"), "role"));
+            role.is_none_or(|r| r == "aut")
+        })
+        .collect();
+    let series = match named("calibre:series") {
+        Some(name) => Some(SeriesRef {
+            name,
+            index: named("calibre:series_index").and_then(|i| i.parse().ok()),
+        }),
+        None => metas
+            .iter()
+            .find(|m| attr(**m, "property").as_deref() == Some("belongs-to-collection"))
+            .map(|m| SeriesRef {
+                name: text(*m),
+                index: refine(attr(*m, "id"), "group-position").and_then(|i| i.parse().ok()),
+            }),
+    };
+    let unique = doc.root_element().attribute("unique-identifier");
+    // Another ISBN wins over the unique identifier's: that one names the file, not the edition.
+    let isbns: Vec<(Option<String>, String)> = dc("identifier")
+        .filter_map(|i| isbn_of(&text(i), attr(i, "scheme").as_deref()).map(|n| (attr(i, "id"), n)))
+        .collect();
+    let isbn = isbns
+        .iter()
+        .find(|(id, _)| id.as_deref() != unique)
+        .or(isbns.first())
+        .map(|(_, n)| n.clone());
+    let first_title = dc("title").next();
+    Ok(Details {
+        title: first_title.map(text).unwrap_or_default(),
+        authors: authors
+            .iter()
+            .map(|a| text(*a))
+            .filter(|a| !a.is_empty())
+            .collect(),
+        series,
+        description: Some(dc("description").next().map(text).unwrap_or_default()),
+        tags: Some(dc("subject").map(text).filter(|t| !t.is_empty()).collect()),
+        publisher: Some(dc("publisher").next().map(text).unwrap_or_default()),
+        published: Some(
+            dc("date")
+                .find(|d| attr(*d, "event").is_none_or(|e| e == "publication"))
+                .map(text)
+                .unwrap_or_default(),
+        ),
+        language: Some(dc("language").next().map(text).unwrap_or_default()),
+        isbn: Some(isbn.unwrap_or_default()),
+        title_sort: Some(
+            named("calibre:title_sort")
+                .or_else(|| first_title.and_then(|t| refine(attr(t, "id"), "file-as")))
+                .unwrap_or_default(),
+        ),
+        author_sort: Some(
+            authors
+                .first()
+                .and_then(|a| attr(*a, "file-as").or_else(|| refine(attr(*a, "id"), "file-as")))
+                .unwrap_or_default(),
+        ),
+    })
+}
+
+/// The details of the library book whose copy is at `path`.
+pub fn read_book(path: &Path) -> Result<Details, String> {
+    let mut epub = deckle_core::epub::EpubReader::open(path).map_err(|e| e.to_string())?;
+    let opf = epub
+        .read_string(&epub.opf_path.clone())
+        .map_err(|e| e.to_string())?;
+    read(&opf)
 }
 
 fn esc(s: &str) -> String {
@@ -68,11 +252,29 @@ pub fn rewrite_opf(opf: &str, d: &Details) -> Option<String> {
     for id in &ids {
         drop_refines(&mut block, id);
     }
+    let epub3 = Regex::new(r#"(?is)<package\b[^>]*\bversion\s*=\s*["']3"#)
+        .unwrap()
+        .is_match(opf);
+    let opf_ns = opf.contains("xmlns:opf=");
+    let sort = filled(&d.author_sort);
     let creators: String = d
         .authors
         .iter()
         .filter(|a| !a.trim().is_empty())
-        .map(|a| format!("\n    <dc:creator>{}</dc:creator>", esc(a.trim())))
+        .enumerate()
+        .map(|(i, a)| match sort.filter(|_| i == 0) {
+            Some(s) if epub3 => format!(
+                "\n    <dc:creator id=\"deckle-creator\">{}</dc:creator>\n    <meta refines=\"#deckle-creator\" property=\"file-as\">{}</meta>",
+                esc(a.trim()),
+                esc(s)
+            ),
+            Some(s) if opf_ns => format!(
+                "\n    <dc:creator opf:file-as=\"{}\">{}</dc:creator>",
+                esc(s),
+                esc(a.trim())
+            ),
+            _ => format!("\n    <dc:creator>{}</dc:creator>", esc(a.trim())),
+        })
         .collect();
 
     // The title: the first keeps its attributes, the text changes.
@@ -125,9 +327,6 @@ pub fn rewrite_opf(opf: &str, d: &Details) -> Option<String> {
                 index_text(i)
             ));
         }
-        let epub3 = Regex::new(r#"(?is)<package\b[^>]*\bversion\s*=\s*["']3"#)
-            .unwrap()
-            .is_match(opf);
         if epub3 {
             block.push_str(&format!(
                 "\n    <meta property=\"belongs-to-collection\" id=\"deckle-series\">{name}</meta>\n    <meta refines=\"#deckle-series\" property=\"collection-type\">series</meta>"
@@ -139,8 +338,89 @@ pub fn rewrite_opf(opf: &str, d: &Details) -> Option<String> {
                 ));
             }
         }
-        block.push('\n');
     }
+
+    // The rest, each only when it's asked for.
+    let dc_re = |tag: &str| {
+        Regex::new(&format!(r"(?is)\s*<dc:{tag}\b[^>]*?(?:/>|>.*?</dc:{tag}>)")).unwrap()
+    };
+    let mut extra = String::new();
+    let mut put = |tag: &str, v: &str| {
+        if !v.trim().is_empty() {
+            extra.push_str(&format!("\n    <dc:{tag}>{}</dc:{tag}>", esc(v.trim())));
+        }
+    };
+    for (tag, value) in [("description", &d.description), ("publisher", &d.publisher)] {
+        if let Some(v) = value {
+            block = dc_re(tag).replace_all(&block, "").into_owned();
+            put(tag, v);
+        }
+    }
+    if let Some(tags) = &d.tags {
+        block = dc_re("subject").replace_all(&block, "").into_owned();
+        tags.iter().for_each(|t| put("subject", t));
+    }
+    if let Some(p) = &d.published {
+        // Only the publication date: EPUB 2's modification and other dates stay.
+        let event = Regex::new(r#"\bevent\s*=\s*["']([^"']+)["']"#).unwrap();
+        block = dc_re("date")
+            .replace_all(&block, |c: &regex::Captures| match event.captures(&c[0]) {
+                Some(e) if &e[1] != "publication" => c[0].to_owned(),
+                _ => String::new(),
+            })
+            .into_owned();
+        put("date", p);
+    }
+    if let Some(l) = filled(&d.language) {
+        block = dc_re("language").replace_all(&block, "").into_owned();
+        put("language", l);
+    }
+    if let Some(i) = &d.isbn {
+        // ISBNs go, except the package's unique identifier, which names the book.
+        let unique =
+            Regex::new(r#"(?is)<package\b[^>]*\bunique-identifier\s*=\s*["']([^"']+)["']"#)
+                .unwrap()
+                .captures(opf)
+                .map(|c| c[1].to_owned());
+        let inner = Regex::new(r"(?is)>(.*?)</").unwrap();
+        let scheme = Regex::new(r#"\bscheme\s*=\s*["']([^"']+)["']"#).unwrap();
+        let mut kept = None;
+        block = dc_re("identifier")
+            .replace_all(&block, |c: &regex::Captures| {
+                let m = &c[0];
+                let text = inner
+                    .captures(m)
+                    .map(|t| t[1].to_owned())
+                    .unwrap_or_default();
+                let found = isbn_of(&text, scheme.captures(m).as_ref().map(|s| &s[1]));
+                if id_of(m).is_some() && id_of(m) == unique {
+                    kept = found;
+                    m.to_owned()
+                } else if found.is_some() {
+                    String::new()
+                } else {
+                    m.to_owned()
+                }
+            })
+            .into_owned();
+        if let Some(n) = normal_isbn(i.trim()).filter(|n| kept.as_ref() != Some(n)) {
+            put("identifier", &format!("urn:isbn:{n}"));
+        }
+    }
+    if let Some(t) = &d.title_sort {
+        let re = Regex::new(
+            r#"(?is)\s*<meta\b[^>]*\bname\s*=\s*["']calibre:title_sort["'][^>]*?(?:/>|>\s*</meta>)"#,
+        )
+        .unwrap();
+        block = re.replace_all(&block, "").into_owned();
+        if !t.trim().is_empty() {
+            extra.push_str(&format!(
+                "\n    <meta name=\"calibre:title_sort\" content=\"{}\"/>",
+                esc(t.trim())
+            ));
+        }
+    }
+    let block = format!("{}{extra}\n", block.trim_end());
     Some(format!(
         "{}{block}{}",
         &opf[..open.end()],
@@ -189,9 +469,7 @@ fn rewrite_epub(path: &Path, d: &Details) -> Result<Vec<u8>, String> {
 
 /// Writes `d` into the library book in `dir`: its EPUB's OPF, then its sidecar.
 pub fn fix(lib: &Library, dir: &Path, d: &Details) -> Result<Book, String> {
-    if d.title.trim().is_empty() {
-        return Err("a book needs a title".into());
-    }
+    check(d)?;
     let mut book = lib
         .list()
         .into_iter()
@@ -220,6 +498,15 @@ pub fn fix(lib: &Library, dir: &Path, d: &Details) -> Result<Book, String> {
         .filter(|a| !a.is_empty())
         .collect();
     m.series = d.series.clone().filter(|s| !s.name.trim().is_empty());
+    if d.author_sort.is_some() {
+        m.author_sort = filled(&d.author_sort).map(str::to_owned);
+    }
+    if let Some(l) = filled(&d.language) {
+        m.language = l.to_owned();
+    }
+    if let Some(i) = &d.isbn {
+        m.isbn = normal_isbn(i);
+    }
     book.sidecar.sha256 = crate::sha256_hex(&bytes);
     lib.save(&book)?;
     Ok(book)
@@ -242,6 +529,7 @@ mod tests {
                     name: "Lamps".into(),
                     index: Some(2.0),
                 }),
+                ..Details::default()
             },
         )
         .unwrap();
@@ -255,6 +543,138 @@ mod tests {
         assert!(out.contains("<dc:creator>Ada Field</dc:creator>"));
         assert!(out.contains("<meta name=\"calibre:series_index\" content=\"2\"/>"));
         assert!(out.contains("property=\"group-position\">2</meta>"));
+    }
+
+    const OPF2: &str = r##"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf"><dc:identifier id="uid" opf:scheme="ISBN">9780000000002</dc:identifier><dc:identifier opf:scheme="ISBN">0-306-40615-2</dc:identifier><dc:title>Old</dc:title><dc:creator opf:role="aut" opf:file-as="Field, Ada">Ada Field</dc:creator><dc:creator opf:role="edt">An Editor</dc:creator><dc:language>en</dc:language><dc:description>&lt;p&gt;Old blurb&lt;/p&gt;</dc:description><dc:subject>Old tag</dc:subject><dc:publisher>Old House</dc:publisher><dc:date opf:event="publication">1999</dc:date><dc:date opf:event="modification">2024-01-01</dc:date><meta name="calibre:title_sort" content="Old"/></metadata><manifest/></package>"##;
+
+    fn full() -> Details {
+        Details {
+            title: "The New One".into(),
+            authors: vec!["Ada Field".into()],
+            series: None,
+            description: Some("<p>A blurb & more</p>".into()),
+            tags: Some(vec!["Fantasy".into(), "Book club".into()]),
+            publisher: Some("Bloomsbury".into()),
+            published: Some("2020-09-15".into()),
+            language: Some("en-GB".into()),
+            isbn: Some("9781635575637".into()),
+            title_sort: Some("New One, The".into()),
+            author_sort: Some("Field, Ada".into()),
+        }
+    }
+
+    #[test]
+    fn every_field_is_written_and_reads_back() {
+        for opf in [OPF, OPF2] {
+            let out = rewrite_opf(opf, &full()).unwrap();
+            roxmltree::Document::parse(&out).unwrap();
+            let back = read(&out).unwrap();
+            assert_eq!(back, full(), "{out}");
+        }
+    }
+
+    #[test]
+    fn rewriting_twice_changes_nothing_more() {
+        for opf in [OPF, OPF2] {
+            let once = rewrite_opf(opf, &full()).unwrap();
+            assert_eq!(rewrite_opf(&once, &full()).unwrap(), once);
+        }
+    }
+
+    #[test]
+    fn none_leaves_the_books_own_and_empty_removes_it() {
+        let keep = Details {
+            title: "T".into(),
+            authors: vec!["Ada Field".into()],
+            ..Details::default()
+        };
+        let out = rewrite_opf(OPF2, &keep).unwrap();
+        for own in [
+            "Old blurb",
+            "Old tag",
+            "Old House",
+            ">1999<",
+            "calibre:title_sort",
+            ">en<",
+        ] {
+            assert!(out.contains(own), "{own} kept: {out}");
+        }
+        let empty = Details {
+            description: Some(String::new()),
+            tags: Some(vec![]),
+            publisher: Some(" ".into()),
+            published: Some(String::new()),
+            language: Some(String::new()),
+            isbn: Some(String::new()),
+            title_sort: Some(String::new()),
+            ..keep
+        };
+        let out = rewrite_opf(OPF2, &empty).unwrap();
+        for gone in [
+            "Old blurb",
+            "Old tag",
+            "Old House",
+            ">1999<",
+            "calibre:title_sort",
+            "0-306-40615-2",
+        ] {
+            assert!(!out.contains(gone), "{gone} removed: {out}");
+        }
+        assert!(out.contains(">en<"), "a book keeps a language");
+        assert!(
+            out.contains("opf:event=\"modification\""),
+            "other dates stay"
+        );
+        assert!(out.contains("id=\"uid\""), "the unique identifier stays");
+    }
+
+    #[test]
+    fn reading_skips_non_authors_and_finds_the_isbn() {
+        let d = read(OPF2).unwrap();
+        assert_eq!(d.authors, vec!["Ada Field".to_owned()]);
+        assert_eq!(
+            d.isbn.as_deref(),
+            Some("0306406152"),
+            "the edition's ISBN, not the unique id's"
+        );
+        assert_eq!(d.published.as_deref(), Some("1999"));
+        assert_eq!(d.description.as_deref(), Some("<p>Old blurb</p>"));
+        assert_eq!(d.author_sort.as_deref(), Some("Field, Ada"));
+    }
+
+    #[test]
+    fn bad_values_are_refused_in_plain_words() {
+        for (d, word) in [
+            (
+                Details {
+                    published: Some("Sept 2020".into()),
+                    ..full()
+                },
+                "Published",
+            ),
+            (
+                Details {
+                    isbn: Some("12345".into()),
+                    ..full()
+                },
+                "ISBN",
+            ),
+            (
+                Details {
+                    language: Some("English".into()),
+                    ..full()
+                },
+                "Language",
+            ),
+        ] {
+            assert!(check(&d).unwrap_err().contains(word));
+        }
+        assert!(check(&full()).is_ok());
+        assert_eq!(
+            normal_isbn("978-1-63557-563-7").as_deref(),
+            Some("9781635575637")
+        );
+        assert_eq!(normal_isbn("0-306-40615-x").as_deref(), Some("030640615X"));
     }
 
     #[test]
@@ -271,6 +691,7 @@ mod tests {
                 name: "Fixes".into(),
                 index: Some(1.5),
             }),
+            ..Details::default()
         };
         let fixed = fix(&lib, &book.dir, &d).unwrap();
         let info = deckle_core::inspect::inspect(&fixed.source_path()).unwrap();

@@ -56,10 +56,35 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ text: string; fail: boolean } | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // A library book's form is filled from its copy's OPF; until that's read, it waits. If the
+  // read fails, only title, authors and series are offered, so nothing unread is overwritten.
+  const [read, setRead] = useState<"reading" | "read" | "failed">(entry?.library_dir ? "reading" : "failed");
+  useEffect(() => {
+    if (!entry?.library_dir) return;
+    let live = true;
+    api
+      .libraryReadDetails(entry.library_dir)
+      .then((d) => {
+        if (!live) return;
+        const fresh = draftFrom(entry, book, d);
+        setSaved(fresh);
+        setDraft(fresh);
+        setRead("read");
+      })
+      .catch((e) => {
+        if (!live) return;
+        setRead("failed");
+        setMsg({ text: `Couldn't read all of this book's details: ${e}`, fail: true });
+      });
+    return () => {
+      live = false;
+    };
+  }, [entry?.library_dir]);
   const changed = changedFields(saved, draft);
   const issues = problems(draft);
   const dirty = changed.length > 0;
-  const editable = !!entry?.library_dir;
+  const editable = !!entry?.library_dir && read !== "reading";
+  const full = editable && read === "read";
   const asinEditable = previewable;
 
   const save = async (): Promise<boolean> => {
@@ -67,7 +92,10 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
     setMsg(null);
     try {
       const library = changed.some((f) => f !== "asin");
-      if (library && entry?.library_dir) await api.libraryFixDetails(entry.library_dir, toDetails(draft));
+      if (library && entry?.library_dir) {
+        const all = toDetails(draft);
+        await api.libraryFixDetails(entry.library_dir, full ? all : { title: all.title, authors: all.authors, series: all.series });
+      }
       if (changed.includes("asin") && book) onAsin(book.id, draft.asin.trim() ? draft.asin.trim().toUpperCase() : null);
       if (library) await onFixed(book);
       setSaved(draft);
@@ -205,7 +233,7 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
             if (dirty && Object.keys(issues).length === 0) void save();
           }}
         >
-          <p className="drawer-home muted small">{home(entry)}</p>
+          <p className="drawer-home muted small">{read === "reading" ? "Reading its details…" : home(entry)}</p>
           <label>
             <span className="field-label">Title {mark("title")}</span>
             <input value={draft.title} onChange={(e) => set("title", e.target.value)} disabled={!editable} aria-invalid={!!issues.title} className={changed.includes("title") ? "changed" : ""} />
@@ -213,7 +241,7 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
           </label>
           <div className="field">
             <span className="field-label" id="authors-label">Authors {mark("authors")}</span>
-            <Authors value={draft.authors} onChange={(v) => set("authors", v)} disabled={!editable} changed={changed.includes("authors")} />
+            <TokenField labelId="authors-label" value={draft.authors} onChange={(v) => set("authors", v)} disabled={!editable} changed={changed.includes("authors")} add="Add an author" another="Add another" />
           </div>
           <div className="details-series">
             <label>
@@ -226,14 +254,65 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
             </label>
           </div>
           {issues.index && <span className="field-problem">{issues.index}</span>}
-          {asinEditable && (
-            <details className="more" open={!!saved.asin || changed.includes("asin")}>
-              <summary>More</summary>
+          {full && (
+            <>
               <label>
-                <span className="field-label">Amazon ASIN {mark("asin")}</span>
-                <input value={draft.asin} onChange={(e) => set("asin", e.target.value)} placeholder="B0… from the book's Amazon page" spellCheck={false} maxLength={12} aria-invalid={!!issues.asin} className={`asin ${changed.includes("asin") ? "changed" : ""}`} />
-                <span className="muted small">{issues.asin ?? "With Prefer features (EBOK), the Kindle fetches Amazon's cover for this edition. Kept with this send, not the library."}</span>
+                <span className="field-label">Description {mark("description")}</span>
+                <textarea rows={4} value={draft.description} onChange={(e) => set("description", e.target.value)} className={changed.includes("description") ? "changed" : ""} />
+                <span className="muted small">Shown on the Kindle's page for the book.</span>
               </label>
+              <div className="details-pair">
+                <label>
+                  <span className="field-label">Publisher {mark("publisher")}</span>
+                  <input value={draft.publisher} onChange={(e) => set("publisher", e.target.value)} className={changed.includes("publisher") ? "changed" : ""} />
+                </label>
+                <label>
+                  <span className="field-label">Published {mark("published")}</span>
+                  <input value={draft.published} onChange={(e) => set("published", e.target.value)} placeholder="2020 or 2020-09-15" aria-invalid={!!issues.published} className={changed.includes("published") ? "changed" : ""} />
+                  {issues.published && <span className="field-problem">{issues.published}</span>}
+                </label>
+                <label>
+                  <span className="field-label">Language {mark("language")}</span>
+                  <input value={draft.language} onChange={(e) => set("language", e.target.value)} placeholder="en" spellCheck={false} aria-invalid={!!issues.language} className={changed.includes("language") ? "changed" : ""} />
+                  {issues.language && <span className="field-problem">{issues.language}</span>}
+                </label>
+                <label>
+                  <span className="field-label">ISBN {mark("isbn")}</span>
+                  <input value={draft.isbn} onChange={(e) => set("isbn", e.target.value)} inputMode="numeric" spellCheck={false} aria-invalid={!!issues.isbn} className={changed.includes("isbn") ? "changed" : ""} />
+                  {issues.isbn && <span className="field-problem">{issues.isbn}</span>}
+                </label>
+              </div>
+              <div className="field">
+                <span className="field-label" id="tags-label">Tags {mark("tags")}</span>
+                <TokenField labelId="tags-label" value={draft.tags} onChange={(v) => set("tags", v)} disabled={false} changed={changed.includes("tags")} add="Add a tag" another="Add another" />
+              </div>
+            </>
+          )}
+          {(full || asinEditable) && (
+            <details className="more" open={changed.some((f) => f === "titleSort" || f === "authorSort" || f === "asin") || !!saved.asin}>
+              <summary>More</summary>
+              <div className="more-fields">
+                {full && (
+                  <>
+                    <label>
+                      <span className="field-label">Sort title {mark("titleSort")}</span>
+                      <input value={draft.titleSort} onChange={(e) => set("titleSort", e.target.value)} placeholder={draft.title} className={changed.includes("titleSort") ? "changed" : ""} />
+                    </label>
+                    <label>
+                      <span className="field-label">Sort author {mark("authorSort")}</span>
+                      <input value={draft.authorSort} onChange={(e) => set("authorSort", e.target.value)} placeholder="Last name, First name" className={changed.includes("authorSort") ? "changed" : ""} />
+                      <span className="muted small">How the first author is filed, like "Corey, James S. A."</span>
+                    </label>
+                  </>
+                )}
+                {asinEditable && (
+                  <label>
+                    <span className="field-label">Amazon ASIN {mark("asin")}</span>
+                    <input value={draft.asin} onChange={(e) => set("asin", e.target.value)} placeholder="B0… from the book's Amazon page" spellCheck={false} maxLength={12} aria-invalid={!!issues.asin} className={`asin ${changed.includes("asin") ? "changed" : ""}`} />
+                    <span className="muted small">{issues.asin ?? "With Prefer features (EBOK), the Kindle fetches Amazon's cover for this edition. Kept with this send, not the library."}</span>
+                  </label>
+                )}
+              </div>
             </details>
           )}
         </form>
@@ -352,8 +431,8 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
   );
 }
 
-/** Authors as removable tokens; Return or a comma adds what's typed, Backspace on empty removes the last. */
-function Authors({ value, onChange, disabled, changed }: { value: string[]; onChange: (v: string[]) => void; disabled: boolean; changed: boolean }) {
+/** Removable tokens (authors, tags); Return or a comma adds what's typed, Backspace on empty removes the last. */
+function TokenField({ labelId, value, onChange, disabled, changed, add, another }: { labelId: string; value: string[]; onChange: (v: string[]) => void; disabled: boolean; changed: boolean; add: string; another: string }) {
   const [text, setText] = useState("");
   const commit = () => {
     const t = text.trim();
@@ -361,7 +440,7 @@ function Authors({ value, onChange, disabled, changed }: { value: string[]; onCh
     setText("");
   };
   return (
-    <div className={`token-field ${changed ? "changed" : ""} ${disabled ? "disabled" : ""}`} role="group" aria-labelledby="authors-label">
+    <div className={`token-field ${changed ? "changed" : ""} ${disabled ? "disabled" : ""}`} role="group" aria-labelledby={labelId}>
       {value.map((a, i) => (
         <span key={`${a}-${i}`} className="token">
           {a}
@@ -374,9 +453,9 @@ function Authors({ value, onChange, disabled, changed }: { value: string[]; onCh
       ))}
       {!disabled && (
         <input
-          aria-label="Add an author"
+          aria-label={add}
           value={text}
-          placeholder={value.length ? "Add another" : "Add an author"}
+          placeholder={value.length ? another : add}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === ",") {

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use deckle_core::preflight::{Chapter, CoverSource, PreflightOptions, preflight};
 use deckle_core::typography::TypographyReport;
 use deckle_library::catalog::{Entry, catalog, cover_of};
-use deckle_library::details::{Details, fix};
+use deckle_library::details::{Details, fix, read_book};
 use deckle_library::sources::{Sources, home};
 use deckle_library::upgrade::Upgrades;
 use deckle_library::watch::{Watched, scan, seen_path};
@@ -252,6 +252,22 @@ pub fn library_fix_details(dir: String, details: Details) -> Result<(), String> 
     )
 }
 
+/// The details of the library book in `dir`, as its copy's OPF has them.
+pub fn details_at(config: &Path, dir: &Path) -> Result<Details, String> {
+    let (lib, _) = Library::configured(config).ok_or("Set up a library first.")?;
+    let book = lib
+        .list()
+        .into_iter()
+        .find(|b| b.dir == dir)
+        .ok_or_else(|| format!("{}: not a book in the library", dir.display()))?;
+    read_book(&book.source_path())
+}
+
+#[tauri::command]
+pub fn library_read_details(dir: String) -> Result<Details, String> {
+    details_at(&deckle_library::config::default_path(), Path::new(&dir))
+}
+
 pub fn watch_set_at(config: &Path, dir: Option<String>) -> Result<Option<String>, String> {
     let dir = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     if let Some(d) = &dir
@@ -376,12 +392,18 @@ mod tests {
                 title: "Mended".into(),
                 authors: vec!["A. Mender".into()],
                 series: None,
+                ..Details::default()
             },
         )
         .unwrap();
         assert_eq!(
             catalog_at(&config, None, None).entries[0].entry.title,
             "Mended"
+        );
+        let read = details_at(&config, &book.dir).unwrap();
+        assert_eq!(
+            (read.title.as_str(), read.authors.clone()),
+            ("Mended", vec!["A. Mender".to_owned()])
         );
 
         let downloads = tmp.path().join("Downloads");
