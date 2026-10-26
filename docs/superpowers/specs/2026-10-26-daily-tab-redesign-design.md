@@ -59,9 +59,10 @@ The page plan leaves Today: it becomes Sections.
 
 - One row per page-plan row (today's `plan`), then a "Not in the paper" divider and the rows that
   are off (`off`). A row: drag handle, name, a one-line detail, its stories (a menu where it has a
-  budget, else "1 page"), an on switch, and a chevron that opens it. Moving (drag, or the
-  keyboard: Alt+↑/↓ on a focused row) and the stories menu keep today's rules (`reorder`,
-  `setBudget`, `step`): grouped kinds stay one block, other towns follow Local.
+  budget, else "1 page"), an on switch, and a chevron that opens it. Moving (drag by the row's
+  head, Move up / Move down in an open row, or Alt+↑/↓ on a focused row) and the stories menu
+  keep today's rules (`reorder`, `setBudget`, `step`): grouped kinds stay one block, other towns
+  follow Local. Only the head drags, since WebKit won't focus a field inside a draggable element.
 - A row opens beneath itself, one at a time, with what it comes from:
   - **Your Reading**: up to *n*, the long-read length, the inbox folder (Change…), the
     bookmarklet (Copy), and a link to Reading.
@@ -83,8 +84,9 @@ The page plan leaves Today: it becomes Sections.
   allows it, else the switch says it turns the whole group off, as today's tooltip does.
 - Every change saves at once: switches, menus and moves straight away, text after a pause in
   typing (about half a second) and on leaving the field. Saves run one at a time against the
-  latest saved file, so the page plan no longer locks; a failed save shows its reason on the row
-  and keeps the typed text. There's no Save button anywhere on the tab.
+  latest saved file, so the page plan only waits while a save runs; a failed save shows its
+  reason in the notice bar and keeps the typed text. An open row stays open while its name
+  saves. There's no Save button anywhere on the tab.
 
 ## 5. Add a section
 
