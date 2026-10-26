@@ -488,3 +488,23 @@ Increment 3 (§11 item 3) landed from `docs/superpowers/plans/2026-10-26-interes
 - **Over any cap** the editor makes no edit at all (existing behaviour) rather than skipping
   relevance only.
 - **Not yet:** nudges (increment 4).
+
+## 17. Implementation notes, PR 4 (2026-10-26)
+
+Increment 4 (§11 item 4) landed from `docs/superpowers/plans/2026-10-26-interests-nudges.md`.
+
+- **One nudge per page, not per line.** §15 found the history records the start of the page a
+  jump was made from, so §7's per-line link ranges can't be told apart. Each suggestion is its
+  own section (`nudge:<key>`, one XHTML file, one KFX section) appended after everything else,
+  at most three per edition: its reason, one link ("Tap here to make <name> a section.", to the
+  front) and "Change your mind on the Daily tab." No back links, no list, no tile, never news.
+- **Accept rule:** a history position whose section key starts with `nudge:` accepts that
+  candidate once, as the app's button would (`learn::accept`); the CLI saves the paper's file
+  and its `interests.json` and notes "Added <name> to your interests (you tapped it in the
+  paper)." A dismissal on the Mac in between doesn't block the tap (the newer decision).
+- **Hardware check: pending.** No Kindle was connected when this landed, so a nudge tap has not
+  yet been seen in a `.yjf`. The fixtures show jumps from links and the contents are recorded
+  as page starts, which is what the rule needs. `[learning] nudges` stays off by default until
+  the tap is confirmed on the Scribe; then this note gets the result.
+- The build takes nudges through `GatherOptions::nudges` from `learn::nudges_for`
+  (`suggest`'s top three), the same way the editor's naming travels.

@@ -263,6 +263,14 @@ deckle digest interests why "Bryce Young"    # the stories behind it
 Renaming an interest in the app keeps its history: its readership rows and what Deckle noticed
 move to the new name.
 
+**Nudges in the paper** (`[learning] nudges = true`, off by default, or the second checkbox
+under Your interests): the paper itself carries what Deckle noticed, as its last pages, one per
+suggestion. Each says why and has one link, "Tap here to make Bryce Young a section." The
+Kindle keeps the page a jump was made from, so at the next connection a tap on that page adds
+the interest, exactly as the app's button would, and the run notes "Added Bryce Young to your
+interests (you tapped it in the paper)." Turning a page can't accept; only a tap can. It ships
+off until a tap has been confirmed in a Kindle's reading data (see the design spec).
+
 With the AI editor on, the morning build also asks it to name what Deckle noticed, from the
 headlines only ("Young" becomes "Bryce Young", with a search that finds him and not every
 Young), so the suggestion reads properly and **Add as interest** uses that search. Highlighted
