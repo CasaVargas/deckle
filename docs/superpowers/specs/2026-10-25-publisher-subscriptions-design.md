@@ -425,3 +425,17 @@ check with `deckle digest subscribe thepilot.com --test` and `deckle digest eedi
 - **No section group yet.** `[[subscribed]]`'s section group is PR 2; in PR 1 every story on a subscribed site is extracted as a stranger's page, as today; one that doesn't extract prints as a headline with its reason (and a saved Your Reading link waits without spending a try).
 - **`--forget`** also deletes the session file.
 - **The Subscriptions card** sits in "The paper" room, not Delivery.
+
+## 16. Build notes, PR 2 (rulings made while building)
+
+- **Signed-in marker.** BLOX is signed in when `tn-user-screenname` is present and non-empty. Spike 1 confirms it against a live account.
+- **Plan parsing.** The services parser is lenient. A plan that can't be read is `Walled::PlanUnknown`: nothing is unlocked and the story prints as a stranger sees it, with the note "couldn't read your plan".
+- **Origin.** The canonical `www` origin comes from the login form's action, not the configured host.
+- **`unlock` fails closed.** If the page's id list can't be read it unlocks nothing; a page with nothing encrypted is returned unchanged.
+- **Dedupe.** By title, in `sections` order. Local skips what an earlier section printed; places keep their own.
+- **One kind.** A single `subscribed` section kind covers every `[[subscribed]]` group, in file order. This supersedes the per-site entry in §3.
+- **Slugs** are validated against BLOX's list (news, sports, opinion, obituaries, business, lifestyles).
+- **Divider page deferred.** The kicker carries the paper's name instead.
+- **`Subscription.service`** is the account's first service for now.
+- **Typed login error** is deferred to PR 3 (network errors still count as a failed attempt).
+- **DeckleReader follow-up:** read the bundle's new `story.access` (1.2).
