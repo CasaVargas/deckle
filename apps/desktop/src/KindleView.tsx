@@ -7,7 +7,7 @@ import { api } from "./api";
 import Highlights from "./Highlights";
 import Icon from "./Icon";
 import KindleDrawer from "./KindleDrawer";
-import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, sentMode, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
+import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
 import type { KindleRoom, ShelfFrom, ShelfShow, ShelfSort } from "./kindleRooms";
 import ThisKindle from "./ThisKindle";
 import Upgrades from "./Upgrades";
@@ -148,11 +148,6 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
   const now = new Date();
   const opened = shelf?.books.find((b) => b.file === openFile) ?? null;
   const toUpdate = shelf ? updatable(shelf.books) : [];
-  const updateAll = () =>
-    onResend(
-      toUpdate.map((b) => ({ source: b.library_source!, cde: sentMode(b) })),
-      `${toUpdate.length} book${toUpdate.length === 1 ? " is" : "s are"} ready to update, each in the mode it was sent in.`,
-    );
   const counts = tabCounts(shelf, upgradesCount);
   const nudges = shelf ? worthALook(shelf, upgradesCount) : [];
   const reading = shelf ? continueReading(shelf.books) : [];
@@ -257,18 +252,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
 
         {upgradesOpened && shelf && (
           <div hidden={room !== "upgrades"}>
-            {toUpdate.length > 0 && (
-              <div className="update-banner" role="status">
-                <span>
-                  <strong>{toUpdate.length === 1 ? "One of Deckle's books" : `${toUpdate.length} of Deckle's books`} can be updated</strong>{" "}
-                  — Deckle can build {toUpdate.length === 1 ? "it" : "them"} better now.
-                </span>
-                <button className="primary" onClick={updateAll} disabled={busy}>
-                  Update all
-                </button>
-              </div>
-            )}
-            <Upgrades target={target} targetKey={targetKey} busy={busy || loading} onUpgrade={onResend} onChanged={load} onNotice={onNotice} onCount={setUpgradesCount} />
+            <Upgrades target={target} targetKey={targetKey} busy={busy || loading} updates={toUpdate} onUpgrade={onResend} onChanged={load} onNotice={onNotice} onCount={setUpgradesCount} />
           </div>
         )}
 

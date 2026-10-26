@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { expect, test } from "vitest";
-import { byOrigin, defaultTicked, leftAsIs, partwayLine, sourceLine, sourcesLine, upgradeLabel } from "./upgradesView";
+import { describe, expect, it, test } from "vitest";
+import { byOrigin, defaultTicked, gainsLine, leftAlone, leftAsIs, partwayLine, selectedLine, sourceLine, sourcesLine, upgradeLabel, upgradesHeading } from "./upgradesView";
 import type { UpgradeRow } from "./types";
 
 const row = (p: Partial<UpgradeRow>): UpgradeRow => ({
@@ -66,4 +66,27 @@ test("rows are grouped by where the new copy comes from, calibre first", () => {
 test("older MOBI books are listed as left alone, with why", () => {
   expect(leftAsIs({ "old-mobi": 1 })).toContain("1 older MOBI book Deckle can't rebuild");
   expect(leftAsIs({ "old-mobi": 3 })).toContain("3 older MOBI books");
+});
+
+describe("the Upgrades room, redesigned", () => {
+  it("counts what Deckle leaves alone, with why", () => {
+    expect(leftAlone({ "amazon-own": 17, locked: 4, "fixed-layout": 2, "has-source": 3 })).toEqual({
+      total: 23,
+      parts: ["17 store books, which already have all of this", "4 locked by DRM, which Deckle never opens", "2 fixed-layout books"],
+    });
+    expect(leftAlone({})).toEqual({ total: 0, parts: [] });
+  });
+
+  it("says what an upgrade gains in plain words", () => {
+    expect(gainsLine(["X-Ray", "Word Wise", "Page numbers"])).toBe("Gains X-Ray, Word Wise and page numbers");
+    expect(gainsLine(["Cover"])).toBe("Gains a cover");
+    expect(gainsLine([])).toBe("");
+  });
+
+  it("heads the room and counts the selection", () => {
+    expect(upgradesHeading(6)).toBe("6 books could be better");
+    expect(upgradesHeading(1)).toBe("1 book could be better");
+    expect(upgradesHeading(0)).toBe("Every book Deckle can improve is current");
+    expect(selectedLine(5, 6)).toBe("5 of 6 selected");
+  });
 });

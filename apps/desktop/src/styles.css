@@ -756,3 +756,29 @@ input[type=checkbox] { padding: 0; }
 .highlights-preview { max-height: 320px; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
 .quiet.danger { color: var(--fail); }
 .primary.danger-fill { background: var(--fail); }
+
+/* Kindle tab redesign, part 3: Upgrades (§5) */
+.upgrades-room { position: relative; display: flex; flex-direction: column; gap: 22px; max-width: 920px; width: 100%; margin: 0 auto; }
+.upgrades-intro h2 { font-family: ui-serif, Georgia, serif; font-size: 26px; font-weight: 500; margin: 0 0 6px; }
+.upgrades-intro p { margin: 0; max-width: 620px; line-height: 1.5; font-size: 13px; }
+.upgrades-room input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); margin: 0; }
+.ugroup-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.ugroup-head label { display: flex; align-items: center; gap: 10px; }
+.ugroup-title { font-family: ui-serif, Georgia, serif; font-size: 17px; font-weight: 600; }
+.urows { list-style: none; margin: 0; padding: 0; }
+.urow { display: grid; grid-template-columns: 26px 36px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); font-size: 13px; }
+.urow-cover { width: 36px; aspect-ratio: 2 / 3; border-radius: 2px; overflow: hidden; background: var(--line); }
+.urow-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.urow-cover .cover-placeholder { display: grid; place-items: center; width: 100%; height: 100%; font-size: 14px; }
+.urow-meta { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.urow-gains { font-size: 12px; color: var(--ok); }
+.urow-why { max-width: 220px; font-size: 12px; color: var(--muted); text-align: right; }
+.left-alone summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.left-alone p { margin: 8px 0 0; line-height: 1.5; }
+.foot-bar { position: sticky; bottom: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-radius: 12px; background: var(--fg); color: var(--bg); box-shadow: 0 10px 30px rgb(0 0 0 / 0.28); font-size: 13px; }
+.foot-bar > span { flex: 1 1 220px; }
+.foot-bar-note { opacity: 0.75; }
+.foot-bar-quiet { background: transparent; border: 0; color: var(--bg); padding: 7px 12px; border-radius: 8px; }
+.foot-bar-quiet:hover { background: color-mix(in srgb, var(--bg) 14%, transparent); }
+.foot-bar .primary { padding: 8px 14px; font-size: 13px; }
+@media (max-width: 640px) { .urow { grid-template-columns: 26px 36px minmax(0, 1fr); } .urow-why { grid-column: 3; text-align: left; } }
