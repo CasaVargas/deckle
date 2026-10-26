@@ -94,9 +94,10 @@ pub fn section_at(layout: &Layout, position: i64) -> Option<&SectionStart> {
     layout.sections.iter().rev().find(|s| s.start <= position)
 }
 
-/// Each section's stories from the runs inside its range: for each title, in order, the first
-/// run equal to it (whitespace collapsed) at or after the section's start and before the next
-/// section's; a title with no such run is left out. `titles` is `(section key, titles)`.
+/// Each section's stories from the runs inside its range: for each title, the **last** run equal
+/// to it (whitespace collapsed) inside the section, because a section with two or more stories
+/// opens with an "In this section" list that prints every title once before the headings
+/// (render.rs); a title with no such run is left out. `titles` is `(section key, titles)`.
 pub fn stories_from_runs(
     runs: &[deckle_kfx::text::Run],
     layout: &Layout,
@@ -110,20 +111,20 @@ pub fn stories_from_runs(
         let from = layout.sections[i].start;
         let to = layout.sections.get(i + 1).map_or(layout.end, |s| s.start);
         let mut stories = Vec::new();
-        let mut after = from;
         for name in names {
             let want = words(name);
             let found = runs
                 .iter()
-                .find(|r| r.pid >= after && r.pid < to && words(&r.text) == want);
+                .rev()
+                .find(|r| r.pid >= from && r.pid < to && words(&r.text) == want);
             if let Some(r) = found {
                 stories.push(StoryStart {
                     title: name.clone(),
                     start: r.pid,
                 });
-                after = r.pid + 1;
             }
         }
+        stories.sort_by_key(|s| s.start);
         out.push((key.clone(), stories));
     }
     out

@@ -141,3 +141,22 @@ fn with_learning_off_nothing_is_written() {
     push(&home, &mount).assert().success();
     assert!(!config_dir(&home).join("interests.json").exists());
 }
+
+#[test]
+fn with_readership_off_highlights_still_count_but_taps_do_not() {
+    let (_tmp, home, mount) = setup("");
+    let dir = config_dir(&home);
+    std::fs::write(
+        dir.join("digest.toml"),
+        "title = \"The Deckle Daily\"\nsections = [\"horoscope\"]\n\n[sync]\nreadership = false\n",
+    )
+    .unwrap();
+    push(&home, &mount).assert().success();
+    let l = deckle_readership::Learning::load(&dir.join("interests.json"));
+    let young = l
+        .candidates
+        .get("bryce young")
+        .unwrap_or_else(|| panic!("{:?}", l.candidates.keys()));
+    let signals: Vec<_> = young.hits.iter().map(|h| h.signal).collect();
+    assert_eq!(signals, [deckle_readership::learn::Signal::Highlight]);
+}

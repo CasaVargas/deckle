@@ -3865,7 +3865,7 @@ fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Act
         clippings: a.clippings
             || puzzle_on(cfg)
             || shelf
-            || deckle_readership::learn::learning_on(cfg, id),
+            || deckle_readership::learn::learning_on(cfg),
         readership: a.readership,
         shelf,
     }

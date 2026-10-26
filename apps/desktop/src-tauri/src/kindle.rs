@@ -322,8 +322,9 @@ pub fn shelf_on(
         let state = deckle_readership::State::load(&config.with_file_name("readership.json"));
         let shelf = deckle_digest::shelf::store::Shelf::load(&config.with_file_name("shelf.json"));
         let bytes = clippings.as_ref().ok().and_then(|c| c.as_deref());
-        if let Err(e) = deckle_readership::learn::on_connection(
+        if let Err(e) = deckle_readership::learn::on_connection_at(
             &cfg,
+            &config.with_file_name("interests.json"),
             &state,
             bytes,
             Some(&shelf),

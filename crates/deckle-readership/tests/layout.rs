@@ -71,6 +71,32 @@ fn stories_are_the_title_runs_inside_each_sections_range() {
 }
 
 #[test]
+fn the_in_this_section_list_is_skipped_and_the_headings_are_the_starts() {
+    // a section front lists every title before the stories themselves (render.rs)
+    let runs = [
+        run(100, "Rust"),
+        run(101, "Your interests"),
+        run(102, "In this section"),
+        run(103, "Rust 2.0 lands"),
+        run(104, "Rust jobs grow"),
+        run(110, "Rust 2.0 lands"),
+        run(111, "Outlet · Oct 25"),
+        run(112, "A long first paragraph of the story."),
+        run(300, "Rust jobs grow"),
+        run(301, "Brief."),
+    ];
+    let titles = [(
+        "interests:Rust".to_owned(),
+        vec!["Rust 2.0 lands".to_owned(), "Rust jobs grow".to_owned()],
+    )];
+    let found = stories_from_runs(&runs, &paper(), &titles);
+    assert_eq!(
+        found[0].1.iter().map(|s| s.start).collect::<Vec<_>>(),
+        [110, 300]
+    );
+}
+
+#[test]
 fn story_at_is_the_last_story_starting_at_or_before_the_position() {
     let mut l = paper();
     l.sections[1].stories = vec![

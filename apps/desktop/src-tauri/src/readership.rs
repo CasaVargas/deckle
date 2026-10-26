@@ -32,13 +32,27 @@ fn load_config(digest: &Path, paper: Option<&str>) -> Result<deckle_digest::Conf
     }
 }
 
+/// The paper's learning file lives beside its readership file.
+fn learning_file(state: &Path) -> PathBuf {
+    state.with_file_name("interests.json")
+}
+
 pub fn view_at(state: &Path, digest: &Path, paper: Option<&str>) -> Result<ReadershipView, String> {
+    view_with_today(state, digest, paper, today())
+}
+
+pub fn view_with_today(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    today: deckle_digest::chrono::NaiveDate,
+) -> Result<ReadershipView, String> {
     let cfg = load_config(digest, paper)?;
-    let learning = deckle_readership::Learning::load(&deckle_readership::Learning::path_for(&cfg));
+    let learning = deckle_readership::Learning::load(&learning_file(state));
     Ok(ReadershipView {
         enabled: cfg.sync.readership,
         report: deckle_readership::report(&State::load(state), &cfg),
-        noticed: deckle_readership::learn::suggest(&learning, &cfg, today()),
+        noticed: deckle_readership::learn::suggest(&learning, &cfg, today),
     })
 }
 
@@ -50,13 +64,23 @@ pub fn accept_at(
     paper: Option<&str>,
     key: &str,
 ) -> Result<ReadershipView, String> {
+    accept_with_today(state, digest, paper, key, today())
+}
+
+pub fn accept_with_today(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    key: &str,
+    today: deckle_digest::chrono::NaiveDate,
+) -> Result<ReadershipView, String> {
     let mut cfg = load_config(digest, paper)?;
-    let path = deckle_readership::Learning::path_for(&cfg);
+    let path = learning_file(state);
     let mut learning = deckle_readership::Learning::load(&path);
-    deckle_readership::learn::accept(&mut learning, &mut cfg, key, today())?;
+    deckle_readership::learn::accept(&mut learning, &mut cfg, key, today)?;
     deckle_digest::papers::save(digest, &cfg)?;
     learning.save(&path)?;
-    view_at(state, digest, paper)
+    view_with_today(state, digest, paper, today)
 }
 
 pub fn dismiss_noticed_at(
@@ -65,8 +89,7 @@ pub fn dismiss_noticed_at(
     paper: Option<&str>,
     key: &str,
 ) -> Result<ReadershipView, String> {
-    let cfg = load_config(digest, paper)?;
-    let path = deckle_readership::Learning::path_for(&cfg);
+    let path = learning_file(state);
     let mut learning = deckle_readership::Learning::load(&path);
     deckle_readership::learn::dismiss(&mut learning, key, today())?;
     learning.save(&path)?;
@@ -221,6 +244,50 @@ pub fn readership_set(on: bool) -> Result<ReadershipView, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_view_reads_what_deckle_noticed_beside_the_state_file_it_was_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let digest = dir.path().join("digest.toml");
+        std::fs::write(&digest, "title = \"T\"\nsections = [\"weather\"]\n").unwrap();
+        let state = dir.path().join("readership.json");
+        let mut learning = deckle_readership::Learning::default();
+        let stop = std::collections::HashSet::new();
+        for (date, title) in [
+            ("2026-10-20", "Bryce Young benched"),
+            ("2026-10-22", "Bryce Young returns"),
+            ("2026-10-22", "Bryce Young sits"),
+        ] {
+            deckle_readership::learn::note(
+                &mut learning,
+                &stop,
+                title,
+                deckle_readership::learn::Hit {
+                    date: date.parse().unwrap(),
+                    section: "x".into(),
+                    title: title.into(),
+                    signal: deckle_readership::learn::Signal::Tap,
+                },
+            );
+        }
+        learning.save(&dir.path().join("interests.json")).unwrap();
+        let today: deckle_digest::chrono::NaiveDate = "2026-10-25".parse().unwrap();
+        let v = view_with_today(&state, &digest, None, today).unwrap();
+        assert_eq!(v.noticed.len(), 1, "{:?}", v.noticed);
+        assert_eq!(v.noticed[0].name, "Bryce Young");
+        let v = accept_with_today(&state, &digest, None, "bryce young", today).unwrap();
+        assert!(v.noticed.is_empty());
+        assert!(
+            std::fs::read_to_string(&digest)
+                .unwrap()
+                .contains("Bryce Young")
+        );
+        assert!(
+            deckle_readership::Learning::load(&dir.path().join("interests.json"))
+                .accepted
+                .contains_key("bryce young")
+        );
+    }
     use deckle_core::deliver::Target;
     use deckle_readership::layout::{Layout, SectionStart};
     use deckle_readership::state::Read;

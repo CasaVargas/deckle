@@ -88,13 +88,24 @@ pub fn save_paper_with_history(
 ) -> Result<(), String> {
     let old = paper_config_at(main, paper)?;
     config.paper = old.paper.clone();
-    let renamed: Vec<(String, String)> = old
-        .interests
-        .iter()
-        .zip(&config.interests)
-        .filter(|(a, b)| a.name.trim() != b.name.trim() && !b.name.trim().is_empty())
-        .map(|(a, b)| (a.name.trim().to_owned(), b.name.trim().to_owned()))
-        .collect();
+    // A rename is a name that changed in place: same count, the new name unknown before, the
+    // old one gone after. A removal or a reorder shifts positions and moves no history.
+    let key = |s: &str| s.trim().to_lowercase();
+    let before: Vec<String> = old.interests.iter().map(|i| key(&i.name)).collect();
+    let after: Vec<String> = config.interests.iter().map(|i| key(&i.name)).collect();
+    let renamed: Vec<(String, String)> = if before.len() == after.len() {
+        old.interests
+            .iter()
+            .zip(&config.interests)
+            .filter(|(a, b)| {
+                let (from, to) = (key(&a.name), key(&b.name));
+                from != to && !to.is_empty() && !before.contains(&to) && !after.contains(&from)
+            })
+            .map(|(a, b)| (a.name.trim().to_owned(), b.name.trim().to_owned()))
+            .collect()
+    } else {
+        Vec::new()
+    };
     deckle_digest::papers::save(main, &config)?;
     if renamed.is_empty() {
         return Ok(());
@@ -736,6 +747,74 @@ mod tests {
             std::fs::read_to_string(&main)
                 .unwrap()
                 .contains("RUST LANG")
+        );
+    }
+
+    #[test]
+    fn removing_or_reordering_interests_moves_no_history() {
+        use deckle_readership::layout::{Layout, SectionStart};
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("digest.toml");
+        std::fs::write(
+            &main,
+            "sections = [\"interests\"]\n[[interests]]\nname = \"A\"\n[[interests]]\nname = \"B\"\n[[interests]]\nname = \"C\"\n",
+        )
+        .unwrap();
+        let sec = |key: &str| SectionStart {
+            key: key.into(),
+            name: key.into(),
+            start: 0,
+            items: None,
+            stories: Vec::new(),
+        };
+        let mut st = deckle_readership::State::default();
+        st.record_layout(Layout {
+            date: "2026-10-21".parse().unwrap(),
+            title: "T".into(),
+            file: "deckle-daily-2026-10-21".into(),
+            end: 100,
+            sections: vec![
+                sec("front"),
+                sec("interests:A"),
+                sec("interests:B"),
+                sec("interests:C"),
+            ],
+        });
+        let state = main.with_file_name("readership.json");
+        st.save(&state).unwrap();
+        let mut learning = deckle_readership::Learning::default();
+        learning
+            .accepted
+            .insert("b".into(), "2026-10-21".parse().unwrap());
+        learning
+            .accepted
+            .insert("c".into(), "2026-10-22".parse().unwrap());
+        let interests = main.with_file_name("interests.json");
+        learning.save(&interests).unwrap();
+        let keys = |state: &std::path::Path| -> Vec<String> {
+            deckle_readership::State::load(state)
+                .editions
+                .values()
+                .flat_map(|l| l.sections.iter().map(|s| s.key.clone()))
+                .collect()
+        };
+        // remove B from the middle: [A, B, C] → [A, C]
+        let mut cfg = Config::load(&main).unwrap();
+        cfg.interests.remove(1);
+        save_paper_with_history(&main, None, cfg, &state, &interests).unwrap();
+        assert_eq!(
+            keys(&state),
+            ["front", "interests:A", "interests:B", "interests:C"]
+        );
+        let l = deckle_readership::Learning::load(&interests);
+        assert!(l.accepted.contains_key("b") && l.accepted.contains_key("c"));
+        // swap: [A, C] → [C, A]
+        let mut cfg = Config::load(&main).unwrap();
+        cfg.interests.swap(0, 1);
+        save_paper_with_history(&main, None, cfg, &state, &interests).unwrap();
+        assert_eq!(
+            keys(&state),
+            ["front", "interests:A", "interests:B", "interests:C"]
         );
     }
 

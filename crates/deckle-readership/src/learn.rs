@@ -169,11 +169,18 @@ fn clean(token: &str) -> &str {
 /// Candidate phrases in `text` (design §5.3): runs of capitalised words (joiners allowed
 /// inside) and single capitalised words of four or more letters, as `(key, display)`, each once.
 pub fn phrases(text: &str) -> Vec<(String, String)> {
-    let tokens: Vec<&str> = text
-        .split_whitespace()
-        .map(clean)
-        .filter(|t| !t.is_empty())
-        .collect();
+    // "Headline - Outlet": the tag after the last separator is the outlet, not a subject
+    let text = [" - ", " – ", " — ", " | "]
+        .iter()
+        .filter_map(|sep| text.rsplit_once(sep))
+        .filter(|(head, tail)| {
+            let n = tail.split_whitespace().count();
+            (1..=6).contains(&n) && head.split_whitespace().count() >= 3
+        })
+        .map(|(head, _)| head)
+        .min_by_key(|head| head.len())
+        .unwrap_or(text);
+    let raw: Vec<&str> = text.split_whitespace().collect();
     let mut out: Vec<(String, String)> = Vec::new();
     let mut run: Vec<&str> = Vec::new();
     let mut flush = |run: &mut Vec<&str>| {
@@ -203,13 +210,24 @@ pub fn phrases(text: &str) -> Vec<(String, String)> {
         }
         run.clear();
     };
-    for (i, t) in tokens.iter().enumerate() {
+    for (i, raw_t) in raw.iter().enumerate() {
+        let t = clean(raw_t);
+        if t.is_empty() {
+            // a lone dash, quote or bullet ends the run
+            flush(&mut run);
+            continue;
+        }
+        let next = raw.get(i + 1).map(|n| clean(n)).filter(|n| !n.is_empty());
         let joiner = !run.is_empty()
             && JOINERS.contains(&t.to_lowercase().as_str())
-            && tokens.get(i + 1).is_some_and(|n| capitalised(n));
+            && next.is_some_and(capitalised);
         if capitalised(t) || joiner {
             run.push(t);
         } else {
+            flush(&mut run);
+        }
+        // "Panthers: Bryce Young" are two subjects: punctuation closes the run
+        if raw_t.ends_with([',', ':', ';', '.', '!', '?']) {
             flush(&mut run);
         }
     }
@@ -363,7 +381,8 @@ pub fn record_highlights(
 }
 
 /// Shelf authors: one Shelf hit per author of each book read in the last [`SHELF_DAYS`] days,
-/// dated the snapshot's day. Returns hits added.
+/// dated the day the book was last read (so plugging in again adds nothing until you read
+/// again). Returns hits added.
 pub fn record_shelf(
     learning: &mut Learning,
     shelf: &Shelf,
@@ -372,16 +391,20 @@ pub fn record_shelf(
 ) -> usize {
     let mut added = 0;
     for k in shelf.kindles.values() {
-        let Some(day) = seen_on(k) else { continue };
+        if seen_on(k).is_none() {
+            continue;
+        }
         for b in &k.books {
-            let fresh = b
+            let Some(read_at) = b
                 .last_read
                 .as_deref()
                 .and_then(|t| DateTime::parse_from_rfc3339(t).ok())
-                .is_some_and(|t| (now - t.with_timezone(&Utc)).num_days() <= SHELF_DAYS);
-            if !fresh {
+                .map(|t| t.with_timezone(&Utc))
+                .filter(|t| (now - *t).num_days() <= SHELF_DAYS)
+            else {
                 continue;
-            }
+            };
+            let day = read_at.date_naive();
             for author in &b.authors {
                 let author = author.trim();
                 if author.is_empty() {
@@ -445,6 +468,9 @@ fn shelf_query(name: &str) -> String {
 /// dismissed lately, with `min_stories` distinct stories across at least two days inside
 /// `window_days`; the top five by stories, then by their latest day.
 pub fn suggest(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Noticed> {
+    if !cfg.learning.enabled {
+        return Vec::new();
+    }
     let stop = stoplist(cfg);
     let first = today - Days::new(u64::from(cfg.learning.window_days));
     let mut out: Vec<(usize, NaiveDate, Noticed)> = Vec::new();
@@ -558,17 +584,29 @@ pub fn accept(
     Ok(entry)
 }
 
-/// Learning is on for this paper on this Kindle: `[learning] enabled`, and readership on for
-/// the device (taps come from the `.yjf` read).
-pub fn learning_on(cfg: &Config, device_id: &str) -> bool {
-    cfg.learning.enabled && cfg.sync.for_device(device_id).readership
+/// Learning is on for this paper (`[learning] enabled`): the clippings are read for its
+/// highlights. Taps come with `[sync] readership`, which gates the `.yjf` read on its own.
+pub fn learning_on(cfg: &Config) -> bool {
+    cfg.learning.enabled
+}
+
+/// [`on_connection_at`] on the paper's own `interests.json` ([`Learning::path_for`]).
+pub fn on_connection(
+    cfg: &Config,
+    state: &State,
+    clippings: Option<&[u8]>,
+    shelf: Option<&Shelf>,
+    now: DateTime<Utc>,
+) -> Result<usize, String> {
+    on_connection_at(cfg, &Learning::path_for(cfg), state, clippings, shelf, now)
 }
 
 /// Everything one connection teaches a paper: taps from `state`, highlights from `clippings`
 /// (when they were read), shelf authors from `shelf`. Loads, updates, prunes and saves the
-/// paper's `interests.json`; returns the hits added. Nothing happens with learning off.
-pub fn on_connection(
+/// learning file at `path`; returns the hits added. Nothing happens with learning off.
+pub fn on_connection_at(
     cfg: &Config,
+    path: &Path,
     state: &State,
     clippings: Option<&[u8]>,
     shelf: Option<&Shelf>,
@@ -577,8 +615,7 @@ pub fn on_connection(
     if !cfg.learning.enabled {
         return Ok(0);
     }
-    let path = Learning::path_for(cfg);
-    let mut learning = Learning::load(&path);
+    let mut learning = Learning::load(path);
     let stop = stoplist(cfg);
     let mut added = record_taps(&mut learning, state, &stop);
     if let Some(bytes) = clippings {
@@ -588,7 +625,7 @@ pub fn on_connection(
         added += record_shelf(&mut learning, shelf, now, &stop);
     }
     prune(&mut learning, now.date_naive(), cfg.learning.window_days);
-    learning.save(&path)?;
+    learning.save(path)?;
     Ok(added)
 }
 

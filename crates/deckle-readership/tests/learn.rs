@@ -74,6 +74,31 @@ fn phrases_find_capitalised_runs_and_long_words() {
     );
 }
 
+fn owned_keys(text: &str) -> Vec<String> {
+    phrases(text).into_iter().map(|(k, _)| k).collect()
+}
+
+#[test]
+fn punctuation_ends_a_run_and_an_outlet_tag_is_dropped() {
+    let k = owned_keys("Man found dead in Cary, NC - Cremation Society of the Carolinas");
+    assert!(!k.iter().any(|p| p.contains("cary nc")), "{k:?}");
+    assert!(k.iter().any(|p| p == "cary"), "{k:?}");
+    assert!(
+        !k.iter().any(|p| p.contains("cremation")),
+        "the outlet tag: {k:?}"
+    );
+    let k = owned_keys("Standoff in Candor - WXII");
+    assert!(
+        k.iter().any(|p| p == "candor") && !k.iter().any(|p| p == "wxii"),
+        "{k:?}"
+    );
+    let k = owned_keys("Panthers: Bryce Young benched; Dalton starts");
+    for want in ["panthers", "bryce young", "dalton"] {
+        assert!(k.iter().any(|p| p == want), "{k:?} lacks {want}");
+    }
+    assert!(!k.iter().any(|p| p == "panthers bryce young"), "{k:?}");
+}
+
 #[test]
 fn stoplist_holds_config_and_builtins() {
     let s = stoplist(&cfg());
@@ -213,6 +238,26 @@ fn shelf_authors_get_one_hit_per_snapshot_day() {
     // a book not touched for months is not in progress
     let stale = shelf_with("Old Author", "2026-10-24T20:00:00Z", "2026-05-01T00:00:00Z");
     assert_eq!(record_shelf(&mut learning, &stale, now, &stop), 0);
+    // the hit is dated by the day you read, not the day the Kindle was plugged in
+    let earlier = shelf_with(
+        "Brandon Sanderson",
+        "2026-10-25T08:00:00Z",
+        "2026-10-20T19:00:00Z",
+    );
+    assert_eq!(record_shelf(&mut learning, &earlier, now, &stop), 1);
+    let dates: Vec<_> = learning.candidates["brandon sanderson"]
+        .hits
+        .iter()
+        .map(|h| h.date)
+        .collect();
+    assert_eq!(dates, [d("2026-10-24"), d("2026-10-20")]);
+    // plugging in again on another day without reading adds nothing
+    let again = shelf_with(
+        "Brandon Sanderson",
+        "2026-10-26T08:00:00Z",
+        "2026-10-20T19:00:00Z",
+    );
+    assert_eq!(record_shelf(&mut learning, &again, now, &stop), 0);
 }
 
 fn seeded() -> Learning {
@@ -251,6 +296,12 @@ fn suggest_needs_three_stories_on_two_days_and_ranks() {
     );
     assert_eq!(s[0].key, "bryce young");
     assert_eq!(s[0].query, None);
+    let mut off = cfg();
+    off.learning.enabled = false;
+    assert!(
+        suggest(&l, &off, today()).is_empty(),
+        "learning off shows nothing"
+    );
     // dismissed last week: hidden; dismissed long ago: back after prune
     let mut l2 = seeded();
     dismiss(&mut l2, "bryce young", d("2026-10-15")).unwrap();
