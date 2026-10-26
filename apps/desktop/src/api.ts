@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, Settings, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -131,4 +131,9 @@ export const api = {
   /** Write-only: the keychain keeps it, nothing reads it back. */
   emailSetPassword: (password: string) => invoke<EmailStatus>("email_set_password", { password }),
   emailTest: (paper: string | null = null) => invoke<string>("email_test", { paper }),
+  subscriptionsStatus: () => invoke<SiteStatus[]>("subscriptions_status"),
+  /** Write-only: the keychain keeps it, nothing reads it back. */
+  subscriptionSetPassword: (site: string, password: string) => invoke<SiteStatus[]>("subscription_set_password", { site, password }),
+  subscriptionTest: (site: string) => invoke<SessionState>("subscription_test", { site }),
+  subscriptionForget: (site: string) => invoke<SiteStatus[]>("subscription_forget", { site }),
 };

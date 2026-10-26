@@ -23,6 +23,7 @@ import { addInterest, listText, removeInterest, setList, setQuery } from "./inte
 import ExportFolders from "./ExportFolders";
 import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
+import SubscriptionsCard from "./SubscriptionsCard";
 import YourDay from "./YourDay";
 import DailyEditor from "./DailyEditor";
 import Papers from "./Papers";
@@ -1032,6 +1033,12 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                 setDraft(c);
                 return save(c);
               }}
+            />
+            <SubscriptionsCard
+              subscriptions={draft.subscriptions ?? []}
+              dirty={dirty}
+              onChange={(subs) => edit((c) => (c.subscriptions = subs))}
+              onSave={() => save()}
             />
           </>
         )}

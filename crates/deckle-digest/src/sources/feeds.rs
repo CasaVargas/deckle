@@ -11,6 +11,7 @@ use regex::Regex;
 
 use crate::config::{Config, FeedConfig, FullText, Topic};
 use crate::fetch::{Net, encode};
+use crate::publisher::Access;
 use crate::{Article, Section, article, esc};
 
 /// Paragraphs kept per article.
@@ -207,18 +208,26 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
     } else {
         link.to_owned()
     };
-    let extracted = net
-        .get_page(&url)
-        .ok()
-        .and_then(|b| article::extract(&String::from_utf8_lossy(&b), &url));
-    let Some(x) = extracted else {
-        return article(item, Some(UNAVAILABLE));
+    let (page, access) = match net.get_page_as(&url) {
+        Ok(got) => got,
+        Err(_) => return article(item, Some(UNAVAILABLE)),
+    };
+    // A walled page is what a stranger sees: extract it as today (a free story reads in
+    // full); only a page the site withholds falls back to the feed, with the reason.
+    let Some(x) = article::extract(&String::from_utf8_lossy(&page), &url) else {
+        let mut a = match &access {
+            Access::Walled { site, why } => article(item, Some(&why.note(site))),
+            _ => article(item, Some(UNAVAILABLE)),
+        };
+        a.extra.access = access;
+        return a;
     };
     let outlet = item.source.clone().unwrap_or_else(|| host(&url).to_owned());
     let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
     if let Some(p) = item.published {
         extra.published = Some(p.to_rfc3339());
     }
+    extra.access = access;
     let meta = [
         x.byline.as_deref().map(by_line),
         item.source.clone(),
@@ -286,6 +295,7 @@ pub(crate) fn story_body(
             .collect(),
         byline: x.byline.clone(),
         published: x.published.clone(),
+        access: crate::publisher::Access::Open,
     };
     let fetched: Vec<Option<Vec<u8>>> = fetched.into_iter().map(|f| f.map(|f| f.jpeg)).collect();
     let kept: Vec<bool> = fetched.iter().map(Option::is_some).collect();
@@ -654,5 +664,81 @@ mod tests {
             "https://news.google.com/rss/search?q=Moore+County+NC+when%3A3d&hl=en-US&gl=US&ceid=US:en"
         );
         assert!(google_news_url("x when:1d", 72).contains("x+when%3A1d&"));
+    }
+
+    /// A subscribed host serving `page` as a stranger would see it.
+    struct WalledNet(String);
+    impl Net for WalledNet {
+        fn get(&self, _: &str) -> Result<Vec<u8>, String> {
+            Ok(self.0.clone().into_bytes())
+        }
+        fn get_page_as(&self, u: &str) -> Result<(Vec<u8>, crate::publisher::Access), String> {
+            use crate::publisher::{Access, Walled};
+            self.get(u).map(|b| {
+                (
+                    b,
+                    Access::Walled {
+                        site: "thepilot.com".into(),
+                        why: Walled::NotSignedIn,
+                    },
+                )
+            })
+        }
+    }
+
+    fn item() -> Item {
+        Item {
+            title: "Council votes".into(),
+            source: Some("The Pilot".into()),
+            published: None,
+            paragraphs: vec!["The feed's own summary.".into()],
+            link: Some("https://www.thepilot.com/story".into()),
+        }
+    }
+
+    fn walled() -> crate::publisher::Access {
+        crate::publisher::Access::Walled {
+            site: "thepilot.com".into(),
+            why: crate::publisher::Walled::NotSignedIn,
+        }
+    }
+
+    #[test]
+    fn a_withheld_story_prints_the_feeds_text_with_the_reason() {
+        let net = WalledNet("<html>LOGIN</html>".into());
+        let a = full_article(&item(), &Config::default(), &net);
+        assert!(a.body.contains("own summary."));
+        assert!(
+            a.body
+                .contains("Subscriber story (not signed in to thepilot.com).")
+        );
+        assert!(!a.body.contains("LOGIN"));
+        assert_eq!(a.extra.access, walled());
+    }
+
+    #[test]
+    fn a_free_story_on_a_subscribed_host_reads_in_full_as_a_stranger() {
+        let words = "word ".repeat(300);
+        let net = WalledNet(format!(
+            "<html><body><article><h1>T</h1><p>{words}</p><p>{words}</p></article></body></html>"
+        ));
+        let a = full_article(&item(), &Config::default(), &net);
+        assert!(a.body.contains("word word"), "{}", a.body);
+        assert!(!a.body.contains("Subscriber story"), "{}", a.body);
+        assert!(!a.body.contains("own summary."), "{}", a.body);
+        assert_eq!(a.extra.access, walled());
+    }
+
+    #[test]
+    fn an_open_story_is_unchanged() {
+        let words = "word ".repeat(300);
+        let page = format!(
+            "<html><body><article><h1>T</h1><p>{words}</p><p>{words}</p></article></body></html>"
+        );
+        let net = move |_: &str| Ok(page.clone().into_bytes());
+        let a = full_article(&item(), &Config::default(), &net);
+        assert_eq!(a.extra.access, crate::publisher::Access::Open);
+        assert!(a.body.contains("word word"));
+        assert!(!a.body.contains("Subscriber story"));
     }
 }

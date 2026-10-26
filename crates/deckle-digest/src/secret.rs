@@ -12,7 +12,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use zeroize::Zeroizing;
 
-use crate::config::EmailConfig;
+use crate::config::{EmailConfig, SubscriptionConfig};
 
 /// The keychain service every entry is filed under.
 pub const SERVICE: &str = "com.casavargas.deckle.smtp";
@@ -52,10 +52,10 @@ impl std::fmt::Display for KeyringError {
 
 /// The system keychain, or a stand-in for it.
 pub trait Keyring {
-    fn get(&self, account: &str) -> Result<Option<Zeroizing<String>>, KeyringError>;
-    fn set(&self, account: &str, password: &str) -> Result<(), KeyringError>;
+    fn get(&self, service: &str, account: &str) -> Result<Option<Zeroizing<String>>, KeyringError>;
+    fn set(&self, service: &str, account: &str, password: &str) -> Result<(), KeyringError>;
     /// Whether there was an entry to delete.
-    fn delete(&self, account: &str) -> Result<bool, KeyringError>;
+    fn delete(&self, service: &str, account: &str) -> Result<bool, KeyringError>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,9 +65,18 @@ pub enum SecretError {
     /// The keychain works but has no password for this account.
     NotSet {
         account: String,
+        /// The CLI command that sets it (`deckle digest email password`).
+        hint: &'static str,
+        /// A site entry's host, appended to `hint`; empty for SMTP.
+        site: String,
     },
     /// No keychain, and no `DECKLE_SMTP_PASSWORD` either.
     NoKeychain(String),
+    /// No keychain, and no `DECKLE_SITE_PASSWORD_<SITE>` either.
+    NoSiteKeychain {
+        why: String,
+        env: String,
+    },
     Keychain(String),
     Empty,
 }
@@ -78,10 +87,26 @@ impl std::fmt::Display for SecretError {
             SecretError::NoAccount => {
                 write!(f, "[email] needs username and smtp_host before a password")
             }
-            SecretError::NotSet { account } => write!(
+            SecretError::NotSet {
+                account,
+                hint,
+                site,
+            } if site.is_empty() => write!(
                 f,
-                "no SMTP password in the keychain for {account}: run `deckle digest email \
-                 password` (or set it on the Daily tab)"
+                "no SMTP password in the keychain for {account}: run `{hint}` (or set it on \
+                 the Daily tab)"
+            ),
+            SecretError::NotSet {
+                account,
+                hint,
+                site,
+            } => write!(
+                f,
+                "no site password in the keychain for {account}: run `{hint} {site}`"
+            ),
+            SecretError::NoSiteKeychain { why, env } => write!(
+                f,
+                "no system keychain ({why}) and {env} isn't set; set it for headless runs"
             ),
             SecretError::NoKeychain(why) => write!(
                 f,
@@ -110,9 +135,13 @@ pub fn smtp_password(
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<(Zeroizing<String>, Source), SecretError> {
     let account = account_for(cfg)?;
-    match keys.get(&account) {
+    match keys.get(SERVICE, &account) {
         Ok(Some(pw)) => Ok((pw, Source::Keychain)),
-        Ok(None) => Err(SecretError::NotSet { account }),
+        Ok(None) => Err(SecretError::NotSet {
+            account,
+            hint: "deckle digest email password",
+            site: String::new(),
+        }),
         Err(KeyringError::Unavailable(why)) => match env(ENV).map(Zeroizing::new) {
             Some(pw) if !pw.is_empty() => Ok((pw, Source::Env)),
             _ => Err(SecretError::NoKeychain(why)),
@@ -136,7 +165,7 @@ pub fn set(cfg: &EmailConfig, keys: &dyn Keyring, password: &str) -> Result<(), 
     if password.is_empty() {
         return Err(SecretError::Empty);
     }
-    keys.set(&account, password).map_err(|e| match e {
+    keys.set(SERVICE, &account, password).map_err(|e| match e {
         KeyringError::Unavailable(why) => SecretError::NoKeychain(why),
         KeyringError::Failed(why) => SecretError::Keychain(why),
     })
@@ -145,10 +174,100 @@ pub fn set(cfg: &EmailConfig, keys: &dyn Keyring, password: &str) -> Result<(), 
 /// Deletes `cfg`'s keychain entry; `false` when there was none.
 pub fn forget(cfg: &EmailConfig, keys: &dyn Keyring) -> Result<bool, SecretError> {
     let account = account_for(cfg)?;
-    keys.delete(&account).map_err(|e| match e {
+    keys.delete(SERVICE, &account).map_err(|e| match e {
         KeyringError::Unavailable(why) => SecretError::NoKeychain(why),
         KeyringError::Failed(why) => SecretError::Keychain(why),
     })
+}
+
+/// The keychain service site passwords are filed under.
+pub const SITE_SERVICE: &str = "com.casavargas.deckle.site";
+
+/// `<username>@<site>`: a new username or site is a new entry.
+pub fn site_account(sub: &SubscriptionConfig) -> String {
+    format!("{}@{}", sub.username.trim(), sub.site.trim())
+}
+
+/// The headless fallback for `site`: `thepilot.com` is `DECKLE_SITE_PASSWORD_THEPILOT_COM`.
+pub fn site_env(site: &str) -> String {
+    format!(
+        "DECKLE_SITE_PASSWORD_{}",
+        site.to_ascii_uppercase()
+            .replace(|c: char| !c.is_ascii_alphanumeric(), "_")
+    )
+}
+
+fn site_account_for(sub: &SubscriptionConfig) -> Result<String, SecretError> {
+    if sub.username.trim().is_empty() || sub.site.trim().is_empty() {
+        return Err(SecretError::NoAccount);
+    }
+    Ok(site_account(sub))
+}
+
+fn site_keyring_error(sub: &SubscriptionConfig, e: KeyringError) -> SecretError {
+    match e {
+        KeyringError::Unavailable(why) => SecretError::NoSiteKeychain {
+            why,
+            env: site_env(&sub.site),
+        },
+        KeyringError::Failed(why) => SecretError::Keychain(why),
+    }
+}
+
+/// The password for `sub`'s account: the keychain's, or `DECKLE_SITE_PASSWORD_<SITE>`
+/// (through `env`) only when there is no keychain at all.
+pub fn site_password(
+    sub: &SubscriptionConfig,
+    keys: &dyn Keyring,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<(Zeroizing<String>, Source), SecretError> {
+    let account = site_account_for(sub)?;
+    match keys.get(SITE_SERVICE, &account) {
+        Ok(Some(pw)) => Ok((pw, Source::Keychain)),
+        Ok(None) => Err(SecretError::NotSet {
+            account,
+            hint: "deckle digest subscribe",
+            site: sub.site.trim().to_owned(),
+        }),
+        Err(KeyringError::Unavailable(why)) => {
+            let name = site_env(&sub.site);
+            match env(&name).map(Zeroizing::new) {
+                Some(pw) if !pw.is_empty() => Ok((pw, Source::Env)),
+                _ => Err(SecretError::NoSiteKeychain { why, env: name }),
+            }
+        }
+        Err(KeyringError::Failed(why)) => Err(SecretError::Keychain(why)),
+    }
+}
+
+/// Whether a fetch would find a password for `sub` (the password stays put).
+pub fn has_site_password(
+    sub: &SubscriptionConfig,
+    keys: &dyn Keyring,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> bool {
+    site_password(sub, keys, env).is_ok()
+}
+
+/// Saves `password` in the keychain for `sub`'s account.
+pub fn set_site(
+    sub: &SubscriptionConfig,
+    keys: &dyn Keyring,
+    password: &str,
+) -> Result<(), SecretError> {
+    let account = site_account_for(sub)?;
+    if password.is_empty() {
+        return Err(SecretError::Empty);
+    }
+    keys.set(SITE_SERVICE, &account, password)
+        .map_err(|e| site_keyring_error(sub, e))
+}
+
+/// Deletes `sub`'s keychain entry; `false` when there was none.
+pub fn forget_site(sub: &SubscriptionConfig, keys: &dyn Keyring) -> Result<bool, SecretError> {
+    let account = site_account_for(sub)?;
+    keys.delete(SITE_SERVICE, &account)
+        .map_err(|e| site_keyring_error(sub, e))
 }
 
 /// The OS keychain: macOS Keychain, Windows Credential Manager, Linux Secret Service.
@@ -156,8 +275,8 @@ pub fn forget(cfg: &EmailConfig, keys: &dyn Keyring) -> Result<bool, SecretError
 pub struct SystemKeyring;
 
 impl SystemKeyring {
-    fn entry(account: &str) -> Result<keyring::Entry, KeyringError> {
-        keyring::Entry::new(SERVICE, account).map_err(keyring_error)
+    fn entry(service: &str, account: &str) -> Result<keyring::Entry, KeyringError> {
+        keyring::Entry::new(service, account).map_err(keyring_error)
     }
 }
 
@@ -181,22 +300,22 @@ fn keyring_error(e: keyring::Error) -> KeyringError {
 }
 
 impl Keyring for SystemKeyring {
-    fn get(&self, account: &str) -> Result<Option<Zeroizing<String>>, KeyringError> {
-        match Self::entry(account)?.get_password() {
+    fn get(&self, service: &str, account: &str) -> Result<Option<Zeroizing<String>>, KeyringError> {
+        match Self::entry(service, account)?.get_password() {
             Ok(pw) => Ok(Some(Zeroizing::new(pw))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(keyring_error(e)),
         }
     }
 
-    fn set(&self, account: &str, password: &str) -> Result<(), KeyringError> {
-        Self::entry(account)?
+    fn set(&self, service: &str, account: &str, password: &str) -> Result<(), KeyringError> {
+        Self::entry(service, account)?
             .set_password(password)
             .map_err(keyring_error)
     }
 
-    fn delete(&self, account: &str) -> Result<bool, KeyringError> {
-        match Self::entry(account)?.delete_credential() {
+    fn delete(&self, service: &str, account: &str) -> Result<bool, KeyringError> {
+        match Self::entry(service, account)?.delete_credential() {
             Ok(()) => Ok(true),
             Err(keyring::Error::NoEntry) => Ok(false),
             Err(e) => Err(keyring_error(e)),
@@ -229,23 +348,33 @@ impl MemoryKeyring {
 }
 
 impl Keyring for MemoryKeyring {
-    fn get(&self, account: &str) -> Result<Option<Zeroizing<String>>, KeyringError> {
+    fn get(&self, service: &str, account: &str) -> Result<Option<Zeroizing<String>>, KeyringError> {
         self.check()?;
-        Ok(self.entries.lock().unwrap().get(account).cloned())
-    }
-
-    fn set(&self, account: &str, password: &str) -> Result<(), KeyringError> {
-        self.check()?;
-        self.entries
+        Ok(self
+            .entries
             .lock()
             .unwrap()
-            .insert(account.to_owned(), Zeroizing::new(password.to_owned()));
+            .get(&format!("{service}\0{account}"))
+            .cloned())
+    }
+
+    fn set(&self, service: &str, account: &str, password: &str) -> Result<(), KeyringError> {
+        self.check()?;
+        self.entries.lock().unwrap().insert(
+            format!("{service}\0{account}"),
+            Zeroizing::new(password.to_owned()),
+        );
         Ok(())
     }
 
-    fn delete(&self, account: &str) -> Result<bool, KeyringError> {
+    fn delete(&self, service: &str, account: &str) -> Result<bool, KeyringError> {
         self.check()?;
-        Ok(self.entries.lock().unwrap().remove(account).is_some())
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .remove(&format!("{service}\0{account}"))
+            .is_some())
     }
 }
 
@@ -277,7 +406,7 @@ mod tests {
     #[test]
     fn the_keychain_wins_over_the_environment() {
         let keys = MemoryKeyring::default();
-        keys.set(&account(&cfg()), PW).unwrap();
+        keys.set(SERVICE, &account(&cfg()), PW).unwrap();
         let (pw, src) = smtp_password(&cfg(), &keys, &env_with(Some("from-env"))).unwrap();
         assert_eq!(pw.as_str(), PW);
         assert_eq!(src, Source::Keychain);
@@ -342,6 +471,108 @@ mod tests {
         }
         let (pw, src) = smtp_password(&cfg(), &keys, &env_with(Some(PW))).unwrap();
         shown.push(format!("{src:?} {}", serde_json::to_string(&src).unwrap()));
+        drop(pw);
+        for s in shown {
+            assert!(!s.contains(PW), "{s}");
+        }
+    }
+
+    fn sub() -> SubscriptionConfig {
+        SubscriptionConfig {
+            site: "thepilot.com".into(),
+            username: "me@example.com".into(),
+            kind: None,
+        }
+    }
+
+    fn site_env_with(v: Option<&'static str>) -> impl Fn(&str) -> Option<String> {
+        move |k: &str| {
+            (k == "DECKLE_SITE_PASSWORD_THEPILOT_COM")
+                .then_some(v)
+                .flatten()
+                .map(str::to_owned)
+        }
+    }
+
+    #[test]
+    fn site_entries_live_in_their_own_service() {
+        assert_eq!(SITE_SERVICE, "com.casavargas.deckle.site");
+        assert_eq!(site_account(&sub()), "me@example.com@thepilot.com");
+        assert_eq!(
+            site_env("thepilot.com"),
+            "DECKLE_SITE_PASSWORD_THEPILOT_COM"
+        );
+        assert_eq!(site_env("a-b.co.uk"), "DECKLE_SITE_PASSWORD_A_B_CO_UK");
+        let keys = MemoryKeyring::default();
+        set(&cfg(), &keys, "smtp-pw").unwrap();
+        assert!(
+            !has_site_password(&sub(), &keys, &site_env_with(None)),
+            "the SMTP entry isn't a site entry"
+        );
+        set_site(&sub(), &keys, PW).unwrap();
+        assert!(
+            has_password(&cfg(), &keys, &env_with(None)),
+            "SMTP entry untouched"
+        );
+        assert!(forget_site(&sub(), &keys).unwrap());
+        assert!(!forget_site(&sub(), &keys).unwrap());
+        assert!(
+            has_password(&cfg(), &keys, &env_with(None)),
+            "forgetting a site keeps SMTP"
+        );
+        assert!(set_site(&sub(), &keys, "").is_err());
+        let blank = SubscriptionConfig {
+            username: " ".into(),
+            ..sub()
+        };
+        assert_eq!(set_site(&blank, &keys, PW), Err(SecretError::NoAccount));
+    }
+
+    #[test]
+    fn site_password_keychain_then_env_then_error() {
+        let keys = MemoryKeyring::default();
+        set_site(&sub(), &keys, PW).unwrap();
+        let (pw, src) = site_password(&sub(), &keys, &site_env_with(Some("from-env"))).unwrap();
+        assert_eq!((pw.as_str(), src), (PW, Source::Keychain));
+
+        let empty = MemoryKeyring::default();
+        let e = site_password(&sub(), &empty, &site_env_with(Some("from-env"))).unwrap_err();
+        assert!(matches!(e, SecretError::NotSet { .. }), "{e}");
+        assert!(
+            e.to_string()
+                .contains("deckle digest subscribe thepilot.com"),
+            "{e}"
+        );
+
+        let none = MemoryKeyring::unavailable();
+        let (pw, src) = site_password(&sub(), &none, &site_env_with(Some("from-env"))).unwrap();
+        assert_eq!((pw.as_str(), src), ("from-env", Source::Env));
+        let e = site_password(&sub(), &none, &site_env_with(None)).unwrap_err();
+        assert!(matches!(e, SecretError::NoSiteKeychain { .. }), "{e}");
+        assert!(
+            e.to_string().contains("DECKLE_SITE_PASSWORD_THEPILOT_COM"),
+            "{e}"
+        );
+        let e = site_password(&sub(), &none, &site_env_with(Some(""))).unwrap_err();
+        assert!(
+            matches!(e, SecretError::NoSiteKeychain { .. }),
+            "an empty variable is unset"
+        );
+    }
+
+    #[test]
+    fn site_errors_never_carry_the_password() {
+        let keys = MemoryKeyring::unavailable();
+        let mut shown = Vec::new();
+        for e in [
+            site_password(&sub(), &keys, &site_env_with(None)).unwrap_err(),
+            site_password(&sub(), &MemoryKeyring::default(), &site_env_with(Some(PW))).unwrap_err(),
+            set_site(&sub(), &keys, PW).unwrap_err(),
+        ] {
+            shown.push(format!("{e} {e:?}"));
+        }
+        let (pw, src) = site_password(&sub(), &keys, &site_env_with(Some(PW))).unwrap();
+        shown.push(format!("{src:?}"));
         drop(pw);
         for s in shown {
             assert!(!s.contains(PW), "{s}");

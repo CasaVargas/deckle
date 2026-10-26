@@ -28,12 +28,14 @@ pub mod next;
 pub mod papers;
 pub mod pdf;
 pub mod press;
+pub mod publisher;
 pub mod puzzle;
 pub mod reading;
 pub mod render;
 pub mod schedule;
 pub mod seasons;
 pub mod secret;
+pub mod session;
 pub mod shelf;
 pub mod showers;
 pub mod sources;
@@ -50,6 +52,8 @@ pub use chrono;
 pub use chrono_tz;
 pub use config::{Config, SectionKind};
 pub use fetch::{Http, Net};
+pub use publisher::Access;
+pub use session::SessionNet;
 pub use url;
 pub use zeroize;
 
@@ -119,6 +123,8 @@ pub struct Extra {
     pub byline: Option<String>,
     /// RFC 3339.
     pub published: Option<String>,
+    /// How the page was fetched: open, through a subscription, or walled.
+    pub access: publisher::Access,
 }
 
 #[derive(Clone, Debug, Default)]

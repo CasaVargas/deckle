@@ -398,7 +398,8 @@ mod tests {
 
     fn keys() -> MemoryKeyring {
         let k = MemoryKeyring::default();
-        k.set(&crate::secret::account(&cfg()), PW).unwrap();
+        k.set(crate::secret::SERVICE, &crate::secret::account(&cfg()), PW)
+            .unwrap();
         k
     }
 

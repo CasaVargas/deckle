@@ -12,6 +12,7 @@ use regex::Regex;
 use crate::config::Config;
 use crate::fetch::Net;
 use crate::inbox::urls_in;
+use crate::publisher::Access;
 use crate::reading::{fnv, normalize_url};
 use crate::sources::feeds::{by_line, host, story_body};
 use crate::sources::reading::{LongRead, slug};
@@ -92,7 +93,7 @@ pub fn build(
     dir: &Path,
     date: NaiveDate,
 ) -> Result<WebBook, String> {
-    let (html, base, outlet) = match source(target)? {
+    let (html, base, outlet, access) = match source(target)? {
         Source::Url(url) => {
             let url = if article::is_google_news(&url) {
                 article::resolve_google_news(&url, net)
@@ -100,9 +101,15 @@ pub fn build(
             } else {
                 url
             };
-            let bytes = net.get_page(&url)?;
+            // A walled page is still extracted below: it's what a stranger sees.
+            let (bytes, access) = net.get_page_as(&url)?;
             let outlet = host(&url).to_owned();
-            (String::from_utf8_lossy(&bytes).into_owned(), url, outlet)
+            (
+                String::from_utf8_lossy(&bytes).into_owned(),
+                url,
+                outlet,
+                access,
+            )
         }
         Source::Page(file) => {
             let bytes = std::fs::read(&file).map_err(|e| e.to_string())?;
@@ -112,17 +119,19 @@ pub fn build(
             let outlet = saved_from(&html)
                 .map(|u| host(&u).to_owned())
                 .unwrap_or_else(|| "a saved page".to_owned());
-            (html, base.to_string(), outlet)
+            (html, base.to_string(), outlet, Access::Open)
         }
     };
-    let x = article::extract_with(&html, &base, None).ok_or_else(|| {
-        format!(
+    let x = article::extract_with(&html, &base, None).ok_or_else(|| match &access {
+        Access::Walled { site, why } => format!("no readable article: {}", why.note(site)),
+        _ => format!(
             "no readable article (under {} words: a paywall, a sign-in page, or a video)",
             article::MIN_WORDS
-        )
+        ),
     })?;
     let title = x.title.clone().unwrap_or_else(|| outlet.clone());
-    let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
+    let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+    extra.access = access;
     let id = format!("{:016x}", fnv(&normalize_url(&base)));
     let stem = format!("{}-{}", slug(&title), &id[..8]);
     let lr = LongRead {

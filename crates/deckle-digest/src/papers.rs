@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! One Mac, many papers (many papers design §3): `digest.toml` is the main paper and each
 //! `papers/<slug>.toml` beside it is another. A paper file can't set the household settings
-//! (`[sync]`, `[reading]`, the email account); it takes them from `digest.toml`.
+//! (`[sync]`, `[reading]`, `[[subscriptions]]`, the email account); it takes them from `digest.toml`.
 
 use std::path::{Path, PathBuf};
 
@@ -67,6 +67,9 @@ fn household_key(text: &str) -> Result<Option<String>, String> {
             return Ok(Some(format!("[{key}]")));
         }
     }
+    if table.contains_key("subscriptions") {
+        return Ok(Some("[[subscriptions]]".to_owned()));
+    }
     if let Some(email) = table.get("email").and_then(|e| e.as_table()) {
         for key in ACCOUNT_KEYS {
             if email.contains_key(key) {
@@ -90,6 +93,7 @@ fn load_extra(main_path: &Path, main: &Config, slug: &str) -> Result<Config, Str
     let mut cfg = Config::parse(&text).map_err(|e| format!("{name}: {e}"))?;
     cfg.sync = main.sync.clone();
     cfg.reading = main.reading.clone();
+    cfg.subscriptions = main.subscriptions.clone();
     cfg.email.from = main.email.from.clone();
     cfg.email.smtp_host = main.email.smtp_host.clone();
     cfg.email.smtp_port = main.email.smtp_port;

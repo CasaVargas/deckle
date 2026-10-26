@@ -6,6 +6,7 @@ use chrono::Local;
 
 use crate::config::Config;
 use crate::fetch::Net;
+use crate::publisher::Access;
 use crate::reading::{Entry, MAX_TRIES, Outcome};
 use crate::sources::feeds::{by_line, host, par_map, story_body};
 use crate::{Article, Section, article, esc};
@@ -63,9 +64,11 @@ enum Got {
     /// Gave up after the last try: a headline with the reason.
     GaveUp(Article, String),
     Retry(String),
+    /// A subscriber page the site withheld: not a failed try, so it waits without one.
+    Withheld(String),
 }
 
-fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String), String> {
+fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String, Access), String> {
     if let Some(file) = &e.file {
         let bytes = std::fs::read(file).map_err(|err| format!("{}: {err}", file.display()))?;
         let base = url::Url::from_file_path(file)
@@ -73,6 +76,7 @@ fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String), String> {
         return Ok((
             String::from_utf8_lossy(&bytes).into_owned(),
             base.to_string(),
+            Access::Open,
         ));
     }
     let url = e.url.as_deref().ok_or("nothing to fetch")?;
@@ -81,8 +85,9 @@ fn fetch_html(e: &Entry, net: &dyn Net) -> Result<(String, String), String> {
     } else {
         url.to_owned()
     };
-    let bytes = net.get_page(&url)?;
-    Ok((String::from_utf8_lossy(&bytes).into_owned(), url))
+    // A walled page is still extracted: it's what a stranger sees, and a free story reads.
+    let (bytes, access) = net.get_page_as(&url)?;
+    Ok((String::from_utf8_lossy(&bytes).into_owned(), url, access))
 }
 
 fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
@@ -103,12 +108,21 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
     } else {
         None
     };
-    let extracted = fetch_html(e, net).and_then(|(html, base)| {
-        article::extract_with(&html, &base, cap)
-            .ok_or_else(|| "no readable article (a paywall, a sign-in page, or a video)".to_owned())
-    });
-    let x = match extracted {
-        Ok(x) => x,
+    let extracted = match fetch_html(e, net) {
+        Ok((html, base, access)) => match article::extract_with(&html, &base, cap) {
+            Some(x) => Ok((x, access)),
+            None => match &access {
+                // The site withheld it from a stranger: wait, without spending a try.
+                Access::Walled { site, why } => {
+                    return Got::Withheld(format!("no readable article: {}", why.note(site)));
+                }
+                _ => Err("no readable article (a paywall, a sign-in page, or a video)".to_owned()),
+            },
+        },
+        Err(why) => Err(why),
+    };
+    let (x, access) = match extracted {
+        Ok(got) => got,
         Err(why) => {
             // The try this edition makes; a same-day rebuild doesn't count again.
             let tries = e.tries + u32::from(e.tried_on != Some(date));
@@ -138,7 +152,8 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         .unwrap_or_else(|| outlet.clone());
     let meta = format!("{saved} · {outlet} · about {} min", minutes(x.words));
     if x.words > cfg.reading.long_read_words && !inline {
-        let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
+        let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+        extra.access = access;
         let lr = LongRead {
             id: e.id.clone(),
             title: title.clone(),
@@ -174,7 +189,8 @@ fn one(e: &Entry, cfg: &Config, net: &dyn Net, date: chrono::NaiveDate) -> Got {
         };
         return Got::Long(Box::new(lr), pointer);
     }
-    let (body, photos, extra) = story_body(&x, &outlet, cfg, net);
+    let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+    extra.access = access;
     Got::Story(Article {
         title,
         meta: Some(match x.byline.as_deref() {
@@ -218,6 +234,7 @@ pub fn section(
                 outcomes.push((e.id.clone(), Outcome::Failed(why)));
             }
             Got::Retry(why) => outcomes.push((e.id.clone(), Outcome::Failed(why))),
+            Got::Withheld(why) => outcomes.push((e.id.clone(), Outcome::Waiting(why))),
         }
     }
     let kicker = match articles.len() {
@@ -240,6 +257,85 @@ pub fn section(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::publisher::Walled;
+    use crate::reading::{Entry, State};
+
+    fn entry(tries: u32) -> Entry {
+        Entry {
+            id: "r-1".into(),
+            url: Some("https://www.thepilot.com/news/a.html".into()),
+            file: None,
+            title: None,
+            saved_at: "2026-10-20T14:03:11Z".parse().unwrap(),
+            source: "cli".into(),
+            state: State::Pending,
+            tries,
+            printed_in: None,
+            note: None,
+            tried_on: None,
+            waits: 0,
+        }
+    }
+
+    /// A subscribed host serving `page` as a stranger would see it.
+    struct WalledNet(String);
+    impl Net for WalledNet {
+        fn get(&self, _: &str) -> Result<Vec<u8>, String> {
+            Ok(self.0.clone().into_bytes())
+        }
+        fn get_page_as(&self, u: &str) -> Result<(Vec<u8>, Access), String> {
+            self.get(u).map(|b| (b, walled()))
+        }
+    }
+
+    fn walled() -> Access {
+        Access::Walled {
+            site: "thepilot.com".into(),
+            why: Walled::NoAdapter,
+        }
+    }
+
+    fn date() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 10, 21).unwrap()
+    }
+
+    #[test]
+    fn a_walled_page_that_reads_prints_as_a_stranger_would_see_it() {
+        let words = "word ".repeat(300);
+        let net = WalledNet(format!(
+            "<html><body><article><h1>T</h1><p>{words}</p><p>{words}</p></article></body></html>"
+        ));
+        let (section, long_reads, outcomes) =
+            section(&[entry(0)], &Config::default(), &net, date());
+        assert!(long_reads.is_empty());
+        assert_eq!(outcomes, [("r-1".to_owned(), Outcome::Printed)]);
+        assert_eq!(section.articles.len(), 1);
+        let a = &section.articles[0];
+        assert!(a.body.contains("word word"), "{}", a.body);
+        assert!(!a.body.contains("Subscriber story"), "{}", a.body);
+        assert_eq!(a.extra.access, walled());
+    }
+
+    #[test]
+    fn a_walled_page_that_doesnt_read_waits_without_spending_a_try() {
+        let net = WalledNet("<html><body><p>Log in to keep reading.</p></body></html>".into());
+        // Even on what would be its last try, it waits rather than giving up.
+        let (section, _, outcomes) =
+            section(&[entry(MAX_TRIES - 1)], &Config::default(), &net, date());
+        assert!(section.articles.is_empty());
+        assert_eq!(
+            outcomes,
+            [(
+                "r-1".to_owned(),
+                Outcome::Waiting(
+                    "no readable article: Subscriber story (Deckle doesn't know how \
+                     thepilot.com signs in yet)."
+                        .into()
+                )
+            )]
+        );
+    }
 
     #[test]
     fn slugs_are_short_ascii_words() {

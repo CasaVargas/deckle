@@ -289,6 +289,8 @@ export interface DailyConfig {
   reading: { inbox: string; max_items: number; long_read_words: number };
   /** Absent while it's untouched (the backend leaves the defaults out). */
   email?: EmailConfig;
+  /** `[[subscriptions]]`: newspapers the household subscribes to. Absent while empty. No passwords here. */
+  subscriptions?: SubscriptionConfig[];
   /** `[day]`: Your Day on the weather page. Absent while untouched. */
   day?: DayConfig;
   /** `[morgue]`: where every edition is kept. Absent while untouched. */
@@ -390,6 +392,31 @@ export const DEFAULT_EMAIL: EmailConfig = {
 export interface EmailStatus {
   configured: boolean;
   has_password: boolean;
+}
+
+/** `[[subscriptions]]`: a newspaper account. The password lives in the keychain. */
+export interface SubscriptionConfig {
+  site: string;
+  username: string;
+  kind?: string | null;
+}
+
+/** Where a site's session stands: serde's externally-tagged form of the Rust enum. */
+export type SessionState =
+  | "NotTried"
+  | { SignedIn: { service: string | null } }
+  | { LoginFailed: string }
+  | "NoAdapter"
+  | { NoPassword: string };
+
+/** A subscription as the card shows it. Never carries the password. */
+export interface SiteStatus {
+  site: string;
+  username: string;
+  kind: string | null;
+  has_password: boolean;
+  state: SessionState;
+  jar_note: string | null;
 }
 
 export interface DailyState {

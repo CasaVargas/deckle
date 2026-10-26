@@ -72,6 +72,10 @@ fn household_keys_are_refused() {
         ("[sync]\npush = false\n", "[sync]"),
         ("[reading]\nmax_items = 2\n", "[reading]"),
         ("[email]\nsmtp_host = \"x\"\n", "[email] smtp_host"),
+        (
+            "[[subscriptions]]\nsite = \"a.com\"\nusername = \"u\"\n",
+            "[[subscriptions]]",
+        ),
     ] {
         paper(&main, "x", body);
         let err = load_one(&main, "x").unwrap_err();
@@ -104,6 +108,30 @@ fn household_keys_are_inherited() {
     assert_eq!(extra.email.username, "me@example.com");
     assert_eq!(extra.email.to, "dad@kindle.com");
     assert!(extra.email.enabled && extra.email.usb_too);
+}
+
+#[test]
+fn a_paper_inherits_the_households_subscriptions() {
+    let (_d, main) = home();
+    let text = std::fs::read_to_string(&main).unwrap();
+    std::fs::write(
+        &main,
+        format!(
+            "{text}\n[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"me@example.com\"\n"
+        ),
+    )
+    .unwrap();
+    paper(&main, "kid", "title = \"Kid\"\n");
+    let kid = load_one(&main, "kid").unwrap();
+    assert_eq!(
+        kid.subscriptions,
+        Config::load(&main).unwrap().subscriptions
+    );
+    assert_eq!(kid.subscriptions.len(), 1);
+    // Saving the extra paper doesn't write them into its file.
+    save(&papers::paper_path(&main, "kid"), &kid).unwrap();
+    let saved = std::fs::read_to_string(papers::paper_path(&main, "kid")).unwrap();
+    assert!(!saved.contains("subscriptions"), "{saved}");
 }
 
 #[test]
