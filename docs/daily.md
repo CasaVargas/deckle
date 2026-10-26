@@ -226,6 +226,39 @@ you rarely reach, **Move up** for a feed you rarely reach. One click (or `deckle
 - Editions that went by email only aren't tracked: no KFX is built for them on this machine, so
   there's nothing to compare the position against (`usb_too = true` editions are).
 
+### Deckle noticed
+
+The paper notices what you read and suggests new interests, on this Mac only. Each time your
+Kindle connects, Deckle looks at three things: the stories you jumped back to the front from
+(the Kindle keeps the last few page jumps in its reading data), the passages you highlighted
+in the paper itself (from `My Clippings.txt`), and the authors of the books in progress on your
+shelf. A subject that comes up in three stories on two different days within two weeks becomes
+a suggestion under **Deckle noticed** in the Editions room, beside How far you read:
+
+> **Bryce Young** · You read 4 stories about Bryce Young in the last 14 days.
+> [Add as interest] [Not interested]
+
+- **Add as interest** writes the `[[interests]]` entry (an author gets a narrower search,
+  `"Brandon Sanderson" author OR book`) and puts `interests` in `sections` if it wasn't there.
+- **Not interested** sets the subject aside for 90 days.
+- Nothing changes the paper on its own; a suggestion waits for a click.
+- What isn't a signal: how far you read (reading straight through reaches every story),
+  highlights in books, and words you looked up.
+
+It's on by default and lives in `interests.json` beside `readership.json` (per paper). Turn it
+off in **The paper → Your interests** or with `[learning] enabled = false`. Taps need
+`[sync] readership`; highlights are read from the Kindle whenever learning is on.
+
+```bash
+deckle digest interests                      # interests, then what Deckle noticed
+deckle digest interests accept "Bryce Young"
+deckle digest interests dismiss "Bryce Young"
+deckle digest interests why "Bryce Young"    # the stories behind it
+```
+
+Renaming an interest in the app keeps its history: its readership rows and what Deckle noticed
+move to the new name.
+
 ### The weather page
 
 The **Weather & Almanac** page has a five-day strip (a picture, the high and low, and a word or

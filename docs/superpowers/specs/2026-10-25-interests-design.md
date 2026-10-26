@@ -443,3 +443,28 @@ Increment 1 (§11 item 1) landed from `docs/superpowers/plans/2026-10-25-interes
   survived URL encoding. The Rust section filled with the other Rusts (a surname, corrosion, the
   film): a one-word name with everyday meanings needs its own `query` (`"Rust" programming`),
   which the starter and docs say. Increment 3's editor scoring is the better answer.
+
+## 15. Implementation notes, PR 2 (2026-10-26)
+
+Increment 2 (§11 item 2) landed from `docs/superpowers/plans/2026-10-26-interests-learning.md`.
+
+- **The history records page starts, not elements.** The Scribe fixtures (`fixtures/yjf`) hold
+  `page.history.record` entries at 821, 4 and 1015 for an edition read to position 103303:
+  all on the front page, so they are the starts of the pages jumps were made from. §5.2's link
+  ranges were dropped: the layout records where each story starts (`StoryStart`), and a hit is
+  the story whose range holds a history position. A jump from a section's own front, or from
+  the front page, is no hit. The practical signal is "jumped back to the front from this
+  story", which is what §5.1 called "read to the end".
+- **Highlights** match on the clipped text itself (phrases from it), not on story bodies, which
+  the Mac doesn't keep; the hit's title is the clip's first 80 characters.
+- **Shelf** authors count while a book was read in the last 60 days; `deckle-shelf`'s percent
+  rule would have been a dependency cycle.
+- **Phrases:** sentence-leading function words (Why, How, The…) are stripped from a run; a
+  candidate keeps the first spelling seen.
+- **Where it runs:** `learn::on_connection` after the reads and the shelf are stored, in the
+  CLI's connection pass (every paper) and the desktop's Kindle session (the main paper). The
+  clippings are read whenever learning is on and readership is on for that Kindle.
+- **Rename** (call 11) migrates `readership.json` keys and `interests.json` entries in the
+  desktop save; the CLI has no rename.
+- **Not yet:** the editor's naming of candidates (increment 3; `Candidate.named` is parsed and
+  honoured by `suggest` and `accept` already), nudges (increment 4).
