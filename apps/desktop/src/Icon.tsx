@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Outline paths from Tabler Icons (MIT, https://tabler.io/icons).
 
-export type IconName = "settings" | "plus" | "dots" | "chevron-down" | "x" | "arrow-left" | "arrow-up" | "arrow-down" | "check" | "link" | "download";
+export type IconName = "settings" | "plus" | "dots" | "chevron-down" | "x" | "arrow-left" | "arrow-up" | "arrow-down" | "check" | "link" | "download" | "refresh";
 
 const PATHS: Record<IconName, string[]> = {
   settings: [
@@ -17,6 +17,7 @@ const PATHS: Record<IconName, string[]> = {
   "arrow-down": ["M12 5l0 14", "M18 13l-6 6", "M6 13l6 6"],
   check: ["M5 12l5 5l10 -10"],
   link: ["M9 15l6 -6", "M11 6l.463 -.536a5 5 0 0 1 7.071 7.072l-.534 .464", "M13 18l-.397 .534a5.068 5.068 0 0 1 -7.127 0a4.972 4.972 0 0 1 0 -7.071l.524 -.463"],
+  refresh: ["M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4", "M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"],
   download: ["M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2", "M7 11l5 5l5 -5", "M12 4l0 12"],
 };
 

@@ -5,6 +5,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, coverRequest } from "./api";
 import { deviceLabel } from "./deviceLabel";
+import { size } from "./kindleRooms";
 import BookRowView from "./BookRow";
 import SettingsView, { type SettingsPage } from "./SettingsView";
 import BookDrawer, { type DrawerTab } from "./BookDrawer";
@@ -65,6 +66,10 @@ export default function App() {
   /** The library search in the top bar (Books tab redesign §4). */
   const [query, setQuery] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
+  /** The Kindle tab's search, in the same place (Kindle tab redesign §3). */
+  const [kindleQuery, setKindleQuery] = useState("");
+  /** The picked Kindle's free space, once the Kindle tab has read it. */
+  const [kindleFree, setKindleFree] = useState<number | null>(null);
   const [bindOpen, setBindOpen] = useState(false);
   const [binding, setBinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -509,7 +514,7 @@ export default function App() {
               Kindle Previewer not found
             </button>
           )}
-          {tab !== "kindle" && hasUpdate(update) && (
+          {hasUpdate(update) && (
             <button className="pill" onClick={() => openSettings("about")}>
               {update.kind === "ready" ? "Restart to update" : "Update available"}
             </button>
@@ -521,6 +526,18 @@ export default function App() {
               <input ref={searchInput} type="search" placeholder="Search titles, authors, series" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} />
               <kbd aria-hidden="true">⌘F</kbd>
             </label>
+          )}
+          {tab === "kindle" && device && (
+            <label className="top-search">
+              <span className="visually-hidden">Search this Kindle</span>
+              <input type="search" placeholder="Search this Kindle" value={kindleQuery} onChange={(e) => setKindleQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setKindleQuery("")} />
+            </label>
+          )}
+          {tab === "kindle" && (
+            <div className="device-pill">
+              {deviceControl}
+              {device && kindleFree != null && <span className="muted">{size(kindleFree)} free</span>}
+            </div>
           )}
           {tab === "books" && (
             <div className="split">
@@ -542,7 +559,7 @@ export default function App() {
         </header>
 
         {tab === "daily" && <DailyView onNotice={setNotice} />}
-        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} />}
+        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
         {tab === "books" && articleOpen && (
           <ArticleField
             ref={articleInput}
@@ -660,21 +677,6 @@ export default function App() {
 
         {!settingsPage && noticeBar}
 
-        {tab === "kindle" && (
-        <footer className="bar">
-          {deviceControl}
-          {hasUpdate(update) ? (
-            <button
-              className="version link"
-              onClick={() => openSettings("about")}
-            >
-              Deckle {version} · {update.kind === "ready" ? "Restart to update" : "Update available"}
-            </button>
-          ) : (
-            <div className="version">Deckle {version}</div>
-          )}
-        </footer>
-        )}
       </div>
     </div>
   );
