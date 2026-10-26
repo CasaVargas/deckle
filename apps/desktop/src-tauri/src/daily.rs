@@ -757,6 +757,10 @@ mod tests {
         assert_eq!(j(S::LoginFailed("x".into())), r#"{"LoginFailed":"x"}"#);
         assert_eq!(j(S::NoAdapter), r#""NoAdapter""#);
         assert_eq!(j(S::NoPassword("x".into())), r#"{"NoPassword":"x"}"#);
+        assert_eq!(
+            j(S::EntitlementUnknown("x".into())),
+            r#"{"EntitlementUnknown":"x"}"#
+        );
     }
 
     #[test]

@@ -221,10 +221,15 @@ const NOT_STUCK: &str = "signed in, but the site still served a stranger's page"
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub enum SessionState {
     NotTried,
-    SignedIn { service: Option<String> },
+    SignedIn {
+        service: Option<String>,
+    },
     LoginFailed(String),
     NoAdapter,
     NoPassword(String),
+    /// Signed in, but the site's reply about the account's plan couldn't be read; its
+    /// stories print as a stranger sees them.
+    EntitlementUnknown(String),
 }
 
 /// A site's account and session, for the CLI and the app. Never carries the password.
@@ -260,8 +265,8 @@ struct Site {
     run: Mutex<Run>,
     /// The adapter's index in `SessionNet::adapters`, resolved once.
     adapter: OnceLock<Option<usize>>,
-    /// `services/`, fetched once per run (a failure counts as no services).
-    entitlement: OnceLock<Entitlement>,
+    /// `services/`, fetched once per run; an `Err` is the reason it couldn't be read.
+    entitlement: OnceLock<Result<Entitlement, String>>,
 }
 
 impl Site {
@@ -447,9 +452,11 @@ impl SessionNet {
                 Walled::NotInPlan | Walled::NoAdapter => SessionState::NoAdapter,
             },
             Ok(()) => {
-                let ent = self.entitlement(s, adapter);
-                let state = SessionState::SignedIn {
-                    service: ent.services.first().cloned(),
+                let state = match self.entitlement(s, adapter) {
+                    Ok(ent) => SessionState::SignedIn {
+                        service: ent.label(),
+                    },
+                    Err(e) => SessionState::EntitlementUnknown(e),
                 };
                 s.run().state = state.clone();
                 state
@@ -470,14 +477,14 @@ impl SessionNet {
         i.map(|i| self.adapters[i].as_ref())
     }
 
-    fn entitlement(&self, s: &Site, adapter: &dyn Publisher) -> Entitlement {
+    /// The account's plan, read once per run. An `Err` is the status text: the session
+    /// holds, but nothing is unlocked without a plan we could read.
+    fn entitlement(&self, s: &Site, adapter: &dyn Publisher) -> Result<Entitlement, String> {
         s.entitlement
             .get_or_init(|| {
                 adapter
                     .entitlement(&s.account.site, s.client.as_ref())
-                    .unwrap_or(Entitlement {
-                        services: Vec::new(),
-                    })
+                    .map_err(|e| format!("couldn't read your plan: {e}"))
             })
             .clone()
     }
@@ -569,8 +576,14 @@ impl SessionNet {
                 drop(login);
             }
         }
-        let ent = self.entitlement(s, adapter);
-        let service = ent.services.first().cloned();
+        let ent = match self.entitlement(s, adapter) {
+            Ok(ent) => ent,
+            Err(e) => {
+                s.run().state = SessionState::EntitlementUnknown(e);
+                return walled(body, Walled::NotInPlan);
+            }
+        };
+        let service = ent.label();
         let unlocked = adapter.unlock(&String::from_utf8_lossy(&body), &ent);
         s.run().state = SessionState::SignedIn {
             service: service.clone(),
@@ -922,6 +935,7 @@ mod net_tests {
         fn entitlement(&self, _site: &str, _c: &dyn SiteClient) -> Result<Entitlement, String> {
             Ok(Entitlement {
                 services: vec!["plus".into()],
+                ..Default::default()
             })
         }
         fn unlock(&self, html: &str, ent: &Entitlement) -> Option<String> {
@@ -1226,6 +1240,121 @@ mod net_tests {
         );
         assert_eq!(site.logins().len(), 1);
         assert_eq!(n.sign_in("nosuch.example"), SessionState::NoAdapter);
+    }
+
+    /// [`FakeBlox`], but the site's reply about the plan can't be read.
+    struct NoPlan;
+
+    impl Publisher for NoPlan {
+        fn kind(&self) -> &'static str {
+            "fake"
+        }
+        fn detect(&self, html: &str) -> bool {
+            FakeBlox.detect(html)
+        }
+        fn signed_in(&self, html: &str) -> bool {
+            FakeBlox.signed_in(html)
+        }
+        fn login(&self, site: &str, u: &str, pw: &str, c: &dyn SiteClient) -> Result<(), String> {
+            FakeBlox.login(site, u, pw, c)
+        }
+        fn entitlement(&self, _: &str, _: &dyn SiteClient) -> Result<Entitlement, String> {
+            Err("the services reply isn't JSON".into())
+        }
+        fn unlock(&self, html: &str, ent: &Entitlement) -> Option<String> {
+            // Would unlock anything: the session must not ask without a plan.
+            let _ = ent;
+            Some(format!("{html}<!--unlocked-->"))
+        }
+        fn sections(&self) -> &[(&'static str, &'static str)] {
+            &[]
+        }
+        fn feed_url(&self, site: &str, slug: &str, n: usize) -> String {
+            FakeBlox.feed_url(site, slug, n)
+        }
+    }
+
+    #[test]
+    fn an_unreadable_plan_is_entitlement_unknown_and_a_walled_story() {
+        let site = FakeSite::new(false, true);
+        let n = SessionNet::with_clients(
+            Http,
+            vec![(
+                account("me", Some(PW), Some("fake")),
+                Box::new(site.clone()) as Box<dyn SiteClient>,
+            )],
+            vec![Box::new(NoPlan)],
+        );
+        let (body, access) = n.get_page_as(STORY).unwrap();
+        assert_eq!(
+            body, b"<html>USER</html>",
+            "the page as served, not unlocked"
+        );
+        assert_eq!(
+            access,
+            Access::Walled {
+                site: "thepilot.com".into(),
+                why: Walled::NotInPlan
+            }
+        );
+        let unknown = SessionState::EntitlementUnknown(
+            "couldn't read your plan: the services reply isn't JSON".into(),
+        );
+        assert_eq!(n.status()[0].state, unknown);
+        assert_eq!(n.sign_in("thepilot.com"), unknown);
+    }
+
+    #[test]
+    fn the_signed_in_service_is_named_when_the_site_names_it() {
+        struct Named;
+        impl Publisher for Named {
+            fn kind(&self) -> &'static str {
+                "fake"
+            }
+            fn detect(&self, html: &str) -> bool {
+                FakeBlox.detect(html)
+            }
+            fn signed_in(&self, html: &str) -> bool {
+                FakeBlox.signed_in(html)
+            }
+            fn login(&self, s: &str, u: &str, pw: &str, c: &dyn SiteClient) -> Result<(), String> {
+                FakeBlox.login(s, u, pw, c)
+            }
+            fn entitlement(&self, _: &str, _: &dyn SiteClient) -> Result<Entitlement, String> {
+                let mut e = Entitlement {
+                    services: vec!["plus".into()],
+                    ..Default::default()
+                };
+                e.names.insert("plus".into(), "Pilot Plus".into());
+                Ok(e)
+            }
+            fn unlock(&self, html: &str, ent: &Entitlement) -> Option<String> {
+                FakeBlox.unlock(html, ent)
+            }
+            fn sections(&self) -> &[(&'static str, &'static str)] {
+                &[]
+            }
+            fn feed_url(&self, site: &str, slug: &str, n: usize) -> String {
+                FakeBlox.feed_url(site, slug, n)
+            }
+        }
+        let site = FakeSite::new(true, true);
+        let n = SessionNet::with_clients(
+            Http,
+            vec![(
+                account("me", Some(PW), Some("fake")),
+                Box::new(site.clone()) as Box<dyn SiteClient>,
+            )],
+            vec![Box::new(Named)],
+        );
+        let (_, access) = n.get_page_as(STORY).unwrap();
+        assert_eq!(
+            access,
+            Access::Subscription {
+                site: "thepilot.com".into(),
+                service: "Pilot Plus".into()
+            }
+        );
     }
 
     #[test]

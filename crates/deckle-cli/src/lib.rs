@@ -3135,6 +3135,7 @@ fn session_text(state: &deckle_digest::session::SessionState) -> String {
         S::LoginFailed(m) => format!("sign-in failed: {m}"),
         S::NoAdapter => "no adapter".into(),
         S::NoPassword(m) => format!("no password: {m}"),
+        S::EntitlementUnknown(m) => m.clone(),
     }
 }
 

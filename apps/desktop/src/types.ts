@@ -383,7 +383,8 @@ export type SessionState =
   | { SignedIn: { service: string | null } }
   | { LoginFailed: string }
   | "NoAdapter"
-  | { NoPassword: string };
+  | { NoPassword: string }
+  | { EntitlementUnknown: string };
 
 /** A subscription as the card shows it. Never carries the password. */
 export interface SiteStatus {

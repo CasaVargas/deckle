@@ -8,6 +8,7 @@ export function subscriptionLine(s: SiteStatus): string {
   if (st === "NoAdapter") return `Deckle doesn't know how ${s.site} signs in yet`;
   if ("SignedIn" in st) return st.SignedIn.service ? `Signed in · ${st.SignedIn.service}, active` : "Signed in";
   if ("LoginFailed" in st) return `Sign-in failed: ${st.LoginFailed}`;
+  if ("EntitlementUnknown" in st) return `Signed in, but ${st.EntitlementUnknown}`;
   return `No password: ${st.NoPassword}`;
 }
 
