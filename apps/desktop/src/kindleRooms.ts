@@ -13,16 +13,24 @@ export const KINDLE_ROOMS: { key: KindleRoom; title: string }[] = [
   { key: "device", title: "This Kindle" },
 ];
 
-export type ShelfFilter = "all" | "reading" | "not-started" | "finished" | "amazon-own" | "sideloaded" | "deckle";
+/** The Shelf's Show control (Kindle tab redesign §3): how far in. */
+export type ShelfShow = "all" | "reading" | "not-started" | "finished";
 
-export const SHELF_FILTERS: { key: ShelfFilter; title: string }[] = [
+export const SHELF_SHOWS: { key: ShelfShow; title: string }[] = [
   { key: "all", title: "All" },
   { key: "reading", title: "Reading" },
-  { key: "not-started", title: "Not started" },
+  { key: "not-started", title: "Unread" },
   { key: "finished", title: "Finished" },
-  { key: "amazon-own", title: "Amazon's own" },
+];
+
+/** The Shelf's From menu: where a book came from. */
+export type ShelfFrom = "anywhere" | "amazon-own" | "sideloaded" | "deckle";
+
+export const SHELF_FROMS: { key: ShelfFrom; title: string }[] = [
+  { key: "anywhere", title: "From anywhere" },
+  { key: "amazon-own", title: "From Amazon" },
   { key: "sideloaded", title: "Sideloaded" },
-  { key: "deckle", title: "Deckle" },
+  { key: "deckle", title: "From Deckle" },
 ];
 
 export type ShelfSort = "recent" | "title" | "author" | "size";
@@ -53,34 +61,26 @@ export function titleOf(b: DeviceBookRow): string {
   return b.title ?? b.file;
 }
 
-function matches(b: DeviceBookRow, f: ShelfFilter): boolean {
-  switch (f) {
-    case "all":
-      return b.kind !== "paper";
-    case "reading":
-    case "not-started":
-    case "finished":
-      return b.kind !== "paper" && b.reading === f;
-    case "deckle":
-      return b.kind === "deckle" || b.kind === "paper";
-    default:
-      return b.kind === f;
-  }
+function matches(b: DeviceBookRow, show: ShelfShow, from: ShelfFrom): boolean {
+  // Papers only show under From Deckle, and only in All: they have no reading state worth a filter.
+  if (b.kind === "paper") return from === "deckle" && show === "all";
+  if (from !== "anywhere" && b.kind !== from) return false;
+  return show === "all" || b.reading === show;
 }
 
-/** How many books each filter shows. */
-export function filterCounts(books: DeviceBookRow[]): Record<ShelfFilter, number> {
-  const out = {} as Record<ShelfFilter, number>;
-  for (const f of SHELF_FILTERS) out[f.key] = books.filter((b) => matches(b, f.key)).length;
+/** How many books each Show choice has, within a From choice. */
+export function showCounts(books: DeviceBookRow[], from: ShelfFrom): Record<ShelfShow, number> {
+  const out = {} as Record<ShelfShow, number>;
+  for (const s of SHELF_SHOWS) out[s.key] = books.filter((b) => matches(b, s.key, from)).length;
   return out;
 }
 
-/** The Shelf's books: filtered, searched (title, author, file name) and sorted. */
-export function shelfBooks(books: DeviceBookRow[], filter: ShelfFilter, query: string, sort: ShelfSort): DeviceBookRow[] {
+/** The Shelf's books: shown, from, searched (title, author, file name) and sorted. */
+export function shelfBooks(books: DeviceBookRow[], show: ShelfShow, from: ShelfFrom, query: string, sort: ShelfSort): DeviceBookRow[] {
   const q = query.trim().toLowerCase();
-  const found = books.filter((b) => matches(b, filter) && matchesMetadata(titleOf(b), [...b.authors, b.file], null, q));
+  const found = books.filter((b) => matches(b, show, from) && matchesMetadata(titleOf(b), [...b.authors, b.file], null, q));
   const byTitle = (a: DeviceBookRow, b: DeviceBookRow) => titleOf(a).localeCompare(titleOf(b), undefined, { sensitivity: "base" });
-  const author = (b: DeviceBookRow) => b.authors[0] ?? "￿";
+  const author = (b: DeviceBookRow) => b.authors[0] ?? "\uffff";
   const order: Record<ShelfSort, (a: DeviceBookRow, b: DeviceBookRow) => number> = {
     // Read most recently first; never-opened books after, by title.
     recent: (a, b) => (b.last_read ?? "").localeCompare(a.last_read ?? "") || byTitle(a, b),
@@ -89,6 +89,34 @@ export function shelfBooks(books: DeviceBookRow[], filter: ShelfFilter, query: s
     size: (a, b) => b.size - a.size || byTitle(a, b),
   };
   return [...found].sort(order[sort]);
+}
+
+/** What a book is, in plain words: Kindle book, Document, Amazon, Paper, or its format. */
+export function kindWord(b: DeviceBookRow): string {
+  if (b.kind === "amazon-own") return "Amazon";
+  if (b.kind === "paper") return "Paper";
+  if (b.cde === "EBOK") return "Kindle book";
+  if (b.cde === "PDOC") return "Document";
+  return b.format.toUpperCase();
+}
+
+/** The line under a cover: how far in, then what it is. */
+export function coverLine(b: DeviceBookRow): string {
+  const far = b.reading === "finished" ? "Finished" : b.reading === "reading" && b.fraction != null ? `${Math.round(b.fraction * 100)}%` : "Unread";
+  return b.kind === "paper" ? kindWord(b) : `${far} · ${kindWord(b)}`;
+}
+
+/** Whether a cover wears the Upgrade mark: Upgrades can do something for it. */
+export function canBeBetter(b: DeviceBookRow): boolean {
+  return b.class === "has-source" || b.class === "kindle-copy" || (b.updates.length > 0 && !!b.library_source);
+}
+
+/** Continue reading: what's being read, most recently opened first, four at most. */
+export function continueReading(books: DeviceBookRow[]): DeviceBookRow[] {
+  return books
+    .filter((b) => b.kind !== "paper" && b.reading === "reading")
+    .sort((a, b) => (b.last_read ?? "").localeCompare(a.last_read ?? ""))
+    .slice(0, 4);
 }
 
 /** "today", "yesterday", "3 days ago", "in March". */
@@ -124,20 +152,44 @@ export function updatable(books: DeviceBookRow[]): DeviceBookRow[] {
   return books.filter((b) => b.updates.length > 0 && b.library_source);
 }
 
-/** The line under each room's name. `upgrades` is the Upgrades room's own count, once it has one. */
-export function kindleRoomNotes(shelf: DeviceShelf | null, upgrades: number | null): Record<KindleRoom, string> {
-  if (!shelf) return { shelf: "", upgrades: "", highlights: "", words: "", device: "" };
-  const books = shelf.books.filter((b) => b.kind !== "paper");
-  const reading = books.filter((b) => b.reading === "reading").length;
+/** One Worth a look card on the Shelf (§3): what, a line on it, and the tab that fixes it. */
+export interface Nudge {
+  key: "upgrades" | "highlights" | "space";
+  title: string;
+  body: string;
+  action: string;
+  room: KindleRoom;
+}
+
+const names = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
+
+/** The Shelf's Worth a look cards; only the ones with something to say. `upgrades` is the Upgrades room's own count, once it has one. */
+export function worthALook(shelf: DeviceShelf, upgrades: number | null): Nudge[] {
+  const out: Nudge[] = [];
   const can = (upgrades ?? upgradable(shelf.books)) + updatable(shelf.books).length;
+  if (can > 0)
+    out.push({ key: "upgrades", title: `${plural(can, "book")} can be upgraded`, body: "X-Ray, Word Wise and page numbers, where Deckle can add them.", action: "See upgrades", room: "upgrades" });
+  const fresh = shelf.highlights.filter((h) => h.new > 0);
+  const n = fresh.reduce((sum, h) => sum + h.new, 0);
+  if (n > 0) {
+    const shown = fresh.slice(0, 2).map((h) => h.title);
+    const more = fresh.length - shown.length;
+    out.push({ key: "highlights", title: `${n} new highlight${n === 1 ? "" : "s"}`, body: `From ${names(more > 0 ? [...shown, plural(more, "more book")] : shown)}.`, action: "Save as Markdown", room: "highlights" });
+  }
+  const free = shelf.spare.reduce((sum, s) => sum + s.size, 0);
+  if (free > 0) {
+    const count = (why: Spare["why"]) => shelf.spare.filter((s) => s.why === why).length;
+    const parts = [count("duplicate") && plural(count("duplicate"), "duplicate"), count("finished") && plural(count("finished"), "finished book"), count("old-paper") && plural(count("old-paper"), "old paper")].filter((x): x is string => !!x);
+    out.push({ key: "space", title: `${size(free)} you could free`, body: `${names(parts)}.`.replace(/^./, (c) => c.toUpperCase()), action: "Make room", room: "device" });
+  }
+  return out;
+}
+
+/** The counts the tabs carry: the Upgrades badge and the Highlights note. */
+export function tabCounts(shelf: DeviceShelf | null, upgrades: number | null): { upgrades: number; highlights: string } {
+  if (!shelf) return { upgrades: 0, highlights: "" };
   const fresh = shelf.highlights.reduce((n, h) => n + h.new, 0);
-  return {
-    shelf: `${plural(books.length, "book")}${reading ? ` · ${reading} reading` : ""}`,
-    upgrades: can ? `${can} can be upgraded` : "All current",
-    highlights: fresh ? `${fresh} new` : plural(shelf.highlights.length, "book"),
-    words: "Vocabulary Builder",
-    device: shelf.space ? `${size(shelf.space.free)} free` : "",
-  };
+  return { upgrades: (upgrades ?? upgradable(shelf.books)) + updatable(shelf.books).length, highlights: fresh ? `${fresh} new` : "" };
 }
 
 /** Why a book is on the Make room list. */

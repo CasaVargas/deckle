@@ -687,3 +687,52 @@ input[type=checkbox] { padding: 0; }
 .suggest-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .suggest-line .use { flex: none; background: transparent; border: 0; padding: 0; font-size: 12px; font-weight: 600; color: var(--accent); }
 .suggest-line .use:hover { text-decoration: underline; }
+
+/* The Kindle tab redesign (§2–3): tabs, Worth a look, Continue reading, the cover grid */
+.device-pill { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 13px; }
+.device-pill { white-space: nowrap; max-width: 380px; min-width: 0; }
+.device-pill .device { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--fg); font-weight: 600; }
+.device-pill .device > span:not(.dot) { overflow: hidden; text-overflow: ellipsis; }
+.device-pill > .muted { flex: none; }
+.device-pill .device select { border: 0; padding: 0; background: transparent; font-weight: 600; }
+.kindle-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.kindle-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.kindle-tabs > button:not(.icon) { display: inline-flex; align-items: center; gap: 6px; background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 11px 0 10px; font-size: 13px; color: var(--muted); }
+.kindle-tabs > button:not(.icon):hover { color: var(--fg); }
+.kindle-tabs > button.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--fg); }
+.tab-badge { min-width: 18px; padding: 0 6px; border-radius: 9px; background: var(--accent); color: var(--accent-fg); font-size: 11px; font-weight: 600; line-height: 18px; text-align: center; }
+.tab-note { font-size: 12px; color: var(--muted); font-weight: 400; }
+.kindle-main { flex: 1; min-height: 0; overflow: auto; padding: 20px 24px 32px; display: flex; flex-direction: column; gap: 26px; }
+.kindle-h2 { font-family: ui-serif, Georgia, serif; font-size: 20px; font-weight: 600; margin: 0 0 12px; }
+.kindle-h2 .muted { font-size: 14px; font-weight: 400; }
+.nudges { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.nudge { display: flex; flex-direction: column; gap: 5px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); font-size: 13px; line-height: 1.4; }
+.nudge > span { color: var(--muted); }
+.link-action { align-self: flex-start; background: transparent; border: 0; padding: 0; margin-top: 2px; color: var(--accent); font-size: 13px; font-weight: 600; }
+.link-action:hover { text-decoration: underline; }
+.reading-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.reading-card { display: flex; gap: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); min-width: 0; }
+.reading-cover { width: 54px; flex: none; aspect-ratio: 2 / 3; border-radius: 3px; overflow: hidden; background: var(--line); box-shadow: 0 3px 8px rgb(0 0 0 / 0.15); }
+.reading-cover img, .kcard-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.reading-cover .cover-placeholder, .kcard-img .cover-placeholder { display: grid; place-items: center; width: 100%; height: 100%; font-family: ui-serif, Georgia, serif; font-size: 22px; color: var(--muted); }
+.reading-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; font-size: 12px; }
+.reading-title { font-family: ui-serif, Georgia, serif; font-size: 15px; font-weight: 600; line-height: 1.2; overflow-wrap: anywhere; }
+.reading-meta .cover-bar { position: static; height: 4px; border-radius: 2px; background: var(--line); }
+.shelf-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 14px; }
+.shelf-bar .kindle-h2 { margin: 0 6px 0 0; }
+.quiet-select { -webkit-appearance: none; appearance: none; border: 1px solid transparent; background: transparent; padding: 4px 8px; border-radius: 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
+.quiet-select:hover, .quiet-select:focus { border-color: var(--line); color: var(--fg); }
+.kcards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 20px 16px; }
+.kcard { position: relative; min-width: 0; }
+.kcard-open { display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 0; border: 0; background: transparent; text-align: left; }
+.kcard-cover { position: relative; display: block; aspect-ratio: 2 / 3; border-radius: 3px 5px 5px 3px; overflow: hidden; background: var(--line); box-shadow: 0 1px 3px rgb(0 0 0 / 0.18); }
+.kcard-img { display: block; width: 100%; height: 100%; }
+.kcard-open:hover .kcard-cover { box-shadow: 0 0 0 2px var(--accent); }
+.upgrade-mark { position: absolute; right: 6px; top: 6px; padding: 1px 7px; border-radius: 9px; background: var(--panel); color: var(--accent); font-size: 10px; font-weight: 700; box-shadow: 0 1px 3px rgb(0 0 0 / 0.2); }
+.cover-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgb(0 0 0 / 0.25); overflow: hidden; }
+.cover-bar > span { display: block; height: 100%; background: var(--accent); }
+.cover-bar > span.done { background: var(--ok); }
+.kcard-title { font-size: 13px; font-weight: 600; margin-top: 7px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kcard-line { font-size: 12px; color: var(--muted); }
+.kcard .menu { top: auto; left: 0; right: auto; }
+.kcard-confirm { position: absolute; z-index: 6; left: 0; top: 100%; width: 220px; margin-top: 4px; display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 8px 24px rgb(0 0 0 / 0.18); font-size: 12px; }

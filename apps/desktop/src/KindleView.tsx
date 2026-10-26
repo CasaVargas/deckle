@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The Kindle tab (Books and Kindle design §7), in rooms like the Daily tab: the Shelf (every book,
-// how far in, filtered and sorted), Upgrades, Highlights, Words, and This Kindle (space, make
-// room, back up and restore).
+// The Kindle tab (Books and Kindle design §7, Kindle tab redesign §2–3), in tabs: the Shelf (what's
+// worth a look, what you're reading, then every book as covers), Upgrades, Highlights, Words, and
+// This Kindle (space, make room, back up and restore).
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import Highlights from "./Highlights";
 import Icon from "./Icon";
-import { KINDLE_ROOMS, SHELF_FILTERS, SHELF_SORTS, filterCounts, kindleRoomNotes, progressLine, shelfBooks, size, updatable } from "./kindleRooms";
-import type { KindleRoom, ShelfFilter, ShelfSort } from "./kindleRooms";
+import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
+import type { KindleRoom, ShelfFrom, ShelfShow, ShelfSort } from "./kindleRooms";
 import ThisKindle from "./ThisKindle";
 import Upgrades from "./Upgrades";
 import WordsAnki from "./WordsAnki";
@@ -26,93 +26,106 @@ interface Props {
   onNotice: (msg: string | null) => void;
   /** After the Kindle was named. */
   onRenamed: () => Promise<void>;
+  /** The top bar's search text. */
+  query: string;
+  /** The Kindle's free space once read, for the top bar's pill. */
+  onFree: (bytes: number | null) => void;
 }
-
-/** The class badge a book on the Shelf wears, when its class says something. */
-const CLASS_BADGE: Partial<Record<UpgradeClass, { text: string; title: string }>> = {
-  "has-source": { text: "Can be upgraded", title: "Its original is on this computer: see Upgrades" },
-  "kindle-copy": { text: "Can be upgraded", title: "Deckle can rebuild it from the Kindle's own copy: see Upgrades" },
-  "amazon-own": { text: "Amazon", title: "From the Kindle Store or Send to Kindle: Amazon keeps a copy" },
-  locked: { text: "Locked", title: "Locked by DRM: Deckle never opens it" },
-  "fixed-layout": { text: "Fixed layout", title: "Comics and picture books are left as they are" },
-};
 
 /** The mode an update keeps: the one it was sent in. */
 function sentMode(book: DeviceBookRow): "pdoc" | "ebok" | null {
   return book.cde === "EBOK" ? "ebok" : book.cde === "PDOC" ? "pdoc" : null;
 }
 
-function updateBadges(book: DeviceBookRow) {
-  const older = book.updates.filter((u) => u.older);
-  const missing = book.updates.filter((u) => !u.older);
+/** A thin bar for how far in: green when finished. */
+function Bar({ book }: { book: DeviceBookRow }) {
+  const pct = book.reading === "finished" ? 100 : Math.round((book.fraction ?? 0) * 100);
   return (
-    <>
-      {older.length > 0 && (
-        <span className="badge stale" title={older.map((u) => u.text).join("\n")}>
-          Older build
-        </span>
-      )}
-      {missing.map((u) => (
-        <span key={u.feature} className="badge stale" title={u.text}>
-          Missing {u.feature}
-        </span>
-      ))}
-      {book.duplicate && (
-        <span className="badge dup" title="Another book on this Kindle is the same one (same ASIN, or same title and author)">
-          Duplicate
-        </span>
-      )}
-    </>
+    <span className="cover-bar" aria-hidden="true">
+      <span className={book.reading === "finished" ? "done" : ""} style={{ width: `${pct}%` }} />
+    </span>
   );
 }
 
-function BookLine({ book, busy, now, onResend, onRemove }: { book: DeviceBookRow; busy: boolean; now: Date; onResend: Props["onResend"]; onRemove: (file: string) => Promise<void> }) {
+function Cover({ book, className }: { book: DeviceBookRow; className: string }) {
+  const title = titleOf(book);
+  return (
+    <span className={className} aria-hidden="true">
+      {book.cover ? <img src={book.cover} alt="" /> : <span className="cover-placeholder">{title.slice(0, 1)}</span>}
+    </span>
+  );
+}
+
+/** A book on the Shelf: its cover, how far in and what it is, and what can be done with it. */
+function BookCard({ book, busy, onResend, onRemove }: { book: DeviceBookRow; busy: boolean; onResend: Props["onResend"]; onRemove: (file: string) => Promise<void> }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
-  const title = book.title ?? book.file;
+  const title = titleOf(book);
   const canUpgrade = book.library_source && book.cde === "PDOC";
   return (
-    <li className="row">
-      <div className="cover-thumb" aria-hidden="true">
-        {book.cover ? <img src={book.cover} alt="" /> : <div className="cover-placeholder">{title.slice(0, 1)}</div>}
-      </div>
-      <div className="meta">
-        <div className="title-line">
-          <span className="title" title={book.file}>
-            {title}
-          </span>
-          {book.cde ? (
-            <span className={`badge ${book.cde === "EBOK" ? "features" : "cover"}`} title={book.cde === "EBOK" ? "A Kindle book (EBOK): X-Ray and Word Wise capable" : "A personal document (PDOC): the cover always shows"}>
-              {book.cde}
-            </span>
-          ) : (
-            <span className="badge">{book.format.toUpperCase()}</span>
+    <li className="kcard">
+      <button className="kcard-open" title={book.file} onClick={() => setMenuOpen((o) => !o)} disabled={busy || removing} aria-haspopup="menu" aria-expanded={menuOpen}>
+        <span className="kcard-cover">
+          <Cover book={book} className="kcard-img" />
+          {canBeBetter(book) && <span className="upgrade-mark">Upgrade</span>}
+          <Bar book={book} />
+        </span>
+        <span className="kcard-title">{title}</span>
+        <span className="kcard-line">{coverLine(book)}</span>
+      </button>
+      {menuOpen && (
+        <div className="menu" role="menu" onMouseLeave={() => setMenuOpen(false)}>
+          {book.updates.length > 0 && book.library_source && (
+            <button
+              role="menuitem"
+              title={book.updates.map((u) => u.text).join("\n")}
+              onClick={() => {
+                setMenuOpen(false);
+                onResend([{ source: book.library_source!, cde: sentMode(book) }], `${title} is ready to update.`);
+              }}
+            >
+              Update
+            </button>
           )}
-          {updateBadges(book)}
-          {CLASS_BADGE[book.class] && (
-            <span className="badge" title={CLASS_BADGE[book.class]!.title}>
-              {CLASS_BADGE[book.class]!.text}
-            </span>
+          <button
+            role="menuitem"
+            disabled={!book.library_source}
+            title={book.library_source ? undefined : "Not in your library, so Deckle has no copy to send"}
+            onClick={() => {
+              setMenuOpen(false);
+              onResend([{ source: book.library_source!, cde: null }], `${title} is ready to send again.`);
+            }}
+          >
+            Send again
+          </button>
+          {canUpgrade && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                onResend([{ source: book.library_source!, cde: "ebok" }], `${title} is ready to send again as a Kindle book.`);
+              }}
+            >
+              Make it a Kindle book (X-Ray, Word Wise)
+            </button>
           )}
+          <button
+            role="menuitem"
+            className="danger"
+            onClick={() => {
+              setMenuOpen(false);
+              setConfirming(true);
+            }}
+          >
+            Remove from Kindle…
+          </button>
         </div>
-        <div className="byline">
-          {book.authors.length > 0 ? book.authors.join(", ") : book.title ? <em>Unknown author</em> : <span className="mono">{book.format} file</span>}
-        </div>
-        <div className="progress-line">
-          <div className={`progress-track ${book.reading}`} aria-hidden="true">
-            <div className="progress-fill" style={{ width: `${Math.round((book.fraction ?? 0) * 100)}%` }} />
-          </div>
-          <span className="muted small">{progressLine(book, now)}</span>
-        </div>
-        <div className="shipped">
-          {[book.xray && "X-Ray", book.word_wise && "Word Wise", size(book.size), book.from_deckle ? (book.library_source ? "in your library" : "from Deckle") : "not from Deckle"]
-            .filter(Boolean)
-            .join(" · ")}
-        </div>
-        {confirming && (
-          <div className="confirm" role="alert">
-            Remove <strong>{title}</strong> and its X-Ray and Word Wise files from this Kindle?
+      )}
+      {confirming && (
+        <div className="confirm kcard-confirm" role="alert">
+          Remove <strong>{title}</strong>? Its reading position goes too.
+          <span className="button-row">
             <button
               className="ghost danger"
               disabled={removing}
@@ -128,70 +141,29 @@ function BookLine({ book, busy, now, onResend, onRemove }: { book: DeviceBookRow
             <button className="ghost" disabled={removing} onClick={() => setConfirming(false)}>
               Keep
             </button>
-          </div>
-        )}
-      </div>
-      <div className="row-menu">
-        <button className="icon" aria-label={`Actions for ${title}`} onClick={() => setMenuOpen((o) => !o)} disabled={busy || removing}>
-          <Icon name="dots" size={18} />
-        </button>
-        {menuOpen && (
-          <div className="menu" onMouseLeave={() => setMenuOpen(false)}>
-            {book.updates.length > 0 && book.library_source && (
-              <button
-                title={book.updates.map((u) => u.text).join("\n")}
-                onClick={() => {
-                  setMenuOpen(false);
-                  onResend([{ source: book.library_source!, cde: sentMode(book) }], `${title} is ready to update.`);
-                }}
-              >
-                Update
-              </button>
-            )}
-            <button
-              disabled={!book.library_source}
-              title={book.library_source ? undefined : "Not in your library, so Deckle has no copy to send"}
-              onClick={() => {
-                setMenuOpen(false);
-                onResend([{ source: book.library_source!, cde: null }], `${title} is ready to send again.`);
-              }}
-            >
-              Re-send
-            </button>
-            {canUpgrade && (
-              <button
-                onClick={() => {
-                  setMenuOpen(false);
-                  onResend([{ source: book.library_source!, cde: "ebok" }], `${title} is ready to send again as EBOK.`);
-                }}
-              >
-                Upgrade to EBOK (X-Ray, Word Wise)
-              </button>
-            )}
-            <button
-              className="danger"
-              onClick={() => {
-                setMenuOpen(false);
-                setConfirming(true);
-              }}
-            >
-              Remove from Kindle…
-            </button>
-          </div>
-        )}
-      </div>
+          </span>
+        </div>
+      )}
     </li>
   );
 }
 
-export default function KindleView({ target, targetKey, device, busy, onResend, onNotice, onRenamed }: Props) {
+/** "Read just now", "Read 5 min ago". */
+function readAgo(at: Date | null, now: Date): string {
+  if (!at) return "";
+  const mins = Math.floor((now.getTime() - at.getTime()) / 60_000);
+  return mins < 1 ? "Read just now" : mins < 60 ? `Read ${mins} min ago` : `Read at ${at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+}
+
+export default function KindleView({ target, targetKey, device, busy, onResend, onNotice, onRenamed, query, onFree }: Props) {
   const [shelf, setShelf] = useState<DeviceShelf | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [room, setRoom] = useState<KindleRoom>("shelf");
-  const [filter, setFilter] = useState<ShelfFilter>("all");
+  const [show, setShow] = useState<ShelfShow>("all");
+  const [from, setFrom] = useState<ShelfFrom>("anywhere");
   const [sort, setSort] = useState<ShelfSort>("recent");
-  const [query, setQuery] = useState("");
+  const [readAt, setReadAt] = useState<Date | null>(null);
   // The Upgrades room reads every book once over MTP: it waits until it's opened, then stays.
   const [upgradesOpened, setUpgradesOpened] = useState(false);
   const [upgradesCount, setUpgradesCount] = useState<number | null>(null);
@@ -205,6 +177,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
     setError(null);
     try {
       setShelf(await api.deviceBooks(target));
+      setReadAt(new Date());
     } catch (e) {
       setError(String(e));
     } finally {
@@ -216,6 +189,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => onFree(shelf?.space?.free ?? null), [shelf, onFree]);
   useEffect(() => {
     setUpgradesOpened(false);
     setUpgradesCount(null);
@@ -254,45 +228,85 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
       toUpdate.map((b) => ({ source: b.library_source!, cde: sentMode(b) })),
       `${toUpdate.length} book${toUpdate.length === 1 ? " is" : "s are"} ready to update, each in the mode it was sent in.`,
     );
-  const notes = kindleRoomNotes(shelf, upgradesCount);
-  const counts = shelf ? filterCounts(shelf.books) : null;
-  const shown = shelf ? shelfBooks(shelf.books, filter, query, sort) : [];
+  const counts = tabCounts(shelf, upgradesCount);
+  const nudges = shelf ? worthALook(shelf, upgradesCount) : [];
+  const reading = shelf ? continueReading(shelf.books) : [];
+  const shown = shelf ? shelfBooks(shelf.books, show, from, query, sort) : [];
+  const showing = shelf ? showCounts(shelf.books, from) : null;
   return (
-    <div className="daily-rooms kindle-rooms">
-      <nav className="rooms" aria-label="Kindle">
+    <div className="kindle-view">
+      <nav className="kindle-tabs" aria-label="Kindle">
         {KINDLE_ROOMS.map((r) => (
           <button key={r.key} className={room === r.key ? "on" : ""} aria-current={room === r.key ? "page" : undefined} onClick={() => open(r.key)}>
-            <span className="room-title">{r.title}</span>
-            {notes[r.key] && <span className="room-note">{notes[r.key]}</span>}
+            {r.title}
+            {r.key === "upgrades" && counts.upgrades > 0 && <span className="tab-badge">{counts.upgrades}</span>}
+            {r.key === "highlights" && counts.highlights && <span className="tab-note">{counts.highlights}</span>}
           </button>
         ))}
+        <span className="spacer" />
+        <span className="tab-note">{loading ? "Reading the Kindle…" : readAgo(readAt, now)}</span>
+        <button className="icon" aria-label="Read the Kindle again" onClick={load} disabled={loading}>
+          <Icon name="refresh" size={16} />
+        </button>
       </nav>
-
-      <main className="list-area">
-        <div className="shelf-head">
-          <div>
-            <h2>{shelf?.device ?? "Kindle"}</h2>
-            <div className="muted small">{shelf ? notes.shelf : loading ? "Reading the Kindle…" : ""}</div>
-          </div>
-          <button className="ghost" onClick={load} disabled={loading}>
-            {loading ? "Reading…" : "Refresh"}
-          </button>
-        </div>
+      <main className="kindle-main">
         {error && <div className="result fail">{error}</div>}
 
         {room === "shelf" && shelf && (
           <>
-            <div className="shelf-tools">
-              <div className="filter-chips" role="group" aria-label="Show">
-                {SHELF_FILTERS.map((f) => (
-                  <button key={f.key} className={`filter-chip ${filter === f.key ? "on" : ""}`} aria-pressed={filter === f.key} onClick={() => setFilter(f.key)} disabled={!!counts && counts[f.key] === 0 && f.key !== "all"}>
-                    {f.title} <span className="muted">{counts?.[f.key] ?? 0}</span>
-                  </button>
+            {nudges.length > 0 && (
+              <section className="nudges" aria-label="Worth a look">
+                {nudges.map((n) => (
+                  <div key={n.key} className="nudge">
+                    <strong>{n.title}</strong>
+                    <span>{n.body}</span>
+                    <button className="link-action" onClick={() => open(n.room)}>
+                      {n.action} →
+                    </button>
+                  </div>
                 ))}
-              </div>
-              <div className="shelf-search">
-                <input type="search" placeholder="Search titles and authors" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Search this Kindle" />
-                <select value={sort} onChange={(e) => setSort(e.target.value as ShelfSort)} aria-label="Sort by">
+              </section>
+            )}
+            {reading.length > 0 && !query.trim() && (
+              <section aria-label="Continue reading">
+                <h2 className="kindle-h2">Continue reading</h2>
+                <ul className="reading-cards">
+                  {reading.map((b) => (
+                    <li key={b.file} className="reading-card">
+                      <Cover book={b} className="reading-cover" />
+                      <span className="reading-meta">
+                        <span className="reading-title">{titleOf(b)}</span>
+                        <span className="muted small">{b.authors.join(", ")}</span>
+                        <span className="spacer" />
+                        <Bar book={b} />
+                        <span className="small">{progressLine(b, now)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            <section aria-label="On this Kindle">
+              <div className="shelf-bar">
+                <h2 className="kindle-h2">
+                  On this Kindle <span className="muted">{showing?.all ?? 0}</span>
+                </h2>
+                <div className="segmented" role="group" aria-label="Show">
+                  {SHELF_SHOWS.map((o) => (
+                    <button key={o.key} className={show === o.key ? "on" : ""} aria-pressed={show === o.key} onClick={() => setShow(o.key)} disabled={o.key !== "all" && showing?.[o.key] === 0}>
+                      {o.title}
+                    </button>
+                  ))}
+                </div>
+                <select className="quiet-select" value={from} onChange={(e) => setFrom(e.target.value as ShelfFrom)} aria-label="From">
+                  {SHELF_FROMS.map((o) => (
+                    <option key={o.key} value={o.key}>
+                      {o.title}
+                    </option>
+                  ))}
+                </select>
+                <span className="spacer" />
+                <select className="quiet-select" value={sort} onChange={(e) => setSort(e.target.value as ShelfSort)} aria-label="Sort by">
                   {SHELF_SORTS.map((o) => (
                     <option key={o.key} value={o.key}>
                       {o.title}
@@ -300,17 +314,17 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
                   ))}
                 </select>
               </div>
-            </div>
-            {shelf.unread_positions > 0 && <p className="muted small">{shelf.unread_positions} books' places weren't read this time; they show as not started.</p>}
-            {shown.length === 0 ? (
-              <p className="muted">{shelf.books.length === 0 ? "No books in documents/ yet." : "No books match."}</p>
-            ) : (
-              <ul className="books" aria-label="Books on this Kindle">
-                {shown.map((b) => (
-                  <BookLine key={b.file} book={b} busy={busy || loading} now={now} onResend={onResend} onRemove={remove} />
-                ))}
-              </ul>
-            )}
+              {shelf.unread_positions > 0 && <p className="muted small">{shelf.unread_positions} books' places weren't read this time; they show as unread.</p>}
+              {shown.length === 0 ? (
+                <p className="muted">{shelf.books.length === 0 ? "No books in documents/ yet." : "No books match."}</p>
+              ) : (
+                <ul className="kcards" aria-label="Books on this Kindle">
+                  {shown.map((b) => (
+                    <BookCard key={b.file} book={b} busy={busy || loading} onResend={onResend} onRemove={remove} />
+                  ))}
+                </ul>
+              )}
+            </section>
           </>
         )}
 

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { defaultSpare, filterCounts, kindleRoomNotes, lastOpened, progressLine, shelfBooks, spaceSlices, spareLine } from "./kindleRooms";
+import { canBeBetter, continueReading, coverLine, defaultSpare, kindWord, lastOpened, progressLine, shelfBooks, showCounts, spaceSlices, spareLine, tabCounts, worthALook } from "./kindleRooms";
 import type { DeviceBookRow, DeviceShelf, Spare } from "./types";
 
 function book(over: Partial<DeviceBookRow>): DeviceBookRow {
@@ -35,20 +35,20 @@ const books = [
 ];
 
 describe("the Shelf", () => {
-  it("counts each filter, leaving the paper out of all but Deckle", () => {
-    const c = filterCounts(books);
-    expect(c.all).toBe(3);
-    expect(c.reading).toBe(1);
-    expect(c["not-started"]).toBe(1);
-    expect(c.finished).toBe(1);
-    expect(c["amazon-own"]).toBe(1);
-    expect(c.deckle).toBe(2);
+  it("counts each Show choice, leaving the paper out", () => {
+    expect(showCounts(books, "anywhere")).toEqual({ all: 3, reading: 1, "not-started": 1, finished: 1 });
+    expect(showCounts(books, "amazon-own")).toEqual({ all: 1, reading: 0, "not-started": 0, finished: 1 });
+  });
+
+  it("shows papers only from Deckle, under All", () => {
+    expect(shelfBooks(books, "all", "deckle", "", "title").map((b) => b.title)).toEqual(["Circe", "The Deckle Daily"]);
+    expect(shelfBooks(books, "not-started", "deckle", "", "title").map((b) => b.title)).toEqual(["Circe"]);
   });
 
   it("sorts by recently read, then searches by author", () => {
-    expect(shelfBooks(books, "all", "", "recent").map((b) => b.title)).toEqual(["Anathem", "Babel", "Circe"]);
-    expect(shelfBooks(books, "all", "", "size").map((b) => b.title)).toEqual(["Babel", "Circe", "Anathem"]);
-    expect(shelfBooks(books, "all", "kuang", "title").map((b) => b.title)).toEqual(["Babel"]);
+    expect(shelfBooks(books, "all", "anywhere", "", "recent").map((b) => b.title)).toEqual(["Anathem", "Babel", "Circe"]);
+    expect(shelfBooks(books, "all", "anywhere", "", "size").map((b) => b.title)).toEqual(["Babel", "Circe", "Anathem"]);
+    expect(shelfBooks(books, "all", "anywhere", "kuang", "title").map((b) => b.title)).toEqual(["Babel"]);
   });
 
   it("says how far in and when", () => {
@@ -59,26 +59,72 @@ describe("the Shelf", () => {
     expect(lastOpened("2026-03-02T10:00:00Z", now)).toBe("in March");
     expect(lastOpened("2025-03-02T10:00:00Z", now)).toBe("in March 2025");
   });
+
+  it("names what a book is in plain words", () => {
+    expect(kindWord(book({ cde: "EBOK" }))).toBe("Kindle book");
+    expect(kindWord(book({ cde: "PDOC" }))).toBe("Document");
+    expect(kindWord(books[1])).toBe("Amazon");
+    expect(kindWord(books[3])).toBe("Paper");
+    expect(kindWord(book({ format: "pdf" }))).toBe("PDF");
+    expect(coverLine(books[0])).toBe("40% · AZW3");
+    expect(coverLine(books[1])).toBe("Finished · Amazon");
+    expect(coverLine(book({ cde: "PDOC" }))).toBe("Unread · Document");
+    expect(coverLine(books[3])).toBe("Paper");
+  });
+
+  it("marks what Upgrades can do better", () => {
+    expect(canBeBetter(books[0])).toBe(true);
+    expect(canBeBetter(books[1])).toBe(false);
+    expect(canBeBetter(book({ class: "current", updates: [{ older: true, feature: null, text: "t" }], library_source: "/l" }))).toBe(true);
+    expect(canBeBetter(book({ class: "current", updates: [{ older: true, feature: null, text: "t" }] }))).toBe(false);
+  });
+
+  it("continues the books being read, most recent first, four at most", () => {
+    const reading = ["2026-10-01", "2026-10-20", "2026-09-01", "2026-10-10", "2026-10-15"].map((d, i) =>
+      book({ file: `${i}`, title: `R${i}`, reading: "reading", last_read: `${d}T10:00:00Z` }),
+    );
+    expect(continueReading([...reading, books[1], books[3]]).map((b) => b.title)).toEqual(["R1", "R4", "R3", "R0"]);
+  });
 });
 
-describe("the rooms' notes", () => {
-  it("count books, upgrades and free space", () => {
-    const shelf: DeviceShelf = {
-      device: "Kindle",
-      space: { total: 8e9, free: 2.1e9 },
-      books,
-      highlights: [],
-      highlights_error: null,
-      split: null,
-      spare: [],
-      backups: [],
-      unread_positions: 0,
-    };
-    const notes = kindleRoomNotes(shelf, null);
-    expect(notes.shelf).toBe("3 books · 1 reading");
-    expect(notes.upgrades).toBe("1 can be upgraded");
-    expect(notes.device).toBe("2.1 GB free");
-    expect(kindleRoomNotes(shelf, 0).upgrades).toBe("All current");
+describe("Worth a look and the tabs", () => {
+  const shelf: DeviceShelf = {
+    device: "Kindle",
+    space: { total: 8e9, free: 2.1e9 },
+    books,
+    highlights: [
+      { key: "a", title: "Piranesi", author: "", file: "", total: 9, new: 5, markdown: "" },
+      { key: "b", title: "The Overstory", author: "", file: "", total: 3, new: 2, markdown: "" },
+      { key: "c", title: "Circe", author: "", file: "", total: 4, new: 1, markdown: "" },
+      { key: "d", title: "Old", author: "", file: "", total: 4, new: 0, markdown: "" },
+    ],
+    highlights_error: null,
+    split: null,
+    spare: [
+      { file: "d1", title: "D", size: 24e6, has_sdr: true, why: "duplicate", keeping: "x" },
+      { file: "f1", title: "F", size: 300e6, has_sdr: true, why: "finished" },
+      { file: "f2", title: "G", size: 100e6, has_sdr: false, why: "finished" },
+    ],
+    backups: [],
+    unread_positions: 0,
+  };
+
+  it("says what's worth a look, and where to fix it", () => {
+    expect(worthALook(shelf, null)).toEqual([
+      { key: "upgrades", title: "1 book can be upgraded", body: "X-Ray, Word Wise and page numbers, where Deckle can add them.", action: "See upgrades", room: "upgrades" },
+      { key: "highlights", title: "8 new highlights", body: "From Piranesi, The Overstory and 1 more book.", action: "Save as Markdown", room: "highlights" },
+      { key: "space", title: "424.0 MB you could free", body: "1 duplicate and 2 finished books.", action: "Make room", room: "device" },
+    ]);
+  });
+
+  it("says nothing when there's nothing to say", () => {
+    expect(worthALook({ ...shelf, books: [books[1]], highlights: [], spare: [] }, 0)).toEqual([]);
+  });
+
+  it("counts for the tabs, preferring the Upgrades room's own count", () => {
+    expect(tabCounts(shelf, null)).toEqual({ upgrades: 1, highlights: "8 new" });
+    expect(tabCounts(shelf, 4)).toEqual({ upgrades: 4, highlights: "8 new" });
+    expect(tabCounts(null, null)).toEqual({ upgrades: 0, highlights: "" });
   });
 });
 
@@ -109,6 +155,6 @@ describe("This Kindle", () => {
 
 it("matches Kindle titles and authors across terms, ignoring accents", () => {
   const rows = [book({ title: "Éarthsea", authors: ["Ursula Le Guin"] })];
-  expect(shelfBooks(rows, "all", "GUIN earthsea", "title")).toHaveLength(1);
-  expect(shelfBooks(rows, "all", "guin absent", "title")).toHaveLength(0);
+  expect(shelfBooks(rows, "all", "anywhere", "GUIN earthsea", "title")).toHaveLength(1);
+  expect(shelfBooks(rows, "all", "anywhere", "guin absent", "title")).toHaveLength(0);
 });
