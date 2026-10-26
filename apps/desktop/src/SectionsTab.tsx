@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
+import AddSection from "./AddSection";
 import Icon from "./Icon";
 import { listText, removeInterest, setList, setQuery } from "./interests";
 import { step } from "./pagePlan";
@@ -73,6 +74,8 @@ export default function SectionsTab({
   footer?: ReactNode;
 }) {
   const [open, setOpen] = useState<string | null>(null);
+  // A row just added: its first field takes focus when it appears
+  const [fresh, setFresh] = useState<string | null>(null);
   const [dragging, setDragging] = useState<number | null>(null);
   const [over, setOver] = useState<number | null>(null);
   if (!next) return null;
@@ -104,19 +107,19 @@ export default function SectionsTab({
         return r.place === null ? (
           <LocalBody draft={draft} change={change} flush={flush} onNotice={onNotice} />
         ) : (
-          <TownBody index={r.place} draft={draft} change={change} flush={flush} onRemove={() => setOpen(null)} />
+          <TownBody index={r.place} draft={draft} change={change} flush={flush} fresh={fresh === rowId(r)} onRemove={() => setOpen(null)} />
         );
       case "interests":
         return r.interest === null ? (
           <p className="muted small">Turn it on, then add something to follow.</p>
         ) : (
-          <InterestBody index={r.interest} draft={draft} change={change} flush={flush} onRemove={() => setOpen(null)} />
+          <InterestBody index={r.interest} draft={draft} change={change} flush={flush} fresh={fresh === rowId(r)} onRemove={() => setOpen(null)} />
         );
       case "feeds":
         return r.feed === null ? (
           <p className="muted small">Turn it on, then add a website or a news topic.</p>
         ) : (
-          <FeedBody index={r.feed} draft={draft} change={change} flush={flush} onRemove={() => setOpen(null)} />
+          <FeedBody index={r.feed} draft={draft} change={change} flush={flush} fresh={fresh === rowId(r)} onRemove={() => setOpen(null)} />
         );
       case "subscribed":
         return (
@@ -281,13 +284,21 @@ export default function SectionsTab({
   return (
     <div className="sections-tab">
       <div className="sections-head">
-        <div>
+        <div className="grow">
           <h2 className="daily-h2">What's in the paper</h2>
           <p className="muted small">
             In the order you'll read it, about {next.pages} Kindle pages. Changes save as you make them
             {saving ? " · Saving…" : ""}.
           </p>
         </div>
+        <AddSection
+          draft={draft}
+          onAdd={(a) => {
+            change(() => a.cfg);
+            setOpen(a.row);
+            setFresh(a.row);
+          }}
+        />
       </div>
       <ol className="sec-list" aria-label="Sections">
         {rows.map((r, i) => row(r, i, true))}
@@ -404,7 +415,7 @@ function LocalBody({ draft, change, flush, onNotice }: { draft: DailyConfig; cha
   );
 }
 
-function TownBody({ index, draft, change, flush, onRemove }: { index: number; draft: DailyConfig; change: Change; flush: () => void; onRemove: () => void }) {
+function TownBody({ index, draft, change, flush, fresh, onRemove }: { index: number; draft: DailyConfig; change: Change; flush: () => void; fresh: boolean; onRemove: () => void }) {
   const p = draft.local.places?.[index];
   if (!p) return null;
   const set = (f: (x: PlaceNews) => PlaceNews) =>
@@ -414,7 +425,7 @@ function TownBody({ index, draft, change, flush, onRemove }: { index: number; dr
       <div className="grid2">
         <label>
           <span className="label">Name</span>
-          <input value={p.name} placeholder="Asheville, NC" onChange={(e) => set((x) => ({ ...x, name: e.target.value }))} onBlur={flush} />
+          <input autoFocus={fresh} value={p.name} placeholder="Asheville, NC" onChange={(e) => set((x) => ({ ...x, name: e.target.value }))} onBlur={flush} />
         </label>
         <label>
           <span className="label">Google News search</span>
@@ -435,7 +446,7 @@ function TownBody({ index, draft, change, flush, onRemove }: { index: number; dr
   );
 }
 
-function InterestBody({ index, draft, change, flush, onRemove }: { index: number; draft: DailyConfig; change: Change; flush: () => void; onRemove: () => void }) {
+function InterestBody({ index, draft, change, flush, fresh, onRemove }: { index: number; draft: DailyConfig; change: Change; flush: () => void; fresh: boolean; onRemove: () => void }) {
   const it = draft.interests?.[index];
   if (!it) return null;
   return (
@@ -444,6 +455,7 @@ function InterestBody({ index, draft, change, flush, onRemove }: { index: number
         <label>
           <span className="label">Name</span>
           <input
+            autoFocus={fresh}
             value={it.name}
             placeholder="Carolina Panthers"
             onChange={(e) => change((c) => ({ ...c, interests: (c.interests ?? []).map((x, i) => (i === index ? { ...x, name: e.target.value } : x)) }), "typing")}
@@ -454,7 +466,7 @@ function InterestBody({ index, draft, change, flush, onRemove }: { index: number
           <span className="label">Its own search</span>
           <CommitField
             value={it.query ?? ""}
-            placeholder={`"${it.name || "Rust"}" programming`}
+            placeholder={`Instead of "${it.name || "its name"}"`}
             title="Your own Google News search instead of the quoted name; OR and -word work"
             onCommit={(v) => change((c) => setQuery(c, index, v))}
           />
@@ -481,7 +493,7 @@ function InterestBody({ index, draft, change, flush, onRemove }: { index: number
   );
 }
 
-function FeedBody({ index, draft, change, flush, onRemove }: { index: number; draft: DailyConfig; change: Change; flush: () => void; onRemove: () => void }) {
+function FeedBody({ index, draft, change, flush, fresh, onRemove }: { index: number; draft: DailyConfig; change: Change; flush: () => void; fresh: boolean; onRemove: () => void }) {
   const f = draft.feeds[index];
   if (!f) return null;
   const set = (p: Partial<typeof f>) => change((c) => ({ ...c, feeds: c.feeds.map((x, i) => (i === index ? { ...x, ...p } : x)) }), "typing");
@@ -493,7 +505,7 @@ function FeedBody({ index, draft, change, flush, onRemove }: { index: number; dr
         <div className="grid2">
           <label>
             <span className="label">Name</span>
-            <input value={f.name} placeholder="Section name" onChange={(e) => set({ name: e.target.value })} onBlur={flush} />
+            <input autoFocus={fresh} value={f.name} placeholder="Section name" onChange={(e) => set({ name: e.target.value })} onBlur={flush} />
           </label>
           <label>
             <span className="label">Address</span>
