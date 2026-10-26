@@ -899,6 +899,22 @@ pub fn subscribed_key(site: &str, slug: &str) -> String {
     format!("subscribed:{site}:{slug}")
 }
 
+/// Every (group, slug, display name) the paper prints, in order: the one place that enumerates
+/// them. A slug the adapter doesn't know is left out (config load rejects one).
+pub fn subscribed_sections(cfg: &Config) -> Vec<(&SubscribedConfig, &'static str, &'static str)> {
+    cfg.subscribed
+        .iter()
+        .flat_map(|g| {
+            g.sections.iter().filter_map(move |slug| {
+                crate::publisher::blox::SECTIONS
+                    .iter()
+                    .find(|(k, _)| k == slug)
+                    .map(|&(k, display)| (g, k, display))
+            })
+        })
+        .collect()
+}
+
 impl SubscribedConfig {
     /// The group's heading: its name, else the site.
     pub fn title(&self) -> String {

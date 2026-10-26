@@ -512,6 +512,31 @@ pub fn feed_section(
     net: &dyn Net,
     taken: &mut HashSet<String>,
 ) -> Section {
+    let opts = FeedOptions {
+        kicker: None,
+        max_age_hours: cfg.max_age_hours,
+    };
+    feed_section_with(feed, opts, cfg, now, net, taken)
+}
+
+/// What a feed section takes from its caller rather than the `[[feeds]]` entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeedOptions {
+    /// The line over the section's title (a subscribed group's name).
+    pub kicker: Option<String>,
+    /// Older items are left out.
+    pub max_age_hours: u32,
+}
+
+/// [`feed_section`] with the kicker and age window given.
+pub fn feed_section_with(
+    feed: &FeedConfig,
+    opts: FeedOptions,
+    cfg: &Config,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    taken: &mut HashSet<String>,
+) -> Section {
     let sources = feed.sources();
     if sources.is_empty() {
         return super::unavailable(&feed.name, "give a url, urls or topic");
@@ -520,7 +545,10 @@ pub fn feed_section(
     let mut items = Vec::new();
     let mut errors = Vec::new();
     for url in &sources {
-        match net.get(url).and_then(|b| parse(&b, now, cfg.max_age_hours)) {
+        match net
+            .get(url)
+            .and_then(|b| parse(&b, now, opts.max_age_hours))
+        {
             Ok((_, found)) if topic_url.as_ref() == Some(url) => items.extend(as_briefs(found)),
             Ok((name, found)) => items.extend(found.into_iter().map(|mut i| {
                 // Several sources: name the channel so a reader can tell them apart.
@@ -550,7 +578,7 @@ pub fn feed_section(
     taken.extend(items.iter().map(|i| title_key(&i.title)));
     section_of(
         &feed.name,
-        None,
+        opts.kicker,
         &items,
         &errors,
         cfg,
