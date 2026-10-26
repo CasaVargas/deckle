@@ -406,3 +406,34 @@ Each lands as its own PR against `main` with `Closes #<issue>` for its own issue
 - Exact phrase-extraction rules and the built-in stoplist.
 - The JSON shape of `interests.json`.
 - Whether `interests` rows in the page plan reuse the feed row component or get their own.
+
+## 14. Implementation notes, PR 1 (2026-10-25)
+
+Increment 1 (§11 item 1) landed from `docs/superpowers/plans/2026-10-25-interests-sections.md`.
+
+- **Config** (§3) as written: `InterestConfig`, `LearningConfig` (parsed and saved now, used by
+  increment 2), `SectionKind::Interests`, key `interests:<name>`, duplicate names an error,
+  defaults filled by `normalize` (5 stories, 72 hours, `"lead"`). `Config::ensure_section` puts
+  `"interests"` before `"feeds"` for the CLI and the app. The serializer writes a new
+  `interests` key inline (`interests = [{ … }]`), as it does every new key; a hand-written
+  `[[interests]]` block keeps its shape and comments.
+- **Gathering** (§4): `sources/interests.rs` with `contains_phrase`, `relevant` and
+  `interest_section`; the search-plus-feeds merge was lifted out of `local_news` into
+  `fetch_merged`, which Local and the places now share. The lead is re-checked on its first 600
+  characters of text and a failing one is dropped (not demoted). Quiet days return `None` and a
+  note; interest sections arrive keyed, and the gather loop leaves keyed sections alone.
+- **Elsewhere:** the editor's section filter includes `interests:`; readership rows, Move up and
+  Drop; the page plan's rows (with `interest` index), `taken` pass and lead candidates; the live
+  cache fetches each interest's searches and feeds.
+- **CLI:** `deckle digest interests [add|remove]`, `--paper` aware, saving to the paper's own
+  file.
+- **Desktop:** main paper only (call 9). "Your interests" card with name, also, not and an
+  add field; interest rows in the page plan with budgets and block reordering.
+- **Not yet:** the `[learning]` switch in the app (increment 2), the editor's relevance scoring
+  (increment 3), nudges (increment 4).
+- **Live check (2026-10-25):** one real build with `name = "Carolina Panthers", also =
+  ["Bryce Young"]` and `name = "Rust", not = ["Rust Belt"]`. The Panthers section filled its
+  five slots with stories naming the team or the quarterback; the quoted query and `when:3d`
+  survived URL encoding. The Rust section filled with the other Rusts (a surname, corrosion, the
+  film): a one-word name with everyday meanings needs its own `query` (`"Rust" programming`),
+  which the starter and docs say. Increment 3's editor scoring is the better answer.
