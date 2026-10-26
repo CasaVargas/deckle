@@ -28,6 +28,7 @@ pub mod next;
 pub mod papers;
 pub mod pdf;
 pub mod press;
+pub mod print;
 pub mod publisher;
 pub mod puzzle;
 pub mod reading;
