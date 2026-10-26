@@ -375,7 +375,7 @@ export default function App() {
     // A finished KFX is copied as is; only EPUBs need Kindle Previewer.
     if (!previewer?.found && runnable.some((b) => b.mode !== "ready")) {
       setNotice("Kindle Previewer is not installed. Open Settings to download it or point Deckle at it.");
-      openSettings("general");
+      openSettings("sending");
       return;
     }
     setNotice(null);
@@ -510,7 +510,7 @@ export default function App() {
             </button>
           </div>
           {!previewer?.found && previewer && (
-            <button className="pill warn" onClick={() => openSettings("general")}>
+            <button className="pill warn" onClick={() => openSettings("sending")}>
               Kindle Previewer not found
             </button>
           )}

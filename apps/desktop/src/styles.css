@@ -842,3 +842,25 @@ input[type=checkbox] { padding: 0; }
 .search-results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .search-result { width: 100%; display: flex; justify-content: space-between; gap: 12px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; font-size: 13px; }
 .search-result:hover { border-color: color-mix(in srgb, var(--fg) 25%, var(--line)); }
+
+/* Settings redesign, part 2: Sending (§5) */
+.set-stack { display: flex; flex-direction: column; gap: 24px; }
+.set-pad { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; font-size: 13px; }
+.set-pad p { margin: 0; line-height: 1.45; }
+.set-pad .set-wide { border: 0; padding: 0; }
+.set-card-head { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.mode-cards { border: 0; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.mode-cards legend { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+.mode-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.mode-card { display: flex; flex-direction: column; gap: 8px; padding: 14px 15px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); font-size: 13px; line-height: 1.45; cursor: pointer; }
+.mode-card.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.mode-head { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.mode-head input { margin: 0; width: 16px; height: 16px; accent-color: var(--accent); }
+.mode-pick { padding: 1px 7px; border-radius: 9px; background: var(--line); color: var(--muted); font-size: 11px; }
+.mode-sample { display: flex; align-items: flex-end; gap: 10px; }
+.mode-cover { display: grid; place-items: center; width: 40px; aspect-ratio: 2 / 3; border-radius: 2px 3px 3px 2px; background: #2d4a3e; color: #e8e1c9; font-family: ui-serif, Georgia, serif; font-size: 13px; box-shadow: inset 2px 0 0 rgb(0 0 0 / 0.18), 0 2px 6px rgb(0 0 0 / 0.15); }
+.mode-cover.blank { background: var(--line); }
+.mode-gets { display: flex; flex-direction: column; gap: 3px; font-size: 11px; }
+.mode-gets .yes { color: var(--ok); }
+.mode-gets .no { color: var(--muted); text-decoration: line-through; }
+.link-action.inline { display: inline; margin: 0; font-size: inherit; }
