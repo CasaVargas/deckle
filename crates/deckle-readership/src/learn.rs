@@ -468,6 +468,62 @@ fn shelf_query(name: &str) -> String {
 /// dismissed lately, with `min_stories` distinct stories across at least two days inside
 /// `window_days`; the top five by stories, then by their latest day.
 pub fn suggest(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Noticed> {
+    rank(learning, cfg, today).into_iter().take(TOP).collect()
+}
+
+/// Candidates the editor may name (design §6): the ones that would rank, not named yet, with
+/// at least one Tap hit (highlight text and shelf authors never travel); each as `(key,
+/// phrase, headlines)` with up to five Tap headlines, newest first; at most ten.
+pub fn naming_candidates(
+    learning: &Learning,
+    cfg: &Config,
+    today: NaiveDate,
+) -> Vec<(String, String, Vec<String>)> {
+    rank(learning, cfg, today)
+        .into_iter()
+        .filter_map(|n| {
+            let c = learning.candidates.get(&n.key)?;
+            if c.named.is_some() {
+                return None;
+            }
+            let mut taps: Vec<&Hit> = c.hits.iter().filter(|h| h.signal == Signal::Tap).collect();
+            if taps.is_empty() {
+                return None;
+            }
+            taps.sort_by_key(|h| std::cmp::Reverse(h.date));
+            let mut headlines: Vec<String> = Vec::new();
+            for h in taps {
+                if !headlines.contains(&h.title) {
+                    headlines.push(h.title.clone());
+                }
+                if headlines.len() == 5 {
+                    break;
+                }
+            }
+            Some((n.key.clone(), c.display.clone(), headlines))
+        })
+        .take(10)
+        .collect()
+}
+
+/// Stores the editor's names on known candidates as `(key, name, query)`; unknown keys are
+/// ignored. Returns how many were set.
+pub fn record_names(learning: &mut Learning, names: &[(String, String, String)]) -> usize {
+    let mut n = 0;
+    for (key, name, query) in names {
+        if let Some(c) = learning.candidates.get_mut(key) {
+            c.named = Some(Named {
+                name: name.clone(),
+                query: query.clone(),
+            });
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Every candidate that qualifies, best first (see [`suggest`]).
+fn rank(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Noticed> {
     if !cfg.learning.enabled {
         return Vec::new();
     }
@@ -537,7 +593,7 @@ pub fn suggest(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Notic
             .then(b.1.cmp(&a.1))
             .then(a.2.key.cmp(&b.2.key))
     });
-    out.into_iter().take(TOP).map(|(_, _, n)| n).collect()
+    out.into_iter().map(|(_, _, n)| n).collect()
 }
 
 /// Makes candidate `key` an interest: writes its entry into `cfg` (a shelf author with a
