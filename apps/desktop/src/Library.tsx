@@ -11,6 +11,8 @@ interface Props {
   hasKindle: boolean;
   /** Paths already in To send. */
   queued: Set<string>;
+  /** The top bar's search text: it filters the covers as you type. */
+  query: string;
   busy: boolean;
   onAdd: (paths: string[]) => void;
 }
@@ -76,13 +78,19 @@ function Card({ book, cover, selected, queued, onToggle, onSeen }: { book: Catal
  * folders as covers, searched, grouped by series with their gaps, and filtered to what isn't on
  * the Kindle yet. Picked books go to To send.
  */
-export default function Library({ catalog, hasKindle, queued, busy, onAdd }: Props) {
-  const [query, setQuery] = useState("");
+export default function Library({ catalog, hasKindle, queued, query, busy, onAdd }: Props) {
   const [search, setSearch] = useState<BookSearchReport | null>(null);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const searchVersion = useRef(0);
   useEffect(() => () => { searchVersion.current++; }, []);
+  // New words drop the last Kindle search: its results answered the old ones.
+  useEffect(() => {
+    searchVersion.current++;
+    setSearch(null);
+    setSearchError(null);
+    setSearching(false);
+  }, [query]);
   const searchAll = async () => {
     const version = ++searchVersion.current;
     setSearching(true);
@@ -119,38 +127,41 @@ export default function Library({ catalog, hasKindle, queued, busy, onAdd }: Pro
   return (
     <section className="library" aria-label="Your library">
       <div className="library-head">
-        <h2>Your library</h2>
-        <span className="muted small">{catalog.entries.length} books</span>
+        <h2>{search ? "Found on your Kindles" : "Your library"}</h2>
+        <span className="muted small">{search ? `${search.results.length} results` : `${catalog.entries.length} books`}</span>
         <div className="spacer" />
-        {picked.size > 0 && (
-          <button className="primary" onClick={add} disabled={busy}>
-            Add {picked.size} to To send
+        {query.trim() && !search && (
+          <button className="quiet" onClick={() => void searchAll()} disabled={busy || searching}>
+            {searching ? "Searching…" : "Also search Kindles"}
+          </button>
+        )}
+        {search && (
+          <button className="quiet" onClick={() => setSearch(null)}>
+            Back to library
           </button>
         )}
       </div>
-      <div className="shelf-tools">
-        {!search && <div className="filter-chips" role="group" aria-label="Show">
-          <button className={`filter-chip ${filter === "all" ? "on" : ""}`} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
-            All
+      {!search && (
+        <div className="shelf-tools">
+          <div className="segmented" role="group" aria-label="Show">
+            <button className={filter === "all" ? "on" : ""} aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
+              All
+            </button>
+            <button
+              className={filter === "not-on-kindle" ? "on" : ""}
+              aria-pressed={filter === "not-on-kindle"}
+              disabled={!hasKindle}
+              title={hasKindle ? undefined : "Connect a Kindle to see what isn't on it"}
+              onClick={() => setFilter("not-on-kindle")}
+            >
+              Not on Kindle
+            </button>
+          </div>
+          <button className={`toggle ${bySeries ? "on" : ""}`} aria-pressed={bySeries} onClick={() => setBySeries((s) => !s)}>
+            Group by series
           </button>
-          <button
-            className={`filter-chip ${filter === "not-on-kindle" ? "on" : ""}`}
-            aria-pressed={filter === "not-on-kindle"}
-            disabled={!hasKindle}
-            title={hasKindle ? undefined : "Connect a Kindle to see what isn't on it"}
-            onClick={() => setFilter("not-on-kindle")}
-          >
-            Not on this Kindle
-          </button>
-          <button className={`filter-chip ${bySeries ? "on" : ""}`} aria-pressed={bySeries} onClick={() => setBySeries((s) => !s)}>
-            Series
-          </button>
-        </div>}
-        <form className="shelf-search" onSubmit={(e) => { e.preventDefault(); if (!busy && !searching) void searchAll(); }}>
-          <input type="search" placeholder="Search titles, authors, series" value={query} disabled={searching} onChange={(e) => { setQuery(e.target.value); setSearch(null); setSearchError(null); }} aria-label="Search library and Kindles" />
-          <button type="submit" disabled={busy || searching}>{searching ? "Searching…" : "Search library and Kindles"}</button>
-        </form>
-      </div>
+        </div>
+      )}
       {catalog.warnings.map((w) => (
         <p key={w} className="warn small">
           {w}
@@ -160,16 +171,18 @@ export default function Library({ catalog, hasKindle, queued, busy, onAdd }: Pro
       {searching && <p role="status">Reading connected Kindles…</p>}
       {search ? (
         <section className="book-search-results" aria-label="Search results" aria-live="polite">
-          <p className="muted small">{search.results.length} results. Unplugged Kindles show previous sends, not a current inventory.</p>
-          <button onClick={() => setSearch(null)}>Back to library</button>
+          <p className="muted small">Unplugged Kindles show previous sends, not a current inventory.</p>
           {search.warnings.map((warning) => <p className="warn" key={warning}>{warning}</p>)}
           {search.results.length === 0 && <p>No books match.</p>}
           {search.results.map((hit, i) => (
-            <article key={i} className="lib-series">
+            <article key={i} className="hit">
               <h3>{hit.title}</h3>
-              <p>{hit.authors.join(", ")}{hit.series ? ` · ${hit.series.name}` : ""}</p>
+              <p className="muted small">{hit.authors.join(", ")}{hit.series ? ` · ${hit.series.name}` : ""}</p>
               <ul>{hit.locations.map((loc, j) => (
-                <li key={j}>{loc.name} — {loc.kind === "library" ? "local" : loc.kind === "connected" ? "connected" : "previously sent; presence unverified"}<br /><span className="muted small">{loc.device ? `${loc.device} · ` : ""}{loc.path}</span></li>
+                <li key={j}>
+                  <span className={`dot ${loc.kind === "connected" ? "on" : ""}`} aria-hidden="true" />
+                  <span>{loc.name} · {loc.kind === "library" ? "in your library" : loc.kind === "connected" ? "on a connected Kindle" : "sent before; may have been removed"}<br /><span className="muted small">{loc.device ? `${loc.device} · ` : ""}{loc.path}</span></span>
+                </li>
               ))}</ul>
             </article>
           ))}
@@ -195,6 +208,17 @@ export default function Library({ catalog, hasKindle, queued, busy, onAdd }: Pro
             ) : null,
           )}
           <div className="lib-grid">{items.filter((i): i is Extract<LibraryItem, { kind: "book" }> => i.kind === "book").map((i) => card(i.book))}</div>
+        </div>
+      )}
+      {picked.size > 0 && (
+        <div className="selection-bar" role="toolbar" aria-label="Selected books">
+          <span className="selection-count">{picked.size} selected</span>
+          <button className="quiet" onClick={() => setPicked(new Set())}>
+            Clear
+          </button>
+          <button className="primary" onClick={add} disabled={busy}>
+            Add to To send
+          </button>
         </div>
       )}
     </section>
