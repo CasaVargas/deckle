@@ -591,10 +591,15 @@ impl SessionNet {
         let ent = match self.entitlement(s, adapter) {
             Ok(ent) => ent,
             Err(e) => {
-                // Nothing is decoded without a plan we could read; a free page still
-                // extracts as served, and a premium one prints as a stranger sees it.
+                // Nothing is decoded without a plan we could read. A page with nothing to
+                // decode (the adapter unlocks it with no services) is free and reads as
+                // served; a premium one prints as a stranger sees it, with the reason.
                 s.run().state = SessionState::EntitlementUnknown(e);
-                return walled(body, Walled::PlanUnknown);
+                return match adapter.unlock(&String::from_utf8_lossy(&body), &Entitlement::default())
+                {
+                    Some(page) => Ok((page.into_bytes(), Access::Open)),
+                    None => walled(body, Walled::PlanUnknown),
+                };
             }
         };
         let service = ent.label();
@@ -1276,9 +1281,9 @@ mod net_tests {
             Err("the services reply isn't JSON".into())
         }
         fn unlock(&self, html: &str, ent: &Entitlement) -> Option<String> {
-            // Would unlock anything: the session must not ask without a plan.
-            let _ = ent;
-            Some(format!("{html}<!--unlocked-->"))
+            // Every page here is premium: unlocked only for a plan, which the session never
+            // has (it may ask with none, to learn whether the page is free).
+            (!ent.services.is_empty()).then(|| format!("{html}<!--unlocked-->"))
         }
         fn sections(&self) -> &[(&'static str, &'static str)] {
             &[]
@@ -1364,7 +1369,8 @@ mod net_tests {
             site: "thepilot.com".into(),
             why: Walled::PlanUnknown,
         };
-        for (page, extracts) in [(free, true), (paid, false)] {
+        // a free page (nothing encrypted) is open; only an encrypted one is walled
+        for (page, extracts, want) in [(free, true, Access::Open), (paid, false, walled)] {
             let n = SessionNet::with_clients(
                 Http,
                 vec![(
@@ -1376,7 +1382,7 @@ mod net_tests {
                 crate::publisher::registry(),
             );
             let (body, access) = n.get_page_as(STORY).unwrap();
-            assert_eq!(access, walled);
+            assert_eq!(access, want);
             assert_eq!(body, page.as_bytes(), "the page as served: nothing decoded");
             let body = String::from_utf8(body).unwrap();
             assert!(!body.contains("paidx0"), "premium text never in clear");
