@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { forgetTested, shownStatus, statusKey, subscriptionLine } from "./subscriptions";
+import { SUBSCRIBED_SLUGS, forgetTested, groupFor, setMaxItems, shownStatus, statusKey, subscriptionLine, toggleGroup, toggleSlug } from "./subscriptions";
 import type { Tested } from "./subscriptions";
-import type { SiteStatus, SubscriptionConfig } from "./types";
+import type { DailyConfig, SiteStatus, SubscriptionConfig } from "./types";
 
 /**
  * Newspapers the household subscribes to (publisher subscriptions design §3): a site and the
@@ -11,13 +11,19 @@ import type { SiteStatus, SubscriptionConfig } from "./types";
  */
 export default function SubscriptionsCard({
   subscriptions,
+  config,
   dirty,
   onChange,
+  onConfig,
   onSave,
 }: {
   subscriptions: SubscriptionConfig[];
+  /** The paper's draft: the `[[subscribed]]` groups and `sections` ride on it. */
+  config: DailyConfig;
   dirty: boolean;
   onChange: (subs: SubscriptionConfig[]) => void;
+  /** Replaces the draft with an edited copy (the helpers in subscriptions.ts return one). */
+  onConfig: (next: (c: DailyConfig) => DailyConfig) => void;
   /** Saves the draft; false when it didn't save (the notice says why). */
   onSave: () => Promise<boolean>;
 }) {
@@ -146,6 +152,13 @@ export default function SubscriptionsCard({
                 Remove
               </button>
             </div>
+            {s.site.trim() && (
+              <PrintPaper
+                site={s.site}
+                config={config}
+                onConfig={onConfig}
+              />
+            )}
             {st && <p className="small">{subscriptionLine(st)}</p>}
             {st?.jar_note && <p className="muted small">{st.jar_note}</p>}
           </div>
@@ -158,5 +171,38 @@ export default function SubscriptionsCard({
         </button>
       </div>
     </section>
+  );
+}
+
+/** "Print this paper": the site's `[[subscribed]]` group, its sections and its stories per section. */
+function PrintPaper({ site, config, onConfig }: { site: string; config: DailyConfig; onConfig: (f: (c: DailyConfig) => DailyConfig) => void }) {
+  const group = groupFor(config, site);
+  return (
+    <div className="print-paper">
+      <label className="check">
+        <input type="checkbox" checked={!!group} onChange={() => onConfig((c) => toggleGroup(c, site))} /> Print this paper
+      </label>
+      {group && (
+        <>
+          <div className="print-paper-slugs">
+            {SUBSCRIBED_SLUGS.map(({ slug, name }) => (
+              <label key={slug} className="check">
+                <input type="checkbox" checked={group.sections.includes(slug)} onChange={() => onConfig((c) => toggleSlug(c, site, slug))} /> {name}
+              </label>
+            ))}
+          </div>
+          <label className="print-paper-max">
+            <span className="label">Stories per section</span>
+            <input
+              type="number"
+              min={1}
+              value={group.max_items ?? ""}
+              placeholder="Same as Local"
+              onChange={(e) => onConfig((c) => setMaxItems(c, site, e.target.value))}
+            />
+          </label>
+        </>
+      )}
+    </div>
   );
 }

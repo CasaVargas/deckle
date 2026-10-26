@@ -980,8 +980,10 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
             />
             <SubscriptionsCard
               subscriptions={draft.subscriptions ?? []}
+              config={draft}
               dirty={dirty}
               onChange={(subs) => edit((c) => (c.subscriptions = subs))}
+              onConfig={(f) => edit((c) => Object.assign(c, f(c)))}
               onSave={() => save()}
             />
           </>
