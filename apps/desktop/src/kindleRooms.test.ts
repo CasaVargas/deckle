@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { canBeBetter, continueReading, coverLine, defaultSpare, kindWord, lastOpened, progressLine, shelfBooks, showCounts, spaceSlices, spareLine, tabCounts, worthALook } from "./kindleRooms";
+import { better, canBeBetter, continueReading, coverLine, highlightsOf, onKindle, defaultSpare, kindWord, lastOpened, progressLine, shelfBooks, showCounts, spaceSlices, spareLine, tabCounts, worthALook } from "./kindleRooms";
 import type { DeviceBookRow, DeviceShelf, Spare } from "./types";
 
 function book(over: Partial<DeviceBookRow>): DeviceBookRow {
@@ -157,4 +157,35 @@ it("matches Kindle titles and authors across terms, ignoring accents", () => {
   const rows = [book({ title: "Éarthsea", authors: ["Ursula Le Guin"] })];
   expect(shelfBooks(rows, "all", "anywhere", "GUIN earthsea", "title")).toHaveLength(1);
   expect(shelfBooks(rows, "all", "anywhere", "guin absent", "title")).toHaveLength(0);
+});
+
+describe("a book's drawer", () => {
+  it("offers the one thing Deckle can do better", () => {
+    expect(better(book({ class: "current", updates: [{ older: true, feature: null, text: "Built by an older Deckle." }], library_source: "/l" }))).toMatchObject({ kind: "update", action: "Update", body: "Built by an older Deckle." });
+    expect(better(book({ class: "has-source" }))?.body).toMatch(/^Its original is on this computer\./);
+    expect(better(book({ class: "kindle-copy" }))?.body).toMatch(/^Deckle can rebuild it/);
+    expect(better(book({ class: "current", library_source: "/l", cde: "PDOC" }))?.kind).toBe("as-kindle-book");
+    expect(better(book({ class: "current", library_source: "/l", cde: "EBOK" }))).toBeNull();
+    expect(better(books[1])).toBeNull();
+  });
+
+  it("says what it is on the Kindle in plain words", () => {
+    expect(onKindle(book({ cde: "PDOC", from_deckle: true, library_source: "/l", size: 4.2e6 }))).toEqual([
+      ["Shows up as", "Document, with its own cover"],
+      ["X-Ray", "Not yet"],
+      ["Word Wise", "Not yet"],
+      ["Size", "4.2 MB"],
+      ["Sent", "By Deckle · in your library"],
+    ]);
+    const locked = onKindle(book({ class: "locked", duplicate: true }));
+    expect(locked[1]).toEqual(["X-Ray", "No: locked by DRM, which Deckle never opens"]);
+    expect(locked.at(-1)).toEqual(["Duplicate", "Another copy of it is on this Kindle"]);
+    expect(onKindle(books[1])[0]).toEqual(["Shows up as", "Book from Amazon"]);
+  });
+
+  it("finds a book's highlights by title", () => {
+    const h = { key: "k", title: "anathem ", author: "", file: "", total: 2, new: 1, markdown: "" };
+    expect(highlightsOf(books[0], [h])).toBe(h);
+    expect(highlightsOf(books[2], [h])).toBeNull();
+  });
 });

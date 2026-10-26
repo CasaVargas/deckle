@@ -6,7 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import Highlights from "./Highlights";
 import Icon from "./Icon";
-import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
+import KindleDrawer from "./KindleDrawer";
+import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, sentMode, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
 import type { KindleRoom, ShelfFrom, ShelfShow, ShelfSort } from "./kindleRooms";
 import ThisKindle from "./ThisKindle";
 import Upgrades from "./Upgrades";
@@ -32,11 +33,6 @@ interface Props {
   onFree: (bytes: number | null) => void;
 }
 
-/** The mode an update keeps: the one it was sent in. */
-function sentMode(book: DeviceBookRow): "pdoc" | "ebok" | null {
-  return book.cde === "EBOK" ? "ebok" : book.cde === "PDOC" ? "pdoc" : null;
-}
-
 /** A thin bar for how far in: green when finished. */
 function Bar({ book }: { book: DeviceBookRow }) {
   const pct = book.reading === "finished" ? 100 : Math.round((book.fraction ?? 0) * 100);
@@ -56,94 +52,19 @@ function Cover({ book, className }: { book: DeviceBookRow; className: string }) 
   );
 }
 
-/** A book on the Shelf: its cover, how far in and what it is, and what can be done with it. */
-function BookCard({ book, busy, onResend, onRemove }: { book: DeviceBookRow; busy: boolean; onResend: Props["onResend"]; onRemove: (file: string) => Promise<void> }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const [removing, setRemoving] = useState(false);
-  const title = titleOf(book);
-  const canUpgrade = book.library_source && book.cde === "PDOC";
+/** A book on the Shelf: its cover, how far in and what it is. Opens its drawer. */
+function BookCard({ book, onOpen }: { book: DeviceBookRow; onOpen: () => void }) {
   return (
     <li className="kcard">
-      <button className="kcard-open" title={book.file} onClick={() => setMenuOpen((o) => !o)} disabled={busy || removing} aria-haspopup="menu" aria-expanded={menuOpen}>
+      <button className="kcard-open" title={book.file} onClick={onOpen}>
         <span className="kcard-cover">
           <Cover book={book} className="kcard-img" />
           {canBeBetter(book) && <span className="upgrade-mark">Upgrade</span>}
           <Bar book={book} />
         </span>
-        <span className="kcard-title">{title}</span>
+        <span className="kcard-title">{titleOf(book)}</span>
         <span className="kcard-line">{coverLine(book)}</span>
       </button>
-      {menuOpen && (
-        <div className="menu" role="menu" onMouseLeave={() => setMenuOpen(false)}>
-          {book.updates.length > 0 && book.library_source && (
-            <button
-              role="menuitem"
-              title={book.updates.map((u) => u.text).join("\n")}
-              onClick={() => {
-                setMenuOpen(false);
-                onResend([{ source: book.library_source!, cde: sentMode(book) }], `${title} is ready to update.`);
-              }}
-            >
-              Update
-            </button>
-          )}
-          <button
-            role="menuitem"
-            disabled={!book.library_source}
-            title={book.library_source ? undefined : "Not in your library, so Deckle has no copy to send"}
-            onClick={() => {
-              setMenuOpen(false);
-              onResend([{ source: book.library_source!, cde: null }], `${title} is ready to send again.`);
-            }}
-          >
-            Send again
-          </button>
-          {canUpgrade && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                setMenuOpen(false);
-                onResend([{ source: book.library_source!, cde: "ebok" }], `${title} is ready to send again as a Kindle book.`);
-              }}
-            >
-              Make it a Kindle book (X-Ray, Word Wise)
-            </button>
-          )}
-          <button
-            role="menuitem"
-            className="danger"
-            onClick={() => {
-              setMenuOpen(false);
-              setConfirming(true);
-            }}
-          >
-            Remove from Kindle…
-          </button>
-        </div>
-      )}
-      {confirming && (
-        <div className="confirm kcard-confirm" role="alert">
-          Remove <strong>{title}</strong>? Its reading position goes too.
-          <span className="button-row">
-            <button
-              className="ghost danger"
-              disabled={removing}
-              onClick={async () => {
-                setRemoving(true);
-                await onRemove(book.file);
-                setRemoving(false);
-                setConfirming(false);
-              }}
-            >
-              {removing ? "Removing…" : "Remove"}
-            </button>
-            <button className="ghost" disabled={removing} onClick={() => setConfirming(false)}>
-              Keep
-            </button>
-          </span>
-        </div>
-      )}
     </li>
   );
 }
@@ -164,6 +85,8 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
   const [from, setFrom] = useState<ShelfFrom>("anywhere");
   const [sort, setSort] = useState<ShelfSort>("recent");
   const [readAt, setReadAt] = useState<Date | null>(null);
+  /** The book whose drawer is open, by file. */
+  const [openFile, setOpenFile] = useState<string | null>(null);
   // The Upgrades room reads every book once over MTP: it waits until it's opened, then stays.
   const [upgradesOpened, setUpgradesOpened] = useState(false);
   const [upgradesCount, setUpgradesCount] = useState<number | null>(null);
@@ -190,6 +113,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
     load();
   }, [load]);
   useEffect(() => onFree(shelf?.space?.free ?? null), [shelf, onFree]);
+  const closeDrawer = useCallback(() => setOpenFile(null), []);
   useEffect(() => {
     setUpgradesOpened(false);
     setUpgradesCount(null);
@@ -222,6 +146,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
     if (r === "upgrades") setUpgradesOpened(true);
   };
   const now = new Date();
+  const opened = shelf?.books.find((b) => b.file === openFile) ?? null;
   const toUpdate = shelf ? updatable(shelf.books) : [];
   const updateAll = () =>
     onResend(
@@ -272,7 +197,8 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
                 <h2 className="kindle-h2">Continue reading</h2>
                 <ul className="reading-cards">
                   {reading.map((b) => (
-                    <li key={b.file} className="reading-card">
+                    <li key={b.file}>
+                      <button className="reading-card" onClick={() => setOpenFile(b.file)}>
                       <Cover book={b} className="reading-cover" />
                       <span className="reading-meta">
                         <span className="reading-title">{titleOf(b)}</span>
@@ -281,6 +207,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
                         <Bar book={b} />
                         <span className="small">{progressLine(b, now)}</span>
                       </span>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -320,7 +247,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
               ) : (
                 <ul className="kcards" aria-label="Books on this Kindle">
                   {shown.map((b) => (
-                    <BookCard key={b.file} book={b} busy={busy || loading} onResend={onResend} onRemove={remove} />
+                    <BookCard key={b.file} book={b} onOpen={() => setOpenFile(b.file)} />
                   ))}
                 </ul>
               )}
@@ -357,6 +284,28 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
 
         {room === "device" && shelf && <ThisKindle target={target} device={device} shelf={shelf} busy={busy || loading} onChanged={load} onNotice={onNotice} onRenamed={onRenamed} />}
       </main>
+      {opened && shelf && (
+        <KindleDrawer
+          key={opened.file}
+          book={opened}
+          highlights={shelf.highlights}
+          busy={busy || loading}
+          onResend={(cde, what) => {
+            if (!opened.library_source) return;
+            setOpenFile(null);
+            onResend([{ source: opened.library_source, cde }], what);
+          }}
+          onRemove={async () => {
+            await remove(opened.file);
+            setOpenFile(null);
+          }}
+          onRoom={(r) => {
+            setOpenFile(null);
+            open(r);
+          }}
+          onClose={closeDrawer}
+        />
+      )}
     </div>
   );
 }

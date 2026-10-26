@@ -60,16 +60,18 @@ Clicking a cover opens a drawer like the Books tab's, with three tabs:
 - **Reading**: the cover, title and author; a progress bar with "22% · opened 3 days ago";
   then, when Deckle can do better, one box saying what and why, with its button:
   - *Upgrade* (has-source or kindle-copy): "Deckle can make this a Kindle book. It went over as a
-    document, so it has no X-Ray, Word Wise or real page numbers." → the Upgrades flow for this
-    one book;
+    document, so it has no X-Ray, Word Wise or real page numbers." → opens the Upgrades tab,
+    which rebuilds from the Kindle's copy when there's no original (built: the drawer doesn't
+    repeat that flow);
   - *Update* (Deckle's own, `updates` not empty): the update's own text → as Update does now;
   - *Upgrade to Kindle book* (in the library, sent as PDOC): → Re-send as EBOK, as now.
   Then **On the Kindle**, a short list in plain words: Shows up as (a Kindle book / a document,
   with its own cover / from Amazon), X-Ray and Word Wise (yes, not yet, or can't: why), Size,
   Sent (by Deckle on a date, in your library / not from Deckle), and Duplicate when it is one.
 - **Highlights**: this book's count and new count, and its new highlights as the export would
-  write them; **Save as Markdown** writes this book's file. Disabled with "No highlights" when
-  it has none.
+  write them, with **Open Highlights to save them** (built: the export writes every book's new
+  highlights at once; there's no per-book save). "No highlights in this book yet" when it has
+  none. Matched to the book by title.
 - **Details**: the file name and folder, format, mode, ASIN when known, and the class reason
   (Locked by DRM, Fixed layout…).
 
