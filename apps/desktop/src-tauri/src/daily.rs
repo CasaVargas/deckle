@@ -203,6 +203,8 @@ fn env_var(k: &str) -> Option<String> {
 
 /// The sites typed into the card as bare hosts; an invalid one is the save's error.
 fn normalize_subscriptions(cfg: &mut Config) -> Result<(), String> {
+    // A row added in the card and never filled in is not a subscription.
+    cfg.subscriptions.retain(|s| !s.site.trim().is_empty());
     for s in &mut cfg.subscriptions {
         s.site = deckle_digest::config::SubscriptionConfig::normalized_site(&s.site)?;
         s.username = s.username.trim().to_owned();
@@ -543,6 +545,49 @@ pub fn subscription_forget(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_states_serialize_to_the_shapes_the_window_reads() {
+        use deckle_digest::session::SessionState as S;
+        let j = |s: S| serde_json::to_string(&s).unwrap();
+        assert_eq!(j(S::NotTried), r#""NotTried""#);
+        assert_eq!(
+            j(S::SignedIn {
+                service: Some("Pilot Plus".into())
+            }),
+            r#"{"SignedIn":{"service":"Pilot Plus"}}"#
+        );
+        assert_eq!(
+            j(S::SignedIn { service: None }),
+            r#"{"SignedIn":{"service":null}}"#
+        );
+        assert_eq!(j(S::LoginFailed("x".into())), r#"{"LoginFailed":"x"}"#);
+        assert_eq!(j(S::NoAdapter), r#""NoAdapter""#);
+        assert_eq!(j(S::NoPassword("x".into())), r#"{"NoPassword":"x"}"#);
+    }
+
+    #[test]
+    fn a_blank_subscription_row_is_dropped_not_an_error() {
+        let mut cfg = Config {
+            subscriptions: vec![
+                deckle_digest::config::SubscriptionConfig {
+                    site: "  ".into(),
+                    username: String::new(),
+                    kind: None,
+                },
+                deckle_digest::config::SubscriptionConfig {
+                    site: "https://www.ThePilot.com/".into(),
+                    username: " me ".into(),
+                    kind: None,
+                },
+            ],
+            ..Default::default()
+        };
+        normalize_subscriptions(&mut cfg).unwrap();
+        assert_eq!(cfg.subscriptions.len(), 1);
+        assert_eq!(cfg.subscriptions[0].site, "thepilot.com");
+        assert_eq!(cfg.subscriptions[0].username, "me");
+    }
 
     #[test]
     fn subscriptions_status_never_returns_the_password() {

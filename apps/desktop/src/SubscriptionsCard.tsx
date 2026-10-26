@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { subscriptionLine } from "./subscriptions";
-import type { SessionState, SiteStatus, SubscriptionConfig } from "./types";
+import { forgetTested, shownStatus, statusKey, subscriptionLine } from "./subscriptions";
+import type { Tested } from "./subscriptions";
+import type { SiteStatus, SubscriptionConfig } from "./types";
 
 /**
  * Newspapers the household subscribes to (publisher subscriptions design §3): a site and the
  * account that signs in to it. The password is write-only and lives in the keychain.
  */
-/** The site as the backend files it: a bare lowercase host. */
-const statusKey = (site: string) =>
-  site.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
-
 export default function SubscriptionsCard({
   subscriptions,
   dirty,
@@ -27,7 +24,7 @@ export default function SubscriptionsCard({
   const [statuses, setStatuses] = useState<SiteStatus[]>([]);
   const [passwords, setPasswords] = useState<Record<number, string>>({});
   // A fresh status only knows what this process has tried, so a test's answer is kept here.
-  const [tested, setTested] = useState<Record<string, SessionState>>({});
+  const [tested, setTested] = useState<Tested>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
@@ -36,12 +33,12 @@ export default function SubscriptionsCard({
   }, []);
   useEffect(refresh, [refresh]);
 
-  const edit = (i: number, p: Partial<SubscriptionConfig>) =>
+  const edit = (i: number, p: Partial<SubscriptionConfig>) => {
+    // A test's answer is about the site and account it was run for.
+    setTested((t) => forgetTested(t, subscriptions[i].site));
     onChange(subscriptions.map((s, j) => (j === i ? { ...s, ...p } : s)));
-  const statusOf = (s: SubscriptionConfig): SiteStatus | undefined => {
-    const st = statuses.find((t) => t.site === statusKey(s.site));
-    return st && { ...st, state: tested[st.site] ?? st.state };
   };
+  const statusOf = (s: SubscriptionConfig): SiteStatus | undefined => shownStatus(statuses, tested, s.site);
   // The keychain entry and the session are named after the saved site and username.
   const saved = async () => {
     if (!dirty) return true;
@@ -59,6 +56,7 @@ export default function SubscriptionsCard({
       if (await saved()) {
         const site = subscriptions[i].site;
         setStatuses(await api.subscriptionSetPassword(site, pw));
+        setTested((t) => forgetTested(t, site));
         setMsg({ text: "Password saved in the system keychain.", ok: true });
       }
     } catch (e) {
@@ -89,6 +87,7 @@ export default function SubscriptionsCard({
     const s = subscriptions[i];
     const next = subscriptions.filter((_, j) => j !== i);
     setMsg(null);
+    setPasswords({}); // typed passwords are by row, and the rows shift
     if (!statusOf(s)) {
       onChange(next); // never saved: nothing in the keychain or on disk
       return;

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { subscriptionLine } from "./subscriptions";
+import { forgetTested, shownStatus, subscriptionLine } from "./subscriptions";
 import type { SiteStatus } from "./types";
 
 const s: SiteStatus = {
@@ -19,4 +19,12 @@ test("subscription lines", () => {
   expect(subscriptionLine({ ...s, state: { LoginFailed: "bad password" } })).toBe("Sign-in failed: bad password");
   expect(subscriptionLine({ ...s, site: "thepilot.com", state: "NoAdapter" })).toBe("Deckle doesn't know how thepilot.com signs in yet");
   expect(subscriptionLine({ ...s, state: { NoPassword: "none saved" } })).toBe("No password: none saved");
+});
+
+test("a tested failure shows until the password changes, then the fresh status", () => {
+  const fresh: SiteStatus = { ...s, site: "thepilot.com", has_password: true, state: "NotTried" };
+  let tested = { "thepilot.com": { NoPassword: "none saved" } };
+  expect(subscriptionLine(shownStatus([fresh], tested, "ThePilot.com")!)).toBe("No password: none saved");
+  tested = forgetTested(tested, "https://www.thepilot.com/") as typeof tested;
+  expect(subscriptionLine(shownStatus([fresh], tested, "thepilot.com")!)).toBe("Not signed in yet");
 });
