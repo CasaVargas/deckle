@@ -632,3 +632,43 @@ input[type=checkbox] { padding: 0; }
 .status-line .mark { font-weight: 700; flex: none; }
 .status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status-line .link { flex: none; font-size: 12px; }
+
+/* Books tab redesign, part 3: the book's drawer (§5) */
+.drawer { width: min(520px, 100%); padding: 0; gap: 0; }
+.drawer-tabs { display: flex; align-items: center; gap: 8px; padding: 10px 16px 0 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1; background: var(--panel); }
+.tab-strip { flex: 1; display: flex; gap: 18px; }
+.tab-strip button { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 0 9px; font-size: 13px; color: var(--muted); }
+.tab-strip button:hover:not(:disabled) { color: var(--fg); }
+.tab-strip button.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--fg); }
+.drawer-head { display: flex; gap: 14px; align-items: flex-start; padding: 18px 20px 4px; }
+.drawer-cover { width: 64px; flex: none; aspect-ratio: 2 / 3; border-radius: 3px; overflow: hidden; background: var(--line); box-shadow: 0 4px 12px rgb(0 0 0 / 0.18); }
+.drawer-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.drawer-cover .cover-placeholder { font-size: 24px; }
+.drawer-title { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.drawer-title h2 { font-family: ui-serif, Georgia, serif; font-size: 22px; font-weight: 600; line-height: 1.15; margin: 0; overflow-wrap: anywhere; }
+.drawer > .details-form, .drawer > .cover-pane, .drawer > .kindle-pane { padding: 14px 20px 20px; }
+.kindle-pane { display: flex; flex-direction: column; gap: 16px; }
+.drawer .details-form { max-width: none; gap: 14px; }
+.drawer-home { margin: 0; line-height: 1.45; }
+.details-form .field { display: flex; flex-direction: column; gap: 4px; }
+.field-label { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.edited { font-size: 11px; font-weight: 400; color: var(--accent); }
+.details-form input { height: 34px; }
+.details-form input:disabled { color: var(--muted); }
+.details-form input.changed, .token-field.changed { border-color: var(--accent); }
+.details-form input[aria-invalid="true"] { border-color: var(--fail); }
+.field-problem { font-size: 12px; color: var(--fail); }
+.details-form input.asin { text-transform: uppercase; letter-spacing: .03em; }
+.token-field { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 34px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.token-field:focus-within { border-color: var(--accent); }
+.token-field.disabled { color: var(--muted); }
+.token-field input { flex: 1; min-width: 110px; height: 26px; border: 0; padding: 0 4px; background: transparent; outline: none; font-size: 13px; }
+.token { display: inline-flex; align-items: center; gap: 2px; padding: 2px 4px 2px 9px; border-radius: 6px; background: color-mix(in srgb, var(--line) 70%, var(--bg)); font-size: 13px; }
+.token-field.disabled .token { padding-right: 9px; }
+.token-x { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); }
+.token-x:hover { color: var(--fg); background: var(--line); }
+.more summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.more[open] summary { margin-bottom: 10px; }
+.drawer-foot { position: sticky; bottom: 0; margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--panel); }
+.foot-note { flex: 1 1 180px; font-size: 12px; color: var(--muted); }
+.foot-note.fail { color: var(--fail); }

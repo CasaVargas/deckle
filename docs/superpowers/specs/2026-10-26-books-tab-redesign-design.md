@@ -75,6 +75,10 @@ tabs:
 - **Cover**: Before you send's cover pane, as is.
 - **On the Kindle**: Before you send's plan and page preview, as is.
 
+Cover and On the Kindle preview the queued book, so a book opened from the library that isn't
+in To send (or one that can't be converted, or is sent as is) has only Details. A queue row's
+title opens On the Kindle, and its menu's **Edit details…** opens Details.
+
 The editor:
 
 - Header: the cover, title, author, format and pages, and where the book lives. For calibre
