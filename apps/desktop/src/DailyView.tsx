@@ -8,9 +8,9 @@ import SectionsTab from "./SectionsTab";
 import type { Change } from "./SectionsTab";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
-import { ROOMS, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
+import { ROOMS, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import PaperSheet from "./PaperSheet";
-import type { Place, Room } from "./dailyRooms";
+import type { Room } from "./dailyRooms";
 import Icon from "./Icon";
 import { reorder, setBudget } from "./pagePlan";
 import PressCard from "./PressCard";
@@ -20,9 +20,8 @@ import EveryEdition from "./EveryEdition";
 import Shelf from "./Shelf";
 import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
-import ExportFolders from "./ExportFolders";
+import DeliveryTab from "./DeliveryTab";
 import { exportParts, remarkablePart } from "./exportsView";
-import RemarkableCard from "./RemarkableCard";
 import { anyKindleHint } from "./papersView";
 import type { DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, NextPaper, PagePlanRow, PapersView, ReadershipView, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL } from "./types";
@@ -91,7 +90,6 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [emailMsg, setEmailMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [testing, setTesting] = useState(false);
   const [room, setRoom] = useState<Room>("today");
-  const [openPlace, setOpenPlace] = useState<Place["key"] | null>(null);
   const [readership, setReadership] = useState<ReadershipView | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   // Your papers (many papers §7): the selected paper is the one every room works on
@@ -406,20 +404,13 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const planToggle = (row: PagePlanRow, on: boolean) =>
     planSave((c) => ({ ...c, sections: on ? [...c.sections, row.kind] : c.sections.filter((x) => x !== row.kind) }));
 
-  const emailCard = (
-    <section className="card email-card">
-      <div className="card-head">
-        <h3>Email to Kindle</h3>
-      </div>
+  const emailBody = (
+    <section className="email-card" aria-label="Email to Kindle">
       <p className="muted small">
         The morning paper arrives over Wi-Fi with no cable: Deckle emails it to your Kindle's Send-to-Kindle address from your
         own mail account. If an email fails, the paper waits for USB as before.
       </p>
       {!isMain && <p className="muted small">It goes from the mail account set on {mainTitle}.</p>}
-      <label className="check">
-        <input type="checkbox" checked={!!draft.email?.enabled} onChange={(e) => editEmail((m) => (m.enabled = e.target.checked), "now")} />
-        Email the paper to my Kindle
-      </label>
       <div className="grid2">
         <label>
           <span className="label">{isMain ? "Kindle address" : "Send to"}</span>
@@ -495,27 +486,6 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       </p>
     </section>
   );
-  const exportFolders = (
-    <ExportFolders
-      exports={draft.export}
-      onSave={(exports) => saveNow({ ...draftRef.current!, export: exports })}
-    />
-  );
-  const remarkableCard = (
-    <RemarkableCard
-      remarkable={draft.remarkable}
-      onSave={(remarkable) => saveNow({ ...draftRef.current!, remarkable })}
-    />
-  );
-
-  // A place's settings, opened beneath its row in Delivery
-  const placeSettings = (key: Place["key"]) => {
-    if (key === "email") return emailCard;
-    if (key === "exports") return exportFolders;
-    if (key === "remarkable") return remarkableCard;
-    return null;
-  };
-
   const saveBox = (
     <form
       className="save-row"
@@ -709,42 +679,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
           </>
         )}
 
-        {room === "delivery" && (
-          <section className="card delivery" aria-label="Where the paper goes">
-            <h3>Where the paper goes</h3>
-            <p className="muted small">
-              Each morning's paper goes to every place that's on. A reader that isn't plugged in keeps its copy waiting and gets it
-              the next time.
-            </p>
-            <ul className="place-list">
-              {destinations(draft).map((p) => {
-                const head = (
-                  <>
-                    <span className={`press-dot ${p.on ? "on" : ""}`} aria-hidden="true" />
-                    <span className="place-name">
-                      <strong>{p.name}</strong>
-                      <span className="muted small">{p.how}</span>
-                    </span>
-                    <span className="place-status">{p.status}</span>
-                  </>
-                );
-                return (
-                  <li key={p.key}>
-                    {p.open ? (
-                      <button className="place-head" aria-expanded={openPlace === p.key} onClick={() => setOpenPlace(openPlace === p.key ? null : p.key)}>
-                        {head}
-                        <Icon name="chevron-down" />
-                      </button>
-                    ) : (
-                      <div className="place-head">{head}</div>
-                    )}
-                    {openPlace === p.key && <div className="place-body">{placeSettings(p.key)}</div>}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        )}
+        {room === "delivery" && <DeliveryTab draft={draft} change={change} emailBody={emailBody} />}
 
         {room === "sections" && (
           <SectionsTab

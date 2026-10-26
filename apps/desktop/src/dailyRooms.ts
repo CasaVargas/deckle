@@ -48,6 +48,50 @@ export function destinations(cfg: DailyConfig): Place[] {
   ];
 }
 
+/** One row of Delivery (Daily tab redesign §8). `on` is null where there's no switch. */
+export interface DeliveryRow {
+  key: string;
+  name: string;
+  how: string;
+  status: string;
+  on: boolean | null;
+  /** It opens to its settings. */
+  opens: boolean;
+}
+
+const FORMAT_LABEL = { epub: "EPUB", pdf: "PDF", bundle: "Bundle" } as const;
+
+/** Delivery's two groups: the Kindle (over USB, by email), then other readers. */
+export function deliveryGroups(cfg: DailyConfig): { kindle: DeliveryRow[]; others: DeliveryRow[] } {
+  const email = cfg.email;
+  const rm = cfg.remarkable ?? DEFAULT_REMARKABLE;
+  return {
+    kindle: [
+      { key: "usb", name: "Over USB", how: "When it's plugged in. Older papers are removed.", status: `Keeps ${plural(cfg.keep, "paper")}`, on: null, opens: true },
+      {
+        key: "email",
+        name: "By email",
+        how: "Over Wi-Fi, from your own mail account",
+        status: email?.enabled ? email.to || "No address yet" : "Off",
+        on: !!email?.enabled,
+        opens: true,
+      },
+    ],
+    others: [
+      { key: "remarkable", name: "reMarkable", how: "A PDF over its USB web interface", status: rm.enabled ? SCREEN_LABEL[rm.screen] : "Off", on: rm.enabled, opens: true },
+      ...(cfg.export ?? []).map((e, i) => ({
+        key: `folder:${i}`,
+        name: e.name,
+        how: e.dir,
+        status: `${FORMAT_LABEL[e.format]} · ${e.photos === "color" ? "color" : "gray"}`,
+        on: null,
+        opens: true,
+      })),
+      { key: "readers", name: "Kobo and PocketBook", how: "Found when one is plugged in, nothing to set up", status: "Automatic", on: null, opens: false },
+    ],
+  };
+}
+
 /** The press days with `d` switched, in week order; none on means every day. */
 export function toggleDay(days: Day[], d: Day): Day[] {
   const on = days.includes(d) ? days.filter((x) => x !== d) : [...days, d];
