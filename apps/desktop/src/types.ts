@@ -106,6 +106,17 @@ export interface BookDetails {
   title: string;
   authors: string[];
   series: { name: string; index: number | null } | null;
+  // The rest: left out or null leaves the book's own; empty removes it (Books tab redesign §5).
+  description?: string | null;
+  tags?: string[] | null;
+  publisher?: string | null;
+  /** A year, or a date like 2020-09-15. */
+  published?: string | null;
+  /** A language tag; empty keeps the book's own. */
+  language?: string | null;
+  isbn?: string | null;
+  title_sort?: string | null;
+  author_sort?: string | null;
 }
 
 /** A book on a Kindle that a send replaces with Deckle's build of its original (Books and Kindle design §6). */

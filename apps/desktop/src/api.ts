@@ -38,6 +38,7 @@ export const api = {
   /** Fetches a picked Open Library cover; resolves to its path on this computer. */
   coverFetch: (large: string) => invoke<string>("cover_fetch", { large }),
   libraryFixDetails: (dir: string, details: BookDetails) => invoke<void>("library_fix_details", { dir, details }),
+  libraryReadDetails: (dir: string) => invoke<BookDetails>("library_read_details", { dir }),
   libraryWatchSet: (dir: string | null) => invoke<string | null>("library_watch_set", { dir }),
   libraryWatchScan: () => invoke<Watched>("library_watch_scan"),
   /** The files bound, in order, into one book; resolves to its row (#22). */
