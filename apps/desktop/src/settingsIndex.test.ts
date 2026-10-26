@@ -9,7 +9,8 @@ describe("Search settings", () => {
   it("finds a setting by the words people type", () => {
     expect(searchSettings("asin").map((e) => e.label)).toEqual(["Match the store cover", "Keeps Deckle's X-Ray for real ASINs"]);
     expect(searchSettings("API key").map((e) => e.label)).toEqual(["API key"]);
-    expect(searchSettings("calibre")[0].page).toBe("general");
+    expect(searchSettings("calibre")[0].page).toBe("library");
+    expect(searchSettings("clippings")[0].page).toBe("highlights");
     expect(searchSettings("previewer")[0].page).toBe("sending");
   });
   it("needs every word, and nothing for nothing", () => {
@@ -75,7 +76,8 @@ describe("page cards", () => {
   const s = { cde: "auto", pages_auto: true, typography: true, popup_notes: false, generated_cover: true, xray: true, llm_provider: "anthropic", wikipedia: true, word_wise: true, word_wise_level: 3 } as unknown as Settings;
   it("say each page's state in a line", () => {
     expect(pageSummary("sending", s, null, [], "0.7.0")).toBe("Automatic");
-    expect(pageSummary("general", s, { root: "/b", auto_add: true, books: 2 }, [], "0.7.0")).toBe("Library of 2 books");
+    expect(pageSummary("library", s, { root: "/b", auto_add: true, books: 2 }, [], "0.7.0")).toBe("2 books · adds every book you send");
+    expect(pageSummary("library", s, { root: null, auto_add: false, books: 0 }, [], "0.7.0")).toBe("Off: books you send aren't kept");
     expect(pageSummary("books", s, null, [], "0.7.0")).toBe("Page numbers, tidy typography and covers when missing");
     expect(pageSummary("reading", s, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia");
     expect(pageSummary("reading", { ...s, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Both off");
