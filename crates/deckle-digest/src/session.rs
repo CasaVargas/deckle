@@ -167,6 +167,13 @@ impl SiteClient for UreqSite {
         read(self.agent.get(url).call())
     }
 
+    fn get_final(&self, url: &str) -> Result<(Vec<u8>, String), String> {
+        use ureq::ResponseExt;
+        let resp = self.agent.get(url).call().map_err(|e| e.to_string())?;
+        let final_url = resp.get_uri().to_string();
+        Ok((read(Ok(resp))?, final_url))
+    }
+
     fn post_form(&self, url: &str, body: &str) -> Result<Vec<u8>, String> {
         read(
             self.agent
@@ -184,6 +191,9 @@ impl SiteClient for UreqSite {
 impl SiteClient for Arc<UreqSite> {
     fn get(&self, url: &str) -> Result<Vec<u8>, String> {
         (**self).get(url)
+    }
+    fn get_final(&self, url: &str) -> Result<(Vec<u8>, String), String> {
+        (**self).get_final(url)
     }
     fn post_form(&self, url: &str, body: &str) -> Result<Vec<u8>, String> {
         (**self).post_form(url, body)
@@ -449,7 +459,9 @@ impl SessionNet {
             Err(why) => match why {
                 Walled::NotSignedIn => SessionState::NoPassword(s.no_password_note()),
                 Walled::LoginFailed(e) => SessionState::LoginFailed(e),
-                Walled::NotInPlan | Walled::NoAdapter => SessionState::NoAdapter,
+                Walled::NotInPlan | Walled::NoAdapter | Walled::PlanUnknown => {
+                    SessionState::NoAdapter
+                }
             },
             Ok(()) => {
                 let state = match self.entitlement(s, adapter) {
@@ -579,8 +591,10 @@ impl SessionNet {
         let ent = match self.entitlement(s, adapter) {
             Ok(ent) => ent,
             Err(e) => {
+                // Nothing is decoded without a plan we could read; a free page still
+                // extracts as served, and a premium one prints as a stranger sees it.
                 s.run().state = SessionState::EntitlementUnknown(e);
-                return walled(body, Walled::NotInPlan);
+                return walled(body, Walled::PlanUnknown);
             }
         };
         let service = ent.label();
@@ -1294,7 +1308,7 @@ mod net_tests {
             access,
             Access::Walled {
                 site: "thepilot.com".into(),
-                why: Walled::NotInPlan
+                why: Walled::PlanUnknown
             }
         );
         let unknown = SessionState::EntitlementUnknown(
@@ -1302,6 +1316,119 @@ mod net_tests {
         );
         assert_eq!(n.status()[0].state, unknown);
         assert_eq!(n.sign_in("thepilot.com"), unknown);
+    }
+
+    /// A BLOX site whose member pages come back but whose plan reply is an HTML page.
+    struct BloxNoPlan {
+        story: String,
+    }
+
+    impl SiteClient for BloxNoPlan {
+        fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+            if url.contains("/tncms/subscription/services/") {
+                Ok(b"<html><body>Please log in</body></html>".to_vec())
+            } else {
+                Ok(self.story.clone().into_bytes())
+            }
+        }
+        fn post_form(&self, _: &str, _: &str) -> Result<Vec<u8>, String> {
+            Err("no login expected".into())
+        }
+    }
+
+    #[test]
+    fn a_blox_plan_we_cant_read_decodes_nothing_and_says_so() {
+        use crate::publisher::blox::{Page, fixture_page};
+        let words = |tag: &str| {
+            let w: Vec<String> = (0..40).map(|i| format!("{tag}{i}")).collect();
+            format!("The {tag} paragraph reads {}.", w.join(" "))
+        };
+        let preview: Vec<String> = (0..4).map(|i| words(&format!("free{i}x"))).collect();
+        let premium = [words("paidx")];
+        let p: Vec<&str> = preview.iter().map(String::as_str).collect();
+        let q: Vec<&str> = premium.iter().map(String::as_str).collect();
+        let free = fixture_page(Page {
+            signed_in: true,
+            service_ids: &["3"],
+            preview: &p,
+            ..Default::default()
+        });
+        let paid = fixture_page(Page {
+            signed_in: true,
+            service_ids: &["3"],
+            preview: &p[..1],
+            premium: &q,
+            login_form: false,
+        });
+        let walled = Access::Walled {
+            site: "thepilot.com".into(),
+            why: Walled::PlanUnknown,
+        };
+        for (page, extracts) in [(free, true), (paid, false)] {
+            let n = SessionNet::with_clients(
+                Http,
+                vec![(
+                    account("me", Some(PW), Some("blox")),
+                    Box::new(BloxNoPlan {
+                        story: page.clone(),
+                    }) as Box<dyn SiteClient>,
+                )],
+                crate::publisher::registry(),
+            );
+            let (body, access) = n.get_page_as(STORY).unwrap();
+            assert_eq!(access, walled);
+            assert_eq!(body, page.as_bytes(), "the page as served: nothing decoded");
+            let body = String::from_utf8(body).unwrap();
+            assert!(!body.contains("paidx0"), "premium text never in clear");
+            let x = crate::article::extract(&body, STORY);
+            assert_eq!(x.is_some(), extracts, "{:?}", x.map(|x| x.words));
+            match &n.status()[0].state {
+                SessionState::EntitlementUnknown(m) => {
+                    assert!(m.starts_with("couldn't read your plan: "), "{m}");
+                    assert!(!m.contains("Please log in"), "{m}");
+                }
+                st => panic!("{st:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_site_client_reports_where_its_redirects_end() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let loc = format!("{base}/final/");
+        std::thread::spawn(move || {
+            for i in 0..2 {
+                let Ok((mut s, _)) = listener.accept() else {
+                    return;
+                };
+                let mut buf = Vec::new();
+                let mut b = [0u8; 1024];
+                while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match s.read(&mut b) {
+                        Ok(0) | Err(_) => break,
+                        Ok(k) => buf.extend_from_slice(&b[..k]),
+                    }
+                }
+                let _ = if i == 0 {
+                    write!(
+                        s,
+                        "HTTP/1.1 301 Moved\r\nLocation: {loc}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                } else {
+                    write!(
+                        s,
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                    )
+                };
+            }
+        });
+        let (body, end) = UreqSite::plain("a")
+            .get_final(&format!("{base}/start/"))
+            .unwrap();
+        assert_eq!(body, b"ok");
+        assert_eq!(end, format!("{base}/final/"));
     }
 
     #[test]

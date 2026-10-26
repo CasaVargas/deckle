@@ -45,16 +45,23 @@ static PAID_IDS: LazyLock<Regex> =
 
 /// The page's `paid_access_service_ids` as strings; empty when the page lists none.
 pub fn paid_access_service_ids(html: &str) -> Vec<String> {
-    PAID_IDS
-        .captures(html)
-        .map(|c| {
+    page_service_ids(html).unwrap_or_default()
+}
+
+/// The page's service ids; `None` when the page names `paid_access_service_ids` in a shape
+/// we can't read (which must fail closed, not count as "lists none").
+fn page_service_ids(html: &str) -> Option<Vec<String>> {
+    match PAID_IDS.captures(html) {
+        Some(c) => Some(
             c[1].split(',')
                 .map(|id| id.trim().trim_matches(|q| q == '"' || q == '\'').trim())
                 .filter(|id| !id.is_empty())
                 .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default()
+                .collect(),
+        ),
+        None if html.contains("paid_access_service_ids") => None,
+        None => Some(Vec::new()),
+    }
 }
 
 /// A JSON id, number or string, as a string.
@@ -189,10 +196,11 @@ impl Publisher for Blox {
     }
 
     fn login(&self, site: &str, user: &str, pw: &str, c: &dyn SiteClient) -> Result<(), String> {
-        let page_url = format!("https://{site}/users/login/");
-        let page = c.get(&page_url)?;
+        let site = site.trim().trim_end_matches('.').to_lowercase();
+        let (page, page_url) = c.get_final(&format!("https://{site}/users/login/"))?;
         let (action, hidden) = login_form(&String::from_utf8_lossy(&page))
             .ok_or_else(|| "the site's login page has no login form".to_string())?;
+        // A relative action is relative to where the login page ended up, after redirects.
         let action = url::Url::parse(&page_url)
             .and_then(|base| base.join(&action))
             .map_err(|_| "the login form points at another host".to_string())?;
@@ -234,7 +242,9 @@ impl Publisher for Blox {
             // Nothing to decode: a free story, as the site served it.
             return Some(html.to_string());
         }
-        if !entitled(&paid_access_service_ids(html), ent) {
+        // An ids line we can't read fails closed: only a page with no such line lists none.
+        let page_ids = page_service_ids(html)?;
+        if !entitled(&page_ids, ent) {
             return None;
         }
         for node in blocks.nodes() {
@@ -418,6 +428,25 @@ mod tests {
     }
 
     #[test]
+    fn an_ids_line_we_cant_read_fails_closed() {
+        let (page, _, _) = premium_page(&["3"]);
+        let line = "tncms.subscription.paid_access_service_ids = [3];";
+        assert!(page.contains(line), "{page}");
+        for odd in [
+            r#"var cfg = {"paid_access_service_ids":[3]};"#,
+            "tncms.subscription.paid_access_service_ids = someVar;",
+        ] {
+            let odd_page = page.replace(line, odd);
+            assert_eq!(Blox.unlock(&odd_page, &ent(&["1"])), None, "{odd}");
+            assert_eq!(Blox.unlock(&odd_page, &ent(&["3"])), None, "{odd}");
+        }
+        // No such line at all: the page lists none, and any active service reads it.
+        let none = page.replace(line, "");
+        assert!(!none.contains("paid_access_service_ids"));
+        assert!(Blox.unlock(&none, &ent(&["1"])).is_some());
+    }
+
+    #[test]
     fn a_page_with_nothing_encrypted_comes_back_unchanged() {
         let page = fixture_page(Page {
             signed_in: true,
@@ -493,6 +522,8 @@ mod tests {
     #[derive(Default)]
     struct Recorder {
         pages: Vec<(String, String)>,
+        /// Request URL -> where its redirects end.
+        finals: Vec<(String, String)>,
         post_reply: String,
         gets: Mutex<Vec<String>>,
         posts: Mutex<Vec<(String, String)>>,
@@ -506,6 +537,14 @@ mod tests {
                 .find(|(u, _)| u == url)
                 .map(|(_, p)| p.clone().into_bytes())
                 .ok_or_else(|| format!("404 {url}"))
+        }
+        fn get_final(&self, url: &str) -> Result<(Vec<u8>, String), String> {
+            let end = self
+                .finals
+                .iter()
+                .find(|(u, _)| u == url)
+                .map_or(url, |(_, f)| f.as_str());
+            Ok((self.get(url)?, end.to_string()))
         }
         fn post_form(&self, url: &str, body: &str) -> Result<Vec<u8>, String> {
             self.posts
@@ -574,9 +613,46 @@ mod tests {
     }
 
     #[test]
+    fn a_relative_action_resolves_against_the_login_pages_final_url() {
+        let member = fixture_page(Page {
+            signed_in: true,
+            ..Default::default()
+        });
+        let page = login_page().replace("https://www.thepilot.com/users/login/", "/users/login/");
+        let c = Recorder {
+            pages: vec![("https://thepilot.com/users/login/".into(), page)],
+            finals: vec![(
+                "https://thepilot.com/users/login/".into(),
+                "https://www.thepilot.com/users/login/".into(),
+            )],
+            post_reply: member,
+            ..Default::default()
+        };
+        Blox.login("thepilot.com", "a@b.test", "pw", &c).unwrap();
+        let posts = c.posts.lock().unwrap();
+        assert_eq!(posts[0].0, "https://www.thepilot.com/users/login/");
+    }
+
+    #[test]
+    fn a_mixed_case_site_matches_its_own_host() {
+        let c = Recorder {
+            pages: vec![("https://thepilot.com/users/login/".into(), login_page())],
+            post_reply: fixture_page(Page {
+                signed_in: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        Blox.login("ThePilot.COM", "a", "b", &c).unwrap();
+        assert_eq!(c.posts.lock().unwrap().len(), 1);
+    }
+
+    #[test]
     fn login_refuses_a_form_that_points_elsewhere() {
         for action in [
             "https://evil.test/login",
+            "//evil.test/users/login/",
+            "https://www.thepilot.com@evil.test/users/login/",
             "https://thepilot.com.evil.test/users/login/",
             "http://www.thepilot.com/users/login/",
         ] {

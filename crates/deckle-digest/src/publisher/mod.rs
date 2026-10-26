@@ -12,6 +12,11 @@ pub mod blox;
 pub trait SiteClient: Sync {
     fn get(&self, url: &str) -> Result<Vec<u8>, String>;
     fn post_form(&self, url: &str, body: &str) -> Result<Vec<u8>, String>;
+    /// A GET that also says the URL it ended at, after redirects. A client that can't tell
+    /// answers with the request URL.
+    fn get_final(&self, url: &str) -> Result<(Vec<u8>, String), String> {
+        Ok((self.get(url)?, url.to_string()))
+    }
 }
 
 /// What a signed-in account may read.
@@ -76,6 +81,9 @@ pub enum Walled {
     LoginFailed(String),
     NotInPlan,
     NoAdapter,
+    /// Signed in, but the site's reply about the account's plan couldn't be read, so
+    /// nothing was unlocked.
+    PlanUnknown,
 }
 
 impl Walled {
@@ -85,6 +93,7 @@ impl Walled {
             Walled::NotSignedIn => format!("Subscriber story (not signed in to {site})."),
             Walled::LoginFailed(e) => format!("Subscriber story (sign-in to {site} failed: {e})."),
             Walled::NotInPlan => format!("Subscriber story (your {site} plan doesn't include it)."),
+            Walled::PlanUnknown => format!("Subscriber story (couldn't read your {site} plan)."),
             Walled::NoAdapter => {
                 format!("Subscriber story (Deckle doesn't know how {site} signs in yet).")
             }
@@ -124,6 +133,10 @@ mod tests {
         assert_eq!(
             Walled::NoAdapter.note("thepilot.com"),
             "Subscriber story (Deckle doesn't know how thepilot.com signs in yet)."
+        );
+        assert_eq!(
+            Walled::PlanUnknown.note("thepilot.com"),
+            "Subscriber story (couldn't read your thepilot.com plan)."
         );
     }
     #[test]
