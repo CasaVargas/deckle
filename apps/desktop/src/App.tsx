@@ -62,6 +62,9 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  /** The library search in the top bar (Books tab redesign §4). */
+  const [query, setQuery] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
   const [bindOpen, setBindOpen] = useState(false);
   const [binding, setBinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -258,6 +261,13 @@ export default function App() {
     // Books tab first opens and focuses the article field; the paste then lands in it.
     const onKey = (ev: KeyboardEvent) => {
       const el = ev.target as HTMLElement | null;
+      // ⌘F (Ctrl+F) finds in the library, when there's one to search.
+      if (ev.key.toLowerCase() === "f" && (ev.metaKey || ev.ctrlKey) && !ev.shiftKey && !ev.altKey && tabRef.current === "books" && searchInput.current) {
+        ev.preventDefault();
+        searchInput.current.focus();
+        searchInput.current.select();
+        return;
+      }
       if (ev.key.toLowerCase() !== "v" || !(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey) return;
       if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
       flushSync(() => setArticleOpen(true));
@@ -504,6 +514,13 @@ export default function App() {
             </button>
           )}
           <div className="spacer" />
+          {tab === "books" && docked && (
+            <label className="top-search">
+              <span className="visually-hidden">Search your library</span>
+              <input ref={searchInput} type="search" placeholder="Search titles, authors, series" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} />
+              <kbd aria-hidden="true">⌘F</kbd>
+            </label>
+          )}
           {tab === "books" && (
             <div className="split">
               <button className="ghost with-icon" aria-haspopup="menu" aria-expanded={addOpen} onClick={() => setAddOpen((o) => !o)} disabled={busy}>
@@ -540,7 +557,7 @@ export default function App() {
         )}
         {tab === "books" && (
         <div className={docked ? "books-split" : "books-whole"}>
-        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
+        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} query={query} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} />}
         <main className={`tray ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
           <div className="tray-scroll">
           {(docked || books.length > 0) && (

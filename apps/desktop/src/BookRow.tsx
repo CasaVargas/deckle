@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from "react";
-import { beforeChip, doneChips, type Chip } from "./bookStatus";
+import { beforeChip, doneChips, statusLine, type Chip } from "./bookStatus";
 import Icon from "./Icon";
 import { PRESETS } from "./presets";
 import type { BookState, PlanRow, Settings, StylePreset } from "./types";
@@ -24,15 +24,18 @@ interface Props {
   onOpen?: (id: string) => void;
 }
 
-function Chips({ chips }: { chips: Chip[] }) {
+const MARK: Record<Chip["tone"], string> = { plain: "", ok: "✓", warn: "!", fail: "!" };
+
+/** The row's status in one sentence, marked by its tone. */
+function Line({ chips, children }: { chips: Chip[]; children?: React.ReactNode }) {
+  const line = statusLine(chips);
+  if (!line) return null;
   return (
-    <>
-      {chips.map((c) => (
-        <span key={c.text} className={`chip ${c.tone}`} title={c.title}>
-          {c.text}
-        </span>
-      ))}
-    </>
+    <div className={`status-line ${line.tone}`} title={line.title}>
+      {MARK[line.tone] && <span className="mark" aria-hidden="true">{MARK[line.tone]}</span>}
+      <span className="status-text">{line.text}</span>
+      {children}
+    </div>
   );
 }
 
@@ -55,9 +58,9 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
   const before = beforeChip(book, plan, settings);
   const stageIndex = book.stage ? STAGES.indexOf(book.stage as (typeof STAGES)[number]) : -1;
 
-  let statusLine: React.ReactNode;
+  let status: React.ReactNode;
   if (book.status === "running") {
-    statusLine = (
+    status = (
       <div className="progress" aria-label={`${STAGE_LABEL[book.stage ?? ""] ?? book.stage}`}>
         <div className="progress-track">
           <div className="progress-fill" style={{ width: `${((stageIndex + 1) / STAGES.length) * 100}%` }} />
@@ -66,48 +69,28 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
       </div>
     );
   } else if (book.status === "done") {
-    statusLine = (
-      <div className="chips">
-        <Chips chips={doneChips(book)} />
+    status = (
+      <Line chips={doneChips(book)}>
         {book.delivered && (
           <button className="link" onClick={() => onReveal(book.delivered!)}>
             Show file
           </button>
         )}
-      </div>
+      </Line>
     );
   } else if (book.status === "failed") {
-    statusLine = (
-      <div className="chips">
-        <span className="chip fail">Failed</span>
-        <span className="chip-text fail" title={book.runError ?? undefined}>
-          {book.runError}
-        </span>
-      </div>
-    );
+    status = <Line chips={[{ text: book.runError ? `Failed: ${book.runError}` : "Failed", tone: "fail", title: book.runError ?? undefined }]} />;
   } else if (book.status === "queued") {
-    statusLine = (
-      <div className="chips">
-        <span className="chip plain">Waiting…</span>
-      </div>
-    );
+    status = <Line chips={[{ text: "Waiting…", tone: "plain" }]} />;
   } else {
     const notes = book.warnings.length;
-    statusLine = (
-      <div className="chips">
-        <Chips chips={[before]} />
-        {book.error && (
-          <span className="chip-text fail" title={book.error}>
-            {book.error}
-          </span>
-        )}
-        {notes > 0 && (
-          <span className="chip warn" title={book.warnings.join("\n")}>
-            {notes} note{notes > 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
-    );
+    const chips: Chip[] = [before];
+    if (preset) chips.push({ text: `${PRESETS[preset]} style`, tone: "plain", title: "Saved book style" });
+    if (book.coverPick && book.coverPick.kind !== "own")
+      chips.push({ text: book.coverPick.kind === "generated" ? "Typographic cover" : "Open Library cover", tone: "plain", title: "The cover picked in Before you send" });
+    if (notes > 0) chips.push({ text: `${notes} note${notes > 1 ? "s" : ""}`, tone: "warn", title: book.warnings.join("\n") });
+    if (book.error) chips.push({ text: book.error, tone: "fail", title: book.error });
+    status = <Line chips={chips} />;
   }
 
   return (
@@ -124,12 +107,6 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
           ) : (
             <span className="title" title={book.path}>
               {book.title}
-            </span>
-          )}
-          {preset && <span className="chip" title="Saved book style">{PRESETS[preset]}</span>}
-          {book.coverPick && book.coverPick.kind !== "own" && (
-            <span className="chip" title="The cover picked in Before you send">
-              {book.coverPick.kind === "generated" ? "Typographic cover" : "Open Library cover"}
             </span>
           )}
         </div>
@@ -170,7 +147,7 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
             </div>
           </form>
         )}
-        {statusLine}
+        {status}
         {book.showReport && (
           <dl className="report">
             <dt>Mode</dt>
