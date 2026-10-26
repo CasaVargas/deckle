@@ -20,12 +20,13 @@ const ROWS: { key: Flag; label: string; note: string; online?: boolean }[] = [
 
 export default function Books({ settings, set }: Props) {
   return (
-    <>
+    <section className="set-card set-pad" aria-label="Books">
+      <p className="muted">What Deckle does to every book it sends.</p>
       {ROWS.map((r) => (
         <Row key={r.key} label={r.label} note={r.note} online={r.online}>
           <Switch label={r.label} checked={settings[r.key]} onChange={(on) => set(r.key, on)} />
         </Row>
       ))}
-    </>
+    </section>
   );
 }

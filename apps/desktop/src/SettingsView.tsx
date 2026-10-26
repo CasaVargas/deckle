@@ -8,7 +8,8 @@ import { PAGES, onlineOn, pageNotes, pageSummary, searchSettings, setupChecks } 
 import type { Check, SettingsPage } from "./settingsIndex";
 import About from "./settings/About";
 import Books from "./settings/Books";
-import General from "./settings/General";
+import HighlightsReading from "./settings/HighlightsReading";
+import LibraryPage from "./settings/LibraryPage";
 import Kindles from "./settings/Kindles";
 import Online from "./settings/Online";
 import Overview from "./settings/Overview";
@@ -137,13 +138,8 @@ export default function SettingsView(props: Props) {
           {page === "sending" && (
             <Sending settings={settings} set={set} previewer={props.previewer} onPickPreviewer={props.onPickPreviewer} devices={props.devices} onKindles={() => onPage("kindles")} />
           )}
-          {page === "general" && (
-            <General
-              settings={settings}
-              set={set}
-              previewer={props.previewer}
-              onPickPreviewer={props.onPickPreviewer}
-              library={props.library}
+          {page === "library" && (
+            <LibraryPage library={props.library}
               onLibrary={props.onLibrary}
               onPickLibrary={props.onPickLibrary}
             />
@@ -151,6 +147,7 @@ export default function SettingsView(props: Props) {
           {page === "books" && <Books settings={settings} set={set} />}
           {page === "reading" && <ReadingAids settings={settings} set={set} />}
           {page === "kindles" && <Kindles devices={props.devices} onDeviceOptions={props.onDeviceOptions} />}
+          {page === "highlights" && <HighlightsReading />}
           {page === "online" && <Online settings={settings} set={set} onPage={onPage} />}
           {page === "about" && <About version={props.version} update={props.update} onUpdateState={props.onUpdateState} busy={props.busy} />}
           </>

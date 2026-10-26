@@ -890,3 +890,8 @@ input[type=checkbox] { padding: 0; }
 .online-row + .online-row { border-top: 1px solid var(--line); }
 .online-row p { margin: 3px 0 4px; line-height: 1.45; }
 .online-row .to { color: var(--fg); font-weight: 600; }
+
+/* Settings redesign, part 5: cards for the regrouped pages */
+.set-card .set-row:last-child { border-bottom: 0; }
+.set-card.set-device h3 { margin: 0; }
+.set-card .set-row { padding: 10px 0; }

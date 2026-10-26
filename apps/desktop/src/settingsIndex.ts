@@ -2,15 +2,16 @@
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 
 /** The Settings pages (Settings redesign §2). */
-export type SettingsPage = "overview" | "sending" | "general" | "books" | "reading" | "kindles" | "online" | "about";
+export type SettingsPage = "overview" | "sending" | "library" | "books" | "reading" | "kindles" | "highlights" | "online" | "about";
 
 export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "overview", title: "Overview" },
   { id: "sending", title: "Sending" },
-  { id: "general", title: "General" },
+  { id: "library", title: "Library" },
   { id: "books", title: "Books" },
   { id: "reading", title: "Reading aids" },
   { id: "kindles", title: "Kindles" },
+  { id: "highlights", title: "Highlights & reading" },
   { id: "online", title: "Online & privacy" },
   { id: "about", title: "About" },
 ];
@@ -24,11 +25,11 @@ export interface Entry {
 
 export const INDEX: Entry[] = [
   { label: "Kindle Previewer", page: "sending", words: "previewer amazon convert kpf location path" },
-  { label: "Library folder", page: "general", words: "library folder keep copy" },
-  { label: "Add every book I send", page: "general", words: "library auto add" },
-  { label: "Find originals in calibre", page: "general", words: "calibre originals upgrades source" },
-  { label: "Find originals in folders", page: "general", words: "folders originals upgrades source epub" },
-  { label: "Watch a folder", page: "general", words: "watch downloads folder inbox" },
+  { label: "Library folder", page: "library", words: "library folder keep copy" },
+  { label: "Add every book I send", page: "library", words: "library auto add" },
+  { label: "Find originals in calibre", page: "library", words: "calibre originals upgrades source" },
+  { label: "Find originals in folders", page: "library", words: "folders originals upgrades source epub" },
+  { label: "Watch a folder", page: "library", words: "watch downloads folder inbox" },
   { label: "How books show up", page: "sending", words: "default mode cover first features first ebok pdoc document kindle book automatic" },
   { label: "Page numbers", page: "books", words: "pages numbers store" },
   { label: "Make a cover when missing", page: "books", words: "cover generated typographic" },
@@ -42,10 +43,10 @@ export const INDEX: Entry[] = [
   { label: "API key", page: "reading", words: "api key token anthropic openai" },
   { label: "Word Wise", page: "reading", words: "word wise hints vocabulary" },
   { label: "How many hints", page: "reading", words: "word wise level slider hints dictionary" },
-  { label: "Highlights folder", page: "kindles", words: "highlights markdown clippings notes folder" },
-  { label: "Write highlights when a Kindle connects", page: "kindles", words: "highlights connect clippings schedule morning" },
-  { label: "Note how far I read the paper", page: "kindles", words: "readership reading paper daily progress" },
-  { label: "From Your Shelf", page: "kindles", words: "shelf reading daily highlight words" },
+  { label: "Highlights folder", page: "highlights", words: "highlights markdown clippings notes folder" },
+  { label: "Write highlights when a Kindle connects", page: "highlights", words: "highlights connect clippings schedule morning" },
+  { label: "Note how far I read the paper", page: "highlights", words: "readership reading paper daily progress" },
+  { label: "From Your Shelf", page: "highlights", words: "shelf reading daily highlight words" },
   { label: "Mode on this Kindle", page: "kindles", words: "kindle device mode ebok pdoc per kindle" },
   { label: "Keeps Deckle's X-Ray for real ASINs", page: "kindles", words: "asin xray real verified" },
   { label: "Updates", page: "about", words: "update version restart" },
@@ -93,22 +94,22 @@ export function setupChecks(a: { previewer: PreviewerStatus | null; library: Lib
   if (a.library)
     out.push(
       a.library.root
-        ? { key: "library", title: "Library", state: `${plural(a.library.books, "book")} in ${base(a.library.root)}`, mark: "ok", page: "general" }
-        : { key: "library", title: "Library", state: "off: books you send aren't kept", mark: "optional", fix: "Choose folder…", page: "general" },
+        ? { key: "library", title: "Library", state: `${plural(a.library.books, "book")} in ${base(a.library.root)}`, mark: "ok", page: "library" }
+        : { key: "library", title: "Library", state: "off: books you send aren't kept", mark: "optional", fix: "Choose folder…", page: "library" },
     );
   if (a.sources) {
     const where = [a.sources.find_in_calibre && a.sources.calibre ? "calibre" : "", a.sources.folders.length ? plural(a.sources.folders.length, "folder") : ""].filter(Boolean);
     out.push(
       where.length
-        ? { key: "originals", title: "Originals", state: `looking in ${list(where)}`, mark: "ok", page: "general" }
-        : { key: "originals", title: "Originals", state: "looking nowhere: Upgrades can only rebuild from the Kindle's copy", mark: "optional", fix: "Set up…", page: "general" },
+        ? { key: "originals", title: "Originals", state: `looking in ${list(where)}`, mark: "ok", page: "library" }
+        : { key: "originals", title: "Originals", state: "looking nowhere: Upgrades can only rebuild from the Kindle's copy", mark: "optional", fix: "Set up…", page: "library" },
     );
   }
   if (a.highlights !== undefined)
     out.push(
       a.highlights
-        ? { key: "highlights", title: "Highlights", state: `written to ${base(a.highlights)}`, mark: "ok", page: "kindles" }
-        : { key: "highlights", title: "Highlights", state: "no folder chosen, so highlights stay on the Kindle", mark: "optional", fix: "Choose folder…", page: "kindles" },
+        ? { key: "highlights", title: "Highlights", state: `written to ${base(a.highlights)}`, mark: "ok", page: "highlights" }
+        : { key: "highlights", title: "Highlights", state: "no folder chosen, so highlights stay on the Kindle", mark: "optional", fix: "Choose folder…", page: "highlights" },
     );
   out.push(
     a.devices.length
@@ -153,8 +154,10 @@ export function pageSummary(page: SettingsPage, s: Settings, library: LibrarySta
   switch (page) {
     case "sending":
       return MODE_WORD[s.cde];
-    case "general":
-      return library?.root ? `Library of ${plural(library.books, "book")}` : "No library";
+    case "library":
+      return library?.root ? `${plural(library.books, "book")}${library.auto_add ? " · adds every book you send" : ""}` : "Off: books you send aren't kept";
+    case "highlights":
+      return "Your highlights, reading of the paper, and From Your Shelf";
     case "books": {
       const on = [s.pages_auto && "page numbers", s.typography && "tidy typography", s.popup_notes && "pop-up footnotes", s.generated_cover && "covers when missing"].filter((x): x is string => !!x);
       return on.length ? list(on).replace(/^./, (c) => c.toUpperCase()) : "Books go as they are";

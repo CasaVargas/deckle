@@ -1,22 +1,19 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { api } from "../api";
-import type { LibraryStatus, PreviewerStatus, Settings } from "../types";
+import type { LibraryStatus } from "../types";
 import Originals from "./Originals";
-import { Link, Row, Switch } from "./Row";
+import { Row, Switch } from "./Row";
 
 interface Props {
-  settings: Settings;
-  set: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
-  previewer: PreviewerStatus | null;
-  onPickPreviewer: () => void;
   library: LibraryStatus | null;
   onLibrary: (root: string | null, autoAdd: boolean) => void;
   onPickLibrary: () => void;
 }
 
-export default function General({ settings, set, previewer, onPickPreviewer, library, onLibrary, onPickLibrary }: Props) {
+export default function LibraryPage({ library, onLibrary, onPickLibrary }: Props) {
   return (
-    <>
+    <div className="set-stack">
+      <section className="set-card set-pad" aria-label="Library">
       <Row
         label="Library"
         note={
@@ -48,8 +45,12 @@ export default function General({ settings, set, previewer, onPickPreviewer, lib
           <Switch label="Add every book I send" checked={library.auto_add} onChange={(on) => onLibrary(library.root, on)} />
         </Row>
       )}
-      <Originals />
-
-    </>
+      </section>
+      <section className="set-card set-pad" aria-label="Originals">
+        <h3 className="set-card-title">Originals</h3>
+        <p className="muted">Where Deckle looks for the originals of your Kindle's books, so Upgrades can rebuild them.</p>
+        <Originals />
+      </section>
+    </div>
   );
 }
