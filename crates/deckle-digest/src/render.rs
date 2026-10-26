@@ -256,7 +256,8 @@ fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8
             body.push_str(&format!("<p>{}</p>\n", esc(line)));
         }
     }
-    if s.articles.len() >= 2 {
+    let nudge = crate::sources::nudges::is_nudge(&s.key);
+    if s.articles.len() >= 2 && !nudge {
         body.push_str("<p class=\"in-section\">In this section</p>\n<ul class=\"toc\">\n");
         for (j, a) in s.articles.iter().enumerate() {
             body.push_str(&format!(
@@ -285,6 +286,10 @@ fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8
         }
         body.push_str(&story);
         body.push('\n');
+        // a nudge's page has one link, the tap that accepts it (interests design §7)
+        if nudge {
+            continue;
+        }
         let front = if plan.contains(i, j) {
             format!("front.xhtml#t{i}-{j}")
         } else {

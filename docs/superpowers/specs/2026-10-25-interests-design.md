@@ -488,3 +488,33 @@ Increment 3 (§11 item 3) landed from `docs/superpowers/plans/2026-10-26-interes
 - **Over any cap** the editor makes no edit at all (existing behaviour) rather than skipping
   relevance only.
 - **Not yet:** nudges (increment 4).
+
+## 17. Implementation notes, PR 4 (2026-10-26)
+
+Increment 4 (§11 item 4) landed from `docs/superpowers/plans/2026-10-26-interests-nudges.md`.
+
+- **One nudge per page, not per line.** §15 found the history records the start of the page a
+  jump was made from, so §7's per-line link ranges can't be told apart. Each suggestion is its
+  own section (`nudge:<key>`, one XHTML file, one KFX section) appended after everything else,
+  at most three per edition: its reason, one link ("Tap here to make <name> a section.", to the
+  front) and "Change your mind on the Daily tab." No back links, no list, no tile, never news.
+- **Accept rule (two steps, after review):** the nudge page's link goes to a confirmation page
+  of its own (`nudge-ok:<key>`, "Done: back to the front page"). A tap is a jump made from the
+  nudge page *and then* one from its confirmation page, in one read's history; leaving the
+  nudge page by Go To or the contents, or paging into the confirmation page and jumping from
+  there, is not. Each key is accepted once, as the app's button would (`learn::accept`); a
+  candidate pruned since the paper was built is taken from the page's own name; a dismissal
+  made after the edition's day wins over the tap. Learning off means no accept. The CLI
+  reloads the paper's file before writing it and notes "Added <name> to your interests (you
+  tapped it in the paper)."
+- **Kindle only.** The PDF, the bundle, the color EPUB and the Morgue get the paper without
+  its nudge pages (`Gathered::without_nudges`). The EPUB queued for a Kobo or PocketBook still
+  carries them (deferred; the flag is off by default).
+- **Deferred:** the desktop's Daily tab doesn't reload after a connection accepts a nudge, so
+  an unsaved draft there could overwrite the new entry on Save.
+- **Hardware check: pending.** No Kindle was connected when this landed, so a nudge tap has not
+  yet been seen in a `.yjf`. The fixtures show jumps from links and the contents are recorded
+  as page starts, which is what the rule needs. `[learning] nudges` stays off by default until
+  the tap is confirmed on the Scribe; then this note gets the result.
+- The build takes nudges through `GatherOptions::nudges` from `learn::nudges_for`
+  (`suggest`'s top three), the same way the editor's naming travels.

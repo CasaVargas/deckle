@@ -4,6 +4,7 @@
 pub mod feeds;
 pub mod interests;
 pub mod lottery;
+pub mod nudges;
 pub mod onthisday;
 pub mod reading;
 pub mod weather;

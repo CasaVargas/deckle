@@ -198,6 +198,19 @@ pub struct Edition {
     pub assets: Vec<(String, Vec<u8>)>,
 }
 
+impl Gathered {
+    /// The paper without its nudge pages (interests design §17): what every output but the
+    /// Kindle's gets, since only the Kindle's reading data can carry a tap. Section indexes in
+    /// `news` and `reading` are unchanged: nudges come after every other section.
+    pub fn without_nudges(&self) -> Gathered {
+        let mut g = self.clone();
+        g.edition
+            .sections
+            .retain(|s| !sources::nudges::is_nudge(&s.key));
+        g
+    }
+}
+
 impl Edition {
     /// `<paper> — Tuesday, October 20, 2026`
     pub fn full_title(&self) -> String {
@@ -330,6 +343,7 @@ impl BuildReport {
 }
 
 /// A gathered edition plus which of its sections carry news stories (for the headlines).
+#[derive(Clone)]
 pub struct Gathered {
     pub edition: Edition,
     pub news: Vec<usize>,
@@ -353,6 +367,18 @@ pub struct GatherOptions {
     /// What Deckle noticed and hasn't named yet, for the editor (interests design §6). The
     /// caller keeps `interests.json`; this crate never sees it.
     pub naming: Vec<NamingCandidate>,
+    /// What Deckle noticed, to print as tappable pages (interests design §7) when
+    /// `[learning] nudges` is on; at most [`sources::nudges::MAX`] are printed.
+    pub nudges: Vec<Nudge>,
+}
+
+/// A suggestion the paper may carry as a page of its own (interests design §7).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Nudge {
+    /// The candidate's key in `interests.json`; the section's key is `nudge:<key>`.
+    pub key: String,
+    pub name: String,
+    pub why: String,
 }
 
 /// A subject the paper noticed, as the editor sees it: its key, the phrase as read, and up to
@@ -673,6 +699,16 @@ pub fn gather_with_editor(
             ));
         }
     }
+    // What Deckle noticed, as the last pages, each its own section so a tap can be told apart
+    // (interests design §7, §15); never news, never in the editor's prompt.
+    if cfg.learning.enabled && cfg.learning.nudges {
+        for n in opts.nudges.iter().take(sources::nudges::MAX) {
+            // the nudge page links to its confirmation page, the next file
+            let ok_href = format!("s{}.xhtml", edition.sections.len() + 2);
+            edition.sections.push(sources::nudges::section(n, &ok_href));
+            edition.sections.push(sources::nudges::confirmation(n));
+        }
+    }
     edition.drop_template_photos();
     let mut gathered = Gathered {
         edition,
@@ -739,11 +775,13 @@ pub fn build_gathered(
     let mut r = report(&gathered.edition, path);
     r.prefix = edition_prefix(cfg);
     r.long_reads = long_reads;
+    // Every other output gets the paper without its nudge pages (interests design §17).
+    let plain = gathered.without_nudges();
     // The fetch kept the photos in color for an export; the paper above grayed them.
     if cfg.wants_color() {
         let dir = out_dir.join("color");
         let color = dir.join(format!("{stem}.epub"));
-        write_edition_as(&gathered, &color, config::Photos::Color)?;
+        write_edition_as(&plain, &color, config::Photos::Color)?;
         r.color_epub = Some(color);
         for lr in &gathered.long_reads {
             let p = dir.join(format!("{}.epub", lr.file_stem));
@@ -759,7 +797,7 @@ pub fn build_gathered(
         if let Some(dir) = p.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        std::fs::write(&p, pdf::render(&gathered, screen, photos))
+        std::fs::write(&p, pdf::render(&plain, screen, photos))
             .map_err(|e| format!("{}: {e}", p.display()))?;
         r.pdfs.push(PdfBuild {
             screen,
@@ -771,7 +809,7 @@ pub fn build_gathered(
         let dir = out_dir
             .join("bundle")
             .join(if books { "books" } else { "paper" });
-        let path = bundle::write(&gathered, &r, &dir, books, now)?;
+        let path = bundle::write(&plain, &r, &dir, books, now)?;
         r.bundles.push(BundleBuild { books, path });
     }
     r.reading_outcomes = gathered.reading_outcomes.clone();

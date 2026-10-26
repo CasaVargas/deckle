@@ -332,6 +332,25 @@ pub fn shelf_on(
         ) {
             eprintln!("learning: {e}");
         }
+        // a nudge tapped on the Kindle is an accept (interests design §7)
+        let learning_path = config.with_file_name("interests.json");
+        let mut learning = deckle_readership::Learning::load(&learning_path);
+        let mut cfg = cfg;
+        let today = deckle_digest::chrono::Local::now().date_naive();
+        let added = deckle_readership::learn::accept_nudges(&mut learning, &mut cfg, &state, today);
+        if !added.is_empty() {
+            match deckle_digest::config::save(&digest, &cfg) {
+                Ok(()) => {
+                    if let Err(e) = learning.save(&learning_path) {
+                        eprintln!("learning: {e}");
+                    }
+                    for name in added {
+                        eprintln!("Added {name} to your interests (you tapped it in the paper).");
+                    }
+                }
+                Err(e) => eprintln!("learning: {e}"),
+            }
+        }
     }
     Ok(DeviceShelf {
         device: device.name,

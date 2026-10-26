@@ -202,6 +202,7 @@ input[type=checkbox] { padding: 0; }
 .feed.interest { grid-template-columns: 150px 1fr 1fr 1fr 28px; }
 .add-interest { width: 100%; }
 .add-interest input { width: 100%; }
+.learning { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 8px; }
 .topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; width: 100%; }
 
 /* Kindle tab (library design §5) */
