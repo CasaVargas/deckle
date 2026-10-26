@@ -64,6 +64,7 @@ pub fn run() {
             commands::start_tab,
             daily::daily_state,
             daily::papers_list,
+            daily::masthead_missing,
             daily::paper_create,
             daily::daily_setup,
             daily::daily_save,

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Ten masthead faces, and a new default.** The Daily's title can be drawn in Manufacturing Consent (the new default), Grenze Gotisch, Pirata One, Texturina, UnifrakturMaguntia (the old default; `masthead = "blackletter"` still picks it), Playfair, Bodoni, Caslon, Old Standard or Inter, all under the SIL Open Font License. A face without a letter of your title falls back to Manufacturing Consent, then Old Standard.
 - **Local no longer repeats a story.** The Daily's Local section skips a story an earlier section already printed and refills with its next one.
 - **The Daily: a paper you subscribe to prints in full.** The Pilot and other BLOX (TownNews) papers: sign in once, pick its sections, and they print as their own section group. Stories your plan doesn't cover print as a stranger sees them, with the reason.
 - **Papers you subscribe to.** The Daily: accounts for the papers you subscribe to (`deckle digest
