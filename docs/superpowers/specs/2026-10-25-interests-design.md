@@ -468,3 +468,23 @@ Increment 2 (§11 item 2) landed from `docs/superpowers/plans/2026-10-26-interes
   desktop save; the CLI has no rename.
 - **Not yet:** the editor's naming of candidates (increment 3; `Candidate.named` is parsed and
   honoured by `suggest` and `accept` already), nudges (increment 4).
+
+## 16. Implementation notes, PR 3 (2026-10-26)
+
+Increment 3 (§11 item 3) landed from `docs/superpowers/plans/2026-10-26-interests-editor.md`.
+
+- **Relevance** rides in the one completion: each interest section carries `interest: {name,
+  also}` (never `not`); the answer's `relevance` holds per-story scores 0/1/2. Zeros are
+  dropped after duplicate removals, the rest stable-sorted by score so recency holds within a
+  score; an unscored story counts as 1; a section left empty prints "Nothing new about X
+  today." The lead is never refetched. An invalid relevance entry (a non-interest section, a
+  foreign story, a score over 2, a story twice) invalidates the whole answer, as every other
+  part does.
+- **Naming**: candidates travel in through `GatherOptions::naming` (key, phrase, up to five
+  Tap headlines; at most ten) and names come back on `Gathered::names`; `deckle-digest` never
+  reads `interests.json`. The CLI's build fills the candidates from `learn::naming_candidates`
+  (ranked, unnamed, with at least one Tap hit; highlight text and shelf authors never travel)
+  and stores the answers with `record_names`. `suggest`/`accept` already used `Candidate.named`.
+- **Over any cap** the editor makes no edit at all (existing behaviour) rather than skipping
+  relevance only.
+- **Not yet:** nudges (increment 4).

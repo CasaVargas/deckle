@@ -468,6 +468,94 @@ fn shelf_query(name: &str) -> String {
 /// dismissed lately, with `min_stories` distinct stories across at least two days inside
 /// `window_days`; the top five by stories, then by their latest day.
 pub fn suggest(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Noticed> {
+    rank(learning, cfg, today).into_iter().take(TOP).collect()
+}
+
+/// A section whose headlines are public news (design §6): what the editor may see. Saved
+/// reading, the shelf, calendars and highlights are not.
+fn public_news(section: &str) -> bool {
+    section == "local"
+        || section.starts_with("local:")
+        || section.starts_with("feeds:")
+        || section.starts_with("interests:")
+}
+
+/// `key` as it is printed in `headline`, when it is there: the public spelling of a phrase.
+fn as_printed(headline: &str, key: &str) -> Option<String> {
+    let lower = headline.to_lowercase();
+    let at = lower.find(key)?;
+    // byte offsets of the lowercase text line up with the original only for ASCII; fall back
+    // to the key itself when they don't
+    headline
+        .get(at..at + key.len())
+        .filter(|s| s.to_lowercase() == key)
+        .map(str::to_owned)
+}
+
+/// Candidates the editor may name (design §6): the ones that would rank, not named yet, with
+/// at least one Tap hit in a public news section inside the window (highlight text, shelf
+/// authors and anything you saved or own never travel); each as `(key, phrase, headlines)`
+/// with the phrase as a public headline printed it and up to five such headlines, newest
+/// first; at most ten.
+pub fn naming_candidates(
+    learning: &Learning,
+    cfg: &Config,
+    today: NaiveDate,
+) -> Vec<(String, String, Vec<String>)> {
+    let first = today - Days::new(u64::from(cfg.learning.window_days));
+    rank(learning, cfg, today)
+        .into_iter()
+        .filter_map(|n| {
+            let c = learning.candidates.get(&n.key)?;
+            if c.named.is_some() {
+                return None;
+            }
+            let mut taps: Vec<&Hit> = c
+                .hits
+                .iter()
+                .filter(|h| h.signal == Signal::Tap && h.date >= first && public_news(&h.section))
+                .collect();
+            if taps.is_empty() {
+                return None;
+            }
+            taps.sort_by_key(|h| std::cmp::Reverse(h.date));
+            let mut headlines: Vec<String> = Vec::new();
+            for h in taps {
+                if !headlines.contains(&h.title) {
+                    headlines.push(h.title.clone());
+                }
+                if headlines.len() == 5 {
+                    break;
+                }
+            }
+            let phrase = headlines
+                .iter()
+                .find_map(|h| as_printed(h, &n.key))
+                .unwrap_or_else(|| n.key.clone());
+            Some((n.key.clone(), phrase, headlines))
+        })
+        .take(10)
+        .collect()
+}
+
+/// Stores the editor's names on known candidates as `(key, name, query)`; unknown keys are
+/// ignored. Returns how many were set.
+pub fn record_names(learning: &mut Learning, names: &[(String, String, String)]) -> usize {
+    let mut n = 0;
+    for (key, name, query) in names {
+        if let Some(c) = learning.candidates.get_mut(key) {
+            c.named = Some(Named {
+                name: name.clone(),
+                query: query.clone(),
+            });
+            n += 1;
+        }
+    }
+    n
+}
+
+/// Every candidate that qualifies, best first (see [`suggest`]).
+fn rank(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Noticed> {
     if !cfg.learning.enabled {
         return Vec::new();
     }
@@ -537,7 +625,7 @@ pub fn suggest(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Notic
             .then(b.1.cmp(&a.1))
             .then(a.2.key.cmp(&b.2.key))
     });
-    out.into_iter().take(TOP).map(|(_, _, n)| n).collect()
+    out.into_iter().map(|(_, _, n)| n).collect()
 }
 
 /// Makes candidate `key` an interest: writes its entry into `cfg` (a shelf author with a

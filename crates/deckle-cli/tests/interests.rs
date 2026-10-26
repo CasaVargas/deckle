@@ -230,3 +230,34 @@ fn dismiss_hides_a_suggestion() {
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     assert!(v["noticed"].as_array().unwrap().is_empty(), "{v}");
 }
+
+#[test]
+fn a_candidate_the_editor_named_shows_that_name_and_accept_uses_its_search() {
+    use deckle_readership::learn::{Learning, Named};
+    let h = setup();
+    seed_noticed(&h);
+    let path = h.config.with_file_name("interests.json");
+    let mut l = Learning::load(&path);
+    l.candidates.get_mut("bryce young").unwrap().named = Some(Named {
+        name: "Bryce Young (QB)".into(),
+        query: "\"Bryce Young\" Panthers".into(),
+    });
+    l.save(&path).unwrap();
+    let o = h
+        .deckle()
+        .args(["--json", "digest", "interests"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["noticed"][0]["name"], "Bryce Young (QB)", "{v}");
+    assert_eq!(v["noticed"][0]["query"], "\"Bryce Young\" Panthers");
+    h.deckle()
+        .args(["digest", "interests", "accept", "Bryce Young (QB)"])
+        .assert()
+        .success();
+    let text = std::fs::read_to_string(&h.config).unwrap();
+    assert!(
+        text.contains("name = \"Bryce Young (QB)\"") && text.contains("Panthers"),
+        "{text}"
+    );
+}

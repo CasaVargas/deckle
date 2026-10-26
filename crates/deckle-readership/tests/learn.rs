@@ -425,3 +425,164 @@ fn renaming_moves_the_acceptance_and_the_candidate() {
     assert_eq!(l.candidates["bryce young (qb)"].display, "Bryce Young");
     assert!(!l.rename("nobody", "x"));
 }
+
+// ---- naming through the editor (interests design §6) ----
+
+use deckle_readership::learn::{naming_candidates, record_names};
+
+#[test]
+fn naming_candidates_skip_shelf_and_highlight_only_and_named() {
+    let mut l = seeded();
+    let stop = HashSet::new();
+    // a highlight-only subject (its hits' titles are clipped text) and a shelf author
+    for (date, title) in [
+        ("2026-10-20", "Dalton looked sharp in relief"),
+        ("2026-10-22", "Dalton again"),
+        ("2026-10-23", "Dalton starts"),
+    ] {
+        note(&mut l, &stop, title, hit(date, title, Signal::Highlight));
+    }
+    let now: DateTime<Utc> = "2026-10-25T12:00:00Z".parse().unwrap();
+    let shelf = shelf_with(
+        "Brandon Sanderson",
+        "2026-10-24T20:00:00Z",
+        "2026-10-24T19:00:00Z",
+    );
+    record_shelf(&mut l, &shelf, now, &stop);
+    let c = naming_candidates(&l, &cfg(), today());
+    let keys: Vec<&str> = c.iter().map(|(k, _, _)| k.as_str()).collect();
+    assert_eq!(keys, ["bryce young"], "{keys:?}");
+    let (_, phrase, headlines) = &c[0];
+    assert_eq!(phrase, "Bryce Young");
+    assert_eq!(headlines.len(), 3);
+    assert!(headlines.iter().all(|h| h.contains("Bryce Young")));
+    // once named, it isn't sent again
+    assert_eq!(
+        record_names(
+            &mut l,
+            &[
+                (
+                    "bryce young".into(),
+                    "Bryce Young".into(),
+                    "\"Bryce Young\" Panthers".into()
+                ),
+                ("nobody".into(), "X".into(), "x".into()),
+            ]
+        ),
+        1
+    );
+    assert!(naming_candidates(&l, &cfg(), today()).is_empty());
+    let s = suggest(&l, &cfg(), today());
+    let young = s.iter().find(|n| n.key == "bryce young").unwrap();
+    assert_eq!(young.name, "Bryce Young");
+    assert_eq!(young.query.as_deref(), Some("\"Bryce Young\" Panthers"));
+    let mut c = cfg();
+    let entry = accept(&mut l, &mut c, "bryce young", today()).unwrap();
+    assert_eq!(entry.query, "\"Bryce Young\" Panthers");
+}
+
+#[test]
+fn naming_candidates_send_at_most_ten_with_five_newest_headlines() {
+    let mut l = Learning::default();
+    let stop = HashSet::new();
+    for n in 0..12 {
+        let name = format!("Topic{n}");
+        for i in 0..7 {
+            let date = if i % 2 == 0 {
+                "2026-10-20"
+            } else {
+                "2026-10-23"
+            };
+            let title = format!("{name} story {i}");
+            note(&mut l, &stop, &title, hit(date, &title, Signal::Tap));
+        }
+    }
+    let c = naming_candidates(&l, &cfg(), today());
+    assert_eq!(c.len(), 10);
+    assert!(c.iter().all(|(_, _, h)| h.len() == 5));
+    assert!(
+        c[0].2[0].contains("story 1")
+            || c[0].2[0].contains("story 3")
+            || c[0].2[0].contains("story 5"),
+        "newest first: {:?}",
+        c[0].2
+    );
+}
+
+#[test]
+fn naming_sends_only_public_headlines_inside_the_window_and_the_phrase_as_printed() {
+    let mut l = Learning::default();
+    let stop = HashSet::new();
+    let private = |date: &str, section: &str, title: &str| Hit {
+        date: d(date),
+        section: section.into(),
+        title: title.into(),
+        signal: Signal::Tap,
+    };
+    // three taps on saved articles and one on the shelf: a candidate, but nothing to send
+    note(
+        &mut l,
+        &stop,
+        "Secret Project memo",
+        private("2026-10-20", "reading", "Secret Project memo"),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Secret Project update",
+        private("2026-10-22", "reading", "Secret Project update"),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Secret Project book",
+        private("2026-10-23", "shelf", "Secret Project book"),
+    );
+    // a public subject first spelled oddly in a private title, then printed in the news
+    note(
+        &mut l,
+        &stop,
+        "BRYCE YOUNG notes",
+        private("2026-10-19", "reading", "BRYCE YOUNG notes"),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Bryce Young benched",
+        hit("2026-10-20", "Bryce Young benched", Signal::Tap),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Bryce Young returns",
+        hit("2026-10-22", "Bryce Young returns", Signal::Tap),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Why Bryce Young sat",
+        hit("2026-10-22", "Why Bryce Young sat", Signal::Tap),
+    );
+    // an old public headline, outside the window
+    note(
+        &mut l,
+        &stop,
+        "Bryce Young drafted",
+        hit("2026-09-01", "Bryce Young drafted", Signal::Tap),
+    );
+    let c = naming_candidates(&l, &cfg(), today());
+    let keys: Vec<&str> = c.iter().map(|(k, _, _)| k.as_str()).collect();
+    assert_eq!(keys, ["bryce young"], "{keys:?}");
+    let (_, phrase, headlines) = &c[0];
+    assert_eq!(
+        phrase, "Bryce Young",
+        "as printed in a public headline, not the private spelling"
+    );
+    assert_eq!(headlines.len(), 3, "{headlines:?}");
+    assert!(
+        headlines
+            .iter()
+            .all(|h| !h.contains("notes") && !h.contains("drafted")),
+        "{headlines:?}"
+    );
+}

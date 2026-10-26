@@ -334,14 +334,36 @@ pub struct Gathered {
     pub reading_outcomes: Vec<(String, reading::Outcome)>,
     /// One-line notices for the person running the build.
     pub notes: Vec<String>,
+    /// The editor's names for `GatherOptions::naming` (empty without the editor).
+    pub names: Vec<Naming>,
 }
 
 /// What a caller knows that the config doesn't.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct GatherOptions {
     /// The Kindle's own progress fraction may print as "about N%" on From Your Shelf (set from
     /// `deckle_shelf::KINDLE_FRACTION_OK`, which this crate can't see).
     pub shelf_fraction_ok: bool,
+    /// What Deckle noticed and hasn't named yet, for the editor (interests design §6). The
+    /// caller keeps `interests.json`; this crate never sees it.
+    pub naming: Vec<NamingCandidate>,
+}
+
+/// A subject the paper noticed, as the editor sees it: its key, the phrase as read, and up to
+/// five headlines it came from.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NamingCandidate {
+    pub key: String,
+    pub phrase: String,
+    pub headlines: Vec<String>,
+}
+
+/// What the editor called a candidate: a clean name and a search that finds it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Naming {
+    pub key: String,
+    pub name: String,
+    pub query: String,
 }
 
 /// Fetches every configured source through `get`. Never fails: a source error becomes the
@@ -608,8 +630,16 @@ pub fn gather_with_editor(
         long_reads,
         reading_outcomes,
         notes,
+        names: Vec::new(),
     };
-    editor::edit(&mut gathered, &cfg.llm, key, post);
+    editor::edit(
+        &mut gathered,
+        &cfg.llm,
+        key,
+        post,
+        &cfg.interests,
+        &opts.naming,
+    );
     gathered
 }
 

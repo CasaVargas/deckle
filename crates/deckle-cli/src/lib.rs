@@ -2145,7 +2145,13 @@ fn digest_interests(
         learning
             .candidates
             .iter()
-            .find(|(k, c)| **k == want || c.display.trim().to_lowercase() == want)
+            .find(|(k, c)| {
+                **k == want
+                    || c.display.trim().to_lowercase() == want
+                    || c.named
+                        .as_ref()
+                        .is_some_and(|n| n.name.trim().to_lowercase() == want)
+            })
             .map(|(k, _)| k.clone())
     };
     match action {
@@ -2433,8 +2439,9 @@ fn digest(
                 now,
                 &output,
                 &deckle_digest::Http,
-                &gather_options(),
+                &gather_options_for(&cfg, date),
             )?;
+            record_naming(&cfg, &gathered);
             report
                 .notes
                 .extend(archive_to_morgue(&cfg, date, &report.epub, &gathered));
@@ -2544,8 +2551,9 @@ fn digest(
                 now,
                 &work,
                 &deckle_digest::Http,
-                &gather_options(),
+                &gather_options_for(&cfg, date),
             )?;
+            record_naming(&cfg, &gathered);
             let opts = paper_options(
                 located.as_ref().map(|l| l.path.clone()),
                 keep_work_dir,
@@ -2569,8 +2577,9 @@ fn digest(
                     now,
                     &work,
                     &deckle_digest::Http,
-                    &gather_options(),
+                    &gather_options_for(&cfg, date),
                 )?;
+                record_naming(&cfg, &gathered);
                 long_reads = prepare_long_reads(&built, &opts).0;
             }
             // Keep the paper in the Morgue whatever happens to its conversion.
@@ -3880,6 +3889,48 @@ fn shelf_on(cfg: &deckle_digest::Config, id: &str) -> bool {
 fn gather_options() -> deckle_digest::GatherOptions {
     deckle_digest::GatherOptions {
         shelf_fraction_ok: deckle_shelf::KINDLE_FRACTION_OK,
+        naming: Vec::new(),
+    }
+}
+
+/// The build's options with what Deckle noticed and the editor may name (interests design
+/// §6): only with the editor on, from the paper's own `interests.json`.
+fn gather_options_for(
+    cfg: &deckle_digest::Config,
+    date: deckle_digest::chrono::NaiveDate,
+) -> deckle_digest::GatherOptions {
+    let mut opts = gather_options();
+    if cfg.llm.enabled {
+        let learning =
+            deckle_readership::Learning::load(&deckle_readership::Learning::path_for(cfg));
+        opts.naming = deckle_readership::learn::naming_candidates(&learning, cfg, date)
+            .into_iter()
+            .map(|(key, phrase, headlines)| deckle_digest::NamingCandidate {
+                key,
+                phrase,
+                headlines,
+            })
+            .collect();
+    }
+    opts
+}
+
+/// Keeps the names the editor gave (interests design §6). Never fails the build.
+fn record_naming(cfg: &deckle_digest::Config, gathered: &deckle_digest::Gathered) {
+    if gathered.names.is_empty() {
+        return;
+    }
+    let path = deckle_readership::Learning::path_for(cfg);
+    let mut learning = deckle_readership::Learning::load(&path);
+    let names: Vec<(String, String, String)> = gathered
+        .names
+        .iter()
+        .map(|n| (n.key.clone(), n.name.clone(), n.query.clone()))
+        .collect();
+    if deckle_readership::learn::record_names(&mut learning, &names) > 0
+        && let Err(e) = learning.save(&path)
+    {
+        eprintln!("learning: {e}");
     }
 }
 
