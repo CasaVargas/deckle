@@ -547,6 +547,8 @@ pub fn gather_with_editor(
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
+            // The group sections arrive with the gather wiring (publisher subscriptions PR 2).
+            SectionKind::Subscribed => {}
         }
         // Each `[[feeds]]` entry is its own section, in file order; so is each place after Local.
         for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {

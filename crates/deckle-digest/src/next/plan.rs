@@ -368,6 +368,8 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             "From Wikipedia".into(),
             "1 page".into(),
         )],
+        // The page plan rows for subscribed groups arrive with the gather wiring.
+        SectionKind::Subscribed => Vec::new(),
     }
 }
 
@@ -448,7 +450,7 @@ pub fn estimate(rows: &[PlanRow], planned: &[usize], history: &History, cfg: &Co
         };
         total += match r.kind {
             SectionKind::Reading => per(3.0),
-            SectionKind::Local | SectionKind::Feeds => per(story),
+            SectionKind::Local | SectionKind::Feeds | SectionKind::Subscribed => per(story),
             SectionKind::Weather => whole(&r.key, 2.0),
             SectionKind::Lottery => whole(&r.key, 1.0),
             SectionKind::Horoscope => {

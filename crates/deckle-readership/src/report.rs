@@ -81,9 +81,9 @@ const KINDS: [SectionKind; 9] = [
 ];
 
 fn kind_of(key: &str) -> Option<SectionKind> {
-    KINDS
-        .into_iter()
-        .find(|k| *k != SectionKind::Feeds && section_key(*k, None) == key)
+    KINDS.into_iter().find(|k| {
+        !matches!(k, SectionKind::Feeds | SectionKind::Subscribed) && section_key(*k, None) == key
+    })
 }
 
 /// What the paper prints for a section, for one no edition in the window had yet.

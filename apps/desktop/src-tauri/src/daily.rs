@@ -139,6 +139,7 @@ pub fn section_names(cfg: &Config) -> Vec<String> {
                 out.extend(cfg.local.places.iter().map(|p| p.name.clone()));
             }
             K::Feeds => out.extend(cfg.feeds.iter().map(|f| f.name.clone())),
+            K::Subscribed => out.extend(cfg.subscribed.iter().map(|g| g.title())),
             K::Lottery => out.push("Lottery".into()),
             K::Horoscope => out.push("Horoscope".into()),
             K::Puzzle => out.push("Puzzle".into()),
@@ -316,6 +317,12 @@ fn normalize_subscriptions(cfg: &mut Config) -> Result<(), String> {
     for s in &mut cfg.subscriptions {
         s.site = deckle_digest::config::SubscriptionConfig::normalized_site(&s.site)?;
         s.username = s.username.trim().to_owned();
+    }
+    // `[[subscribed]]` groups: a blank row is dropped, a site is a bare host.
+    cfg.subscribed.retain(|g| !g.site.trim().is_empty());
+    for g in &mut cfg.subscribed {
+        g.site = deckle_digest::config::SubscriptionConfig::normalized_site(&g.site)
+            .map_err(|e| e.replacen("[[subscriptions]]", "[[subscribed]]", 1))?;
     }
     Ok(())
 }

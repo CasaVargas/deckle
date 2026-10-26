@@ -23,6 +23,9 @@ pub enum SectionKind {
     /// looked up (shelf design).
     Shelf,
     Onthisday,
+    /// Every `[[subscribed]]` group of a paper, in file order: a subscribed publisher's own
+    /// feeds, read signed in (publisher subscriptions design §3).
+    Subscribed,
 }
 
 /// The key a section goes by across editions (readership design §4): the kind's name, or
@@ -42,6 +45,11 @@ pub fn section_key(kind: SectionKind, feed: Option<&str>) -> String {
         SectionKind::Puzzle => "puzzle",
         SectionKind::Shelf => "shelf",
         SectionKind::Onthisday => "onthisday",
+        // the caller builds a group's key with `subscribed_key`; `None` is the kind itself
+        SectionKind::Subscribed => match feed {
+            Some(key) => return key.to_owned(),
+            None => "subscribed",
+        },
     };
     name.to_owned()
 }
@@ -105,6 +113,10 @@ pub struct Config {
     /// household setting: every paper sees the same list. Left out of a save while empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subscriptions: Vec<SubscriptionConfig>,
+    /// Publisher groups this paper prints in full (`[[subscribed]]`), a paper-file setting.
+    /// Left out of a save while empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subscribed: Vec<SubscribedConfig>,
     /// Your Day: today's events from calendars (almanac design §5). Left out of a save
     /// while it's untouched.
     #[serde(skip_serializing_if = "DayConfig::is_default")]
@@ -254,6 +266,7 @@ impl Default for Config {
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
             subscriptions: Vec::new(),
+            subscribed: Vec::new(),
             day: DayConfig::default(),
             puzzle: PuzzleConfig::default(),
             shelf: ShelfConfig::default(),
@@ -865,6 +878,62 @@ impl SubscriptionConfig {
     }
 }
 
+/// `[[subscribed]]`: a subscribed publisher's sections, printed as their own group.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SubscribedConfig {
+    /// A bare lowercase host, normalized like a subscription's.
+    pub site: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The adapter's section slugs, in print order.
+    pub sections: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_items: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_age_hours: Option<u32>,
+}
+
+/// The section key of one `[[subscribed]]` slug: `subscribed:<site>:<slug>`.
+pub fn subscribed_key(site: &str, slug: &str) -> String {
+    format!("subscribed:{site}:{slug}")
+}
+
+impl SubscribedConfig {
+    /// The group's heading: its name, else the site.
+    pub fn title(&self) -> String {
+        match self.name.as_deref().map(str::trim) {
+            Some(n) if !n.is_empty() => n.to_owned(),
+            _ => self.site.clone(),
+        }
+    }
+
+    /// At least one section, each a slug in `known` (slug, display name).
+    pub fn validate(&self, known: &[(&str, &str)]) -> Result<(), String> {
+        if self.sections.is_empty() {
+            return Err(format!(
+                "[[subscribed]] {}: sections is empty; known: {}",
+                self.site,
+                known_list(known)
+            ));
+        }
+        for slug in &self.sections {
+            if !known.iter().any(|(k, _)| k == slug) {
+                return Err(format!(
+                    "[[subscribed]] {}: unknown section {slug:?}; known: {}",
+                    self.site,
+                    known_list(known)
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn known_list(known: &[(&str, &str)]) -> String {
+    known.iter().map(|(k, _)| *k).collect::<Vec<_>>().join(", ")
+}
+
 /// `[email]`: the paper to a Send-to-Kindle address over the owner's own SMTP account (email
 /// design §5). The password is never here: it's in the system keychain (`secret`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1147,6 +1216,16 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # site = "thepilot.com"           # just the host, no https:// or path
 # username = "you@example.com"
 
+# Print a subscribed newspaper's own sections in full, as a group in the paper. The site
+# should also be in [[subscriptions]] above. Sections for a BLOX site: news, sports, opinion,
+# obituaries, business, lifestyles.
+# [[subscribed]]
+# site = "thepilot.com"
+# name = "The Pilot"              # optional heading; the site is used without it
+# sections = ["news", "sports"]   # in print order
+# max_items = 8                   # per section; defaults to [local] max_items
+# max_age_hours = 48              # defaults to [local] max_age_hours
+
 # When the paper is built, once `deckle digest schedule` is installed.
 # [schedule]
 # at = "05:30"                    # 24-hour
@@ -1202,6 +1281,14 @@ feeds = []
 # enabled = true
 # to = "dad_ABC123@kindle.com"
 # usb_too = false
+
+# Print a subscribed newspaper's own sections in full (its site goes in digest.toml's
+# [[subscriptions]]). Sections for a BLOX site: news, sports, opinion, obituaries, business,
+# lifestyles.
+# [[subscribed]]
+# site = "thepilot.com"
+# name = "The Pilot"
+# sections = ["news", "sports"]
 "#;
 
 impl Config {
@@ -1209,6 +1296,7 @@ impl Config {
         let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
         cfg.normalize();
         cfg.normalize_subscriptions()?;
+        cfg.normalize_subscribed()?;
         cfg.email.validate()?;
         cfg.llm.validate()?;
         cfg.schedule.validate()?;
@@ -1255,6 +1343,17 @@ impl Config {
         Ok(())
     }
 
+    /// Normalizes each `[[subscribed]]` site and checks its slugs against the BLOX list (the
+    /// only adapter, so the only list).
+    fn normalize_subscribed(&mut self) -> Result<(), String> {
+        for g in &mut self.subscribed {
+            g.site = SubscriptionConfig::normalized_site(&g.site)
+                .map_err(|e| e.replacen("[[subscriptions]]", "[[subscribed]]", 1))?;
+            g.validate(crate::publisher::blox::SECTIONS)?;
+        }
+        Ok(())
+    }
+
     /// The subscription for `host`: its site, or a subdomain of it.
     pub fn subscription(&self, host: &str) -> Option<&SubscriptionConfig> {
         let host = host.to_ascii_lowercase();
@@ -1278,6 +1377,7 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     for s in &cfg.subscriptions {
         s.validate()?;
     }
+    cfg.normalize_subscribed()?;
     let cfg = &cfg;
     cfg.email.validate()?;
     cfg.llm.validate()?;
@@ -2037,6 +2137,120 @@ mod tests {
         let subs = Config::parse(&text).unwrap().subscriptions;
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].site, "thepilot.com");
+    }
+
+    #[test]
+    fn subscribed_groups_parse_round_trip_and_leave_an_empty_list_out() {
+        let text = "[[subscribed]]\nsite = \"https://www.ThePilot.com/\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\nmax_items = 8\nmax_age_hours = 48\n";
+        let cfg = Config::parse(text).unwrap();
+        assert_eq!(cfg.subscribed.len(), 1);
+        assert_eq!(cfg.subscribed[0].site, "thepilot.com");
+        assert_eq!(cfg.subscribed[0].title(), "The Pilot");
+        assert_eq!(cfg.subscribed[0].sections, ["news", "sports"]);
+        assert_eq!(cfg.subscribed[0].max_items, Some(8));
+        let back = Config::parse(&toml::to_string(&cfg).unwrap()).unwrap();
+        assert_eq!(back.subscribed, cfg.subscribed);
+        let empty = Config::default();
+        assert!(!toml::to_string(&empty).unwrap().contains("subscribed"));
+        let bare =
+            Config::parse("[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\n")
+                .unwrap();
+        assert_eq!(bare.subscribed[0].title(), "thepilot.com");
+        assert!(
+            Config::parse("[[subscribed]]\nsite = \"a.com\"\nsections = [\"news\"]\nx = 1\n")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn subscribed_rejects_an_unknown_or_missing_section() {
+        let e = Config::parse("[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"obits\"]\n")
+            .unwrap_err();
+        assert_eq!(
+            e,
+            "[[subscribed]] thepilot.com: unknown section \"obits\"; known: news, sports, opinion, obituaries, business, lifestyles"
+        );
+        let e =
+            Config::parse("[[subscribed]]\nsite = \"thepilot.com\"\nsections = []\n").unwrap_err();
+        assert!(e.contains("thepilot.com") && e.contains("sections"), "{e}");
+        assert!(
+            Config::parse("[[subscribed]]\nsite = \"a.com/x\"\nsections = [\"news\"]\n").is_err()
+        );
+    }
+
+    #[test]
+    fn saving_keeps_subscribed_and_validates_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, STARTER).unwrap();
+        let mut c = Config::load(&path).unwrap();
+        save(&path, &c).unwrap();
+        assert!(
+            !std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("\n[[subscribed]]")
+        );
+        c.subscribed.push(SubscribedConfig {
+            site: "https://www.thepilot.com".into(),
+            name: None,
+            sections: vec!["news".into()],
+            max_items: None,
+            max_age_hours: None,
+        });
+        save(&path, &c).unwrap();
+        let back = Config::load(&path).unwrap();
+        assert_eq!(back.subscribed[0].site, "thepilot.com");
+        c.subscribed[0].sections = vec!["obits".into()];
+        assert!(save(&path, &c).unwrap_err().contains("unknown section"));
+    }
+
+    #[test]
+    fn subscribed_keys_and_kind() {
+        assert_eq!(
+            subscribed_key("thepilot.com", "news"),
+            "subscribed:thepilot.com:news"
+        );
+        assert_eq!(
+            section_key(
+                SectionKind::Subscribed,
+                Some("subscribed:thepilot.com:news")
+            ),
+            "subscribed:thepilot.com:news"
+        );
+        assert_eq!(section_key(SectionKind::Subscribed, None), "subscribed");
+        assert_eq!(
+            serde_json::to_string(&SectionKind::Subscribed).unwrap(),
+            "\"subscribed\""
+        );
+        assert_eq!(
+            serde_json::from_str::<SectionKind>("\"subscribed\"").unwrap(),
+            SectionKind::Subscribed
+        );
+    }
+
+    #[test]
+    fn the_starter_subscribed_block_parses_once_uncommented() {
+        for starter in [STARTER, PAPER_STARTER] {
+            // PAPER_STARTER is a template with placeholders; its block stands alone.
+            if starter == STARTER {
+                assert!(Config::parse(starter).unwrap().subscribed.is_empty());
+            }
+            let block: String = starter
+                .lines()
+                .skip_while(|l| !l.starts_with("# [[subscribed]]"))
+                .take_while(|l| l.starts_with('#'))
+                .map(|l| format!("{}\n", l.strip_prefix("# ").unwrap_or(l)))
+                .collect();
+            assert!(block.starts_with("[[subscribed]]"), "{block}");
+            let text = if starter == STARTER {
+                format!("{starter}\n{block}")
+            } else {
+                block.clone()
+            };
+            let got = Config::parse(&text).unwrap().subscribed;
+            assert_eq!(got.len(), 1);
+            assert_eq!(got[0].site, "thepilot.com");
+        }
     }
 
     #[test]
