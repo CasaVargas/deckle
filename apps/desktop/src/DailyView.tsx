@@ -22,6 +22,7 @@ import { TOPICS, toggleTopic, topicOn, topicTitle } from "./topics";
 import ExportFolders from "./ExportFolders";
 import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
+import SubscriptionsCard from "./SubscriptionsCard";
 import YourDay from "./YourDay";
 import DailyEditor from "./DailyEditor";
 import type { DailyConfig, DailyState, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PlaceRow, ReadingEntry, RunResult } from "./types";
@@ -814,6 +815,12 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                 setDraft(c);
                 return save(c);
               }}
+            />
+            <SubscriptionsCard
+              subscriptions={draft.subscriptions ?? []}
+              dirty={dirty}
+              onChange={(subs) => edit((c) => (c.subscriptions = subs))}
+              onSave={() => save()}
             />
           </>
         )}

@@ -557,3 +557,5 @@ input[type=checkbox] { padding: 0; }
 
 .preset-picker { display: grid; gap: 0.4rem; padding: 0.65rem; font-size: 0.85rem; }
 .preset-picker select { max-width: 100%; }
+.subscription-row { border-top: 1px solid var(--line); padding: 10px 0 2px; }
+.subscription-row .save-row input[type="password"] { flex: 1; }

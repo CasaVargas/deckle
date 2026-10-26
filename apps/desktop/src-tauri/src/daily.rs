@@ -199,6 +199,40 @@ fn env_var(k: &str) -> Option<String> {
     std::env::var(k).ok()
 }
 
+// ---- Subscriptions (publisher subscriptions design §3) -------------------------------
+
+/// The sites typed into the card as bare hosts; an invalid one is the save's error.
+fn normalize_subscriptions(cfg: &mut Config) -> Result<(), String> {
+    for s in &mut cfg.subscriptions {
+        s.site = deckle_digest::config::SubscriptionConfig::normalized_site(&s.site)?;
+        s.username = s.username.trim().to_owned();
+    }
+    Ok(())
+}
+
+/// Each subscription with whether a password is there and where its session stands; never
+/// the password.
+pub fn subscriptions_status_with(
+    subs: &[deckle_digest::config::SubscriptionConfig],
+    config_path: &Path,
+    keys: &dyn Keyring,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Vec<deckle_digest::session::SiteStatus> {
+    deckle_digest::SessionNet::from_config(config_path, subs, keys, env).status()
+}
+
+fn subscription_for(
+    cfg: &Config,
+    site: &str,
+) -> Result<deckle_digest::config::SubscriptionConfig, String> {
+    let site = deckle_digest::config::SubscriptionConfig::normalized_site(site)?;
+    cfg.subscriptions
+        .iter()
+        .find(|s| s.site == site)
+        .cloned()
+        .ok_or_else(|| format!("no subscription for {site}; save the site first"))
+}
+
 // ---- Tauri commands -----------------------------------------------------------------
 
 #[tauri::command]
@@ -220,8 +254,9 @@ pub fn daily_setup() -> Result<DailyState, String> {
 }
 
 #[tauri::command]
-pub fn daily_save(config: Config) -> Result<DailyState, String> {
+pub fn daily_save(mut config: Config) -> Result<DailyState, String> {
     let path = config_path();
+    normalize_subscriptions(&mut config)?;
     deckle_digest::config::save(&path, &config)?;
     Ok(state_at(&path))
 }
@@ -424,9 +459,110 @@ pub async fn email_test() -> Result<String, String> {
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+pub fn subscriptions_status() -> Result<Vec<deckle_digest::session::SiteStatus>, String> {
+    let path = config_path();
+    let cfg = Config::load(&path)?;
+    Ok(subscriptions_status_with(
+        &cfg.subscriptions,
+        &path,
+        &SystemKeyring,
+        &env_var,
+    ))
+}
+
+/// Writes the keychain for a saved subscription. Nothing reads it back to the window.
+#[tauri::command]
+pub fn subscription_set_password(
+    site: String,
+    password: String,
+) -> Result<Vec<deckle_digest::session::SiteStatus>, String> {
+    let path = config_path();
+    let cfg = Config::load(&path)?;
+    let sub = subscription_for(&cfg, &site)?;
+    let password = Zeroizing::new(password);
+    secret::set_site(&sub, &SystemKeyring, &password).map_err(|e| e.to_string())?;
+    Ok(subscriptions_status_with(
+        &cfg.subscriptions,
+        &path,
+        &SystemKeyring,
+        &env_var,
+    ))
+}
+
+/// Signs in to the site now and keeps the session.
+#[tauri::command]
+pub async fn subscription_test(
+    site: String,
+) -> Result<deckle_digest::session::SessionState, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = config_path();
+        let cfg = Config::load(&path)?;
+        let sub = subscription_for(&cfg, &site)?;
+        let net = deckle_digest::SessionNet::from_config(
+            &path,
+            &cfg.subscriptions,
+            &SystemKeyring,
+            &env_var,
+        );
+        let state = net.sign_in(&sub.site);
+        for note in net.save_jars() {
+            eprintln!("{note}");
+        }
+        Ok(state)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Removes the keychain entry, the config entry and the saved session.
+#[tauri::command]
+pub fn subscription_forget(
+    site: String,
+) -> Result<Vec<deckle_digest::session::SiteStatus>, String> {
+    let path = config_path();
+    let mut cfg = Config::load(&path)?;
+    let sub = subscription_for(&cfg, &site)?;
+    secret::forget_site(&sub, &SystemKeyring).map_err(|e| e.to_string())?;
+    cfg.subscriptions.retain(|s| s.site != sub.site);
+    deckle_digest::config::save(&path, &cfg)?;
+    let jar = deckle_digest::session::jar_path(path.parent().unwrap_or(Path::new("")), &sub.site);
+    if let Err(e) = std::fs::remove_file(&jar)
+        && e.kind() != std::io::ErrorKind::NotFound
+    {
+        eprintln!("couldn't remove {}: {e}", jar.display());
+    }
+    Ok(subscriptions_status_with(
+        &cfg.subscriptions,
+        &path,
+        &SystemKeyring,
+        &env_var,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn subscriptions_status_never_returns_the_password() {
+        use deckle_digest::config::SubscriptionConfig;
+        use deckle_digest::secret::MemoryKeyring;
+        let sub = SubscriptionConfig {
+            site: "thepilot.com".into(),
+            username: "reader@example.com".into(),
+            kind: None,
+        };
+        let keys = MemoryKeyring::default();
+        secret::set_site(&sub, &keys, "hunter2-pilot").unwrap();
+        let cfg = vec![sub];
+        let out =
+            subscriptions_status_with(&cfg, Path::new("/nowhere/digest.toml"), &keys, &|_| None);
+        let json = serde_json::to_string(&out).unwrap();
+        assert!(json.contains("\"has_password\":true"), "{json}");
+        assert!(json.contains("thepilot.com"));
+        assert!(!json.contains("hunter2-pilot"), "{json}");
+    }
 
     #[test]
     fn day_preview_counts_events_and_masks_addresses() {
