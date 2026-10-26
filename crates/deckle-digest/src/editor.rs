@@ -113,7 +113,8 @@ fn try_edit(
         if g.news.contains(&i)
             && (section.key == "local"
                 || section.key.starts_with("local:")
-                || section.key.starts_with("feeds:"))
+                || section.key.starts_with("feeds:")
+                || section.key.starts_with("interests:"))
             && !section.articles.is_empty()
         {
             let id = format!("s{i}");

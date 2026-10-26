@@ -127,6 +127,53 @@ full_text = "lead"              # true, false or "lead"
   section already printed (Local, other places, and earlier feed sections). Local and other places only
   record their titles and are never trimmed themselves; Your Reading is never trimmed or recorded.
 
+### Your interests
+
+A topic section gives you everyone's sports. An **interest** gives you yours: "Carolina
+Panthers", "Rust", "e-ink readers", "Moore County Schools". Each `[[interests]]` entry is its own
+section, and every morning Deckle searches Google News for it (the name in quotes, or your own
+`query`), merges in any `also` searches and `feeds`, keeps only the stories whose headline names
+the interest, and prints the top story whole with the rest as briefs. Add them in the Daily tab
+(**The paper → Your interests**), from the terminal, or in the file:
+
+```toml
+sections = ["reading", "weather", "local", "interests", "feeds", ...]
+
+[[interests]]
+name = "Carolina Panthers"      # the section's title; the search is the name in quotes
+# query = "\"Carolina Panthers\" NFL"   # your own search instead; Google's OR and -word work
+# also = ["Bryce Young"]        # more searches, merged; a story naming one is relevant
+# not = ["Florida Panthers"]    # a story whose headline has one of these is dropped
+# feeds = []                    # RSS feeds merged in
+# max_items = 5
+# full_text = "lead"            # top story whole, the rest briefs; true or false
+# max_age_hours = 72            # interests move slower than the wires
+```
+
+- **Relevance:** Google's search is loose, so a story stays only if its headline (or a feed
+  item's description) names the interest or an `also` phrase, as whole words: "Rust" never
+  matches "trust". The top story's own text is checked again after it's fetched; one that turns
+  out to be about the wrong Rust is dropped and the next is tried.
+- **`not`** is the reader's word: "Florida Panthers" keeps the hockey team out. A one-word name
+  with everyday meanings ("Rust" is also a surname, a film and what happens to iron) wants its own
+  `query`: the card's search field, or `--query` from the terminal.
+- **A quiet day** leaves the section out of the paper rather than printing an empty one; the
+  build notes "Nothing new about Rust today." A source that failed prints "Unavailable today"
+  as any section does.
+- Interests sit before your feeds in the starter, so your interest wins a story over Sports.
+  Each is a row in the page plan (budget editable there) and in How far you read.
+- Interests live in each paper's own file, so Dad's paper has Dad's.
+
+```bash
+deckle digest interests                       # list them
+deckle digest interests add "Rust" --query '"Rust" programming' --also "Cargo"
+deckle digest interests remove "Rust"
+deckle digest --paper kid-courier interests add "Dinosaurs"
+```
+
+The paper noticing what you read and suggesting new interests, and accepting one with a tap on
+the Kindle, come in later increments (`docs/superpowers/specs/2026-10-25-interests-design.md`).
+
 ### The front page and section fronts
 
 The first page is laid out like a paper's front: the lead story, then a two-column table of

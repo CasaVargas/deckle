@@ -2,6 +2,7 @@
 //! One module per network source; each turns a response into a [`crate::Section`].
 
 pub mod feeds;
+pub mod interests;
 pub mod lottery;
 pub mod onthisday;
 pub mod reading;

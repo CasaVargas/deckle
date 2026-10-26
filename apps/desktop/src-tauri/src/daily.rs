@@ -138,6 +138,7 @@ pub fn section_names(cfg: &Config) -> Vec<String> {
                 out.push("Local".into());
                 out.extend(cfg.local.places.iter().map(|p| p.name.clone()));
             }
+            K::Interests => out.extend(cfg.interests.iter().map(|i| i.name.clone())),
             K::Feeds => out.extend(cfg.feeds.iter().map(|f| f.name.clone())),
             K::Lottery => out.push("Lottery".into()),
             K::Horoscope => out.push("Horoscope".into()),
@@ -624,6 +625,19 @@ pub async fn email_test(paper: Option<String>) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn section_names_list_each_interest_like_each_feed() {
+        let cfg = Config::parse(
+            "sections = [\"local\", \"interests\", \"feeds\"]\n[[interests]]\nname = \"Rust\"\n\
+             [[interests]]\nname = \"Carolina Panthers\"\n[[feeds]]\nname = \"HN\"\nurl = \"https://x/f\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            section_names(&cfg),
+            ["Local", "Rust", "Carolina Panthers", "HN"]
+        );
+    }
 
     #[test]
     fn day_preview_counts_events_and_masks_addresses() {

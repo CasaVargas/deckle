@@ -223,7 +223,27 @@ export const STAGE_LABEL: Record<string, string> = {
 
 // ---- The Daily tab (Daily design §5c) ----
 
-export type SectionKind = "reading" | "weather" | "local" | "feeds" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
+export type SectionKind = "reading" | "weather" | "local" | "interests" | "feeds" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
+
+/** One `[[interests]]` entry (interests design §3). */
+export interface InterestConfig {
+  name: string;
+  query?: string;
+  also?: string[];
+  not?: string[];
+  feeds?: string[];
+  max_items: number;
+  full_text?: boolean | "lead";
+  max_age_hours?: number;
+}
+
+/** `[learning]`: what the paper notices about your reading (interests design §5). */
+export interface LearningConfig {
+  enabled: boolean;
+  window_days: number;
+  min_stories: number;
+  nudges: boolean;
+}
 
 export interface FeedConfig {
   name: string;
@@ -259,7 +279,11 @@ export interface DailyConfig {
   max_photos: number;
   sections: SectionKind[];
   local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number; places?: PlaceNews[] };
+  /** `[[interests]]`; absent while there are none. */
+  interests?: InterestConfig[];
   feeds: FeedConfig[];
+  /** `[learning]`; absent while untouched. */
+  learning?: LearningConfig;
   lottery: { games: string[] };
   horoscope: { signs: string[] };
   reading: { inbox: string; max_items: number; long_read_words: number };
@@ -449,6 +473,7 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   reading: "Your Reading",
   weather: "Weather & almanac",
   local: "Local news",
+  interests: "Your interests",
   feeds: "Your feeds",
   shelf: "From Your Shelf",
   lottery: "Lottery",
@@ -457,7 +482,7 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   onthisday: "On This Day",
 };
 
-export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
+export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "interests", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
 
 export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
 
@@ -681,6 +706,8 @@ export interface PagePlanRow {
   feed: number | null;
   /** The `[[local.places]]` index of another place's row. */
   place: number | null;
+  /** The `[[interests]]` index of an interest row. */
+  interest: number | null;
   name: string;
   detail: string;
   budget: string;

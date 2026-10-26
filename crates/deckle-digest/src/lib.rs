@@ -426,6 +426,9 @@ pub fn gather_with_editor(
         Some(_) => Vec::new(),
     };
     let mut kinds = cfg.sections.clone();
+    if !cfg.interests.is_empty() && !kinds.contains(&SectionKind::Interests) {
+        notes.push(sources::interests::NOT_IN_SECTIONS.into());
+    }
     if cfg.paper.is_some() && kinds.contains(&SectionKind::Reading) {
         kinds.retain(|k| *k != SectionKind::Reading);
         notes.push("Saved articles go to the main paper (digest.toml).".into());
@@ -488,6 +491,24 @@ pub fn gather_with_editor(
                     edition.sections.push(place);
                 }
             }
+            SectionKind::Interests => {
+                for interest in &cfg.interests {
+                    match sources::interests::interest_section(
+                        interest,
+                        cfg,
+                        now,
+                        net,
+                        &mut printed,
+                    ) {
+                        Some(section) => {
+                            news.push(edition.sections.len());
+                            edition.sections.push(section);
+                        }
+                        // a quiet day: the section is left out, not printed empty (design §4.6)
+                        None => notes.push(sources::interests::quiet_note(&interest.name)),
+                    }
+                }
+            }
             SectionKind::Feeds => {
                 for feed in &cfg.feeds {
                     news.push(edition.sections.len());
@@ -544,6 +565,10 @@ pub fn gather_with_editor(
         }
         // Each `[[feeds]]` entry is its own section, in file order; so is each place after Local.
         for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {
+            // interest sections arrive keyed (a quiet one is skipped, so indexes don't line up)
+            if !s.key.is_empty() {
+                continue;
+            }
             let name = match kind {
                 SectionKind::Feeds => Some(cfg.feeds[i].name.as_str()),
                 SectionKind::Local if i > 0 => Some(cfg.local.places[i - 1].name.as_str()),
