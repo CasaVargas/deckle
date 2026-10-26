@@ -452,6 +452,45 @@ for USB as before and the run's report says why. `--to <folder>` and `digest pus
   makes macOS ask once whether "deckle wants to use your confidential information": choose
   **Always Allow**, or the 5:30 run waits on that dialog.
 
+## Papers you subscribe to
+
+If you pay for a newspaper's website, the Daily can sign in as you and read its full articles.
+**No publisher is supported yet**; The Pilot and other BLOX papers come next. Until then a
+subscriber story still prints as a headline, with a note saying why.
+(`docs/superpowers/specs/2026-10-25-publisher-subscriptions-design.md`)
+
+Add the account to `digest.toml` (one block per site; the password is not stored here):
+
+```toml
+# A newspaper you subscribe to: the paper signs in as you to read its full articles. The
+# password is not stored here; it goes in the system keychain. One block per site.
+# [[subscriptions]]
+# site = "thepilot.com"           # just the host, no https:// or path
+# username = "you@example.com"
+```
+
+```sh
+deckle digest subscribe                     # list your sites and their state
+deckle digest subscribe thepilot.com --username you@example.com
+                                            # add or update the account, ask for the password
+                                            # without echo, save it, sign in once
+deckle digest subscribe thepilot.com --stdin   # read the password from one line of stdin
+deckle digest subscribe thepilot.com --test    # sign in only, to check the password
+deckle digest subscribe thepilot.com --forget  # remove the account, keychain entry and session
+```
+
+The same fields are in **Daily → The paper → Subscriptions**: site, username, a write-only
+password, **Save password**, **Test sign-in** and **Remove**. `deckle digest lint <url>` prints
+`signed in as <user> at <site>` (or why it couldn't) before its usual report.
+
+- **The password** lives in the system keychain: service `com.casavargas.deckle.site`, account
+  `<username>@<site>`. With no keychain at all (Linux without Secret Service, CI),
+  `DECKLE_SITE_PASSWORD_<SITE>` is read instead: the site uppercased, anything that isn't a letter
+  or digit as `_` (`DECKLE_SITE_PASSWORD_THEPILOT_COM`).
+- **The session** (the cookies from signing in) is kept in `sessions/<site>.json` beside
+  `digest.toml`, one file per site, readable only by you. Delete it to sign out; the next run signs
+  in again. `--forget` deletes it too.
+
 ## Export folders: an iPad, a Boox, any folder
 
 The paper doesn't have to go to a Kindle. Each `[[export]]` folder gets every morning's edition

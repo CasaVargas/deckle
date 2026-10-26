@@ -414,3 +414,14 @@ L overall; ships in three PRs that each leave the app working:
 
 What CI can't check is a real sign-in and a real e-edition download. Those are the owner's
 check with `deckle digest subscribe thepilot.com --test` and `deckle digest eedition -o`.
+
+## 15. Build notes, PR 1 (rulings made while building)
+
+- **ureq features.** ureq 3 needs both `cookies` and `json` for the jar file. ureq's `save_json` persists only cookies with an expiry, so a site whose login cookie is session-only is signed in again on each run (the login dance handles a stale jar). Revisit after spike 1 shows BLOX's cookie attributes; a hand-written jar via `CookieJar::iter`/`insert` is the fallback.
+- **Login cap.** Login attempts per site per run are capped at 2, successes included. A login that returns Ok but still serves a stranger's page counts, and is reported as `signed in, but the site still served a stranger's page`.
+- **Network errors in `login`** count as a failed attempt (the trait can't tell them apart). Revisit in PR 2 with a typed login error.
+- **Cached failures.** A failed entitlement fetch or home-page detect is cached for the run.
+- **Keychain.** `Keyring` gained a `service` parameter; `SecretError::NotSet` carries the site so the hint names `deckle digest subscribe <site>`.
+- **No section group yet.** `[[subscribed]]`'s section group is PR 2; in PR 1 every subscriber story prints as a headline with its reason.
+- **`--forget`** also deletes the session file.
+- **The Subscriptions card** sits in "The paper" room, not Delivery.
