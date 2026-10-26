@@ -5,7 +5,8 @@
 //! `search_url` query for the title and author).
 use deckle_core::inspect::{BookInfo, Creator, NO_TITLE_WARNING, Series, inspect};
 use deckle_core::metadata_fill::{
-    FillOutcome, Metadata, Missing, edition_url, fill, lookup, parse_series, search_url,
+    FillOutcome, Metadata, Missing, edition_url, fill, lookup, marc_language, parse_series,
+    search_url, w3c_date,
 };
 use deckle_core::normalize::{NormalizeOptions, normalize};
 
@@ -356,4 +357,59 @@ fn a_filled_author_round_trips_through_the_opf() {
         "{:?}",
         info.creators
     );
+}
+
+#[test]
+fn the_edition_gives_its_publisher_date_and_language() {
+    let mut log = Vec::new();
+    let info = bare(Some(ISBN));
+    let (md, _) = lookup(&info, Missing::of(&info), &mut saved(&mut log))
+        .unwrap()
+        .expect("found");
+    assert_eq!(md.publisher.as_deref(), Some("Mariner Books"));
+    assert_eq!(md.published.as_deref(), Some("1994"));
+    assert_eq!(md.language.as_deref(), Some("en"));
+}
+
+#[test]
+fn a_title_search_finds_no_edition_details() {
+    let mut log = Vec::new();
+    let info = BookInfo {
+        title: "The Fellowship of the Ring".into(),
+        ..bare(None)
+    };
+    let (md, source) = lookup(&info, Missing::of(&info), &mut saved(&mut log))
+        .unwrap()
+        .expect("found");
+    assert_eq!(source, "search");
+    assert_eq!(
+        (md.publisher, md.published, md.language),
+        (None, None, None)
+    );
+}
+
+#[test]
+fn open_library_dates_become_w3c_dates() {
+    for (given, want) in [
+        ("1994", Some("1994")),
+        ("September 15, 2020", Some("2020-09-15")),
+        ("Sep 15, 2020", Some("2020-09-15")),
+        ("15 September 2020", Some("2020-09-15")),
+        ("September 2020", Some("2020-09")),
+        ("2020-09-15", Some("2020-09-15")),
+        ("2020-9-5", Some("2020-09-05")),
+        ("c1994", Some("1994")),
+        ("someday", None),
+        ("February 30, 2020", None),
+    ] {
+        assert_eq!(w3c_date(given).as_deref(), want, "{given}");
+    }
+}
+
+#[test]
+fn marc_languages_become_tags() {
+    assert_eq!(marc_language("/languages/eng").as_deref(), Some("en"));
+    assert_eq!(marc_language("/languages/fre").as_deref(), Some("fr"));
+    assert_eq!(marc_language("/languages/ger").as_deref(), Some("de"));
+    assert_eq!(marc_language("/languages/xyz"), None);
 }

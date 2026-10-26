@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use deckle_core::metadata_fill::{Metadata, Missing, lookup};
 use deckle_core::preflight::{Chapter, CoverSource, PreflightOptions, preflight};
 use deckle_core::typography::TypographyReport;
 use deckle_library::catalog::{Entry, catalog, cover_of};
@@ -12,7 +13,7 @@ use deckle_library::details::{Details, fix, read_book};
 use deckle_library::sources::{Sources, home};
 use deckle_library::upgrade::Upgrades;
 use deckle_library::watch::{Watched, scan, seen_path};
-use deckle_library::{Library, LibraryConfig};
+use deckle_library::{Library, LibraryConfig, SeriesRef};
 use serde::Serialize;
 use tauri::State;
 
@@ -268,6 +269,105 @@ pub fn library_read_details(dir: String) -> Result<Details, String> {
     details_at(&deckle_library::config::default_path(), Path::new(&dir))
 }
 
+/// What Open Library has for the fields a book leaves empty (Books tab redesign §6). Empty
+/// fields here are ones it has nothing for, or the book already fills.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Suggested {
+    pub authors: Vec<String>,
+    pub series: Option<SeriesRef>,
+    pub description: Option<String>,
+    pub tags: Vec<String>,
+    pub publisher: Option<String>,
+    pub published: Option<String>,
+    pub language: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Suggestions {
+    /// "isbn" (the edition) or "search" (the work, by title and author).
+    pub source: &'static str,
+    pub suggested: Suggested,
+}
+
+/// Only what `own` leaves empty: the book's own details always win.
+pub fn suggest(own: &Details, found: &Metadata) -> Suggested {
+    let empty = |v: &Option<String>| v.as_deref().is_none_or(|s| s.trim().is_empty());
+    let or_none = |want: bool, v: &Option<String>| v.clone().filter(|_| want);
+    Suggested {
+        authors: if own.authors.is_empty() {
+            found.authors.clone()
+        } else {
+            vec![]
+        },
+        series: if own.series.is_none() {
+            found.series.as_ref().map(|s| SeriesRef {
+                name: s.name.clone(),
+                index: s.index,
+            })
+        } else {
+            None
+        },
+        description: or_none(empty(&own.description), &found.description),
+        tags: if own.tags.as_ref().is_none_or(Vec::is_empty) {
+            found.subjects.clone()
+        } else {
+            vec![]
+        },
+        publisher: or_none(empty(&own.publisher), &found.publisher),
+        published: or_none(empty(&own.published), &found.published),
+        language: or_none(empty(&own.language), &found.language),
+    }
+}
+
+/// Looks the library book in `dir` up on Open Library. `None`: it has no record there.
+pub fn suggest_at(
+    config: &Path,
+    dir: &Path,
+    fetch: &mut deckle_core::matcher::Fetcher,
+) -> Result<Option<Suggestions>, String> {
+    let (lib, _) = Library::configured(config).ok_or("Set up a library first.")?;
+    let book = lib
+        .list()
+        .into_iter()
+        .find(|b| b.dir == dir)
+        .ok_or_else(|| format!("{}: not a book in the library", dir.display()))?;
+    let path = book.source_path();
+    let own = read_book(&path)?;
+    let info = deckle_core::inspect::inspect(&path).map_err(|e| e.to_string())?;
+    Ok(
+        lookup(&info, Missing::of(&info), fetch)?.map(|(md, source)| Suggestions {
+            source,
+            suggested: suggest(&own, &md),
+        }),
+    )
+}
+
+/// Open Library's suggestions for a library book. Online, so only with the metadata setting on
+/// or when the person `asked` (the editor's Look up on Open Library).
+#[tauri::command]
+pub async fn library_suggest_details(
+    state: State<'_, AppState>,
+    dir: String,
+    asked: bool,
+) -> Result<Option<Suggestions>, String> {
+    if !asked && !load_settings_from(&state.settings_file).metadata_fill {
+        return Err("Fill missing details is off in Settings → Books.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut fetch = |url: &str| {
+            deckle_core::wordwise::http_get_bytes(url)
+                .and_then(|b| String::from_utf8(b).map_err(|e| e.to_string()))
+        };
+        suggest_at(
+            &deckle_library::config::default_path(),
+            Path::new(&dir),
+            &mut fetch,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 pub fn watch_set_at(config: &Path, dir: Option<String>) -> Result<Option<String>, String> {
     let dir = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     if let Some(d) = &dir
@@ -343,6 +443,38 @@ mod tests {
         assert!(view.typography.is_some() && view.notes.is_some());
         assert!(view.after.unwrap().css.contains("line-height: 1.45"));
         assert!(!view.before.unwrap().css.contains("line-height: 1.45"));
+    }
+
+    #[test]
+    fn suggestions_cover_only_what_the_book_leaves_empty() {
+        let found = Metadata {
+            authors: vec!["Ada Field".into()],
+            description: Some("A blurb".into()),
+            subjects: vec!["SF".into()],
+            publisher: Some("Orbit".into()),
+            published: Some("2011".into()),
+            language: Some("en".into()),
+            ..Default::default()
+        };
+        let own = Details {
+            title: "T".into(),
+            authors: vec!["Me".into()],
+            description: Some(String::new()),
+            tags: Some(vec![]),
+            publisher: Some("Mine".into()),
+            published: Some(" ".into()),
+            language: Some("fr".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            suggest(&own, &found),
+            Suggested {
+                description: Some("A blurb".into()),
+                tags: vec!["SF".into()],
+                published: Some("2011".into()),
+                ..Default::default()
+            }
+        );
     }
 
     #[test]

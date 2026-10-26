@@ -4,8 +4,9 @@ import { api } from "./api";
 import { kindlePage, plannedLines } from "./beforeSend";
 import { changedFields, draftFrom, problems, toDetails, type Draft, type Field } from "./detailsDraft";
 import Icon from "./Icon";
+import { applyAll, suggestionsFor, type Suggestion } from "./suggest";
 import { presetSettings, PRESETS } from "./presets";
-import type { BookState, CatalogEntry, CoverChoice, CoverOffer, PlanRow, PreflightView, Settings } from "./types";
+import type { BookState, CatalogEntry, CoverChoice, CoverOffer, PlanRow, PreflightView, Settings, Suggestions } from "./types";
 
 export type DrawerTab = "details" | "cover" | "kindle";
 
@@ -86,6 +87,33 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
   const editable = !!entry?.library_dir && read !== "reading";
   const full = editable && read === "read";
   const asinEditable = previewable;
+
+  // Open Library's suggestions for empty fields (§6): looked up on opening when Fill missing
+  // details is on, else only when asked. Nothing is used until the person says so.
+  type Lookup = { kind: "idle" } | { kind: "looking" } | { kind: "found"; found: Suggestions } | { kind: "none" } | { kind: "failed"; error: string };
+  const [lookup, setLookup] = useState<Lookup>({ kind: "idle" });
+  const look = async (asked: boolean) => {
+    if (!entry?.library_dir) return;
+    setLookup({ kind: "looking" });
+    try {
+      const found = await api.librarySuggestDetails(entry.library_dir, asked);
+      setLookup(found ? { kind: "found", found } : { kind: "none" });
+    } catch (e) {
+      setLookup({ kind: "failed", error: String(e) });
+    }
+  };
+  useEffect(() => {
+    if (read === "read" && settings.metadata_fill && lookup.kind === "idle") void look(false);
+  }, [read]);
+  const suggestions = lookup.kind === "found" ? suggestionsFor(draft, lookup.found.suggested) : [];
+  const patch = (p: Partial<Draft>) => {
+    setMsg(null);
+    setDraft((d) => ({ ...d, ...p }));
+  };
+  const hint = (f: Field) => {
+    const s = suggestions.find((x) => x.field === f);
+    return s && <SuggestLine s={s} onUse={() => patch(s.patch)} />;
+  };
 
   const save = async (): Promise<boolean> => {
     setSaving(true);
@@ -234,6 +262,42 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
           }}
         >
           <p className="drawer-home muted small">{read === "reading" ? "Reading its details…" : home(entry)}</p>
+          {full && (
+            <div className={`suggest-banner ${suggestions.length ? "has" : ""}`} role="status">
+              {lookup.kind === "idle" && (
+                <>
+                  <span>Missing details? Open Library may have them.</span>
+                  <button type="button" className="quiet" onClick={() => void look(true)}>
+                    Look up on Open Library
+                  </button>
+                </>
+              )}
+              {lookup.kind === "looking" && <span>Looking on Open Library…</span>}
+              {lookup.kind === "found" && suggestions.length > 0 && (
+                <>
+                  <span>
+                    <strong>
+                      Open Library has {suggestions.length} detail{suggestions.length > 1 ? "s" : ""} this book is missing
+                    </strong>{" "}
+                    {lookup.found.source === "isbn" ? "for this edition" : "for this title"}. Nothing changes until you use them.
+                  </span>
+                  <button type="button" className="ghost" onClick={() => patch(applyAll(draft, suggestions))}>
+                    Use all {suggestions.length}
+                  </button>
+                </>
+              )}
+              {lookup.kind === "found" && suggestions.length === 0 && <span>Open Library has nothing to add.</span>}
+              {lookup.kind === "none" && <span>Open Library has no record of this book.</span>}
+              {lookup.kind === "failed" && (
+                <>
+                  <span className="warn">Couldn't reach Open Library: {lookup.error}</span>
+                  <button type="button" className="quiet" onClick={() => void look(true)}>
+                    Try again
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           <label>
             <span className="field-label">Title {mark("title")}</span>
             <input value={draft.title} onChange={(e) => set("title", e.target.value)} disabled={!editable} aria-invalid={!!issues.title} className={changed.includes("title") ? "changed" : ""} />
@@ -242,6 +306,7 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
           <div className="field">
             <span className="field-label" id="authors-label">Authors {mark("authors")}</span>
             <TokenField labelId="authors-label" value={draft.authors} onChange={(v) => set("authors", v)} disabled={!editable} changed={changed.includes("authors")} add="Add an author" another="Add another" />
+            {hint("authors")}
           </div>
           <div className="details-series">
             <label>
@@ -254,27 +319,31 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
             </label>
           </div>
           {issues.index && <span className="field-problem">{issues.index}</span>}
+          {hint("series")}
           {full && (
             <>
               <label>
                 <span className="field-label">Description {mark("description")}</span>
                 <textarea rows={4} value={draft.description} onChange={(e) => set("description", e.target.value)} className={changed.includes("description") ? "changed" : ""} />
-                <span className="muted small">Shown on the Kindle's page for the book.</span>
+                {hint("description") ?? <span className="muted small">Shown on the Kindle's page for the book.</span>}
               </label>
               <div className="details-pair">
                 <label>
                   <span className="field-label">Publisher {mark("publisher")}</span>
                   <input value={draft.publisher} onChange={(e) => set("publisher", e.target.value)} className={changed.includes("publisher") ? "changed" : ""} />
+                  {hint("publisher")}
                 </label>
                 <label>
                   <span className="field-label">Published {mark("published")}</span>
                   <input value={draft.published} onChange={(e) => set("published", e.target.value)} placeholder="2020 or 2020-09-15" aria-invalid={!!issues.published} className={changed.includes("published") ? "changed" : ""} />
                   {issues.published && <span className="field-problem">{issues.published}</span>}
+                  {hint("published")}
                 </label>
                 <label>
                   <span className="field-label">Language {mark("language")}</span>
                   <input value={draft.language} onChange={(e) => set("language", e.target.value)} placeholder="en" spellCheck={false} aria-invalid={!!issues.language} className={changed.includes("language") ? "changed" : ""} />
                   {issues.language && <span className="field-problem">{issues.language}</span>}
+                  {hint("language")}
                 </label>
                 <label>
                   <span className="field-label">ISBN {mark("isbn")}</span>
@@ -285,6 +354,7 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
               <div className="field">
                 <span className="field-label" id="tags-label">Tags {mark("tags")}</span>
                 <TokenField labelId="tags-label" value={draft.tags} onChange={(v) => set("tags", v)} disabled={false} changed={changed.includes("tags")} add="Add a tag" another="Add another" />
+                {hint("tags")}
               </div>
             </>
           )}
@@ -428,6 +498,20 @@ export default function BookDrawer({ book, entry, plan, settings, cover, initial
         </div>
       )}
     </div>
+  );
+}
+
+/** "Suggested: … · Use" under an empty field. */
+function SuggestLine({ s, onUse }: { s: Suggestion; onUse: () => void }) {
+  return (
+    <span className="suggest-line">
+      <span className="suggest-text" title={s.text}>
+        Suggested: {s.text}
+      </span>
+      <button type="button" className="use" onClick={onUse}>
+        Use
+      </button>
+    </span>
   );
 }
 
