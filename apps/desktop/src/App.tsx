@@ -58,7 +58,7 @@ export default function App() {
   const [previewer, setPreviewer] = useState<PreviewerStatus | null>(null);
   const [settingsPage, setSettingsPage] = useState<SettingsPage | null>(null);
   /** The settings page last opened this session: the gear returns to it. */
-  const lastPage = useRef<SettingsPage>("general");
+  const lastPage = useRef<SettingsPage>("overview");
   const [update, setUpdate] = useState<UpdateState>({ kind: "checking" });
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
