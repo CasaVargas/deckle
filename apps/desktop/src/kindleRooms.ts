@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { matchesMetadata } from "./libraryView";
-import type { BookKind, DeviceBookRow, DeviceShelf, Spare } from "./types";
+import type { BookKind, DeviceBookRow, DeviceShelf, HighlightRow, Spare } from "./types";
 
 /** The Kindle tab's rooms (Books and Kindle design §7), like the Daily tab's. */
 export type KindleRoom = "shelf" | "upgrades" | "highlights" | "words" | "device";
@@ -219,4 +219,53 @@ export function spaceSlices(split: { total: number; free: number; kinds: [BookKi
     { key: "other" as const, label: "System and other", bytes: split.other, pct: pct(split.other) },
     { key: "free" as const, label: "Free", bytes: split.free, pct: pct(split.free) },
   ].filter((s) => s.bytes > 0);
+}
+
+/** What the drawer's Reading tab offers (Kindle tab redesign §4): the one thing Deckle can do better, if any. */
+export type Better =
+  | { kind: "update"; title: string; body: string; action: string }
+  | { kind: "upgrade"; title: string; body: string; action: string }
+  | { kind: "as-kindle-book"; title: string; body: string; action: string };
+
+export function better(b: DeviceBookRow): Better | null {
+  if (b.updates.length > 0 && b.library_source)
+    return { kind: "update", title: "Deckle can build this better now", body: b.updates.map((u) => u.text).join(" "), action: "Update" };
+  if (b.class === "has-source" || b.class === "kindle-copy")
+    return {
+      kind: "upgrade",
+      title: "Deckle can upgrade this",
+      body: `${b.class === "has-source" ? "Its original is on this computer." : "Deckle can rebuild it from the Kindle’s own copy."} Upgrading gives it what a store book has, where Deckle can add it: X-Ray, Word Wise and page numbers. Your place and highlights are kept.`,
+      action: "Upgrade…",
+    };
+  if (b.library_source && b.cde === "PDOC")
+    return { kind: "as-kindle-book", title: "Send it as a Kindle book", body: "It went over as a document, so it has no X-Ray or Word Wise. Sent as a Kindle book, it can have both.", action: "Send as a Kindle book" };
+  return null;
+}
+
+/** The drawer's On the Kindle list, in plain words. */
+export function onKindle(b: DeviceBookRow): [string, string][] {
+  const shows =
+    b.kind === "amazon-own" ? "Book from Amazon" : b.kind === "paper" ? "Deckle paper" : b.cde === "EBOK" ? "Kindle book" : b.cde === "PDOC" ? "Document, with its own cover" : `${b.format.toUpperCase()} file`;
+  const why: Partial<Record<DeviceBookRow["class"], string>> = { locked: "locked by DRM, which Deckle never opens", "fixed-layout": "a fixed layout, left as it is" };
+  const feature = (on: boolean) => (on ? "Yes" : why[b.class] ? `No: ${why[b.class]}` : "Not yet");
+  const rows: [string, string][] = [
+    ["Shows up as", shows],
+    ["X-Ray", feature(b.xray)],
+    ["Word Wise", feature(b.word_wise)],
+    ["Size", size(b.size)],
+    ["Sent", b.from_deckle ? (b.library_source ? "By Deckle · in your library" : "By Deckle") : "Not by Deckle"],
+  ];
+  if (b.duplicate) rows.push(["Duplicate", "Another copy of it is on this Kindle"]);
+  return rows;
+}
+
+/** This book's highlights, matched by title. */
+export function highlightsOf(b: DeviceBookRow, rows: HighlightRow[]): HighlightRow | null {
+  const t = titleOf(b).trim().toLowerCase();
+  return rows.find((h) => h.title.trim().toLowerCase() === t) ?? null;
+}
+
+/** The mode an update keeps: the one it was sent in. */
+export function sentMode(b: DeviceBookRow): "pdoc" | "ebok" | null {
+  return b.cde === "EBOK" ? "ebok" : b.cde === "PDOC" ? "pdoc" : null;
 }
