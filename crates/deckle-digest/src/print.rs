@@ -382,6 +382,18 @@ pub fn split_opening(body: &str, words_wanted: usize) -> Option<(String, String)
     Some((paras.join("\n"), rest))
 }
 
+/// `(figure, rest)`: the lead figure at the head of a jump's rest, for the PDF's front page,
+/// and the rest without it (print layout §2.2). `None` and the rest as it is otherwise.
+pub fn take_lead_figure(rest: &str) -> (Option<String>, String) {
+    match top_level(rest).first() {
+        Some(e) if rest[e.start..].starts_with("<div class=\"figure lead\"") => (
+            Some(rest[e.start..e.end].to_owned()),
+            format!("{}{}", &rest[..e.start], rest[e.end..].trim_start()),
+        ),
+        _ => (None, rest.to_owned()),
+    }
+}
+
 fn has_paragraph_text(body: &str) -> bool {
     top_level(body)
         .iter()
@@ -556,6 +568,17 @@ mod tests {
         let (opening, rest) = split_opening(&body, 110).unwrap();
         assert_eq!(opening, format!("{}\n{}", p(40, "a"), p(80, "b")));
         assert_eq!(rest, format!("{fig}\n{}", p(30, "c")));
+    }
+
+    #[test]
+    fn the_lead_figure_comes_off_the_head_of_the_rest() {
+        let fig = "<div class=\"figure lead\"><img src=\"t\" alt=\"\"/></div>";
+        let rest = format!("{fig}\n{}", p(5, "r"));
+        assert_eq!(take_lead_figure(&rest), (Some(fig.to_owned()), p(5, "r")));
+        let other = format!("{}<div class=\"figure lead\"></div>", p(5, "r"));
+        assert_eq!(take_lead_figure(&other), (None, other.clone()));
+        let plain_figure = format!("<div class=\"figure\"></div>{}", p(5, "r"));
+        assert_eq!(take_lead_figure(&plain_figure).0, None);
     }
 
     #[test]
