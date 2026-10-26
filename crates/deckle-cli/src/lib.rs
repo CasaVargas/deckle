@@ -3800,7 +3800,11 @@ fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Act
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
-        clippings: a.clippings || puzzle_on(cfg) || shelf,
+        // learning reads the paper's own highlights too (interests design §5)
+        clippings: a.clippings
+            || puzzle_on(cfg)
+            || shelf
+            || deckle_readership::learn::learning_on(cfg, id),
         readership: a.readership,
         shelf,
     }
@@ -3931,6 +3935,20 @@ fn sync_to(
     });
     record_morgue(&flush);
     let shelf = record_shelf(cfg, target, &flush);
+    // What this connection teaches each paper (interests design §5): taps from the reads just
+    // recorded, highlights from the clippings, authors from the shelf just stored.
+    for (paper, (_, state)) in papers.iter().zip(&states) {
+        let store = deckle_digest::shelf::store::Shelf::load(&paper.shelf_store());
+        if let Err(e) = deckle_readership::learn::on_connection(
+            paper,
+            state,
+            flush.clippings.as_deref(),
+            Some(&store),
+            deckle_digest::chrono::Utc::now(),
+        ) {
+            eprintln!("learning: {e}");
+        }
+    }
     let waiting = flush
         .waiting
         .iter()

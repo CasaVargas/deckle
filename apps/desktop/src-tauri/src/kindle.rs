@@ -316,6 +316,22 @@ pub fn shelf_on(
     if let Some(books) = shelf_books {
         record_shelf(conn, config, books, skipped, library.as_ref(), &clippings);
     }
+    // What the connection teaches the main paper (interests design §5), after the reads and
+    // the shelf it draws on are stored.
+    if let Ok(cfg) = deckle_digest::Config::load(&digest) {
+        let state = deckle_readership::State::load(&config.with_file_name("readership.json"));
+        let shelf = deckle_digest::shelf::store::Shelf::load(&config.with_file_name("shelf.json"));
+        let bytes = clippings.as_ref().ok().and_then(|c| c.as_deref());
+        if let Err(e) = deckle_readership::learn::on_connection(
+            &cfg,
+            &state,
+            bytes,
+            Some(&shelf),
+            deckle_digest::chrono::Utc::now(),
+        ) {
+            eprintln!("learning: {e}");
+        }
+    }
     Ok(DeviceShelf {
         device: device.name,
         space: inv.space,

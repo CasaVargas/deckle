@@ -539,6 +539,40 @@ pub fn accept(
     Ok(entry)
 }
 
+/// Learning is on for this paper on this Kindle: `[learning] enabled`, and readership on for
+/// the device (taps come from the `.yjf` read).
+pub fn learning_on(cfg: &Config, device_id: &str) -> bool {
+    cfg.learning.enabled && cfg.sync.for_device(device_id).readership
+}
+
+/// Everything one connection teaches a paper: taps from `state`, highlights from `clippings`
+/// (when they were read), shelf authors from `shelf`. Loads, updates, prunes and saves the
+/// paper's `interests.json`; returns the hits added. Nothing happens with learning off.
+pub fn on_connection(
+    cfg: &Config,
+    state: &State,
+    clippings: Option<&[u8]>,
+    shelf: Option<&Shelf>,
+    now: DateTime<Utc>,
+) -> Result<usize, String> {
+    if !cfg.learning.enabled {
+        return Ok(0);
+    }
+    let path = Learning::path_for(cfg);
+    let mut learning = Learning::load(&path);
+    let stop = stoplist(cfg);
+    let mut added = record_taps(&mut learning, state, &stop);
+    if let Some(bytes) = clippings {
+        added += record_highlights(&mut learning, bytes, &cfg.title, &stop);
+    }
+    if let Some(shelf) = shelf {
+        added += record_shelf(&mut learning, shelf, now, &stop);
+    }
+    prune(&mut learning, now.date_naive(), cfg.learning.window_days);
+    learning.save(&path)?;
+    Ok(added)
+}
+
 /// Sets candidate `key` aside for [`DISMISSED_DAYS`].
 pub fn dismiss(learning: &mut Learning, key: &str, today: NaiveDate) -> Result<(), String> {
     if !learning.candidates.contains_key(key) {
