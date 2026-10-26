@@ -780,7 +780,8 @@ mod tests {
         std::fs::write(&path, "not json").unwrap();
         let s = UreqSite::new("a");
         let err = s.load_jar(&path).unwrap_err();
-        assert!(err.contains("sessions/"), "{err}");
+        // The message names the file; the separator is the platform's (`\` on Windows).
+        assert!(err.contains("a.json") && err.contains("sessions"), "{err}");
         assert!(s.cookie_names().is_empty());
     }
 
