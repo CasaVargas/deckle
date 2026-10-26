@@ -120,6 +120,11 @@ fn current_keys(cfg: &Config) -> Vec<String> {
                 .iter()
                 .map(|f| section_key(*k, Some(&f.name)))
                 .collect(),
+            SectionKind::Interests => cfg
+                .interests
+                .iter()
+                .map(|i| section_key(*k, Some(&i.name)))
+                .collect(),
             // Local, then each other place's local news
             SectionKind::Local => std::iter::once(section_key(*k, None))
                 .chain(
@@ -240,7 +245,7 @@ pub fn report(state: &State, cfg: &Config) -> Report {
                 continue;
             }
             let (n, m, pos, size) = stats[i];
-            if row.key.starts_with("feeds:") {
+            if row.key.starts_with("feeds:") || row.key.starts_with("interests:") {
                 let Some(prev) = i.checked_sub(1).map(|p| &rows[p]) else {
                     continue;
                 };
@@ -338,6 +343,14 @@ pub fn apply(s: &Suggestion, cfg: &mut Config) -> Result<(), String> {
             (cfg.local.places.len() < before)
                 .then_some(())
                 .ok_or_else(|| format!("no place named {name}"))
+        }
+        (SuggestionKind::Drop, None) if s.key.starts_with("interests:") => {
+            let name = &s.key["interests:".len()..];
+            let before = cfg.interests.len();
+            cfg.interests.retain(|i| i.name != name);
+            (cfg.interests.len() < before)
+                .then_some(())
+                .ok_or_else(|| format!("no interest named {name}"))
         }
         (SuggestionKind::Drop, Some(name)) => {
             let before = cfg.feeds.len();

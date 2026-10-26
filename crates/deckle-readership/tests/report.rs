@@ -297,6 +297,54 @@ fn at_most_three_rule_order_then_lowest_share() {
 }
 
 #[test]
+fn interest_sections_get_rows_move_up_and_drop_removes_the_entry() {
+    let cfg = Config::parse(
+        "sections = [\"weather\", \"interests\"]\n\n[[interests]]\nname = \"Rust\"\n\n\
+         [[interests]]\nname = \"Cargo\"\n",
+    )
+    .unwrap();
+    let mut s = State::default();
+    let secs = [
+        ("weather", "Weather", 100),
+        ("interests:Rust", "Rust", 2000),
+        ("interests:Cargo", "Cargo", 9000),
+    ];
+    for i in 0..10 {
+        edition(&mut s, i, &secs, &[("K", Some(9500))]);
+    }
+    let r = report(&s, &cfg);
+    let keys: Vec<_> = r.sections.iter().map(|s| s.key.as_str()).collect();
+    assert_eq!(keys, ["weather", "interests:Rust", "interests:Cargo"]);
+    assert_eq!(r.sections[2].name, "Cargo");
+    // reached late and rarely: an interest gets "Move up", as a feed does
+    let mut f = vec![Some(500); 9];
+    f.push(Some(9500));
+    let mut s2 = State::default();
+    for (i, furthest) in f.iter().enumerate() {
+        edition(&mut s2, i as u64, &secs, &[("K", *furthest)]);
+    }
+    let r2 = report(&s2, &cfg);
+    assert!(ids(&r2).contains(&"up:interests:Cargo"), "{:?}", ids(&r2));
+    let drop = deckle_readership::report::Suggestion {
+        id: "drop:interests:Cargo".into(),
+        kind: SuggestionKind::Drop,
+        key: "interests:Cargo".into(),
+        title: String::new(),
+        why: String::new(),
+    };
+    let mut c = cfg.clone();
+    apply(&drop, &mut c).unwrap();
+    assert_eq!(
+        c.interests
+            .iter()
+            .map(|i| i.name.as_str())
+            .collect::<Vec<_>>(),
+        ["Rust"]
+    );
+    assert!(apply(&drop, &mut c).is_err());
+}
+
+#[test]
 fn apply_drop_and_move_up_edit_the_config() {
     let mut s = State::default();
     for i in 0..10 {
