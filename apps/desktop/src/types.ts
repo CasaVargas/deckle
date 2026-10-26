@@ -119,6 +119,23 @@ export interface BookDetails {
   author_sort?: string | null;
 }
 
+/** What Open Library has for a library book's empty fields (Books tab redesign §6). */
+export interface Suggested {
+  authors: string[];
+  series: { name: string; index: number | null } | null;
+  description: string | null;
+  tags: string[];
+  publisher: string | null;
+  published: string | null;
+  language: string | null;
+}
+
+export interface Suggestions {
+  /** "isbn": the book's own edition; "search": the work found by title and author. */
+  source: "isbn" | "search";
+  suggested: Suggested;
+}
+
 /** A book on a Kindle that a send replaces with Deckle's build of its original (Books and Kindle design §6). */
 export interface UpgradeOf {
   /** The Kindle's profile key. */

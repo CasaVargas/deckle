@@ -101,9 +101,13 @@ the editor looks the book up with the same Open Library code a send uses, once p
   **Use all *n***. Using one fills the field and marks it edited; it's saved only on **Save**.
 - With the setting off, there's a quiet "Look up on Open Library" link instead, which says it
   goes online and does nothing until clicked.
-- Open Library returns title, authors, series, description and subjects (as tags) today.
-  Publisher, published date, language and ISBN are suggested only if the lookup is extended
-  to read them from the edition record (PR 5).
+- Open Library returns title, authors, series, description and subjects (as tags). Part 5
+  reads the edition record's publisher, publish date (free text, made a W3C date) and language
+  (MARC, made a tag like `en`) too. Those come only from the edition, which is found by ISBN;
+  a title search finds a work, which has none, so a book without an ISBN gets no publisher,
+  date or language suggestion. An ISBN is never suggested: the only edition Deckle can find is
+  the one the book's own ISBN names. The send-time fill doesn't use the new fields.
+- The title isn't suggested: every book in the library has one.
 
 ## 7. Rulings
 
