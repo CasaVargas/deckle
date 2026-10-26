@@ -58,6 +58,15 @@ static CANONICAL: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
+/// Why a page with too little text can't be read (shared with the cookbook's page-text fallback,
+/// cookbook design §4.2).
+pub(crate) fn stub_reason() -> String {
+    format!(
+        "no readable article (under {} words: a paywall, a sign-in page, or a video)",
+        article::MIN_WORDS
+    )
+}
+
 /// The address a saved page came from, when it says (`rel=canonical`, `og:url`).
 fn saved_from(html: &str) -> Option<String> {
     CANONICAL.captures(html).map(|c| c[1].to_owned())
@@ -124,10 +133,7 @@ pub fn build(
     };
     let x = article::extract_with(&html, &base, None).ok_or_else(|| match &access {
         Access::Walled { site, why } => format!("no readable article: {}", why.note(site)),
-        _ => format!(
-            "no readable article (under {} words: a paywall, a sign-in page, or a video)",
-            article::MIN_WORDS
-        ),
+        _ => stub_reason(),
     })?;
     let title = x.title.clone().unwrap_or_else(|| outlet.clone());
     let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
