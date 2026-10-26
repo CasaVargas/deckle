@@ -7,6 +7,7 @@ import { api } from "./api";
 import Highlights from "./Highlights";
 import Icon from "./Icon";
 import KindleDrawer from "./KindleDrawer";
+import Unplugged from "./Unplugged";
 import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
 import type { KindleRoom, ShelfFrom, ShelfShow, ShelfSort } from "./kindleRooms";
 import ThisKindle from "./ThisKindle";
@@ -130,16 +131,7 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
     }
   };
 
-  if (!target) {
-    return (
-      <main className="list-area empty">
-        <div className="dropzone-inner">
-          <h1>No Kindle connected</h1>
-          <p>Connect a Kindle by USB to see the books on it, how far into each you are, how much room is left, and which ones Deckle can upgrade.</p>
-        </div>
-      </main>
-    );
-  }
+  if (!target) return <Unplugged />;
 
   const open = (r: KindleRoom) => {
     setRoom(r);

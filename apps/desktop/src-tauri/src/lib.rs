@@ -94,6 +94,7 @@ pub fn run() {
             books::library_fix_details,
             books::library_read_details,
             books::library_suggest_details,
+            books::library_sent_kindles,
             books::library_watch_set,
             books::library_watch_scan,
             kindle::library_set,

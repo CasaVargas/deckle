@@ -368,6 +368,91 @@ pub async fn library_suggest_details(
     .map_err(|e| e.to_string())?
 }
 
+/// A book Deckle sent to a Kindle, for the Kindle tab when that Kindle isn't plugged in
+/// (Kindle tab redesign §7).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SentBook {
+    /// The library copy, for its cover.
+    pub path: String,
+    pub title: String,
+    pub authors: Vec<String>,
+    /// When it was last sent there, RFC 3339.
+    pub at: String,
+    pub cde: Option<String>,
+}
+
+/// A Kindle the library has sent books to, with those books, newest first.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SentKindle {
+    /// Its profile key (`ms:…`, `mtp:…`), as a connected Kindle's `DeviceRow.key`.
+    pub key: String,
+    pub name: String,
+    /// The last send to it.
+    pub last: String,
+    pub books: Vec<SentBook>,
+}
+
+/// The Kindles in the library's send records, most recently sent to first. Exports to folders
+/// are left out; a book sent twice counts once, at its latest send.
+pub fn sent_kindles(lib: &Library) -> Vec<SentKindle> {
+    let mut out: Vec<SentKindle> = Vec::new();
+    for book in lib.list() {
+        let m = &book.sidecar.metadata;
+        for s in book
+            .sidecar
+            .sends
+            .iter()
+            .filter(|s| !s.device.is_empty() && !s.device.starts_with("folder:"))
+        {
+            let k = match out.iter_mut().position(|k| k.key == s.device) {
+                Some(i) => &mut out[i],
+                None => {
+                    out.push(SentKindle {
+                        key: s.device.clone(),
+                        name: s.device_name.clone(),
+                        last: String::new(),
+                        books: Vec::new(),
+                    });
+                    out.last_mut().unwrap()
+                }
+            };
+            if s.at > k.last {
+                k.last = s.at.clone();
+                if !s.device_name.is_empty() {
+                    k.name = s.device_name.clone();
+                }
+            }
+            let path = book.source_path().to_string_lossy().into_owned();
+            match k.books.iter_mut().find(|b| b.path == path) {
+                Some(b) if s.at > b.at => {
+                    b.at = s.at.clone();
+                    b.cde = s.cde.clone();
+                }
+                Some(_) => {}
+                None => k.books.push(SentBook {
+                    path,
+                    title: m.title.clone(),
+                    authors: m.authors.clone(),
+                    at: s.at.clone(),
+                    cde: s.cde.clone(),
+                }),
+            }
+        }
+    }
+    for k in &mut out {
+        k.books.sort_by(|a, b| b.at.cmp(&a.at));
+    }
+    out.sort_by(|a, b| b.last.cmp(&a.last));
+    out
+}
+
+#[tauri::command]
+pub fn library_sent_kindles() -> Vec<SentKindle> {
+    Library::configured(&deckle_library::config::default_path())
+        .map(|(lib, _)| sent_kindles(&lib))
+        .unwrap_or_default()
+}
+
 pub fn watch_set_at(config: &Path, dir: Option<String>) -> Result<Option<String>, String> {
     let dir = dir.filter(|d| !d.trim().is_empty()).map(PathBuf::from);
     if let Some(d) = &dir
@@ -443,6 +528,48 @@ mod tests {
         assert!(view.typography.is_some() && view.notes.is_some());
         assert!(view.after.unwrap().css.contains("line-height: 1.45"));
         assert!(!view.before.unwrap().css.contains("line-height: 1.45"));
+    }
+
+    #[test]
+    fn sent_kindles_list_each_kindles_books_newest_first_without_exports() {
+        let tmp = tempfile::tempdir().unwrap();
+        let lib = Library::new(tmp.path().join("Library"));
+        let mut book = lib
+            .add(&deckle_kfx::fixtures::path("deckle-mini.epub"))
+            .unwrap()
+            .book;
+        let send = |device: &str, name: &str, at: &str, cde: &str| deckle_library::SendRecord {
+            device: device.into(),
+            device_name: name.into(),
+            file: "x.kfx".into(),
+            at: at.into(),
+            cde: Some(cde.into()),
+            ..Default::default()
+        };
+        book.sidecar.sends = vec![
+            send("ms:a", "Kindle", "2026-10-01T10:00:00Z", "PDOC"),
+            send("ms:a", "Paperwhite", "2026-10-12T10:00:00Z", "EBOK"),
+            send("mtp:b", "Oasis", "2026-09-01T10:00:00Z", "PDOC"),
+            send("folder:/tmp/out", "", "2026-10-20T10:00:00Z", "PDOC"),
+        ];
+        lib.save(&book).unwrap();
+        let k = sent_kindles(&lib);
+        assert_eq!(
+            k.iter()
+                .map(|k| (k.key.as_str(), k.name.as_str(), k.last.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("ms:a", "Paperwhite", "2026-10-12T10:00:00Z"),
+                ("mtp:b", "Oasis", "2026-09-01T10:00:00Z")
+            ]
+        );
+        assert_eq!(k[0].books.len(), 1, "sent twice, counted once");
+        assert_eq!(
+            k[0].books[0].cde.as_deref(),
+            Some("EBOK"),
+            "its latest send"
+        );
+        assert!(sent_kindles(&Library::new(tmp.path().join("Empty"))).is_empty());
     }
 
     #[test]

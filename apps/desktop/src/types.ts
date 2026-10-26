@@ -136,6 +136,14 @@ export interface Suggestions {
   suggested: Suggested;
 }
 
+/** A Kindle the library has sent to, for the Kindle tab when it isn't plugged in (Kindle tab redesign §7). */
+export interface SentKindle {
+  key: string;
+  name: string;
+  last: string;
+  books: { path: string; title: string; authors: string[]; at: string; cde: string | null }[];
+}
+
 /** A book on a Kindle that a send replaces with Deckle's build of its original (Books and Kindle design §6). */
 export interface UpgradeOf {
   /** The Kindle's profile key. */
