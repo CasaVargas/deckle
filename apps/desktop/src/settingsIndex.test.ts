@@ -54,6 +54,7 @@ describe("Overview", () => {
     ]);
     expect(setupHeading(checks)).toBe("1 thing needs doing before Deckle can send books.");
     expect(pageNotes(checks)).toEqual({ sending: "to do" });
+    expect(pageNotes(checks, ["Wikipedia summaries", "Open Library details"])).toEqual({ sending: "to do", online: "2 on" });
   });
 
   it("leaves out what hasn't loaded yet", () => {
@@ -79,6 +80,7 @@ describe("page cards", () => {
     expect(pageSummary("reading", s, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia");
     expect(pageSummary("reading", { ...s, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Both off");
     expect(pageSummary("kindles", s, null, [kindle], "0.7.0")).toBe("Paperwhite");
+    expect(pageSummary("online", { ...s, metadata_fill: false, amazon_match: false }, null, [], "0.7.0")).toBe("2 features on");
     expect(pageSummary("about", s, null, [], "0.7.0")).toBe("Deckle 0.7.0");
   });
 });

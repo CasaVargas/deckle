@@ -10,6 +10,7 @@ import About from "./settings/About";
 import Books from "./settings/Books";
 import General from "./settings/General";
 import Kindles from "./settings/Kindles";
+import Online from "./settings/Online";
 import Overview from "./settings/Overview";
 import ReadingAids from "./settings/ReadingAids";
 import Sending from "./settings/Sending";
@@ -50,7 +51,7 @@ export default function SettingsView(props: Props) {
     api.highlightsStatus().then(setHighlights).catch(() => setHighlights(undefined));
   }, [page]);
   const checks = setupChecks({ previewer: props.previewer, library: props.library, sources, highlights: highlights === undefined ? undefined : (highlights?.folder ?? null), devices: props.devices });
-  const notes = pageNotes(checks);
+  const notes = pageNotes(checks, onlineOn(settings));
   const fix = async (c: Check) => {
     if (c.key === "previewer") props.onPickPreviewer();
     else if (c.key === "library") props.onPickLibrary();
@@ -97,7 +98,7 @@ export default function SettingsView(props: Props) {
             }}
           >
             <span>{p.title}</span>
-            {notes[p.id] && <span className="nav-note">{notes[p.id]}</span>}
+            {notes[p.id] && <span className={`nav-note ${p.id === "online" ? "plain" : ""}`}>{notes[p.id]}</span>}
           </button>
         ))}
       </nav>
@@ -150,6 +151,7 @@ export default function SettingsView(props: Props) {
           {page === "books" && <Books settings={settings} set={set} />}
           {page === "reading" && <ReadingAids settings={settings} set={set} />}
           {page === "kindles" && <Kindles devices={props.devices} onDeviceOptions={props.onDeviceOptions} />}
+          {page === "online" && <Online settings={settings} set={set} onPage={onPage} />}
           {page === "about" && <About version={props.version} update={props.update} onUpdateState={props.onUpdateState} busy={props.busy} />}
           </>
           )}

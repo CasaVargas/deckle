@@ -36,7 +36,7 @@ export default function Overview({ checks, online, summary, onFix, onPage }: Pro
       </section>
       <section className="online-line" aria-label="Going online">
         <span>{onlineLine(online)}</span>
-        <button className="link-action" onClick={() => onPage("about")}>
+        <button className="link-action" onClick={() => onPage("online")}>
           What each one sends →
         </button>
       </section>
