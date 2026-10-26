@@ -92,6 +92,7 @@ fn inputs<'a>(
 fn xhtml(section: deckle_digest::Section) -> String {
     let g = Gathered {
         edition: Edition {
+            large_print: false,
             paper: "The Deckle Daily".into(),
             date: date(),
             place: "New York, NY".into(),
@@ -208,4 +209,46 @@ fn no_location_unavailable() {
     assert!(s.unavailable.is_some());
     assert_eq!(line, None);
     assert!(assets.is_empty());
+}
+
+#[test]
+fn large_print_lists_the_strip_and_ships_its_stylesheet() {
+    let c = Config {
+        large_print: true,
+        ..cfg()
+    };
+    let (s, _, _) = page(&inputs(&c, Ok(forecast()), Some(agenda())));
+    let body = &s.articles[0].body;
+    assert!(body.contains("<ul class=\"strip-list\">"), "{body}");
+    assert_eq!(body.matches("<li class=\"day\">").count(), 5, "{body}");
+    assert!(!body.contains("table class=\"strip\""));
+    assert!(body.contains("THU"));
+
+    let style = |large_print: bool| {
+        let g = Gathered {
+            edition: Edition {
+                large_print,
+                paper: "The Deckle Daily".into(),
+                date: date(),
+                place: "New York, NY".into(),
+                weather_line: None,
+                masthead: Default::default(),
+                sections: vec![s.clone()],
+                assets: Vec::new(),
+            },
+            news: Vec::new(),
+            reading: None,
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+        };
+        let (_, css) = render::render(&g, Vec::new())
+            .into_iter()
+            .find(|(p, _)| p == "OEBPS/style.css")
+            .unwrap();
+        String::from_utf8(css).unwrap()
+    };
+    let (regular, large) = (style(false), style(true));
+    assert!(large.starts_with(&regular) && large.len() > regular.len());
+    assert!(large.contains("ul.strip-list") && !regular.contains("ul.strip-list"));
 }

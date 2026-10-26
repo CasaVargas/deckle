@@ -184,6 +184,8 @@ pub struct Section {
 
 #[derive(Clone, Debug)]
 pub struct Edition {
+    /// A layout for big type (many papers §6): the large-print stylesheet and the strip as a list.
+    pub large_print: bool,
     pub paper: String,
     pub date: NaiveDate,
     pub place: String,
@@ -372,6 +374,17 @@ pub fn gather_with(
     )
 }
 
+/// The settings a paper prints with: large print keeps one photo a story (many papers §6).
+fn print_config(cfg: &Config) -> std::borrow::Cow<'_, Config> {
+    match cfg.large_print && cfg.max_photos > 1 {
+        true => std::borrow::Cow::Owned(Config {
+            max_photos: 1,
+            ..cfg.clone()
+        }),
+        false => std::borrow::Cow::Borrowed(cfg),
+    }
+}
+
 /// Deterministic/offline-test entry point: provider HTTP and credentials are injected.
 #[allow(clippy::too_many_arguments)]
 pub fn gather_with_editor(
@@ -383,7 +396,9 @@ pub fn gather_with_editor(
     key: &str,
     post: &mut deckle_xray::llm::Post<'_>,
 ) -> Gathered {
+    let cfg = &*print_config(cfg);
     let mut edition = Edition {
+        large_print: cfg.large_print,
         paper: cfg.title.clone(),
         date,
         place: cfg.place.clone(),
@@ -720,4 +735,25 @@ pub fn esc(s: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod print_config_tests {
+    use super::{Config, print_config};
+
+    #[test]
+    fn large_print_keeps_one_photo_a_story() {
+        let regular = Config::default();
+        assert_eq!(print_config(&regular).max_photos, regular.max_photos);
+        let large = Config {
+            large_print: true,
+            ..Config::default()
+        };
+        assert_eq!(print_config(&large).max_photos, 1);
+        let none = Config {
+            max_photos: 0,
+            ..large
+        };
+        assert_eq!(print_config(&none).max_photos, 0);
+    }
 }

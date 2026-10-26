@@ -312,14 +312,104 @@ fn readership_is_kept_per_paper() {
 }
 
 #[test]
-fn morgue_and_schedule_say_they_are_main_only_for_now() {
+fn morgue_says_it_is_main_only_for_now() {
     let h = setup();
-    for args in [
-        &["digest", "--paper", "kid-courier", "morgue", "list"][..],
-        &["digest", "--paper", "kid-courier", "schedule"][..],
-    ] {
-        let o = h.deckle(&[]).args(args).output().unwrap();
-        assert!(!o.status.success());
-        assert!(text(&o).contains("main paper"), "{}", text(&o));
-    }
+    let o = h
+        .deckle(&[])
+        .args(["digest", "--paper", "kid-courier", "morgue", "list"])
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
+    assert!(text(&o).contains("main paper"), "{}", text(&o));
+}
+
+#[test]
+fn schedule_writes_each_papers_time_and_days_and_installs_every_job() {
+    let h = setup();
+    let o = h
+        .deckle(&[])
+        .env("DECKLE_SCHEDULE_DRY_RUN", "1")
+        .args([
+            "digest",
+            "--paper",
+            "kid-courier",
+            "schedule",
+            "--at",
+            "07:00",
+            "--days",
+            "sat",
+        ])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    let t = text(&o);
+    assert!(
+        t.contains("would install com.casavargas.deckle.digest.kid-courier at 07:00 sat"),
+        "{t}"
+    );
+    assert!(t.contains("The Kid Courier is built sat at 07:00"), "{t}");
+    let file = std::fs::read_to_string(h.config.with_file_name("papers/kid-courier.toml")).unwrap();
+    assert!(
+        file.contains("at = \"07:00\"") && file.contains("\"sat\""),
+        "{file}"
+    );
+    assert!(
+        !file.contains("[sync]"),
+        "household settings stay out: {file}"
+    );
+    // Only what was written, plus the schedule: no defaults spilled in.
+    assert!(!file.contains("max_age_hours"), "{file}");
+    // The main paper has no [schedule] at: its installed job (if any) is left alone.
+    assert!(
+        !t.contains("would install com.casavargas.deckle.digest at"),
+        "{t}"
+    );
+
+    // Now the main paper too: both jobs, and the watcher.
+    let o = h
+        .deckle(&[])
+        .env("DECKLE_SCHEDULE_DRY_RUN", "1")
+        .args(["digest", "schedule", "--at", "05:30"])
+        .output()
+        .unwrap();
+    let t = text(&o);
+    assert!(
+        t.contains("would install com.casavargas.deckle.digest at 05:30"),
+        "{t}"
+    );
+    assert!(t.contains("digest.kid-courier at 07:00 sat"), "{t}");
+    assert!(
+        t.contains("would install com.casavargas.deckle.watch"),
+        "{t}"
+    );
+
+    // Off for one paper: its job, and `at` leaves its file.
+    let o = h
+        .deckle(&[])
+        .env("DECKLE_SCHEDULE_DRY_RUN", "1")
+        .args(["digest", "--paper", "kid-courier", "schedule", "--off"])
+        .output()
+        .unwrap();
+    assert!(text(&o).contains("would remove com.casavargas.deckle.digest.kid-courier"));
+    let file = std::fs::read_to_string(h.config.with_file_name("papers/kid-courier.toml")).unwrap();
+    assert!(!file.contains("07:00"), "{file}");
+}
+
+#[test]
+fn schedule_refuses_a_bad_day_or_days_without_a_time() {
+    let h = setup();
+    let o = h
+        .deckle(&[])
+        .env("DECKLE_SCHEDULE_DRY_RUN", "1")
+        .args(["digest", "schedule", "--at", "07:00", "--days", "saturday"])
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
+    assert!(text(&o).contains("isn't a day"), "{}", text(&o));
+    let o = h
+        .deckle(&[])
+        .args(["digest", "schedule", "--days", "sat"])
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
 }

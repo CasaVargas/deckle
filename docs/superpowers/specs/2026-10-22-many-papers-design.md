@@ -338,3 +338,57 @@ These are the calls made where the spec left room, so the code and this document
 - **`digest schedule --paper`** is refused until PR 2.
 - **Saving an extra paper** (readership "apply", later the app) never writes the household
   settings into its file.
+
+## 13. Implementation notes, PR 2 (2026-10-25)
+
+- **`schedule --at`** writes `[schedule]` into the paper's own file, then installs every paper
+  that has `at`, plus the watcher. Jobs for papers that are gone are removed. The main
+  paper's job is replaced only when `digest.toml` has `at`, so an existing user's job stays
+  until they set a time again.
+- **`schedule --off --paper <slug>`** removes that paper's job and its `at`. The watcher is
+  removed only when no edition job is left. Plain `--off` removes everything, as before. The
+  app's "off" switch for the main paper uses the per-paper removal.
+- **Linux** prints one cron line per paper, with days as cron weekdays.
+- **`DECKLE_SCHEDULE_DRY_RUN`** makes install and remove report what they would do, for tests:
+  a real install loads jobs into the login session whatever `HOME` is.
+- **Saving an extra paper** adds a key the file lacks only when it isn't the default, so a
+  hand-written paper file stays short.
+
+## 14. Implementation notes, PR 3 (2026-10-25)
+
+- **`render::LARGE_STYLE`** follows `STYLE` in `style.css` only when `Edition.large_print`;
+  a regular paper's stylesheet and pages are byte-identical to before (the weather golden
+  still matches). Later rules win, and a test checks that no selector is under 1em in effect.
+  The one exception is the crossword's clue numbers (`table.grid span.n`), which have to fit
+  inside their squares.
+- **Heads** are 1.1× (`.paper`, `.section-head`, `h2.headline`, `h2.lead`, `h3.subhead`,
+  `.big`). **Rules** go from 1px to 2px, and the section head's top rule from 3px to 4px.
+- **The forecast strip** is `<ul class="strip-list">` with a `<li class="day">` per day when
+  `cfg.large_print`, in `sources::weather`. The table stays for regular papers.
+- **Photos:** gather prints with `max_photos` capped at 1 (`print_config`).
+- **`body { font-size: 1.25em }`** is not added: it waits on the device check on the
+  Paperwhite and the Scribe (§6).
+
+## 15. Implementation notes, PR 4 (2026-10-25)
+
+The Daily tab has grown rooms since §7 was written (Today, Editions, Reading, Delivery, The
+paper). Your papers fits them like this:
+
+- **Your papers** is a row of cards above the rooms, shown once `digest.toml` exists. Picking a
+  card (Edit) selects that paper, and every room then works on it. Preview builds that paper.
+- **The paper** room gets Reader, Kindle (Any Kindle, or a named Kindle from the device list),
+  Large print (with the Aa line) and Days. A Kindle is saved by its name when it has one, else
+  by its sync id.
+- **Today:** the press bar's time and on/off are the selected paper's. Saving a time writes
+  `[schedule] at` (and its `days`) to that paper's file, then installs its job, as the CLI
+  does. Stop the presses stays household-wide (one `press.json`, as in the CLI).
+- **Reading:** an extra paper shows "Saved articles go to <main title>." instead of Your
+  Reading and the Shelf.
+- **Editions:** How far you read uses the paper's own readership file. Every edition (the
+  Morgue) stays on the main paper in the app for now, as `digest morgue` does in the CLI; an
+  extra paper says so.
+- **Delivery → Email:** an extra paper shows only on/off, Send to and Also by USB; the account
+  stays on the main paper. The password is the household's.
+- **Commands** take `paper: Option<String>` (`None` is the main paper). `papers_list` returns
+  the cards and `paper_create(title, reader)` the new slug. Tomorrow's paper reads the paper's
+  work folder, so "sent" days in This week are that paper's.

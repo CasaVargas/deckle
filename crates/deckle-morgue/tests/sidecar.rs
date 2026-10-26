@@ -31,6 +31,7 @@ fn section(key: &str, title: &str, articles: Vec<Article>) -> Section {
 fn gathered() -> Gathered {
     Gathered {
         edition: Edition {
+            large_print: false,
             paper: "The Deckle Daily".into(),
             date: date(),
             place: "Linden Falls, NC".into(),

@@ -2643,11 +2643,20 @@ fn digest(
                 ExitCode::SUCCESS
             })
         }
-        cli::DigestCommand::Schedule { at, off } => {
-            main_paper_only(paper, "A schedule")?;
+        cli::DigestCommand::Schedule { at, days, off } => {
             use deckle_digest::schedule;
+            let extra = paper.filter(|p| *p != deckle_digest::papers::MAIN);
             if off {
-                let done = schedule::remove()?;
+                let done = match extra {
+                    // One paper: its job goes, and `at` leaves its file.
+                    Some(slug) => {
+                        let mut cfg = paper_config(&path, Some(slug))?;
+                        cfg.schedule = Default::default();
+                        deckle_digest::papers::save(&path, &cfg)?;
+                        schedule::remove_paper(slug)?
+                    }
+                    None => schedule::remove()?,
+                };
                 emit(json, &done, || {
                     if done.is_empty() {
                         "nothing was scheduled".into()
@@ -2659,43 +2668,66 @@ fn digest(
             }
             let Some(at) = at else {
                 let st = schedule::status();
-                emit(json, &st, || match (&st.at, st.watch) {
-                    (None, false) => {
-                        "not scheduled; `deckle digest schedule --at 05:30` sets it up".into()
+                emit(json, &st, || {
+                    if st.papers.is_empty() && !st.watch {
+                        return "not scheduled; `deckle digest schedule --at 05:30` sets it up"
+                            .into();
                     }
-                    (at, watch) => format!(
-                        "edition: {}\nwatcher: {}{}",
-                        at.as_deref()
-                            .map(|t| format!("daily at {t}"))
-                            .unwrap_or_else(|| "off".into()),
-                        if watch { "on" } else { "off" },
-                        st.exe
-                            .as_deref()
-                            .map(|e| format!("\nruns: {e}"))
-                            .unwrap_or_default()
-                    ),
+                    let mut lines: Vec<String> = st
+                        .papers
+                        .iter()
+                        .map(|p| {
+                            let days: Vec<&str> = p.days.iter().map(|d| d.key()).collect();
+                            let when = match (&p.at, days.is_empty()) {
+                                (Some(at), true) => format!("daily at {at}"),
+                                (Some(at), false) => format!("{} at {at}", days.join(", ")),
+                                (None, _) => "installed".into(),
+                            };
+                            format!("edition {}: {when}", p.slug)
+                        })
+                        .collect();
+                    lines.push(format!("watcher: {}", if st.watch { "on" } else { "off" }));
+                    if let Some(e) = &st.exe {
+                        lines.push(format!("runs: {e}"));
+                    }
+                    lines.join("\n")
                 })?;
                 return Ok(ExitCode::SUCCESS);
             };
-            let (hour, minute) = schedule::parse_at(&at)?;
-            // The jobs need the config that exists now, not one created later.
-            load_digest_config(&path)?;
+            schedule::parse_at(&at)?;
+            let days: Vec<deckle_digest::config::Day> = match &days {
+                None => Vec::new(),
+                Some(list) => list
+                    .split(',')
+                    .filter(|d| !d.trim().is_empty())
+                    .map(|d| {
+                        deckle_digest::config::Day::parse(d)
+                            .ok_or_else(|| format!("--days: {d:?} isn't a day (mon … sun)"))
+                    })
+                    .collect::<Result<_, _>>()?,
+            };
+            // Saved in the paper's own file, then every paper's job installed from the files.
+            let mut cfg = paper_config(&path, paper)?;
+            cfg.schedule.at = Some(at.clone());
+            cfg.schedule.days = days.clone();
+            deckle_digest::papers::save(&path, &cfg)?;
             let exe = std::env::current_exe().map_err(|e| e.to_string())?;
             let exe = exe.canonicalize().unwrap_or(exe);
             if let Some(w) = schedule::unstable_exe(&exe) {
                 eprintln!("warning: {w}");
             }
-            let s = schedule::Schedule {
-                hour,
-                minute,
-                exe,
-                config: explicit_config.map(|c| c.canonicalize().unwrap_or(c)),
+            let config = explicit_config.map(|c| c.canonicalize().unwrap_or(c));
+            let jobs = schedule::jobs_for(&all_papers(&path)?, &exe, config.as_deref());
+            let done = schedule::install_all(&jobs, &exe, config.as_deref())?;
+            let when = match days.is_empty() {
+                true => "daily".to_owned(),
+                false => days.iter().map(|d| d.key()).collect::<Vec<_>>().join(", "),
             };
-            let done = schedule::install(&s)?;
             emit(json, &done, || {
                 format!(
-                    "{}\nThe paper is built daily at {at} and goes to your Kindle when it's plugged in.",
-                    done.join("\n")
+                    "{}\n{} is built {when} at {at} and goes to its Kindle when it's plugged in.",
+                    done.join("\n"),
+                    cfg.title
                 )
             })?;
             Ok(ExitCode::SUCCESS)

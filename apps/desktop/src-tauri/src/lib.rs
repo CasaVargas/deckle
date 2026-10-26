@@ -63,6 +63,8 @@ pub fn run() {
             commands::reveal,
             commands::start_tab,
             daily::daily_state,
+            daily::papers_list,
+            daily::paper_create,
             daily::daily_setup,
             daily::daily_save,
             daily::daily_day_preview,

@@ -361,6 +361,8 @@ paper. Each other paper is a file of its own in `papers/` beside it:
 deckle digest papers new --title "The Kid Courier" --for "Maya"   # writes papers/kid-courier.toml
 deckle digest papers                                              # lists every paper
 deckle digest --paper kid-courier run                             # builds that one now
+deckle digest --paper kid-courier schedule --at 07:00 --days sat  # Saturdays at 7
+deckle digest schedule                                            # every paper's job, and the watcher
 ```
 
 A paper's file name, its *slug*, is lowercase letters, digits and dashes (`kid-courier`). Each
@@ -370,7 +372,7 @@ paper has its own title, sections, feeds, place, `keep`, export folders, reMarka
 ```toml
 reader = "Maya"                   # who it's for
 kindle = "Mom's Kindle"           # only this Kindle gets it (its name or sync id); leave out for any
-large_print = true                # (a layout for big type; coming)
+large_print = true                # a layout for big type (below)
 ```
 
 - **Shared settings.** `[sync]`, `[reading]` (the Inbox and saved articles) and the email
@@ -386,10 +388,20 @@ large_print = true                # (a layout for big type; coming)
   pruned by its own `keep`, so one paper never removes another's.
 - **Per-paper state.** Each paper keeps its own readership and puzzles in `papers/<slug>/`, and
   its Morgue editions in a `<slug>/` folder inside the Morgue.
-- **For now:** the `digest morgue` commands and `digest schedule` work on the main paper only.
-  Schedule an extra paper with your own scheduler (`deckle digest --paper <slug> run`).
-  Per-paper schedules, large print and the app's Your papers are coming.
-- **Removing a paper:** delete its file.
+- **Schedules.** Each paper has its own job. `schedule --at` saves `[schedule] at` (and
+  `days`) in that paper's file and installs every paper's job, plus the one watcher. On macOS
+  that's a LaunchAgent per paper (`com.casavargas.deckle.digest.<slug>`); on Windows, a task
+  (`\Deckle\Digest-<slug>`). A main paper you scheduled before many papers keeps its job
+  until you set its time again. `schedule --off` removes everything; with `--paper`, only that
+  paper's job.
+- **Large print.** `large_print = true` lays the paper out for big type: nothing smaller than
+  the body text, bigger headlines, heavier rules, the five-day forecast as a list (one day a
+  line), and one photo a story. Set the text size on the Kindle itself (Aa). It applies to
+  every book on that Kindle.
+- **For now:** the `digest morgue` commands work on the main paper only. The app's Your papers
+  is coming.
+- **Removing a paper:** delete its file, then run `deckle digest schedule --at …` for any
+  paper (or `--off`) so its job goes too.
 
 ## The title's typeface
 

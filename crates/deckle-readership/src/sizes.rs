@@ -108,7 +108,11 @@ pub fn next_paper(
         .into_iter()
         .filter_map(|s| Some((s.key, s.share?)))
         .collect();
-    let sent = |d: NaiveDate| built.join(format!("deckle-daily-{d}.epub")).exists();
+    let sent = |d: NaiveDate| {
+        built
+            .join(format!("{}.epub", deckle_digest::edition_stem(cfg, d)))
+            .exists()
+    };
     let queue = ReadingQueue::new(
         cfg.reading
             .queue_path

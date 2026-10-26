@@ -238,6 +238,14 @@ export interface FeedConfig {
 export interface DailyConfig {
   llm?: DailyEditorConfig;
   title: string;
+  /** Who the paper is for. Absent while empty. */
+  reader?: string;
+  /** The Kindle it goes to, by name or sync id. Absent: any Kindle. */
+  kindle?: string;
+  /** A layout for big type. Absent while off. */
+  large_print?: boolean;
+  /** `[schedule]`: when it's built. Absent while untouched. */
+  schedule?: { at?: string; days?: Day[] };
   /** The title's typeface: absent for the blackletter, else "serif", "sans" or a .ttf path. */
   masthead?: string;
   place: string;
@@ -424,6 +432,38 @@ export interface ScheduleStatus {
   at: string | null;
   watch: boolean;
   exe: string | null;
+  /** Every paper's installed edition job, main first. */
+  papers?: { slug: string; at: string | null; days: Day[] }[];
+}
+
+/** `[schedule] days`. */
+export type Day = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
+
+/** A card in Your papers (many papers §7). `main` is digest.toml's paper. */
+export interface PaperCard {
+  slug: string;
+  title: string;
+  reader: string;
+  sections: string[];
+  /** A Kindle's name or sync id; empty for any Kindle. */
+  kindle: string;
+  email_to: string | null;
+  usb_too: boolean;
+  at: string | null;
+  days: Day[];
+  large_print: boolean;
+  installed: boolean;
+}
+
+export interface KnownKindle {
+  sync_id: string;
+  name: string;
+}
+
+export interface PapersView {
+  papers: PaperCard[];
+  notes: string[];
+  kindles: KnownKindle[];
 }
 
 export interface PlaceRow {
