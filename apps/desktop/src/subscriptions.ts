@@ -90,3 +90,20 @@ export function setMaxItems(cfg: DailyConfig, site: string, value: string): Dail
   const next: SubscribedConfig = value.trim() !== "" && n >= 1 ? { ...rest, max_items: n } : rest;
   return withGroups(cfg, (cfg.subscribed ?? []).map((x) => (x === g ? next : x)));
 }
+
+/** Drops a site's group (its account is gone); `subscribed` leaves `sections` with the last one. */
+export function removeGroup(cfg: DailyConfig, site: string): DailyConfig {
+  const key = statusKey(site);
+  return withGroups(cfg, (cfg.subscribed ?? []).filter((g) => statusKey(g.site) !== key));
+}
+
+/** Re-keys a group to a renamed site; if the new site already has a group, that one stays and the old is dropped. */
+export function renameGroup(cfg: DailyConfig, from: string, to: string): DailyConfig {
+  const a = statusKey(from);
+  const b = statusKey(to);
+  if (a === b) return cfg;
+  const groups = cfg.subscribed ?? [];
+  if (!groups.some((g) => statusKey(g.site) === a)) return cfg;
+  if (groups.some((g) => statusKey(g.site) === b)) return removeGroup(cfg, from);
+  return withGroups(cfg, groups.map((g) => (statusKey(g.site) === a ? { ...g, site: b } : g)));
+}

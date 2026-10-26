@@ -30,7 +30,7 @@ test("a tested failure shows until the password changes, then the fresh status",
   expect(subscriptionLine(shownStatus([fresh], tested, "thepilot.com")!)).toBe("Not signed in yet");
 });
 
-import { groupFor, setMaxItems, toggleGroup, toggleSlug } from "./subscriptions";
+import { groupFor, removeGroup, renameGroup, setMaxItems, toggleGroup, toggleSlug } from "./subscriptions";
 import type { DailyConfig } from "./types";
 
 const cfgOf = (sections: string[], subscribed?: unknown[]) => ({ sections, subscribed }) as unknown as DailyConfig;
@@ -80,4 +80,30 @@ test("stories per section edits max_items; empty unsets", () => {
   expect(groupFor(c, "a.com")?.max_items).toBe(6);
   c = setMaxItems(c, "a.com", "");
   expect(groupFor(c, "a.com")).not.toHaveProperty("max_items");
+});
+
+test("removing an account drops its group and, with the last, the kind", () => {
+  const two = toggleGroup(toggleGroup(cfgOf(["local"]), "a.com"), "b.com");
+  const one = removeGroup(two, "A.com");
+  expect(one.subscribed?.map((g) => g.site)).toEqual(["b.com"]);
+  expect(one.sections).toEqual(["local", "subscribed"]);
+  const none = removeGroup(one, "b.com");
+  expect(none.subscribed).toEqual([]);
+  expect(none.sections).toEqual(["local"]);
+});
+
+test("renaming a site moves its group", () => {
+  let c = toggleSlug(toggleGroup(cfgOf(["local"]), "a.com"), "a.com", "sports");
+  c = renameGroup(c, "a.com", "https://www.B.com/");
+  expect(groupFor(c, "a.com")).toBeUndefined();
+  expect(groupFor(c, "b.com")?.sections).toEqual(["news", "sports"]);
+  expect(c.sections).toEqual(["local", "subscribed"]);
+});
+
+test("renaming onto a site that already has a group keeps that one", () => {
+  let c = toggleGroup(toggleGroup(cfgOf(["local"]), "a.com"), "b.com");
+  c = toggleSlug(c, "b.com", "opinion");
+  c = renameGroup(c, "a.com", "b.com");
+  expect(c.subscribed).toHaveLength(1);
+  expect(groupFor(c, "b.com")?.sections).toEqual(["news", "opinion"]);
 });

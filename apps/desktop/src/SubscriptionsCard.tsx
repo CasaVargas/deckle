@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
-import { SUBSCRIBED_SLUGS, forgetTested, groupFor, setMaxItems, shownStatus, statusKey, subscriptionLine, toggleGroup, toggleSlug } from "./subscriptions";
+import { SUBSCRIBED_SLUGS, forgetTested, groupFor, removeGroup, renameGroup, setMaxItems, shownStatus, statusKey, subscriptionLine, toggleGroup, toggleSlug } from "./subscriptions";
 import type { Tested } from "./subscriptions";
 import type { DailyConfig, SiteStatus, SubscriptionConfig } from "./types";
 
@@ -43,6 +43,8 @@ export default function SubscriptionsCard({
     // A test's answer is about the site and account it was run for.
     setTested((t) => forgetTested(t, subscriptions[i].site));
     onChange(subscriptions.map((s, j) => (j === i ? { ...s, ...p } : s)));
+    // The paper's group follows the row's site.
+    if (p.site !== undefined) onConfig((c) => renameGroup(c, subscriptions[i].site, p.site as string));
   };
   const statusOf = (s: SubscriptionConfig): SiteStatus | undefined => shownStatus(statuses, tested, s.site);
   // The keychain entry and the session are named after the saved site and username.
@@ -96,11 +98,13 @@ export default function SubscriptionsCard({
     setPasswords({}); // typed passwords are by row, and the rows shift
     if (!statusOf(s)) {
       onChange(next); // never saved: nothing in the keychain or on disk
+      onConfig((c) => removeGroup(c, s.site));
       return;
     }
     try {
       setStatuses(await api.subscriptionForget(s.site));
       onChange(next);
+      onConfig((c) => removeGroup(c, s.site));
     } catch (e) {
       setMsg({ text: String(e), ok: false });
     }
