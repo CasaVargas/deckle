@@ -48,6 +48,21 @@ pub trait Publisher: Sync {
     fn feed_url(&self, site: &str, slug: &str, n: usize) -> String;
 }
 
+/// Items a subscribed slug's feed asks for beyond its budget, so a group after Local (which may
+/// already have printed some of its stories) can still refill to `max_items`.
+pub const SUBSCRIBED_SPARE: usize = 5;
+
+/// The feed URL the press and the preview both read for one `[[subscribed]]` slug (one cache
+/// key): `max_items` plus [`SUBSCRIBED_SPARE`]; the cut still uses `max_items`.
+pub fn subscribed_feed_url(
+    cfg: &crate::config::Config,
+    group: &crate::config::SubscribedConfig,
+    slug: &str,
+) -> String {
+    let n = group.max_items.unwrap_or(cfg.local.max_items);
+    blox::Blox.feed_url(&group.site, slug, n.saturating_add(SUBSCRIBED_SPARE))
+}
+
 /// Every known adapter.
 pub fn registry() -> Vec<Box<dyn Publisher>> {
     vec![Box::new(blox::Blox)]

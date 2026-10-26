@@ -1563,12 +1563,12 @@ fn a_subscribed_group_prints_one_section_per_slug_after_local() {
     assert_eq!(sports.articles.len(), 2);
     // both are news (lead and puzzle theme)
     assert_eq!(g.news, [0, 1, 2]);
-    // the feed asked for [local] max_items stories
+    // the feed asked for [local] max_items stories plus five spare
     let asked = asked.lock().unwrap();
     assert!(
         asked
             .iter()
-            .any(|u| u.starts_with(&format!("{PILOT_FEEDS}news&l=12&"))),
+            .any(|u| u.starts_with(&format!("{PILOT_FEEDS}news&l=17&"))),
         "{asked:?}"
     );
     assert!(!g.notes.iter().any(|n| n == STRANGER_NOTE), "{:?}", g.notes);
@@ -1594,6 +1594,33 @@ fn a_story_in_local_and_the_group_prints_once_in_local() {
     assert_eq!(news.key, "subscribed:thepilot.com:news");
     assert_eq!(news.articles.len(), 1);
     assert_eq!(news.articles[0].title, "Library reopens after roof repairs");
+}
+
+#[test]
+fn a_subscribed_group_after_local_refills_to_max_items_from_its_spares() {
+    let mut c = subscribed_config(vec![SectionKind::Local, SectionKind::Subscribed], true);
+    c.local.google_news = String::new();
+    c.local.feeds = vec![SHARED_LOCAL.into()];
+    c.subscribed[0].max_items = Some(1);
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        pilot_net(url)
+    };
+    let g = gather(&c, date(), now(), &net);
+    // one story budgeted, six asked for: Local's shared story is dropped and the next fills in
+    assert!(
+        asked
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|u| u.starts_with(&format!("{PILOT_FEEDS}news&l=6&"))),
+        "{asked:?}"
+    );
+    let news = &g.edition.sections[1];
+    assert_eq!(news.key, "subscribed:thepilot.com:news");
+    let titles: Vec<&str> = news.articles.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, ["Library reopens after roof repairs"]);
 }
 
 #[test]

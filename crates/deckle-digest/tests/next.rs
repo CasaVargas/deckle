@@ -887,7 +887,8 @@ fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
         "sections = [\"weather\", \"subscribed\"]\n\n[[subscribed]]\nsite = \"thepilot.com\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\nmax_items = 5\n",
     )
     .unwrap();
-    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=5&s=start_time&sd=desc";
+    // max_items plus five spare, so a group after Local can refill
+    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=10&s=start_time&sd=desc";
     assert!(live_urls(&s.cfg).contains(&news.to_owned()));
     // the same twice-an-hour limit as a feed's
     let net = Counting::new();
@@ -916,6 +917,44 @@ fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
     assert!(labels(&p).contains(&"The Pilot · Sports · 5 slots".to_owned()));
     let json = serde_json::to_string(&p.plan[0]).unwrap();
     assert!(!json.contains("subscribed"), "{json}");
+}
+
+#[test]
+fn local_after_a_group_drops_the_groups_story_and_refills_as_the_press_does() {
+    let mut s = Setup::new();
+    s.cfg = Config::parse(
+        "sections = [\"subscribed\", \"local\"]\n\n[local]\nmax_items = 2\n\n[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 1\n",
+    )
+    .unwrap();
+    s.cfg.local.google_news = String::new();
+    s.cfg.local.feeds = vec![LOCAL.into()];
+    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=6&s=start_time&sd=desc";
+    s.live.feeds.insert(
+        news.into(),
+        fetched(&[("Water tower vote", local(2026, 10, 22, 14, 0))]),
+    );
+    s.live.feeds.insert(
+        LOCAL.into(),
+        fetched(&[
+            ("Water tower vote", local(2026, 10, 22, 13, 0)),
+            ("Library reopens", local(2026, 10, 22, 12, 0)),
+            ("Fair opens", local(2026, 10, 22, 11, 0)),
+        ]),
+    );
+    let p = s.plan();
+    // the group prints the shared story first; Local drops it and refills to its two stories,
+    // the count the press prints
+    let lead = p.lead.clone().unwrap();
+    assert_eq!(lead.key, "local");
+    assert_eq!(lead.kicker, "LOCAL · 2 NEW SINCE 05:30");
+    assert_eq!(lead.title.as_deref(), Some("Library reopens"));
+    assert_eq!(
+        labels(&p),
+        [
+            "THEPILOT.COM · NEWS · 1 NEW SINCE 05:30 | Water tower vote",
+            "LOCAL · 2 NEW SINCE 05:30 | Fair opens"
+        ]
+    );
 }
 
 #[test]

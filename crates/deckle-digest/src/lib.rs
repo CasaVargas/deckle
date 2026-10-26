@@ -549,7 +549,6 @@ pub fn gather_with_editor(
                 .sections
                 .push(sources::onthisday::section(date, net)),
             SectionKind::Subscribed => {
-                use publisher::Publisher;
                 let mut noted = std::collections::HashSet::new();
                 for group in &cfg.subscribed {
                     if cfg.subscription(&group.site).is_none() && noted.insert(&group.site) {
@@ -564,7 +563,7 @@ pub fn gather_with_editor(
                     let max_items = group.max_items.unwrap_or(cfg.local.max_items);
                     let feed = config::FeedConfig {
                         name: display.into(),
-                        url: publisher::blox::Blox.feed_url(&group.site, slug, max_items),
+                        url: publisher::subscribed_feed_url(cfg, group, slug),
                         full_text: Some(config::FullText::Yes),
                         max_items,
                         ..Default::default()
