@@ -471,14 +471,38 @@ pub fn suggest(learning: &Learning, cfg: &Config, today: NaiveDate) -> Vec<Notic
     rank(learning, cfg, today).into_iter().take(TOP).collect()
 }
 
+/// A section whose headlines are public news (design §6): what the editor may see. Saved
+/// reading, the shelf, calendars and highlights are not.
+fn public_news(section: &str) -> bool {
+    section == "local"
+        || section.starts_with("local:")
+        || section.starts_with("feeds:")
+        || section.starts_with("interests:")
+}
+
+/// `key` as it is printed in `headline`, when it is there: the public spelling of a phrase.
+fn as_printed(headline: &str, key: &str) -> Option<String> {
+    let lower = headline.to_lowercase();
+    let at = lower.find(key)?;
+    // byte offsets of the lowercase text line up with the original only for ASCII; fall back
+    // to the key itself when they don't
+    headline
+        .get(at..at + key.len())
+        .filter(|s| s.to_lowercase() == key)
+        .map(str::to_owned)
+}
+
 /// Candidates the editor may name (design §6): the ones that would rank, not named yet, with
-/// at least one Tap hit (highlight text and shelf authors never travel); each as `(key,
-/// phrase, headlines)` with up to five Tap headlines, newest first; at most ten.
+/// at least one Tap hit in a public news section inside the window (highlight text, shelf
+/// authors and anything you saved or own never travel); each as `(key, phrase, headlines)`
+/// with the phrase as a public headline printed it and up to five such headlines, newest
+/// first; at most ten.
 pub fn naming_candidates(
     learning: &Learning,
     cfg: &Config,
     today: NaiveDate,
 ) -> Vec<(String, String, Vec<String>)> {
+    let first = today - Days::new(u64::from(cfg.learning.window_days));
     rank(learning, cfg, today)
         .into_iter()
         .filter_map(|n| {
@@ -486,7 +510,11 @@ pub fn naming_candidates(
             if c.named.is_some() {
                 return None;
             }
-            let mut taps: Vec<&Hit> = c.hits.iter().filter(|h| h.signal == Signal::Tap).collect();
+            let mut taps: Vec<&Hit> = c
+                .hits
+                .iter()
+                .filter(|h| h.signal == Signal::Tap && h.date >= first && public_news(&h.section))
+                .collect();
             if taps.is_empty() {
                 return None;
             }
@@ -500,7 +528,11 @@ pub fn naming_candidates(
                     break;
                 }
             }
-            Some((n.key.clone(), c.display.clone(), headlines))
+            let phrase = headlines
+                .iter()
+                .find_map(|h| as_printed(h, &n.key))
+                .unwrap_or_else(|| n.key.clone());
+            Some((n.key.clone(), phrase, headlines))
         })
         .take(10)
         .collect()

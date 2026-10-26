@@ -2439,7 +2439,7 @@ fn digest(
                 now,
                 &output,
                 &deckle_digest::Http,
-                &gather_options_for(&cfg),
+                &gather_options_for(&cfg, date),
             )?;
             record_naming(&cfg, &gathered);
             report
@@ -2551,7 +2551,7 @@ fn digest(
                 now,
                 &work,
                 &deckle_digest::Http,
-                &gather_options_for(&cfg),
+                &gather_options_for(&cfg, date),
             )?;
             record_naming(&cfg, &gathered);
             let opts = paper_options(
@@ -2577,7 +2577,7 @@ fn digest(
                     now,
                     &work,
                     &deckle_digest::Http,
-                    &gather_options_for(&cfg),
+                    &gather_options_for(&cfg, date),
                 )?;
                 record_naming(&cfg, &gathered);
                 long_reads = prepare_long_reads(&built, &opts).0;
@@ -3895,13 +3895,15 @@ fn gather_options() -> deckle_digest::GatherOptions {
 
 /// The build's options with what Deckle noticed and the editor may name (interests design
 /// §6): only with the editor on, from the paper's own `interests.json`.
-fn gather_options_for(cfg: &deckle_digest::Config) -> deckle_digest::GatherOptions {
+fn gather_options_for(
+    cfg: &deckle_digest::Config,
+    date: deckle_digest::chrono::NaiveDate,
+) -> deckle_digest::GatherOptions {
     let mut opts = gather_options();
     if cfg.llm.enabled {
         let learning =
             deckle_readership::Learning::load(&deckle_readership::Learning::path_for(cfg));
-        let today = deckle_digest::chrono::Local::now().date_naive();
-        opts.naming = deckle_readership::learn::naming_candidates(&learning, cfg, today)
+        opts.naming = deckle_readership::learn::naming_candidates(&learning, cfg, date)
             .into_iter()
             .map(|(key, phrase, headlines)| deckle_digest::NamingCandidate {
                 key,

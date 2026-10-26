@@ -508,3 +508,81 @@ fn naming_candidates_send_at_most_ten_with_five_newest_headlines() {
         c[0].2
     );
 }
+
+#[test]
+fn naming_sends_only_public_headlines_inside_the_window_and_the_phrase_as_printed() {
+    let mut l = Learning::default();
+    let stop = HashSet::new();
+    let private = |date: &str, section: &str, title: &str| Hit {
+        date: d(date),
+        section: section.into(),
+        title: title.into(),
+        signal: Signal::Tap,
+    };
+    // three taps on saved articles and one on the shelf: a candidate, but nothing to send
+    note(
+        &mut l,
+        &stop,
+        "Secret Project memo",
+        private("2026-10-20", "reading", "Secret Project memo"),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Secret Project update",
+        private("2026-10-22", "reading", "Secret Project update"),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Secret Project book",
+        private("2026-10-23", "shelf", "Secret Project book"),
+    );
+    // a public subject first spelled oddly in a private title, then printed in the news
+    note(
+        &mut l,
+        &stop,
+        "BRYCE YOUNG notes",
+        private("2026-10-19", "reading", "BRYCE YOUNG notes"),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Bryce Young benched",
+        hit("2026-10-20", "Bryce Young benched", Signal::Tap),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Bryce Young returns",
+        hit("2026-10-22", "Bryce Young returns", Signal::Tap),
+    );
+    note(
+        &mut l,
+        &stop,
+        "Why Bryce Young sat",
+        hit("2026-10-22", "Why Bryce Young sat", Signal::Tap),
+    );
+    // an old public headline, outside the window
+    note(
+        &mut l,
+        &stop,
+        "Bryce Young drafted",
+        hit("2026-09-01", "Bryce Young drafted", Signal::Tap),
+    );
+    let c = naming_candidates(&l, &cfg(), today());
+    let keys: Vec<&str> = c.iter().map(|(k, _, _)| k.as_str()).collect();
+    assert_eq!(keys, ["bryce young"], "{keys:?}");
+    let (_, phrase, headlines) = &c[0];
+    assert_eq!(
+        phrase, "Bryce Young",
+        "as printed in a public headline, not the private spelling"
+    );
+    assert_eq!(headlines.len(), 3, "{headlines:?}");
+    assert!(
+        headlines
+            .iter()
+            .all(|h| !h.contains("notes") && !h.contains("drafted")),
+        "{headlines:?}"
+    );
+}

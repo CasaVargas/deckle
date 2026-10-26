@@ -655,3 +655,29 @@ fn an_answer_without_names_leaves_names_empty() {
     assert!(g.notes.is_empty());
     assert!(g.names.is_empty());
 }
+
+#[test]
+fn a_section_emptied_by_duplicates_keeps_the_covered_earlier_note() {
+    let mut g = original_with_interest();
+    let mut answer = answer_with_interest(json!([{"section":"s2","scores":[
+        {"id":"s2a0","score":2},{"id":"s2a1","score":2},{"id":"s2a2","score":2}]}]));
+    // every Rust story is "the same event" as a park story: removed as duplicates
+    answer["duplicate_groups"] = json!([["s0a0", "s2a0", "s2a1", "s2a2"]]);
+    edit_interest(&mut g, |_| {}, answer);
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert!(g.edition.sections[2].articles.is_empty());
+    assert_eq!(
+        g.edition.sections[2].unavailable.as_deref(),
+        Some("These stories are covered earlier in today's edition.")
+    );
+}
+
+#[test]
+fn the_prompt_tells_the_editor_briefs_cover_only_scored_stories() {
+    let mut g = original_with_interest();
+    edit_interest(
+        &mut g,
+        |body| assert!(body.contains("scored 1 or 2"), "{body}"),
+        answer_with_interest(json!([])),
+    );
+}
