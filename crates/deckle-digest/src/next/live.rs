@@ -117,6 +117,25 @@ fn sources(cfg: &Config) -> Vec<Source> {
             });
         }
     }
+    // each interest's searches (titles carry the outlet) and feeds (interests design §3)
+    for i in &cfg.interests {
+        for q in i.searches() {
+            push(Source {
+                url: google_news_url(&q, i.max_age_hours),
+                max_age_hours: i.max_age_hours,
+                max_items: i.max_items.saturating_add(SPARE),
+                briefs: true,
+            });
+        }
+        for url in &i.feeds {
+            push(Source {
+                url: url.clone(),
+                max_age_hours: i.max_age_hours,
+                max_items: i.max_items.saturating_add(SPARE),
+                briefs: false,
+            });
+        }
+    }
     for f in &cfg.feeds {
         // every source of a section: its topic's search (titles carry the outlet), `url`, `urls`;
         // a few spare items beyond the budget, since stories an earlier row has are dropped first

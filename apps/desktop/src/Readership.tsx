@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { barTone, headline, howFar } from "./readershipView";
-import type { ReadershipSuggestion, ReadershipView } from "./types";
+import type { Noticed, ReadershipSuggestion, ReadershipView } from "./types";
 
 /** How far you read the paper, per section, with suggested edits (readership design §7). */
 export default function Readership({ paper = null, onApplied }: { paper?: string | null; onApplied?: () => void }) {
@@ -99,6 +99,25 @@ export default function Readership({ paper = null, onApplied }: { paper?: string
             </div>
           )}
         </>
+      )}
+      {view.noticed.length > 0 && (
+        <div className="readership-tips noticed">
+          <h4>Deckle noticed</h4>
+          {view.noticed.map((n: Noticed) => (
+            <div key={n.key} className="readership-tip">
+              <div className="grow">
+                <div className="readership-tip-title">{n.name}</div>
+                <div className="muted small">{n.why}</div>
+              </div>
+              <button className="ghost" disabled={busy !== null} onClick={() => act(n.key, () => api.interestsAccept(n.key, paper).finally(() => onApplied?.()))}>
+                {busy === n.key ? "Saving…" : "Add as interest"}
+              </button>
+              <button className="link" disabled={busy !== null} onClick={() => act(n.key, () => api.interestsDismiss(n.key, paper))}>
+                Not interested
+              </button>
+            </div>
+          ))}
+        </div>
       )}
       {error && <p className="warn small">{error}</p>}
     </section>

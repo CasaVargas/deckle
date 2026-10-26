@@ -34,6 +34,10 @@ pub struct Read {
     pub last_read: Option<String>,
     /// When Deckle read it.
     pub seen: String,
+    /// `page.history.store`: the starts of the pages each jump was made from (interests
+    /// design §5.2, as amended in the learning plan).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub history: Vec<i64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -99,6 +103,34 @@ impl State {
         }
     }
 
+    /// Moves a section's history to a new key (a renamed interest, interests design §5.4):
+    /// every layout's section with key `old`, and the dismissed suggestion ids that end in it.
+    /// Returns how many entries moved.
+    pub fn rename_section_key(&mut self, old: &str, new: &str) -> usize {
+        let mut n = 0;
+        for layout in self.editions.values_mut() {
+            for s in layout.sections.iter_mut().filter(|s| s.key == old) {
+                s.key = new.to_owned();
+                n += 1;
+            }
+        }
+        let moved: Vec<(String, chrono::NaiveDate)> = self
+            .dismissed
+            .iter()
+            .filter_map(|(id, d)| {
+                let (kind, key) = id.split_once(':')?;
+                (key == old).then(|| (format!("{kind}:{new}"), *d))
+            })
+            .collect();
+        for (id, _) in &moved {
+            let (kind, _) = id.split_once(':').unwrap_or((id, ""));
+            self.dismissed.remove(&format!("{kind}:{old}"));
+        }
+        n += moved.len();
+        self.dismissed.extend(moved);
+        n
+    }
+
     /// Every recorded edition's stem, newest first.
     pub fn stems(&self) -> Vec<String> {
         self.editions
@@ -147,6 +179,7 @@ impl State {
                             last: p.last,
                             last_read: p.last_read,
                             seen: now.to_owned(),
+                            history: p.history,
                         }
                     }
                     Err(e) => {

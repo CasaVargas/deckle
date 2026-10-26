@@ -67,9 +67,64 @@ fn paper_config(paper: Option<&str>) -> Result<Config, String> {
 
 /// Saves `config` as paper `paper`'s file. The window's copy doesn't carry which paper it is,
 /// so that's taken from the file on disk.
-pub fn save_paper_at(main: &Path, paper: Option<&str>, mut config: Config) -> Result<(), String> {
-    config.paper = paper_config_at(main, paper)?.paper;
-    deckle_digest::papers::save(main, &config)
+pub fn save_paper_at(main: &Path, paper: Option<&str>, config: Config) -> Result<(), String> {
+    let old = paper_config_at(main, paper)?;
+    let state = old
+        .state_file("readership.json")
+        .unwrap_or_else(deckle_readership::state_path);
+    let learning = deckle_readership::Learning::path_for(&old);
+    save_paper_with_history(main, paper, config, &state, &learning)
+}
+
+/// Saves a paper's config and, for every interest whose name changed (paired by position with
+/// the file's current entries), moves its readership and learning history to the new key
+/// (interests design §5.4, call 11).
+pub fn save_paper_with_history(
+    main: &Path,
+    paper: Option<&str>,
+    mut config: Config,
+    state: &Path,
+    learning: &Path,
+) -> Result<(), String> {
+    let old = paper_config_at(main, paper)?;
+    config.paper = old.paper.clone();
+    // A rename is a name that changed in place: same count, the new name unknown before, the
+    // old one gone after. A removal or a reorder shifts positions and moves no history.
+    let key = |s: &str| s.trim().to_lowercase();
+    let before: Vec<String> = old.interests.iter().map(|i| key(&i.name)).collect();
+    let after: Vec<String> = config.interests.iter().map(|i| key(&i.name)).collect();
+    let renamed: Vec<(String, String)> = if before.len() == after.len() {
+        old.interests
+            .iter()
+            .zip(&config.interests)
+            .filter(|(a, b)| {
+                let (from, to) = (key(&a.name), key(&b.name));
+                from != to && !to.is_empty() && !before.contains(&to) && !after.contains(&from)
+            })
+            .map(|(a, b)| (a.name.trim().to_owned(), b.name.trim().to_owned()))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    deckle_digest::papers::save(main, &config)?;
+    if renamed.is_empty() {
+        return Ok(());
+    }
+    let mut st = deckle_readership::State::load(state);
+    let mut lr = deckle_readership::Learning::load(learning);
+    let (mut moved_state, mut moved_learning) = (0, false);
+    for (from, to) in &renamed {
+        moved_state +=
+            st.rename_section_key(&format!("interests:{from}"), &format!("interests:{to}"));
+        moved_learning |= lr.rename(&from.to_lowercase(), &to.to_lowercase());
+    }
+    if moved_state > 0 {
+        st.save(state)?;
+    }
+    if moved_learning {
+        lr.save(learning)?;
+    }
+    Ok(())
 }
 
 /// A card in Your papers (many papers §7).
@@ -138,6 +193,7 @@ pub fn section_names(cfg: &Config) -> Vec<String> {
                 out.push("Local".into());
                 out.extend(cfg.local.places.iter().map(|p| p.name.clone()));
             }
+            K::Interests => out.extend(cfg.interests.iter().map(|i| i.name.clone())),
             K::Feeds => out.extend(cfg.feeds.iter().map(|f| f.name.clone())),
             K::Subscribed => out.extend(cfg.subscribed.iter().map(|g| g.title())),
             K::Lottery => out.push("Lottery".into()),
@@ -811,6 +867,156 @@ mod tests {
         assert!(json.contains("\"has_password\":true"), "{json}");
         assert!(json.contains("thepilot.com"));
         assert!(!json.contains("hunter2-pilot"), "{json}");
+    }
+
+    #[test]
+    fn saving_a_renamed_interest_migrates_its_history() {
+        use deckle_readership::layout::{Layout, SectionStart};
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("digest.toml");
+        std::fs::write(
+            &main,
+            "sections = [\"interests\"]\n[[interests]]\nname = \"Rust\"\n",
+        )
+        .unwrap();
+        let mut st = deckle_readership::State::default();
+        st.record_layout(Layout {
+            date: "2026-10-21".parse().unwrap(),
+            title: "T".into(),
+            file: "deckle-daily-2026-10-21".into(),
+            end: 100,
+            sections: vec![
+                SectionStart {
+                    key: "front".into(),
+                    name: "Front page".into(),
+                    start: 0,
+                    items: None,
+                    stories: Vec::new(),
+                },
+                SectionStart {
+                    key: "interests:Rust".into(),
+                    name: "Rust".into(),
+                    start: 10,
+                    items: None,
+                    stories: Vec::new(),
+                },
+            ],
+        });
+        let state = main.with_file_name("readership.json");
+        st.save(&state).unwrap();
+        let mut learning = deckle_readership::Learning::default();
+        learning
+            .accepted
+            .insert("rust".into(), "2026-10-21".parse().unwrap());
+        let interests = main.with_file_name("interests.json");
+        learning.save(&interests).unwrap();
+        let mut cfg = Config::load(&main).unwrap();
+        cfg.interests[0].name = "Rust lang".into();
+        save_paper_with_history(&main, None, cfg, &state, &interests).unwrap();
+        let st = deckle_readership::State::load(&state);
+        let keys: Vec<String> = st
+            .editions
+            .values()
+            .flat_map(|l| l.sections.iter().map(|s| s.key.clone()))
+            .collect();
+        assert!(keys.contains(&"interests:Rust lang".to_owned()), "{keys:?}");
+        assert!(!keys.contains(&"interests:Rust".to_owned()));
+        let learning = deckle_readership::Learning::load(&interests);
+        assert!(
+            learning.accepted.contains_key("rust lang"),
+            "{:?}",
+            learning.accepted
+        );
+        // a rename by case only saves without a duplicate error
+        let mut cfg = Config::load(&main).unwrap();
+        cfg.interests[0].name = "RUST LANG".into();
+        save_paper_with_history(&main, None, cfg, &state, &interests).unwrap();
+        assert!(
+            std::fs::read_to_string(&main)
+                .unwrap()
+                .contains("RUST LANG")
+        );
+    }
+
+    #[test]
+    fn removing_or_reordering_interests_moves_no_history() {
+        use deckle_readership::layout::{Layout, SectionStart};
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("digest.toml");
+        std::fs::write(
+            &main,
+            "sections = [\"interests\"]\n[[interests]]\nname = \"A\"\n[[interests]]\nname = \"B\"\n[[interests]]\nname = \"C\"\n",
+        )
+        .unwrap();
+        let sec = |key: &str| SectionStart {
+            key: key.into(),
+            name: key.into(),
+            start: 0,
+            items: None,
+            stories: Vec::new(),
+        };
+        let mut st = deckle_readership::State::default();
+        st.record_layout(Layout {
+            date: "2026-10-21".parse().unwrap(),
+            title: "T".into(),
+            file: "deckle-daily-2026-10-21".into(),
+            end: 100,
+            sections: vec![
+                sec("front"),
+                sec("interests:A"),
+                sec("interests:B"),
+                sec("interests:C"),
+            ],
+        });
+        let state = main.with_file_name("readership.json");
+        st.save(&state).unwrap();
+        let mut learning = deckle_readership::Learning::default();
+        learning
+            .accepted
+            .insert("b".into(), "2026-10-21".parse().unwrap());
+        learning
+            .accepted
+            .insert("c".into(), "2026-10-22".parse().unwrap());
+        let interests = main.with_file_name("interests.json");
+        learning.save(&interests).unwrap();
+        let keys = |state: &std::path::Path| -> Vec<String> {
+            deckle_readership::State::load(state)
+                .editions
+                .values()
+                .flat_map(|l| l.sections.iter().map(|s| s.key.clone()))
+                .collect()
+        };
+        // remove B from the middle: [A, B, C] → [A, C]
+        let mut cfg = Config::load(&main).unwrap();
+        cfg.interests.remove(1);
+        save_paper_with_history(&main, None, cfg, &state, &interests).unwrap();
+        assert_eq!(
+            keys(&state),
+            ["front", "interests:A", "interests:B", "interests:C"]
+        );
+        let l = deckle_readership::Learning::load(&interests);
+        assert!(l.accepted.contains_key("b") && l.accepted.contains_key("c"));
+        // swap: [A, C] → [C, A]
+        let mut cfg = Config::load(&main).unwrap();
+        cfg.interests.swap(0, 1);
+        save_paper_with_history(&main, None, cfg, &state, &interests).unwrap();
+        assert_eq!(
+            keys(&state),
+            ["front", "interests:A", "interests:B", "interests:C"]
+        );
+    }
+
+    #[test]
+    fn section_names_list_each_interest_like_each_feed() {
+        let cfg = Config::parse(
+            "sections = [\"local\", \"interests\", \"feeds\"]\n[[interests]]\nname = \"Rust\"\n\
+             [[interests]]\nname = \"Carolina Panthers\"\n[[feeds]]\nname = \"HN\"\nurl = \"https://x/f\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            section_names(&cfg),
+            ["Local", "Rust", "Carolina Panthers", "HN"]
+        );
     }
 
     #[test]

@@ -13,6 +13,8 @@ pub enum SectionKind {
     Reading,
     Weather,
     Local,
+    /// Every `[[interests]]` entry, each its own section, in file order (interests design §3).
+    Interests,
     /// Every `[[feeds]]` entry, each as its own section, in file order.
     Feeds,
     Lottery,
@@ -40,6 +42,7 @@ pub fn section_key(kind: SectionKind, feed: Option<&str>) -> String {
             None => "local",
         },
         SectionKind::Feeds => return format!("feeds:{}", feed.unwrap_or_default()),
+        SectionKind::Interests => return format!("interests:{}", feed.unwrap_or_default()),
         SectionKind::Lottery => "lottery",
         SectionKind::Horoscope => "horoscope",
         SectionKind::Puzzle => "puzzle",
@@ -100,7 +103,14 @@ pub struct Config {
     pub max_photos: usize,
     pub sections: Vec<SectionKind>,
     pub local: LocalConfig,
+    /// `[[interests]]`: things you care about, each its own section (interests design §3).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub interests: Vec<InterestConfig>,
     pub feeds: Vec<FeedConfig>,
+    /// What the paper notices about your reading (interests design §5). Left out of a save
+    /// while it's untouched.
+    #[serde(default, skip_serializing_if = "LearningConfig::is_default")]
+    pub learning: LearningConfig,
     pub lottery: LotteryConfig,
     pub horoscope: HoroscopeConfig,
     pub reading: ReadingConfig,
@@ -252,6 +262,7 @@ impl Default for Config {
                 SectionKind::Reading,
                 SectionKind::Weather,
                 SectionKind::Local,
+                SectionKind::Interests,
                 SectionKind::Feeds,
                 SectionKind::Shelf,
                 SectionKind::Lottery,
@@ -259,7 +270,9 @@ impl Default for Config {
                 SectionKind::Onthisday,
             ],
             local: LocalConfig::default(),
+            interests: Vec::new(),
             feeds: Vec::new(),
+            learning: LearningConfig::default(),
             lottery: LotteryConfig::default(),
             horoscope: HoroscopeConfig::default(),
             reading: ReadingConfig::default(),
@@ -507,6 +520,102 @@ impl FeedConfig {
 
 fn default_feed_items() -> usize {
     0
+}
+
+/// One `[[interests]]` entry: a thing you care about, hunted across the news every morning and
+/// printed as its own section (interests design §3).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InterestConfig {
+    /// The section's title; the search is the name in quotes unless `query` says otherwise.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub query: String,
+    /// More searches, merged; a story naming one is relevant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<String>,
+    /// A story whose headline has one of these is dropped.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not: Vec<String>,
+    /// RSS/Atom feeds merged in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub feeds: Vec<String>,
+    /// 0 means unset: [`Config::parse`] makes it 5.
+    #[serde(default)]
+    pub max_items: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub full_text: Option<FullText>,
+    /// 0 means unset: [`Config::parse`] makes it 72 (interests move slower than the wires).
+    #[serde(default)]
+    pub max_age_hours: u32,
+}
+
+impl InterestConfig {
+    /// The Google News search: `query`, or the name in double quotes.
+    pub fn search_query(&self) -> String {
+        let q = self.query.trim();
+        if q.is_empty() {
+            format!("\"{}\"", self.name.trim())
+        } else {
+            q.to_owned()
+        }
+    }
+
+    /// Every search run for this interest: [`Self::search_query`] then each `also`, without
+    /// blanks or repeats.
+    pub fn searches(&self) -> Vec<String> {
+        let mut out = vec![self.search_query()];
+        for a in &self.also {
+            let a = a.trim();
+            if !a.is_empty() && !out.iter().any(|o| o == a) {
+                out.push(a.to_owned());
+            }
+        }
+        out
+    }
+
+    /// The phrases a relevant story names: the name, then each `also`.
+    pub fn phrases(&self) -> Vec<&str> {
+        std::iter::once(self.name.trim())
+            .chain(self.also.iter().map(|a| a.trim()))
+            .filter(|p| !p.is_empty())
+            .collect()
+    }
+
+    /// How this entry fetches whole stories: its own setting, else the top story only.
+    pub fn full(&self) -> FullText {
+        self.full_text.unwrap_or(FullText::Lead)
+    }
+}
+
+/// `[learning]`: what the paper notices about your reading, on this Mac (interests design §5).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LearningConfig {
+    pub enabled: bool,
+    /// The window a subject must recur in.
+    pub window_days: u32,
+    /// Distinct stories about it, across at least two editions.
+    pub min_stories: u32,
+    /// The suggestions as tappable lines in the paper itself (interests design §7).
+    pub nudges: bool,
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        LearningConfig {
+            enabled: true,
+            window_days: 14,
+            min_stories: 3,
+            nudges: false,
+        }
+    }
+}
+
+impl LearningConfig {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1115,6 +1224,28 @@ pub enum Photos {
     Color,
 }
 
+/// Two interests may not share a name (ignoring case and surrounding spaces): the name is the
+/// section's key across editions. Blank names (a row just added in the app) are left alone;
+/// their section says "give a name".
+pub fn validate_interests(interests: &[InterestConfig]) -> Result<(), String> {
+    for (n, a) in interests.iter().enumerate() {
+        let key = a.name.trim().to_lowercase();
+        if key.is_empty() {
+            continue;
+        }
+        if let Some(b) = interests[n + 1..]
+            .iter()
+            .find(|b| b.name.trim().to_lowercase() == key)
+        {
+            return Err(format!(
+                "duplicate interest \"{}\" and \"{}\"",
+                a.name, b.name
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Each export has a name, unique, and a folder.
 pub fn validate_exports(exports: &[ExportConfig]) -> Result<(), String> {
     for (i, e) in exports.iter().enumerate() {
@@ -1152,7 +1283,7 @@ photos = true                     # with their photos, in grayscale for e-ink
 max_photos = 4                    # per story
 
 # Order of the paper. Remove a name to drop that section.
-sections = ["reading", "weather", "local", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"]
+sections = ["reading", "weather", "local", "interests", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"]
 
 [reading]
 inbox = "~/Deckle/Inbox"          # point at iCloud Drive to save from an iPhone
@@ -1170,6 +1301,18 @@ max_age_hours = 72                # local news moves slower
 # name = "Asheville, NC"          # the section's title
 # google_news = "Asheville NC"
 # feeds = []
+
+# Things you care about, each its own section: a Google News search per interest, filtered
+# for relevance. `deckle digest interests add "Rust"` adds one from the terminal.
+# [[interests]]
+# name = "Carolina Panthers"      # the section's title; the search is the name in quotes
+# query = "\"Carolina Panthers\" NFL"   # your own search instead; Google's OR and -word work
+# also = ["Bryce Young"]          # more searches, merged; a story naming one is relevant
+# not = ["Florida Panthers"]      # a story whose headline has one of these is dropped
+# feeds = []                      # RSS feeds merged in
+# max_items = 5
+# full_text = "lead"              # top story whole, the rest briefs; true or false
+# max_age_hours = 72
 
 # Each [[feeds]] entry becomes its own section, in this order.
 # A Google News topic (WORLD NATION BUSINESS TECHNOLOGY ENTERTAINMENT SPORTS SCIENCE HEALTH)
@@ -1214,6 +1357,11 @@ signs = []                        # e.g. ["leo", "virgo"]; empty prints all twel
 # calendars = ["~/Calendars/Home.ics", "webcal://p01-caldav.icloud.com/published/2/…"]
 # max_items = 8
 # weather_note = true             # "Rain likely around 4 PM, during School pickup."
+
+# What the paper notices about your reading, on this Mac only (suggestions on the Daily tab).
+# [learning]
+# enabled = true
+# nudges = false                  # the suggestions as tappable lines in the paper itself
 
 # What `deckle digest watch` does when a Kindle is plugged in.
 [sync]
@@ -1295,11 +1443,16 @@ place = {place}
 {location}units = "imperial"                # or "metric"
 keep = 3                          # editions kept on the Kindle
 
-sections = ["weather", "local", "feeds"]
+sections = ["weather", "local", "interests", "feeds"]
 
 [local]
 google_news = ""                  # a Google News search, e.g. "Toledo OH"
 feeds = []
+
+# Things this reader cares about, each its own section (a Google News search per interest).
+# [[interests]]
+# name = "Carolina Panthers"
+# not = ["Florida Panthers"]
 
 # [schedule]
 # at = "06:00"                    # 24-hour
@@ -1326,6 +1479,7 @@ impl Config {
         cfg.normalize();
         cfg.normalize_subscriptions()?;
         cfg.normalize_subscribed()?;
+        validate_interests(&cfg.interests)?;
         cfg.email.validate()?;
         cfg.llm.validate()?;
         cfg.schedule.validate()?;
@@ -1347,6 +1501,19 @@ impl Config {
         }
     }
 
+    /// Puts `kind` into `sections` when it's missing: right before `before`, or at the end when
+    /// `before` isn't there either. Returns whether anything changed.
+    pub fn ensure_section(&mut self, kind: SectionKind, before: SectionKind) -> bool {
+        if self.sections.contains(&kind) {
+            return false;
+        }
+        match self.sections.iter().position(|k| *k == before) {
+            Some(at) => self.sections.insert(at, kind),
+            None => self.sections.push(kind),
+        }
+        true
+    }
+
     /// `main` for `digest.toml`'s paper, else the extra paper's slug.
     pub fn slug(&self) -> &str {
         self.paper
@@ -1360,6 +1527,19 @@ impl Config {
         for f in &mut self.feeds {
             if f.max_items == 0 {
                 f.max_items = if f.topic.is_some() { 5 } else { 10 };
+            }
+        }
+        for i in &mut self.interests {
+            // the name is the section's key: spaces around it would split the rows
+            let trimmed = i.name.trim();
+            if trimmed.len() != i.name.len() {
+                i.name = trimmed.to_owned();
+            }
+            if i.max_items == 0 {
+                i.max_items = 5;
+            }
+            if i.max_age_hours == 0 {
+                i.max_age_hours = 72;
             }
         }
     }
@@ -1418,6 +1598,7 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     cfg.llm.validate()?;
     cfg.schedule.validate()?;
     validate_exports(&cfg.export)?;
+    validate_interests(&cfg.interests)?;
     let mut cfg = cfg.clone();
     cfg.normalize();
     let cfg = &cfg;
@@ -1649,6 +1830,159 @@ mod tests {
     fn section_keys() {
         assert_eq!(section_key(SectionKind::Onthisday, None), "onthisday");
         assert_eq!(section_key(SectionKind::Feeds, Some("HN")), "feeds:HN");
+        assert_eq!(
+            section_key(SectionKind::Interests, Some("Rust")),
+            "interests:Rust"
+        );
+    }
+
+    #[test]
+    fn ensure_section_adds_the_kind_before_another_or_at_the_end_once() {
+        let mut c = Config::parse("sections = [\"local\", \"feeds\"]\n").unwrap();
+        assert!(c.ensure_section(SectionKind::Interests, SectionKind::Feeds));
+        assert_eq!(
+            c.sections,
+            [
+                SectionKind::Local,
+                SectionKind::Interests,
+                SectionKind::Feeds
+            ]
+        );
+        assert!(!c.ensure_section(SectionKind::Interests, SectionKind::Feeds));
+        let mut c = Config::parse("sections = [\"horoscope\"]\n").unwrap();
+        assert!(c.ensure_section(SectionKind::Interests, SectionKind::Feeds));
+        assert_eq!(c.sections, [SectionKind::Horoscope, SectionKind::Interests]);
+    }
+
+    #[test]
+    fn interests_parse_with_defaults_and_key() {
+        let c = Config::parse(
+            "sections = [\"interests\"]\n[[interests]]\nname = \"Rust\"\n[[interests]]\n\
+             name = \"Carolina Panthers\"\nquery = \"\\\"Carolina Panthers\\\" NFL\"\n\
+             also = [\"Bryce Young\"]\nnot = [\"Florida Panthers\"]\nmax_items = 3\n\
+             full_text = false\nmax_age_hours = 24\n",
+        )
+        .unwrap();
+        assert_eq!(c.sections, [SectionKind::Interests]);
+        let r = &c.interests[0];
+        assert_eq!(r.search_query(), "\"Rust\"");
+        assert_eq!(r.searches(), vec!["\"Rust\"".to_owned()]);
+        assert_eq!(
+            (r.max_items, r.max_age_hours, r.full()),
+            (5, 72, FullText::Lead)
+        );
+        let p = &c.interests[1];
+        assert_eq!(
+            p.searches(),
+            vec![
+                "\"Carolina Panthers\" NFL".to_owned(),
+                "Bryce Young".to_owned()
+            ]
+        );
+        assert_eq!(p.phrases(), vec!["Carolina Panthers", "Bryce Young"]);
+        assert_eq!(
+            (p.max_items, p.max_age_hours, p.full()),
+            (3, 24, FullText::No)
+        );
+        assert!(c.learning.is_default() && c.learning.enabled);
+    }
+
+    #[test]
+    fn blank_interest_names_are_not_duplicates_and_names_are_trimmed() {
+        let c = Config::parse(
+            "[[interests]]\nname = \"\"\n[[interests]]\nname = \" \"\n[[interests]]\nname = \" Rust \"\n",
+        )
+        .unwrap();
+        assert_eq!(c.interests.len(), 3);
+        assert_eq!(c.interests[2].name, "Rust");
+        assert_eq!(c.interests[2].phrases(), vec!["Rust"]);
+    }
+
+    #[test]
+    fn duplicate_interest_names_are_an_error() {
+        let e = Config::parse("[[interests]]\nname = \"Rust\"\n[[interests]]\nname = \" rust \"\n")
+            .unwrap_err();
+        assert!(e.contains("duplicate interest"), "{e}");
+    }
+
+    #[test]
+    fn learning_is_left_out_of_a_save_at_defaults_and_kept_when_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(&path, "title = \"T\"\n").unwrap();
+        let mut cfg = Config::load(&path).unwrap();
+        save(&path, &cfg).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("learning"));
+        cfg.learning.nudges = true;
+        save(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("nudges = true"), "{text}");
+        assert_eq!(Config::load(&path).unwrap().learning, cfg.learning);
+    }
+
+    #[test]
+    fn interests_save_round_trip_keeps_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(
+            &path,
+            "sections = [\"interests\"]\n\n[[interests]]\n# the team\nname = \"Carolina Panthers\" # go cats\n\
+             not = [\"Florida Panthers\"]\n",
+        )
+        .unwrap();
+        let mut cfg = Config::load(&path).unwrap();
+        cfg.interests.push(InterestConfig {
+            name: "Rust".into(),
+            ..Default::default()
+        });
+        save(&path, &cfg).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            text.contains("# the team")
+                && text.contains("# go cats")
+                && text.contains("name = \"Rust\""),
+            "{text}"
+        );
+        assert!(!text.contains("query ="), "defaults stay out:\n{text}");
+        cfg.normalize();
+        assert_eq!(Config::load(&path).unwrap().interests, cfg.interests);
+    }
+
+    #[test]
+    fn starters_interest_block_parses_once_uncommented() {
+        for starter in [STARTER, PAPER_STARTER] {
+            let text: String = starter
+                .lines()
+                .map(|l| {
+                    if l.starts_with("# [[interests]]")
+                        || l.starts_with("# name = \"Carolina")
+                        || l.starts_with("# not = ")
+                    {
+                        l.trim_start_matches("# ").to_owned()
+                    } else {
+                        l.to_owned()
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            // PAPER_STARTER holds {title}-style placeholders: fill them like papers::create does
+            let text = text
+                .replace("{title}", "\"T\"")
+                .replace("{reader}", "\"R\"")
+                .replace("{place}", "\"P\"")
+                .replace("{location}", "");
+            let c = Config::parse(&text).unwrap();
+            assert_eq!(c.interests.len(), 1, "{text}");
+            assert_eq!(c.interests[0].name, "Carolina Panthers");
+        }
+        let c = Config::parse(STARTER).unwrap();
+        let i = c
+            .sections
+            .iter()
+            .position(|k| *k == SectionKind::Interests)
+            .unwrap();
+        assert_eq!(c.sections[i - 1], SectionKind::Local);
+        assert_eq!(c.sections[i + 1], SectionKind::Feeds);
     }
 
     #[test]
@@ -1820,7 +2154,7 @@ mod tests {
         let c = Config::parse(STARTER).unwrap();
         assert_eq!(c.feeds.len(), 1);
         assert_eq!(c.local.google_news, "New York City");
-        assert_eq!(c.sections.len(), 9);
+        assert_eq!(c.sections.len(), 10);
         assert_eq!(c.sections[0], SectionKind::Reading);
         assert_eq!(c.reading.long_read_words, 4000);
     }

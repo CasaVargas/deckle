@@ -68,6 +68,8 @@ pub struct PlanRow {
     /// The `[[subscribed]]` group and slug of a subscribed paper's row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscribed: Option<SubscribedRef>,
+    /// The `[[interests]]` index of an interest row.
+    pub interest: Option<usize>,
     pub name: String,
     pub detail: String,
     pub budget: String,
@@ -97,10 +99,11 @@ pub struct NextPaper {
 }
 
 /// Every kind, in the starter's order: where an off section is listed.
-const KINDS: [SectionKind; 10] = [
+const KINDS: [SectionKind; 11] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
+    SectionKind::Interests,
     SectionKind::Feeds,
     SectionKind::Subscribed,
     SectionKind::Shelf,
@@ -192,6 +195,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             feed: None,
             place: None,
             subscribed: None,
+            interest: None,
             name: name.into(),
             detail,
             budget,
@@ -202,7 +206,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
         planned: 0,
     };
     let stories_row =
-        |key: String, feed, place, name: &str, detail: String, max: usize, stories| {
+        |key: String, feed, place, interest, name: &str, detail: String, max: usize, stories| {
             let planned = match &stories {
                 Some(s) => max.min(Vec::len(s)),
                 None => max,
@@ -214,6 +218,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     feed,
                     place,
                     subscribed: None,
+                    interest,
                     name: name.into(),
                     detail,
                     budget: format!("{max} stories"),
@@ -250,6 +255,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     feed: None,
                     place: None,
                     subscribed: None,
+                    interest: None,
                     name: "Your Reading".into(),
                     detail,
                     budget: if n <= max {
@@ -280,6 +286,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                 section_key(kind, None),
                 None,
                 None,
+                None,
                 "Local",
                 local_detail(&l.google_news, &l.feeds),
                 l.max_items,
@@ -292,6 +299,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     section_key(kind, Some(&p.name)),
                     None,
                     Some(n),
+                    None,
                     &p.name,
                     local_detail(&p.google_news, &p.feeds),
                     max,
@@ -300,6 +308,53 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
             }
             out
         }
+        SectionKind::Interests => cfg
+            .interests
+            .iter()
+            .enumerate()
+            .map(|(n, it)| {
+                let urls: Vec<String> = it
+                    .searches()
+                    .iter()
+                    .map(|q| google_news_url(q, it.max_age_hours))
+                    .chain(it.feeds.iter().cloned())
+                    .collect();
+                let got: Vec<&super::live::Fetched> = urls
+                    .iter()
+                    .filter_map(|u| i.live.feeds.get(u))
+                    .filter(|x| x.error.is_none())
+                    .collect();
+                let mut detail = it.search_query();
+                if !it.feeds.is_empty() {
+                    detail.push_str(&format!(" + {} feeds", it.feeds.len()));
+                }
+                // merged, newest first, one copy of a repeated story, only stories that name the
+                // interest; `plan` drops what earlier rows show and cuts to the budget
+                let stories = if got.is_empty() {
+                    None
+                } else {
+                    let mut items: Vec<LiveItem> = got
+                        .iter()
+                        .flat_map(|x| x.items.iter().cloned())
+                        .filter(|x| crate::sources::interests::relevant(it, &x.title, ""))
+                        .collect();
+                    items.sort_by_key(|i| std::cmp::Reverse(i.published));
+                    let mut seen = HashSet::new();
+                    items.retain(|i| seen.insert(title_key(&i.title)));
+                    Some(items)
+                };
+                stories_row(
+                    section_key(kind, Some(&it.name)),
+                    None,
+                    None,
+                    Some(n),
+                    &it.name,
+                    detail,
+                    it.max_items,
+                    stories,
+                )
+            })
+            .collect(),
         SectionKind::Feeds => cfg
             .feeds
             .iter()
@@ -332,6 +387,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                 stories_row(
                     section_key(kind, Some(&f.name)),
                     Some(n),
+                    None,
                     None,
                     &f.name,
                     detail,
@@ -400,6 +456,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     });
                 let mut row = stories_row(
                     subscribed_key(&g.site, slug),
+                    None,
                     None,
                     None,
                     &format!("{} · {display}", g.title()),
@@ -494,7 +551,10 @@ pub fn estimate(rows: &[PlanRow], planned: &[usize], history: &History, cfg: &Co
         };
         total += match r.kind {
             SectionKind::Reading => per(3.0),
-            SectionKind::Local | SectionKind::Feeds | SectionKind::Subscribed => per(story),
+            SectionKind::Local
+            | SectionKind::Feeds
+            | SectionKind::Interests
+            | SectionKind::Subscribed => per(story),
             SectionKind::Weather => whole(&r.key, 2.0),
             SectionKind::Lottery => whole(&r.key, 1.0),
             SectionKind::Horoscope => {
@@ -539,7 +599,13 @@ pub fn plan(i: &Inputs) -> NextPaper {
                 s.truncate(r.row.items.unwrap_or(usize::MAX));
                 taken.extend(s.iter().map(|i| title_key(&i.title)));
             }
-            (SectionKind::Local | SectionKind::Feeds | SectionKind::Subscribed, Some(s)) => {
+            (
+                SectionKind::Local
+                | SectionKind::Feeds
+                | SectionKind::Interests
+                | SectionKind::Subscribed,
+                Some(s),
+            ) => {
                 s.retain(|i| !taken.contains(&title_key(&i.title)));
                 s.truncate(r.row.items.unwrap_or(usize::MAX));
                 taken.extend(s.iter().map(|i| title_key(&i.title)));
@@ -569,7 +635,7 @@ pub fn plan(i: &Inputs) -> NextPaper {
                 (Tier::Local, r.stories.as_ref().map_or(0, Vec::len))
             }
             SectionKind::Local => (Tier::Feed, r.stories.as_ref().map_or(0, Vec::len)),
-            SectionKind::Feeds | SectionKind::Subscribed => {
+            SectionKind::Feeds | SectionKind::Interests | SectionKind::Subscribed => {
                 (Tier::Feed, r.stories.as_ref().map_or(0, Vec::len))
             }
             _ => continue,
@@ -640,30 +706,34 @@ pub fn plan(i: &Inputs) -> NextPaper {
                     });
                 }
             }
-            SectionKind::Local | SectionKind::Feeds | SectionKind::Subscribed => match r
-                .stories
-                .as_deref()
-            {
-                Some(items) if !items.is_empty() => {
-                    // its newest headline, unless that one leads the paper
-                    if let Some((_, item)) = items.iter().enumerate().find(|(a, _)| !is_lead(*a)) {
-                        tiles.push(Tile {
-                            key: r.row.key.clone(),
-                            kicker: story_kicker(&r.row.name, items, since),
-                            title: Some(item.title.clone()),
-                            reason: None,
-                            dashed: false,
-                        });
+            SectionKind::Local
+            | SectionKind::Feeds
+            | SectionKind::Interests
+            | SectionKind::Subscribed => {
+                match r.stories.as_deref() {
+                    Some(items) if !items.is_empty() => {
+                        // its newest headline, unless that one leads the paper
+                        if let Some((_, item)) =
+                            items.iter().enumerate().find(|(a, _)| !is_lead(*a))
+                        {
+                            tiles.push(Tile {
+                                key: r.row.key.clone(),
+                                kicker: story_kicker(&r.row.name, items, since),
+                                title: Some(item.title.clone()),
+                                reason: None,
+                                dashed: false,
+                            });
+                        }
                     }
+                    _ => tiles.push(Tile {
+                        key: r.row.key.clone(),
+                        kicker: format!("{} · {} slots", r.row.name, r.row.items.unwrap_or(0)),
+                        title: None,
+                        reason: None,
+                        dashed: true,
+                    }),
                 }
-                _ => tiles.push(Tile {
-                    key: r.row.key.clone(),
-                    kicker: format!("{} · {} slots", r.row.name, r.row.items.unwrap_or(0)),
-                    title: None,
-                    reason: None,
-                    dashed: true,
-                }),
-            },
+            }
             // the masthead says it: "Weather · fills in at press time"
             SectionKind::Weather => {}
             SectionKind::Puzzle => tiles.push(Tile {

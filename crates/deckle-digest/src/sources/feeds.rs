@@ -129,7 +129,8 @@ fn clean_line(s: &str) -> String {
         .to_owned()
 }
 
-pub(crate) fn title_key(title: &str) -> String {
+/// A title reduced to its letters and digits, lowercase: how repeats are spotted.
+pub fn title_key(title: &str) -> String {
     title
         .chars()
         .filter(|c| c.is_alphanumeric())
@@ -323,10 +324,10 @@ pub(crate) fn story_body(
 }
 
 /// Stories tried, in order, for the whole one in a `Lead` section.
-const LEAD_TRIES: usize = 3;
+pub(crate) const LEAD_TRIES: usize = 3;
 /// A section's note when every story it found was already printed or too old.
 pub const NO_NEW_STORIES: &str = "No new stories today.";
-const UNAVAILABLE: &str = "Full story unavailable offline.";
+pub(crate) const UNAVAILABLE: &str = "Full story unavailable offline.";
 /// Article pages fetched at once.
 const WORKERS: usize = 8;
 
@@ -362,7 +363,7 @@ fn teaser(paragraphs: &[String]) -> Option<String> {
         .cloned()
 }
 
-fn section_of(
+pub(crate) fn section_of(
     title: &str,
     kicker: Option<String>,
     items: &[Item],
@@ -475,6 +476,45 @@ pub fn place_section(
     )
 }
 
+/// Google News searches (as briefs) and feeds, fetched, merged, deduplicated by title, newest
+/// first. Errors read "Google News: …" or "<host>: …"; one source failing leaves the others.
+pub(crate) fn fetch_merged(
+    searches: &[String],
+    feeds: &[String],
+    max_age_hours: u32,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+) -> (Vec<Item>, Vec<String>) {
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    for search in searches {
+        if search.trim().is_empty() {
+            continue;
+        }
+        match net
+            .get(&google_news_url(search, max_age_hours))
+            .and_then(|b| parse(&b, now, max_age_hours))
+        {
+            Ok((_, found)) => items.extend(as_briefs(found)),
+            Err(e) => errors.push(format!("Google News: {e}")),
+        }
+    }
+    for url in feeds {
+        match net.get(url).and_then(|b| parse(&b, now, max_age_hours)) {
+            Ok((name, found)) => items.extend(found.into_iter().map(|mut i| {
+                i.source = i.source.or(name.clone());
+                i
+            })),
+            Err(e) => errors.push(format!("{}: {e}", host(url))),
+        }
+    }
+    // Newest first, so the newest copy of a repeated story is the one kept.
+    items.sort_by_key(|i| std::cmp::Reverse(i.published));
+    let mut seen = HashSet::new();
+    items.retain(|i| seen.insert(title_key(&i.title)));
+    (items, errors)
+}
+
 /// A Google News search and local feeds, merged, deduplicated, newest first, under
 /// `[local] max_age_hours`.
 #[allow(clippy::too_many_arguments)]
@@ -489,32 +529,13 @@ fn local_news(
     net: &dyn Net,
     taken: &HashSet<String>,
 ) -> Section {
-    let mut items = Vec::new();
-    let mut errors = Vec::new();
-    if !search.trim().is_empty() {
-        match net
-            .get(&google_news_url(search, cfg.local.max_age_hours))
-            .and_then(|b| parse(&b, now, cfg.local.max_age_hours))
-        {
-            Ok((_, found)) => items.extend(as_briefs(found)),
-            Err(e) => errors.push(format!("Google News: {e}")),
-        }
-    }
-    for url in feeds {
-        match net
-            .get(url)
-            .and_then(|b| parse(&b, now, cfg.local.max_age_hours))
-        {
-            Ok((name, found)) => items.extend(found.into_iter().map(|mut i| {
-                i.source = i.source.or(name.clone());
-                i
-            })),
-            Err(e) => errors.push(format!("{url}: {e}")),
-        }
-    }
-    let mut seen = HashSet::new();
-    items.retain(|i| seen.insert(title_key(&i.title)));
-    items.sort_by_key(|i| std::cmp::Reverse(i.published));
+    let (mut items, errors) = fetch_merged(
+        &[search.to_owned()],
+        feeds,
+        cfg.local.max_age_hours,
+        now,
+        net,
+    );
     // A story an earlier section printed is dropped before the cut (whichever section comes
     // first in `sections` prints it), so Local refills from its next-newest items.
     items.retain(|i| !taken.contains(&title_key(&i.title)));
@@ -621,6 +642,57 @@ mod tests {
             "<p>One &amp; two</p><script>x()</script><p>Three<br/>Four</p><figure><img src=x></figure>",
         );
         assert_eq!(p, ["One & two", "Three", "Four"]);
+    }
+
+    #[test]
+    fn fetch_merged_dedupes_and_names_feed_sources() {
+        struct Two;
+        impl Net for Two {
+            fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+                if url.contains("news.google.com") {
+                    Ok(b"<rss version=\"2.0\"><channel><title>G</title><item><title>Alpha - WXII</title>\
+                         <link>https://x/a</link><pubDate>Tue, 20 Oct 2026 10:00:00 +0000</pubDate></item>\
+                         </channel></rss>"
+                        .to_vec())
+                } else if url == "https://f.example/rss" {
+                    Ok(b"<rss version=\"2.0\"><channel><title>The Feed</title><item><title>Alpha!</title>\
+                         <link>https://x/a2</link><pubDate>Tue, 20 Oct 2026 09:00:00 +0000</pubDate></item>\
+                         <item><title>Beta</title><link>https://x/b</link>\
+                         <pubDate>Tue, 20 Oct 2026 11:00:00 +0000</pubDate></item></channel></rss>"
+                        .to_vec())
+                } else {
+                    Err("offline".into())
+                }
+            }
+        }
+        let now = "2026-10-20T22:00:00Z".parse().unwrap();
+        let (items, errors) = fetch_merged(
+            &["Alpha".into()],
+            &[
+                "https://f.example/rss".into(),
+                "https://bad.example/rss".into(),
+            ],
+            72,
+            now,
+            &Two,
+        );
+        assert_eq!(
+            items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(),
+            ["Beta", "Alpha"]
+        );
+        assert_eq!(items[1].source.as_deref(), Some("WXII"));
+        assert_eq!(items[0].source.as_deref(), Some("The Feed"));
+        assert_eq!(errors, ["bad.example: offline"]);
+    }
+
+    #[test]
+    fn a_query_with_google_operators_encodes_and_gets_one_when() {
+        let url = google_news_url("\"Rust\" programming OR \"Rust language\" -game", 72);
+        assert!(
+            url.contains("q=%22Rust%22+programming+OR+%22Rust+language%22+-game+when%3A3d&"),
+            "{url}"
+        );
+        assert_eq!(url.matches("when").count(), 1);
     }
 
     #[test]

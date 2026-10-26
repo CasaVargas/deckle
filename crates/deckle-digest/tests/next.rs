@@ -4,8 +4,9 @@
 use std::sync::Mutex;
 
 use chrono::{DateTime, Duration, Utc};
-use deckle_digest::config::{Config, FeedConfig};
+use deckle_digest::config::{Config, FeedConfig, InterestConfig};
 use deckle_digest::next::live::{LiveCache, REFRESH_EVERY_MIN, checked, live_urls, refresh};
+use deckle_digest::sources::feeds::google_news_url;
 
 const SCIENCE: &str = "https://science.example.org/rss";
 const OTHER: &str = "https://other.example.org/feed";
@@ -470,6 +471,42 @@ fn untitled_saved_page() {
     let lead = s.plan().lead.unwrap();
     assert_eq!(lead.kicker, "YOUR READING");
     assert_eq!(lead.title.as_deref(), Some("page.html"));
+}
+
+#[test]
+fn interest_rows_show_the_search_and_filter_the_cache_for_relevance() {
+    let mut s = Setup::new();
+    s.cfg.sections = vec![SectionKind::Local, SectionKind::Interests];
+    s.cfg.interests = vec![InterestConfig {
+        name: "Rust".into(),
+        not: vec!["Rust Belt".into()],
+        max_items: 5,
+        max_age_hours: 72,
+        ..Default::default()
+    }];
+    let url = google_news_url("\"Rust\"", 72);
+    assert!(live_urls(&s.cfg).contains(&url), "{:?}", live_urls(&s.cfg));
+    s.live.feeds.insert(
+        url,
+        fetched(&[
+            ("Rust 2.0 lands", local(2026, 10, 22, 14, 0)),
+            ("Trust funds", local(2026, 10, 22, 13, 0)),
+            ("Rust Belt voters", local(2026, 10, 22, 12, 0)),
+        ]),
+    );
+    let p = s.plan();
+    let row = p.plan.iter().find(|r| r.key == "interests:Rust").unwrap();
+    assert_eq!(row.kind, SectionKind::Interests);
+    assert_eq!(row.interest, Some(0));
+    assert_eq!(row.feed, None);
+    assert_eq!(row.detail, "\"Rust\"");
+    assert_eq!((row.budget.as_str(), row.items), ("5 stories", Some(5)));
+    // one relevant story, and with nothing local it leads the paper: "Trust funds" and
+    // "Rust Belt voters" never make it in
+    let lead = p.lead.unwrap();
+    assert_eq!(lead.key, "interests:Rust");
+    assert_eq!(lead.title.as_deref(), Some("Rust 2.0 lands"));
+    assert!(p.tiles.iter().all(|t| t.key != "interests:Rust"));
 }
 
 #[test]

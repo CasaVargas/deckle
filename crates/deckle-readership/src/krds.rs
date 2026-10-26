@@ -27,6 +27,9 @@ pub struct Positions {
     pub kindle_fraction: Option<f64>,
     /// `timer.average.calculator`: the Kindle's reading-pace samples, words per minute.
     pub wpm: Vec<f64>,
+    /// `page.history.store`: where each jump started, in file order. The Kindle records the
+    /// start of the page the jump was made from (fixtures: 821, 4 and 1015 on a front page).
+    pub history: Vec<i64>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -168,6 +171,17 @@ pub fn parse_yjf(bytes: &[u8]) -> Result<Positions, KrdsError> {
                 p.last = position_id(pos);
                 if let Some(Value::Int(ms)) = rest.first() {
                     p.last_read = utc_time(*ms);
+                }
+            }
+            ("page.history.store", values) => {
+                for v in values {
+                    if let Value::Object(inner, vs) = v
+                        && inner == "page.history.record"
+                        && let Some(Value::Str(pos)) = vs.first()
+                        && let Some(id) = position_id(pos)
+                    {
+                        p.history.push(id);
+                    }
                 }
             }
             ("book.info.store", [Value::Int(words), Value::Double(fraction), ..]) => {

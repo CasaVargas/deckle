@@ -128,6 +128,57 @@ full_text = "lead"              # true, false or "lead"
   stories. Other places keep their own stories and only record their titles; Your Reading is never
   trimmed or recorded.
 
+### Your interests
+
+A topic section gives you everyone's sports. An **interest** gives you yours: "Carolina
+Panthers", "Rust", "e-ink readers", "Moore County Schools". Each `[[interests]]` entry is its own
+section, and every morning Deckle searches Google News for it (the name in quotes, or your own
+`query`), merges in any `also` searches and `feeds`, keeps only the stories whose headline names
+the interest, and prints the top story whole with the rest as briefs. Add them in the Daily tab
+(**The paper → Your interests**), from the terminal, or in the file:
+
+```toml
+sections = ["reading", "weather", "local", "interests", "feeds", ...]
+
+[[interests]]
+name = "Carolina Panthers"      # the section's title; the search is the name in quotes
+# query = "\"Carolina Panthers\" NFL"   # your own search instead; Google's OR and -word work
+# also = ["Bryce Young"]        # more searches, merged; a story naming one is relevant
+# not = ["Florida Panthers"]    # a story whose headline has one of these is dropped
+# feeds = []                    # RSS feeds merged in
+# max_items = 5
+# full_text = "lead"            # top story whole, the rest briefs; true or false
+# max_age_hours = 72            # interests move slower than the wires
+```
+
+- **Relevance:** Google's search is loose, so a story stays only if its headline (or a feed
+  item's description) names the interest or an `also` phrase, as whole words: "Rust" never
+  matches "trust". The top story's own text is checked again after it's fetched; one that turns
+  out to be about the wrong Rust is dropped and the next is tried.
+- **`not`** is the reader's word: "Florida Panthers" keeps the hockey team out. A one-word name
+  with everyday meanings ("Rust" is also a surname, a film and what happens to iron) wants its own
+  `query`: the card's search field, or `--query` from the terminal.
+- **A quiet day** leaves the section out of the paper rather than printing an empty one; the
+  build notes "Nothing new about Rust today." A source that failed prints "Unavailable today"
+  as any section does.
+- Interests sit before your feeds in the starter, so your interest wins a story over Sports.
+  Each is a row in the page plan (budget editable there) and in How far you read.
+- **With the AI editor on** (`[llm]`), the editor also scores each interest story: about the
+  interest, merely mentioning it, or about something else that shares the words. The last kind
+  is dropped and the rest are ordered by score; a section with nothing left prints "Nothing new
+  about Rust today." Only headlines and excerpts go to the provider, never your `not` list.
+- Interests live in each paper's own file, so Dad's paper has Dad's.
+
+```bash
+deckle digest interests                       # list them
+deckle digest interests add "Rust" --query '"Rust" programming' --also "Cargo"
+deckle digest interests remove "Rust"
+deckle digest --paper kid-courier interests add "Dinosaurs"
+```
+
+The paper noticing what you read and suggesting new interests, and accepting one with a tap on
+the Kindle, come in later increments (`docs/superpowers/specs/2026-10-25-interests-design.md`).
+
 ### The front page and section fronts
 
 The first page is laid out like a paper's front: the lead story, then a two-column table of
@@ -179,6 +230,44 @@ you rarely reach, **Move up** for a feed you rarely reach. One click (or `deckle
   suggestion, never invent one.
 - Editions that went by email only aren't tracked: no KFX is built for them on this machine, so
   there's nothing to compare the position against (`usb_too = true` editions are).
+
+### Deckle noticed
+
+The paper notices what you read and suggests new interests, on this Mac only. Each time your
+Kindle connects, Deckle looks at three things: the stories you jumped back to the front from
+(the Kindle keeps the last few page jumps in its reading data), the passages you highlighted
+in the paper itself (from `My Clippings.txt`), and the authors of the books in progress on your
+shelf. A subject that comes up in three stories on two different days within two weeks becomes
+a suggestion under **Deckle noticed** in the Editions room, beside How far you read:
+
+> **Bryce Young** · You read 4 stories about Bryce Young in the last 14 days.
+> [Add as interest] [Not interested]
+
+- **Add as interest** writes the `[[interests]]` entry (an author gets a narrower search,
+  `"Brandon Sanderson" author OR book`) and puts `interests` in `sections` if it wasn't there.
+- **Not interested** sets the subject aside for 90 days.
+- Nothing changes the paper on its own; a suggestion waits for a click.
+- What isn't a signal: how far you read (reading straight through reaches every story),
+  highlights in books, and words you looked up.
+
+It's on by default and lives in `interests.json` beside `readership.json` (per paper). Turn it
+off in **The paper → Your interests** or with `[learning] enabled = false`. Taps need
+`[sync] readership`; highlights are read from the Kindle whenever learning is on.
+
+```bash
+deckle digest interests                      # interests, then what Deckle noticed
+deckle digest interests accept "Bryce Young"
+deckle digest interests dismiss "Bryce Young"
+deckle digest interests why "Bryce Young"    # the stories behind it
+```
+
+Renaming an interest in the app keeps its history: its readership rows and what Deckle noticed
+move to the new name.
+
+With the AI editor on, the morning build also asks it to name what Deckle noticed, from the
+headlines only ("Young" becomes "Bryce Young", with a search that finds him and not every
+Young), so the suggestion reads properly and **Add as interest** uses that search. Highlighted
+text and your shelf never go to the provider.
 
 ### The weather page
 

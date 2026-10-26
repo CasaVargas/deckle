@@ -19,6 +19,7 @@ import Shelf from "./Shelf";
 import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
 import { TOPICS, toggleTopic, topicOn, topicTitle } from "./topics";
+import { addInterest, listText, removeInterest, setList, setQuery } from "./interests";
 import ExportFolders from "./ExportFolders";
 import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
@@ -81,6 +82,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [saveUrl, setSaveUrl] = useState("");
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [next, setNext] = useState<NextPaper | null>(null);
+  const [newInterest, setNewInterest] = useState("");
   const [planSaving, setPlanSaving] = useState(false);
   const [time, setTime] = useState("05:30");
   const [placeQuery, setPlaceQuery] = useState("");
@@ -187,6 +189,12 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       f(c);
       return c;
     });
+    setDirty(true);
+  };
+
+  /** Like `edit`, for the pure helpers that return a new config. */
+  const editWith = (f: (c: DailyConfig) => DailyConfig) => {
+    setDraft((d) => (d ? f(d) : d));
     setDirty(true);
   };
 
@@ -891,6 +899,54 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                     {t.title}
                   </label>
                 ))}
+              </div>
+
+              <div className="label">Your interests</div>
+              <p className="muted small">Things you care about, each its own section: Deckle searches the news for them every morning.</p>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={draft.learning?.enabled ?? true}
+                  onChange={(e) => edit((c) => (c.learning = { window_days: 14, min_stories: 3, nudges: false, ...(c.learning ?? {}), enabled: e.target.checked }))}
+                />
+                Deckle keeps track of what you tap and highlight in the paper, on this Mac, to suggest new interests.
+              </label>
+              <div className="feeds">
+                {(draft.interests ?? []).map((it, i) => (
+                  <div key={i} className="feed interest">
+                    <input value={it.name} placeholder="e.g. Carolina Panthers" onChange={(e) => edit((c) => (c.interests![i].name = e.target.value))} />
+                    <input
+                      value={it.query ?? ""}
+                      placeholder={`Search: "${it.name || "Rust"}" programming`}
+                      title="Your own Google News search instead of the quoted name; OR and -word work"
+                      onChange={(e) => editWith((c) => setQuery(c, i, e.target.value))}
+                    />
+                    <input
+                      value={listText(it.also)}
+                      placeholder="Also: Bryce Young, Dave Canales"
+                      onChange={(e) => editWith((c) => setList(c, i, "also", e.target.value))}
+                    />
+                    <input
+                      value={listText(it.not)}
+                      placeholder="Leave out: Florida Panthers, hockey"
+                      onChange={(e) => editWith((c) => setList(c, i, "not", e.target.value))}
+                    />
+                    <button className="icon small" aria-label="Remove interest" onClick={() => editWith((c) => removeInterest(c, i))}>
+                      <Icon name="x" size={14} />
+                    </button>
+                  </div>
+                ))}
+                <form
+                  className="add-interest"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!newInterest.trim()) return;
+                    editWith((c) => addInterest(c, newInterest));
+                    setNewInterest("");
+                  }}
+                >
+                  <input value={newInterest} placeholder="Add an interest… (Enter)" onChange={(e) => setNewInterest(e.target.value)} />
+                </form>
               </div>
 
               <div className="label">Your feeds</div>

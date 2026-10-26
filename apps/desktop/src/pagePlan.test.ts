@@ -60,12 +60,20 @@ const cfg = (): DailyConfig => ({
   reading: { inbox: "", max_items: 10, long_read_words: 4000 },
 });
 
-const row = (key: string, kind: SectionKind, feed: number | null = null, items: number | null = null, place: number | null = null): PagePlanRow => ({
+const row = (
+  key: string,
+  kind: SectionKind,
+  feed: number | null = null,
+  items: number | null = null,
+  place: number | null = null,
+  interest: number | null = null,
+): PagePlanRow => ({
   key,
   kind,
   feed,
   place,
-  name: key.replace(/^feeds:/, ""),
+  interest,
+  name: key.replace(/^(feeds|interests):/, ""),
   detail: "",
   budget: "",
   items,
@@ -166,6 +174,58 @@ describe("reorder", () => {
     const base = cfg();
     reorder(base, rows(), 5, 1);
     expect(base.sections).toEqual(["reading", "weather", "local", "feeds", "horoscope"]);
+  });
+});
+
+describe("interest rows", () => {
+  const withInterests = (): DailyConfig => ({
+    ...cfg(),
+    sections: ["local", "interests", "feeds", "horoscope"],
+    interests: [
+      { name: "Rust", max_items: 5 },
+      { name: "Cargo", max_items: 5 },
+    ],
+  });
+  const irows = (): PagePlanRow[] => [
+    row("local", "local", null, 12),
+    row("interests:Rust", "interests", null, 5, null, 0),
+    row("interests:Cargo", "interests", null, 5, null, 1),
+    row("feeds:A", "feeds", 0, 10),
+    row("feeds:B", "feeds", 1, 10),
+    row("horoscope", "horoscope"),
+  ];
+  const inames = (c: DailyConfig) => (c.interests ?? []).map((i) => i.name);
+
+  test("setBudget edits an interest's max_items", () => {
+    const c = setBudget(withInterests(), irows()[2], 7);
+    expect(c.interests![1].max_items).toBe(7);
+    expect(c.interests![0].max_items).toBe(5);
+  });
+
+  test("an interest moves within [[interests]]", () => {
+    const c = reorder(withInterests(), irows(), 2, 1);
+    expect(inames(c)).toEqual(["Cargo", "Rust"]);
+    expect(names(c)).toEqual(["A", "B"]);
+    expect(c.sections).toEqual(withInterests().sections);
+  });
+
+  test("a section dropped between interests snaps to the block's nearest end", () => {
+    const c = reorder(withInterests(), irows(), 5, 2);
+    expect(c.sections.filter((s) => s === "interests")).toHaveLength(1);
+    expect(inames(c)).toEqual(["Rust", "Cargo"]);
+    expect(c.sections.indexOf("horoscope")).toBeLessThan(c.sections.indexOf("feeds"));
+  });
+
+  test("an interest dropped outside its block snaps back to it", () => {
+    const c = reorder(withInterests(), irows(), 1, 5);
+    expect(inames(c)).toEqual(["Cargo", "Rust"]);
+    expect(c.sections).toEqual(withInterests().sections);
+  });
+
+  test("rows naming interests the config no longer has change nothing", () => {
+    const c = withInterests();
+    c.interests = [{ name: "Other", max_items: 5 }];
+    expect(reorder(c, irows(), 2, 1)).toBe(c);
   });
 });
 

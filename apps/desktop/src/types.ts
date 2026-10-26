@@ -223,7 +223,27 @@ export const STAGE_LABEL: Record<string, string> = {
 
 // ---- The Daily tab (Daily design §5c) ----
 
-export type SectionKind = "reading" | "weather" | "local" | "feeds" | "subscribed" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
+export type SectionKind = "reading" | "weather" | "local" | "interests" | "feeds" | "subscribed" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
+
+/** One `[[interests]]` entry (interests design §3). */
+export interface InterestConfig {
+  name: string;
+  query?: string;
+  also?: string[];
+  not?: string[];
+  feeds?: string[];
+  max_items: number;
+  full_text?: boolean | "lead";
+  max_age_hours?: number;
+}
+
+/** `[learning]`: what the paper notices about your reading (interests design §5). */
+export interface LearningConfig {
+  enabled: boolean;
+  window_days: number;
+  min_stories: number;
+  nudges: boolean;
+}
 
 export interface FeedConfig {
   name: string;
@@ -259,7 +279,11 @@ export interface DailyConfig {
   max_photos: number;
   sections: SectionKind[];
   local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number; places?: PlaceNews[] };
+  /** `[[interests]]`; absent while there are none. */
+  interests?: InterestConfig[];
   feeds: FeedConfig[];
+  /** `[learning]`; absent while untouched. */
+  learning?: LearningConfig;
   lottery: { games: string[] };
   horoscope: { signs: string[] };
   reading: { inbox: string; max_items: number; long_read_words: number };
@@ -488,6 +512,7 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   reading: "Your Reading",
   weather: "Weather & almanac",
   local: "Local news",
+  interests: "Your interests",
   feeds: "Your feeds",
   subscribed: "Subscribed papers",
   shelf: "From Your Shelf",
@@ -497,7 +522,7 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   onthisday: "On This Day",
 };
 
-export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "feeds", "subscribed", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
+export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "interests", "feeds", "subscribed", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
 
 export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
 
@@ -644,6 +669,19 @@ export interface ReadershipView {
   /** `[sync] readership` in digest.toml. */
   enabled: boolean;
   report: ReadershipReport;
+  /** What Deckle noticed about your reading (interests design §5.4). */
+  noticed: Noticed[];
+}
+
+/** A subject that recurred in what you read; one click makes it an interest. */
+export interface Noticed {
+  key: string;
+  name: string;
+  why: string;
+  stories: number;
+  days: number;
+  signal: "tap" | "highlight" | "shelf";
+  query: string | null;
 }
 
 /** A day with a kept edition (Morgue design §4). `date` is YYYY-MM-DD. */
@@ -723,6 +761,8 @@ export interface PagePlanRow {
   place: number | null;
   /** The `[[subscribed]]` group and slug of a subscribed paper's row. */
   subscribed?: { site: string; slug: string };
+  /** The `[[interests]]` index of an interest row. */
+  interest: number | null;
   name: string;
   detail: string;
   budget: string;

@@ -40,6 +40,7 @@ fn layout(date: NaiveDate) -> Layout {
         name: name.into(),
         start,
         items: None,
+        stories: Vec::new(),
     };
     Layout {
         date,
@@ -62,6 +63,7 @@ fn read(opened: bool, furthest: Option<i64>, last: Option<i64>) -> Read {
         last,
         last_read: None,
         seen: "2026-10-22T10:00:00Z".into(),
+        history: Vec::new(),
     }
 }
 
