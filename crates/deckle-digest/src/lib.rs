@@ -347,6 +347,18 @@ pub struct GatherOptions {
     /// What Deckle noticed and hasn't named yet, for the editor (interests design §6). The
     /// caller keeps `interests.json`; this crate never sees it.
     pub naming: Vec<NamingCandidate>,
+    /// What Deckle noticed, to print as tappable pages (interests design §7) when
+    /// `[learning] nudges` is on; at most [`sources::nudges::MAX`] are printed.
+    pub nudges: Vec<Nudge>,
+}
+
+/// A suggestion the paper may carry as a page of its own (interests design §7).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Nudge {
+    /// The candidate's key in `interests.json`; the section's key is `nudge:<key>`.
+    pub key: String,
+    pub name: String,
+    pub why: String,
 }
 
 /// A subject the paper noticed, as the editor sees it: its key, the phrase as read, and up to
@@ -620,6 +632,13 @@ pub fn gather_with_editor(
                 "The puzzle wasn't saved ({}: {e}); a rebuild today makes it again",
                 path.display()
             ));
+        }
+    }
+    // What Deckle noticed, as the last pages, each its own section so a tap can be told apart
+    // (interests design §7, §15); never news, never in the editor's prompt.
+    if cfg.learning.enabled && cfg.learning.nudges {
+        for n in opts.nudges.iter().take(sources::nudges::MAX) {
+            edition.sections.push(sources::nudges::section(n));
         }
     }
     edition.drop_template_photos();

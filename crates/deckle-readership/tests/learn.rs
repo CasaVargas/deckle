@@ -586,3 +586,69 @@ fn naming_sends_only_public_headlines_inside_the_window_and_the_phrase_as_printe
         "{headlines:?}"
     );
 }
+
+// ---- nudges (interests design §7, as amended by §15) ----
+
+use deckle_readership::learn::{accept_nudges, nudges_for};
+
+fn state_with_nudge(histories: &[(&str, Vec<i64>)]) -> State {
+    let mut state = State::default();
+    let mut l = layout("2026-10-25", &[0, 100, 9000]);
+    l.end = 9500;
+    l.sections[1].key = "horoscope".into();
+    l.sections[2].key = "nudge:bryce young".into();
+    state.record_layout(l);
+    for (device, history) in histories {
+        state.reads.entry(d("2026-10-25")).or_default().insert(
+            (*device).into(),
+            Read {
+                opened: true,
+                history: history.clone(),
+                seen: "x".into(),
+                ..Read::default()
+            },
+        );
+    }
+    state
+}
+
+#[test]
+fn a_tap_on_a_nudge_page_accepts_it_once() {
+    let mut l = seeded();
+    let mut c = cfg();
+    c.sections = vec![SectionKind::Local, SectionKind::Feeds];
+    let state = state_with_nudge(&[("K", vec![4, 9100]), ("K2", vec![9100])]);
+    assert_eq!(accept_nudges(&mut l, &mut c, &state, today()), ["Bryce Young"]);
+    assert!(c.interests.iter().any(|i| i.name == "Bryce Young"));
+    assert_eq!(
+        c.sections,
+        [SectionKind::Local, SectionKind::Interests, SectionKind::Feeds]
+    );
+    assert_eq!(l.accepted["bryce young"], today());
+    // again: nothing new
+    assert!(accept_nudges(&mut l, &mut c, &state, today()).is_empty());
+    // a position elsewhere, or a nudge for a key no longer known, does nothing
+    let mut l2 = seeded();
+    let mut c2 = cfg();
+    assert!(accept_nudges(&mut l2, &mut c2, &state_with_nudge(&[("K", vec![150])]), today()).is_empty());
+    l2.candidates.remove("bryce young");
+    assert!(accept_nudges(&mut l2, &mut c2, &state, today()).is_empty());
+    // dismissed on the Mac after the paper was built: the tap is the newer decision
+    let mut l3 = seeded();
+    let mut c3 = cfg();
+    dismiss(&mut l3, "bryce young", today()).unwrap();
+    assert_eq!(accept_nudges(&mut l3, &mut c3, &state, today()), ["Bryce Young"]);
+}
+
+#[test]
+fn nudges_for_are_the_top_three_suggestions_when_the_flag_is_on() {
+    let l = seeded();
+    let mut c = cfg();
+    assert!(nudges_for(&l, &c, today()).is_empty(), "flag off");
+    c.learning.nudges = true;
+    let n = nudges_for(&l, &c, today());
+    assert_eq!(n.len(), 1);
+    assert_eq!(n[0].0, "bryce young");
+    assert_eq!(n[0].1, "Bryce Young");
+    assert!(n[0].2.starts_with("You read 3 stories"));
+}

@@ -3890,6 +3890,7 @@ fn gather_options() -> deckle_digest::GatherOptions {
     deckle_digest::GatherOptions {
         shelf_fraction_ok: deckle_shelf::KINDLE_FRACTION_OK,
         naming: Vec::new(),
+        nudges: Vec::new(),
     }
 }
 
