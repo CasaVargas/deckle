@@ -23,7 +23,7 @@ pub const ARTICLE_EXTENSIONS: [&str; 4] = ["webloc", "url", "html", "htm"];
 
 /// What a `deckle run` argument names: a web address, or a file by its extension.
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum Source {
+pub(crate) enum Source {
     Url(String),
     Page(PathBuf),
 }
@@ -36,7 +36,7 @@ pub struct WebBook {
     pub words: usize,
 }
 
-fn is_address(target: &str) -> bool {
+pub(crate) fn is_address(target: &str) -> bool {
     target.starts_with("http://") || target.starts_with("https://")
 }
 
@@ -72,7 +72,7 @@ fn saved_from(html: &str) -> Option<String> {
     CANONICAL.captures(html).map(|c| c[1].to_owned())
 }
 
-fn source(target: &str) -> Result<Source, String> {
+pub(crate) fn source(target: &str) -> Result<Source, String> {
     if is_address(target) {
         return Ok(Source::Url(target.to_owned()));
     }

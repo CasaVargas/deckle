@@ -2,7 +2,9 @@
 //! The Kitchen Book: a cookbook built from saved recipe links
 //! (docs/superpowers/specs/2026-10-26-cookbook-design.md).
 
+pub mod add;
 pub mod filing;
+pub mod picture;
 pub mod recipe;
 pub mod store;
 
