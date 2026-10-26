@@ -1651,7 +1651,7 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
 
 /// `old` takes `new`'s keys and values; a value that changed keeps its comments, one that
 /// didn't is left alone, and keys `new` lacks (cleared options) are removed.
-fn merge_table(old: &mut toml_edit::Table, new: &toml_edit::Table) {
+pub(crate) fn merge_table(old: &mut toml_edit::Table, new: &toml_edit::Table) {
     use toml_edit::Item;
     let gone: Vec<String> = old
         .iter()
