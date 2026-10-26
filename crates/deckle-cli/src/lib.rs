@@ -4020,10 +4020,26 @@ fn record_layout(
         .collect();
     let stem = deckle_digest::edition_stem(cfg, date);
     let stem = stem.as_str();
+    let titles: Vec<(String, Vec<String>)> = built
+        .sections
+        .iter()
+        .map(|s| (s.key.clone(), s.titles.clone()))
+        .collect();
     let layout = std::fs::read(kfx)
         .map_err(|e| format!("{}: {e}", kfx.display()))
         .and_then(|bytes| {
-            deckle_readership::layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)
+            let mut l = deckle_readership::layout::layout_from_kfx(
+                &bytes,
+                date,
+                &built.title,
+                stem,
+                &sections,
+            )?;
+            // stories are a nicety for learning: a layout without them is still a layout
+            if let Err(e) = deckle_readership::layout::add_stories(&mut l, &bytes, &titles) {
+                eprintln!("readership: stories: {e}");
+            }
+            Ok(l)
         })
         .map(|l| with_items(l, built));
     let path = readership_path(cfg);
@@ -5099,6 +5115,7 @@ mod layout_tests {
             name: key.into(),
             start: 0,
             items: None,
+            stories: Vec::new(),
         };
         let layout = Layout {
             date: "2026-10-22".parse().unwrap(),
@@ -5112,6 +5129,7 @@ mod layout_tests {
             title: key.into(),
             items,
             unavailable: None,
+            titles: Vec::new(),
         };
         let built = deckle_digest::BuildReport {
             epub: PathBuf::new(),

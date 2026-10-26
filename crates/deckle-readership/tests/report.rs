@@ -36,6 +36,7 @@ fn edition(s: &mut State, i: u64, secs: &[(&str, &str, i64)], reads: &[(&str, Op
                 name: (*n).into(),
                 start: *start,
                 items: None,
+                stories: Vec::new(),
             })
             .collect(),
     });

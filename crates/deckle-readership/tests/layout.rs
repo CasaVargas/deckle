@@ -1,103 +1,113 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use chrono::NaiveDate;
-use deckle_kfx::text::{content_runs, section_first_runs};
-use deckle_readership::layout::{Layout, SectionStart, layout_from_kfx, section_at};
+//! Where each story starts (learning plan, Task 2): found among a section's runs, looked up by
+//! position.
+mod common;
 
-fn mini() -> Vec<u8> {
-    std::fs::read(deckle_kfx::fixtures::path("deckle-mini-pdoc.golden.kfx")).unwrap()
+use common::*;
+use deckle_kfx::text::Run;
+use deckle_readership::layout::{Layout, SectionStart, StoryStart, stories_from_runs, story_at};
+
+fn paper() -> Layout {
+    let mut l = layout("2026-10-21", &[0, 100, 500]);
+    l.end = 1000;
+    l.sections[1].key = "interests:Rust".into();
+    l.sections[2].key = "feeds:HN".into();
+    l
 }
 
-fn d(s: &str) -> NaiveDate {
-    s.parse().unwrap()
-}
-
-/// The mini book's chapters after the first, keyed "b", "c": chapter one stands in for the
-/// front page.
-fn chapter_names() -> Vec<(String, String)> {
-    section_first_runs(&mini()).unwrap()[1..]
-        .iter()
-        .zip(["b", "c"])
-        .map(|(r, k)| (k.to_owned(), r.text.clone()))
-        .collect()
-}
-
-#[test]
-fn section_starts_come_from_section_boundaries_not_text_search() {
-    // "Chapter One" also opens the book's text, as a front-page line naming a section would;
-    // matching runs by section keeps the later sections at their own headings.
-    let l = layout_from_kfx(
-        &mini(),
-        d("2026-10-21"),
-        "Mini",
-        "deckle-daily-2026-10-21",
-        &chapter_names(),
-    )
-    .unwrap();
-    let keys: Vec<_> = l.sections.iter().map(|s| s.key.as_str()).collect();
-    assert_eq!(keys, ["front", "b", "c"]);
-    assert_eq!(l.sections[0].name, "Front page");
-    assert_eq!(l.sections[0].start, 3);
-    assert!(l.sections.windows(2).all(|w| w[0].start < w[1].start));
-    let firsts = section_first_runs(&mini()).unwrap();
-    assert_eq!(l.sections[1].start, firsts[1].pid);
-    assert_eq!(l.end, content_runs(&mini()).unwrap().1);
-    assert_eq!(
-        (l.title.as_str(), l.file.as_str()),
-        ("Mini", "deckle-daily-2026-10-21")
-    );
-}
-
-#[test]
-fn a_heading_repeated_in_an_earlier_section_is_not_taken() {
-    // Ask for the first chapter's heading as if it were a later section: section boundaries
-    // say it isn't the first run of any section after the front page.
-    let names = vec![("x".to_owned(), "Chapter One".to_owned())];
-    assert!(layout_from_kfx(&mini(), d("2026-10-21"), "Mini", "f", &names).is_err());
-}
-
-#[test]
-fn a_section_missing_from_the_kfx_is_an_error() {
-    let names = vec![("x".to_owned(), "No Such Heading".to_owned())];
-    let e = layout_from_kfx(&mini(), d("2026-10-21"), "Mini", "f", &names).unwrap_err();
-    assert!(e.contains("No Such Heading"), "{e}");
-}
-
-fn layout_fixture() -> Layout {
-    let s = |key: &str, start| SectionStart {
-        key: key.into(),
-        name: key.into(),
-        start,
-        items: None,
-    };
-    Layout {
-        date: d("2026-10-21"),
-        title: "T".into(),
-        file: "f".into(),
-        end: 30000,
-        sections: vec![s("front", 4), s("reading", 1204), s("weather", 20511)],
+fn run(pid: i64, text: &str) -> Run {
+    Run {
+        pid,
+        text: text.into(),
     }
 }
 
 #[test]
-fn positions_map_to_the_section_starting_at_or_before_them() {
-    let l = layout_fixture();
-    assert_eq!(section_at(&l, 1204).unwrap().key, "reading");
-    assert_eq!(section_at(&l, 1203).unwrap().key, "front");
-    assert_eq!(section_at(&l, 999_999).unwrap().key, "weather");
-    assert!(section_at(&l, 0).is_none());
+fn stories_are_the_title_runs_inside_each_sections_range() {
+    let runs = [
+        run(100, "Rust"),
+        run(110, "Rust 2.0  lands"),
+        run(300, "Rust jobs grow"),
+        run(500, "HN"),
+        run(520, "Rust 2.0 lands"),
+    ];
+    let titles = [
+        (
+            "interests:Rust".to_owned(),
+            vec![
+                "Rust 2.0 lands".to_owned(),
+                "Rust jobs grow".to_owned(),
+                "Missing".to_owned(),
+            ],
+        ),
+        ("feeds:HN".to_owned(), vec!["Rust 2.0 lands".to_owned()]),
+    ];
+    let found = stories_from_runs(&runs, &paper(), &titles);
+    assert_eq!(
+        found,
+        [
+            (
+                "interests:Rust".to_owned(),
+                vec![
+                    StoryStart {
+                        title: "Rust 2.0 lands".into(),
+                        start: 110
+                    },
+                    StoryStart {
+                        title: "Rust jobs grow".into(),
+                        start: 300
+                    },
+                ]
+            ),
+            (
+                "feeds:HN".to_owned(),
+                vec![StoryStart {
+                    title: "Rust 2.0 lands".into(),
+                    start: 520
+                }]
+            ),
+        ]
+    );
 }
 
 #[test]
-fn layouts_round_trip_as_json() {
-    let l = layout_fixture();
-    let back: Layout = serde_json::from_str(&serde_json::to_string(&l).unwrap()).unwrap();
-    assert_eq!(back, l);
+fn story_at_is_the_last_story_starting_at_or_before_the_position() {
+    let mut l = paper();
+    l.sections[1].stories = vec![
+        StoryStart {
+            title: "Rust 2.0 lands".into(),
+            start: 110,
+        },
+        StoryStart {
+            title: "Rust jobs grow".into(),
+            start: 300,
+        },
+    ];
+    l.sections[2].stories = vec![StoryStart {
+        title: "Comet".into(),
+        start: 520,
+    }];
+    let at = |p: i64| story_at(&l, p).map(|(s, st)| (s.key.as_str(), st.title.as_str()));
+    assert_eq!(at(4), None, "the front has no stories");
+    assert_eq!(at(105), None, "a section's own front");
+    assert_eq!(at(110), Some(("interests:Rust", "Rust 2.0 lands")));
+    assert_eq!(at(299), Some(("interests:Rust", "Rust 2.0 lands")));
+    assert_eq!(at(300), Some(("interests:Rust", "Rust jobs grow")));
+    assert_eq!(at(700), Some(("feeds:HN", "Comet")));
+    assert_eq!(at(1000), None, "past the end");
 }
 
 #[test]
-fn headings_match_with_whitespace_normalised() {
-    let mut names = chapter_names();
-    names[0].1 = names[0].1.replace(' ', "  ");
-    names[0].1.push('\n');
-    assert!(layout_from_kfx(&mini(), d("2026-10-21"), "Mini", "f", &names).is_ok());
+fn a_layout_without_stories_loads_with_none() {
+    let json = serde_json::to_string(&paper()).unwrap();
+    assert!(!json.contains("stories"));
+    let back: Layout = serde_json::from_str(&json).unwrap();
+    assert!(back.sections.iter().all(|s| s.stories.is_empty()));
+    let _ = SectionStart {
+        key: "x".into(),
+        name: "x".into(),
+        start: 0,
+        items: None,
+        stories: Vec::new(),
+    };
 }

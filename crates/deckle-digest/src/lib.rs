@@ -259,6 +259,9 @@ pub struct SectionSummary {
     pub title: String,
     pub items: usize,
     pub unavailable: Option<String>,
+    /// The stories' titles in order, for the readership layout (learning plan, Task 2).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub titles: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -726,6 +729,7 @@ fn report(edition: &Edition, epub: PathBuf) -> BuildReport {
                 title: s.title.clone(),
                 items: s.articles.len(),
                 unavailable: s.unavailable.clone(),
+                titles: s.articles.iter().map(|a| a.title.clone()).collect(),
             })
             .collect(),
         long_reads: Vec::new(),

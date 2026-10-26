@@ -182,6 +182,7 @@ mod tests {
             name: name.into(),
             start,
             items: None,
+            stories: Vec::new(),
         };
         Layout {
             date,
@@ -210,6 +211,7 @@ mod tests {
                 last: Some(f),
                 last_read: None,
                 seen: "x".into(),
+                history: Vec::new(),
             };
             s.reads.entry(date).or_default().insert("K".into(), r);
         }
@@ -246,6 +248,7 @@ mod tests {
             name: name.into(),
             start,
             items: None,
+            stories: Vec::new(),
         };
         for i in 0..10u64 {
             let date = start + deckle_digest::chrono::Days::new(i);
@@ -267,6 +270,7 @@ mod tests {
                 last: Some(3000),
                 last_read: None,
                 seen: "x".into(),
+                history: Vec::new(),
             };
             s.reads.entry(date).or_default().insert("K".into(), r);
         }
