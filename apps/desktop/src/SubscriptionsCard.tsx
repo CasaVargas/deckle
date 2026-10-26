@@ -2,12 +2,16 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "./api";
 import { subscriptionLine } from "./subscriptions";
-import type { SiteStatus, SubscriptionConfig } from "./types";
+import type { SessionState, SiteStatus, SubscriptionConfig } from "./types";
 
 /**
  * Newspapers the household subscribes to (publisher subscriptions design §3): a site and the
  * account that signs in to it. The password is write-only and lives in the keychain.
  */
+/** The site as the backend files it: a bare lowercase host. */
+const statusKey = (site: string) =>
+  site.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+
 export default function SubscriptionsCard({
   subscriptions,
   dirty,
@@ -22,6 +26,8 @@ export default function SubscriptionsCard({
 }) {
   const [statuses, setStatuses] = useState<SiteStatus[]>([]);
   const [passwords, setPasswords] = useState<Record<number, string>>({});
+  // A fresh status only knows what this process has tried, so a test's answer is kept here.
+  const [tested, setTested] = useState<Record<string, SessionState>>({});
   const [busy, setBusy] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
@@ -32,9 +38,17 @@ export default function SubscriptionsCard({
 
   const edit = (i: number, p: Partial<SubscriptionConfig>) =>
     onChange(subscriptions.map((s, j) => (j === i ? { ...s, ...p } : s)));
-  const statusOf = (s: SubscriptionConfig) => statuses.find((t) => t.site === s.site.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, ""));
+  const statusOf = (s: SubscriptionConfig): SiteStatus | undefined => {
+    const st = statuses.find((t) => t.site === statusKey(s.site));
+    return st && { ...st, state: tested[st.site] ?? st.state };
+  };
   // The keychain entry and the session are named after the saved site and username.
-  const saved = async () => !dirty || (await onSave());
+  const saved = async () => {
+    if (!dirty) return true;
+    const ok = await onSave();
+    if (ok) refresh();
+    return ok;
+  };
 
   const savePassword = async (i: number) => {
     const pw = passwords[i];
@@ -60,8 +74,10 @@ export default function SubscriptionsCard({
     setMsg(null);
     try {
       if (await saved()) {
-        await api.subscriptionTest(subscriptions[i].site);
+        const site = subscriptions[i].site;
+        const state = await api.subscriptionTest(site);
         refresh();
+        setTested((t) => ({ ...t, [statusKey(site)]: state }));
       }
     } catch (e) {
       setMsg({ text: String(e), ok: false });
@@ -90,7 +106,7 @@ export default function SubscriptionsCard({
       <div className="card-head">
         <h3>Subscriptions</h3>
         {dirty && (
-          <button className="primary" onClick={() => onSave()}>
+          <button className="primary" onClick={() => saved()}>
             Save
           </button>
         )}
