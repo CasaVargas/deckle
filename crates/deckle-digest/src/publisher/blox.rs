@@ -49,18 +49,21 @@ pub fn paid_access_service_ids(html: &str) -> Vec<String> {
 }
 
 /// The page's service ids; `None` when the page names `paid_access_service_ids` in a shape
-/// we can't read (which must fail closed, not count as "lists none").
+/// we can't read (which must fail closed, not count as "lists none"): assigned more than once,
+/// or named anywhere outside the one assignment we parsed.
 fn page_service_ids(html: &str) -> Option<Vec<String>> {
-    match PAID_IDS.captures(html) {
-        Some(c) => Some(
+    let found: Vec<regex::Captures> = PAID_IDS.captures_iter(html).collect();
+    let named = html.matches("paid_access_service_ids").count();
+    match found.as_slice() {
+        [] if named == 0 => Some(Vec::new()),
+        [c] if named == 1 => Some(
             c[1].split(',')
                 .map(|id| id.trim().trim_matches(|q| q == '"' || q == '\'').trim())
                 .filter(|id| !id.is_empty())
                 .map(str::to_string)
                 .collect(),
         ),
-        None if html.contains("paid_access_service_ids") => None,
-        None => Some(Vec::new()),
+        _ => None,
     }
 }
 
@@ -435,6 +438,12 @@ mod tests {
         for odd in [
             r#"var cfg = {"paid_access_service_ids":[3]};"#,
             "tncms.subscription.paid_access_service_ids = someVar;",
+            // assigned twice: the first (empty) list must not read as "lists none"
+            "tncms.subscription.paid_access_service_ids = []; \
+             tncms.subscription.paid_access_service_ids = [3];",
+            // one parsed assignment, and the name again somewhere we didn't parse
+            "tncms.subscription.paid_access_service_ids = [1]; \
+             cfg.paid_access_service_ids.push(3);",
         ] {
             let odd_page = page.replace(line, odd);
             assert_eq!(Blox.unlock(&odd_page, &ent(&["1"])), None, "{odd}");

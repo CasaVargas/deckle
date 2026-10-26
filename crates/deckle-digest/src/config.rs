@@ -933,7 +933,7 @@ impl SubscribedConfig {
                 known_list(known)
             ));
         }
-        for slug in &self.sections {
+        for (n, slug) in self.sections.iter().enumerate() {
             if !known.iter().any(|(k, _)| k == slug) {
                 return Err(format!(
                     "[[subscribed]] {}: unknown section {slug:?}; known: {}",
@@ -941,6 +941,19 @@ impl SubscribedConfig {
                     known_list(known)
                 ));
             }
+            // a repeated slug would print twice under one section key
+            if self.sections[..n].contains(slug) {
+                return Err(format!(
+                    "[[subscribed]] {}: section {slug:?} is listed twice",
+                    self.site
+                ));
+            }
+        }
+        if self.max_items == Some(0) {
+            return Err(format!(
+                "[[subscribed]] {}: max_items must be at least 1",
+                self.site
+            ));
         }
         Ok(())
     }
@@ -1362,10 +1375,16 @@ impl Config {
     /// Normalizes each `[[subscribed]]` site and checks its slugs against the BLOX list (the
     /// only adapter, so the only list).
     fn normalize_subscribed(&mut self) -> Result<(), String> {
-        for g in &mut self.subscribed {
+        for n in 0..self.subscribed.len() {
+            let g = &mut self.subscribed[n];
             g.site = SubscriptionConfig::normalized_site(&g.site)
                 .map_err(|e| e.replacen("[[subscriptions]]", "[[subscribed]]", 1))?;
             g.validate(crate::publisher::blox::SECTIONS)?;
+            // two groups for one site would give the same section keys
+            let site = &self.subscribed[n].site;
+            if self.subscribed[..n].iter().any(|o| &o.site == site) {
+                return Err(format!("[[subscribed]] {site} appears twice"));
+            }
         }
         Ok(())
     }
@@ -2191,6 +2210,33 @@ mod tests {
         assert!(e.contains("thepilot.com") && e.contains("sections"), "{e}");
         assert!(
             Config::parse("[[subscribed]]\nsite = \"a.com/x\"\nsections = [\"news\"]\n").is_err()
+        );
+    }
+
+    #[test]
+    fn subscribed_rejects_repeats_and_an_empty_budget() {
+        let e = Config::parse(
+            "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\", \"sports\", \"news\"]\n",
+        )
+        .unwrap_err();
+        assert_eq!(e, "[[subscribed]] thepilot.com: section \"news\" is listed twice");
+        // the same site twice, however it's spelled
+        let e = Config::parse(
+            "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\n\n[[subscribed]]\nsite = \"https://www.ThePilot.com/\"\nsections = [\"sports\"]\n",
+        )
+        .unwrap_err();
+        assert_eq!(e, "[[subscribed]] thepilot.com appears twice");
+        let e = Config::parse(
+            "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 0\n",
+        )
+        .unwrap_err();
+        assert_eq!(e, "[[subscribed]] thepilot.com: max_items must be at least 1");
+        // two different sites are fine
+        assert!(
+            Config::parse(
+                "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 1\n\n[[subscribed]]\nsite = \"journalnow.com\"\nsections = [\"news\"]\n",
+            )
+            .is_ok()
         );
     }
 
