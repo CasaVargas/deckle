@@ -14,6 +14,12 @@ pub struct ReadershipView {
     /// `[sync] readership` in `digest.toml`.
     pub enabled: bool,
     pub report: Report,
+    /// What Deckle noticed about your reading (interests design §5.4).
+    pub noticed: Vec<deckle_readership::Noticed>,
+}
+
+fn today() -> deckle_digest::chrono::NaiveDate {
+    deckle_digest::chrono::Local::now().date_naive()
 }
 
 /// Paper `paper`'s config (`None`: the main paper, `digest`).
@@ -26,12 +32,68 @@ fn load_config(digest: &Path, paper: Option<&str>) -> Result<deckle_digest::Conf
     }
 }
 
+/// The paper's learning file lives beside its readership file.
+fn learning_file(state: &Path) -> PathBuf {
+    state.with_file_name("interests.json")
+}
+
 pub fn view_at(state: &Path, digest: &Path, paper: Option<&str>) -> Result<ReadershipView, String> {
+    view_with_today(state, digest, paper, today())
+}
+
+pub fn view_with_today(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    today: deckle_digest::chrono::NaiveDate,
+) -> Result<ReadershipView, String> {
     let cfg = load_config(digest, paper)?;
+    let learning = deckle_readership::Learning::load(&learning_file(state));
     Ok(ReadershipView {
         enabled: cfg.sync.readership,
         report: deckle_readership::report(&State::load(state), &cfg),
+        noticed: deckle_readership::learn::suggest(&learning, &cfg, today),
     })
+}
+
+/// Makes what Deckle noticed under `key` an interest of paper `paper`: the entry goes into
+/// its file (comments kept), the acceptance into its `interests.json`.
+pub fn accept_at(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    key: &str,
+) -> Result<ReadershipView, String> {
+    accept_with_today(state, digest, paper, key, today())
+}
+
+pub fn accept_with_today(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    key: &str,
+    today: deckle_digest::chrono::NaiveDate,
+) -> Result<ReadershipView, String> {
+    let mut cfg = load_config(digest, paper)?;
+    let path = learning_file(state);
+    let mut learning = deckle_readership::Learning::load(&path);
+    deckle_readership::learn::accept(&mut learning, &mut cfg, key, today)?;
+    deckle_digest::papers::save(digest, &cfg)?;
+    learning.save(&path)?;
+    view_with_today(state, digest, paper, today)
+}
+
+pub fn dismiss_noticed_at(
+    state: &Path,
+    digest: &Path,
+    paper: Option<&str>,
+    key: &str,
+) -> Result<ReadershipView, String> {
+    let path = learning_file(state);
+    let mut learning = deckle_readership::Learning::load(&path);
+    deckle_readership::learn::dismiss(&mut learning, key, today())?;
+    learning.save(&path)?;
+    view_at(state, digest, paper)
 }
 
 fn suggestion(
@@ -160,6 +222,18 @@ pub fn readership_dismiss(id: String, paper: Option<String>) -> Result<Readershi
     dismiss_at(&s, &d, paper.as_deref(), &id)
 }
 
+#[tauri::command]
+pub fn interests_accept(key: String, paper: Option<String>) -> Result<ReadershipView, String> {
+    let (s, d) = paths(paper.as_deref())?;
+    accept_at(&s, &d, paper.as_deref(), &key)
+}
+
+#[tauri::command]
+pub fn interests_dismiss(key: String, paper: Option<String>) -> Result<ReadershipView, String> {
+    let (s, d) = paths(paper.as_deref())?;
+    dismiss_noticed_at(&s, &d, paper.as_deref(), &key)
+}
+
 /// Turning it on or off is the household's, so the view after is the main paper's.
 #[tauri::command]
 pub fn readership_set(on: bool) -> Result<ReadershipView, String> {
@@ -170,6 +244,50 @@ pub fn readership_set(on: bool) -> Result<ReadershipView, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_view_reads_what_deckle_noticed_beside_the_state_file_it_was_given() {
+        let dir = tempfile::tempdir().unwrap();
+        let digest = dir.path().join("digest.toml");
+        std::fs::write(&digest, "title = \"T\"\nsections = [\"weather\"]\n").unwrap();
+        let state = dir.path().join("readership.json");
+        let mut learning = deckle_readership::Learning::default();
+        let stop = std::collections::HashSet::new();
+        for (date, title) in [
+            ("2026-10-20", "Bryce Young benched"),
+            ("2026-10-22", "Bryce Young returns"),
+            ("2026-10-22", "Bryce Young sits"),
+        ] {
+            deckle_readership::learn::note(
+                &mut learning,
+                &stop,
+                title,
+                deckle_readership::learn::Hit {
+                    date: date.parse().unwrap(),
+                    section: "x".into(),
+                    title: title.into(),
+                    signal: deckle_readership::learn::Signal::Tap,
+                },
+            );
+        }
+        learning.save(&dir.path().join("interests.json")).unwrap();
+        let today: deckle_digest::chrono::NaiveDate = "2026-10-25".parse().unwrap();
+        let v = view_with_today(&state, &digest, None, today).unwrap();
+        assert_eq!(v.noticed.len(), 1, "{:?}", v.noticed);
+        assert_eq!(v.noticed[0].name, "Bryce Young");
+        let v = accept_with_today(&state, &digest, None, "bryce young", today).unwrap();
+        assert!(v.noticed.is_empty());
+        assert!(
+            std::fs::read_to_string(&digest)
+                .unwrap()
+                .contains("Bryce Young")
+        );
+        assert!(
+            deckle_readership::Learning::load(&dir.path().join("interests.json"))
+                .accepted
+                .contains_key("bryce young")
+        );
+    }
     use deckle_core::deliver::Target;
     use deckle_readership::layout::{Layout, SectionStart};
     use deckle_readership::state::Read;
@@ -182,6 +300,7 @@ mod tests {
             name: name.into(),
             start,
             items: None,
+            stories: Vec::new(),
         };
         Layout {
             date,
@@ -210,6 +329,7 @@ mod tests {
                 last: Some(f),
                 last_read: None,
                 seen: "x".into(),
+                history: Vec::new(),
             };
             s.reads.entry(date).or_default().insert("K".into(), r);
         }
@@ -246,6 +366,7 @@ mod tests {
             name: name.into(),
             start,
             items: None,
+            stories: Vec::new(),
         };
         for i in 0..10u64 {
             let date = start + deckle_digest::chrono::Days::new(i);
@@ -267,6 +388,7 @@ mod tests {
                 last: Some(3000),
                 last_read: None,
                 seen: "x".into(),
+                history: Vec::new(),
             };
             s.reads.entry(date).or_default().insert("K".into(), r);
         }

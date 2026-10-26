@@ -629,6 +629,19 @@ export interface ReadershipView {
   /** `[sync] readership` in digest.toml. */
   enabled: boolean;
   report: ReadershipReport;
+  /** What Deckle noticed about your reading (interests design §5.4). */
+  noticed: Noticed[];
+}
+
+/** A subject that recurred in what you read; one click makes it an interest. */
+export interface Noticed {
+  key: string;
+  name: string;
+  why: string;
+  stories: number;
+  days: number;
+  signal: "tap" | "highlight" | "shelf";
+  query: string | null;
 }
 
 /** A day with a kept edition (Morgue design §4). `date` is YYYY-MM-DD. */

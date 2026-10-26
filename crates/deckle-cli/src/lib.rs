@@ -2135,41 +2135,102 @@ fn digest_interests(
     action: Option<cli::InterestsCommand>,
 ) -> Result<ExitCode, String> {
     use deckle_digest::config::{InterestConfig, SectionKind};
+    use deckle_readership::learn::{self, Learning, Noticed};
     let mut cfg = paper_config(path, paper)?;
+    let learning_path = Learning::path_for(&cfg);
+    let today = deckle_digest::chrono::Local::now().date_naive();
+    // "Bryce Young" or "bryce young": the candidate's key, or its spelling
+    let find_key = |learning: &Learning, phrase: &str| -> Option<String> {
+        let want = phrase.trim().to_lowercase();
+        learning
+            .candidates
+            .iter()
+            .find(|(k, c)| **k == want || c.display.trim().to_lowercase() == want)
+            .map(|(k, _)| k.clone())
+    };
     match action {
         None => {
+            let learning = Learning::load(&learning_path);
+            let noticed = learn::suggest(&learning, &cfg, today);
             #[derive(serde::Serialize)]
             struct Out<'a> {
                 paper: &'a str,
                 interests: &'a [InterestConfig],
+                noticed: &'a [Noticed],
             }
             let out = Out {
                 paper: cfg.slug(),
                 interests: &cfg.interests,
+                noticed: &noticed,
             };
             emit(json, &out, || {
-                if cfg.interests.is_empty() {
-                    return "No interests yet: `deckle digest interests add \"Rust\"`.".to_owned();
+                let mut lines: Vec<String> = if cfg.interests.is_empty() {
+                    vec!["No interests yet: `deckle digest interests add \"Rust\"`.".to_owned()]
+                } else {
+                    cfg.interests
+                        .iter()
+                        .map(|i| {
+                            let mut line = format!(
+                                "{} — {} · {} stories",
+                                i.name,
+                                i.search_query(),
+                                i.max_items
+                            );
+                            if !i.also.is_empty() {
+                                line.push_str(&format!(" · also {}", i.also.join(", ")));
+                            }
+                            if !i.not.is_empty() {
+                                line.push_str(&format!(" · not {}", i.not.join(", ")));
+                            }
+                            line
+                        })
+                        .collect()
+                };
+                for n in &noticed {
+                    lines.push(format!(
+                        "noticed: {} — {} (accept with: deckle digest interests accept \"{}\")",
+                        n.name, n.why, n.name
+                    ));
                 }
-                cfg.interests
-                    .iter()
-                    .map(|i| {
-                        let mut line = format!(
-                            "{} — {} · {} stories",
-                            i.name,
-                            i.search_query(),
-                            i.max_items
-                        );
-                        if !i.also.is_empty() {
-                            line.push_str(&format!(" · also {}", i.also.join(", ")));
-                        }
-                        if !i.not.is_empty() {
-                            line.push_str(&format!(" · not {}", i.not.join(", ")));
-                        }
-                        line
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                lines.join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(cli::InterestsCommand::Accept { phrase }) => {
+            let mut learning = Learning::load(&learning_path);
+            let key = find_key(&learning, &phrase)
+                .ok_or_else(|| format!("no suggestion \"{phrase}\""))?;
+            let entry = learn::accept(&mut learning, &mut cfg, &key, today)?;
+            deckle_digest::papers::save(path, &cfg)?;
+            learning.save(&learning_path)?;
+            emit(json, &entry, || format!("added {}", entry.name))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(cli::InterestsCommand::Dismiss { phrase }) => {
+            let mut learning = Learning::load(&learning_path);
+            let key = find_key(&learning, &phrase)
+                .ok_or_else(|| format!("no suggestion \"{phrase}\""))?;
+            learn::dismiss(&mut learning, &key, today)?;
+            let name = learning.candidates[&key].display.clone();
+            learning.save(&learning_path)?;
+            let out = serde_json::json!({ "dismissed": key });
+            emit(json, &out, || format!("dismissed {name}"))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Some(cli::InterestsCommand::Why { name }) => {
+            let learning = Learning::load(&learning_path);
+            let key = find_key(&learning, &name)
+                .ok_or_else(|| format!("nothing noticed about \"{name}\""))?;
+            let c = &learning.candidates[&key];
+            emit(json, c, || {
+                let mut lines = vec![format!("{} — {} hits", c.display, c.hits.len())];
+                for h in &c.hits {
+                    lines.push(format!(
+                        "  {} · {} · {} ({:?})",
+                        h.date, h.section, h.title, h.signal
+                    ));
+                }
+                lines.join("\n")
             })?;
             Ok(ExitCode::SUCCESS)
         }
@@ -3800,7 +3861,11 @@ fn sync_actions(cfg: &deckle_digest::Config, id: &str) -> deckle_core::sync::Act
     deckle_core::sync::Actions {
         push: a.push,
         prune: a.prune,
-        clippings: a.clippings || puzzle_on(cfg) || shelf,
+        // learning reads the paper's own highlights too (interests design §5)
+        clippings: a.clippings
+            || puzzle_on(cfg)
+            || shelf
+            || deckle_readership::learn::learning_on(cfg),
         readership: a.readership,
         shelf,
     }
@@ -3931,6 +3996,20 @@ fn sync_to(
     });
     record_morgue(&flush);
     let shelf = record_shelf(cfg, target, &flush);
+    // What this connection teaches each paper (interests design §5): taps from the reads just
+    // recorded, highlights from the clippings, authors from the shelf just stored.
+    for (paper, (_, state)) in papers.iter().zip(&states) {
+        let store = deckle_digest::shelf::store::Shelf::load(&paper.shelf_store());
+        if let Err(e) = deckle_readership::learn::on_connection(
+            paper,
+            state,
+            flush.clippings.as_deref(),
+            Some(&store),
+            deckle_digest::chrono::Utc::now(),
+        ) {
+            eprintln!("learning: {e}");
+        }
+    }
     let waiting = flush
         .waiting
         .iter()
@@ -4020,10 +4099,26 @@ fn record_layout(
         .collect();
     let stem = deckle_digest::edition_stem(cfg, date);
     let stem = stem.as_str();
+    let titles: Vec<(String, Vec<String>)> = built
+        .sections
+        .iter()
+        .map(|s| (s.key.clone(), s.titles.clone()))
+        .collect();
     let layout = std::fs::read(kfx)
         .map_err(|e| format!("{}: {e}", kfx.display()))
         .and_then(|bytes| {
-            deckle_readership::layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)
+            let mut l = deckle_readership::layout::layout_from_kfx(
+                &bytes,
+                date,
+                &built.title,
+                stem,
+                &sections,
+            )?;
+            // stories are a nicety for learning: a layout without them is still a layout
+            if let Err(e) = deckle_readership::layout::add_stories(&mut l, &bytes, &titles) {
+                eprintln!("readership: stories: {e}");
+            }
+            Ok(l)
         })
         .map(|l| with_items(l, built));
     let path = readership_path(cfg);
@@ -5099,6 +5194,7 @@ mod layout_tests {
             name: key.into(),
             start: 0,
             items: None,
+            stories: Vec::new(),
         };
         let layout = Layout {
             date: "2026-10-22".parse().unwrap(),
@@ -5112,6 +5208,7 @@ mod layout_tests {
             title: key.into(),
             items,
             unavailable: None,
+            titles: Vec::new(),
         };
         let built = deckle_digest::BuildReport {
             epub: PathBuf::new(),

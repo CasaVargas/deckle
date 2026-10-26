@@ -21,12 +21,14 @@ fn local_layout(date: &str, len: i64, items: Option<u32>) -> Layout {
                 name: "Front page".into(),
                 start: 0,
                 items: None,
+                stories: Vec::new(),
             },
             SectionStart {
                 key: "local".into(),
                 name: "Local".into(),
                 start: 1000,
                 items,
+                stories: Vec::new(),
             },
         ],
     }
@@ -87,6 +89,7 @@ fn read(furthest: i64) -> Read {
         last: Some(furthest),
         last_read: None,
         seen: "x".into(),
+        history: Vec::new(),
     }
 }
 

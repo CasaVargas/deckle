@@ -902,6 +902,14 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
               <div className="label">Your interests</div>
               <p className="muted small">Things you care about, each its own section: Deckle searches the news for them every morning.</p>
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={draft.learning?.enabled ?? true}
+                  onChange={(e) => edit((c) => (c.learning = { window_days: 14, min_stories: 3, nudges: false, ...(c.learning ?? {}), enabled: e.target.checked }))}
+                />
+                Deckle keeps track of what you tap and highlight in the paper, on this Mac, to suggest new interests.
+              </label>
               <div className="feeds">
                 {(draft.interests ?? []).map((it, i) => (
                   <div key={i} className="feed interest">

@@ -126,3 +126,16 @@ fn non_finite_doubles_are_dropped_not_kept() {
     assert_eq!(p.wpm, vec![300.0], "only finite samples survive");
     assert_eq!(p.words_read, Some(12));
 }
+
+#[test]
+fn page_history_lists_the_jumps_origins_in_order() {
+    assert_eq!(
+        parse_yjf(&fixture("daily-2026-10-21.yjf")).unwrap().history,
+        [821, 4, 1015]
+    );
+    assert_eq!(
+        parse_yjf(&fixture("daily-2026-10-20.yjf")).unwrap().history,
+        [4]
+    );
+    assert!(parse_yjf(&yjf(5)).unwrap().history.is_empty());
+}

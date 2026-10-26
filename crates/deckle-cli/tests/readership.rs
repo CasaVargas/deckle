@@ -49,6 +49,7 @@ fn seeded() -> State {
             name: name.into(),
             start,
             items: None,
+            stories: Vec::new(),
         };
         s.record_layout(Layout {
             date,
@@ -68,6 +69,7 @@ fn seeded() -> State {
             last: Some(f),
             last_read: None,
             seen: "x".into(),
+            history: Vec::new(),
         };
         s.reads.entry(date).or_default().insert("K".into(), r);
     }

@@ -87,6 +87,8 @@ export const api = {
   readershipApply: (id: string, paper: string | null = null) => invoke<ReadershipView>("readership_apply", { id, paper }),
   readershipDismiss: (id: string, paper: string | null = null) => invoke<ReadershipView>("readership_dismiss", { id, paper }),
   readershipSet: (on: boolean) => invoke<ReadershipView>("readership_set", { on }),
+  interestsAccept: (key: string, paper: string | null = null) => invoke<ReadershipView>("interests_accept", { key, paper }),
+  interestsDismiss: (key: string, paper: string | null = null) => invoke<ReadershipView>("interests_dismiss", { key, paper }),
   morgueMonth: (year: number, month: number) => invoke<MorgueMonth>("morgue_month", { year, month }),
   morgueSearch: (query: string) => invoke<MorgueHit[]>("morgue_search", { query }),
   morgueShow: (date: string) => invoke<MorgueDetail | null>("morgue_show", { date }),

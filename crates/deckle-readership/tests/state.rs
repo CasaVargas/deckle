@@ -150,3 +150,57 @@ fn one_bad_yjf_does_not_stop_the_others() {
     assert_eq!(r.errors[0].0, stem("2026-10-20"));
     assert_eq!(s.reads[&d("2026-10-21")]["K"].furthest, Some(50));
 }
+
+#[test]
+fn a_read_keeps_the_page_history_and_old_files_load_without_it() {
+    let mut s = State::default();
+    s.record_layout(layout("2026-10-21", &[4, 1204]));
+    let bytes = synthetic(&[
+        obj(
+            "fpr",
+            &[utf("AQ:1300"), long(-1), int(-1), utf(""), utf("")],
+        ),
+        obj(
+            "page.history.store",
+            &[
+                int(1),
+                obj("page.history.record", &[utf("AQ:821"), long(1)]),
+            ],
+        ),
+    ]);
+    s.record_reads("K", &[(stem("2026-10-21"), OnDevice::Opened(bytes))], NOW);
+    assert_eq!(s.reads[&d("2026-10-21")]["K"].history, [821]);
+    let old: deckle_readership::state::Read =
+        serde_json::from_str("{\"opened\":true,\"seen\":\"x\"}").unwrap();
+    assert!(old.history.is_empty());
+}
+
+#[test]
+fn renaming_a_section_key_moves_layouts_and_dismissals() {
+    let mut s = State::default();
+    let mut l = layout("2026-10-21", &[4, 1204, 3000]);
+    l.sections[1].key = "interests:Rust".into();
+    l.sections[2].key = "feeds:Rust".into();
+    s.record_layout(l);
+    s.dismissed
+        .insert("drop:interests:Rust".into(), d("2026-10-21"));
+    s.dismissed
+        .insert("up:interests:Rust".into(), d("2026-10-21"));
+    s.dismissed
+        .insert("drop:feeds:Rust".into(), d("2026-10-21"));
+    let n = s.rename_section_key("interests:Rust", "interests:Rust lang");
+    assert_eq!(n, 3);
+    let keys: Vec<&str> = s.editions[&d("2026-10-21")]
+        .sections
+        .iter()
+        .map(|x| x.key.as_str())
+        .collect();
+    assert_eq!(keys, ["front", "interests:Rust lang", "feeds:Rust"]);
+    assert!(s.dismissed.contains_key("drop:interests:Rust lang"));
+    assert!(s.dismissed.contains_key("up:interests:Rust lang"));
+    assert!(
+        s.dismissed.contains_key("drop:feeds:Rust"),
+        "another kind's key stays"
+    );
+    assert_eq!(s.rename_section_key("interests:Nobody", "x"), 0);
+}

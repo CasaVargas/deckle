@@ -36,6 +36,7 @@ fn edition(s: &mut State, i: u64, secs: &[(&str, &str, i64)], reads: &[(&str, Op
                 name: (*n).into(),
                 start: *start,
                 items: None,
+                stories: Vec::new(),
             })
             .collect(),
     });
@@ -46,6 +47,7 @@ fn edition(s: &mut State, i: u64, secs: &[(&str, &str, i64)], reads: &[(&str, Op
             last: *f,
             last_read: None,
             seen: NOW.into(),
+            history: Vec::new(),
         };
         s.reads.entry(date(i)).or_default().insert((*dev).into(), r);
     }

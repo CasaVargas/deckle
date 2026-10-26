@@ -139,3 +139,94 @@ fn add_on_another_paper_writes_its_own_file_only() {
             .contains("Dinosaurs")
     );
 }
+
+/// A qualifying candidate (three stories on two days) in the main paper's `interests.json`.
+fn seed_noticed(h: &Home) {
+    use deckle_readership::learn::{Hit, Learning, Signal};
+    let mut l = Learning::default();
+    let stop = std::collections::HashSet::new();
+    for (date, title) in [
+        ("2026-10-20", "Bryce Young benched"),
+        ("2026-10-22", "Bryce Young returns"),
+        ("2026-10-22", "Bryce Young in the spotlight"),
+    ] {
+        deckle_readership::learn::note(
+            &mut l,
+            &stop,
+            title,
+            Hit {
+                date: date.parse().unwrap(),
+                section: "interests:Panthers".into(),
+                title: title.into(),
+                signal: Signal::Tap,
+            },
+        );
+    }
+    l.save(&h.config.with_file_name("interests.json")).unwrap();
+}
+
+#[test]
+fn the_list_shows_what_deckle_noticed_and_accept_makes_it_an_interest() {
+    let h = setup();
+    seed_noticed(&h);
+    let o = h
+        .deckle()
+        .args(["--json", "digest", "interests"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["noticed"][0]["name"], "Bryce Young", "{v}");
+    assert_eq!(v["noticed"][0]["stories"], 3);
+    h.deckle()
+        .args(["digest", "interests"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Bryce Young").and(predicate::str::contains("accept")));
+    h.deckle()
+        .args(["digest", "interests", "why", "Bryce Young"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("2026-10-22")
+                .and(predicate::str::contains("Bryce Young returns")),
+        );
+    h.deckle()
+        .args(["digest", "interests", "accept", "bryce young"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("added Bryce Young"));
+    let text = std::fs::read_to_string(&h.config).unwrap();
+    assert!(text.contains("name = \"Bryce Young\""), "{text}");
+    let o = h
+        .deckle()
+        .args(["--json", "digest", "interests"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["interests"][0]["name"], "Bryce Young");
+    assert!(v["noticed"].as_array().unwrap().is_empty(), "{v}");
+    h.deckle()
+        .args(["digest", "interests", "dismiss", "Cargo"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no suggestion"));
+}
+
+#[test]
+fn dismiss_hides_a_suggestion() {
+    let h = setup();
+    seed_noticed(&h);
+    h.deckle()
+        .args(["digest", "interests", "dismiss", "Bryce Young"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("dismissed Bryce Young"));
+    let o = h
+        .deckle()
+        .args(["--json", "digest", "interests"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert!(v["noticed"].as_array().unwrap().is_empty(), "{v}");
+}
