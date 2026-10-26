@@ -3,6 +3,9 @@
 // far, when it goes to press, a link box and the week), Sections, Reading, Editions and Delivery,
 // all backed by digest.toml and the CLI. The paper switcher picks which paper they work on.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { debounce, saveQueue } from "./saveQueue";
+import SectionsTab from "./SectionsTab";
+import type { Change } from "./SectionsTab";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api } from "./api";
 import { ROOMS, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
@@ -10,7 +13,6 @@ import { fontFileName, mastheadChoice, mastheadValue } from "./mastheadView";
 import type { MastheadChoice } from "./mastheadView";
 import type { Place, Room } from "./dailyRooms";
 import Icon from "./Icon";
-import PagePlanCard from "./PagePlanCard";
 import { reorder, setBudget } from "./pagePlan";
 import PressCard from "./PressCard";
 import PaperSwitcher from "./PaperSwitcher";
@@ -19,17 +21,13 @@ import EveryEdition from "./EveryEdition";
 import Shelf from "./Shelf";
 import ThisWeek from "./ThisWeek";
 import TomorrowsPaper from "./TomorrowsPaper";
-import { TOPICS, toggleTopic, topicOn, topicTitle } from "./topics";
-import { addInterest, listText, removeInterest, setList, setQuery } from "./interests";
 import ExportFolders from "./ExportFolders";
 import { exportParts, remarkablePart } from "./exportsView";
 import RemarkableCard from "./RemarkableCard";
-import SubscriptionsCard from "./SubscriptionsCard";
-import YourDay from "./YourDay";
 import DailyEditor from "./DailyEditor";
 import { anyKindleHint } from "./papersView";
-import type { DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, FeedConfig, NextPaper, PagePlanRow, PapersView, PlaceRow, ReadershipView, ReadingEntry, RunResult } from "./types";
-import { DEFAULT_EMAIL, SIGNS } from "./types";
+import type { DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, NextPaper, PagePlanRow, PapersView, ReadershipView, ReadingEntry, RunResult } from "./types";
+import { DEFAULT_EMAIL } from "./types";
 
 /** Amazon's Manage Your Content and Devices: the approved-sender list and the emailed Docs. */
 const MYCD = "https://www.amazon.com/mycd";
@@ -73,7 +71,13 @@ function host(url: string | null): string {
 export default function DailyView({ onNotice }: { onNotice: (m: string) => void }) {
   const [state, setState] = useState<DailyState | null>(null);
   const [draft, setDraft] = useState<DailyConfig | null>(null);
-  const [dirty, setDirty] = useState(false);
+  // Saving as you go (Daily tab redesign §4): the newest edit is in draftRef; `seq` counts edits,
+  // so a save that lands after newer typing leaves the typing alone.
+  const draftRef = useRef<DailyConfig | null>(null);
+  const seq = useRef(0);
+  const [saving, setSaving] = useState(false);
+  const [planStale, setPlanStale] = useState(false);
+  const failed = useRef<string | null>(null);
   const [preview, setPreview] = useState<EditionPreview | null>(null);
   const [running, setRunning] = useState<null | "preview" | "send">(null);
   const runningRef = useRef<null | "preview" | "send">(null);
@@ -82,11 +86,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [saveUrl, setSaveUrl] = useState("");
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [next, setNext] = useState<NextPaper | null>(null);
-  const [newInterest, setNewInterest] = useState("");
-  const [planSaving, setPlanSaving] = useState(false);
   const [time, setTime] = useState("05:30");
-  const [placeQuery, setPlaceQuery] = useState("");
-  const [places, setPlaces] = useState<PlaceRow[] | null>(null);
   const [copied, setCopied] = useState(false);
   const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null);
   const [password, setPassword] = useState("");
@@ -109,8 +109,8 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     async (s?: DailyState) => {
       const st = s ?? (await api.dailyState(arg));
       setState(st);
-      setDraft(st.config ? structuredClone(st.config) : null);
-      setDirty(false);
+      draftRef.current = st.config ? structuredClone(st.config) : null;
+      setDraft(draftRef.current);
       api.emailStatus(arg).then(setEmailStatus).catch(() => {});
     },
     [arg],
@@ -118,7 +118,13 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
   // Tomorrow's paper: recomputed from local files often; headlines fetched on open and focus only
   const loadNext = useCallback(() => {
-    api.dailyNext(arg).then(setNext).catch(() => {});
+    api
+      .dailyNext(arg)
+      .then((n) => {
+        setNext(n);
+        setPlanStale(false);
+      })
+      .catch(() => {});
   }, [arg]);
   const refreshNext = useCallback(() => {
     api.dailyNextRefresh(arg).then(setNext).catch(() => {});
@@ -175,60 +181,100 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       .catch(() => {});
   }, [paper, papers, isMain]);
 
+  // What a save needs that changes between renders
+  const live = useRef({ paper, papers, next, state, onNotice, loadNext, loadPapers });
+  live.current = { paper, papers, next, state, onNotice, loadNext, loadPapers };
+
+  // One save at a time, of the newest config, to the paper it was made on
+  const queue = useRef(
+    saveQueue<{ c: DailyConfig; slug: string }>(
+      async ({ c, slug }) => {
+        const at = seq.current;
+        const { papers: ps, next: n, state: before } = live.current;
+        const daysBefore = (before?.config?.schedule?.days ?? []).join();
+        const st = await api.dailySave(c, slug === "main" ? null : slug);
+        if (slug !== live.current.paper) return;
+        setState(st);
+        if (seq.current === at && st.config) {
+          draftRef.current = structuredClone(st.config);
+          setDraft(draftRef.current);
+        }
+        // New days move an installed job: it's reinstalled with them.
+        const card = ps?.papers.find((p) => p.slug === slug);
+        if (card?.installed && n?.press.at && (c.schedule?.days ?? []).join() !== daysBefore) {
+          await api.scheduleSet(n.press.at, slug === "main" ? null : slug);
+        }
+      },
+      (e) => {
+        failed.current = String(e);
+        live.current.onNotice(String(e));
+      },
+      () => {
+        setSaving(false);
+        live.current.loadNext();
+        live.current.loadPapers();
+      },
+    ),
+  ).current;
+
+  const push = (c: DailyConfig) => {
+    failed.current = null;
+    setSaving(true);
+    setPlanStale(true);
+    return queue.push({ c, slug: live.current.paper });
+  };
+  const typing = useRef(debounce(() => draftRef.current && push(draftRef.current), 500)).current;
+  useEffect(() => () => typing.flush(), [typing]);
+
+  /** An edit: switches and menus save at once, typing once it pauses (or the field is left). */
+  const change: Change = (f, how = "now") => {
+    const d = draftRef.current;
+    if (!d) return;
+    const c = f(structuredClone(d));
+    draftRef.current = c;
+    setDraft(c);
+    seq.current++;
+    if (how === "typing") typing.call();
+    else {
+      typing.cancel();
+      push(c);
+    }
+  };
+  /** The old in-place style: `f` edits a copy. */
+  const edit = (f: (c: DailyConfig) => void, how: "now" | "typing" = "typing") =>
+    change((c) => {
+      f(c);
+      return c;
+    }, how);
+  /** Saves now (a config, or the newest edits) and says whether it worked. */
+  const saveNow = async (c?: DailyConfig): Promise<boolean> => {
+    typing.cancel();
+    if (c) {
+      draftRef.current = c;
+      setDraft(c);
+      seq.current++;
+    }
+    if (!draftRef.current) return false;
+    await push(draftRef.current);
+    return failed.current === null;
+  };
+
   const choosePaper = (slug: string) => {
     if (slug === paper) return;
-    if (dirty) {
-      onNotice("Save your changes to this paper first.");
-      return;
-    }
+    typing.flush();
     setPaper(slug);
   };
 
-  const edit = (f: (c: DailyConfig) => void) => {
-    setDraft((d) => {
-      if (!d) return d;
-      const c = structuredClone(d);
-      f(c);
-      return c;
-    });
-    setDirty(true);
-  };
-
-  /** Like `edit`, for the pure helpers that return a new config. */
-  const editWith = (f: (c: DailyConfig) => DailyConfig) => {
-    setDraft((d) => (d ? f(d) : d));
-    setDirty(true);
-  };
-
-  const save = async (c = draft): Promise<boolean> => {
-    if (!c) return false;
-    const daysBefore = (state?.config?.schedule?.days ?? []).join();
-    try {
-      await load(await api.dailySave(c, arg));
-      // New days move an installed job: it's reinstalled with them.
-      const card = papers?.papers.find((p) => p.slug === paper);
-      if (card?.installed && next?.press.at && (c.schedule?.days ?? []).join() !== daysBefore) {
-        await api.scheduleSet(next.press.at, arg);
-      }
-      loadNext();
-      loadPapers();
-      return true;
-    } catch (e) {
-      onNotice(String(e));
-      return false;
-    }
-  };
-
-  const editEmail = (f: (e: EmailConfig) => void) =>
+  const editEmail = (f: (e: EmailConfig) => void, how: "now" | "typing" = "typing") =>
     edit((c) => {
       c.email = c.email ?? { ...DEFAULT_EMAIL };
       f(c.email);
-    });
+    }, how);
 
   // The keychain entry is named after the saved username and host, so unsaved edits go first.
   const savePassword = async () => {
     if (!password) return;
-    if (dirty && !(await save())) return;
+    if (!(await saveNow())) return;
     try {
       setEmailStatus(await api.emailSetPassword(password));
       setEmailMsg({ text: "Password saved in the system keychain.", ok: true });
@@ -240,7 +286,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
   const sendTest = async () => {
     if (testing) return;
-    if (dirty && !(await save())) return;
+    if (!(await saveNow())) return;
     setTesting(true);
     setEmailMsg(null);
     try {
@@ -253,7 +299,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
 
   const run = async (send: boolean, slug = paper) => {
     if (running) return;
-    if (dirty) await save();
+    await saveNow();
     setResult(null);
     runningRef.current = send ? "send" : "preview";
     setRunning(runningRef.current);
@@ -275,17 +321,6 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     }
   };
 
-  const findPlace = async () => {
-    if (!placeQuery.trim()) return;
-    setPlaces(null);
-    try {
-      setPlaces(await api.geocode(placeQuery));
-    } catch (e) {
-      onNotice(String(e));
-      setPlaces([]);
-    }
-  };
-
   const setScheduleOn = async (on: boolean, at = time) => {
     try {
       await api.scheduleSet(on ? at : null, arg);
@@ -298,10 +333,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   };
 
   const createPaper = async (title: string, reader: string): Promise<boolean> => {
-    if (dirty) {
-      onNotice("Save your changes to this paper first.");
-      return false;
-    }
+    typing.flush();
     try {
       const slug = await api.paperCreate(title, reader);
       setPaper(slug);
@@ -313,13 +345,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     }
   };
 
-  const toggleDayOn = (d: Day) => {
-    if (!draft) return;
-    const c = structuredClone(draft);
-    c.schedule = { ...c.schedule, days: toggleDay(c.schedule?.days ?? [], d) };
-    setDraft(c);
-    save(c);
-  };
+  const toggleDayOn = (d: Day) => change((c) => ({ ...c, schedule: { ...c.schedule, days: toggleDay(c.schedule?.days ?? [], d) } }));
 
   const stopPresses = async (on: boolean) => {
     try {
@@ -369,19 +395,12 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     );
   }
 
-  // Page plan edits write digest.toml at once. They apply to the saved config the plan was
-  // made from, one at a time: with unsaved edits in The paper (a feed added or removed) the
-  // plan waits for them to be saved.
-  const planLocked = dirty || planSaving || !next;
-  const planSave = async (f: (c: DailyConfig) => DailyConfig) => {
-    if (planLocked || !state.config) return;
-    setPlanSaving(true);
-    try {
-      const c = f(structuredClone(state.config));
-      if (c !== state.config) await save(c);
-    } finally {
-      setPlanSaving(false);
-    }
+  // Page plan edits save at once, on the newest config. A move or budget waits while a save
+  // runs and until the plan is rebuilt from it, so its rows match the file.
+  const planLocked = saving || planStale || !next;
+  const planSave = (f: (c: DailyConfig) => DailyConfig) => {
+    if (planLocked) return;
+    change(f);
   };
   const planMove = (from: number, to: number) => planSave((c) => (next ? reorder(c, next.plan, from, to) : c));
   const planBudget = (row: PagePlanRow, n: number) => planSave((c) => setBudget(c, row, n));
@@ -392,11 +411,6 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
     <section className="card email-card">
       <div className="card-head">
         <h3>Email to Kindle</h3>
-        {dirty && (
-          <button className="primary" onClick={() => save()}>
-            Save
-          </button>
-        )}
       </div>
       <p className="muted small">
         The morning paper arrives over Wi-Fi with no cable: Deckle emails it to your Kindle's Send-to-Kindle address from your
@@ -404,7 +418,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
       </p>
       {!isMain && <p className="muted small">It goes from the mail account set on {mainTitle}.</p>}
       <label className="check">
-        <input type="checkbox" checked={!!draft.email?.enabled} onChange={(e) => editEmail((m) => (m.enabled = e.target.checked))} />
+        <input type="checkbox" checked={!!draft.email?.enabled} onChange={(e) => editEmail((m) => (m.enabled = e.target.checked), "now")} />
         Email the paper to my Kindle
       </label>
       <div className="grid2">
@@ -423,7 +437,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         </label>
         <label>
           <span className="label">Port</span>
-          <select value={draft.email?.smtp_port ?? 587} onChange={(e) => editEmail((m) => (m.smtp_port = Number(e.target.value)))}>
+          <select value={draft.email?.smtp_port ?? 587} onChange={(e) => editEmail((m) => (m.smtp_port = Number(e.target.value)), "now")}>
             <option value={587}>587 (STARTTLS)</option>
             <option value={465}>465 (TLS)</option>
           </select>
@@ -456,7 +470,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         </>)}
       </div>
       <label className="check">
-        <input type="checkbox" checked={!!draft.email?.usb_too} onChange={(e) => editEmail((m) => (m.usb_too = e.target.checked))} />
+        <input type="checkbox" checked={!!draft.email?.usb_too} onChange={(e) => editEmail((m) => (m.usb_too = e.target.checked), "now")} />
         Also send it over USB when the email goes out (two copies on the Kindle)
       </label>
       <div className="paper-actions">
@@ -485,23 +499,13 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const exportFolders = (
     <ExportFolders
       exports={draft.export}
-      onSave={(exports) => {
-        const c = structuredClone(draft);
-        c.export = exports;
-        setDraft(c);
-        return save(c);
-      }}
+      onSave={(exports) => saveNow({ ...draftRef.current!, export: exports })}
     />
   );
   const remarkableCard = (
     <RemarkableCard
       remarkable={draft.remarkable}
-      onSave={(remarkable) => {
-        const c = structuredClone(draft);
-        c.remarkable = remarkable;
-        setDraft(c);
-        return save(c);
-      }}
+      onSave={(remarkable) => saveNow({ ...draftRef.current!, remarkable })}
     />
   );
 
@@ -674,11 +678,7 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
                   className="ghost"
                   onClick={async () => {
                     const dir = await openDialog({ directory: true, multiple: false });
-                    if (typeof dir === "string") {
-                      const c = structuredClone(draft);
-                      c.reading.inbox = dir;
-                      save(c);
-                    }
+                    if (typeof dir === "string") change((c) => ({ ...c, reading: { ...c.reading, inbox: dir } }));
                   }}
                 >
                   Change…
@@ -748,329 +748,114 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         )}
 
         {room === "sections" && (
-          <>
-            <PagePlanCard
-              next={next}
-              locked={planLocked}
-              lockedWhy={dirty ? "Save your changes below first, or in Delivery's Email to Kindle." : undefined}
-              onMove={planMove}
-              onBudget={planBudget}
-              onToggle={planToggle}
-            />
-            <section className="card settings-card">
-              <div className="card-head">
-                <h3>The paper</h3>
-                <button className="primary" disabled={!dirty} onClick={() => save()}>
-                  {dirty ? "Save" : "Saved"}
-                </button>
-              </div>
-
-              <div className="grid2">
-                <label>
-                  <span className="label">Name</span>
-                  <input value={draft.title} onChange={(e) => edit((c) => (c.title = e.target.value))} />
-                </label>
-                <label>
-                  <span className="label">For</span>
-                  <input value={draft.reader ?? ""} placeholder="Who reads it" onChange={(e) => edit((c) => (c.reader = e.target.value))} />
-                </label>
-                <label>
-                  <span className="label">Kindle</span>
-                  <select value={draft.kindle ?? ""} onChange={(e) => edit((c) => (c.kindle = e.target.value))}>
-                    <option value="">Any Kindle</option>
-                    {(papers?.kindles ?? []).map((k) => (
-                      <option key={k.sync_id} value={k.name}>
-                        {k.name}
+          <SectionsTab
+            next={next}
+            draft={draft}
+            locked={planLocked}
+            saving={saving}
+            change={change}
+            flush={typing.flush}
+            saveNow={saveNow}
+            onMove={planMove}
+            onBudget={planBudget}
+            onToggle={planToggle}
+            onReading={() => setRoom("reading")}
+            onNotice={onNotice}
+            footer={
+              <section className="card settings-card" aria-label="The paper itself">
+                <h3>The paper itself</h3>
+                <div className="grid2">
+                  <label>
+                    <span className="label">Name</span>
+                    <input value={draft.title} onChange={(e) => edit((c) => (c.title = e.target.value))} onBlur={typing.flush} />
+                  </label>
+                  <label>
+                    <span className="label">For</span>
+                    <input value={draft.reader ?? ""} placeholder="Who reads it" onChange={(e) => edit((c) => (c.reader = e.target.value))} onBlur={typing.flush} />
+                  </label>
+                  <label>
+                    <span className="label">Kindle</span>
+                    <select value={draft.kindle ?? ""} onChange={(e) => edit((c) => (c.kindle = e.target.value), "now")}>
+                      <option value="">Any Kindle</option>
+                      {(papers?.kindles ?? []).map((k) => (
+                        <option key={k.sync_id} value={k.name}>
+                          {k.name}
+                        </option>
+                      ))}
+                      {draft.kindle && !(papers?.kindles ?? []).some((k) => k.name === draft.kindle) && (
+                        <option value={draft.kindle}>{draft.kindle} (not named yet)</option>
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    <span className="label">Title font</span>
+                    <select
+                      value={mastheadChoice(draft.masthead)}
+                      onChange={async (e) => {
+                        const choice = e.target.value as MastheadChoice;
+                        if (choice !== "file") {
+                          edit((c) => (c.masthead = mastheadValue(choice)), "now");
+                          return;
+                        }
+                        const picked = await openDialog({ multiple: false, filters: [{ name: "TrueType font", extensions: ["ttf"] }] });
+                        if (typeof picked === "string") edit((c) => (c.masthead = picked), "now");
+                      }}
+                    >
+                      <option value="blackletter">Blackletter</option>
+                      <option value="serif">Serif</option>
+                      <option value="sans">Sans</option>
+                      <option value="file">
+                        {mastheadChoice(draft.masthead) === "file" && draft.masthead ? `Custom: ${fontFileName(draft.masthead)}` : "Choose a .ttf file…"}
                       </option>
-                    ))}
-                    {draft.kindle && !(papers?.kindles ?? []).some((k) => k.name === draft.kindle) && (
-                      <option value={draft.kindle}>{draft.kindle} (not named yet)</option>
-                    )}
-                  </select>
-                </label>
-                <label>
-                  <span className="label">Units</span>
-                  <select value={draft.units} onChange={(e) => edit((c) => (c.units = e.target.value as DailyConfig["units"]))}>
-                    <option value="imperial">°F, mph</option>
-                    <option value="metric">°C, km/h</option>
-                  </select>
-                </label>
-                <label>
-                  <span className="label">Title font</span>
-                  <select
-                    value={mastheadChoice(draft.masthead)}
-                    onChange={async (e) => {
-                      const choice = e.target.value as MastheadChoice;
-                      if (choice !== "file") {
-                        edit((c) => (c.masthead = mastheadValue(choice)));
-                        return;
-                      }
-                      const picked = await openDialog({
-                        multiple: false,
-                        filters: [{ name: "TrueType font", extensions: ["ttf"] }],
-                      });
-                      if (typeof picked === "string") edit((c) => (c.masthead = picked));
-                    }}
-                  >
-                    <option value="blackletter">Blackletter</option>
-                    <option value="serif">Serif</option>
-                    <option value="sans">Sans</option>
-                    <option value="file">
-                      {mastheadChoice(draft.masthead) === "file" && draft.masthead
-                        ? `Custom: ${fontFileName(draft.masthead)}`
-                        : "Choose a .ttf file…"}
-                    </option>
-                  </select>
-                </label>
-              </div>
-
-              {(papers?.kindles.length ?? 0) === 0 && (
-                <p className="muted small">To send this paper to one Kindle only, name your Kindles in the Kindle tab.</p>
-              )}
-
-              <div className="grid2">
-                <div>
-                  <div className="label">Type</div>
-                  <label className="check">
-                    <input type="checkbox" checked={!!draft.large_print} onChange={(e) => edit((c) => (c.large_print = e.target.checked))} />
-                    Large print
+                    </select>
                   </label>
-                  <p className="muted small">
-                    Nothing smaller than the body text, bigger headlines and one photo a story. Set the text size on the Kindle itself
-                    (Aa). It applies to every book on that Kindle.
-                  </p>
                 </div>
-                <div />
-              </div>
-
-              <div className="label">Place</div>
-              <div className="place">
-                <span>
-                  {draft.place || <em>Not set</em>}
-                  {draft.latitude != null && <span className="muted small"> · {draft.latitude.toFixed(2)}, {draft.longitude?.toFixed(2)}</span>}
-                </span>
-                <form
-                  className="save-row"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    findPlace();
-                  }}
-                >
-                  <input placeholder="Town, state (e.g. Carthage, NC)" value={placeQuery} onChange={(e) => setPlaceQuery(e.target.value)} />
-                  <button className="ghost" type="submit">
-                    Find
-                  </button>
-                </form>
-                {places && (
-                  <div className="places">
-                    {places.length === 0 && <span className="muted small">No matches.</span>}
-                    {places.map((p) => (
-                      <button
-                        key={`${p.latitude},${p.longitude}`}
-                        className="chip"
-                        onClick={() => {
-                          edit((c) => {
-                            c.place = p.label;
-                            c.latitude = Math.round(p.latitude * 100) / 100;
-                            c.longitude = Math.round(p.longitude * 100) / 100;
-                          });
-                          setPlaces(null);
-                          setPlaceQuery("");
-                        }}
-                      >
-                        {p.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <label>
-                <span className="label">Local news search</span>
-                <input value={draft.local.google_news} placeholder="e.g. Moore County NC" onChange={(e) => edit((c) => (c.local.google_news = e.target.value))} />
-              </label>
-
-              <div className="label">Other places</div>
-              <p className="muted small">Local news for a relative's town or a trip, each its own section after Local. Weather stays on your place.</p>
-              <div className="feeds">
-                {(draft.local.places ?? []).map((p, i) => (
-                  <div key={i} className="feed">
-                    <input value={p.name} placeholder="Name (e.g. Asheville, NC)" onChange={(e) => edit((c) => (c.local.places![i].name = e.target.value))} />
-                    <input value={p.google_news} placeholder="Google News search" onChange={(e) => edit((c) => (c.local.places![i].google_news = e.target.value))} />
-                    <button className="icon small" aria-label="Remove place" onClick={() => edit((c) => c.local.places!.splice(i, 1))}>
-                      <Icon name="x" size={14} />
-                    </button>
-                  </div>
-                ))}
-                <button className="ghost" onClick={() => edit((c) => (c.local.places = [...(c.local.places ?? []), { name: "", google_news: "", feeds: [] }]))}>
-                  Add a place
-                </button>
-              </div>
-
-              <div className="label">Topics</div>
-              <p className="muted small">Each ticked topic becomes its own section, from Google News.</p>
-              <div className="topics">
-                {TOPICS.map((t) => (
-                  <label key={t.slug} className="check">
-                    <input type="checkbox" checked={topicOn(draft.feeds, t.slug)} onChange={() => edit((c) => (c.feeds = toggleTopic(c.feeds, t.slug)))} />
-                    {t.title}
-                  </label>
-                ))}
-              </div>
-
-              <div className="label">Your interests</div>
-              <p className="muted small">Things you care about, each its own section: Deckle searches the news for them every morning.</p>
-              <div className="learning">
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={draft.learning?.enabled ?? true}
-                  onChange={(e) => edit((c) => (c.learning = { window_days: 14, min_stories: 3, nudges: false, ...(c.learning ?? {}), enabled: e.target.checked }))}
-                />
-                Deckle keeps track of what you tap and highlight in the paper, on this Mac, to suggest new interests.
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={(draft.learning?.enabled ?? true) && (draft.learning?.nudges ?? false)}
-                  disabled={!(draft.learning?.enabled ?? true)}
-                  onChange={(e) => edit((c) => (c.learning = { enabled: true, window_days: 14, min_stories: 3, ...(c.learning ?? {}), nudges: e.target.checked }))}
-                />
-                Also print what Deckle noticed in the paper, as pages you can tap to accept.
-              </label>
-              </div>
-              <div className="feeds">
-                {(draft.interests ?? []).map((it, i) => (
-                  <div key={i} className="feed interest">
-                    <input value={it.name} placeholder="e.g. Carolina Panthers" onChange={(e) => edit((c) => (c.interests![i].name = e.target.value))} />
-                    <input
-                      value={it.query ?? ""}
-                      placeholder={`Search: "${it.name || "Rust"}" programming`}
-                      title="Your own Google News search instead of the quoted name; OR and -word work"
-                      onChange={(e) => editWith((c) => setQuery(c, i, e.target.value))}
-                    />
-                    <input
-                      value={listText(it.also)}
-                      placeholder="Also: Bryce Young, Dave Canales"
-                      onChange={(e) => editWith((c) => setList(c, i, "also", e.target.value))}
-                    />
-                    <input
-                      value={listText(it.not)}
-                      placeholder="Leave out: Florida Panthers, hockey"
-                      onChange={(e) => editWith((c) => setList(c, i, "not", e.target.value))}
-                    />
-                    <button className="icon small" aria-label="Remove interest" onClick={() => editWith((c) => removeInterest(c, i))}>
-                      <Icon name="x" size={14} />
-                    </button>
-                  </div>
-                ))}
-                <form
-                  className="add-interest"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!newInterest.trim()) return;
-                    editWith((c) => addInterest(c, newInterest));
-                    setNewInterest("");
-                  }}
-                >
-                  <input value={newInterest} placeholder="Add an interest… (Enter)" onChange={(e) => setNewInterest(e.target.value)} />
-                </form>
-              </div>
-
-              <div className="label">Your feeds</div>
-              <div className="feeds">
-                {draft.feeds.map((f: FeedConfig, i: number) => (
-                  <div key={i} className="feed">
-                    <input value={f.name} placeholder="Section name" onChange={(e) => edit((c) => (c.feeds[i].name = e.target.value))} />
-                    {f.topic ? (
-                      <span className="muted small">topic: {topicTitle(f.topic)}</span>
-                    ) : (
-                      <input value={f.url} placeholder="https://… (RSS or Atom)" spellCheck={false} onChange={(e) => edit((c) => (c.feeds[i].url = e.target.value))} />
-                    )}
-                    <button className="icon small" aria-label="Remove feed" onClick={() => edit((c) => c.feeds.splice(i, 1))}>
-                      <Icon name="x" size={14} />
-                    </button>
-                  </div>
-                ))}
-                <button className="ghost" onClick={() => edit((c) => c.feeds.push({ name: "", url: "", max_items: 8 }))}>
-                  Add a feed
-                </button>
-              </div>
-
-              <div className="grid2">
-                <div>
-                  <div className="label">Lottery</div>
-                  {[
-                    ["powerball", "Powerball"],
-                    ["megamillions", "Mega Millions"],
-                  ].map(([k, label]) => (
-                    <label key={k} className="check">
-                      <input
-                        type="checkbox"
-                        checked={draft.lottery.games.includes(k)}
-                        onChange={(e) => edit((c) => (c.lottery.games = e.target.checked ? [...c.lottery.games, k] : c.lottery.games.filter((g) => g !== k)))}
-                      />
-                      {label}
-                    </label>
-                  ))}
-                </div>
-                <div>
-                  <div className="label">Stories</div>
+                {(papers?.kindles.length ?? 0) === 0 && <p className="muted small">To send this paper to one Kindle only, name your Kindles in the Kindle tab.</p>}
+                <div className="sec-checks">
                   <label className="check">
-                    <input type="checkbox" checked={draft.full_text} onChange={(e) => edit((c) => (c.full_text = e.target.checked))} />
+                    <input type="checkbox" checked={draft.full_text} onChange={(e) => edit((c) => (c.full_text = e.target.checked), "now")} />
                     Whole stories, not summaries
                   </label>
                   <label className="check">
-                    <input type="checkbox" checked={draft.photos} disabled={!draft.full_text} onChange={(e) => edit((c) => (c.photos = e.target.checked))} />
+                    <input type="checkbox" checked={draft.photos} disabled={!draft.full_text} onChange={(e) => edit((c) => (c.photos = e.target.checked), "now")} />
                     With their photos
+                  </label>
+                  <label className="check">
+                    <input type="checkbox" checked={!!draft.large_print} onChange={(e) => edit((c) => (c.large_print = e.target.checked), "now")} />
+                    Large print: nothing smaller than the body text, bigger headlines, one photo a story
                   </label>
                   <label className="inline">
                     Keep the last
-                    <input type="number" min={1} max={14} value={draft.keep} onChange={(e) => edit((c) => (c.keep = Math.max(1, Number(e.target.value) || 1)))} />
+                    <input type="number" min={1} max={14} value={draft.keep} onChange={(e) => edit((c) => (c.keep = Math.max(1, Number(e.target.value) || 1)), "now")} />
                     editions on the Kindle
                   </label>
                 </div>
-              </div>
-
-              <DailyEditor value={draft.llm} onChange={(value) => edit((c) => { c.llm = value; })} />
-
-              <div className="label">Horoscope {draft.horoscope.signs.length === 0 && <span className="muted small">(none chosen: all twelve)</span>}</div>
-              <div className="places">
-                {SIGNS.map((s) => (
-                  <button
-                    key={s}
-                    className={`chip ${draft.horoscope.signs.includes(s) ? "on" : ""}`}
-                    onClick={() => edit((c) => (c.horoscope.signs = c.horoscope.signs.includes(s) ? c.horoscope.signs.filter((x) => x !== s) : [...c.horoscope.signs, s]))}
-                  >
-                    {s[0].toUpperCase() + s.slice(1)}
-                  </button>
-                ))}
-              </div>
-
-              <p className="muted small">
-                Saved to <span className="mono">{state.config_path}</span>; your own comments in that file are kept.
-              </p>
-            </section>
-
-            <YourDay
-              day={draft.day}
-              emailOn={draft.email?.enabled ?? false}
-              onSave={(day) => {
-                const c = structuredClone(draft);
-                c.day = day;
-                setDraft(c);
-                return save(c);
-              }}
-            />
-            <SubscriptionsCard
-              subscriptions={draft.subscriptions ?? []}
-              config={draft}
-              dirty={dirty}
-              onChange={(subs) => edit((c) => (c.subscriptions = subs))}
-              onConfig={(f) => edit((c) => Object.assign(c, f(c)))}
-              onSave={() => save()}
-            />
-          </>
+                <div className="sec-checks">
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={draft.learning?.enabled ?? true}
+                      onChange={(e) => edit((c) => (c.learning = { window_days: 14, min_stories: 3, nudges: false, ...(c.learning ?? {}), enabled: e.target.checked }), "now")}
+                    />
+                    Notice what I tap and highlight in the paper, on this Mac, to suggest new things to follow
+                  </label>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={(draft.learning?.enabled ?? true) && (draft.learning?.nudges ?? false)}
+                      disabled={!(draft.learning?.enabled ?? true)}
+                      onChange={(e) => edit((c) => (c.learning = { enabled: true, window_days: 14, min_stories: 3, ...(c.learning ?? {}), nudges: e.target.checked }), "now")}
+                    />
+                    Also print what Deckle noticed, as pages you can tap to accept
+                  </label>
+                </div>
+                <DailyEditor value={draft.llm} onChange={(value) => edit((c) => { c.llm = value; })} />
+                <p className="muted small">
+                  Saved as you go to <span className="mono">{state.config_path}</span>; your own comments in that file are kept.
+                </p>
+              </section>
+            }
+          />
         )}
       </div>
     </div>
