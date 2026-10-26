@@ -101,10 +101,8 @@ pub fn build(
             } else {
                 url
             };
+            // A walled page is still extracted below: it's what a stranger sees.
             let (bytes, access) = net.get_page_as(&url)?;
-            if let Access::Walled { site, why } = &access {
-                return Err(format!("no readable article: {}", why.note(site)));
-            }
             let outlet = host(&url).to_owned();
             (
                 String::from_utf8_lossy(&bytes).into_owned(),
@@ -124,11 +122,12 @@ pub fn build(
             (html, base.to_string(), outlet, Access::Open)
         }
     };
-    let x = article::extract_with(&html, &base, None).ok_or_else(|| {
-        format!(
+    let x = article::extract_with(&html, &base, None).ok_or_else(|| match &access {
+        Access::Walled { site, why } => format!("no readable article: {}", why.note(site)),
+        _ => format!(
             "no readable article (under {} words: a paywall, a sign-in page, or a video)",
             article::MIN_WORDS
-        )
+        ),
     })?;
     let title = x.title.clone().unwrap_or_else(|| outlet.clone());
     let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);

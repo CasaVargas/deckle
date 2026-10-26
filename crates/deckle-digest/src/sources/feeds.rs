@@ -211,13 +211,15 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
         Ok(got) => got,
         Err(_) => return article(item, Some(UNAVAILABLE)),
     };
-    if let Access::Walled { site, why } = &access {
-        let mut a = article(item, Some(&why.note(site)));
+    // A walled page is what a stranger sees: extract it as today (a free story reads in
+    // full); only a page the site withholds falls back to the feed, with the reason.
+    let Some(x) = article::extract(&String::from_utf8_lossy(&page), &url) else {
+        let mut a = match &access {
+            Access::Walled { site, why } => article(item, Some(&why.note(site))),
+            _ => article(item, Some(UNAVAILABLE)),
+        };
         a.extra.access = access;
         return a;
-    }
-    let Some(x) = article::extract(&String::from_utf8_lossy(&page), &url) else {
-        return article(item, Some(UNAVAILABLE));
     };
     let outlet = item.source.clone().unwrap_or_else(|| host(&url).to_owned());
     let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
@@ -592,10 +594,11 @@ mod tests {
         assert!(google_news_url("x when:1d", 72).contains("x+when%3A1d&"));
     }
 
-    struct WalledNet;
+    /// A subscribed host serving `page` as a stranger would see it.
+    struct WalledNet(String);
     impl Net for WalledNet {
         fn get(&self, _: &str) -> Result<Vec<u8>, String> {
-            Ok(b"<html>LOGIN</html>".to_vec())
+            Ok(self.0.clone().into_bytes())
         }
         fn get_page_as(&self, u: &str) -> Result<(Vec<u8>, crate::publisher::Access), String> {
             use crate::publisher::{Access, Walled};
@@ -621,23 +624,37 @@ mod tests {
         }
     }
 
+    fn walled() -> crate::publisher::Access {
+        crate::publisher::Access::Walled {
+            site: "thepilot.com".into(),
+            why: crate::publisher::Walled::NotSignedIn,
+        }
+    }
+
     #[test]
-    fn a_walled_story_prints_the_feeds_text_with_the_reason() {
-        use crate::publisher::{Access, Walled};
-        let a = full_article(&item(), &Config::default(), &WalledNet);
+    fn a_withheld_story_prints_the_feeds_text_with_the_reason() {
+        let net = WalledNet("<html>LOGIN</html>".into());
+        let a = full_article(&item(), &Config::default(), &net);
         assert!(a.body.contains("own summary."));
         assert!(
             a.body
                 .contains("Subscriber story (not signed in to thepilot.com).")
         );
         assert!(!a.body.contains("LOGIN"));
-        assert_eq!(
-            a.extra.access,
-            Access::Walled {
-                site: "thepilot.com".into(),
-                why: Walled::NotSignedIn
-            }
-        );
+        assert_eq!(a.extra.access, walled());
+    }
+
+    #[test]
+    fn a_free_story_on_a_subscribed_host_reads_in_full_as_a_stranger() {
+        let words = "word ".repeat(300);
+        let net = WalledNet(format!(
+            "<html><body><article><h1>T</h1><p>{words}</p><p>{words}</p></article></body></html>"
+        ));
+        let a = full_article(&item(), &Config::default(), &net);
+        assert!(a.body.contains("word word"), "{}", a.body);
+        assert!(!a.body.contains("Subscriber story"), "{}", a.body);
+        assert!(!a.body.contains("own summary."), "{}", a.body);
+        assert_eq!(a.extra.access, walled());
     }
 
     #[test]

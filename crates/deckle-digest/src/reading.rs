@@ -55,6 +55,9 @@ pub enum Outcome {
     Printed,
     Book,
     Failed(String),
+    /// Not printed, and not a failed try either: a subscriber page the site withheld. The
+    /// entry stays pending with the reason, its tries untouched.
+    Waiting(String),
 }
 
 enum Line {
@@ -411,6 +414,7 @@ impl ReadingQueue {
                     e.state = State::Book;
                     e.printed_in = Some(date);
                 }
+                Outcome::Waiting(why) => e.note = Some(why.clone()),
                 Outcome::Failed(why) => {
                     if e.tried_on != Some(date) {
                         e.tries += 1;

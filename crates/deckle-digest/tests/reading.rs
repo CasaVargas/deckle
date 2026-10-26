@@ -82,6 +82,31 @@ fn three_failures_mark_failed() {
 }
 
 #[test]
+fn a_withheld_entry_waits_with_its_reason_and_keeps_its_tries() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = queue(&dir);
+    let d = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
+    let Added::New(id) = q
+        .add_url("https://www.thepilot.com/a", None, "cli", now())
+        .unwrap()
+    else {
+        panic!()
+    };
+    for day in 0..5 {
+        q.commit(
+            d + chrono::Days::new(day),
+            &[(id.clone(), Outcome::Waiting("subscriber story".into()))],
+        )
+        .unwrap();
+    }
+    let e = &q.load()[0];
+    assert_eq!(e.state, State::Pending);
+    assert_eq!(e.tries, 0);
+    assert_eq!(e.tried_on, None);
+    assert_eq!(e.note.as_deref(), Some("subscriber story"));
+}
+
+#[test]
 fn malformed_lines_survive_rewrite() {
     let dir = tempfile::tempdir().unwrap();
     let q = queue(&dir);

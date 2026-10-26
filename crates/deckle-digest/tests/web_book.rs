@@ -232,3 +232,64 @@ fn a_saved_page_without_a_byline_files_under_its_site() {
         "{opf}"
     );
 }
+
+/// A subscribed host: every page comes back `Walled` (as a stranger sees it).
+struct WalledFake(Fake);
+
+impl deckle_digest::Net for WalledFake {
+    fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+        self.0.get(url)
+    }
+    fn get_page_as(
+        &self,
+        url: &str,
+    ) -> Result<(Vec<u8>, deckle_digest::publisher::Access), String> {
+        self.0.get(url).map(|b| (b, walled()))
+    }
+}
+
+fn walled() -> deckle_digest::publisher::Access {
+    deckle_digest::publisher::Access::Walled {
+        site: "ex.com".into(),
+        why: deckle_digest::publisher::Walled::NoAdapter,
+    }
+}
+
+#[test]
+fn a_walled_page_that_reads_becomes_its_book() {
+    let dir = tempfile::tempdir().unwrap();
+    let book = build(
+        URL,
+        &Config::default(),
+        &WalledFake(fake()),
+        dir.path(),
+        date(),
+    )
+    .unwrap();
+    assert_eq!(book.title, "The Long One");
+    assert!(book.words > 8000, "{}", book.words);
+    assert!(book.path.exists());
+}
+
+#[test]
+fn a_walled_page_that_doesnt_read_says_why_and_writes_nothing() {
+    struct Stub;
+    impl deckle_digest::Net for Stub {
+        fn get(&self, _: &str) -> Result<Vec<u8>, String> {
+            Ok(b"<html><body><p>Log in to keep reading.</p></body></html>".to_vec())
+        }
+        fn get_page_as(
+            &self,
+            url: &str,
+        ) -> Result<(Vec<u8>, deckle_digest::publisher::Access), String> {
+            self.get(url).map(|b| (b, walled()))
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let err = build(URL, &Config::default(), &Stub, dir.path(), date()).unwrap_err();
+    assert_eq!(
+        err,
+        "no readable article: Subscriber story (Deckle doesn't know how ex.com signs in yet)."
+    );
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+}
