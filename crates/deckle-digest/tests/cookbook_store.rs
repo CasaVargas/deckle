@@ -449,3 +449,27 @@ fn save_config_keeps_chapter_comments() {
     assert!(text.contains("subtitle = \"Gathered\""), "{text}");
     assert_eq!(store.config().unwrap(), cfg);
 }
+
+#[test]
+fn save_config_keeps_comment_on_renamed_chapter() {
+    let (_d, store) = store();
+    store.save_config(&BookConfig::default()).unwrap();
+    let path = store.dir.join("cookbook.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text = text.replacen(
+        "[[chapters]]\nid = \"salads\"",
+        "# kids won't eat these\n[[chapters]]\nid = \"salads\"",
+        1,
+    );
+    std::fs::write(&path, text).unwrap();
+    let mut cfg = store.config().unwrap();
+    let salads = cfg.chapters.iter_mut().find(|c| c.id == "salads").unwrap();
+    salads.name = "Greens".to_owned();
+    store.save_config(&cfg).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("# kids won't eat these\n[[chapters]]\nid = \"salads\"\nname = \"Greens\""),
+        "{text}"
+    );
+    assert_eq!(store.config().unwrap(), cfg);
+}

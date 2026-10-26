@@ -1674,13 +1674,17 @@ pub(crate) fn merge_table(old: &mut toml_edit::Table, new: &toml_edit::Table) {
                     *o.decor_mut() = decor;
                 }
             }
-            // [[feeds]]: in the new order, each entry merged into the old one of the same name
-            // so its comments stay; new entries come whole, dropped ones go. (The serializer
-            // writes the new list as an inline array of inline tables.)
+            // [[feeds]], [[chapters]]: in the new order, each entry merged into the old one with
+            // the same key so its comments stay; new entries come whole, dropped ones go. The key
+            // is `id` when both tables have one (a renamed chapter keeps its entry), else `name`.
+            // (The serializer writes the new list as an inline array of inline tables.)
             (Some(Item::ArrayOfTables(o)), n) if tables_of(n).is_some() => {
-                let name = |t: &toml_edit::Table| {
-                    t.get("name").and_then(|v| v.as_str()).map(str::to_owned)
+                let key_of = |t: &toml_edit::Table, key: &str| {
+                    t.get(key).and_then(|v| v.as_str()).map(str::to_owned)
                 };
+                let by_id = o.iter().all(|t| t.contains_key("id"))
+                    && tables_of(n).is_some_and(|ts| ts.iter().all(|t| t.contains_key("id")));
+                let name = |t: &toml_edit::Table| key_of(t, if by_id { "id" } else { "name" });
                 // Tables print in document-position order: hand the old slots out in the new order.
                 let mut slots: Vec<_> = o.iter().filter_map(|t| t.position()).collect();
                 slots.sort_unstable();
