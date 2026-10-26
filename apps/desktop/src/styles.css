@@ -881,3 +881,12 @@ input[type=checkbox] { padding: 0; }
 .tick-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .tick-row input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
 .mode-head input:disabled + strong { opacity: 0.6; }
+
+/* Settings redesign, part 4: Online & privacy (§7) */
+.nav-note.plain { color: var(--muted); }
+.online-rows { overflow: hidden; font-size: 13px; }
+.online-head { padding: 11px 16px; border-bottom: 1px solid var(--line); font-weight: 600; }
+.online-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 16px; }
+.online-row + .online-row { border-top: 1px solid var(--line); }
+.online-row p { margin: 3px 0 4px; line-height: 1.45; }
+.online-row .to { color: var(--fg); font-weight: 600; }

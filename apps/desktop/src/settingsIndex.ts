@@ -2,7 +2,7 @@
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 
 /** The Settings pages (Settings redesign §2). */
-export type SettingsPage = "overview" | "sending" | "general" | "books" | "reading" | "kindles" | "about";
+export type SettingsPage = "overview" | "sending" | "general" | "books" | "reading" | "kindles" | "online" | "about";
 
 export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "overview", title: "Overview" },
@@ -11,6 +11,7 @@ export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "books", title: "Books" },
   { id: "reading", title: "Reading aids" },
   { id: "kindles", title: "Kindles" },
+  { id: "online", title: "Online & privacy" },
   { id: "about", title: "About" },
 ];
 
@@ -48,7 +49,8 @@ export const INDEX: Entry[] = [
   { label: "Mode on this Kindle", page: "kindles", words: "kindle device mode ebok pdoc per kindle" },
   { label: "Keeps Deckle's X-Ray for real ASINs", page: "kindles", words: "asin xray real verified" },
   { label: "Updates", page: "about", words: "update version restart" },
-  { label: "What Deckle sends online", page: "about", words: "online privacy network internet" },
+  { label: "What Deckle sends online", page: "online", words: "online privacy network internet send" },
+  { label: "Checking for updates", page: "online", words: "update github online privacy" },
   { label: "Credits", page: "about", words: "credits licence license wiktionary" },
 ];
 
@@ -136,10 +138,11 @@ export function onlineLine(names: string[]): string {
   return `${plural(names.length, "feature")} go${names.length === 1 ? "es" : ""} online: ${list(names)}. Everything else stays on this Mac.`;
 }
 
-/** The notes beside the sidebar's pages: what needs doing there. */
-export function pageNotes(checks: Check[]): Partial<Record<SettingsPage, string>> {
+/** The notes beside the sidebar's pages: what needs doing there, and how many online features are on. */
+export function pageNotes(checks: Check[], online: string[] = []): Partial<Record<SettingsPage, string>> {
   const out: Partial<Record<SettingsPage, string>> = {};
   for (const c of checks.filter((c) => c.mark === "todo")) out[c.page] = "to do";
+  if (online.length) out.online = `${online.length} on`;
   return out;
 }
 
@@ -163,6 +166,10 @@ export function pageSummary(page: SettingsPage, s: Settings, library: LibrarySta
     }
     case "kindles":
       return devices.length ? list(devices.map((d) => d.name || d.model_hint)) : "None plugged in";
+    case "online": {
+      const on = onlineOn(s).length;
+      return on ? `${plural(on, "feature")} on` : "Nothing optional goes online";
+    }
     case "about":
       return `Deckle ${version}`;
     default:
