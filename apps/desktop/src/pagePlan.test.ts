@@ -88,6 +88,50 @@ const rows = (): PagePlanRow[] => [
   row("horoscope", "horoscope"),
 ];
 
+const subRows = (): PagePlanRow[] => [
+  row("reading", "reading", null, 10),
+  row("feeds:A", "feeds", 0, 10),
+  { ...row("subscribed:p.com:news", "subscribed", null, 12), subscribed: { site: "p.com", slug: "news" } },
+  { ...row("subscribed:p.com:sports", "subscribed", null, 12), subscribed: { site: "p.com", slug: "sports" } },
+  row("horoscope", "horoscope"),
+];
+const subCfg = (): DailyConfig => ({
+  ...cfg(),
+  sections: ["reading", "feeds", "subscribed", "horoscope"],
+  feeds: [cfg().feeds[0]],
+  subscribed: [{ site: "p.com", sections: ["news", "sports"] }],
+});
+
+describe("subscribed papers", () => {
+  test("a budget lands on the group's max_items", () => {
+    const r = subRows();
+    const c = setBudget(subCfg(), r[3], 7);
+    expect(c.subscribed?.[0].max_items).toBe(7);
+    expect(setBudget(subCfg(), r[3], 99).subscribed?.[0].max_items).toBe(20);
+  });
+
+  test("the rows move as one block", () => {
+    const c = reorder(subCfg(), subRows(), 3, 0);
+    expect(c.sections).toEqual(["subscribed", "reading", "feeds", "horoscope"]);
+    const d = reorder(subCfg(), subRows(), 2, 4);
+    expect(d.sections).toEqual(["reading", "feeds", "horoscope", "subscribed"]);
+    // a drop on its own rows changes nothing
+    expect(reorder(subCfg(), subRows(), 3, 2).sections).toEqual(subCfg().sections);
+  });
+
+  test("a section dropped inside the block snaps to its edge; step skips the block", () => {
+    const c = reorder(subCfg(), subRows(), 4, 3);
+    expect(c.sections).toEqual(["reading", "feeds", "subscribed", "horoscope"]);
+    expect(step(subRows(), 2, 1)).toBe(4);
+    expect(step(subRows(), 3, -1)).toBe(1);
+  });
+
+  test("a row for a paper no longer in the config is left alone", () => {
+    const c = { ...subCfg(), subscribed: [] };
+    expect(setBudget(c, subRows()[2], 3)).toBe(c);
+  });
+});
+
 const names = (c: DailyConfig) => c.feeds.map((f) => f.name);
 
 describe("reorder", () => {

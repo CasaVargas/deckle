@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import { forgetTested, shownStatus, statusKey, subscriptionLine } from "./subscriptions";
+import { SUBSCRIBED_SLUGS, forgetTested, groupFor, removeGroup, renameGroup, setMaxItems, shownStatus, statusKey, subscriptionLine, toggleGroup, toggleSlug } from "./subscriptions";
 import type { Tested } from "./subscriptions";
-import type { SiteStatus, SubscriptionConfig } from "./types";
+import type { DailyConfig, SiteStatus, SubscriptionConfig } from "./types";
 
 /**
  * Newspapers the household subscribes to (publisher subscriptions design §3): a site and the
@@ -11,13 +11,19 @@ import type { SiteStatus, SubscriptionConfig } from "./types";
  */
 export default function SubscriptionsCard({
   subscriptions,
+  config,
   dirty,
   onChange,
+  onConfig,
   onSave,
 }: {
   subscriptions: SubscriptionConfig[];
+  /** The paper's draft: the `[[subscribed]]` groups and `sections` ride on it. */
+  config: DailyConfig;
   dirty: boolean;
   onChange: (subs: SubscriptionConfig[]) => void;
+  /** Replaces the draft with an edited copy (the helpers in subscriptions.ts return one). */
+  onConfig: (next: (c: DailyConfig) => DailyConfig) => void;
   /** Saves the draft; false when it didn't save (the notice says why). */
   onSave: () => Promise<boolean>;
 }) {
@@ -33,10 +39,23 @@ export default function SubscriptionsCard({
   }, []);
   useEffect(refresh, [refresh]);
 
+  // The site a row had when its field took focus: the group follows on blur, not per keystroke.
+  const siteAtFocus = useRef<Record<number, string>>({});
+  const othersThan = (i: number) => subscriptions.filter((_, j) => j !== i).map((s) => s.site);
+
   const edit = (i: number, p: Partial<SubscriptionConfig>) => {
     // A test's answer is about the site and account it was run for.
     setTested((t) => forgetTested(t, subscriptions[i].site));
     onChange(subscriptions.map((s, j) => (j === i ? { ...s, ...p } : s)));
+  };
+  // The paper's group follows the row's site once the edit is committed.
+  const commitSite = (i: number) => {
+    const from = siteAtFocus.current[i];
+    delete siteAtFocus.current[i];
+    const to = subscriptions[i]?.site;
+    if (from === undefined || to === undefined || from === to) return;
+    const others = othersThan(i);
+    onConfig((c) => renameGroup(c, from, to, others));
   };
   const statusOf = (s: SubscriptionConfig): SiteStatus | undefined => shownStatus(statuses, tested, s.site);
   // The keychain entry and the session are named after the saved site and username.
@@ -86,15 +105,19 @@ export default function SubscriptionsCard({
   const remove = async (i: number) => {
     const s = subscriptions[i];
     const next = subscriptions.filter((_, j) => j !== i);
+    const others = next.map((o) => o.site);
+    siteAtFocus.current = {}; // rows shift
     setMsg(null);
     setPasswords({}); // typed passwords are by row, and the rows shift
     if (!statusOf(s)) {
       onChange(next); // never saved: nothing in the keychain or on disk
+      onConfig((c) => removeGroup(c, s.site, others));
       return;
     }
     try {
       setStatuses(await api.subscriptionForget(s.site));
       onChange(next);
+      onConfig((c) => removeGroup(c, s.site, others));
     } catch (e) {
       setMsg({ text: String(e), ok: false });
     }
@@ -121,7 +144,14 @@ export default function SubscriptionsCard({
             <div className="grid2">
               <label>
                 <span className="label">Site</span>
-                <input value={s.site} placeholder="thepilot.com" spellCheck={false} onChange={(e) => edit(i, { site: e.target.value })} />
+                <input
+                  value={s.site}
+                  placeholder="thepilot.com"
+                  spellCheck={false}
+                  onFocus={() => (siteAtFocus.current[i] = s.site)}
+                  onChange={(e) => edit(i, { site: e.target.value })}
+                  onBlur={() => commitSite(i)}
+                />
               </label>
               <label>
                 <span className="label">Username</span>
@@ -146,6 +176,13 @@ export default function SubscriptionsCard({
                 Remove
               </button>
             </div>
+            {s.site.trim() && (
+              <PrintPaper
+                site={s.site}
+                config={config}
+                onConfig={onConfig}
+              />
+            )}
             {st && <p className="small">{subscriptionLine(st)}</p>}
             {st?.jar_note && <p className="muted small">{st.jar_note}</p>}
           </div>
@@ -158,5 +195,38 @@ export default function SubscriptionsCard({
         </button>
       </div>
     </section>
+  );
+}
+
+/** "Print this paper": the site's `[[subscribed]]` group, its sections and its stories per section. */
+function PrintPaper({ site, config, onConfig }: { site: string; config: DailyConfig; onConfig: (f: (c: DailyConfig) => DailyConfig) => void }) {
+  const group = groupFor(config, site);
+  return (
+    <div className="print-paper">
+      <label className="check">
+        <input type="checkbox" checked={!!group} onChange={() => onConfig((c) => toggleGroup(c, site))} /> Print this paper
+      </label>
+      {group && (
+        <>
+          <div className="print-paper-slugs">
+            {SUBSCRIBED_SLUGS.map(({ slug, name }) => (
+              <label key={slug} className="check">
+                <input type="checkbox" checked={group.sections.includes(slug)} onChange={() => onConfig((c) => toggleSlug(c, site, slug))} /> {name}
+              </label>
+            ))}
+          </div>
+          <label className="print-paper-max">
+            <span className="label">Stories per section</span>
+            <input
+              type="number"
+              min={1}
+              value={group.max_items ?? ""}
+              placeholder="Same as Local"
+              onChange={(e) => onConfig((c) => setMaxItems(c, site, e.target.value))}
+            />
+          </label>
+        </>
+      )}
+    </div>
   );
 }

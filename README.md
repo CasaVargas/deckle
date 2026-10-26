@@ -74,8 +74,8 @@ Included in the current release. The first item is the screenshot above.
 - **From Your Shelf:** the books you're in the middle of, a past highlight and the words you
   looked up this week, drawn from your own Kindle.
 - **Papers you subscribe to:** accounts for the papers you pay for (`deckle digest subscribe`),
-  with the password in the keychain. No publisher is supported yet; The Pilot and other BLOX papers
-  come next.
+  with the password in the keychain. The Pilot and other BLOX (TownNews) papers print in full, as
+  their own section group.
 - **The Morgue:** every edition kept in a plain folder, searchable, shown on the Daily tab as a
   month of front pages, and sendable to the Kindle again.
 - **The paper on an iPad, or in any folder:** each morning's edition also goes to the folders you

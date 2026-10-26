@@ -2,18 +2,38 @@
 //! Publisher subscriptions: the adapter interface (publisher subscriptions design §5–§6).
 //!
 //! A [`Publisher`] knows one CMS family's sign-in, entitlement and unlock rules; the
-//! [`registry`] lists the known ones (none yet). [`Access`] records how a page was fetched.
+//! [`registry`] lists the known ones. [`Access`] records how a page was fetched.
+
+use std::collections::BTreeMap;
+
+pub mod blox;
 
 /// The HTTP surface an adapter signs in through: cookie-carrying, per site.
 pub trait SiteClient: Sync {
     fn get(&self, url: &str) -> Result<Vec<u8>, String>;
     fn post_form(&self, url: &str, body: &str) -> Result<Vec<u8>, String>;
+    /// A GET that also says the URL it ended at, after redirects. A client that can't tell
+    /// answers with the request URL.
+    fn get_final(&self, url: &str) -> Result<(Vec<u8>, String), String> {
+        Ok((self.get(url)?, url.to_string()))
+    }
 }
 
 /// What a signed-in account may read.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Entitlement {
+    /// The account's active service ids.
     pub services: Vec<String>,
+    /// Service id → display name, when the site's reply carries one.
+    pub names: BTreeMap<String, String>,
+}
+
+impl Entitlement {
+    /// The account's first service as a reader would name it: its display name, else its id.
+    pub fn label(&self) -> Option<String> {
+        let id = self.services.first()?;
+        Some(self.names.get(id).cloned().unwrap_or_else(|| id.clone()))
+    }
 }
 
 /// One CMS family's sign-in and unlock rules.
@@ -28,9 +48,24 @@ pub trait Publisher: Sync {
     fn feed_url(&self, site: &str, slug: &str, n: usize) -> String;
 }
 
-/// Every known adapter. Empty until the first lands.
+/// Items a subscribed slug's feed asks for beyond its budget, so a group after Local (which may
+/// already have printed some of its stories) can still refill to `max_items`.
+pub const SUBSCRIBED_SPARE: usize = 5;
+
+/// The feed URL the press and the preview both read for one `[[subscribed]]` slug (one cache
+/// key): `max_items` plus [`SUBSCRIBED_SPARE`]; the cut still uses `max_items`.
+pub fn subscribed_feed_url(
+    cfg: &crate::config::Config,
+    group: &crate::config::SubscribedConfig,
+    slug: &str,
+) -> String {
+    let n = group.max_items.unwrap_or(cfg.local.max_items);
+    blox::Blox.feed_url(&group.site, slug, n.saturating_add(SUBSCRIBED_SPARE))
+}
+
+/// Every known adapter.
 pub fn registry() -> Vec<Box<dyn Publisher>> {
-    Vec::new()
+    vec![Box::new(blox::Blox)]
 }
 
 /// The `kind` of the first adapter that recognises this page, if any.
@@ -61,6 +96,9 @@ pub enum Walled {
     LoginFailed(String),
     NotInPlan,
     NoAdapter,
+    /// Signed in, but the site's reply about the account's plan couldn't be read, so
+    /// nothing was unlocked.
+    PlanUnknown,
 }
 
 impl Walled {
@@ -70,6 +108,7 @@ impl Walled {
             Walled::NotSignedIn => format!("Subscriber story (not signed in to {site})."),
             Walled::LoginFailed(e) => format!("Subscriber story (sign-in to {site} failed: {e})."),
             Walled::NotInPlan => format!("Subscriber story (your {site} plan doesn't include it)."),
+            Walled::PlanUnknown => format!("Subscriber story (couldn't read your {site} plan)."),
             Walled::NoAdapter => {
                 format!("Subscriber story (Deckle doesn't know how {site} signs in yet).")
             }
@@ -83,9 +122,22 @@ mod tests {
     use crate::fetch::Net;
 
     #[test]
-    fn the_registry_is_empty_and_nothing_is_detected() {
-        assert!(registry().is_empty());
-        assert_eq!(detect_kind("<html>tncms</html>"), None);
+    fn the_registry_has_blox() {
+        let kinds: Vec<&str> = registry().iter().map(|p| p.kind()).collect();
+        assert_eq!(kinds, vec!["blox"]);
+        assert_eq!(detect_kind("<html>tncms</html>"), Some("blox"));
+        assert_eq!(detect_kind("<html>wordpress</html>"), None);
+    }
+    #[test]
+    fn an_entitlement_is_labelled_by_name_when_known() {
+        let mut e = Entitlement {
+            services: vec!["3".into()],
+            ..Default::default()
+        };
+        assert_eq!(e.label().as_deref(), Some("3"));
+        e.names.insert("3".into(), "Pilot Plus".into());
+        assert_eq!(e.label().as_deref(), Some("Pilot Plus"));
+        assert_eq!(Entitlement::default().label(), None);
     }
     #[test]
     fn walled_notes() {
@@ -96,6 +148,10 @@ mod tests {
         assert_eq!(
             Walled::NoAdapter.note("thepilot.com"),
             "Subscriber story (Deckle doesn't know how thepilot.com signs in yet)."
+        );
+        assert_eq!(
+            Walled::PlanUnknown.note("thepilot.com"),
+            "Subscriber story (couldn't read your thepilot.com plan)."
         );
     }
     #[test]

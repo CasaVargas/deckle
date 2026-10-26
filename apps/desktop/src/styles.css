@@ -579,3 +579,7 @@ input[type=checkbox] { padding: 0; }
 @media (max-width: 720px) {
   .paper-card { flex-basis: 78%; }
 }
+.print-paper { margin: 6px 0 2px; }
+.print-paper-slugs { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 2px 0 6px 22px; }
+.print-paper-max { display: block; margin-left: 22px; }
+.print-paper-max input { width: 120px; }

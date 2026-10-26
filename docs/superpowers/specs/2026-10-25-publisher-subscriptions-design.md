@@ -425,3 +425,55 @@ check with `deckle digest subscribe thepilot.com --test` and `deckle digest eedi
 - **No section group yet.** `[[subscribed]]`'s section group is PR 2; in PR 1 every story on a subscribed site is extracted as a stranger's page, as today; one that doesn't extract prints as a headline with its reason (and a saved Your Reading link waits without spending a try).
 - **`--forget`** also deletes the session file.
 - **The Subscriptions card** sits in "The paper" room, not Delivery.
+
+## 16. Build notes, PR 2 (rulings made while building)
+
+- **Signed-in marker.** BLOX is signed in when `tn-user-screenname` is present and non-empty. Spike 1 confirms it against a live account.
+- **Plan parsing.** The services parser is lenient. A plan that can't be read is `Walled::PlanUnknown`: nothing is unlocked and the story prints as a stranger sees it, with the note "couldn't read your plan".
+- **Origin.** The login POST goes to the login form's own `action`, wherever it points. The services URL and the section feeds use the `https://www.<site>` rule (the configured host with `www.` added unless it already starts with it), not the form's action. Spike 1 confirms that `www` is the canonical origin for a live BLOX site.
+- **Feed spares.** A subscribed slug's feed asks for `max_items` + 5 (`SUBSCRIBED_SPARE`), so a group after Local can refill after dropping what Local printed; the press and the preview share one URL (one cache key), and the cut still uses `max_items`.
+- **A withheld page that extracts.** `Walled { NotInPlan | PlanUnknown }` is premium for certain: if its clear preview still extracts, it prints with the walled note (§9). With an unreadable plan, a page with nothing encrypted is `Open`; `PlanUnknown` is only for an encrypted page.
+- **`unlock` fails closed.** If the page's id list can't be read it unlocks nothing; a page with nothing encrypted is returned unchanged.
+- **Dedupe.** By title, in `sections` order. Local skips what an earlier section printed and refills; places keep their own. The page plan does the same. A slug listed twice in a group, a site in two groups, and `max_items = 0` are config errors.
+- **One kind.** A single `subscribed` section kind covers every `[[subscribed]]` group, in file order. This supersedes the per-site entry in §3.
+- **Slugs** are validated against BLOX's list (news, sports, opinion, obituaries, business, lifestyles).
+- **Divider page deferred.** The kicker carries the paper's name instead.
+- **`Subscription.service`** is the account's first service for now.
+- **Typed login error** is deferred to PR 3 (network errors still count as a failed attempt).
+- **DeckleReader follow-up:** read the bundle's new `story.access` (1.2).
+
+### 16.1 What the live site turned out to do (read from its public scripts, 2026-10-26)
+
+Found after PR 2's code was written, from `user.js` and the `tnt.access.*` scripts a Pilot page
+loads; none of it needed an account, and all of it changes PR 2's entitlement source:
+
+- **Sign-in state lives in cookies, not the page.** `user.js` fills `__tnt.user` from the
+  cookies `tncms-authtoken`, `tncms-user`, `tncms-screenname`, `tncms-avatarurl`,
+  `tncms-isadmin`. A stranger's page and a subscriber's page carry the same header markup
+  (CSS picks a block); `span.tn-user-screenname` is empty for everyone until JS fills it. So
+  `Blox::signed_in(html)` as built (a non-empty screen name) would never be true. The right
+  marker is the jar: a `tncms-authtoken` (or `tncms-user`) cookie after the login POST.
+- **The account's services are in the `tncms-user` cookie** (`__tnt.user.services`, a
+  comma-separated list of service ids, URL-encoded), set by the server at login. The page's
+  own scripts compare `__tnt.user.services` with a product's `service_id`.
+  `/tncms/subscription/services/` is the **purchase catalog** the offers modal reads, not the
+  account's entitlements: PR 2's `entitlement()` reads the wrong thing. It fails safe (a
+  catalog carries no "active" flag, so every service counts inactive and premium stories stay
+  walled), but a real subscriber gets nothing unlocked until this is fixed.
+- **The unscramble is exactly ROT47** (`__tnt.subscription.api.unscramble`, applied to each
+  `.subscriber-only.encrypted-content` element's `textContent`, then the `encrypted-content`
+  class is removed and `#article-body[data-content-encrypted]` flips to `false`). It runs from
+  the access-granted callback list; what grants access, and whether the server instead sends a
+  subscriber the page already decrypted, is only visible with an account.
+- **`paid_access_service_ids` appears on a real page once, inside a comment**
+  (`// GTM tncms.subscription.paid_access_service_ids`); the page's required ids are
+  `var bloxServiceIDs = [];` (empty on a stranger's page) and `data-subscription-service=""`
+  on the offer links. PR 2's fail-closed rule therefore walls every premium page as built.
+- **Spike 1 is now a blocker, not a confirmation.** `tools/blox-spike.sh <site> <user> <url>`
+  runs the login with your own account and prints the shapes (cookie names, the decoded
+  `tncms-user` cookie with its token redacted, whether the premium page arrives decrypted, and
+  the catalog reply) without printing secrets. PR 2's follow-up then: `signed_in` from the
+  jar's cookie names (add `SiteClient::has_cookie(name)`), `entitlement` from the `tncms-user`
+  cookie's services (add `SiteClient::cookie(name)`; the adapter decodes it in-process and
+  never logs it), the page's ids from `bloxServiceIDs = [...]` with the comment mention
+  ignored, and the catalog endpoint dropped.

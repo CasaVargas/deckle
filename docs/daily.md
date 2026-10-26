@@ -123,9 +123,10 @@ full_text = "lead"              # true, false or "lead"
 - `full_text = "lead"` is the default for a topic: the top story prints whole, the rest as short
   briefs. `true` prints every story whole, `false` none. A plain `url` entry follows the global
   full-text setting unless you set it.
-- **No repeats across sections:** a `[[feeds]]` section drops a story whose title an earlier news
-  section already printed (Local, other places, and earlier feed sections). Local and other places only
-  record their titles and are never trimmed themselves; Your Reading is never trimmed or recorded.
+- **No repeats across sections:** Local, a `[[feeds]]` section and a subscribed paper's section drop
+  a story whose title an earlier news section already printed, then refill from their next-newest
+  stories. Other places keep their own stories and only record their titles; Your Reading is never
+  trimmed or recorded.
 
 ### Your interests
 
@@ -556,7 +557,9 @@ for USB as before and the run's report says why. `--to <folder>` and `digest pus
 ## Papers you subscribe to
 
 If you pay for a newspaper's website, the Daily can sign in as you and read its full articles.
-**No publisher is supported yet**; The Pilot and other BLOX papers come next. Until then the
+The Pilot and most small-town US papers run on BLOX (TownNews): sign in once
+(`deckle digest subscribe`) and the paper's stories print in full. A story your plan doesn't
+cover, or one the site withholds, prints as a stranger sees it, with a note saying why. Any other
 site's stories print as a stranger would see them: a free story in full, and a story the site
 withholds as a headline with a note saying why. A saved article the site withholds waits in Your
 Reading without using up its tries.
@@ -571,6 +574,36 @@ Add the account to `digest.toml` (one block per site; the password is not stored
 # site = "thepilot.com"           # just the host, no https:// or path
 # username = "you@example.com"
 ```
+
+Print the paper's own sections as a group in your paper with `[[subscribed]]` (in `digest.toml`
+or a paper's file under `papers/`; the site should also have a `[[subscriptions]]` account):
+
+```toml
+# Print a subscribed newspaper's own sections in full, as a group in the paper. The site
+# should also be in [[subscriptions]] above. Sections for a BLOX site: news, sports, opinion,
+# obituaries, business, lifestyles.
+# [[subscribed]]
+# site = "thepilot.com"
+# name = "The Pilot"              # optional heading; the site is used without it
+# sections = ["news", "sports"]   # in print order
+# max_items = 8                   # per section; defaults to [local] max_items
+# max_age_hours = 48              # defaults to [local] max_age_hours
+```
+
+The group prints as its own section, in file order, with each story's kicker carrying the
+paper's name. `max_items` is stories per section and `max_age_hours` the age window; both
+default to `[local]`'s. The `subscribed` section sits in `sections` right after `local` (add or
+move it there like any other), and the **Print this paper** switch on the Subscriptions card adds
+the block and lets you tick its sections and set the stories per section. A story already printed
+by an earlier section is skipped (other places excepted: they keep their own stories), so the paper
+doesn't repeat itself; each section asks the site for five stories beyond its budget to refill from.
+
+Removing a subscription on the card drops this paper's group only. Another paper's file under
+`papers/` keeps its `[[subscribed]]` block, and that paper then prints the group as a stranger
+sees it, with the note below.
+
+If the site has a `[[subscribed]]` block but no account in `[[subscriptions]]`, the edition says so
+("No subscription for <site> in digest.toml") and the stories print as a stranger sees them.
 
 ```sh
 deckle digest subscribe                     # list your sites and their state
@@ -719,6 +752,10 @@ morning's edition in the folder as data rather than a finished file: a
 the cover and the EPUB. A native reader app draws the paper from it, with the front page plan,
 each story's text and link, the weather as numbers and the crossword with its answers.
 `books = true` adds the long reads' EPUBs. `keep` prunes old bundles.
+
+From version 1.2 a story carries `access`: `open` for a free page, `subscription` when the paper
+signed in as a subscriber and read it whole, and `walled` when the site withheld it (a reader can
+show the note saying why).
 
 From version 1.1 the bundle's photos are full size for a tablet: in color, up to 2400 px on the
 long side (the EPUB keeps its 1000-px e-ink copies). Each photo comes with its caption, credit

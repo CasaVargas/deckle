@@ -57,7 +57,7 @@
       "required": ["key", "kind", "title", "kicker", "unavailable", "stories", "weather", "puzzle"],
       "properties": {
         "key": { "type": "string" },
-        "kind": { "type": "string", "description": "reading, weather, local, feeds, shelf, lottery, horoscope, puzzle, onthisday; a reader draws a kind it doesn't know from its stories' bodies." },
+        "kind": { "type": "string", "description": "reading, weather, local, feeds, shelf, lottery, horoscope, puzzle, onthisday, subscribed (1.2); a reader draws a kind it doesn't know from its stories' bodies." },
         "title": { "type": "string" },
         "ai_brief": { "type": "array", "maxItems": 3, "items": { "type": "string" } },
         "kicker": { "type": ["string", "null"] },
@@ -124,7 +124,8 @@
         "minutes": { "type": "integer", "minimum": 0, "description": "1.1: reading time at 230 words a minute." },
         "prominence": { "enum": ["lead", "front", "inside"], "description": "1.1: where Deckle's front page put it." },
         "partial": { "type": "boolean", "description": "1.1: the text looks cut off by a paywall." },
-        "pull_quote": { "type": ["string", "null"], "description": "1.1: a sentence from the body to set large; stories of 600 words or more." }
+        "pull_quote": { "type": ["string", "null"], "description": "1.1: a sentence from the body to set large; stories of 600 words or more." },
+        "access": { "enum": ["open", "subscription", "walled"], "description": "1.2: how the story was fetched: open, through the owner's subscription, or withheld by the site." }
       }
     },
     "weather": {

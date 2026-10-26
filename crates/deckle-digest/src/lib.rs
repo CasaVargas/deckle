@@ -433,7 +433,8 @@ pub fn gather_with_editor(
         assets: Vec::new(),
     };
     let mut news = Vec::new();
-    // Titles already printed by Local, places and earlier feed sections (Your Reading is neither).
+    // Titles already printed by Local, places and earlier feed or subscribed sections (Your
+    // Reading is neither).
     let mut printed = std::collections::HashSet::<String>::new();
     let mut g_reading = None;
     let mut long_reads = Vec::new();
@@ -501,7 +502,7 @@ pub fn gather_with_editor(
             }
             SectionKind::Local => {
                 news.push(edition.sections.len());
-                let local = sources::feeds::local_section(cfg, now, net);
+                let local = sources::feeds::local_section(cfg, now, net, &printed);
                 printed.extend(
                     local
                         .articles
@@ -593,8 +594,51 @@ pub fn gather_with_editor(
             SectionKind::Onthisday => edition
                 .sections
                 .push(sources::onthisday::section(date, net)),
+            SectionKind::Subscribed => {
+                let mut noted = std::collections::HashSet::new();
+                for group in &cfg.subscribed {
+                    if cfg.subscription(&group.site).is_none() && noted.insert(&group.site) {
+                        notes.push(format!(
+                            "No subscription for {} in digest.toml; stories print as a stranger \
+                             sees them.",
+                            group.site
+                        ));
+                    }
+                }
+                for (group, slug, display) in config::subscribed_sections(cfg) {
+                    let max_items = group.max_items.unwrap_or(cfg.local.max_items);
+                    let feed = config::FeedConfig {
+                        name: display.into(),
+                        url: publisher::subscribed_feed_url(cfg, group, slug),
+                        full_text: Some(config::FullText::Yes),
+                        max_items,
+                        ..Default::default()
+                    };
+                    let opts = sources::feeds::FeedOptions {
+                        kicker: Some(group.title()),
+                        max_age_hours: group.max_age_hours.unwrap_or(cfg.local.max_age_hours),
+                    };
+                    news.push(edition.sections.len());
+                    edition.sections.push(sources::feeds::feed_section_with(
+                        &feed,
+                        opts,
+                        cfg,
+                        now,
+                        net,
+                        &mut printed,
+                    ));
+                }
+            }
         }
-        // Each `[[feeds]]` entry is its own section, in file order; so is each place after Local.
+        // Each `[[feeds]]` entry is its own section, in file order; so is each place after Local
+        // and each slug of a subscribed group.
+        let subscribed: Vec<String> = match kind {
+            SectionKind::Subscribed => config::subscribed_sections(cfg)
+                .into_iter()
+                .map(|(g, slug, _)| config::subscribed_key(&g.site, slug))
+                .collect(),
+            _ => Vec::new(),
+        };
         for (i, s) in edition.sections[first_new..].iter_mut().enumerate() {
             // interest sections arrive keyed (a quiet one is skipped, so indexes don't line up)
             if !s.key.is_empty() {
@@ -603,6 +647,7 @@ pub fn gather_with_editor(
             let name = match kind {
                 SectionKind::Feeds => Some(cfg.feeds[i].name.as_str()),
                 SectionKind::Local if i > 0 => Some(cfg.local.places[i - 1].name.as_str()),
+                SectionKind::Subscribed => Some(subscribed[i].as_str()),
                 _ => None,
             };
             s.key = config::section_key(*kind, name);

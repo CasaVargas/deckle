@@ -181,6 +181,7 @@ Each story:
   - `prominence`: `lead`, `front` or `inside`, as Deckle's front page placed the story;
   - `partial`: the text looks cut off by a paywall;
   - `pull_quote`: a sentence of 60–200 characters, on stories of 600 words or more.
+- **Added in 1.2:** `access` on every story: `open`, `subscription` (fetched through the owner's own subscription) or `walled` (withheld by the site). Section `kind` gains `subscribed`. Both are additive.
 - **`long_read`:** for a piece printed as its own book, the path of its EPUB under `epub/`, when the export carries books. Otherwise `null`.
 
 ### 6.4 `front` and `files`

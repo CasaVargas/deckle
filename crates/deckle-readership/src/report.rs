@@ -3,7 +3,7 @@
 //! you got to each section, and a few edits to the paper you can apply with one click.
 
 use deckle_digest::Config;
-use deckle_digest::config::{SectionKind, section_key};
+use deckle_digest::config::{SectionKind, section_key, subscribed_key, subscribed_sections};
 use serde::Serialize;
 
 use crate::layout::{Layout, section_at};
@@ -68,12 +68,13 @@ pub struct Suggestion {
     pub why: String,
 }
 
-const KINDS: [SectionKind; 10] = [
+const KINDS: [SectionKind; 11] = [
     SectionKind::Reading,
     SectionKind::Weather,
     SectionKind::Local,
     SectionKind::Interests,
     SectionKind::Feeds,
+    SectionKind::Subscribed,
     SectionKind::Shelf,
     SectionKind::Lottery,
     SectionKind::Horoscope,
@@ -83,12 +84,24 @@ const KINDS: [SectionKind; 10] = [
 
 fn kind_of(key: &str) -> Option<SectionKind> {
     KINDS.into_iter().find(|k| {
-        *k != SectionKind::Feeds && *k != SectionKind::Interests && section_key(*k, None) == key
+        !matches!(
+            k,
+            SectionKind::Feeds | SectionKind::Interests | SectionKind::Subscribed
+        ) && section_key(*k, None) == key
     })
 }
 
 /// What the paper prints for a section, for one no edition in the window had yet.
-fn paper_name(key: &str) -> String {
+fn paper_name(key: &str, cfg: &Config) -> String {
+    if key.starts_with("subscribed:") {
+        let found = subscribed_sections(cfg)
+            .into_iter()
+            .find(|(g, slug, _)| subscribed_key(&g.site, slug) == key);
+        return match found {
+            Some((g, _, display)) => format!("{} · {display}", g.title()),
+            None => key.to_owned(),
+        };
+    }
     if let Some(name) = key
         .strip_prefix("feeds:")
         .or_else(|| key.strip_prefix("interests:"))
@@ -133,6 +146,10 @@ fn current_keys(cfg: &Config) -> Vec<String> {
                         .iter()
                         .map(|p| section_key(*k, Some(&p.name))),
                 )
+                .collect(),
+            SectionKind::Subscribed => subscribed_sections(cfg)
+                .into_iter()
+                .map(|(g, slug, _)| subscribed_key(&g.site, slug))
                 .collect(),
             _ => vec![section_key(*k, None)],
         })
@@ -200,7 +217,7 @@ pub fn report(state: &State, cfg: &Config) -> Report {
             .first()
             .and_then(|l| l.sections.iter().find(|s| &s.key == key))
             .map(|s| s.name.clone())
-            .unwrap_or_else(|| paper_name(key));
+            .unwrap_or_else(|| paper_name(key, cfg));
         let start = |l: &Layout| l.sections.iter().find(|s| &s.key == key).map(|s| s.start);
         let with: Vec<(&Layout, i64)> = opened
             .iter()
@@ -343,6 +360,23 @@ pub fn apply(s: &Suggestion, cfg: &mut Config) -> Result<(), String> {
             (cfg.local.places.len() < before)
                 .then_some(())
                 .ok_or_else(|| format!("no place named {name}"))
+        }
+        // one slug of a subscribed paper; the paper goes when its last slug does
+        (SuggestionKind::Drop, None) if s.key.starts_with("subscribed:") => {
+            let (site, slug) = s.key["subscribed:".len()..]
+                .split_once(':')
+                .ok_or_else(|| format!("unknown section {}", s.key))?;
+            let group = cfg
+                .subscribed
+                .iter_mut()
+                .find(|g| g.site == site && g.sections.iter().any(|x| x == slug))
+                .ok_or_else(|| format!("no subscribed section {site} {slug}"))?;
+            group.sections.retain(|x| x != slug);
+            cfg.subscribed.retain(|g| !g.sections.is_empty());
+            if cfg.subscribed.is_empty() {
+                cfg.sections.retain(|k| *k != SectionKind::Subscribed);
+            }
+            Ok(())
         }
         (SuggestionKind::Drop, None) if s.key.starts_with("interests:") => {
             let name = &s.key["interests:".len()..];

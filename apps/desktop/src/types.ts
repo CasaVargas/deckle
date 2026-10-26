@@ -223,7 +223,7 @@ export const STAGE_LABEL: Record<string, string> = {
 
 // ---- The Daily tab (Daily design §5c) ----
 
-export type SectionKind = "reading" | "weather" | "local" | "interests" | "feeds" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
+export type SectionKind = "reading" | "weather" | "local" | "interests" | "feeds" | "subscribed" | "shelf" | "lottery" | "horoscope" | "puzzle" | "onthisday";
 
 /** One `[[interests]]` entry (interests design §3). */
 export interface InterestConfig {
@@ -291,6 +291,8 @@ export interface DailyConfig {
   email?: EmailConfig;
   /** `[[subscriptions]]`: newspapers the household subscribes to. Absent while empty. No passwords here. */
   subscriptions?: SubscriptionConfig[];
+  /** `[[subscribed]]`: this paper's subscribed publisher groups. Absent while empty. */
+  subscribed?: SubscribedConfig[];
   /** `[day]`: Your Day on the weather page. Absent while untouched. */
   day?: DayConfig;
   /** `[morgue]`: where every edition is kept. Absent while untouched. */
@@ -401,13 +403,23 @@ export interface SubscriptionConfig {
   kind?: string | null;
 }
 
+/** `[[subscribed]]`: a subscribed publisher's sections, printed as a group. Paper-file setting. */
+export interface SubscribedConfig {
+  site: string;
+  name?: string | null;
+  sections: string[];
+  max_items?: number | null;
+  max_age_hours?: number | null;
+}
+
 /** Where a site's session stands: serde's externally-tagged form of the Rust enum. */
 export type SessionState =
   | "NotTried"
   | { SignedIn: { service: string | null } }
   | { LoginFailed: string }
   | "NoAdapter"
-  | { NoPassword: string };
+  | { NoPassword: string }
+  | { EntitlementUnknown: string };
 
 /** A subscription as the card shows it. Never carries the password. */
 export interface SiteStatus {
@@ -502,6 +514,7 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   local: "Local news",
   interests: "Your interests",
   feeds: "Your feeds",
+  subscribed: "Subscribed papers",
   shelf: "From Your Shelf",
   lottery: "Lottery",
   horoscope: "Horoscope",
@@ -509,7 +522,7 @@ export const SECTION_LABEL: Record<SectionKind, string> = {
   onthisday: "On This Day",
 };
 
-export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "interests", "feeds", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
+export const ALL_SECTIONS: SectionKind[] = ["reading", "weather", "local", "interests", "feeds", "subscribed", "shelf", "lottery", "horoscope", "puzzle", "onthisday"];
 
 export const SIGNS = ["aries", "taurus", "gemini", "cancer", "leo", "virgo", "libra", "scorpio", "sagittarius", "capricorn", "aquarius", "pisces"];
 
@@ -746,6 +759,8 @@ export interface PagePlanRow {
   feed: number | null;
   /** The `[[local.places]]` index of another place's row. */
   place: number | null;
+  /** The `[[subscribed]]` group and slug of a subscribed paper's row. */
+  subscribed?: { site: string; slug: string };
   /** The `[[interests]]` index of an interest row. */
   interest: number | null;
   name: string;

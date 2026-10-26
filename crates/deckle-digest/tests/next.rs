@@ -914,3 +914,95 @@ fn url_only_feed_row_unchanged() {
     assert_eq!(row.detail, "Science Daily Brief");
     assert_eq!(row.budget, "10 stories");
 }
+
+// --- subscribed papers ---
+
+#[test]
+fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
+    let mut s = Setup::new();
+    s.cfg = Config::parse(
+        "sections = [\"weather\", \"subscribed\"]\n\n[[subscribed]]\nsite = \"thepilot.com\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\nmax_items = 5\n",
+    )
+    .unwrap();
+    // max_items plus five spare, so a group after Local can refill
+    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=10&s=start_time&sd=desc";
+    assert!(live_urls(&s.cfg).contains(&news.to_owned()));
+    // the same twice-an-hour limit as a feed's
+    let net = Counting::new();
+    let mut cache = LiveCache::default();
+    assert_eq!(refresh(&s.cfg, &mut cache, t0(), &net), 2);
+    assert_eq!(
+        refresh(&s.cfg, &mut cache, t0() + Duration::minutes(10), &net),
+        0
+    );
+    s.live.feeds.insert(
+        news.into(),
+        fetched(&[("Council votes", local(2026, 10, 22, 13, 0))]),
+    );
+    let p = s.plan();
+    let rows: Vec<_> = p
+        .plan
+        .iter()
+        .filter(|r| r.kind == SectionKind::Subscribed)
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].key, "subscribed:thepilot.com:news");
+    assert_eq!(rows[0].name, "The Pilot · News");
+    assert_eq!(rows[0].detail, "thepilot.com · news");
+    assert_eq!(rows[0].items, Some(5));
+    let r = rows[0].subscribed.as_ref().unwrap();
+    assert_eq!((r.site.as_str(), r.slug.as_str()), ("thepilot.com", "news"));
+    // the fetched headline leads (nothing local), and the other slug is a dashed slot
+    assert_eq!(
+        p.lead.clone().unwrap().title.as_deref(),
+        Some("Council votes")
+    );
+    assert!(labels(&p).contains(&"The Pilot · Sports · 5 slots".to_owned()));
+    let json = serde_json::to_string(&p.plan[0]).unwrap();
+    assert!(!json.contains("subscribed"), "{json}");
+}
+
+#[test]
+fn local_after_a_group_drops_the_groups_story_and_refills_as_the_press_does() {
+    let mut s = Setup::new();
+    s.cfg = Config::parse(
+        "sections = [\"subscribed\", \"local\"]\n\n[local]\nmax_items = 2\n\n[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 1\n",
+    )
+    .unwrap();
+    s.cfg.local.google_news = String::new();
+    s.cfg.local.feeds = vec![LOCAL.into()];
+    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=6&s=start_time&sd=desc";
+    s.live.feeds.insert(
+        news.into(),
+        fetched(&[("Water tower vote", local(2026, 10, 22, 14, 0))]),
+    );
+    s.live.feeds.insert(
+        LOCAL.into(),
+        fetched(&[
+            ("Water tower vote", local(2026, 10, 22, 13, 0)),
+            ("Library reopens", local(2026, 10, 22, 12, 0)),
+            ("Fair opens", local(2026, 10, 22, 11, 0)),
+        ]),
+    );
+    let p = s.plan();
+    // the group prints the shared story first; Local drops it and refills to its two stories,
+    // the count the press prints
+    let lead = p.lead.clone().unwrap();
+    assert_eq!(lead.key, "local");
+    assert_eq!(lead.kicker, "LOCAL · 2 NEW SINCE 05:30");
+    assert_eq!(lead.title.as_deref(), Some("Library reopens"));
+    assert_eq!(
+        labels(&p),
+        [
+            "THEPILOT.COM · NEWS · 1 NEW SINCE 05:30 | Water tower vote",
+            "LOCAL · 2 NEW SINCE 05:30 | Fair opens"
+        ]
+    );
+}
+
+#[test]
+fn subscribed_is_off_when_no_group_exists() {
+    let p = Setup::new().plan();
+    assert!(p.plan.iter().all(|r| r.kind != SectionKind::Subscribed));
+    assert!(p.off.iter().all(|r| r.kind != SectionKind::Subscribed));
+}

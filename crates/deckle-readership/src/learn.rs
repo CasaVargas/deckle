@@ -258,7 +258,7 @@ pub fn stoplist(cfg: &Config) -> HashSet<String> {
             SectionKind::Reading => "Your Reading",
             SectionKind::Weather => "Weather",
             SectionKind::Local => "Local",
-            SectionKind::Interests | SectionKind::Feeds => "",
+            SectionKind::Interests | SectionKind::Feeds | SectionKind::Subscribed => "",
             SectionKind::Lottery => "Lottery",
             SectionKind::Horoscope => "Horoscope",
             SectionKind::Puzzle => "Puzzle",
@@ -272,6 +272,9 @@ pub fn stoplist(cfg: &Config) -> HashSet<String> {
     }
     for f in &cfg.feeds {
         add(&f.name);
+    }
+    for g in &cfg.subscribed {
+        add(&g.title());
     }
     for i in &cfg.interests {
         add(&i.name);

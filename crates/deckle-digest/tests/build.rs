@@ -1074,9 +1074,16 @@ fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
     assert!(errors.is_empty(), "{errors:#?}");
 
     assert_eq!(v["format"], "deckle-edition");
-    assert_eq!(v["version"], "1.1");
+    assert_eq!(v["version"], "1.2");
     assert_eq!(v["edition"]["date"], "2026-10-20");
     let sections = v["sections"].as_array().unwrap();
+    // 1.2: every story says how it was fetched; nothing here is subscribed or walled.
+    for s in sections
+        .iter()
+        .flat_map(|s| s["stories"].as_array().unwrap())
+    {
+        assert_eq!(s["access"], "open", "{s}");
+    }
     assert_eq!(sections.len(), g.edition.sections.len());
     for (s, js) in g.edition.sections.iter().zip(sections) {
         assert_eq!(js["title"], s.title.as_str());
@@ -1461,4 +1468,225 @@ fn an_extra_papers_build_is_named_by_its_stem() {
         out.path().join("deckle-daily-kid-courier-2026-10-20.epub")
     );
     assert_eq!(r.prefix, "deckle-daily-kid-courier-");
+}
+
+// ---- A subscribed paper's section group (publisher subscriptions PR 2) ----
+
+use deckle_digest::SectionKind;
+use deckle_digest::config::{SubscribedConfig, SubscriptionConfig};
+
+const PILOT_FEEDS: &str = "https://www.thepilot.com/search/?f=rss&t=article&c=";
+/// A Local feed carrying one story the group's News feed also carries.
+const SHARED_LOCAL: &str = "https://local.example/rss";
+
+/// The two BLOX section feeds, their story pages, and a local feed sharing one story.
+fn pilot_net(url: &str) -> Result<Vec<u8>, String> {
+    if let Some(rest) = url.strip_prefix(PILOT_FEEDS) {
+        let slug = rest.split('&').next().unwrap();
+        return match slug {
+            "news" => Ok(fixture("blox-news.xml")),
+            "sports" => Ok(fixture("blox-sports.xml")),
+            _ => Err(format!("offline: {url}")),
+        };
+    }
+    if url.starts_with("https://www.thepilot.com/") && url.ends_with(".html") {
+        return Ok(long_page(600).into_bytes());
+    }
+    if url == SHARED_LOCAL {
+        return Ok(
+            br#"<?xml version="1.0"?><rss version="2.0"><channel><title>Local Wire</title>
+<item><title>Town board weighs a new water tower</title><link>https://local.example/tower</link>
+<description><![CDATA[<p>The wire's synthetic copy.</p>]]></description>
+<pubDate>Tue, 20 Oct 2026 21:00:00 +0000</pubDate></item></channel></rss>"#
+                .to_vec(),
+        );
+    }
+    fake(url)
+}
+
+fn subscribed_config(sections: Vec<SectionKind>, subscribed_account: bool) -> Config {
+    let mut c = config();
+    c.sections = sections;
+    c.subscribed = vec![SubscribedConfig {
+        site: "thepilot.com".into(),
+        name: Some("The Pilot".into()),
+        sections: vec!["news".into(), "sports".into()],
+        max_items: None,
+        max_age_hours: None,
+    }];
+    if subscribed_account {
+        c.subscriptions = vec![SubscriptionConfig {
+            site: "thepilot.com".into(),
+            username: "reader".into(),
+            kind: Some("blox".into()),
+        }];
+    }
+    c
+}
+
+const STRANGER_NOTE: &str =
+    "No subscription for thepilot.com in digest.toml; stories print as a stranger sees them.";
+
+#[test]
+fn a_subscribed_group_prints_one_section_per_slug_after_local() {
+    let c = subscribed_config(vec![SectionKind::Local, SectionKind::Subscribed], true);
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        pilot_net(url)
+    };
+    let g = gather(&c, date(), now(), &net);
+    let keys: Vec<&str> = g.edition.sections.iter().map(|s| s.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "local",
+            "subscribed:thepilot.com:news",
+            "subscribed:thepilot.com:sports"
+        ]
+    );
+    let (news, sports) = (&g.edition.sections[1], &g.edition.sections[2]);
+    assert_eq!(news.title, "News");
+    assert_eq!(sports.title, "Sports");
+    assert_eq!(news.kicker.as_deref(), Some("The Pilot"));
+    assert_eq!(sports.kicker.as_deref(), Some("The Pilot"));
+    let titles: Vec<&str> = news.articles.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(
+        titles,
+        [
+            "Town board weighs a new water tower",
+            "Library reopens after roof repairs"
+        ]
+    );
+    // whole stories from the story pages, not the feed's summaries
+    assert!(
+        news.articles[0].body.contains("library"),
+        "{}",
+        news.articles[0].body
+    );
+    assert_eq!(sports.articles.len(), 2);
+    // both are news (lead and puzzle theme)
+    assert_eq!(g.news, [0, 1, 2]);
+    // the feed asked for [local] max_items stories plus five spare
+    let asked = asked.lock().unwrap();
+    assert!(
+        asked
+            .iter()
+            .any(|u| u.starts_with(&format!("{PILOT_FEEDS}news&l=17&"))),
+        "{asked:?}"
+    );
+    assert!(!g.notes.iter().any(|n| n == STRANGER_NOTE), "{:?}", g.notes);
+}
+
+#[test]
+fn a_story_in_local_and_the_group_prints_once_in_local() {
+    let mut c = subscribed_config(vec![SectionKind::Local, SectionKind::Subscribed], true);
+    c.local.google_news = String::new();
+    c.local.feeds = vec![SHARED_LOCAL.into()];
+    let g = gather(&c, date(), now(), &pilot_net);
+    let shared = "Town board weighs a new water tower";
+    let holders: Vec<&str> = g
+        .edition
+        .sections
+        .iter()
+        .filter(|s| s.articles.iter().any(|a| a.title == shared))
+        .map(|s| s.key.as_str())
+        .collect();
+    assert_eq!(holders, ["local"]);
+    // the group's News refills with its next story
+    let news = &g.edition.sections[1];
+    assert_eq!(news.key, "subscribed:thepilot.com:news");
+    assert_eq!(news.articles.len(), 1);
+    assert_eq!(news.articles[0].title, "Library reopens after roof repairs");
+}
+
+#[test]
+fn a_subscribed_group_after_local_refills_to_max_items_from_its_spares() {
+    let mut c = subscribed_config(vec![SectionKind::Local, SectionKind::Subscribed], true);
+    c.local.google_news = String::new();
+    c.local.feeds = vec![SHARED_LOCAL.into()];
+    c.subscribed[0].max_items = Some(1);
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        pilot_net(url)
+    };
+    let g = gather(&c, date(), now(), &net);
+    // one story budgeted, six asked for: Local's shared story is dropped and the next fills in
+    assert!(
+        asked
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|u| u.starts_with(&format!("{PILOT_FEEDS}news&l=6&"))),
+        "{asked:?}"
+    );
+    let news = &g.edition.sections[1];
+    assert_eq!(news.key, "subscribed:thepilot.com:news");
+    let titles: Vec<&str> = news.articles.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(titles, ["Library reopens after roof repairs"]);
+}
+
+#[test]
+fn a_group_before_local_prints_the_shared_story() {
+    let mut c = subscribed_config(vec![SectionKind::Subscribed, SectionKind::Local], true);
+    c.local.google_news = String::new();
+    c.local.feeds = vec![SHARED_LOCAL.into()];
+    let g = gather(&c, date(), now(), &pilot_net);
+    let news = &g.edition.sections[0];
+    assert_eq!(news.key, "subscribed:thepilot.com:news");
+    assert_eq!(
+        news.articles[0].title,
+        "Town board weighs a new water tower"
+    );
+    assert_eq!(news.articles.len(), 2);
+    // Whichever section comes first prints a shared story: Local, after the group, skips it.
+    let local = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "local")
+        .expect("Local prints after the group");
+    assert!(
+        local
+            .articles
+            .iter()
+            .all(|a| a.title != "Town board weighs a new water tower"),
+        "Local reprinted the group's story: {:?}",
+        local.articles.iter().map(|a| &a.title).collect::<Vec<_>>()
+    );
+    let holders: Vec<&str> = g
+        .edition
+        .sections
+        .iter()
+        .filter(|s| {
+            s.articles
+                .iter()
+                .any(|a| a.title == "Town board weighs a new water tower")
+        })
+        .map(|s| s.key.as_str())
+        .collect();
+    assert_eq!(holders, ["subscribed:thepilot.com:news"]);
+}
+
+#[test]
+fn a_group_without_an_account_prints_as_a_stranger_with_a_note() {
+    let c = subscribed_config(vec![SectionKind::Local, SectionKind::Subscribed], false);
+    let g = gather(&c, date(), now(), &pilot_net);
+    let keys: Vec<&str> = g.edition.sections.iter().map(|s| s.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        [
+            "local",
+            "subscribed:thepilot.com:news",
+            "subscribed:thepilot.com:sports"
+        ]
+    );
+    assert_eq!(g.edition.sections[1].articles.len(), 2);
+    assert_eq!(
+        g.notes.iter().filter(|n| *n == STRANGER_NOTE).count(),
+        1,
+        "{:?}",
+        g.notes
+    );
 }

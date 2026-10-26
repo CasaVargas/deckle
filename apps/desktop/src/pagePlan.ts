@@ -26,8 +26,9 @@ export function pressLine(p: Press, nowMs: number): string {
 }
 
 /** Kinds whose rows come from a list in the config and stay one block in the paper. */
-const GROUPED: SectionKind[] = ["feeds", "interests"];
+const GROUPED: SectionKind[] = ["feeds", "interests", "subscribed"];
 const isFeed = (r: PagePlanRow) => r.kind === "feeds";
+const isSub = (r: PagePlanRow) => r.kind === "subscribed";
 const isInterest = (r: PagePlanRow) => r.kind === "interests";
 const grouped = (r: PagePlanRow) => GROUPED.includes(r.kind);
 
@@ -35,6 +36,9 @@ const grouped = (r: PagePlanRow) => GROUPED.includes(r.kind);
 function matches(cfg: DailyConfig, rows: PagePlanRow[]): boolean {
   return (
     rows.filter(isFeed).every((r) => r.feed !== null && cfg.feeds[r.feed]?.name === r.name) &&
+    rows
+      .filter(isSub)
+      .every((r) => r.subscribed && cfg.subscribed?.some((g) => g.site === r.subscribed!.site && g.sections.includes(r.subscribed!.slug))) &&
     rows.filter(isInterest).every((r) => r.interest !== null && cfg.interests?.[r.interest]?.name === r.name) &&
     rows.every((r) => r.place === null || cfg.local.places?.[r.place]?.name === r.name)
   );
@@ -56,6 +60,7 @@ export function reorder(cfg: DailyConfig, all: PagePlanRow[], from: number, to: 
   from = rows.indexOf(moving);
   to = target && target.place !== null ? local : rows.indexOf(target ?? rows[rows.length - 1]);
   if (to < 0) to = rows.length - 1;
+  if (isSub(moving)) return moveSubscribed(cfg, rows, from, to);
   const order = rows.slice();
   const [moved] = order.splice(from, 1);
   order.splice(Math.max(0, Math.min(to, order.length)), 0, moved);
@@ -77,19 +82,40 @@ export function reorder(cfg: DailyConfig, all: PagePlanRow[], from: number, to: 
     // a row of this kind must touch its block: next to another, or between them
     if (moved.kind === kind && !(at >= first - 1 && at <= last + 1)) snap(kind, at < first ? "start" : "end");
   }
-  const sections: SectionKind[] = [];
-  for (const r of order) {
-    const kind = r.kind;
-    if (!sections.includes(kind)) sections.push(kind);
-  }
-  // sections not shown as rows (none today) keep their place at the end
-  for (const s of cfg.sections) if (!sections.includes(s)) sections.push(s);
+  const sections = sectionsOf(cfg, order);
   const feedRows = order.filter(isFeed);
   const feeds = feedRows.length > 0 ? feedRows.map((r) => ({ ...cfg.feeds[r.feed ?? 0] })) : cfg.feeds.slice();
   const interestRows = order.filter(isInterest);
   const interests =
     interestRows.length > 0 && cfg.interests ? interestRows.map((r) => ({ ...cfg.interests![r.interest ?? 0] })) : cfg.interests;
   return interests === undefined ? { ...cfg, sections, feeds } : { ...cfg, sections, feeds, interests };
+}
+
+/** The kinds of `order`, each where it first appears; kinds with no row keep their place at the end. */
+function sectionsOf(cfg: DailyConfig, order: PagePlanRow[]): SectionKind[] {
+  const sections: SectionKind[] = [];
+  for (const r of order) {
+    if (!sections.includes(r.kind)) sections.push(r.kind);
+  }
+  for (const s of cfg.sections) if (!sections.includes(s)) sections.push(s);
+  return sections;
+}
+
+/** The subscribed rows are one block: moving one moves them all, to the row at `to` (never into
+ * the feeds block). Their order inside the block is the file's, so a drop on one is a no-op. */
+function moveSubscribed(cfg: DailyConfig, rows: PagePlanRow[], from: number, to: number): DailyConfig {
+  if (isSub(rows[to])) return cfg;
+  const rest = rows.filter((r) => !isSub(r));
+  const block = rows.filter(isSub);
+  const target = rows[to];
+  let at = rest.indexOf(target) + (to > from ? 1 : 0);
+  const feeds = rest.map((r, i) => (isFeed(r) ? i : -1)).filter((i) => i >= 0);
+  if (feeds.length > 0 && at > feeds[0] && at <= feeds[feeds.length - 1]) {
+    at = at - feeds[0] < feeds[feeds.length - 1] + 1 - at ? feeds[0] : feeds[feeds.length - 1] + 1;
+  }
+  const order = rest.slice();
+  order.splice(at, 0, ...block);
+  return { ...cfg, sections: sectionsOf(cfg, order) };
 }
 
 /** Sets a row's story budget, 1–20, on its own key. */
@@ -107,6 +133,10 @@ export function setBudget(cfg: DailyConfig, row: PagePlanRow, n: number): DailyC
       return { ...cfg, local: { ...cfg.local, max_items: v } };
     case "feeds":
       return { ...cfg, feeds: cfg.feeds.map((f, i) => (i === row.feed ? { ...f, max_items: v } : f)) };
+    case "subscribed": {
+      const ref = row.subscribed;
+      return { ...cfg, subscribed: (cfg.subscribed ?? []).map((g) => (g.site === ref?.site ? { ...g, max_items: v } : g)) };
+    }
     case "interests":
       return { ...cfg, interests: (cfg.interests ?? []).map((it, i) => (i === row.interest ? { ...it, max_items: v } : it)) };
     default:
@@ -132,7 +162,8 @@ export function weekLabel(d: WeekDay): string {
  * place (places follow Local), or null at the ends. */
 export function step(rows: PagePlanRow[], i: number, dir: -1 | 1): number | null {
   for (let j = i + dir; j >= 0 && j < rows.length; j += dir) {
-    if (rows[j].place === null) return j;
+    // a subscribed paper moves as a block, past its own rows
+    if (rows[j].place === null && !(isSub(rows[i]) && isSub(rows[j]))) return j;
   }
   return null;
 }

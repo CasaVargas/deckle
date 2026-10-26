@@ -11,7 +11,7 @@ use regex::Regex;
 
 use crate::config::{Config, FeedConfig, FullText, Topic};
 use crate::fetch::{Net, encode};
-use crate::publisher::Access;
+use crate::publisher::{Access, Walled};
 use crate::{Article, Section, article, esc};
 
 /// Paragraphs kept per article.
@@ -223,7 +223,19 @@ pub fn full_article(item: &Item, cfg: &Config, net: &dyn Net) -> Article {
         return a;
     };
     let outlet = item.source.clone().unwrap_or_else(|| host(&url).to_owned());
-    let (body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+    let (mut body, photos, mut extra) = story_body(&x, &outlet, cfg, net);
+    // A page the site withholds from this account (not in the plan, or the plan unreadable on
+    // an encrypted page) is premium for certain: what extracted is its clear preview, so it
+    // prints with the reason, as the headline-only fallback does (spec §9).
+    if let Access::Walled {
+        site,
+        why: why @ (Walled::NotInPlan | Walled::PlanUnknown),
+    } = &access
+    {
+        let note = format!("<p class=\"note\">{}</p>", esc(&why.note(site)));
+        let at = body.rfind("<p class=\"source\">").unwrap_or(body.len());
+        body.insert_str(at, &note);
+    }
     if let Some(p) = item.published {
         extra.published = Some(p.to_rfc3339());
     }
@@ -418,7 +430,12 @@ pub(crate) fn section_of(
 
 /// The Local section: the Google News search and local feeds, merged, deduplicated, newest
 /// first.
-pub fn local_section(cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section {
+pub fn local_section(
+    cfg: &Config,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    taken: &HashSet<String>,
+) -> Section {
     let l = &cfg.local;
     if l.google_news.trim().is_empty() && l.feeds.is_empty() {
         return super::unavailable(
@@ -428,7 +445,7 @@ pub fn local_section(cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section
     }
     let kicker = (!cfg.place.is_empty()).then(|| format!("News from around {}", cfg.place));
     let (search, feeds, max) = (&l.google_news, &l.feeds, l.max_items);
-    local_news("Local", kicker, search, feeds, max, cfg, now, net)
+    local_news("Local", kicker, search, feeds, max, cfg, now, net, taken)
 }
 
 /// Another place's local news (#102), built as Local is.
@@ -453,6 +470,9 @@ pub fn place_section(
         cfg,
         now,
         net,
+        // A place keeps its own stories even when Local printed them: two towns rarely overlap,
+        // and a place is built exactly as Local is (local places design §2).
+        &HashSet::new(),
     )
 }
 
@@ -507,6 +527,7 @@ fn local_news(
     cfg: &Config,
     now: DateTime<Utc>,
     net: &dyn Net,
+    taken: &HashSet<String>,
 ) -> Section {
     let (mut items, errors) = fetch_merged(
         &[search.to_owned()],
@@ -515,6 +536,9 @@ fn local_news(
         now,
         net,
     );
+    // A story an earlier section printed is dropped before the cut (whichever section comes
+    // first in `sections` prints it), so Local refills from its next-newest items.
+    items.retain(|i| !taken.contains(&title_key(&i.title)));
     items.truncate(max_items);
     let mode = if cfg.full_text {
         FullText::Yes
@@ -533,6 +557,31 @@ pub fn feed_section(
     net: &dyn Net,
     taken: &mut HashSet<String>,
 ) -> Section {
+    let opts = FeedOptions {
+        kicker: None,
+        max_age_hours: cfg.max_age_hours,
+    };
+    feed_section_with(feed, opts, cfg, now, net, taken)
+}
+
+/// What a feed section takes from its caller rather than the `[[feeds]]` entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FeedOptions {
+    /// The line over the section's title (a subscribed group's name).
+    pub kicker: Option<String>,
+    /// Older items are left out.
+    pub max_age_hours: u32,
+}
+
+/// [`feed_section`] with the kicker and age window given.
+pub fn feed_section_with(
+    feed: &FeedConfig,
+    opts: FeedOptions,
+    cfg: &Config,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    taken: &mut HashSet<String>,
+) -> Section {
     let sources = feed.sources();
     if sources.is_empty() {
         return super::unavailable(&feed.name, "give a url, urls or topic");
@@ -541,7 +590,10 @@ pub fn feed_section(
     let mut items = Vec::new();
     let mut errors = Vec::new();
     for url in &sources {
-        match net.get(url).and_then(|b| parse(&b, now, cfg.max_age_hours)) {
+        match net
+            .get(url)
+            .and_then(|b| parse(&b, now, opts.max_age_hours))
+        {
             Ok((_, found)) if topic_url.as_ref() == Some(url) => items.extend(as_briefs(found)),
             Ok((name, found)) => items.extend(found.into_iter().map(|mut i| {
                 // Several sources: name the channel so a reader can tell them apart.
@@ -571,7 +623,7 @@ pub fn feed_section(
     taken.extend(items.iter().map(|i| title_key(&i.title)));
     section_of(
         &feed.name,
-        None,
+        opts.kicker,
         &items,
         &errors,
         cfg,
@@ -667,19 +719,23 @@ mod tests {
     }
 
     /// A subscribed host serving `page` as a stranger would see it.
-    struct WalledNet(String);
+    struct WalledNet(String, crate::publisher::Walled);
+    impl WalledNet {
+        fn stranger(page: String) -> Self {
+            WalledNet(page, crate::publisher::Walled::NotSignedIn)
+        }
+    }
     impl Net for WalledNet {
         fn get(&self, _: &str) -> Result<Vec<u8>, String> {
             Ok(self.0.clone().into_bytes())
         }
         fn get_page_as(&self, u: &str) -> Result<(Vec<u8>, crate::publisher::Access), String> {
-            use crate::publisher::{Access, Walled};
             self.get(u).map(|b| {
                 (
                     b,
-                    Access::Walled {
+                    crate::publisher::Access::Walled {
                         site: "thepilot.com".into(),
-                        why: Walled::NotSignedIn,
+                        why: self.1.clone(),
                     },
                 )
             })
@@ -705,7 +761,7 @@ mod tests {
 
     #[test]
     fn a_withheld_story_prints_the_feeds_text_with_the_reason() {
-        let net = WalledNet("<html>LOGIN</html>".into());
+        let net = WalledNet::stranger("<html>LOGIN</html>".into());
         let a = full_article(&item(), &Config::default(), &net);
         assert!(a.body.contains("own summary."));
         assert!(
@@ -719,7 +775,7 @@ mod tests {
     #[test]
     fn a_free_story_on_a_subscribed_host_reads_in_full_as_a_stranger() {
         let words = "word ".repeat(300);
-        let net = WalledNet(format!(
+        let net = WalledNet::stranger(format!(
             "<html><body><article><h1>T</h1><p>{words}</p><p>{words}</p></article></body></html>"
         ));
         let a = full_article(&item(), &Config::default(), &net);
@@ -727,6 +783,32 @@ mod tests {
         assert!(!a.body.contains("Subscriber story"), "{}", a.body);
         assert!(!a.body.contains("own summary."), "{}", a.body);
         assert_eq!(a.extra.access, walled());
+    }
+
+    #[test]
+    fn a_premium_page_outside_the_plan_prints_its_clear_text_with_the_reason() {
+        use crate::publisher::Walled;
+        let words = "word ".repeat(150);
+        for why in [Walled::NotInPlan, Walled::PlanUnknown] {
+            let net = WalledNet(
+                format!("<html><body><article><h1>T</h1><p>{words}</p></article></body></html>"),
+                why.clone(),
+            );
+            let a = full_article(&item(), &Config::default(), &net);
+            assert!(a.body.contains("word word"), "{}", a.body);
+            assert!(!a.body.contains("own summary."), "{}", a.body);
+            let note = format!("<p class=\"note\">{}</p>", esc(&why.note("thepilot.com")));
+            assert!(a.body.contains(&note), "{}", a.body);
+            // the note sits before the source line, as the headline-only fallback has it
+            assert!(a.body.find(&note) < a.body.find("<p class=\"source\">"));
+            assert_eq!(
+                a.extra.access,
+                crate::publisher::Access::Walled {
+                    site: "thepilot.com".into(),
+                    why
+                }
+            );
+        }
     }
 
     #[test]
