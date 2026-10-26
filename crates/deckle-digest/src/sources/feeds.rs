@@ -417,7 +417,12 @@ fn section_of(
 
 /// The Local section: the Google News search and local feeds, merged, deduplicated, newest
 /// first.
-pub fn local_section(cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section {
+pub fn local_section(
+    cfg: &Config,
+    now: DateTime<Utc>,
+    net: &dyn Net,
+    taken: &HashSet<String>,
+) -> Section {
     let l = &cfg.local;
     if l.google_news.trim().is_empty() && l.feeds.is_empty() {
         return super::unavailable(
@@ -427,7 +432,7 @@ pub fn local_section(cfg: &Config, now: DateTime<Utc>, net: &dyn Net) -> Section
     }
     let kicker = (!cfg.place.is_empty()).then(|| format!("News from around {}", cfg.place));
     let (search, feeds, max) = (&l.google_news, &l.feeds, l.max_items);
-    local_news("Local", kicker, search, feeds, max, cfg, now, net)
+    local_news("Local", kicker, search, feeds, max, cfg, now, net, taken)
 }
 
 /// Another place's local news (#102), built as Local is.
@@ -452,6 +457,9 @@ pub fn place_section(
         cfg,
         now,
         net,
+        // A place keeps its own stories even when Local printed them: two towns rarely overlap,
+        // and a place is built exactly as Local is (local places design §2).
+        &HashSet::new(),
     )
 }
 
@@ -467,6 +475,7 @@ fn local_news(
     cfg: &Config,
     now: DateTime<Utc>,
     net: &dyn Net,
+    taken: &HashSet<String>,
 ) -> Section {
     let mut items = Vec::new();
     let mut errors = Vec::new();
@@ -494,6 +503,9 @@ fn local_news(
     let mut seen = HashSet::new();
     items.retain(|i| seen.insert(title_key(&i.title)));
     items.sort_by_key(|i| std::cmp::Reverse(i.published));
+    // A story an earlier section printed is dropped before the cut (whichever section comes
+    // first in `sections` prints it), so Local refills from its next-newest items.
+    items.retain(|i| !taken.contains(&title_key(&i.title)));
     items.truncate(max_items);
     let mode = if cfg.full_text {
         FullText::Yes

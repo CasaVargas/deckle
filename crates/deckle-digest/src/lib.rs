@@ -474,7 +474,7 @@ pub fn gather_with_editor(
             }
             SectionKind::Local => {
                 news.push(edition.sections.len());
-                let local = sources::feeds::local_section(cfg, now, net);
+                let local = sources::feeds::local_section(cfg, now, net, &printed);
                 printed.extend(
                     local
                         .articles
@@ -550,8 +550,9 @@ pub fn gather_with_editor(
                 .push(sources::onthisday::section(date, net)),
             SectionKind::Subscribed => {
                 use publisher::Publisher;
+                let mut noted = std::collections::HashSet::new();
                 for group in &cfg.subscribed {
-                    if cfg.subscription(&group.site).is_none() {
+                    if cfg.subscription(&group.site).is_none() && noted.insert(&group.site) {
                         notes.push(format!(
                             "No subscription for {} in digest.toml; stories print as a stranger \
                              sees them.",

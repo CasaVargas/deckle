@@ -1605,6 +1605,33 @@ fn a_group_before_local_prints_the_shared_story() {
         "Town board weighs a new water tower"
     );
     assert_eq!(news.articles.len(), 2);
+    // Whichever section comes first prints a shared story: Local, after the group, skips it.
+    let local = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "local")
+        .expect("Local prints after the group");
+    assert!(
+        local
+            .articles
+            .iter()
+            .all(|a| a.title != "Town board weighs a new water tower"),
+        "Local reprinted the group's story: {:?}",
+        local.articles.iter().map(|a| &a.title).collect::<Vec<_>>()
+    );
+    let holders: Vec<&str> = g
+        .edition
+        .sections
+        .iter()
+        .filter(|s| {
+            s.articles
+                .iter()
+                .any(|a| a.title == "Town board weighs a new water tower")
+        })
+        .map(|s| s.key.as_str())
+        .collect();
+    assert_eq!(holders, ["subscribed:thepilot.com:news"]);
 }
 
 #[test]
