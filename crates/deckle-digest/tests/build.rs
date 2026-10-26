@@ -1073,9 +1073,13 @@ fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
     assert!(errors.is_empty(), "{errors:#?}");
 
     assert_eq!(v["format"], "deckle-edition");
-    assert_eq!(v["version"], "1.1");
+    assert_eq!(v["version"], "1.2");
     assert_eq!(v["edition"]["date"], "2026-10-20");
     let sections = v["sections"].as_array().unwrap();
+    // 1.2: every story says how it was fetched; nothing here is subscribed or walled.
+    for s in sections.iter().flat_map(|s| s["stories"].as_array().unwrap()) {
+        assert_eq!(s["access"], "open", "{s}");
+    }
     assert_eq!(sections.len(), g.edition.sections.len());
     for (s, js) in g.edition.sections.iter().zip(sections) {
         assert_eq!(js["title"], s.title.as_str());

@@ -20,7 +20,7 @@ use crate::{BuildReport, EDITION_PREFIX, Gathered};
 
 /// The format's name and the version this writer writes (§6.1, §10).
 pub const FORMAT: &str = "deckle-edition";
-pub const VERSION: &str = "1.1";
+pub const VERSION: &str = "1.2";
 
 /// The bundle's folder name for `date`.
 pub fn bundle_name(date: NaiveDate) -> String {
@@ -90,6 +90,8 @@ struct StoryJson {
     prominence: &'static str,
     partial: bool,
     pull_quote: Option<String>,
+    // 1.2: how the story was fetched.
+    access: &'static str,
 }
 
 #[derive(Serialize)]
@@ -240,7 +242,18 @@ fn kind_name(key: &str) -> &'static str {
         "horoscope" => "horoscope",
         "puzzle" => "puzzle",
         "onthisday" => "onthisday",
+        "subscribed" => "subscribed",
         _ => "other",
+    }
+}
+
+/// The bundle's name for how a story was fetched (1.2).
+fn access_name(a: &crate::publisher::Access) -> &'static str {
+    use crate::publisher::Access;
+    match a {
+        Access::Open => "open",
+        Access::Subscription { .. } => "subscription",
+        Access::Walled { .. } => "walled",
     }
 }
 
@@ -471,6 +484,7 @@ pub fn write(
                 prominence,
                 partial: crate::article::looks_cut_off(&text),
                 pull_quote: crate::article::pull_quote(&paragraphs(&body), n_words),
+                access: access_name(&a.extra.access),
                 words: n_words,
                 body: Body {
                     format: "xhtml",
@@ -725,5 +739,22 @@ mod tests {
         assert_eq!(kind_name("feeds:Hacker News"), "feeds");
         assert_eq!(kind_name("local:Asheville, NC"), "local");
         assert_eq!(kind_name("weather"), "weather");
+        assert_eq!(kind_name("subscribed:thepilot.com:news"), "subscribed");
+    }
+
+    #[test]
+    fn access_names_the_three_ways_a_story_was_fetched() {
+        use crate::publisher::{Access, Walled};
+        assert_eq!(access_name(&Access::Open), "open");
+        let sub = Access::Subscription {
+            site: "thepilot.com".into(),
+            service: "BLOX".into(),
+        };
+        assert_eq!(access_name(&sub), "subscription");
+        let walled = Access::Walled {
+            site: "thepilot.com".into(),
+            why: Walled::NotInPlan,
+        };
+        assert_eq!(access_name(&walled), "walled");
     }
 }
