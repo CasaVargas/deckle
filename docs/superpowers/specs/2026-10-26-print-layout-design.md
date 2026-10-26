@@ -106,6 +106,9 @@ The lead (from `front_plan`) jumps when its story has more after its opening:
   The PDF moves it to the front page (§4.3); the EPUB leaves it in `rest`.
 - **Rest:** everything after the opening. When it holds no paragraph text, there's no jump: the
   story prints whole on the front page, and its section lists it as a refer (§5.4).
+- **No opening:** a body with no top-level paragraph (a brief, the lottery, an empty body) has
+  no jump and isn't printed whole. The paper prints it as it does today: the teaser on the
+  front page, the story in its section.
 - **Slug:** the headline's first word that isn't a stopword (a short fixed list: a, an, and,
   the, of, to, in, on, for, at, by, with, is, are, was, will, be, as, from, after, how, why,
   what, new), upper-cased, letters only. "Mill Yard Will Be a Market Again" gives MILL,
@@ -289,9 +292,10 @@ a fresh screen, so the folio sits where a page's folio would.
 
 The lead's story in its section starts with a jump head instead of its `h2.headline`:
 
-- `p.jumphead` with the slug in bold, then "Continued from A1" as a link to the jump line;
-- the headline in italics, as `p.jumptitle`, carrying the article's `id="a<j>"`, so every
-  existing link to the story still lands;
+- `p.jumphead`, carrying the article's `id="a<j>"` so every existing link to the story lands
+  at the top of the jump: the slug in bold, then "Continued from A1" as a link to the jump
+  line;
+- the headline in italics, as `p.jumptitle`;
 - then `rest`.
 
 The back links at the end ("↩ Local · ↩ Front page") stay as they are.
