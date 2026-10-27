@@ -1,0 +1,16 @@
+# Keys that never get an index entry (§6.4). Whole keys only: "olive oil" is kept.
+# Seasoning modifiers (black, ground, kosher, sea, flaky, ...) are ignored when checking,
+# so "freshly ground black pepper" and "kosher salt" are covered by "pepper" and "salt".
+salt
+pepper
+water
+oil
+ice
+sugar substitute
+salt and pepper
+pepper and salt
+hot water
+boiling water
+ice water
+cooking spray
+nonstick spray

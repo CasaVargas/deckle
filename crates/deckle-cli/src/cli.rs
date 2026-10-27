@@ -351,6 +351,13 @@ pub enum CookbookCommand {
         who: String,
         text: String,
     },
+    /// Write the book as an EPUB (`cookbook.epub`) in a folder, without sending it anywhere.
+    /// Prints how many recipes in how many chapters, then the path.
+    Build {
+        /// The folder to write `cookbook.epub` into (made if it isn't there).
+        #[arg(short, long)]
+        out: PathBuf,
+    },
     /// Choose a recipe's picture.
     Picture {
         /// A recipe's id, or the address it was saved from.
