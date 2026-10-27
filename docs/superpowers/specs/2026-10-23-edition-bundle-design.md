@@ -247,15 +247,17 @@ Edition mode) without reimplementing it. All of it is optional and additive. A 1
 ignores it.
 
 ```json
-"sections": [ { "key": "local", "kind": "local", "book": "B", "…": "…" } ],
+"sections": [
+  { "key": "local", "kind": "local", "book": "B",
+    "stories": [ { "id": "2026-10-26/local/2", "pull": { "text": "“We have waited forty years for somebody to do something with that yard”", "after": 4 }, "…": "…" } ] }
+],
 "front": {
   "lead": "2026-10-26/local/1",
   "tiles": ["…"],
   "skybox": ["2026-10-26/puzzle/1", "2026-10-26/reading/1"],
   "lead_layout": "jump",
   "jump": { "story": "2026-10-26/local/1", "slug": "MILL", "opening": 3 }
-},
-"stories": [ { "id": "2026-10-26/feeds:World/1", "pull": { "text": "“We have waited forty years for somebody to do something with that yard”", "after": 4 } } ]
+}
 ```
 
 - **`book`** (section): the section's letter (§2.1 of the print layout design). Runs follow the
