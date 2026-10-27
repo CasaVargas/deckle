@@ -25,6 +25,7 @@ export default function CookbookAdd({
   book,
   delivery,
   focusAdd,
+  focusTaken,
   incoming,
   taken,
   onChanged,
@@ -36,6 +37,8 @@ export default function CookbookAdd({
   delivery: CookbookDelivery | null;
   /** Bumped to focus the link box (the Books tab's Recipe… entry). */
   focusAdd: number;
+  /** The last `focusAdd` acted on, kept by the app so showing the tab again doesn't focus it again. */
+  focusTaken: MutableRefObject<number>;
   incoming: Incoming | null;
   /** The last `incoming.seq` handled, kept by the tab so a room switch doesn't replay it. */
   taken: MutableRefObject<number>;
@@ -106,11 +109,12 @@ export default function CookbookAdd({
 
   // The Books tab's Recipe… entry: the link box takes focus
   useEffect(() => {
-    if (focusAdd > 0) {
+    if (focusAdd > focusTaken.current) {
+      focusTaken.current = focusAdd;
       input.current?.focus();
       input.current?.select();
     }
-  }, [focusAdd]);
+  }, [focusAdd, focusTaken]);
 
   // A paste or drop: the first address goes on the card now, the rest wait their turn
   useEffect(() => {

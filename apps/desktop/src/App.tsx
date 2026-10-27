@@ -19,6 +19,7 @@ import { runSummary } from "./bookStatus";
 import CookbookView from "./CookbookView";
 import type { Incoming } from "./CookbookAdd";
 import DailyView from "./DailyView";
+import type { Room } from "./dailyRooms";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
@@ -79,7 +80,10 @@ export default function App() {
   const [tab, setTab] = useState<"books" | "daily" | "cookbook" | "kindle">("books");
   /** The Cookbook tab: a counter that sends focus to Add's link box, and what was pasted or dropped on the tab. */
   const [focusAdd, setFocusAdd] = useState(0);
+  const focusTaken = useRef(0);
   const [incoming, setIncoming] = useState<Incoming | null>(null);
+  /** The Daily room to land on when that tab is opened from the Cookbook's Delivery note (taken once). */
+  const [dailyRoom, setDailyRoom] = useState<Room | null>(null);
   const [library, setLibrary] = useState<LibraryStatus | null>(null);
   /** The Books tab's library (Books and Kindle design §8): Deckle's, calibre's and your folders' books. */
   const [catalog, setCatalog] = useState<CatalogView | null>(null);
@@ -221,11 +225,14 @@ export default function App() {
       else if (ev.payload.type === "leave") setDragging(false);
       else if (ev.payload.type === "drop") {
         setDragging(false);
-        // On the Cookbook tab, link files and saved pages are recipes for Add; nothing else belongs there.
-        if (cookbookPasteReady.current) {
-          const files = ev.payload.paths.filter((p) => ARTICLE_FILE.test(p));
-          if (files.length > 0) setIncoming((c) => ({ seq: (c?.seq ?? 0) + 1, targets: files }));
-          else setNotice("Drop .webloc, .url or .html files to add recipes.");
+        // On the Cookbook tab, link files and saved pages are recipes for Add; nothing else belongs
+        // there, and never the Books library (not even while Settings covers the tab).
+        if (tabRef.current === "cookbook") {
+          if (cookbookPasteReady.current) {
+            const files = ev.payload.paths.filter((p) => ARTICLE_FILE.test(p));
+            if (files.length > 0) setIncoming((c) => ({ seq: (c?.seq ?? 0) + 1, targets: files }));
+            else setNotice("Drop .webloc, .url or .html files to add recipes.");
+          }
           return;
         }
         addPaths(ev.payload.paths);
@@ -589,8 +596,21 @@ export default function App() {
           </button>
         </header>
 
-        {tab === "daily" && <DailyView onNotice={setNotice} />}
-        {tab === "cookbook" && <CookbookView onNotice={setNotice} focusAdd={focusAdd} incoming={incoming} />}
+        {tab === "daily" && <DailyView onNotice={setNotice} initialRoom={dailyRoom} onRoomTaken={() => setDailyRoom(null)} />}
+        {tab === "cookbook" && (
+          <CookbookView
+            onNotice={setNotice}
+            focusAdd={focusAdd}
+            focusTaken={focusTaken}
+            incoming={incoming}
+            apiKey={settings.llm_api_key}
+            onApiKey={(llm_api_key) => saveSettings({ ...settings, llm_api_key })}
+            onDailyDelivery={() => {
+              setDailyRoom("delivery");
+              setTab("daily");
+            }}
+          />
+        )}
         {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
         {tab === "books" && articleOpen && (
           <ArticleField

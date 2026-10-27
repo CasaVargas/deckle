@@ -65,7 +65,16 @@ function host(url: string | null): string {
   }
 }
 
-export default function DailyView({ onNotice }: { onNotice: (m: string) => void }) {
+export default function DailyView({
+  onNotice,
+  initialRoom,
+  onRoomTaken,
+}: {
+  onNotice: (m: string) => void;
+  /** A room to open on (the Cookbook's Delivery note links to Delivery); `onRoomTaken` says it was used. */
+  initialRoom?: Room | null;
+  onRoomTaken?: () => void;
+}) {
   const [state, setState] = useState<DailyState | null>(null);
   const [draft, setDraft] = useState<DailyConfig | null>(null);
   // Saving as you go (Daily tab redesign §4): the newest edit is in draftRef; `seq` counts edits,
@@ -89,7 +98,11 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
   const [password, setPassword] = useState("");
   const [emailMsg, setEmailMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [testing, setTesting] = useState(false);
-  const [room, setRoom] = useState<Room>("today");
+  const [room, setRoom] = useState<Room>(initialRoom ?? "today");
+  useEffect(() => {
+    if (initialRoom) onRoomTaken?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [readership, setReadership] = useState<ReadershipView | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   // Your papers (many papers §7): the selected paper is the one every room works on
