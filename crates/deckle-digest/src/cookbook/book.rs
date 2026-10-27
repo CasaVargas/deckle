@@ -62,7 +62,7 @@ pub fn printed_picture(store: &Store, saved: &Saved, cfg: &BookConfig) -> Pictur
 }
 
 /// The title the book shows for a recipe.
-fn shown_title(s: &Saved) -> String {
+pub(super) fn shown_title(s: &Saved) -> String {
     [s.title_override.as_deref(), Some(&s.recipe.title)]
         .into_iter()
         .flatten()
@@ -159,6 +159,7 @@ pub fn build(store: &Store, out: &Path) -> Result<Built, String> {
         bins[at].push(Entry {
             saved,
             title: shown_title(saved),
+            illustrated: image.is_some() && picture == Picture::Illustration,
             image,
         });
     }

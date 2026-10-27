@@ -5,6 +5,7 @@
 pub mod add;
 pub mod book;
 pub mod filing;
+pub mod illustrate;
 pub mod index;
 pub(crate) mod ornament;
 pub mod picture;

@@ -19,6 +19,8 @@ pub(super) struct Entry<'a> {
     pub title: String,
     /// The picture's file name inside `OEBPS/images/`, when one is printed.
     pub image: Option<String>,
+    /// That picture is a generated illustration (the foot says so).
+    pub illustrated: bool,
 }
 
 /// A chapter with something in it.
@@ -165,7 +167,7 @@ fn groups(out: &mut String, groups: &[Group], list: &str, class: &str) {
     }
 }
 
-fn foot(s: &Saved) -> String {
+fn foot(s: &Saved, illustrated: bool) -> String {
     let r = &s.recipe;
     let mut bits: Vec<String> = Vec::new();
     // A saved page with no canonical link or site name has only the placeholder.
@@ -177,6 +179,9 @@ fn foot(s: &Saved) -> String {
         bits.push(format!("by {}", esc(a.trim())));
     }
     bits.push(format!("saved {}", s.added.format("%b %-d, %Y")));
+    if illustrated {
+        bits.push("Illustration generated".to_owned());
+    }
     if !bits[0].starts_with("From") {
         let first = bits[0].remove(0).to_ascii_uppercase();
         bits[0].insert(0, first);
@@ -244,7 +249,7 @@ pub(super) fn recipe(e: &Entry) -> String {
             esc(n.trim())
         );
     }
-    out.push_str(&foot(s));
+    out.push_str(&foot(s, e.illustrated));
     out.push_str("</section>\n");
     out
 }

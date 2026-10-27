@@ -935,3 +935,33 @@ fn a_saved_page_without_a_site_has_no_from() {
     );
     assert!(chapter.contains("<p>Saved Oct 2, 2026</p>"), "{chapter}");
 }
+
+/// The text of a recipe's foot in the built book.
+fn foot_of(e: &Entries, chapter: &str, id: &str) -> String {
+    let src = text(e, chapter);
+    let doc = xml(src);
+    let sec = recipe_section(&doc, id);
+    let foot = sec
+        .descendants()
+        .find(|n| has_class(*n, "foot"))
+        .expect("a foot");
+    all_text(foot)
+}
+
+#[test]
+fn illustrated_recipe_foot_labelled() {
+    let f = fixture();
+    let (e, _) = epub(&f.store);
+    // The loaf prints its drawing, so its foot says so; the soup prints a photo and doesn't.
+    let loaf = foot_of(&e, "OEBPS/chapter-baking.xhtml", &f.loaf.id);
+    assert!(loaf.contains("Illustration generated"), "{loaf}");
+    assert!(loaf.contains("Oct 2, 2026"), "{loaf}");
+    let soup = foot_of(&e, "OEBPS/chapter-soups.xhtml", &f.soup.id);
+    assert!(!soup.contains("Illustration"), "{soup}");
+
+    // An illustration that was asked for but never drawn prints the photo, with no label.
+    std::fs::remove_file(f.store.image_path(&f.loaf.id, ImageKind::Ill)).unwrap();
+    let (e, _) = epub(&f.store);
+    let loaf = foot_of(&e, "OEBPS/chapter-baking.xhtml", &f.loaf.id);
+    assert!(!loaf.contains("Illustration"), "{loaf}");
+}
