@@ -1044,6 +1044,7 @@ dependencies = [
  "deckle-shelf",
  "deckle-transport",
  "deckle-xray",
+ "image",
  "predicates",
  "rpassword",
  "rusqlite",

@@ -9,6 +9,7 @@ pub mod article;
 pub mod bookmarklet;
 pub mod bundle;
 pub mod config;
+pub mod cookbook;
 pub mod cover;
 pub mod day;
 pub mod editor;

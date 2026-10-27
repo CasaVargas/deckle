@@ -293,6 +293,74 @@ pub enum Command {
         #[command(subcommand)]
         action: DigestCommand,
     },
+    /// The Kitchen Book: a cookbook built from the recipes you save.
+    Cookbook {
+        #[command(subcommand)]
+        action: CookbookCommand,
+    },
+}
+
+/// Which picture a recipe prints.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum PictureArg {
+    /// The site's photo.
+    Site,
+    /// A generated illustration.
+    Illustration,
+    /// No picture.
+    None,
+    /// Whatever the book's setting says.
+    Default,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CookbookCommand {
+    /// Keep recipes from web addresses, link files or saved pages, and file each into a
+    /// chapter. Prints the chapter and the picture.
+    Add {
+        /// Web addresses, `.webloc`/`.url` link files or saved pages (`.html`).
+        targets: Vec<String>,
+        /// A chapter id (`deckle cookbook chapters`); default: filed by its categories and title.
+        #[arg(long)]
+        chapter: Option<String>,
+        /// A note to print with the recipe.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// The recipes in the book: id, title, chapter, added, structured or text, picture.
+    List {
+        /// Only this chapter's recipes (a chapter id).
+        #[arg(long)]
+        chapter: Option<String>,
+    },
+    /// File a recipe into another chapter.
+    Move {
+        /// A recipe's id, or the address it was saved from.
+        who: String,
+        /// A chapter id (`deckle cookbook chapters`).
+        chapter: String,
+    },
+    /// Delete a recipe and its pictures.
+    Remove {
+        /// A recipe's id, or the address it was saved from.
+        who: String,
+    },
+    /// Set a recipe's note; an empty string clears it.
+    Note {
+        /// A recipe's id, or the address it was saved from.
+        who: String,
+        text: String,
+    },
+    /// Choose a recipe's picture.
+    Picture {
+        /// A recipe's id, or the address it was saved from.
+        who: String,
+        #[arg(value_enum)]
+        choice: PictureArg,
+    },
+    /// The book's chapters, in book order, with their recipe counts. Add, rename, remove and
+    /// reorder them by editing cookbook.toml.
+    Chapters,
 }
 
 #[derive(Subcommand, Debug)]
