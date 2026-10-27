@@ -48,11 +48,16 @@ fn is_quantity(token: &str) -> bool {
             .all(|c| c.is_numeric() || matches!(c, '.' | ',' | '/' | '⁄' | '-' | '–' | '—'))
 }
 
-/// Singularizes a word: `-ies` to `-y`, `-oes` to `-o`, a trailing `-s` (but not `-ss` or `-us`)
+/// Singularizes a word: `-ies` to `-y`, `-oes` to `-o`, `-leaves` to `-leaf`, `-loaves` to `-loaf`, a trailing `-s` (but not `-ss` or `-us`)
 /// dropped.
 fn singular(word: &str) -> String {
     if let Some(stem) = word.strip_suffix("ies").filter(|s| !s.is_empty()) {
         return format!("{stem}y");
+    }
+    for (plural, one) in [("leaves", "leaf"), ("loaves", "loaf")] {
+        if let Some(stem) = word.strip_suffix(plural) {
+            return format!("{stem}{one}");
+        }
     }
     if let Some(stem) = word.strip_suffix("oes").filter(|s| !s.is_empty()) {
         return format!("{stem}o");
@@ -92,7 +97,7 @@ const SEASONING_MODIFIERS: [&str; 16] = [
 ];
 
 /// Phrases that end a line without naming an ingredient.
-const TRAILING_PHRASES: [&str; 9] = [
+const TRAILING_PHRASES: [&str; 12] = [
     " to taste",
     " for serving",
     " for garnish",
@@ -102,6 +107,15 @@ const TRAILING_PHRASES: [&str; 9] = [
     " plus more",
     " optional",
     " if desired",
+    " for frying",
+    " for greasing",
+    " for brushing",
+];
+
+/// Size and texture words that make a preceding "extra" part of a phrase to skip ("extra large
+/// eggs", "extra firm tofu"), not part of the name. "Extra virgin" is handled by an alias.
+const EXTRA_BEFORE: [&str; 8] = [
+    "large", "small", "firm", "soft", "lean", "fine", "thick", "thin",
 ];
 
 /// Strips serving phrases from the end of a (lowercase) line, with or without a comma.
@@ -149,9 +163,13 @@ pub fn key_ingredient(line: &str) -> Option<String> {
     // The leading run: quantities, units and "of" before the first real word. A unit word
     // after that is part of the name ("prime rib", "ground cloves", "fish sticks").
     let mut leading = true;
-    for raw in line.split_whitespace() {
-        let token = raw.trim_matches(|c: char| !c.is_alphanumeric());
-        if token.is_empty() {
+    let tokens: Vec<&str> = line
+        .split_whitespace()
+        .map(|raw| raw.trim_matches(|c: char| !c.is_alphanumeric()))
+        .filter(|t| !t.is_empty())
+        .collect();
+    for (i, &token) in tokens.iter().enumerate() {
+        if token == "extra" && tokens.get(i + 1).is_some_and(|n| EXTRA_BEFORE.contains(n)) {
             continue;
         }
         // 2. Quantities, fractions and ranges, with the "to" or "or" joining a range.
@@ -195,11 +213,18 @@ pub fn key_ingredient(line: &str) -> Option<String> {
     let key = words.join(" ");
     // Seasoning modifiers count only for the stop check: "freshly ground black pepper" is
     // pepper, but "bell pepper" and "celery salt" are not.
-    let plain: Vec<&str> = key
-        .split(' ')
-        .skip_while(|w| SEASONING_MODIFIERS.contains(w))
-        .collect();
-    if lists.stop.contains(&key) || lists.stop.contains(&plain.join(" ")) {
+    // Each side of an "and" is checked on its own: "sea salt and cracked pepper".
+    let plain = key
+        .split(" and ")
+        .map(|side| {
+            side.split(' ')
+                .skip_while(|w| SEASONING_MODIFIERS.contains(w))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(" and ");
+    if lists.stop.contains(&key) || lists.stop.contains(&plain) {
         return None;
     }
     // 6. Aliases.

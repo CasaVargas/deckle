@@ -12,3 +12,4 @@ icing sugar = powdered sugar
 caster sugar = sugar
 extra virgin olive oil = olive oil
 extra-virgin olive oil = olive oil
+garlic clove = garlic

@@ -97,6 +97,16 @@ fn key_ingredient_table() {
         ("1 jalapeño pepper", "jalapeño pepper"),
         ("1 tsp celery salt", "celery salt"),
         ("1 cup cream of tartar", "cream of tartar"),
+        // "extra" before a size or texture word is skipped.
+        ("2 extra large eggs", "egg"),
+        ("1 block extra firm tofu", "tofu"),
+        ("2 sourdough loaves", "sourdough loaf"),
+        ("2 bay leaves", "bay leaf"),
+        ("3 sprigs thyme", "thyme"),
+        ("2 thyme sprigs", "thyme sprig"),
+        ("4 garlic cloves", "garlic"),
+        ("1 tbsp butter, plus more", "butter"),
+        ("1 tsp vanilla (optional)", "vanilla"),
     ];
     for (line, want) in cases {
         assert_eq!(key_ingredient(line).as_deref(), Some(want), "{line:?}");
@@ -123,6 +133,11 @@ fn key_ingredient_rejects_junk() {
         "Diamond Crystal kosher salt",
         "Cracked black pepper",
         "Flaky salt",
+        "Kosher salt and freshly ground black pepper to taste",
+        "salt and black pepper",
+        "sea salt and cracked pepper",
+        "Oil for frying",
+        "Sugar substitute",
     ] {
         assert_eq!(key_ingredient(line), None, "{line:?}");
     }
