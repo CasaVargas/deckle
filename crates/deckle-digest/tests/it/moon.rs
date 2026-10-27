@@ -16,7 +16,7 @@ struct Row {
 
 fn fixture() -> BTreeMap<i32, Vec<(Phase, DateTime<Utc>)>> {
     let raw: BTreeMap<i32, Vec<Row>> =
-        serde_json::from_str(include_str!("fixtures/usno/moon.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/usno/moon.json")).unwrap();
     raw.into_iter()
         .map(|(y, rows)| {
             let rows = rows

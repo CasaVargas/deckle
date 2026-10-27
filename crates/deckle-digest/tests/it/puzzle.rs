@@ -231,7 +231,7 @@ use deckle_digest::puzzle::store::Solve;
 use deckle_digest::{Edition, Gathered, Section, render};
 
 fn fixture_words() -> Words {
-    Words::from_tsv(include_str!("fixtures/puzzle/words.tsv"))
+    Words::from_tsv(include_str!("../fixtures/puzzle/words.tsv"))
 }
 
 fn page_cfg() -> Config {
@@ -398,7 +398,7 @@ use deckle_digest::puzzle::grid::Dir;
 use deckle_digest::puzzle::ladder::Ladder;
 use deckle_digest::puzzle::store::{Clue, Puzzle};
 
-const CLIPPINGS: &[u8] = include_bytes!("fixtures/puzzle/clippings.txt");
+const CLIPPINGS: &[u8] = include_bytes!("../fixtures/puzzle/clippings.txt");
 
 fn clue(number: u8, dir: Dir, answer: &str, text: &str) -> Clue {
     Clue {

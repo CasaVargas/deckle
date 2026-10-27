@@ -420,13 +420,11 @@ fn all_is_ordered_and_skips_junk() {
 
 #[test]
 fn default_dir_follows_env_then_config_folder() {
-    // The only test that touches the environment.
+    // Passed in rather than set with `set_var`: the process environment is shared by every test.
     let dir = tempfile::tempdir().unwrap();
-    // SAFETY: no other test in this binary reads or writes the environment.
-    unsafe { std::env::set_var("DECKLE_COOKBOOK_DIR", dir.path()) };
-    assert_eq!(Store::default_dir(), dir.path());
-    unsafe { std::env::remove_var("DECKLE_COOKBOOK_DIR") };
-    assert!(Store::default_dir().ends_with("deckle/cookbook"));
+    assert_eq!(Store::dir_for(Some(dir.path().into())), dir.path());
+    assert!(Store::dir_for(Some("".into())).ends_with("deckle/cookbook"));
+    assert!(Store::dir_for(None).ends_with("deckle/cookbook"));
 }
 
 #[test]

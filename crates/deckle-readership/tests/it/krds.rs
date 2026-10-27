@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-mod common;
 
-use common::*;
+use crate::common::*;
 use deckle_readership::{parse_yjf, position_id};
 
 #[test]

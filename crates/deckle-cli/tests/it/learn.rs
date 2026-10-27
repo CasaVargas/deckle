@@ -2,7 +2,6 @@
 //! Learning on a connection (interests design §5): a push to a fake Kindle reads the edition's
 //! `.yjf` and the clippings, and `interests.json` gains the hits. Unix only: the fake Previewer
 //! is a shell script.
-#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 

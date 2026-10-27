@@ -2,7 +2,6 @@
 //! Several Kindles in one home (Kindle profiles design): two mass-storage Kindles found through
 //! `DECKLE_MOUNTS`, named, sent to by name, and a book waiting in the outbox for the one that
 //! isn't plugged in. Unix only: the fake Previewer is a shell script.
-#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 

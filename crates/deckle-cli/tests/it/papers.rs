@@ -2,7 +2,6 @@
 //! One Mac, many papers (many papers design): `digest papers`, `--paper`, a paper bound to one
 //! Kindle waiting for it, and each paper pruned by its own prefix and `keep`. Offline: the
 //! papers print only the horoscope. Unix only: the fake Previewer is a shell script.
-#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 

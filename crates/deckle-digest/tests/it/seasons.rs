@@ -26,7 +26,7 @@ fn tz(name: &str) -> Tz {
 #[test]
 fn matches_usno_within_five_minutes() {
     let years: BTreeMap<i32, Vec<Row>> =
-        serde_json::from_str(include_str!("fixtures/usno/seasons.json")).unwrap();
+        serde_json::from_str(include_str!("../fixtures/usno/seasons.json")).unwrap();
     assert_eq!(years.len(), 7);
     let order = [
         Season::MarchEquinox,

@@ -26,7 +26,7 @@ fn minutes(t: NaiveTime) -> i64 {
 #[test]
 fn matches_usno_within_two_minutes() {
     let rows: Vec<Row> =
-        serde_json::from_str(include_str!("fixtures/usno/sun.json")).expect("fixture");
+        serde_json::from_str(include_str!("../fixtures/usno/sun.json")).expect("fixture");
     assert_eq!(rows.len(), 12);
     for r in rows {
         let tz: Tz = r.tz.parse().unwrap();
