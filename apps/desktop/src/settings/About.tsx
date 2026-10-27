@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { relaunch } from "@tauri-apps/plugin-process";
 import { install, type UpdateState } from "../updates";
+import CasaVargas from "./CasaVargas";
 import { Link, REPO } from "./Row";
 
 interface Props {
@@ -76,6 +77,7 @@ export default function About({ version, update, onUpdateState, busy }: Props) {
       <div className="set-block">
         <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} />
       </div>
+      <CasaVargas />
       <p className="set-prose">
         What Deckle sends online, and when, is under <strong>Online &amp; privacy</strong>.
       </p>
