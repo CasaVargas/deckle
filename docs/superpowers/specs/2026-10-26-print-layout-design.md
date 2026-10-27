@@ -114,7 +114,8 @@ The lead (from `front_plan`) jumps when its story has more after its opening:
 - **Slug:** the headline's first word that isn't a stopword (a short fixed list: a, an, and,
   the, of, to, in, on, for, at, by, with, is, are, was, will, be, as, from, after, how, why,
   what, new, and the labels sites put before a headline: video, watch, photos, live, breaking,
-  update, exclusive, opinion, analysis, review), upper-cased, letters only. "Mill Yard Will Be a Market Again" gives MILL,
+  update, exclusive, opinion, analysis, review), upper-cased, letters only, keeping a
+  compound whole ("Multi-state" gives MULTI-STATE). "Mill Yard Will Be a Market Again" gives MILL,
   "Council Weighs a Night Bus to the Hospital" gives COUNCIL. When the optional editor runs
   (daily LLM editor design), it may suggest a slug. A suggestion is used only if it's one word
   from the headline, so the slug always matches what the reader sees.
@@ -200,8 +201,10 @@ Top to bottom:
    - The **jump line**, right-aligned and bold italic: "See MILL, B1 ›". It's a link to the
      jump head.
    - With no jump, the whole story is set here instead.
-5. **Refers:** the tiles in columns, each its headline in bold, its section in small capitals
-   and its page label, linked to the story's anchor (today they link to the section).
+5. **Refers:** the tiles as full-width rows, each its headline in bold, its section in
+   italics and its page label, linked to the story's anchor. (Not in columns: a row ends in a
+   right-aligned label slot, and at two refers to a line the headlines would wrap badly; this
+   was settled in phase 3.)
 6. **Inside:** the index in a box: a heavy rule above, a hairline below, each section's title,
    dot leaders, its page label, and its item count in italics. Each row is a link.
 

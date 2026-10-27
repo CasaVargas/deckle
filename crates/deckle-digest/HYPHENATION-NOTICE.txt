@@ -1,0 +1,11 @@
+The PDF edition hyphenates English with the `hypher` crate (MIT OR Apache-2.0,
+https://github.com/typst/hypher), which embeds these patterns:
+
+Hyphenation patterns for American English (hyph-en-us.tex, ushyphmax)
+Copyright (C) 1990, 2004, 2005 Gerard D.C. Kuiken
+This file is part of the hyph-utf8 package.
+See http://www.hyphenation.org/tex for more information.
+
+Copying and distribution of this file, with or without modification,
+are permitted in any medium without royalty provided the copyright
+notice and this notice are preserved.

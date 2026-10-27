@@ -210,11 +210,14 @@ fn shorten(s: &str, max: usize) -> String {
 /// The jump's slug (spec §2.2): the headline's first word that isn't a stopword, in capitals,
 /// letters only.
 pub fn slug(title: &str) -> String {
+    // letters, and the hyphens inside a compound ("multi-state")
     let letters = |w: &str| -> String {
-        w.chars()
+        let word: String = w
+            .chars()
             .skip_while(|c| !c.is_alphabetic())
-            .take_while(|c| c.is_alphabetic())
-            .collect()
+            .take_while(|c| c.is_alphabetic() || *c == '-')
+            .collect();
+        word.trim_end_matches('-').to_owned()
     };
     let words: Vec<String> = title
         .split_whitespace()
@@ -513,6 +516,9 @@ mod tests {
             "VIDEO"
         );
         assert_eq!(slug("WATCH: Robot roams Manhattan"), "ROBOT");
+        // a compound stays whole
+        assert_eq!(slug("Multi-state crews battle a brush fire"), "MULTI-STATE");
+        assert_eq!(slug("Re- and un-elected"), "RE");
         assert_eq!(slug(""), "STORY");
     }
 
