@@ -13,12 +13,13 @@ use std::io::Write;
 use crate::masthead::Masthead;
 use ab_glyph::{Font, FontRef, GlyphId};
 use pdf_writer::types::{
-    ActionType, AnnotationType, CidFontType, FontFlags, SystemInfo, UnicodeCmap,
+    ActionType, AnnotationType, CidFontType, FontFlags, NumberingStyle, SystemInfo, UnicodeCmap,
 };
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, Str, TextStr};
 use serde::{Deserialize, Serialize};
 
 use crate::config::Photos;
+use crate::print::{FRONT_LABEL, PrintPlan};
 use crate::sources::feeds::photo_token;
 use crate::{Gathered, long_date};
 
@@ -143,8 +144,9 @@ struct Run {
     text: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 enum Align {
+    #[default]
     Left,
     Center,
 }
@@ -186,12 +188,70 @@ struct Cell {
     number: Option<String>,
 }
 
+/// What a slot prints (print layout §4.2): a page label, the page count, or text.
+#[derive(Clone, Debug)]
+enum Slot {
+    /// The label of the page an anchor lands on.
+    Label(usize),
+    Pages,
+    Text(String),
+}
+
+/// A field's right-aligned ending, sized before layout for the widest text its slot could
+/// print, so filling it in never moves a line or a page break.
+#[derive(Clone, Debug)]
+struct Tail {
+    prefix: String,
+    slot: Slot,
+    suffix: String,
+    face: Face,
+    size: f32,
+}
+
+impl Tail {
+    fn label(anchor: usize, face: Face, size: f32) -> Self {
+        Tail {
+            prefix: String::new(),
+            slot: Slot::Label(anchor),
+            suffix: String::new(),
+            face,
+            size,
+        }
+    }
+}
+
+/// One cell of a row of fields: wrapped runs, then its tail at the cell's right edge.
+#[derive(Clone, Debug, Default)]
+struct Field {
+    runs: Vec<Run>,
+    align: Align,
+    tail: Option<Tail>,
+    /// Dot leaders from the text to the tail.
+    leader: bool,
+    link: Option<usize>,
+}
+
 #[derive(Clone, Debug)]
 enum Block {
     Para(Para),
-    Image { image: usize },
-    Rule { thick: f32 },
-    Table { rows: Vec<Vec<Cell>>, grid: bool },
+    /// `cap`: the share of the page's height the picture may take.
+    Image {
+        image: usize,
+        cap: f32,
+    },
+    /// Cells side by side, with hairlines between them when `divided`.
+    Fields {
+        fields: Vec<Field>,
+        divided: bool,
+        after: f32,
+    },
+    Rule {
+        thick: f32,
+    },
+    Table {
+        rows: Vec<Vec<Cell>>,
+        grid: bool,
+    },
     Space(f32),
     PageBreak,
     Anchor(usize),
@@ -282,6 +342,10 @@ struct Doc {
     anchors: usize,
     t: Type,
     photos: Photos,
+    /// The anchor just after the front page's jump line, when it has one: the fit checks it.
+    jump_end: Option<usize>,
+    /// The anchor at the end of the front page.
+    front_end: usize,
 }
 
 impl Doc {
@@ -319,8 +383,75 @@ impl Doc {
     }
 }
 
+/// Anchors the front page links to before the sections are laid out.
+struct Anchors {
+    section: Vec<usize>,
+    story: Vec<Vec<usize>>,
+    /// The front page's lead, where a refer to it lands.
+    lead: usize,
+    /// The jump line, where the jump head links back to.
+    jump: usize,
+    /// Just after the jump line.
+    jump_end: usize,
+    /// The end of the front page.
+    front_end: usize,
+}
+
+/// How the front page sets its lead (§4.3). Tried in order until the jump line lands on the
+/// front page: a smaller headline and photo, then no photo there, then fewer paragraphs of the
+/// opening, which move to the head of the continuation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fit {
+    /// The headline's size, times the headline size.
+    headline: f32,
+    /// The lead photo's share of the page, or `None`: it stays with the continuation.
+    photo: Option<f32>,
+    /// Opening paragraphs the front page keeps.
+    keep: usize,
+}
+
+const FITS: [Fit; 4] = [
+    Fit {
+        headline: 1.6,
+        photo: Some(0.30),
+        keep: usize::MAX,
+    },
+    Fit {
+        headline: 1.35,
+        photo: Some(0.24),
+        keep: usize::MAX,
+    },
+    Fit {
+        headline: 1.2,
+        photo: Some(0.16),
+        keep: usize::MAX,
+    },
+    Fit {
+        headline: 1.2,
+        photo: None,
+        keep: usize::MAX,
+    },
+];
+
+/// The jump's pieces under `fit`: the front page's photo and opening, the continuation, and
+/// how many opening paragraphs moved to the continuation.
+fn jump_parts(x: &crate::print::Jump, fit: Fit) -> (Option<String>, String, String, usize) {
+    let (figure, rest) = crate::print::take_lead_figure(&x.rest);
+    let ends = crate::print::paragraph_ends(&x.opening);
+    let keep = fit.keep.min(ends.len()).max(1);
+    let cut = ends.get(keep - 1).copied().unwrap_or(x.opening.len());
+    let moved = x.opening[cut..].trim_start();
+    let moved_count = ends.len().saturating_sub(keep);
+    let (front_figure, rest) = match (fit.photo, figure) {
+        (Some(_), figure) => (figure, format!("{moved}{rest}")),
+        (None, Some(f)) => (None, format!("{f}\n{moved}{rest}")),
+        (None, None) => (None, format!("{moved}{rest}")),
+    };
+    (front_figure, x.opening[..cut].to_owned(), rest, moved_count)
+}
+
 /// The blocks of the whole edition: the front page, then each section from a new page.
-fn document(g: &Gathered, t: Type, photos: Photos) -> Doc {
+fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan, fit: Fit) -> Doc {
     let e = &g.edition;
     let mut d = Doc {
         blocks: Vec::new(),
@@ -329,23 +460,63 @@ fn document(g: &Gathered, t: Type, photos: Photos) -> Doc {
         anchors: 0,
         t,
         photos,
+        jump_end: None,
+        front_end: 0,
     };
-    // Each section's anchor is known before the front page links to it.
-    let section_anchor: Vec<usize> = (0..e.sections.len()).collect();
-    d.anchors = e.sections.len();
+    // Every anchor the front page links to is known before the front page is built.
+    let mut next = 0;
+    let mut take = || {
+        next += 1;
+        next - 1
+    };
+    let section: Vec<usize> = e.sections.iter().map(|_| take()).collect();
+    let story = e
+        .sections
+        .iter()
+        .map(|s| s.articles.iter().map(|_| take()).collect())
+        .collect();
+    let ids = Anchors {
+        section,
+        story,
+        lead: take(),
+        jump: take(),
+        jump_end: take(),
+        front_end: take(),
+    };
+    d.anchors = next;
     let front = d.anchor();
     d.outline.push((0, "Front page".into(), front));
-    front_page(&mut d, g, &section_anchor);
+    front_page(&mut d, g, print, &ids, fit);
+    d.blocks.push(Block::Anchor(ids.front_end));
+    d.front_end = ids.front_end;
     for (i, s) in e.sections.iter().enumerate() {
         d.blocks.push(Block::PageBreak);
-        d.blocks.push(Block::Anchor(section_anchor[i]));
-        d.outline.push((0, s.title.clone(), section_anchor[i]));
-        let mut head = Para::new(vec![d.run(Face::Bold, t.section(), &s.title)]);
-        head.keep = true;
-        d.para(head);
+        d.blocks.push(Block::Anchor(ids.section[i]));
+        d.outline.push((0, s.title.clone(), ids.section[i]));
+        // The section flag: its title, with its kicker beside it when that fits (§4.1).
+        let beside = s
+            .kicker
+            .as_ref()
+            .filter(|k| k.chars().count() <= KICKER_BESIDE);
+        d.blocks.push(Block::Fields {
+            fields: vec![Field {
+                runs: vec![d.run(Face::Bold, t.section(), &s.title)],
+                tail: beside.map(|k| Tail {
+                    prefix: String::new(),
+                    slot: Slot::Text(k.clone()),
+                    suffix: String::new(),
+                    face: Face::Italic,
+                    size: t.meta(),
+                }),
+                ..Field::default()
+            }],
+            divided: false,
+            after: 0.0,
+        });
         d.blocks.push(Block::Rule { thick: 1.2 });
+        d.blocks.push(Block::Rule { thick: 0.4 });
         d.blocks.push(Block::Space(t.body * 0.4));
-        if let Some(k) = &s.kicker {
+        if let Some(k) = s.kicker.as_ref().filter(|_| beside.is_none()) {
             let mut p = Para::new(vec![d.run(Face::Italic, t.body, k)]);
             p.after = t.body * 0.5;
             d.para(p);
@@ -366,19 +537,67 @@ fn document(g: &Gathered, t: Type, photos: Photos) -> Doc {
                 d.blocks.push(Block::Rule { thick: 0.4 });
                 d.blocks.push(Block::Space(t.body * 0.6));
             }
-            let at = d.anchor();
+            let at = ids.story[i][j];
+            d.blocks.push(Block::Anchor(at));
             d.outline.push((1, a.title.clone(), at));
-            let mut h = Para::new(vec![d.run(Face::Bold, t.headline(), &a.title)]);
-            h.keep = true;
-            h.after = t.body * 0.25;
-            d.para(h);
+            // The lead printed whole on the front page is a refer here (§5.4).
+            if print.whole == Some((i, j)) {
+                let mut p = Para::new(vec![d.run(
+                    Face::Italic,
+                    t.body,
+                    &format!("{} — on {FRONT_LABEL}", a.title),
+                )]);
+                p.link = Some(ids.lead);
+                d.para(p);
+                continue;
+            }
+            let jump = print
+                .jump
+                .as_ref()
+                .filter(|x| (x.section, x.article) == (i, j));
+            let mut pull = print.pulls.get(&(i, j)).cloned();
+            let text = match jump {
+                // The jump head: the slug and where it came from, then the headline (§4.4).
+                Some(x) => {
+                    let mut head = Para::new(vec![
+                        d.run(Face::Bold, t.headline(), &x.slug),
+                        d.run(Face::Regular, t.body, " · "),
+                        d.run(
+                            Face::Italic,
+                            t.body,
+                            &format!("Continued from {FRONT_LABEL}"),
+                        ),
+                    ]);
+                    head.keep = true;
+                    head.link = Some(ids.jump);
+                    d.para(head);
+                    let mut title = Para::new(vec![d.run(Face::Italic, t.body, &a.title)]);
+                    title.keep = true;
+                    title.after = t.body * 0.25;
+                    d.para(title);
+                    // without what the front page printed; its pull quote follows the paragraphs
+                    // that moved here
+                    let (_, _, rest, moved) = jump_parts(x, fit);
+                    if let Some(p) = &mut pull {
+                        p.after += moved;
+                    }
+                    rest
+                }
+                None => {
+                    let mut h = Para::new(vec![d.run(Face::Bold, t.headline(), &a.title)]);
+                    h.keep = true;
+                    h.after = t.body * 0.25;
+                    d.para(h);
+                    a.body.clone()
+                }
+            };
             if let Some(m) = &a.meta {
                 let mut p = Para::new(vec![d.run(Face::Italic, t.meta(), m)]);
                 p.keep = true;
                 p.after = t.body * 0.4;
                 d.para(p);
             }
-            body(&mut d, &a.body, &a.photos, &e.assets);
+            story_body(&mut d, &text, &a.photos, &e.assets, pull.as_ref());
         }
         if let Some(u) = &s.unavailable {
             let p = Para::new(vec![d.run(Face::Italic, t.body, u)]);
@@ -388,9 +607,56 @@ fn document(g: &Gathered, t: Type, photos: Photos) -> Doc {
     d
 }
 
-fn front_page(d: &mut Doc, g: &Gathered, sections: &[usize]) {
+/// A story's body, with its pull quote set between rules after its paragraph (§4.6).
+fn story_body(
+    d: &mut Doc,
+    xhtml: &str,
+    photos: &[Vec<u8>],
+    assets: &[(String, Vec<u8>)],
+    pull: Option<&crate::print::Pull>,
+) {
+    let at = pull.and_then(|p| crate::print::paragraph_ends(xhtml).get(p.after).copied());
+    let (Some(p), Some(at)) = (pull, at) else {
+        body(d, xhtml, photos, assets);
+        return;
+    };
+    body(d, &xhtml[..at], photos, assets);
+    let t = d.t;
+    d.blocks.push(Block::Space(t.body * 0.3));
+    d.blocks.push(Block::Rule { thick: 0.4 });
+    let mut q = Para::new(vec![d.run(Face::Italic, t.body * 1.5, &p.text)]);
+    q.align = Align::Center;
+    d.para(q);
+    d.blocks.push(Block::Rule { thick: 0.4 });
+    d.blocks.push(Block::Space(t.body * 0.3));
+    body(d, &xhtml[at..], photos, assets);
+}
+
+fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors, fit: Fit) {
     let e = &g.edition;
     let t = d.t;
+    // The skybox: teasers for what's inside, each with its page (§4.3).
+    if !print.skybox.is_empty() {
+        let fields = print
+            .skybox
+            .iter()
+            .map(|x| Field {
+                runs: vec![
+                    d.run(Face::Bold, t.meta(), &x.title),
+                    d.run(Face::Regular, t.meta(), &format!(" · {}", x.text)),
+                ],
+                tail: Some(Tail::label(ids.section[x.section], Face::Italic, t.meta())),
+                link: Some(ids.section[x.section]),
+                ..Field::default()
+            })
+            .collect();
+        d.blocks.push(Block::Fields {
+            fields,
+            divided: true,
+            after: t.body * 0.2,
+        });
+        d.blocks.push(Block::Rule { thick: 0.4 });
+    }
     let mut ears = format!("No. {}", e.number());
     if !e.place.is_empty() {
         ears.push_str(&format!(" · {}", e.place));
@@ -402,11 +668,35 @@ fn front_page(d: &mut Doc, g: &Gathered, sections: &[usize]) {
     let mut p = Para::new(vec![d.run(Face::Masthead, MASTHEAD_FIT, &e.paper)]);
     p.align = Align::Center;
     d.para(p);
+    // The dateline band: the date, the edition, and how many pages it runs to.
+    d.blocks.push(Block::Rule { thick: 1.6 });
+    d.blocks.push(Block::Fields {
+        fields: vec![
+            Field {
+                runs: vec![d.run(Face::Regular, t.meta(), &long_date(e.date))],
+                ..Field::default()
+            },
+            Field {
+                runs: vec![d.run(Face::Italic, t.meta(), "Final edition")],
+                align: Align::Center,
+                ..Field::default()
+            },
+            Field {
+                tail: Some(Tail {
+                    prefix: String::new(),
+                    slot: Slot::Pages,
+                    suffix: " pages".into(),
+                    face: Face::Regular,
+                    size: t.meta(),
+                }),
+                ..Field::default()
+            },
+        ],
+        divided: false,
+        after: 0.0,
+    });
     d.blocks.push(Block::Rule { thick: 0.8 });
-    let mut p = Para::new(vec![d.run(Face::Regular, t.meta(), &long_date(e.date))]);
-    p.align = Align::Center;
-    d.para(p);
-    d.blocks.push(Block::Rule { thick: 0.8 });
+    d.blocks.push(Block::Rule { thick: 0.4 });
     if let Some(w) = &e.weather_line {
         let mut p = Para::new(vec![d.run(Face::Italic, t.body, w)]);
         p.align = Align::Center;
@@ -416,38 +706,103 @@ fn front_page(d: &mut Doc, g: &Gathered, sections: &[usize]) {
     let plan = crate::front::front_plan(g);
     if let Some((s, a)) = plan.lead {
         let art = &e.sections[s].articles[a];
-        let mut h = Para::new(vec![d.run(Face::Bold, t.headline() * 1.2, &art.title)]);
-        h.before = t.body * 0.6;
-        h.link = Some(sections[s]);
+        let story = ids.story[s][a];
+        d.blocks.push(Block::Anchor(ids.lead));
+        let mut k = Para::new(vec![d.run(
+            Face::Bold,
+            t.meta(),
+            &e.sections[s].title.to_uppercase(),
+        )]);
+        k.before = t.body * 0.6;
+        k.keep = true;
+        d.para(k);
+        let mut h = Para::new(vec![d.run(
+            Face::Bold,
+            t.headline() * fit.headline,
+            &art.title,
+        )]);
+        h.link = Some(story);
+        h.keep = true;
         d.para(h);
-        let meta = match &art.meta {
-            Some(m) => format!("{} · {m}", e.sections[s].title),
-            None => e.sections[s].title.clone(),
-        };
-        let p = Para::new(vec![d.run(Face::Italic, t.meta(), &meta)]);
-        d.para(p);
-        if let Some(teaser) = &art.teaser {
-            let mut p = Para::new(vec![d.run(Face::Regular, t.body, teaser)]);
-            p.before = t.body * 0.3;
+        if let Some(m) = &art.meta {
+            let mut p = Para::new(vec![d.run(Face::Italic, t.meta(), m)]);
+            p.after = t.body * 0.3;
             d.para(p);
         }
+        match &print.jump {
+            Some(x) if (x.section, x.article) == (s, a) => {
+                let (figure, opening, _, _) = jump_parts(x, fit);
+                if let (Some(figure), Some(share)) = (figure, fit.photo) {
+                    let from = d.blocks.len();
+                    body(d, &figure, &art.photos, &e.assets);
+                    for b in &mut d.blocks[from..] {
+                        if let Block::Image { cap, .. } = b {
+                            *cap = share;
+                        }
+                    }
+                }
+                body(d, &opening, &art.photos, &e.assets);
+                d.blocks.push(Block::Anchor(ids.jump));
+                d.blocks.push(Block::Fields {
+                    fields: vec![Field {
+                        tail: Some(Tail {
+                            prefix: format!("See {}, ", x.slug),
+                            slot: Slot::Label(story),
+                            suffix: " \u{203a}".into(),
+                            face: Face::Bold,
+                            size: t.body,
+                        }),
+                        link: Some(story),
+                        ..Field::default()
+                    }],
+                    divided: false,
+                    after: t.body * 0.4,
+                });
+                d.blocks.push(Block::Anchor(ids.jump_end));
+                d.jump_end = Some(ids.jump_end);
+            }
+            _ if print.whole == Some((s, a)) => body(d, &art.body, &art.photos, &e.assets),
+            _ => {
+                if let Some(teaser) = &art.teaser {
+                    let mut p = Para::new(vec![d.run(Face::Regular, t.body, teaser)]);
+                    p.before = t.body * 0.3;
+                    d.para(p);
+                }
+            }
+        }
     }
+    // Refers: the other front-page stories, each with its page.
     if !plan.tiles.is_empty() {
         d.blocks.push(Block::Space(t.body * 0.6));
         d.blocks.push(Block::Rule { thick: 0.4 });
+        d.blocks.push(Block::Space(t.body * 0.3));
         for &(s, a) in &plan.tiles {
-            let mut p = Para::new(vec![
-                d.run(Face::Bold, t.meta(), &format!("{} — ", e.sections[s].title)),
-                d.run(Face::Regular, t.body, &e.sections[s].articles[a].title),
-            ]);
-            p.before = t.body * 0.35;
-            p.link = Some(sections[s]);
-            d.para(p);
+            let story = ids.story[s][a];
+            d.blocks.push(Block::Fields {
+                fields: vec![Field {
+                    runs: vec![
+                        d.run(Face::Bold, t.body, &e.sections[s].articles[a].title),
+                        d.run(
+                            Face::Italic,
+                            t.meta(),
+                            &format!("  {}", e.sections[s].title),
+                        ),
+                    ],
+                    tail: Some(Tail::label(story, Face::Italic, t.meta())),
+                    link: Some(story),
+                    ..Field::default()
+                }],
+                divided: false,
+                after: t.body * 0.35,
+            });
         }
     }
+    // Inside today: every section, its page, and how much is in it.
+    d.blocks.push(Block::Space(t.body * 0.6));
+    d.blocks.push(Block::Rule { thick: 1.6 });
     let mut h = Para::new(vec![d.run(Face::Bold, t.headline(), "Inside today")]);
-    h.before = t.body;
     h.keep = true;
+    h.after = t.body * 0.2;
     d.para(h);
     for (i, s) in e.sections.iter().enumerate() {
         let count = match (s.articles.len(), &s.unavailable) {
@@ -456,18 +811,32 @@ fn front_page(d: &mut Doc, g: &Gathered, sections: &[usize]) {
             (1, _) => "1 item".to_owned(),
             (n, _) => format!("{n} items"),
         };
-        let mut p = Para::new(vec![
-            d.run(Face::Regular, t.body, &s.title),
-            d.run(Face::Italic, t.meta(), &format!("  {count}")),
-        ]);
-        p.bullet = true;
-        p.link = Some(sections[i]);
-        d.para(p);
+        d.blocks.push(Block::Fields {
+            fields: vec![Field {
+                runs: vec![
+                    d.run(Face::Regular, t.body, &s.title),
+                    d.run(Face::Italic, t.meta(), &format!("  {count}")),
+                ],
+                tail: Some(Tail::label(ids.section[i], Face::Bold, t.body)),
+                leader: true,
+                link: Some(ids.section[i]),
+                ..Field::default()
+            }],
+            divided: false,
+            after: t.body * 0.15,
+        });
     }
+    d.blocks.push(Block::Rule { thick: 0.4 });
 }
 
 /// A marker size: the masthead is sized at layout to fill the column.
 const MASTHEAD_FIT: f32 = -1.0;
+/// Share of the page's height a photo may take; the front page's lead photo less (`FITS`).
+const PHOTO_CAP: f32 = 0.45;
+/// The folio's room at the top of a page, in meta lines (§4.1).
+const FOLIO_LINES: f32 = 2.2;
+/// A kicker longer than this goes under the section flag rather than beside its title.
+const KICKER_BESIDE: usize = 40;
 
 /// HTML's named entities, but XML's own five, as characters; roxmltree knows only XML's.
 fn xml_entities(s: &str) -> String {
@@ -603,7 +972,10 @@ fn walk(d: &mut Doc, cx: &mut Walk, n: roxmltree::Node, style: Style, runs: &mut
         "img" => {
             flush(d, runs, Para::new(Vec::new()));
             if let Some(i) = n.attribute("src").and_then(|s| img_index(d, cx, s)) {
-                d.blocks.push(Block::Image { image: i });
+                d.blocks.push(Block::Image {
+                    image: i,
+                    cap: PHOTO_CAP,
+                });
             }
         }
         "table" => {
@@ -841,6 +1213,12 @@ struct Layout<'a> {
     /// Each anchor's page and height.
     anchors: Vec<Option<(usize, f32)>>,
     links: Vec<Link>,
+    margin: f32,
+    /// What each anchor's page is labelled, once a first pass has found out (§4.2).
+    labels: Vec<Option<String>>,
+    pages_total: Option<usize>,
+    /// The widest label the paper could print: every label slot is this wide.
+    widest_label: String,
 }
 
 /// A laid-out line: its pieces and their widths.
@@ -857,12 +1235,18 @@ impl<'a> Layout<'a> {
             page_h,
             left: margin,
             width: page_w - 2.0 * margin,
-            top: margin,
-            bottom: page_h - margin - t.meta() * 2.0,
+            // the folio's room at the top of every page but the front, which starts at the
+            // margin (§4.1)
+            top: margin + FOLIO_LINES * t.meta(),
+            bottom: page_h - margin,
             pages: vec![Vec::new()],
             y: margin,
             anchors: vec![None; anchors],
             links: Vec::new(),
+            margin,
+            labels: Vec::new(),
+            pages_total: None,
+            widest_label: "A88".into(),
         }
     }
 
@@ -871,7 +1255,7 @@ impl<'a> Layout<'a> {
     }
 
     fn at_top(&self) -> bool {
-        self.y <= self.top + 0.01
+        self.y <= self.top + 0.01 && (self.page() > 0 || self.pages[0].is_empty())
     }
 
     fn new_page(&mut self) {
@@ -1082,14 +1466,14 @@ impl<'a> Layout<'a> {
         self.y += p.after;
     }
 
-    fn image(&mut self, img: &Image) {
+    fn image(&mut self, img: &Image, cap: f32) {
         let (pw, ph) = img.size();
         let (pw, ph) = (pw.max(1) as f32, ph.max(1) as f32);
-        // Small pictures (icons) stay small; photos fill the column, up to 45% of the page.
+        // Small pictures (icons) stay small; photos fill the column, up to `cap` of the page.
         let natural = pw * 72.0 / 150.0;
         let mut w = natural.min(self.width);
         let mut h = w * ph / pw;
-        let max_h = (self.bottom - self.top) * 0.45;
+        let max_h = (self.bottom - self.top) * cap;
         if h > max_h {
             h = max_h;
             w = h * pw / ph;
@@ -1105,6 +1489,140 @@ impl<'a> Layout<'a> {
             h,
         });
         self.y += h + self.t.body * 0.5;
+    }
+
+    /// The width `t` takes whatever its slot ends up saying.
+    fn tail_width(&self, t: &Tail) -> f32 {
+        let widest = match &t.slot {
+            Slot::Label(_) => self.widest_label.clone(),
+            Slot::Pages => "888".to_owned(),
+            Slot::Text(s) => s.clone(),
+        };
+        self.fonts
+            .width(t.face, t.size, &format!("{}{widest}{}", t.prefix, t.suffix))
+    }
+
+    fn tail_text(&self, t: &Tail) -> String {
+        let slot = match &t.slot {
+            Slot::Label(a) => self
+                .labels
+                .get(*a)
+                .cloned()
+                .flatten()
+                .unwrap_or_else(|| self.widest_label.clone()),
+            Slot::Pages => self.pages_total.map_or("888".into(), |n| n.to_string()),
+            Slot::Text(s) => s.clone(),
+        };
+        format!("{}{slot}{}", t.prefix, t.suffix)
+    }
+
+    /// Cells side by side: each wraps its runs in what its tail leaves, then sets the tail at
+    /// its right edge on its last line, with dot leaders when asked.
+    fn fields(&mut self, fields: &[Field], divided: bool, after: f32) {
+        if fields.is_empty() {
+            return;
+        }
+        let gap = self.t.body;
+        let n = fields.len() as f32;
+        let cell_w = (self.width - gap * (n - 1.0)) / n;
+        let laid: Vec<(Vec<Line>, f32, f32)> = fields
+            .iter()
+            .map(|f| {
+                let tail_w = f
+                    .tail
+                    .as_ref()
+                    .map_or(0.0, |t| self.tail_width(t) + gap * 0.5);
+                let text_w = (cell_w - tail_w).max(cell_w * 0.2);
+                let mut runs = f.runs.clone();
+                if let Some(r) = runs.first_mut() {
+                    r.text = r.text.trim_start().to_owned();
+                }
+                if let Some(r) = runs.last_mut() {
+                    r.text = r.text.trim_end().to_owned();
+                }
+                let lines = self.lines(&runs, text_w);
+                let tail_h = f.tail.as_ref().map_or(0.0, |t| self.t.leading(t.size));
+                let h: f32 = lines.iter().map(|l| self.line_height(l)).sum();
+                (lines, text_w, h.max(tail_h))
+            })
+            .collect();
+        let h = laid.iter().map(|l| l.2).fold(0.0, f32::max);
+        self.room(h);
+        let (page, y0) = (self.page(), self.y);
+        for (k, (f, (lines, text_w, _))) in fields.iter().zip(&laid).enumerate() {
+            let x0 = self.left + k as f32 * (cell_w + gap);
+            let mut y = y0;
+            let (mut baseline, mut end_x) = (None, x0);
+            for line in lines {
+                let size = line.iter().map(|p| p.1).fold(0.0, f32::max);
+                let base = y + size * 1.05;
+                let line_w: f32 = line.iter().map(|p| p.3).sum();
+                let mut x = x0
+                    + match f.align {
+                        Align::Left => 0.0,
+                        Align::Center => ((text_w - line_w) / 2.0).max(0.0),
+                    };
+                for (face, size, text, w) in line {
+                    self.op(Op::Text {
+                        x,
+                        y: base,
+                        face: *face,
+                        size: *size,
+                        text: text.clone(),
+                    });
+                    x += w;
+                }
+                (baseline, end_x) = (Some(base), x);
+                y += self.line_height(line);
+            }
+            if let Some(t) = &f.tail {
+                let text = self.tail_text(t);
+                let tx = x0 + cell_w - self.fonts.width(t.face, t.size, &text);
+                let base = baseline.unwrap_or(y0 + t.size * 1.05);
+                if f.leader {
+                    let dot = self.fonts.width(Face::Regular, t.size, ". ");
+                    let room = tx - end_x - gap * 0.8;
+                    let count = (room / dot.max(0.01)).floor();
+                    if count >= 2.0 {
+                        self.op(Op::Text {
+                            x: tx - gap * 0.4 - count * dot,
+                            y: base,
+                            face: Face::Regular,
+                            size: t.size,
+                            text: ". ".repeat(count as usize),
+                        });
+                    }
+                }
+                self.op(Op::Text {
+                    x: tx,
+                    y: base,
+                    face: t.face,
+                    size: t.size,
+                    text,
+                });
+            }
+            if divided && k > 0 {
+                let x = x0 - gap / 2.0;
+                self.op(Op::Line {
+                    x1: x,
+                    y1: y0,
+                    x2: x,
+                    y2: y0 + h,
+                    width: 0.4,
+                });
+            }
+            if let Some(anchor) = f.link {
+                self.links.push(Link {
+                    page,
+                    x: x0,
+                    y: y0,
+                    w: cell_w,
+                    h,
+                    anchor,
+                });
+            }
+        }
+        self.y = y0 + h + after;
     }
 
     fn rule(&mut self, thick: f32) {
@@ -1247,6 +1765,7 @@ impl<'a> Layout<'a> {
                 .fold(0.0, f32::max),
             Some(Block::Image { .. }) => (self.bottom - self.top) * 0.2,
             Some(Block::Table { .. }) => self.t.body * 2.5,
+            Some(Block::Fields { .. }) => self.t.leading(self.t.body),
             _ => 0.0,
         }
     }
@@ -1261,8 +1780,8 @@ impl<'a> Layout<'a> {
                     let keep = self.first_height(next);
                     self.para(p, keep);
                 }
-                Block::Image { image } => {
-                    self.image(&doc.images[*image]);
+                Block::Image { image, cap } => {
+                    self.image(&doc.images[*image], *cap);
                     if let Some(Op::Image { image: slot, .. }) =
                         self.pages.last_mut().and_then(|p| p.last_mut())
                     {
@@ -1270,6 +1789,11 @@ impl<'a> Layout<'a> {
                     }
                 }
                 Block::Rule { thick } => self.rule(*thick),
+                Block::Fields {
+                    fields,
+                    divided,
+                    after,
+                } => self.fields(fields, *divided, *after),
                 Block::Table { rows, grid } => self.table(rows, *grid, &doc.images),
                 Block::Space(h) => {
                     if !self.at_top() {
@@ -1290,14 +1814,175 @@ pub fn render(g: &Gathered, screen: Screen, photos: Photos) -> Vec<u8> {
     let page = screen.page();
     let t = Type::for_width(page.0);
     let fonts = Fonts::new(g.edition.masthead);
-    let doc = document(g, t, photos);
-    let mut lay = Layout::new(&fonts, page, t, doc.anchors);
-    lay.run(&doc);
+    let print = crate::print::print_plan(g, &crate::front::front_plan(g));
+    let doc = fitted(&fonts, g, t, photos, &print, page);
+    let (_, lay, ranges, labels) = two_passes(&fonts, &doc, &print.book, page, t);
+    let furniture = Furniture {
+        paper: &g.edition.paper,
+        date: long_date(g.edition.date),
+        labels: &labels,
+        ranges: &ranges,
+    };
+    write(&fonts, &doc, &lay, &furniture)
+}
+
+/// The document with the first fit that keeps the whole front page on page 1, else the first
+/// that keeps its jump line there (§4.3), else the last one tried. Each try is one layout pass.
+fn fitted(
+    fonts: &Fonts,
+    g: &Gathered,
+    t: Type,
+    photos: Photos,
+    print: &PrintPlan,
+    page: (f32, f32),
+) -> Doc {
+    let mut fits = FITS.to_vec();
+    if let Some(x) = &print.jump {
+        let n = crate::print::paragraph_ends(&x.opening).len();
+        fits.extend((1..n).rev().map(|keep| Fit {
+            keep,
+            ..FITS[FITS.len() - 1]
+        }));
+    }
+    let widest = widest_label(fonts, &print.book);
+    let on_front = |lay: &Layout, a: usize| lay.anchors[a].is_some_and(|(p, _)| p == 0);
+    let (mut jump_fits, mut last) = (None, None);
+    for fit in fits {
+        let d = document(g, t, photos, print, fit);
+        let Some(jump_end) = d.jump_end else {
+            return d;
+        };
+        let lay = lay_out(fonts, &d, page, t, &widest, Vec::new(), None);
+        if on_front(&lay, d.front_end) {
+            return d;
+        }
+        if on_front(&lay, jump_end) && jump_fits.is_none() {
+            jump_fits = Some(fit);
+        }
+        last = Some(d);
+    }
+    match jump_fits {
+        Some(fit) => document(g, t, photos, print, fit),
+        None => last.expect("at least one fit"),
+    }
+}
+
+/// Book ranges and every page's label.
+type Labels = (Vec<(usize, char)>, Vec<String>);
+
+/// Two passes (§4.2): the first finds the pages, the second prints their labels in slots
+/// already sized for them, so nothing moves. Both layouts, the book ranges and each page's
+/// label. Sections' anchors are the document's first.
+fn two_passes<'a>(
+    fonts: &'a Fonts,
+    doc: &Doc,
+    book: &[Option<char>],
+    page: (f32, f32),
+    t: Type,
+) -> (Layout<'a>, Layout<'a>, Vec<(usize, char)>, Vec<String>) {
+    let widest = widest_label(fonts, book);
+    let first = lay_out(fonts, doc, page, t, &widest, Vec::new(), None);
+    let section_pages: Vec<Option<usize>> = first.anchors[..book.len()]
+        .iter()
+        .map(|a| a.map(|(p, _)| p))
+        .collect();
+    let (ranges, labels): Labels = page_labels(book, &section_pages, first.pages.len());
+    let by_anchor = first
+        .anchors
+        .iter()
+        .map(|a| a.map(|(p, _)| labels[p].clone()))
+        .collect();
+    let second = lay_out(
+        fonts,
+        doc,
+        page,
+        t,
+        &widest,
+        by_anchor,
+        Some(first.pages.len()),
+    );
+    debug_assert_eq!(second.pages.len(), first.pages.len(), "pass 2 moved a page");
+    debug_assert_eq!(second.anchors, first.anchors, "pass 2 moved an anchor");
+    (first, second, ranges, labels)
+}
+
+fn lay_out<'a>(
+    fonts: &'a Fonts,
+    doc: &Doc,
+    page: (f32, f32),
+    t: Type,
+    widest: &str,
+    labels: Vec<Option<String>>,
+    pages_total: Option<usize>,
+) -> Layout<'a> {
+    let mut lay = Layout::new(fonts, page, t, doc.anchors);
+    lay.widest_label = widest.to_owned();
+    lay.labels = labels;
+    lay.pages_total = pages_total;
+    lay.run(doc);
     if lay.pages.last().is_some_and(Vec::is_empty) && lay.pages.len() > 1 {
         lay.pages.pop();
     }
-    let footer = format!("{} · {}", g.edition.paper, long_date(g.edition.date));
-    write(&fonts, &doc, &lay, &footer)
+    lay
+}
+
+/// The widest label the paper could print: its widest letter and two digits.
+fn widest_label(fonts: &Fonts, book: &[Option<char>]) -> String {
+    let letter = book
+        .iter()
+        .flatten()
+        .copied()
+        .chain(['A'])
+        .max_by(|a, b| {
+            let w = |c: &char| fonts.width(Face::Bold, 10.0, &c.to_string());
+            w(a).total_cmp(&w(b))
+        })
+        .unwrap_or('A');
+    format!("{letter}88")
+}
+
+/// Each book's first page, and every page's label (§3, §4.2). The front page opens book A;
+/// a section that starts a new book starts its range at its first page.
+fn page_labels(
+    book: &[Option<char>],
+    section_pages: &[Option<usize>],
+    pages: usize,
+) -> (Vec<(usize, char)>, Vec<String>) {
+    let mut ranges = vec![(0, 'A')];
+    for (b, p) in book.iter().zip(section_pages) {
+        let (Some(b), Some(p)) = (b, p) else {
+            continue;
+        };
+        let last = ranges.last_mut().expect("the front page's");
+        if *b == last.1 {
+            continue;
+        }
+        if *p > last.0 {
+            ranges.push((*p, *b));
+        } else {
+            last.1 = *b;
+        }
+    }
+    let labels = (0..pages)
+        .map(|n| {
+            let (start, c) = ranges
+                .iter()
+                .rev()
+                .find(|(s, _)| *s <= n)
+                .copied()
+                .unwrap_or((0, 'A'));
+            format!("{c}{}", n - start + 1)
+        })
+        .collect();
+    (ranges, labels)
+}
+
+/// What every page but the front carries, and the label of each page.
+struct Furniture<'a> {
+    paper: &'a str,
+    date: String,
+    labels: &'a [String],
+    ranges: &'a [(usize, char)],
 }
 
 fn deflate(data: &[u8]) -> Vec<u8> {
@@ -1310,7 +1995,7 @@ fn glyph_bytes(glyphs: &[(u16, char)]) -> Vec<u8> {
     glyphs.iter().flat_map(|(g, _)| g.to_be_bytes()).collect()
 }
 
-fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, footer: &str) -> Vec<u8> {
+fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, furniture: &Furniture) -> Vec<u8> {
     let mut pdf = Pdf::new();
     let mut next = 1;
     let mut alloc = || {
@@ -1341,16 +2026,12 @@ fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, footer: &str) -> Vec<u8> {
         let mut c = Content::new();
         let mut faces_on: BTreeSet<Face> = BTreeSet::new();
         let mut images_on: BTreeSet<usize> = BTreeSet::new();
-        let foot = format!("{footer} · {}", n + 1);
-        let foot_size = lay.t.meta() * 0.85;
-        let foot_op = Op::Text {
-            x: lay.left,
-            y: lay.page_h - lay.top * 0.6,
-            face: Face::Italic,
-            size: foot_size,
-            text: if total > 1 { foot } else { footer.to_owned() },
+        let folio = match n {
+            0 => Vec::new(),
+            _ => folio(fonts, lay, furniture, n),
         };
-        for op in ops.iter().chain(std::iter::once(&foot_op)) {
+        // the folio first, so text extraction and read-back meet it first
+        for op in folio.iter().chain(ops) {
             match op {
                 Op::Text {
                     x,
@@ -1612,11 +2293,66 @@ fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, footer: &str) -> Vec<u8> {
         }
         o.count(items.len() as i32);
     }
-    pdf.catalog(catalog)
-        .pages(tree)
-        .outlines(outline_root)
-        .page_mode(pdf_writer::types::PageMode::UseOutlines);
+    // Page labels: each book's pages numbered from 1 under its letter (§4.2).
+    let label_refs: Vec<Ref> = furniture.ranges.iter().map(|_| alloc()).collect();
+    for (r, (_, letter)) in label_refs.iter().zip(furniture.ranges) {
+        pdf.indirect(*r)
+            .start::<pdf_writer::writers::PageLabel>()
+            .style(NumberingStyle::Arabic)
+            .prefix(TextStr(&letter.to_string()));
+    }
+    {
+        let mut cat = pdf.catalog(catalog);
+        cat.pages(tree)
+            .outlines(outline_root)
+            .page_mode(pdf_writer::types::PageMode::UseOutlines);
+        let mut tree = cat.page_labels();
+        let mut nums = tree.nums();
+        for (r, (start, _)) in label_refs.iter().zip(furniture.ranges) {
+            nums.insert(*start as i32, *r);
+        }
+    }
     pdf.finish()
+}
+
+/// Page `n`'s folio (§4.1): its label at the left, the paper in the middle, the date at the
+/// right, over a hairline.
+fn folio(fonts: &Fonts, lay: &Layout, f: &Furniture, n: usize) -> Vec<Op> {
+    let size = lay.t.meta();
+    let y = lay.margin + size * 1.05;
+    let label = f.labels.get(n).cloned().unwrap_or_default();
+    let paper_w = fonts.width(Face::Regular, size, f.paper);
+    let date_w = fonts.width(Face::Italic, size, &f.date);
+    vec![
+        Op::Text {
+            x: lay.left,
+            y,
+            face: Face::Bold,
+            size,
+            text: label,
+        },
+        Op::Text {
+            x: lay.left + (lay.width - paper_w) / 2.0,
+            y,
+            face: Face::Regular,
+            size,
+            text: f.paper.to_owned(),
+        },
+        Op::Text {
+            x: lay.left + lay.width - date_w,
+            y,
+            face: Face::Italic,
+            size,
+            text: f.date.clone(),
+        },
+        Op::Line {
+            x1: lay.left,
+            y1: y + size * 0.5,
+            x2: lay.left + lay.width,
+            y2: y + size * 0.5,
+            width: 0.4,
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -1741,6 +2477,303 @@ mod tests {
             ops.iter()
                 .any(|o| matches!(o, Op::Text { text, .. } if text == "1"))
         );
+    }
+
+    #[test]
+    fn page_labels_number_each_book_from_its_first_page() {
+        let book = [Some('A'), Some('A'), Some('B'), Some('C')];
+        let pages = [Some(1), Some(2), Some(4), Some(7)];
+        let (ranges, labels) = page_labels(&book, &pages, 9);
+        assert_eq!(ranges, vec![(0, 'A'), (4, 'B'), (7, 'C')]);
+        assert_eq!(
+            labels,
+            ["A1", "A2", "A3", "A4", "B1", "B2", "B3", "C1", "C2"]
+        );
+        // a section that was never laid out doesn't start a book
+        let (ranges, _) = page_labels(&[Some('A'), Some('B')], &[Some(1), None], 2);
+        assert_eq!(ranges, vec![(0, 'A')]);
+    }
+
+    fn text_of(ops: &[Op]) -> String {
+        ops.iter()
+            .filter_map(|o| match o {
+                Op::Text { text, .. } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn row(text: &str, leader: bool) -> Field {
+        Field {
+            runs: vec![Run {
+                face: Face::Regular,
+                size: 10.0,
+                text: text.into(),
+            }],
+            tail: Some(Tail::label(0, Face::Bold, 10.0)),
+            leader,
+            ..Field::default()
+        }
+    }
+
+    #[test]
+    fn a_slot_is_set_at_the_cells_edge_and_never_moves_a_line() {
+        let f = fonts();
+        let long = "Council weighs a night bus to the hospital and back, every forty minutes";
+        let lay = |label: &str| {
+            let mut l = layout(&f);
+            l.labels = vec![Some(label.to_owned())];
+            l.fields(&[row(long, false)], false, 0.0);
+            l
+        };
+        let (a, b) = (lay("A2"), lay("B88"));
+        assert_eq!(a.y, b.y);
+        let words = |l: &Layout| -> Vec<(f32, f32)> {
+            l.pages[0]
+                .iter()
+                .filter_map(|o| match o {
+                    Op::Text { x, y, text, .. } if !text.contains('A') && !text.contains('B') => {
+                        Some((*x, *y))
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            words(&a),
+            words(&b),
+            "the text sits the same with either label"
+        );
+        let Some(Op::Text {
+            x,
+            face,
+            size,
+            text,
+            ..
+        }) = a.pages[0].last()
+        else {
+            panic!("the tail is drawn last");
+        };
+        assert_eq!(text, "A2");
+        let right = x + f.width(*face, *size, text);
+        assert!((right - (a.left + a.width)).abs() < 0.01, "{right}");
+    }
+
+    #[test]
+    fn leaders_only_when_asked() {
+        let f = fonts();
+        let dots = |leader: bool| {
+            let mut l = layout(&f);
+            l.labels = vec![Some("B1".into())];
+            l.fields(&[row("Local", leader)], false, 0.0);
+            text_of(&l.pages[0]).contains(". . .")
+        };
+        assert!(dots(true));
+        assert!(!dots(false));
+    }
+
+    fn paper() -> Gathered {
+        use crate::{Article, Edition, Section};
+        let p = |n: usize, w: &str| format!("<p>{}</p>\n", vec![w; n].join(" "));
+        let quote = "\u{201c}We have waited forty years for somebody to do something with that yard,\u{201d} she said.";
+        let quoted: String = (0..7)
+            .map(|i| match i {
+                2 => format!("<p>{quote}</p>\n"),
+                _ => p(12, &format!("para{i}")),
+            })
+            .collect();
+        let section = |key: &str, title: &str, articles: Vec<Article>| Section {
+            key: key.into(),
+            title: title.into(),
+            articles,
+            ..Default::default()
+        };
+        let story = |title: &str, body: String| Article {
+            title: title.into(),
+            body,
+            meta: Some("Courier".into()),
+            ..Default::default()
+        };
+        Gathered {
+            news: vec![0, 1],
+            reading: None,
+            long_reads: Vec::new(),
+            reading_outcomes: Vec::new(),
+            notes: Vec::new(),
+            names: Vec::new(),
+            edition: Edition {
+                large_print: false,
+                paper: "The Deckle Daily".into(),
+                date: chrono::NaiveDate::from_ymd_opt(2026, 10, 26).unwrap(),
+                place: "Aberdale".into(),
+                weather_line: None,
+                masthead: Masthead::default(),
+                sections: vec![
+                    section(
+                        "local",
+                        "Local",
+                        vec![story(
+                            "Mill Yard Will Be a Market Again",
+                            format!("{}{}", p(120, "opening"), p(40, "later")),
+                        )],
+                    ),
+                    section("feeds:A", "World", vec![story("Herons Stay Later", quoted)]),
+                    section("puzzle", "Puzzle", vec![story("Crossword", p(5, "clue"))]),
+                    section(
+                        "reading",
+                        "Your Reading",
+                        vec![story("Saved", p(5, "saved"))],
+                    ),
+                ],
+                assets: Vec::new(),
+            },
+        }
+    }
+
+    /// Both passes of `g` on `screen`, and every page's text.
+    fn laid(g: &Gathered, screen: Screen) -> (usize, usize, Vec<String>) {
+        let f = Box::leak(Box::new(Fonts::new(g.edition.masthead)));
+        let page = screen.page();
+        let t = Type::for_width(page.0);
+        let print = crate::print::print_plan(g, &crate::front::front_plan(g));
+        let doc = fitted(f, g, t, Photos::Gray, &print, page);
+        let (first, second, _, _) = two_passes(f, &doc, &print.book, page, t);
+        let texts = second.pages.iter().map(|ops| text_of(ops)).collect();
+        (first.pages.len(), second.pages.len(), texts)
+    }
+
+    #[test]
+    fn the_front_page_teases_jumps_and_indexes_with_page_labels() {
+        let (_, _, pages) = laid(&paper(), Screen::Remarkable2);
+        let front = &pages[0];
+        // the skybox: what's inside, not on the front, with its page
+        assert!(front.contains("PUZZLE · Crossword B1"), "{front}");
+        assert!(front.contains("YOUR READING · Saved B2"), "{front}");
+        assert!(front.contains("Final edition"));
+        assert!(front.contains(&format!("{} pages", pages.len())), "{front}");
+        // the lead's opening, then its jump
+        assert!(front.contains("opening opening"));
+        assert!(!front.contains("later"));
+        assert!(front.contains("See MILL, A2 \u{203a}"), "{front}");
+        // a refer and the index, with labels and leaders
+        assert!(front.contains("Herons Stay Later World A"), "{front}");
+        assert!(front.contains("Inside today"));
+        assert!(front.contains(". . ."));
+    }
+
+    #[test]
+    fn the_jump_lands_under_its_head_and_the_pull_quote_between_rules() {
+        let (_, _, pages) = laid(&paper(), Screen::Remarkable2);
+        let landing = pages
+            .iter()
+            .find(|t| t.contains("Continued from A1"))
+            .expect("a jump head");
+        assert!(landing.contains("MILL · Continued from A1 Mill Yard Will Be a Market Again"));
+        assert!(landing.contains("later later"));
+        assert!(
+            !landing.contains("opening"),
+            "the opening isn't printed twice"
+        );
+        let world = pages.iter().find(|t| t.contains("para0")).unwrap();
+        let quote = "\u{201c}We have waited forty years for somebody to do something with that yard\u{201d}";
+        let at = world
+            .find(quote)
+            .unwrap_or_else(|| panic!("the pull quote: {world}"));
+        assert!(world.find("para4").unwrap() < at && at < world.find("para5").unwrap());
+    }
+
+    #[test]
+    fn a_short_lead_prints_whole_and_its_section_refers_to_it() {
+        let mut g = paper();
+        g.edition.sections[0].articles[0].body = "<p>All of it.</p>".into();
+        let (_, _, pages) = laid(&g, Screen::Remarkable2);
+        assert!(pages[0].contains("All of it."));
+        assert!(!pages[0].contains("See MILL"));
+        assert!(
+            pages
+                .iter()
+                .any(|t| t.contains("Mill Yard Will Be a Market Again — on A1"))
+        );
+    }
+
+    #[test]
+    fn the_jump_line_stays_on_the_front_page_and_nothing_is_lost() {
+        // print layout §4.3: a front page too full for its lead is fitted, never overflowed
+        let mut g = paper();
+        let lead = &mut g.edition.sections[0].articles[0];
+        lead.title = "Beyond the governor\u{2019}s race: New York\u{2019}s minor parties fight to \
+                      maintain ballot access and political influence across the state"
+            .into();
+        let p = |w: &str| format!("<p>{}</p>\n", vec![w; 40].join(" "));
+        lead.body = format!("{}{}{}{}", p("alpha"), p("beta"), p("gamma"), p("later"));
+        for screen in [
+            Screen::Remarkable2,
+            Screen::RemarkablePaperProMove,
+            Screen::A5,
+        ] {
+            let (_, _, pages) = laid(&g, screen);
+            assert!(
+                pages[0].contains("See BEYOND, A2 \u{203a}"),
+                "{screen:?}: page 2 is [{}]",
+                pages[1].chars().take(400).collect::<String>()
+            );
+            let all = pages.join(" ");
+            for w in ["alpha", "beta", "gamma", "later"] {
+                assert_eq!(all.matches(w).count(), 40, "{screen:?}: {w}");
+            }
+        }
+    }
+
+    #[test]
+    fn both_passes_agree_on_every_screen() {
+        for screen in [
+            Screen::Remarkable2,
+            Screen::RemarkablePaperPro,
+            Screen::RemarkablePaperProMove,
+            Screen::Ipad,
+            Screen::A5,
+        ] {
+            let (first, second, pages) = laid(&paper(), screen);
+            assert_eq!(first, second, "{screen:?}");
+            assert!(pages[0].contains(&format!("{first} pages")), "{screen:?}");
+        }
+    }
+
+    #[test]
+    fn a_folio_carries_the_label_the_paper_and_the_date() {
+        let f = fonts();
+        let l = layout(&f);
+        let labels = vec!["A1".to_owned(), "A2".to_owned()];
+        let furniture = Furniture {
+            paper: "The Deckle Daily",
+            date: "Monday, October 26, 2026".into(),
+            labels: &labels,
+            ranges: &[(0, 'A')],
+        };
+        let ops = folio(&f, &l, &furniture, 1);
+        assert_eq!(
+            text_of(&ops),
+            "A2 The Deckle Daily Monday, October 26, 2026"
+        );
+        assert!(ops.iter().any(|o| matches!(o, Op::Line { .. })));
+        // it sits in the room the top margin keeps for it
+        let Op::Text { y, .. } = &ops[0] else {
+            panic!()
+        };
+        assert!(*y > l.margin && *y < l.top, "{y}");
+    }
+
+    #[test]
+    fn the_pdf_carries_page_labels_per_book() {
+        let bytes = render(&paper(), Screen::Remarkable2, Photos::Gray);
+        let pdf = String::from_utf8_lossy(&bytes);
+        assert!(pdf.contains("/PageLabels"), "no page labels");
+        assert_eq!(pdf.matches("/Type /PageLabel").count(), 2, "A and B");
+        assert!(pdf.contains("/P (A)") && pdf.contains("/P (B)"));
     }
 
     #[test]

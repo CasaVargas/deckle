@@ -119,7 +119,12 @@ fn imports_two_with_one_kfx() {
             .as_ref()
             .expect("the lead is read from the front page");
         assert_eq!(lead.title, "Mill sold");
-        assert!(lead.teaser.is_none(), "teasers are not kept in the EPUB");
+        // a short lead prints whole on the front page (print layout §5.4): its first paragraph
+        // is read as the teaser
+        assert_eq!(
+            lead.teaser.as_deref(),
+            Some("The old mill & brewery changed hands.")
+        );
         assert!(m.paths(date).0.exists());
     }
     assert_eq!(
@@ -131,6 +136,40 @@ fn imports_two_with_one_kfx() {
         !m.paths(d("2026-10-20")).2.exists(),
         "no KFX for the second"
     );
+}
+
+#[test]
+fn a_jumped_lead_is_stitched_back_together() {
+    // print layout §2.2: a long lead prints its opening on the front page and jumps inside
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("cache");
+    std::fs::create_dir_all(&dir).unwrap();
+    let date = d("2026-10-21");
+    let mut g = gathered(date);
+    let opening = vec!["opening"; 120].join(" ");
+    let quote = "\u{201c}We have waited forty years for somebody to do something with that yard,\u{201d} she said.";
+    g.edition.sections[0].articles[0].body = format!(
+        "<p>{opening}</p>\n<p>later one</p>\n<p>later two</p>\n<p>{quote}</p>\n<p>later four</p>\n<p>later five</p>\n<p>later six</p>\n"
+    );
+    deckle_digest::write_edition(&g, &dir.join(format!("deckle-daily-{date}.epub"))).unwrap();
+    let m = Morgue {
+        root: tmp.path().join("Morgue"),
+        keep_days: 0,
+    };
+    assert_eq!(import_cache(&m, &dir), [date]);
+    let s = m.sidecar(date).unwrap();
+    let titles: Vec<&str> = s
+        .sections
+        .iter()
+        .flat_map(|x| x.stories.iter().map(|st| st.title.as_str()))
+        .collect();
+    assert_eq!(titles, ["Mill sold", "Fair opens", "Powerball"]);
+    let text = &s.sections[0].stories[0].text;
+    assert!(text.starts_with("opening opening"), "{text}");
+    assert!(text.contains("later one later two"), "{text}");
+    // the pull quote repeats the story's own words: it isn't kept twice
+    assert_eq!(text.matches("waited forty years").count(), 1, "{text}");
+    assert_eq!(s.lead.as_ref().unwrap().title, "Mill sold");
 }
 
 #[test]

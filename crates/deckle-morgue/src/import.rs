@@ -27,7 +27,7 @@ fn text_of(n: roxmltree::Node) -> String {
 
 /// Classes whose elements aren't story text: the byline, links, rules, the section's own list,
 /// the "unavailable" note.
-const NOT_STORY: [&str; 7] = [
+const NOT_STORY: [&str; 9] = [
     "meta",
     "link",
     "rule",
@@ -35,6 +35,9 @@ const NOT_STORY: [&str; 7] = [
     "in-section",
     "toc",
     "unavailable",
+    // print layout §5: a folio line, and a pull quote that repeats the story's own words
+    "folio",
+    "pull",
 ];
 
 /// `s3.xhtml#a2` → section index 2 (zero-based).
@@ -81,6 +84,9 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
     let mut weather = None;
     // The lead's title, the section page it links to and (when the page prints one) its teaser.
     let mut lead: Option<(String, Option<usize>, Option<String>)> = None;
+    // What the front page prints of the lead (print layout §2.2): its opening when it jumps, or
+    // all of it when it's short. A section page's jump head or refer picks it up.
+    let mut lead_text: Vec<String> = Vec::new();
     if let Some(front) = read_entry(&mut zip, "OEBPS/front.xhtml")
         && let Ok(doc) = roxmltree::Document::parse(&front)
     {
@@ -104,6 +110,21 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
                 if !title.is_empty() {
                     lead = Some((title, idx, teaser));
                 }
+                // after the headline (`next_siblings` starts at it) and its byline: the story's
+                // paragraphs, up to the jump line, the tiles or the index
+                lead_text = n
+                    .next_siblings()
+                    .filter(|s| s.is_element())
+                    .skip(2)
+                    .take_while(|s| {
+                        !(s.has_tag_name("table")
+                            || s.has_tag_name("h2")
+                            || s.has_tag_name("ul")
+                            || has_class(*s, "jump"))
+                    })
+                    .filter(|s| !NOT_STORY.iter().any(|c| has_class(*s, c)))
+                    .map(text_of)
+                    .collect();
             } else if has_class(n, "paper") {
                 paper = text_of(n).trim().to_owned();
             } else if has_class(n, "ears") {
@@ -154,6 +175,25 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
             } else if n.has_tag_name("h2") && has_class(n, "headline") {
                 flush(&mut current, &mut section);
                 current = Some((text_of(n).trim().to_owned(), Vec::new()));
+            } else if has_class(n, "jumphead") {
+                // the lead continued: its opening is on the front page, its title comes next
+                flush(&mut current, &mut section);
+                current = Some((String::new(), lead_text.clone()));
+            } else if has_class(n, "jumptitle") {
+                if let Some((title, _)) = current.as_mut()
+                    && title.is_empty()
+                {
+                    *title = text_of(n).trim().to_owned();
+                }
+            } else if has_class(n, "refer") {
+                // the lead printed whole on the front page
+                flush(&mut current, &mut section);
+                let title = n
+                    .descendants()
+                    .find(|d| d.has_tag_name("a"))
+                    .map(|a| text_of(a).trim().to_owned())
+                    .unwrap_or_default();
+                current = Some((title, lead_text.clone()));
             } else if let Some((_, parts)) = current.as_mut()
                 && !NOT_STORY.iter().any(|c| has_class(n, c))
             {
