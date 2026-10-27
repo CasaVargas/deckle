@@ -7,14 +7,16 @@ use chrono::{DateTime, Utc};
 use super::filing::file_into;
 pub use super::picture::site_picture;
 use super::recipe::{Recipe, parse_recipe};
-use super::store::{ImageKind, Store, Stored, recipe_id};
+use super::store::{ImageKind, Store, Stored, recipe_id, write_atomic};
 use crate::article;
 use crate::fetch::Net;
 use crate::reading::normalize_url;
 use crate::web_book::{Source, source};
 
 /// Said when a recipe is saved with no printed picture.
-const NO_PICTURE: &str = "No picture on the page";
+pub const NO_PICTURE: &str = "No picture on the page";
+/// Said when saving a recipe again found no usable photo, and its earlier picture stays.
+pub const KEPT_PICTURE: &str = "Kept the earlier picture";
 
 /// What the owner chose when adding.
 pub struct AddOptions<'a> {
@@ -80,8 +82,10 @@ fn read(target: &str, net: &dyn Net) -> Result<(Recipe, String, Option<Vec<u8>>)
 
 /// Saves the recipe at `target` into `store`, with its photo: as fetched in
 /// `images/<id>.orig.jpg` (the bytes are kept as they came, whatever their format) and as
-/// printed in `images/<id>.jpg`. A photo that is missing, won't load or is too small leaves the
-/// recipe without a picture (`picture_note`). Adding one again refreshes both files.
+/// printed in `images/<id>.jpg`. The pictures are written first, each atomically, so a disk
+/// failure stores nothing. A photo that is missing, won't load or is too small leaves a new
+/// recipe without a picture ([`NO_PICTURE`]); adding one again then keeps the earlier picture
+/// ([`KEPT_PICTURE`]), and otherwise refreshes both files.
 pub fn add(
     store: &Store,
     target: &str,
@@ -90,24 +94,27 @@ pub fn add(
     now: DateTime<Utc>,
 ) -> Result<AddOutcome, String> {
     let (recipe, key, photo) = read(target, net)?;
-    let printed = photo.as_deref().and_then(site_picture);
-    let stored = store.put(recipe, &key, opts.chapter, opts.note, now)?;
-    let (Stored::Added(saved) | Stored::Updated(saved)) = &stored;
-    let picture_note = match (&photo, &printed) {
+    let id = recipe_id(&key);
+    let (orig_path, printed_path) = (
+        store.image_path(&id, ImageKind::Orig),
+        store.image_path(&id, ImageKind::Printed),
+    );
+    let picture_note = match (&photo, photo.as_deref().and_then(site_picture)) {
         (Some(orig), Some(printed)) => {
-            let write = |kind, bytes: &[u8]| {
-                let path = store.image_path(&saved.id, kind);
-                if let Some(dir) = path.parent() {
-                    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            let fresh = !orig_path.exists();
+            write_atomic(&orig_path, orig)?;
+            if let Err(e) = write_atomic(&printed_path, printed) {
+                if fresh {
+                    let _ = std::fs::remove_file(&orig_path);
                 }
-                std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))
-            };
-            write(ImageKind::Orig, orig)?;
-            write(ImageKind::Printed, printed)?;
+                return Err(e);
+            }
             None
         }
+        _ if printed_path.is_file() => Some(KEPT_PICTURE),
         _ => Some(NO_PICTURE),
     };
+    let stored = store.put(recipe, &key, opts.chapter, opts.note, now)?;
     Ok(AddOutcome {
         stored,
         picture_note,

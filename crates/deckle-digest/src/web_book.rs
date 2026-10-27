@@ -36,7 +36,7 @@ pub struct WebBook {
     pub words: usize,
 }
 
-pub(crate) fn is_address(target: &str) -> bool {
+fn is_address(target: &str) -> bool {
     target.starts_with("http://") || target.starts_with("https://")
 }
 

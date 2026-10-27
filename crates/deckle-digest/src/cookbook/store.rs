@@ -120,14 +120,14 @@ fn cap_note(note: &str) -> String {
 }
 
 /// Writes `text` to a temp file beside `path`, then renames it into place.
-fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, text: impl AsRef<[u8]>) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
-    std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::write(&tmp, text.as_ref()).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
@@ -204,7 +204,7 @@ impl Store {
         let mut new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
         spread_tables(new.as_table_mut());
         crate::config::merge_table(doc.as_table_mut(), new.as_table());
-        write_atomic(&path, &doc.to_string())
+        write_atomic(&path, doc.to_string())
     }
 
     /// Saves the recipe read from `key` (§5). A new one is filed into a chapter (`chapter`, or

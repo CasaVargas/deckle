@@ -315,6 +315,11 @@ fn site_picture_crops_to_three_by_two() {
     assert_eq!(dims(&site_picture(&png(600, 600)).unwrap()), (600, 400));
     assert_eq!(dims(&site_picture(&png(1200, 400)).unwrap()), (600, 400));
     assert_eq!(dims(&site_picture(&png(2400, 1600)).unwrap()), (1000, 667));
+    // An odd size crops without a panic, to within a pixel of 3:2.
+    let (w, h) = dims(&site_picture(&png(601, 401)).unwrap());
+    assert_eq!((w, h), (601, 401));
+    let (w, h) = dims(&site_picture(&png(401, 601)).unwrap());
+    assert_eq!((w, h), (401, 267));
     assert!(site_picture(&png(50, 50)).is_none());
     assert!(site_picture(b"nope").is_none());
 }
@@ -328,4 +333,57 @@ fn a_target_that_is_nothing_is_refused() {
     let err = add(&store, "https://fetch.test/gone", &net, &opts(), at(26)).unwrap_err();
     assert!(err.contains("offline"), "{err}");
     assert!(!store.dir.exists());
+}
+
+#[test]
+fn resave_with_failed_photo_keeps_earlier_picture() {
+    let (_d, store) = store();
+    let net = Fixture::new(&[
+        (PAGE_URL, recipe_page(IMG_URL).into_bytes()),
+        (IMG_URL, png(1600, 1200)),
+    ]);
+    let first = add(&store, PAGE_URL, &net, &opts(), at(26)).unwrap();
+    let id = saved(&first.stored).id.clone();
+    let (orig, printed) = (
+        store.image_path(&id, ImageKind::Orig),
+        store.image_path(&id, ImageKind::Printed),
+    );
+    let (orig_before, printed_before) = (
+        std::fs::read(&orig).unwrap(),
+        std::fs::read(&printed).unwrap(),
+    );
+
+    // The image is no longer served.
+    let net = Fixture::new(&[(PAGE_URL, recipe_page(IMG_URL).into_bytes())]);
+    let again = add(&store, PAGE_URL, &net, &opts(), at(27)).unwrap();
+    assert!(matches!(again.stored, Stored::Updated(_)));
+    assert_eq!(again.picture_note, Some("Kept the earlier picture"));
+    assert_eq!(std::fs::read(&orig).unwrap(), orig_before);
+    assert_eq!(std::fs::read(&printed).unwrap(), printed_before);
+}
+
+#[test]
+fn resave_of_a_recipe_that_never_had_a_picture_says_so() {
+    let (_d, store) = store();
+    let net = Fixture::new(&[(PAGE_URL, recipe_page(IMG_URL).into_bytes())]);
+    add(&store, PAGE_URL, &net, &opts(), at(26)).unwrap();
+    let again = add(&store, PAGE_URL, &net, &opts(), at(27)).unwrap();
+    assert_eq!(again.picture_note, Some("No picture on the page"));
+}
+
+#[test]
+fn image_write_failure_stores_nothing() {
+    let (_d, store) = store();
+    // A directory where the printed picture goes makes the rename fail.
+    let id = recipe_id(KEY);
+    std::fs::create_dir_all(store.image_path(&id, ImageKind::Printed)).unwrap();
+    let net = Fixture::new(&[
+        (PAGE_URL, recipe_page(IMG_URL).into_bytes()),
+        (IMG_URL, png(1600, 1200)),
+    ]);
+    let err = add(&store, PAGE_URL, &net, &opts(), at(26)).unwrap_err();
+    assert!(err.contains(&format!("{id}.jpg")), "{err}");
+    assert!(store.find(KEY).unwrap().is_none());
+    assert!(store.all().unwrap().is_empty());
+    assert!(!store.image_path(&id, ImageKind::Orig).exists());
 }
