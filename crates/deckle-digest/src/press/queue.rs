@@ -48,6 +48,8 @@ pub(crate) struct JournalData {
     bindings: Vec<Binding>,
     entries: Vec<Entry>,
     jobs: Vec<Job>,
+    #[serde(default)]
+    outputs: Vec<OutputRecord>,
 }
 pub(crate) fn validate_data(data: &JournalData) -> bool {
     use std::collections::{HashMap, HashSet};
@@ -194,6 +196,35 @@ pub(crate) fn validate_data(data: &JournalData) -> bool {
             e.status.state,
             PressState::Published | PressState::ResultRemoved
         ) && (!j.terminal || j.lease.is_none())
+        {
+            return false;
+        }
+    }
+    let mut editions = HashSet::new();
+    for o in &data.outputs {
+        if o.stages.iter().any(|s| {
+            s.generation == 0
+                || s.generation > 3
+                || !s.name.starts_with(&format!(".{}-", o.result.edition_id))
+                || !s.name.ends_with(".tmp")
+                || s.name
+                    .get(38..s.name.len().saturating_sub(4))
+                    .is_none_or(|id| Uuid::parse_str(id).is_err())
+        }) {
+            return false;
+        }
+        if !editions.insert(o.result.edition_id)
+            || validate_result(&o.lease, &o.result).is_err()
+            || !data.jobs.iter().any(|j| {
+                j.id == o.lease.job_id
+                    && j.edition == o.lease.edition_id
+                    && j.root == o.lease.root
+                    && j.producer == o.lease.producer_id
+                    && j.paper == o.lease.paper_id
+            })
+            || (o.removed_at.is_some() && o.published_at.is_none())
+            || (o.deleted && (o.removed_at.is_none() || o.deletion_completed_at.is_none()))
+            || (!o.deleted && o.deletion_completed_at.is_some())
         {
             return false;
         }
@@ -610,6 +641,13 @@ impl PressJournal {
                 e.status.revision += 1;
             }
         }
+        if let Some(o) = data
+            .outputs
+            .iter_mut()
+            .find(|o| o.lease.job_id == lease.job_id)
+        {
+            o.published_at = Some(now);
+        }
         self.commit(data)
     }
 }
@@ -758,5 +796,219 @@ impl PressJournal {
         });
         self.commit(data)?;
         Ok(status)
+    }
+}
+
+/// Paths are always derived from the binding and stable IDs, never deserialized paths.
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct OutputRecord {
+    pub lease: JobLease,
+    pub result: PressResult,
+    pub published_at: Option<DateTime<Utc>>,
+    pub removed_at: Option<DateTime<Utc>>,
+    pub deleted: bool,
+    #[serde(default)]
+    pub deletion_completed_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub stages: Vec<StageRecord>,
+}
+impl PressJournal {
+    pub(crate) fn record_intent(
+        &mut self,
+        lease: &JobLease,
+        result: PressResult,
+        now: DateTime<Utc>,
+    ) -> Result<(), PressError> {
+        self.validate_lease(lease, now)?;
+        validate_result(lease, &result)?;
+        let mut data = self.data.clone();
+        if let Some(old) = data
+            .outputs
+            .iter_mut()
+            .find(|o| o.lease.job_id == lease.job_id)
+        {
+            if old.published_at.is_some() || old.removed_at.is_some() {
+                return Err(conflict());
+            }
+            old.result = result;
+            old.lease = lease.clone();
+        } else {
+            data.outputs.push(OutputRecord {
+                lease: lease.clone(),
+                result,
+                published_at: None,
+                removed_at: None,
+                deleted: false,
+                deletion_completed_at: None,
+                stages: Vec::new(),
+            });
+        }
+        self.commit(data)
+    }
+    pub(crate) fn outputs(&self) -> Vec<OutputRecord> {
+        self.data.outputs.clone()
+    }
+    pub(crate) fn job_status(&self, job: Uuid) -> Option<PressStatus> {
+        self.data
+            .entries
+            .iter()
+            .find(|e| {
+                e.status.job_id == Some(job)
+                    && matches!(
+                        e.status.state,
+                        PressState::Published | PressState::ResultRemoved
+                    )
+            })
+            .map(|e| e.status.clone())
+    }
+    pub(crate) fn mark_removed(
+        &mut self,
+        edition: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        let mut data = self.data.clone();
+        let o = data
+            .outputs
+            .iter_mut()
+            .find(|o| o.result.edition_id == edition)
+            .ok_or_else(conflict)?;
+        if o.removed_at.is_some() {
+            return Ok(());
+        }
+        if o.published_at.is_none()
+            || data
+                .jobs
+                .iter()
+                .any(|j| j.id == o.lease.job_id && !j.terminal)
+        {
+            return Err(conflict());
+        }
+        o.removed_at = Some(now);
+        for e in &mut data.entries {
+            if e.status
+                .result
+                .as_ref()
+                .is_some_and(|r| r.edition_id == edition)
+            {
+                e.status.state = PressState::ResultRemoved;
+                e.status.removed_at = Some(now);
+                e.status.message = Some(RESULT_REMOVED_MESSAGE.into());
+                e.status.revision += 1;
+                e.status.updated_at = now;
+            }
+        }
+        self.commit(data)
+    }
+    pub(crate) fn mark_deleted(
+        &mut self,
+        edition: Uuid,
+        now: DateTime<Utc>,
+    ) -> Result<(), PressError> {
+        let mut data = self.data.clone();
+        let output = data
+            .outputs
+            .iter_mut()
+            .find(|o| o.result.edition_id == edition)
+            .ok_or_else(conflict)?;
+        output.deleted = true;
+        output.deletion_completed_at = Some(now);
+        self.commit(data)
+    }
+    pub(crate) fn forget_old(
+        &mut self,
+        now: DateTime<Utc>,
+        mut remove_status: impl FnMut(&PressBinding, Uuid) -> Result<(), PressError>,
+    ) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        let mut data = self.data.clone();
+        let old: std::collections::HashSet<_> = data
+            .entries
+            .iter()
+            .filter(|e| terminal(e.status.state) && now - e.status.updated_at >= Duration::days(30))
+            .filter(|e| {
+                !data.outputs.iter().any(|o| {
+                    e.status.job_id == Some(o.lease.job_id)
+                        && (!o.deleted
+                            || o.deletion_completed_at
+                                .is_some_and(|at| now - at < Duration::days(30)))
+                })
+            })
+            .map(|e| e.request.request_id)
+            .collect();
+        let removed: Vec<_> = data
+            .entries
+            .iter()
+            .filter(|e| old.contains(&e.request.request_id))
+            .filter_map(|e| {
+                self.binding_for_request(e.request.request_id)
+                    .map(|b| (b, e.request.request_id))
+            })
+            .collect();
+        for (binding, id) in removed {
+            remove_status(&binding, id)?;
+        }
+        data.entries
+            .retain(|e| !old.contains(&e.request.request_id));
+        data.outputs.retain(|o| {
+            !o.deleted
+                || o.deletion_completed_at
+                    .is_none_or(|at| now - at < Duration::days(30))
+        });
+        data.jobs.retain(|j| {
+            !j.terminal
+                || data.entries.iter().any(|e| e.status.job_id == Some(j.id))
+                || data.outputs.iter().any(|o| o.lease.job_id == j.id)
+        });
+        self.commit(data)
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct StageRecord {
+    pub name: String,
+    pub local: bool,
+    pub generation: u64,
+}
+impl PressJournal {
+    pub(crate) fn record_stage(
+        &mut self,
+        lease: &JobLease,
+        name: String,
+        local: bool,
+    ) -> Result<(), PressError> {
+        self.check_generation(lease)?;
+        let mut data = self.data.clone();
+        data.outputs
+            .iter_mut()
+            .find(|o| o.lease.job_id == lease.job_id)
+            .ok_or_else(conflict)?
+            .stages
+            .push(StageRecord {
+                name,
+                local,
+                generation: lease.generation,
+            });
+        self.commit(data)
+    }
+    pub(crate) fn job_terminal(&self, job: Uuid) -> bool {
+        self.data.jobs.iter().any(|j| j.id == job && j.terminal)
+    }
+}
+
+impl PressJournal {
+    pub(crate) fn forget_intent(&mut self, job: Uuid) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        let mut data = self.data.clone();
+        if !self.job_terminal(job)
+            || data
+                .outputs
+                .iter()
+                .any(|o| o.lease.job_id == job && o.published_at.is_some())
+        {
+            return Err(conflict());
+        }
+        data.outputs.retain(|o| o.lease.job_id != job);
+        self.commit(data)
     }
 }

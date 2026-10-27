@@ -34,3 +34,5 @@ mod weather_page;
 mod web_book;
 
 mod press_queue;
+
+mod press_publish;

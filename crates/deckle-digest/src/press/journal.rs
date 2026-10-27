@@ -78,6 +78,9 @@ impl PressJournal {
             healthy: true,
         })
     }
+    pub(crate) fn local_root(&self) -> &Path {
+        &self.root
+    }
     pub(crate) fn commit(&mut self, data: JournalData) -> Result<(), PressError> {
         self.ensure_healthy()?;
         let payload = serde_json::to_string(&data).map_err(|_| storage())?;

@@ -288,3 +288,8 @@ mod journal;
 mod queue;
 pub use journal::PressJournal;
 pub use queue::JobLease;
+
+pub mod publish;
+pub mod retention;
+pub use publish::{archived_artifact, flush_statuses, publish_result, recover_result};
+pub use retention::prune_results;

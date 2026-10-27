@@ -165,7 +165,9 @@ fn bounded_regular(path: &Path) -> Result<Vec<u8>, PressError> {
     Ok(bytes)
 }
 
-fn owned_manifest(binding: &PressBinding) -> Result<Option<ProducerManifest>, PressError> {
+pub(crate) fn owned_manifest(
+    binding: &PressBinding,
+) -> Result<Option<ProducerManifest>, PressError> {
     // The prepared canonical path may have been replaced while OS setup was in progress.
     if fs::canonicalize(&binding.root).map_err(|_| storage())? != binding.root {
         return Err(conflict());
