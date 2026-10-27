@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.8.0 — the Kitchen Book, and a paper that looks printed
+
+- **The Kitchen Book.** A cookbook that grows on your Kindle. Save a recipe from a recipe site
+  and Deckle files it in a chapter (Breakfast, Mains, Desserts, …), with the site's photo made
+  for e-ink. The book has its own cover and an index by ingredient, and every Kindle gets it as
+  one book, *Deckle Kitchen Book*, brought up to date each time you plug in after adding a recipe.
+- **A Cookbook tab.** Paste a recipe's address anywhere on the tab, or drop a link file, and see
+  it before it goes in the book. **Recipes** lists the book by chapter, with search; open a
+  recipe to change its chapter, picture or note. **Delivery** shows each Kindle and lets you
+  leave one out. **Book settings** has the title, subtitle and chapters (rename, reorder, add).
+- **Save recipes from anywhere.** A *Save recipe* bookmarklet sends the page you're on to the
+  cookbook (`deckle save --bookmarklet` prints it). Links and saved pages dropped in the
+  Inbox's new `Recipes` folder go there too, so with the Inbox in iCloud Drive an iPhone
+  Shortcut can save recipes from your phone. Offline? Deckle keeps trying for a day.
+- **Engravings of your dishes (optional, off by default).** Deckle can draw each recipe as an
+  old-fashioned engraving, using an OpenAI-compatible image service and your own API key. Only
+  the title, the chapter and up to eight ingredients are sent; the site's photo is kept.
+- **The Daily looks printed.** Page labels like A1 and B3, page numbers, the day's top stories
+  teased across the top of the front page, a lead story that continues inside, and pull
+  quotes taken word for word from the story.
+- **Newspaper columns in the PDF edition.** Stories are set in justified, hyphenated columns:
+  two on a reMarkable, Paper Pro, iPad or A5, one on a Paper Pro Move or in large print.
+  Columns balance on their last page, with a hairline between them, and never leave a lone
+  line at the top or bottom.
+- **Newsletter sign-ups no longer print inside stories.** The "Sign up for the … newsletter"
+  boxes some sites put in the middle of a story are left out.
+- **Who makes Deckle.** Settings → About now shows Casa Vargas, the studio behind Deckle, and
+  its other apps.
+- **Fixes.**
+  - Books your Kindle filed under `Downloads` can now be upgraded.
+  - *A paper you subscribe to* opens its setup row again, and signing in works again on BLOX
+    papers that moved their login form.
+  - Typing in a paper's settings no longer loses focus every few seconds.
+
 ## 0.7.0 — many papers, interests, and a redesigned app
 
 - **A redesigned app.** Every tab was rebuilt, one at a time.
@@ -19,7 +53,6 @@
   interests, the AI editor (when on) scores each story's relevance, and the paper can nudge
   you toward one.
 - **The cover's top line reads "Printed this morning".** It used to borrow a magazine's old motto.
-- **Newsletter sign-ups no longer print inside stories.** A story's "Sign up for the … newsletter" heading goes, with the short tagline under it and the hidden "Thanks for signing up!" (as the New York Post's inline module has them). A paragraph that only mentions a newsletter stays.
 - **Other places need only a name.** The Daily searches Google News for a place's name; the second box is now an optional custom search. A place with just a name no longer prints "Unavailable today".
 - **Ten masthead faces, and a new default.** The Daily's title can be drawn in Manufacturing Consent (the new default), Grenze Gotisch, Pirata One, Texturina, UnifrakturMaguntia (the old default; `masthead = "blackletter"` still picks it), Playfair, Bodoni, Caslon, Old Standard or Inter, all under the SIL Open Font License. A face without a letter of your title falls back to Manufacturing Consent, then Old Standard.
 - **Local no longer repeats a story.** The Daily's Local section skips a story an earlier section already printed and refills with its next one.
