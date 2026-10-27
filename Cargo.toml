@@ -56,6 +56,10 @@ uuid = { version = "1", features = ["v4"] }
 assert_cmd = "2"
 predicates = "3"
 
-# Dependencies build without debug info: smaller, faster dev builds; our own crates keep it.
+# Our own crates keep line tables only: backtraces still name files and lines, and linking is
+# far faster than with full debug info. Dependencies build without any.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package."*"]
 debug = false
