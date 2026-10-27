@@ -4,7 +4,11 @@
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
-use deckle_digest::inbox::{Skip, scan, scan_for_kindles, scan_with_books};
+use deckle_digest::Net;
+use deckle_digest::cookbook::store::Store;
+use deckle_digest::inbox::{
+    Skip, scan, scan_for_kindles, scan_recipes, scan_recipes_spaced, scan_with_books,
+};
 use deckle_digest::reading::ReadingQueue;
 
 fn later() -> SystemTime {
@@ -221,4 +225,318 @@ fn a_book_in_a_kindles_folder_is_meant_for_that_kindle() {
         inbox.join("Holiday/Left.epub").exists(),
         "other folders are left alone"
     );
+}
+
+// The Recipes folder (cookbook design §8.3).
+
+const RECIPE_URL: &str = "https://fetch.test/recipes/oat-cookies";
+
+fn recipe_page() -> String {
+    r#"<!doctype html><html><head><title>Oat Cookies</title>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "Recipe", "name": "Oat Cookies",
+  "recipeCategory": "Dessert",
+  "recipeIngredient": ["1 cup oats"], "recipeInstructions": ["Bake them."]}
+</script></head><body><h1>Oat Cookies</h1></body></html>"#
+        .to_owned()
+}
+
+/// Serves the one recipe page, says 404 to a `/gone` address and is offline for the rest,
+/// and records each URL asked for.
+struct Web(std::sync::Mutex<Vec<String>>);
+
+impl Web {
+    fn new() -> Self {
+        Web(std::sync::Mutex::new(Vec::new()))
+    }
+}
+
+impl Net for Web {
+    fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+        self.0.lock().unwrap().push(url.to_owned());
+        if url == RECIPE_URL {
+            Ok(recipe_page().into_bytes())
+        } else if url.ends_with("/gone") {
+            Err("http status: 404".into())
+        } else {
+            Err(format!("offline: {url}"))
+        }
+    }
+}
+
+fn recipes_setup() -> (tempfile::TempDir, ReadingQueue, std::path::PathBuf, Store) {
+    let (d, q, inbox) = setup();
+    std::fs::create_dir_all(inbox.join("Recipes")).unwrap();
+    let store = Store::new(d.path().join("cookbook"));
+    (d, q, inbox, store)
+}
+
+#[test]
+fn recipe_link_goes_to_cookbook_not_reading() {
+    let (_d, q, inbox, store) = recipes_setup();
+    write(
+        &inbox.join("Recipes/cookies.url"),
+        &format!("[InternetShortcut]\r\nURL={RECIPE_URL}\r\n"),
+    );
+    write(
+        &inbox.join("Recipes/more.txt"),
+        &format!("{RECIPE_URL}\nhttps://nowhere.test/gone\n"),
+    );
+    // The article scan leaves the folder alone.
+    let r = scan(&inbox, &q, later());
+    assert_eq!(r.queued, 0);
+    assert!(r.other_folders.is_empty(), "{:?}", r.other_folders);
+    assert!(inbox.join("Recipes/cookies.url").exists());
+
+    let net = Web::new();
+    let r = scan_recipes(&inbox, &store, &net, later());
+    // cookies.url, and the first address in more.txt (the second is nowhere).
+    assert_eq!(r.recipes, 2, "{:?} {:?}", r.unreadable, r.retry);
+    assert_eq!(r.unreadable.len(), 1, "more.txt names a page that is gone");
+    assert!(inbox.join("Recipes/Unreadable/more.txt").exists());
+    let why = std::fs::read_to_string(inbox.join("Recipes/Unreadable/more.txt.txt")).unwrap();
+    assert!(
+        why.contains(&format!("Added before this failed: {RECIPE_URL}. Failed: https://nowhere.test/gone: http status: 404."))
+            && why.contains("Dropping the file back in is safe."),
+        "{why}"
+    );
+    assert_eq!(store.all().unwrap().len(), 1, "both were the same recipe");
+    assert_eq!(store.all().unwrap()[0].recipe.title, "Oat Cookies");
+    assert!(q.load().is_empty(), "recipes never land in Your Reading");
+    assert!(inbox.join("Recipes/Sent/cookies.url").exists());
+}
+
+#[test]
+fn saved_page_in_recipes_added() {
+    let (_d, q, inbox, store) = recipes_setup();
+    write(&inbox.join("Recipes/page.html"), &recipe_page());
+    write(&inbox.join("Recipes/page.HTM"), &recipe_page());
+    let net = Web::new();
+    let r = scan_recipes(&inbox, &store, &net, later());
+    assert_eq!(r.recipes, 2, "{:?}", r.unreadable);
+    assert_eq!(store.all().unwrap().len(), 2, "a saved page is its own key");
+    assert!(
+        net.0.lock().unwrap().is_empty(),
+        "a saved page is not fetched"
+    );
+    assert!(inbox.join("Recipes/Sent/page.html").exists());
+    assert!(q.load().is_empty());
+}
+
+#[test]
+fn unreadable_moves_with_reason_txt() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    write(
+        &inbox.join("Recipes/gone.txt"),
+        "https://nowhere.test/gone\n",
+    );
+    write(&inbox.join("Recipes/empty.txt"), "no link in here\n");
+    std::fs::write(inbox.join("Recipes/photo.png"), [0u8, 1, 2]).unwrap();
+    let r = scan_recipes(&inbox, &store, &Web::new(), later());
+    assert_eq!(r.recipes, 0);
+    assert_eq!(r.unreadable.len(), 3, "{:?}", r.unreadable);
+    assert!(store.all().unwrap().is_empty());
+    for f in ["gone.txt", "empty.txt", "photo.png"] {
+        assert!(inbox.join("Recipes/Unreadable").join(f).exists(), "{f}");
+        assert!(
+            inbox
+                .join("Recipes/Unreadable")
+                .join(format!("{f}.txt"))
+                .exists(),
+            "{f} has a reason"
+        );
+    }
+    let why = std::fs::read_to_string(inbox.join("Recipes/Unreadable/gone.txt.txt")).unwrap();
+    assert!(why.contains("404"), "{why}");
+}
+
+#[test]
+fn sent_folder_used_for_added() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    write(&inbox.join("Recipes/a.url"), &format!("URL={RECIPE_URL}\n"));
+    let net = Web::new();
+    scan_recipes(&inbox, &store, &net, later());
+    // The same name again lands beside the first, never over it.
+    write(&inbox.join("Recipes/a.url"), &format!("URL={RECIPE_URL}\n"));
+    let r = scan_recipes(&inbox, &store, &net, later());
+    assert_eq!(r.recipes, 1, "adding again updates the recipe");
+    assert!(inbox.join("Recipes/Sent/a.url").exists());
+    assert!(inbox.join("Recipes/Sent/a (2).url").exists());
+    assert!(
+        !inbox.join("Recipes/Saved").exists(),
+        "Saved/ is for articles"
+    );
+    assert_eq!(store.all().unwrap().len(), 1);
+}
+
+#[test]
+fn kindle_named_recipes_is_skipped_with_warning() {
+    let (_d, q, inbox, _store) = recipes_setup();
+    write(&inbox.join("Recipes/book.epub"), "book");
+    let kindles = [("Recipes".to_owned(), "G000AAAA".to_owned())];
+    let mut seen = 0;
+    let r = scan_for_kindles(&inbox, &q, later(), &kindles, &mut |_, _| {
+        seen += 1;
+        Ok(())
+    });
+    assert_eq!(seen, 0, "Recipes/ is never a Kindle's folder");
+    assert!(inbox.join("Recipes/book.epub").exists());
+    assert_eq!(
+        r.warnings,
+        ["A Kindle named Recipes can't have an Inbox folder: Recipes/ is for the cookbook"]
+    );
+    // Any case, and no warning for other names.
+    let kindles = [("recipes".to_owned(), "G000AAAA".to_owned())];
+    let r = scan_for_kindles(&inbox, &q, later(), &kindles, &mut |_, _| Ok(()));
+    assert_eq!(r.warnings.len(), 1);
+    let r = scan_for_kindles(&inbox, &q, later(), &[], &mut |_, _| Ok(()));
+    assert!(r.warnings.is_empty());
+}
+
+#[test]
+fn unsettled_files_wait() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    write(
+        &inbox.join("Recipes/new.url"),
+        &format!("URL={RECIPE_URL}\n"),
+    );
+    let net = Web::new();
+    let r = scan_recipes(&inbox, &store, &net, SystemTime::now());
+    assert_eq!(r.recipes, 0);
+    assert!(inbox.join("Recipes/new.url").exists());
+    assert!(net.0.lock().unwrap().is_empty(), "nothing fetched yet");
+}
+
+#[test]
+fn an_empty_or_missing_recipes_folder_costs_nothing() {
+    let (d, _q, inbox, store) = recipes_setup();
+    let net = Web::new();
+    let r = scan_recipes(&inbox, &store, &net, later());
+    assert_eq!(r.recipes, 0);
+    assert!(r.unreadable.is_empty() && r.retry.is_empty());
+    assert!(!inbox.join("Recipes/Sent").exists());
+    assert!(!inbox.join("Recipes/Unreadable").exists());
+    std::fs::remove_dir(inbox.join("Recipes")).unwrap();
+    let r = scan_recipes(&inbox, &store, &net, later());
+    assert_eq!(r.recipes, 0);
+    assert!(!d.path().join("cookbook").exists(), "the book is untouched");
+}
+
+#[test]
+fn the_article_scan_makes_the_recipes_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
+    let inbox = dir.path().join("Inbox");
+    scan(&inbox, &q, later());
+    assert!(inbox.join("Recipes").is_dir());
+}
+
+#[test]
+fn a_bookmarklet_link_is_added_by_the_next_scan() {
+    let (d, q, inbox, store) = recipes_setup();
+    let line = format!(
+        "GET /save?token=t&kind=recipe&url={}&title=Oat%20Cookies HTTP/1.1",
+        deckle_digest::fetch::encode(RECIPE_URL)
+    );
+    let (status, _) = deckle_digest::bookmarklet::handle(
+        &line,
+        "t",
+        &q,
+        &inbox.join("Recipes"),
+        chrono::Utc::now(),
+    );
+    assert_eq!(status, 200);
+    let net = Web::new();
+    assert!(
+        net.0.lock().unwrap().is_empty(),
+        "the handler fetched nothing"
+    );
+    let r = scan_recipes(&inbox, &store, &net, later());
+    assert_eq!(r.recipes, 1, "{:?}", r.unreadable);
+    assert_eq!(store.all().unwrap()[0].recipe.title, "Oat Cookies");
+    assert!(inbox.join("Recipes/Sent/oat-cookies.url").exists());
+    assert!(q.load().is_empty());
+    drop(d);
+}
+
+#[test]
+fn a_recipe_link_waits_while_offline() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    write(
+        &inbox.join("Recipes/later.txt"),
+        "https://nowhere.test/slow\n",
+    );
+    let r = scan_recipes(&inbox, &store, &Web::new(), later());
+    assert_eq!(r.recipes, 0);
+    assert!(r.unreadable.is_empty(), "{:?}", r.unreadable);
+    assert_eq!(r.retry.len(), 1);
+    assert!(r.retry[0].1.contains("offline"), "{:?}", r.retry);
+    assert!(inbox.join("Recipes/later.txt").exists(), "still there");
+    assert!(!inbox.join("Recipes/Unreadable").exists());
+}
+
+#[test]
+fn a_404_recipe_link_is_unreadable() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    write(
+        &inbox.join("Recipes/dead.url"),
+        "URL=https://nowhere.test/gone\n",
+    );
+    let r = scan_recipes(&inbox, &store, &Web::new(), later());
+    assert!(r.retry.is_empty(), "{:?}", r.retry);
+    assert_eq!(r.unreadable.len(), 1);
+    assert!(inbox.join("Recipes/Unreadable/dead.url").exists());
+}
+
+#[test]
+fn a_day_old_link_that_still_fails_is_unreadable() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    write(
+        &inbox.join("Recipes/old.txt"),
+        "https://nowhere.test/slow\n",
+    );
+    let hours = |h: u64| SystemTime::now() + Duration::from_secs(h * 3600);
+    // Not yet a day: still waiting.
+    let r = scan_recipes_spaced(&inbox, &store, &Web::new(), hours(23), Duration::ZERO);
+    assert_eq!(r.retry.len(), 1);
+    let r = scan_recipes_spaced(&inbox, &store, &Web::new(), hours(25), Duration::ZERO);
+    assert!(r.retry.is_empty());
+    assert_eq!(r.unreadable.len(), 1);
+    let why = std::fs::read_to_string(inbox.join("Recipes/Unreadable/old.txt.txt")).unwrap();
+    assert!(why.starts_with("Couldn't fetch for a day: "), "{why}");
+    assert!(why.contains("offline"), "{why}");
+}
+
+#[test]
+fn retries_are_spaced() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    write(
+        &inbox.join("Recipes/slow.txt"),
+        "https://nowhere.test/slow\n",
+    );
+    let net = Web::new();
+    let gap = Duration::from_secs(120);
+    let first = scan_recipes_spaced(&inbox, &store, &net, later(), gap);
+    let second = scan_recipes_spaced(&inbox, &store, &net, later(), gap);
+    assert_eq!(first.retry.len(), 1);
+    assert!(second.retry.is_empty(), "not tried again yet");
+    assert_eq!(net.0.lock().unwrap().len(), 1, "one attempt in two scans");
+}
+
+#[test]
+fn a_link_that_comes_good_is_added_after_a_retry() {
+    let (_d, _q, inbox, store) = recipes_setup();
+    // The same file is offline for one net and online for another.
+    write(&inbox.join("Recipes/c.url"), &format!("URL={RECIPE_URL}\n"));
+    struct Offline;
+    impl Net for Offline {
+        fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+            Err(format!("offline: {url}"))
+        }
+    }
+    let r = scan_recipes_spaced(&inbox, &store, &Offline, later(), Duration::ZERO);
+    assert_eq!(r.retry.len(), 1);
+    let r = scan_recipes_spaced(&inbox, &store, &Web::new(), later(), Duration::ZERO);
+    assert_eq!(r.recipes, 1, "{:?}", r.retry);
+    assert!(inbox.join("Recipes/Sent/c.url").exists());
 }

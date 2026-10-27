@@ -2464,7 +2464,7 @@ fn digest(
             let date = parse_date(date.as_deref())?;
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            scan_inbox(&cfg);
+            scan_inbox(&cfg, false);
             let net = household_net(&path, &cfg);
             let built = deckle_digest::build_gathered(
                 &cfg,
@@ -2588,7 +2588,7 @@ fn digest(
             let converted = work.join("kfx");
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            scan_inbox(&cfg);
+            scan_inbox(&cfg, false);
             let net = household_net(&path, &cfg);
             let first = deckle_digest::build_gathered(
                 &cfg,
@@ -3064,8 +3064,12 @@ fn digest(
                 .transpose()
             {
                 Ok(Some(token)) => {
+                    // Save recipe drops its link file in the Inbox's Recipes folder, where
+                    // the scan below adds it to the cookbook.
+                    let recipes = deckle_digest::inbox::expand_home(&cfg.reading.inbox)
+                        .join(deckle_digest::inbox::RECIPES_FOLDER);
                     std::thread::spawn(move || {
-                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token) {
+                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token, recipes) {
                             eprintln!(
                                 "bookmarklet: can't listen on 127.0.0.1:{}: {e}",
                                 deckle_digest::bookmarklet::PORT
@@ -3111,7 +3115,7 @@ fn digest(
                     }
                     Err(_) => {}
                 }
-                scan_inbox(&cfg);
+                scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,
                     cookbook_delivery::rebuild_if_dirty(&cookbook, None).map(|built| {
@@ -5171,8 +5175,9 @@ fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::Reading
 }
 
 /// Queues what was dropped in the Inbox folder: articles for the paper, books for the
-/// outbox (design §10). Says so when it found anything.
-fn scan_inbox(cfg: &deckle_digest::Config) {
+/// outbox (design §10). Says so when it found anything. Recipes for the cookbook are added
+/// only with `recipes` (the watcher): fetching a backlog of them must not hold up a build.
+fn scan_inbox(cfg: &deckle_digest::Config, recipes: bool) {
     let dir = deckle_digest::inbox::expand_home(&cfg.reading.inbox);
     let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
     let kindles: Vec<(String, String)> = cfg
@@ -5188,6 +5193,13 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
         &kindles,
         &mut inbox::with_readers(reader_seen().then(epub_queue), inbox::pipeline()),
     );
+    // Said once per run: the watcher scans every few seconds.
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        for w in &r.warnings {
+            eprintln!("inbox: {w}");
+        }
+    });
     for folder in &r.other_folders {
         eprintln!(
             "inbox: left {} alone: no Kindle is called that (name one with `deckle devices name`)",
@@ -5213,6 +5225,41 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
     for (file, why) in &r.retry {
         eprintln!("inbox: {} waits for the next scan: {why}", file.display());
     }
+    if recipes {
+        scan_recipes_folder(&dir);
+    }
+}
+
+/// Adds what was dropped in the Inbox's `Recipes/` folder to the cookbook (cookbook design
+/// §8.3). An empty folder costs one directory read. The cookbook delivery picks the new
+/// recipes up on its next tick.
+fn scan_recipes_folder(dir: &Path) {
+    let store = deckle_digest::cookbook::store::Store::new(
+        deckle_digest::cookbook::store::Store::default_dir(),
+    );
+    let r = deckle_digest::inbox::scan_recipes(
+        dir,
+        &store,
+        &deckle_digest::Http,
+        std::time::SystemTime::now(),
+    );
+    if r.recipes > 0 {
+        eprintln!(
+            "inbox: added {} {} to the cookbook from {}",
+            r.recipes,
+            if r.recipes == 1 { "recipe" } else { "recipes" },
+            dir.join(deckle_digest::inbox::RECIPES_FOLDER).display()
+        );
+    }
+    for (file, why) in &r.unreadable {
+        eprintln!(
+            "inbox: couldn't add {} to the cookbook: {why}",
+            file.display()
+        );
+    }
+    for (file, why) in &r.retry {
+        eprintln!("inbox: {} waits for the next try: {why}", file.display());
+    }
 }
 
 fn save(
@@ -5229,9 +5276,12 @@ fn save(
         let dir = queue.path.parent().unwrap_or(Path::new("."));
         let token = deckle_digest::bookmarklet::token(dir).map_err(|e| e.to_string())?;
         println!(
-            "Drag this to your bookmarks bar (or make a bookmark with it as the address).\n\
-             It works while `deckle digest watch` is running.\n\n{}",
-            deckle_digest::bookmarklet::javascript(&token)
+            "Drag these to your bookmarks bar (or make a bookmark with each as the address).\n\
+             They work while `deckle digest watch` is running.\n\n\
+             Save to paper (an article for tomorrow's Daily):\n{}\n\n\
+             Save recipe (a recipe for the cookbook):\n{}",
+            deckle_digest::bookmarklet::javascript(&token),
+            deckle_digest::bookmarklet::recipe_javascript(&token)
         );
         return Ok(ExitCode::SUCCESS);
     }

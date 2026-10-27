@@ -433,3 +433,55 @@ fn build_of_an_empty_book_still_writes_one() {
     assert_eq!(said.lines().next().unwrap(), "0 recipes in 0 chapters");
     assert!(out.join("cookbook.epub").is_file());
 }
+
+/// Deckle's config folder under `home`, as the CLI finds it on this OS.
+fn config_dir(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/deckle")
+    } else {
+        home.join("deckle")
+    }
+}
+
+#[test]
+fn a_one_shot_build_leaves_the_recipes_folder_to_the_watcher() {
+    // A backlog of recipe fetches must not delay the morning paper: only `digest watch`
+    // adds what is in Inbox/Recipes.
+    let book = Book::new();
+    let home = book.dir.path().join("home");
+    let dir = config_dir(&home);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("digest.toml"),
+        "sections = [\"horoscope\"]\n\n[horoscope]\nsigns = [\"leo\"]\n\n[reading]\ninbox = \"~/Inbox\"\n",
+    )
+    .unwrap();
+    let recipes = home.join("Inbox/Recipes");
+    std::fs::create_dir_all(&recipes).unwrap();
+    let page = book.page();
+    let dropped = recipes.join("soup.html");
+    std::fs::copy(&page, &dropped).unwrap();
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(120);
+    std::fs::File::options()
+        .write(true)
+        .open(&dropped)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    let out = book.dir.path().join("out");
+    Command::cargo_bin("deckle")
+        .unwrap()
+        .env("DECKLE_COOKBOOK_DIR", book.cookbook())
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", &home)
+        .env("XDG_CACHE_HOME", home.join("cache"))
+        .env("APPDATA", &home)
+        .env("LOCALAPPDATA", &home)
+        .args(["digest", "build", "--date", "2026-10-01", "-o"])
+        .arg(&out)
+        .assert()
+        .success();
+    assert!(dropped.exists(), "still waiting for the watcher");
+    assert!(!recipes.join("Sent").exists());
+    assert!(book.list_json().is_empty(), "nothing was added to the book");
+}

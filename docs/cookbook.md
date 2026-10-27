@@ -36,6 +36,40 @@ adding five recipes in a row costs one build.
 - Only one build runs at a time (`cookbook/build/.lock`): `send` waits for a running build; `digest watch` skips the tick and tries again.
 - `--to <folder>`: copies `cookbook.epub` there. A folder isn't a Kindle, so nothing is recorded.
 
+## Saving from the Inbox
+
+Drop recipe links (`.webloc`, `.url`, `.txt` with one address per line) or saved pages (`.html`,
+`.htm`) into `Recipes/` inside the Inbox (`~/Deckle/Inbox/Recipes` unless `[reading] inbox` moves
+it). Only `deckle digest watch` adds them (a one-shot `digest build`, `run` or `push` leaves the
+folder alone, so fetching a backlog can't delay the paper). Each file is moved to `Recipes/Sent`
+once added. Recipes saved this way never appear in the Daily's Your Reading, and articles
+dropped in the main Inbox never reach the cookbook. A recipe from a site you're signed into goes
+in as a saved `.html` page. An iPhone Shortcut ("Save File") pointed at the iCloud Inbox's
+`Recipes` folder is the phone path.
+
+A link that can't be fetched yet (no network when the Mac wakes, a timeout, a server error, a
+file that hasn't finished downloading from iCloud) stays in `Recipes/` and is tried again, at
+most every two minutes, for a day; `watch` says `waits for the next try`. After a day it moves
+to `Recipes/Unreadable` with the reason `Couldn't fetch for a day: …`. A site that says no
+(404, 403, 410…), a page with no recipe on it, or a file of another kind goes to
+`Recipes/Unreadable` at once, with a `.txt` giving the reason. When a `.txt` with several
+addresses fails part way, the reason lists the ones that were added; dropping the file back in
+is safe. Drop an Unreadable file back in to try again.
+
+### Save recipe bookmarklet
+
+`deckle save --bookmarklet` prints a second bookmarklet beside the paper's, **Save recipe**. Drag it
+to the bookmarks bar; on a recipe page, click it. A small popup says "Sent to your cookbook" and
+`deckle digest watch` adds the recipe on its next scan (every few seconds). It works like the
+paper's bookmarklet (a popup to `127.0.0.1:47219` with the same token, so it needs `watch`
+running), but the listener only writes a link file, named after the page's title, into
+`Inbox/Recipes`; the scan does the fetching. It sends the page's address only, never its HTML.
+For a recipe behind a login, save the page as `.html` and drop it into `Inbox/Recipes`. If the
+popup says the bookmarklet is out of date, run `deckle save --bookmarklet` again.
+
+`Recipes` is reserved in the Inbox: a Kindle actually named "Recipes" can't have a folder there,
+and `watch` says so once.
+
 ## Delivery
 
 Every Kindle gets the newest build (not just the first one to plug in). `cookbook/delivered.json`

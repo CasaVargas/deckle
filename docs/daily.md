@@ -42,12 +42,16 @@ along with the paper.
 ```sh
 deckle save https://example.com/story     # or a saved .html page (sites you're signed into)
 deckle save --list                        # what's waiting, and what printed
-deckle save --bookmarklet                 # a bookmarklet for your browser (needs `digest watch`)
+deckle save --bookmarklet                 # bookmarklets for your browser (needs `digest watch`)
 ```
 
 Or drop links (`.webloc`, `.url`, `.txt`) and saved pages into `~/Deckle/Inbox`. Point
 `[reading] inbox` in `digest.toml` at an iCloud Drive folder and an iPhone Shortcut ("Save File")
 saves from your phone. The queue is a plain file, `reading.jsonl`, next to `digest.toml`.
+
+`deckle save --bookmarklet` prints two bookmarklets: **Save to paper** (above) and **Save recipe**,
+which sends the page to the cookbook instead (see below). Both send only the page's address and
+title, never its contents, and both need `digest watch` running.
 
 The same Inbox takes books: drop an `.epub`, `.docx` or `.kfx` there and it's sent later. The
 file's extension decides: `.epub`, `.docx` and `.kfx` are books, and `.webloc`, `.url`, `.txt`
@@ -55,6 +59,16 @@ and `.html` are articles. Each book is converted like `deckle run` would (a KFX 
 is) and waits in the outbox with the paper; see below for how it's finished on push. It moves to `Inbox/Sent`, or to `Inbox/Unreadable`
 with a `.txt` saying why it couldn't be converted. Books need Kindle Previewer; without it they
 stay in the Inbox until it's installed.
+
+Recipes have their own folder, `Inbox/Recipes` (made on the first scan): links (`.webloc`, `.url`,
+`.txt`) and saved pages (`.html`) dropped there go to the cookbook instead of Your Reading, and
+move to `Inbox/Recipes/Sent`, or to `Inbox/Recipes/Unreadable` with a `.txt` saying why. Only
+`watch` adds them (not `build`, `run` or `push`). A link it can't fetch yet, such as one that
+syncs in before Wi-Fi is up, waits and is retried for a day; a page that's gone (404) or isn't a
+recipe goes to `Unreadable` at once. Deckle doesn't guess which kind a link is: the folder you drop it in decides. An iPhone Shortcut pointed
+at the iCloud Inbox's `Recipes` folder saves recipes from your phone. `Recipes` is reserved, so a
+Kindle named "Recipes" gets no Inbox folder of its own (`watch` says so once). The Save recipe
+bookmarklet drops its link there too. See [the cookbook](cookbook.md).
 
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
