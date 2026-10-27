@@ -2,6 +2,7 @@
 //! The `deckle` command line, as a library so the desktop app can run it too.
 
 mod cli;
+mod cookbook;
 mod highlights;
 mod inbox;
 mod series;
@@ -374,6 +375,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             paper,
             action,
         } => digest(json, config, paper, action),
+        cli::Command::Cookbook { action } => cookbook::run(json, action),
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
