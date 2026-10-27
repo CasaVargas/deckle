@@ -281,6 +281,10 @@ Where each value comes from:
 
 - Boilerplate lines are dropped: newsletter sign-ups, "Advertisement", share prompts, lists of
   related links, cookie notices.
+  A sign-up is dropped as a heading or a paragraph that starts with the ask and names a newsletter
+  ("Sign up for the California Morning Report newsletter"), with the one short tagline paragraph
+  right after it and the module's "Thanks for signing up!". A paragraph that only mentions a
+  newsletter is kept.
 - A story printed in two sections keeps the first.
 - Story bodies get the typography pass books get (curly quotes, dashes).
 - `deckle digest lint <edition>` prints what it would drop, to tune the rules.

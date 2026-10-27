@@ -663,20 +663,58 @@ static BOILERPLATE: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-/// Drops boilerplate paragraphs from extracted XHTML; returns the rest and the text of what
-/// went, for `deckle digest lint`.
+/// A newsletter sign-up's headline, as a paragraph or a subhead: short, and starting with the
+/// ask ("Sign up for the California Morning Report newsletter"). A paragraph that only mentions
+/// a newsletter doesn't start this way.
+static SIGNUP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^(sign up|subscribe) (for|to) [^.!?,;:]{0,60}\bnewsletters?\b[^.!?,;:]{0,30}[.!]?$",
+    )
+    .unwrap()
+});
+
+/// A sign-up module's thank-you, which a page hides until the form is sent.
+static SIGNED_UP: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^thanks? (you )?for (signing up|subscribing)[.!]?$").unwrap()
+});
+
+/// The most words a sign-up's tagline has ("The biggest news, opinion and culture shaping
+/// California right now.").
+const TAGLINE_WORDS: usize = 20;
+
+/// Drops boilerplate paragraphs from extracted XHTML, and newsletter sign-ups with the short
+/// tagline paragraph right after them; returns the rest and the text of what went, for
+/// `deckle digest lint`.
 pub fn lint(xhtml: &str) -> (String, Vec<String>) {
-    static PARA: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)<p>(.*?)</p>\n?").unwrap());
+    static BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?s)<p>(.*?)</p>\n?|<h3 class="subhead">(.*?)</h3>\n?"#).unwrap()
+    });
     static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
     let mut dropped = Vec::new();
-    let out = PARA.replace_all(xhtml, |c: &regex::Captures| {
-        let text = html_escape::decode_html_entities(&TAG.replace_all(&c[1], "")).into_owned();
+    // Where the last sign-up dropped ended, while its tagline may still follow.
+    let mut signup_end = None;
+    let out = BLOCK.replace_all(xhtml, |c: &regex::Captures| {
+        let all = c.get(0).unwrap();
+        let (inner, para) = match c.get(1) {
+            Some(p) => (p.as_str(), true),
+            None => (&c[2], false),
+        };
+        let text = html_escape::decode_html_entities(&TAG.replace_all(inner, "")).into_owned();
         let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
-        if BOILERPLATE.is_match(&text) && !c[1].contains("<img") {
+        let tagline = signup_end.take().is_some_and(|end| {
+            para && xhtml[end..all.start()].trim().is_empty()
+                && text.split(' ').count() <= TAGLINE_WORDS
+        });
+        let signup = SIGNUP.is_match(&text);
+        let boilerplate = SIGNED_UP.is_match(&text) || para && BOILERPLATE.is_match(&text);
+        if (signup || boilerplate || tagline) && !inner.contains("<img") {
+            if signup {
+                signup_end = Some(all.end());
+            }
             dropped.push(text);
             String::new()
         } else {
-            c[0].to_owned()
+            all.as_str().to_owned()
         }
     });
     (out.into_owned(), dropped)
@@ -842,6 +880,55 @@ mod tests {
         );
         assert_eq!(dropped.len(), 3);
         assert_eq!(dropped[0], "Advertisement");
+    }
+
+    #[test]
+    fn lint_drops_a_newsletter_sign_up_and_its_tagline() {
+        // The New York Post's inline module, as the writer leaves it (2026-10-26).
+        let x = concat!(
+            "<p>Calderón pleaded guilty on Monday.</p>\n",
+            "<div class=\"figure\"><img src=\"__DECKLE_IMG_1__\" alt=\"\"/></div>\n",
+            "   <h3 class=\"subhead\">Sign up for the California Morning Report newsletter</h3>\n",
+            " <p>The biggest news, opinion and culture shaping California right now.</p>\n",
+            "  <h3 class=\"subhead\">Thanks for signing up!</h3>\n",
+            "<p>She faces up to five years.</p>\n",
+        );
+        let (out, dropped) = lint(x);
+        assert_eq!(
+            out,
+            concat!(
+                "<p>Calderón pleaded guilty on Monday.</p>\n",
+                "<div class=\"figure\"><img src=\"__DECKLE_IMG_1__\" alt=\"\"/></div>\n",
+                "      <p>She faces up to five years.</p>\n",
+            )
+        );
+        assert_eq!(
+            dropped,
+            [
+                "Sign up for the California Morning Report newsletter",
+                "The biggest news, opinion and culture shaping California right now.",
+                "Thanks for signing up!",
+            ]
+        );
+        // As a bold paragraph, too.
+        let (out, _) = lint(concat!(
+            "<p><strong>Sign up for California Morning Report newsletter</strong></p>\n",
+            "<p>The biggest news shaping California right now.</p>\n",
+        ));
+        assert_eq!(out, "");
+    }
+
+    #[test]
+    fn lint_keeps_a_story_that_mentions_a_newsletter() {
+        let x = concat!(
+            "<p>Residents can sign up for the city's newsletter, the mayor said, but few have.</p>\n",
+            "<p>\"Subscribe to the newsletter,\" she told the council, \"and you will know more than we do.\"</p>\n",
+            "<h3 class=\"subhead\">The newsletter that broke the story</h3>\n",
+            "<p>It was short.</p>\n",
+        );
+        let (out, dropped) = lint(x);
+        assert_eq!(out, x);
+        assert!(dropped.is_empty());
     }
 
     #[test]
