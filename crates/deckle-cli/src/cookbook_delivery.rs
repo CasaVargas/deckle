@@ -679,9 +679,21 @@ mod tests {
         }
     }
 
-    /// Sets a file's or a folder's modified time (the owner may, with any handle).
+    /// Sets a file's or a folder's modified time. Unix: the owner may, with any handle. Windows
+    /// needs the attribute-writing right, and a folder opens only with backup semantics.
     fn set_mtime(path: &Path, t: SystemTime) {
-        std::fs::File::open(path).unwrap().set_modified(t).unwrap();
+        let mut opts = std::fs::File::options();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_WRITE_ATTRIBUTES: u32 = 0x0100;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            opts.access_mode(FILE_WRITE_ATTRIBUTES)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        }
+        #[cfg(not(windows))]
+        opts.read(true);
+        opts.open(path).unwrap().set_modified(t).unwrap();
     }
 
     const MOM: &str = "Kindle 5.16.2.1.1 (4184940002)/Mom";
