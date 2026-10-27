@@ -200,8 +200,10 @@ Top to bottom:
    - The **jump line**, right-aligned and bold italic: "See MILL, B1 ›". It's a link to the
      jump head.
    - With no jump, the whole story is set here instead.
-5. **Refers:** the tiles in columns, each its headline in bold, its section in small capitals
-   and its page label, linked to the story's anchor (today they link to the section).
+5. **Refers:** the tiles as full-width rows, each its headline in bold, its section in
+   italics and its page label, linked to the story's anchor. (Not in columns: a row ends in a
+   right-aligned label slot, and at two refers to a line the headlines would wrap badly; this
+   was settled in phase 3.)
 6. **Inside:** the index in a box: a heavy rule above, a hairline below, each section's title,
    dot leaders, its page label, and its item count in italics. Each row is a link.
 

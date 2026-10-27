@@ -245,6 +245,10 @@ enum Block {
         divided: bool,
         after: f32,
     },
+    /// A run of story text set in columns (§4.5): paragraphs and spaces only.
+    Columns {
+        items: Vec<Block>,
+    },
     Rule {
         thick: f32,
     },
@@ -346,6 +350,8 @@ struct Doc {
     jump_end: Option<usize>,
     /// The anchor at the end of the front page.
     front_end: usize,
+    /// A large-print paper: story text in one column.
+    large_print: bool,
 }
 
 impl Doc {
@@ -462,6 +468,7 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan, fit: Fit) 
         photos,
         jump_end: None,
         front_end: 0,
+        large_print: g.edition.large_print,
     };
     // Every anchor the front page links to is known before the front page is built.
     let mut next = 0;
@@ -597,7 +604,14 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan, fit: Fit) 
                 p.after = t.body * 0.4;
                 d.para(p);
             }
-            story_body(&mut d, &text, &a.photos, &e.assets, pull.as_ref());
+            story_body(
+                &mut d,
+                &text,
+                &a.photos,
+                &e.assets,
+                pull.as_ref(),
+                columned(&s.key),
+            );
         }
         if let Some(u) = &s.unavailable {
             let p = Para::new(vec![d.run(Face::Italic, t.body, u)]);
@@ -608,7 +622,23 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan, fit: Fit) 
 }
 
 /// A story's body, with its pull quote set between rules after its paragraph (§4.6).
+/// In columns when `columns` (§4.5).
 fn story_body(
+    d: &mut Doc,
+    xhtml: &str,
+    photos: &[Vec<u8>],
+    assets: &[(String, Vec<u8>)],
+    pull: Option<&crate::print::Pull>,
+    columns: bool,
+) {
+    let from = d.blocks.len();
+    pulled_body(d, xhtml, photos, assets, pull);
+    if columns {
+        columnize(&mut d.blocks, from);
+    }
+}
+
+fn pulled_body(
     d: &mut Doc,
     xhtml: &str,
     photos: &[Vec<u8>],
@@ -630,6 +660,40 @@ fn story_body(
     d.blocks.push(Block::Rule { thick: 0.4 });
     d.blocks.push(Block::Space(t.body * 0.3));
     body(d, &xhtml[at..], photos, assets);
+}
+
+/// Whether a section's stories are set in columns (§4.5): news and the reading sections, not
+/// the weather, the puzzle or the lottery, whose tables are the point.
+fn columned(key: &str) -> bool {
+    crate::print::is_news(key) || ["reading", "shelf", "horoscope", "onthisday"].contains(&key)
+}
+
+/// Gathers the left-aligned paragraphs and spaces from `from` on into column runs (§4.5).
+/// Anything else (a figure, a table, a rule, a centered pull quote) spans the page and ends
+/// a run.
+fn columnize(blocks: &mut Vec<Block>, from: usize) {
+    let tail: Vec<Block> = blocks.drain(from..).collect();
+    let mut run: Vec<Block> = Vec::new();
+    let flush = |run: &mut Vec<Block>, blocks: &mut Vec<Block>| {
+        if run.iter().any(|b| matches!(b, Block::Para(_))) {
+            blocks.push(Block::Columns {
+                items: std::mem::take(run),
+            });
+        } else {
+            blocks.append(run);
+        }
+    };
+    for b in tail {
+        match &b {
+            Block::Para(p) if p.align == Align::Left && p.link.is_none() => run.push(b),
+            Block::Space(_) if !run.is_empty() => run.push(b),
+            _ => {
+                flush(&mut run, blocks);
+                blocks.push(b);
+            }
+        }
+    }
+    flush(&mut run, blocks);
 }
 
 fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors, fit: Fit) {
@@ -741,7 +805,14 @@ fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors, fit: 
                         }
                     }
                 }
-                body(d, &opening, &art.photos, &e.assets);
+                story_body(
+                    d,
+                    &opening,
+                    &art.photos,
+                    &e.assets,
+                    None,
+                    columned(&e.sections[s].key),
+                );
                 d.blocks.push(Block::Anchor(ids.jump));
                 d.blocks.push(Block::Fields {
                     fields: vec![Field {
@@ -761,7 +832,14 @@ fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors, fit: 
                 d.blocks.push(Block::Anchor(ids.jump_end));
                 d.jump_end = Some(ids.jump_end);
             }
-            _ if print.whole == Some((s, a)) => body(d, &art.body, &art.photos, &e.assets),
+            _ if print.whole == Some((s, a)) => story_body(
+                d,
+                &art.body,
+                &art.photos,
+                &e.assets,
+                None,
+                columned(&e.sections[s].key),
+            ),
             _ => {
                 if let Some(teaser) = &art.teaser {
                     let mut p = Para::new(vec![d.run(Face::Regular, t.body, teaser)]);
@@ -1178,6 +1256,9 @@ enum Op {
         y2: f32,
         width: f32,
     },
+    /// Marked content whose text reads as `0` (`/ActualText`): a hyphenated word's halves.
+    BeginActual(String),
+    EndActual,
     /// A rectangle, filled black or stroked.
     Rect {
         x: f32,
@@ -1219,6 +1300,8 @@ struct Layout<'a> {
     pages_total: Option<usize>,
     /// The widest label the paper could print: every label slot is this wide.
     widest_label: String,
+    /// Story text in one column whatever the width: a large-print paper.
+    single_column: bool,
 }
 
 /// A laid-out line: its pieces and their widths.
@@ -1233,6 +1316,101 @@ struct End {
     continues: bool,
     /// A paragraph's last line, or one ending at a forced break: never justified.
     last: bool,
+}
+
+/// A column line, with what packing needs to know about its paragraph.
+#[derive(Clone, Debug)]
+struct ColumnLine {
+    line: Line,
+    end: End,
+    h: f32,
+    /// Its place in its paragraph, and the paragraph's line count.
+    idx: usize,
+    count: usize,
+    /// A subhead's line: never a column's last.
+    keep: bool,
+    indent: f32,
+    bullet: f32,
+}
+
+#[derive(Clone, Debug)]
+enum Unit {
+    Line(ColumnLine),
+    /// Space between paragraphs, dropped at a column's top.
+    Gap(f32),
+}
+
+impl Unit {
+    fn height(&self) -> f32 {
+        match self {
+            Unit::Line(l) => l.h,
+            Unit::Gap(h) => *h,
+        }
+    }
+}
+
+/// `units` packed into at most `n` columns no taller than `h`: each column's range. A
+/// paragraph leaves two lines at a column's foot and takes two to the next, and a subhead
+/// never ends a column (§4.5). The ranges cover a prefix of `units`.
+fn pack(units: &[Unit], h: f32, n: usize) -> Vec<std::ops::Range<usize>> {
+    let mut cols = Vec::new();
+    let mut i = 0;
+    while cols.len() < n && i < units.len() {
+        while matches!(units.get(i), Some(Unit::Gap(_))) {
+            i += 1;
+        }
+        if i >= units.len() {
+            break;
+        }
+        let start = i;
+        let (mut used, mut j) = (0.0, i);
+        while j < units.len() && used + units[j].height() <= h + 0.01 {
+            used += units[j].height();
+            j += 1;
+        }
+        if j < units.len() {
+            j = settle(units, start, j);
+        }
+        if j == start {
+            break;
+        }
+        cols.push(start..j);
+        i = j;
+    }
+    // trailing spaces belong to no column
+    if cols.last().is_some_and(|c| c.end < units.len())
+        && units[cols.last().expect("a column").end..]
+            .iter()
+            .all(|u| matches!(u, Unit::Gap(_)))
+    {
+        cols.last_mut().expect("a column").end = units.len();
+    }
+    cols
+}
+
+/// Where a column that would end before `end` should end instead, so it leaves no orphan,
+/// widow or subhead at its foot. Never at `start` or before.
+fn settle(units: &[Unit], start: usize, end: usize) -> usize {
+    let line_at = |k: usize| match &units[k] {
+        Unit::Line(l) => Some(l),
+        Unit::Gap(_) => None,
+    };
+    let mut k = end;
+    for _ in 0..4 {
+        let Some(last) = (start..k).rev().find(|&u| line_at(u).is_some()) else {
+            break;
+        };
+        let l = line_at(last).expect("a line");
+        let next = (k..units.len()).find_map(line_at);
+        // the line after the column is its paragraph's last: a widow in the next column
+        let widow = next.is_some_and(|n| n.idx + 1 == n.count && n.idx == l.idx + 1 && l.idx >= 1);
+        let orphan = l.idx == 0 && l.count >= 2;
+        if !(l.keep || orphan || widow) || last <= start {
+            break;
+        }
+        k = last;
+    }
+    if k <= start { end } else { k }
 }
 
 /// The stretch each space between words takes for `line` to fill `width`, or `None` when the
@@ -1270,6 +1448,7 @@ impl<'a> Layout<'a> {
             labels: Vec::new(),
             pages_total: None,
             widest_label: "A88".into(),
+            single_column: false,
         }
     }
 
@@ -1749,6 +1928,196 @@ impl<'a> Layout<'a> {
         self.y = y0 + h + after;
     }
 
+    /// How many columns story text takes on this page (§4.5): as many as fit at 17 ems each,
+    /// at most three; one for a large-print paper.
+    fn column_count(&self) -> usize {
+        if self.single_column {
+            return 1;
+        }
+        let g = self.gutter();
+        (((self.width + g) / (17.0 * self.t.body + g)).floor() as usize).clamp(1, 3)
+    }
+
+    fn gutter(&self) -> f32 {
+        1.4 * self.t.body
+    }
+
+    /// A run of story text in columns: cut into lines, packed column by column and page by
+    /// page, the last page balanced, justified and hyphenated, with hairlines between columns.
+    /// One column lays the run out as ordinary text.
+    fn columns(&mut self, items: &[Block], images: &[Image]) {
+        let n = self.column_count();
+        if n == 1 {
+            self.run_blocks(items, images);
+            return;
+        }
+        let g = self.gutter();
+        let col_w = (self.width - g * (n - 1) as f32) / n as f32;
+        let units = self.units(items, col_w);
+        let tallest = units.iter().map(Unit::height).fold(0.0, f32::max);
+        let mut i = 0;
+        while i < units.len() {
+            let avail = self.bottom - self.y;
+            let rest = &units[i..];
+            let all = pack(rest, avail, n);
+            if all.last().is_some_and(|c| c.end == rest.len()) {
+                // The rest fits on this page: the shortest columns that still hold it.
+                let (mut lo, mut hi) = (tallest.min(avail), avail);
+                for _ in 0..24 {
+                    let mid = (lo + hi) / 2.0;
+                    match pack(rest, mid, n)
+                        .last()
+                        .is_some_and(|c| c.end == rest.len())
+                    {
+                        true => hi = mid,
+                        false => lo = mid,
+                    }
+                }
+                let cols = pack(rest, hi, n);
+                self.place(rest, &cols, col_w);
+                break;
+            }
+            let consumed = all.last().map_or(0, |c| c.end);
+            if consumed == 0 {
+                if self.at_top() {
+                    // a line taller than the page: set it anyway rather than loop
+                    self.place(rest, std::slice::from_ref(&(0..1)), col_w);
+                    i += 1;
+                }
+                self.new_page();
+                continue;
+            }
+            self.place(rest, &all, col_w);
+            i += consumed;
+            self.new_page();
+        }
+    }
+
+    /// A run's paragraphs as line units and the spaces between them.
+    fn units(&self, items: &[Block], col_w: f32) -> Vec<Unit> {
+        let mut units = Vec::new();
+        for item in items {
+            match item {
+                Block::Para(p) => {
+                    let mut runs = p.runs.clone();
+                    if let Some(r) = runs.first_mut() {
+                        r.text = r.text.trim_start().to_owned();
+                    }
+                    if let Some(r) = runs.last_mut() {
+                        r.text = r.text.trim_end().to_owned();
+                    }
+                    let bullet = if p.bullet { self.t.body } else { 0.0 };
+                    let lines = self.lines_with(&runs, col_w - p.indent - bullet, true);
+                    if lines.is_empty() {
+                        continue;
+                    }
+                    if p.before > 0.0 {
+                        units.push(Unit::Gap(p.before));
+                    }
+                    let count = lines.len();
+                    for (idx, (line, end)) in lines.into_iter().enumerate() {
+                        units.push(Unit::Line(ColumnLine {
+                            h: self.line_height(&line),
+                            line,
+                            end,
+                            idx,
+                            count,
+                            keep: p.keep,
+                            indent: p.indent,
+                            bullet,
+                        }));
+                    }
+                    if p.after > 0.0 {
+                        units.push(Unit::Gap(p.after));
+                    }
+                }
+                Block::Space(h) => units.push(Unit::Gap(*h)),
+                _ => {}
+            }
+        }
+        units
+    }
+
+    /// Draws `units`' columns side by side from the current height, then the rules between
+    /// them, and moves below the tallest.
+    fn place(&mut self, units: &[Unit], cols: &[std::ops::Range<usize>], col_w: f32) {
+        let g = self.gutter();
+        let space = self.fonts.width(Face::Regular, self.t.body, " ");
+        let top = self.y;
+        let mut tallest = 0.0f32;
+        for (c, range) in cols.iter().enumerate() {
+            let x0 = self.left + c as f32 * (col_w + g);
+            let mut y = top;
+            for (k, unit) in units[range.clone()].iter().enumerate() {
+                let l = match unit {
+                    Unit::Gap(h) => {
+                        if k > 0 {
+                            y += h;
+                        }
+                        continue;
+                    }
+                    Unit::Line(l) => l,
+                };
+                let size = l.line.iter().map(|p| p.1).fold(0.0, f32::max);
+                let baseline = y + size * 1.05;
+                if l.bullet > 0.0 && l.idx == 0 {
+                    self.op(Op::Text {
+                        x: x0 + l.indent,
+                        y: baseline,
+                        face: Face::Regular,
+                        size,
+                        text: "•".into(),
+                    });
+                }
+                let room = col_w - l.indent - l.bullet;
+                let stretch = match l.end.last {
+                    true => None,
+                    false => justify(&l.line, room, space),
+                };
+                let mut x = x0 + l.indent + l.bullet;
+                let pieces = l.line.len();
+                for (p, (face, size, text, w)) in l.line.iter().enumerate() {
+                    if p > 0 && text.starts_with(' ') {
+                        x += stretch.unwrap_or(0.0);
+                    }
+                    let tail = p == 0 && l.end.continues;
+                    let head = p + 1 == pieces && l.end.hyphen.is_some();
+                    if tail {
+                        self.op(Op::BeginActual(String::new()));
+                    }
+                    if head {
+                        let word = l.end.hyphen.clone().unwrap_or_default();
+                        self.op(Op::BeginActual(word));
+                    }
+                    self.op(Op::Text {
+                        x,
+                        y: baseline,
+                        face: *face,
+                        size: *size,
+                        text: text.clone(),
+                    });
+                    for _ in 0..(usize::from(tail) + usize::from(head)) {
+                        self.op(Op::EndActual);
+                    }
+                    x += w;
+                }
+                y += l.h;
+            }
+            tallest = tallest.max(y - top);
+        }
+        for c in 1..cols.len() {
+            let x = self.left + c as f32 * (col_w + g) - g / 2.0;
+            self.op(Op::Line {
+                x1: x,
+                y1: top,
+                x2: x,
+                y2: top + tallest,
+                width: 0.4,
+            });
+        }
+        self.y = top + tallest + self.t.body * 0.3;
+    }
+
     fn rule(&mut self, thick: f32) {
         self.room(thick + 4.0);
         let y = self.y + 2.0;
@@ -1889,23 +2258,28 @@ impl<'a> Layout<'a> {
                 .fold(0.0, f32::max),
             Some(Block::Image { .. }) => (self.bottom - self.top) * 0.2,
             Some(Block::Table { .. }) => self.t.body * 2.5,
-            Some(Block::Fields { .. }) => self.t.leading(self.t.body),
+            Some(Block::Fields { .. } | Block::Columns { .. }) => self.t.leading(self.t.body),
             _ => 0.0,
         }
     }
 
     fn run(&mut self, doc: &Doc) {
-        for (k, b) in doc.blocks.iter().enumerate() {
+        self.run_blocks(&doc.blocks, &doc.images);
+    }
+
+    fn run_blocks(&mut self, blocks: &[Block], images: &[Image]) {
+        for (k, b) in blocks.iter().enumerate() {
             match b {
                 Block::Para(p) => {
-                    let next = doc.blocks[k + 1..]
+                    let next = blocks[k + 1..]
                         .iter()
                         .find(|b| !matches!(b, Block::Anchor(_) | Block::Space(_)));
                     let keep = self.first_height(next);
                     self.para(p, keep);
                 }
+                Block::Columns { items } => self.columns(items, images),
                 Block::Image { image, cap } => {
-                    self.image(&doc.images[*image], *cap);
+                    self.image(&images[*image], *cap);
                     if let Some(Op::Image { image: slot, .. }) =
                         self.pages.last_mut().and_then(|p| p.last_mut())
                     {
@@ -1918,7 +2292,7 @@ impl<'a> Layout<'a> {
                     divided,
                     after,
                 } => self.fields(fields, *divided, *after),
-                Block::Table { rows, grid } => self.table(rows, *grid, &doc.images),
+                Block::Table { rows, grid } => self.table(rows, *grid, images),
                 Block::Space(h) => {
                     if !self.at_top() {
                         self.y += h;
@@ -2043,6 +2417,7 @@ fn lay_out<'a>(
     lay.widest_label = widest.to_owned();
     lay.labels = labels;
     lay.pages_total = pages_total;
+    lay.single_column = doc.large_print;
     lay.run(doc);
     if lay.pages.last().is_some_and(Vec::is_empty) && lay.pages.len() > 1 {
         lay.pages.pop();
@@ -2199,6 +2574,15 @@ fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, furniture: &Furniture) -> Vec<u
                     c.move_to(*x1, ph - *y1);
                     c.line_to(*x2, ph - *y2);
                     c.stroke();
+                }
+                // a hyphenated word's halves read as the whole word (§4.5)
+                Op::BeginActual(text) => {
+                    c.begin_marked_content_with_properties(Name(b"Span"))
+                        .properties()
+                        .actual_text(TextStr(text));
+                }
+                Op::EndActual => {
+                    c.end_marked_content();
                 }
                 Op::Rect { x, y, w, h, fill } => {
                     c.set_line_width(0.6);
@@ -2686,6 +3070,234 @@ mod tests {
         // a line with too few gaps to fill stays ragged
         let lonely = l.lines_with(&run("Short words"), width, true);
         assert_eq!(justify(&lonely[0].0, width, space), None);
+    }
+
+    #[test]
+    fn column_counts_follow_the_page_width() {
+        let f = fonts();
+        let count = |screen: Screen, single: bool| {
+            let page = screen.page();
+            let mut l = Layout::new(&f, page, Type::for_width(page.0), 0);
+            l.single_column = single;
+            l.column_count()
+        };
+        assert_eq!(count(Screen::Remarkable2, false), 2);
+        assert_eq!(count(Screen::RemarkablePaperPro, false), 2);
+        assert_eq!(count(Screen::RemarkablePaperProMove, false), 1);
+        assert_eq!(count(Screen::Ipad, false), 2);
+        assert_eq!(count(Screen::A5, false), 2);
+        assert_eq!(count(Screen::Remarkable2, true), 1, "large print");
+    }
+
+    fn paras(n: usize, words: usize) -> Vec<Block> {
+        (0..n)
+            .map(|i| {
+                let text = (0..words)
+                    .map(|k| format!("p{i}w{k}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let mut p = Para::new(run(&text));
+                p.after = 4.0;
+                Block::Para(p)
+            })
+            .collect()
+    }
+
+    /// The x of every text op, the y of every text op, and the text in drawing order.
+    fn column_ops(l: &Layout) -> (Vec<f32>, Vec<f32>, String) {
+        let texts: Vec<(f32, f32)> = l
+            .pages
+            .iter()
+            .flatten()
+            .filter_map(|o| match o {
+                Op::Text { x, y, .. } => Some((*x, *y)),
+                _ => None,
+            })
+            .collect();
+        let all: Vec<Op> = l.pages.iter().flatten().cloned().collect();
+        (
+            texts.iter().map(|t| t.0).collect(),
+            texts.iter().map(|t| t.1).collect(),
+            text_of(&all),
+        )
+    }
+
+    #[test]
+    fn a_run_reads_in_order_and_balances_its_last_page() {
+        let f = fonts();
+        let mut l = layout(&f);
+        let items = paras(3, 40);
+        l.columns(&items, &[]);
+        let (xs, ys, text) = column_ops(&l);
+        // reading order: every word once, in order
+        let want: Vec<String> = (0..3)
+            .flat_map(|i| (0..40).map(move |k| format!("p{i}w{k}")))
+            .collect();
+        assert_eq!(text.replace('-', ""), want.join(" "));
+        // two columns, the second starting at the first one's top
+        let mid = l.left + l.width / 2.0;
+        assert!(xs.iter().any(|x| *x < mid) && xs.iter().any(|x| *x > mid));
+        // balanced: the columns end within one line of each other
+        let foot = |right: bool| {
+            xs.iter()
+                .zip(&ys)
+                .filter(|(x, _)| (**x > mid) == right)
+                .map(|(_, y)| *y)
+                .fold(0.0f32, f32::max)
+        };
+        assert!(
+            (foot(false) - foot(true)).abs() <= l.t.leading(10.0) + 0.1,
+            "{} {}",
+            foot(false),
+            foot(true)
+        );
+        assert_eq!(l.pages.len(), 1);
+        // a hairline between the columns
+        assert!(
+            l.pages[0]
+                .iter()
+                .any(|o| matches!(o, Op::Line { x1, x2, .. } if (x1 - x2).abs() < 0.01))
+        );
+    }
+
+    #[test]
+    fn a_long_run_snakes_onto_the_next_page() {
+        let f = fonts();
+        let mut l = layout(&f);
+        let items = paras(30, 50);
+        l.columns(&items, &[]);
+        assert!(l.pages.len() > 1);
+        let all: Vec<Op> = l.pages.iter().flatten().cloned().collect();
+        let text = text_of(&all).replace('-', "");
+        assert!(text.starts_with("p0w0 p0w1") && text.ends_with("p29w48 p29w49"));
+        assert_eq!(text.split(' ').count(), 30 * 50, "every word once");
+    }
+
+    #[test]
+    fn no_paragraph_leaves_one_line_alone_at_a_columns_edge() {
+        let f = fonts();
+        for words in [12, 25, 33, 47, 60] {
+            let mut l = layout(&f);
+            let items = paras(9, words);
+            l.columns(&items, &[]);
+            // per column: the paragraphs whose words it holds, in order
+            let mid = l.left + l.width / 2.0;
+            for page in &l.pages {
+                for right in [false, true] {
+                    let lines: Vec<(f32, usize)> = page
+                        .iter()
+                        .filter_map(|o| match o {
+                            Op::Text { x, y, text, .. } if (*x > mid) == right => {
+                                let para = text
+                                    .trim()
+                                    .trim_start_matches('p')
+                                    .split('w')
+                                    .next()?
+                                    .parse()
+                                    .ok()?;
+                                Some((*y, para))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let mut ys: Vec<(f32, usize)> = lines.clone();
+                    ys.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    ys.dedup_by(|a, b| a.0 == b.0);
+                    if ys.len() < 2 {
+                        continue;
+                    }
+                    let first = ys[0].1;
+                    let last = ys[ys.len() - 1].1;
+                    let at_top = ys.iter().filter(|(_, p)| *p == first).count();
+                    let at_foot = ys.iter().filter(|(_, p)| *p == last).count();
+                    let total = |p: usize| {
+                        l.lines_with(
+                            &run(&(0..words)
+                                .map(|k| format!("p{p}w{k}"))
+                                .collect::<Vec<_>>()
+                                .join(" ")),
+                            (l.width - 14.0) / 2.0,
+                            true,
+                        )
+                        .len()
+                    };
+                    if at_top < total(first) {
+                        assert!(at_top >= 2, "{words}: a widow at a column's top");
+                    }
+                    if at_foot < total(last) {
+                        assert!(at_foot >= 2, "{words}: an orphan at a column's foot");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_hyphenated_words_halves_read_as_the_whole_word() {
+        let f = fonts();
+        let mut l = layout(&f);
+        let text = ["extraordinarily", "unquestionably", "notwithstanding"]
+            .repeat(20)
+            .join(" ");
+        l.columns(&[Block::Para(Para::new(run(&text)))], &[]);
+        let ops: Vec<&Op> = l.pages.iter().flatten().collect();
+        let mut wrapped = 0;
+        for (k, op) in ops.iter().enumerate() {
+            if let Op::BeginActual(word) = op {
+                let Op::Text { text, .. } = ops[k + 1] else {
+                    panic!("text follows a BeginActual");
+                };
+                if word.is_empty() {
+                    assert!(!text.ends_with('-') || text.trim().len() > 1);
+                } else {
+                    assert!(text.ends_with('-'), "{text}");
+                    assert!(
+                        word.starts_with(text.trim().trim_end_matches('-')),
+                        "{word} {text}"
+                    );
+                    wrapped += 1;
+                }
+                assert!(matches!(ops[k + 2], Op::EndActual | Op::BeginActual(_)));
+            }
+        }
+        assert!(wrapped > 0);
+        let begins = ops
+            .iter()
+            .filter(|o| matches!(o, Op::BeginActual(_)))
+            .count();
+        let ends = ops.iter().filter(|o| matches!(o, Op::EndActual)).count();
+        assert_eq!(begins, ends);
+    }
+
+    #[test]
+    fn the_written_pdf_marks_hyphenated_words() {
+        let mut g = paper();
+        g.edition.sections[1].articles[0].body = format!(
+            "<p>{}</p>",
+            ["extraordinarily", "unquestionably"].repeat(40).join(" ")
+        );
+        let bytes = render(&g, Screen::Remarkable2, Photos::Gray);
+        // page content is deflated: inflate every stream and look inside
+        let mut found = false;
+        let mut rest = &bytes[..];
+        while let Some(at) = rest.windows(7).position(|w| w == b"stream\n") {
+            let from = at + 7;
+            let Some(len) = rest[from..].windows(9).position(|w| w == b"endstream") else {
+                break;
+            };
+            let mut out = Vec::new();
+            use std::io::Read;
+            if flate2::read::ZlibDecoder::new(&rest[from..from + len])
+                .read_to_end(&mut out)
+                .is_ok()
+                && out.windows(11).any(|w| w == b"/ActualText")
+            {
+                found = true;
+                break;
+            }
+            rest = &rest[from + len + b"endstream".len()..];
+        }
+        assert!(found, "no /ActualText in any content stream");
     }
 
     #[test]
