@@ -342,6 +342,10 @@ struct Doc {
     anchors: usize,
     t: Type,
     photos: Photos,
+    /// The anchor just after the front page's jump line, when it has one: the fit checks it.
+    jump_end: Option<usize>,
+    /// The anchor at the end of the front page.
+    front_end: usize,
 }
 
 impl Doc {
@@ -387,10 +391,67 @@ struct Anchors {
     lead: usize,
     /// The jump line, where the jump head links back to.
     jump: usize,
+    /// Just after the jump line.
+    jump_end: usize,
+    /// The end of the front page.
+    front_end: usize,
+}
+
+/// How the front page sets its lead (§4.3). Tried in order until the jump line lands on the
+/// front page: a smaller headline and photo, then no photo there, then fewer paragraphs of the
+/// opening, which move to the head of the continuation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fit {
+    /// The headline's size, times the headline size.
+    headline: f32,
+    /// The lead photo's share of the page, or `None`: it stays with the continuation.
+    photo: Option<f32>,
+    /// Opening paragraphs the front page keeps.
+    keep: usize,
+}
+
+const FITS: [Fit; 4] = [
+    Fit {
+        headline: 1.6,
+        photo: Some(0.30),
+        keep: usize::MAX,
+    },
+    Fit {
+        headline: 1.35,
+        photo: Some(0.24),
+        keep: usize::MAX,
+    },
+    Fit {
+        headline: 1.2,
+        photo: Some(0.16),
+        keep: usize::MAX,
+    },
+    Fit {
+        headline: 1.2,
+        photo: None,
+        keep: usize::MAX,
+    },
+];
+
+/// The jump's pieces under `fit`: the front page's photo and opening, the continuation, and
+/// how many opening paragraphs moved to the continuation.
+fn jump_parts(x: &crate::print::Jump, fit: Fit) -> (Option<String>, String, String, usize) {
+    let (figure, rest) = crate::print::take_lead_figure(&x.rest);
+    let ends = crate::print::paragraph_ends(&x.opening);
+    let keep = fit.keep.min(ends.len()).max(1);
+    let cut = ends.get(keep - 1).copied().unwrap_or(x.opening.len());
+    let moved = x.opening[cut..].trim_start();
+    let moved_count = ends.len().saturating_sub(keep);
+    let (front_figure, rest) = match (fit.photo, figure) {
+        (Some(_), figure) => (figure, format!("{moved}{rest}")),
+        (None, Some(f)) => (None, format!("{f}\n{moved}{rest}")),
+        (None, None) => (None, format!("{moved}{rest}")),
+    };
+    (front_figure, x.opening[..cut].to_owned(), rest, moved_count)
 }
 
 /// The blocks of the whole edition: the front page, then each section from a new page.
-fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan) -> Doc {
+fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan, fit: Fit) -> Doc {
     let e = &g.edition;
     let mut d = Doc {
         blocks: Vec::new(),
@@ -399,6 +460,8 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan) -> Doc {
         anchors: 0,
         t,
         photos,
+        jump_end: None,
+        front_end: 0,
     };
     // Every anchor the front page links to is known before the front page is built.
     let mut next = 0;
@@ -417,11 +480,15 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan) -> Doc {
         story,
         lead: take(),
         jump: take(),
+        jump_end: take(),
+        front_end: take(),
     };
     d.anchors = next;
     let front = d.anchor();
     d.outline.push((0, "Front page".into(), front));
-    front_page(&mut d, g, print, &ids);
+    front_page(&mut d, g, print, &ids, fit);
+    d.blocks.push(Block::Anchor(ids.front_end));
+    d.front_end = ids.front_end;
     for (i, s) in e.sections.iter().enumerate() {
         d.blocks.push(Block::PageBreak);
         d.blocks.push(Block::Anchor(ids.section[i]));
@@ -488,6 +555,7 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan) -> Doc {
                 .jump
                 .as_ref()
                 .filter(|x| (x.section, x.article) == (i, j));
+            let mut pull = print.pulls.get(&(i, j)).cloned();
             let text = match jump {
                 // The jump head: the slug and where it came from, then the headline (§4.4).
                 Some(x) => {
@@ -507,8 +575,13 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan) -> Doc {
                     title.keep = true;
                     title.after = t.body * 0.25;
                     d.para(title);
-                    // its photo went to the front page
-                    crate::print::take_lead_figure(&x.rest).1
+                    // without what the front page printed; its pull quote follows the paragraphs
+                    // that moved here
+                    let (_, _, rest, moved) = jump_parts(x, fit);
+                    if let Some(p) = &mut pull {
+                        p.after += moved;
+                    }
+                    rest
                 }
                 None => {
                     let mut h = Para::new(vec![d.run(Face::Bold, t.headline(), &a.title)]);
@@ -524,13 +597,7 @@ fn document(g: &Gathered, t: Type, photos: Photos, print: &PrintPlan) -> Doc {
                 p.after = t.body * 0.4;
                 d.para(p);
             }
-            story_body(
-                &mut d,
-                &text,
-                &a.photos,
-                &e.assets,
-                print.pulls.get(&(i, j)),
-            );
+            story_body(&mut d, &text, &a.photos, &e.assets, pull.as_ref());
         }
         if let Some(u) = &s.unavailable {
             let p = Para::new(vec![d.run(Face::Italic, t.body, u)]);
@@ -565,7 +632,7 @@ fn story_body(
     body(d, &xhtml[at..], photos, assets);
 }
 
-fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors) {
+fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors, fit: Fit) {
     let e = &g.edition;
     let t = d.t;
     // The skybox: teasers for what's inside, each with its page (§4.3).
@@ -649,7 +716,11 @@ fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors) {
         k.before = t.body * 0.6;
         k.keep = true;
         d.para(k);
-        let mut h = Para::new(vec![d.run(Face::Bold, t.headline() * 1.6, &art.title)]);
+        let mut h = Para::new(vec![d.run(
+            Face::Bold,
+            t.headline() * fit.headline,
+            &art.title,
+        )]);
         h.link = Some(story);
         h.keep = true;
         d.para(h);
@@ -660,16 +731,17 @@ fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors) {
         }
         match &print.jump {
             Some(x) if (x.section, x.article) == (s, a) => {
-                if let Some(figure) = crate::print::take_lead_figure(&x.rest).0 {
+                let (figure, opening, _, _) = jump_parts(x, fit);
+                if let (Some(figure), Some(share)) = (figure, fit.photo) {
                     let from = d.blocks.len();
                     body(d, &figure, &art.photos, &e.assets);
                     for b in &mut d.blocks[from..] {
                         if let Block::Image { cap, .. } = b {
-                            *cap = LEAD_PHOTO_CAP;
+                            *cap = share;
                         }
                     }
                 }
-                body(d, &x.opening, &art.photos, &e.assets);
+                body(d, &opening, &art.photos, &e.assets);
                 d.blocks.push(Block::Anchor(ids.jump));
                 d.blocks.push(Block::Fields {
                     fields: vec![Field {
@@ -686,6 +758,8 @@ fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors) {
                     divided: false,
                     after: t.body * 0.4,
                 });
+                d.blocks.push(Block::Anchor(ids.jump_end));
+                d.jump_end = Some(ids.jump_end);
             }
             _ if print.whole == Some((s, a)) => body(d, &art.body, &art.photos, &e.assets),
             _ => {
@@ -757,9 +831,8 @@ fn front_page(d: &mut Doc, g: &Gathered, print: &PrintPlan, ids: &Anchors) {
 
 /// A marker size: the masthead is sized at layout to fill the column.
 const MASTHEAD_FIT: f32 = -1.0;
-/// Share of the page's height a photo may take; the front page's lead photo less (§4.3).
+/// Share of the page's height a photo may take; the front page's lead photo less (`FITS`).
 const PHOTO_CAP: f32 = 0.45;
-const LEAD_PHOTO_CAP: f32 = 0.30;
 /// The folio's room at the top of a page, in meta lines (§4.1).
 const FOLIO_LINES: f32 = 2.2;
 /// A kicker longer than this goes under the section flag rather than beside its title.
@@ -1742,7 +1815,7 @@ pub fn render(g: &Gathered, screen: Screen, photos: Photos) -> Vec<u8> {
     let t = Type::for_width(page.0);
     let fonts = Fonts::new(g.edition.masthead);
     let print = crate::print::print_plan(g, &crate::front::front_plan(g));
-    let doc = document(g, t, photos, &print);
+    let doc = fitted(&fonts, g, t, photos, &print, page);
     let (_, lay, ranges, labels) = two_passes(&fonts, &doc, &print.book, page, t);
     let furniture = Furniture {
         paper: &g.edition.paper,
@@ -1751,6 +1824,47 @@ pub fn render(g: &Gathered, screen: Screen, photos: Photos) -> Vec<u8> {
         ranges: &ranges,
     };
     write(&fonts, &doc, &lay, &furniture)
+}
+
+/// The document with the first fit that keeps the whole front page on page 1, else the first
+/// that keeps its jump line there (§4.3), else the last one tried. Each try is one layout pass.
+fn fitted(
+    fonts: &Fonts,
+    g: &Gathered,
+    t: Type,
+    photos: Photos,
+    print: &PrintPlan,
+    page: (f32, f32),
+) -> Doc {
+    let mut fits = FITS.to_vec();
+    if let Some(x) = &print.jump {
+        let n = crate::print::paragraph_ends(&x.opening).len();
+        fits.extend((1..n).rev().map(|keep| Fit {
+            keep,
+            ..FITS[FITS.len() - 1]
+        }));
+    }
+    let widest = widest_label(fonts, &print.book);
+    let on_front = |lay: &Layout, a: usize| lay.anchors[a].is_some_and(|(p, _)| p == 0);
+    let (mut jump_fits, mut last) = (None, None);
+    for fit in fits {
+        let d = document(g, t, photos, print, fit);
+        let Some(jump_end) = d.jump_end else {
+            return d;
+        };
+        let lay = lay_out(fonts, &d, page, t, &widest, Vec::new(), None);
+        if on_front(&lay, d.front_end) {
+            return d;
+        }
+        if on_front(&lay, jump_end) && jump_fits.is_none() {
+            jump_fits = Some(fit);
+        }
+        last = Some(d);
+    }
+    match jump_fits {
+        Some(fit) => document(g, t, photos, print, fit),
+        None => last.expect("at least one fit"),
+    }
 }
 
 /// Book ranges and every page's label.
@@ -2530,7 +2644,7 @@ mod tests {
         let page = screen.page();
         let t = Type::for_width(page.0);
         let print = crate::print::print_plan(g, &crate::front::front_plan(g));
-        let doc = document(g, t, Photos::Gray, &print);
+        let doc = fitted(f, g, t, Photos::Gray, &print, page);
         let (first, second, _, _) = two_passes(f, &doc, &print.book, page, t);
         let texts = second.pages.iter().map(|ops| text_of(ops)).collect();
         (first.pages.len(), second.pages.len(), texts)
@@ -2588,6 +2702,34 @@ mod tests {
                 .iter()
                 .any(|t| t.contains("Mill Yard Will Be a Market Again — on A1"))
         );
+    }
+
+    #[test]
+    fn the_jump_line_stays_on_the_front_page_and_nothing_is_lost() {
+        // print layout §4.3: a front page too full for its lead is fitted, never overflowed
+        let mut g = paper();
+        let lead = &mut g.edition.sections[0].articles[0];
+        lead.title = "Beyond the governor\u{2019}s race: New York\u{2019}s minor parties fight to \
+                      maintain ballot access and political influence across the state"
+            .into();
+        let p = |w: &str| format!("<p>{}</p>\n", vec![w; 40].join(" "));
+        lead.body = format!("{}{}{}{}", p("alpha"), p("beta"), p("gamma"), p("later"));
+        for screen in [
+            Screen::Remarkable2,
+            Screen::RemarkablePaperProMove,
+            Screen::A5,
+        ] {
+            let (_, _, pages) = laid(&g, screen);
+            assert!(
+                pages[0].contains("See BEYOND, A2 \u{203a}"),
+                "{screen:?}: page 2 is [{}]",
+                pages[1].chars().take(400).collect::<String>()
+            );
+            let all = pages.join(" ");
+            for w in ["alpha", "beta", "gamma", "later"] {
+                assert_eq!(all.matches(w).count(), 40, "{screen:?}: {w}");
+            }
+        }
     }
 
     #[test]

@@ -45,28 +45,28 @@
 
 **Files:** `crates/deckle-digest/src/print.rs`
 
-- [ ] **Test first:** a rest that starts with `<div class="figure lead">…</div>` returns `(Some(figure), rest_without_it)`, and any other rest returns `(None, rest)`.
-- [ ] Implement with `top_level`.
+- [x] **Test first:** a rest that starts with `<div class="figure lead">…</div>` returns `(Some(figure), rest_without_it)`, and any other rest returns `(None, rest)`.
+- [x] Implement with `top_level`.
 
 ### Task 2: Slots, fields, folios and page labels
 
 **Files:** `crates/deckle-digest/src/pdf.rs`
 
-- [ ] **Types:**
+- [x] **Types:**
   - `Align::Right`
   - `enum Slot { Label(usize), Pages, Text(String) }`
   - `struct Tail { prefix, slot, suffix, face, size }`
   - `struct Field { runs, align, tail: Option<Tail>, leader: bool, link: Option<usize> }`
   - `Block::Fields { fields: Vec<Field>, divided: bool, after: f32 }`
   - `Block::Image` gains `cap: f32`
-- [ ] **`Layout`:**
+- [x] **`Layout`:**
   - gains `labels: Vec<Option<String>>` (per anchor), `pages_total: Option<usize>` and `widest_label: String`;
   - `fn tail_width(&Tail)` and `fn tail_text(&Tail)`;
   - `fn fields(...)` lays the cells out side by side, with hairlines between divided cells, dot leaders, and a link box per cell.
-- [ ] **Margins:** `Layout::new` moves the footer's room to the top for the folio. Page 0 starts at the margin.
-- [ ] **`fn page_labels(book_of_section, section_pages, pages) -> (Vec<(usize, char)> /* range starts */, Vec<String> /* label per page */)`.**
-- [ ] **`write`** takes a `Furniture { paper, date, labels, ranges }` instead of the footer string. It draws folios on pages 1 and up (label bold left, paper centered, date right, a hairline below), and writes `/PageLabels`.
-- [ ] **Tests first:**
+- [x] **Margins:** `Layout::new` moves the footer's room to the top for the folio. Page 0 starts at the margin.
+- [x] **`fn page_labels(book_of_section, section_pages, pages) -> (Vec<(usize, char)> /* range starts */, Vec<String> /* label per page */)`.**
+- [x] **`write`** takes a `Furniture { paper, date, labels, ranges }` instead of the footer string. It draws folios on pages 1 and up (label bold left, paper centered, date right, a hairline below), and writes `/PageLabels`.
+- [x] **Tests first:**
   - `page_labels` on [A, A, B, C] sections across pages;
   - `fields` puts a slot's text right-aligned at the cell's edge;
   - a field's line breaks don't depend on its slot's text (same ops with "A2" and with "B88");
@@ -77,11 +77,11 @@
 
 **Files:** `crates/deckle-digest/src/pdf.rs`
 
-- [ ] **`document(g, t, photos, print)`:**
+- [x] **`document(g, t, photos, print)`:**
   - reserves anchors for sections, stories, the front's lead and the jump line;
   - builds the front page (spec §4.3), the section flags (§4.1), and the jump head, refer and pull quotes (§4.4, §4.6).
-- [ ] **`render`:** pass 1, then labels, then pass 2. `debug_assert_eq!` on the page count and anchors.
-- [ ] **Tests first** (unit, without PDFium; `Layout` ops of a small `Gathered`):
+- [x] **`render`:** pass 1, then labels, then pass 2. `debug_assert_eq!` on the page count and anchors.
+- [x] **Tests first** (unit, without PDFium; `Layout` ops of a small `Gathered`):
   - the front page draws the skybox teasers with their labels;
   - "See LOCAL, A2 ›" is drawn, linked to the story's anchor;
   - refers carry labels;
@@ -93,11 +93,11 @@
 
 ### Task 4: Read-back and a real edition
 
-- [ ] **PDFium tests in `tests/build.rs`:**
+- [x] **PDFium tests in `tests/build.rs`:**
   - page 2's text starts with its folio label;
   - the front page's text has "See", the slug and a label;
   - the outline count is unchanged;
   - `/PageLabels` labels come back: PDFium's `label()` on a section's first page gives its letter.
-- [ ] Run the whole suite, clippy and fmt.
-- [ ] Build a real edition's PDF with the scratch-`HOME` recipe (Tolaria), render pages to PNG with PDFium, and look at the front page, a section's first page and an inside page.
-- [ ] Commit per task, push, and update PR #212.
+- [x] Run the whole suite, clippy and fmt.
+- [x] Build a real edition's PDF with the scratch-`HOME` recipe (Tolaria), render pages to PNG with PDFium, and look at the front page, a section's first page and an inside page.
+- [x] Commit per task, push, and update PR #212.

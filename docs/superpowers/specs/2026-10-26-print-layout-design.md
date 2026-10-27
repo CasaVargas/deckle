@@ -205,8 +205,19 @@ Top to bottom:
 6. **Inside:** the index in a box: a heavy rule above, a hairline below, each section's title,
    dot leaders, its page label, and its item count in italics. Each row is a link.
 
-The lead and its photo should finish above the middle of the page (the fold). That's a target
-for the sizes above, checked by a test on the sample edition; it isn't enforced at layout.
+**The front page fits.** A real edition (a four-line headline, a photo, 110 words, ten
+refers) overflowed one 6-inch page and pushed the jump line onto A2, which made "Continued from
+A1" false. So the PDF fits the lead, trying these in order with one layout pass each:
+
+1. headline 1.6×, photo 30% of the page;
+2. 1.35× and 24%;
+3. 1.2× and 16%;
+4. 1.2× with no photo on the front page (it stays at the head of the continuation);
+5. then the opening's last paragraphs, one at a time, moved to the head of the continuation.
+
+It takes the first try that keeps the whole front page on page 1. Failing that, it takes the
+first that keeps the jump line there, and failing that, the last. The EPUB's opening and rest
+are unchanged; only the PDF moves paragraphs, and a moved paragraph is never printed twice.
 
 ### 4.4 The jump head
 
