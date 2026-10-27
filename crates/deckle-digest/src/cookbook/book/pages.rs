@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Duration, Utc};
+use dom_query::Document;
 use regex::Regex;
 
 use crate::cookbook::recipe::Group;
@@ -114,15 +115,39 @@ fn facts(s: &Saved) -> String {
 
 /// A page's body text with its photos taken out: the extractor leaves `__DECKLE_IMG_k__`
 /// placeholders and a lead figure in it, and the recipe prints its own stored picture.
+///
+/// The body is parsed and every `img`, `figure` and `div.figure` element is removed with
+/// everything inside it (a gallery is nested figure divs, which no regex can balance), then
+/// written back out as XHTML. If that doesn't parse as XML, the body's text stands in as plain
+/// paragraphs, so one odd page never breaks the chapter file.
 fn without_photos(xhtml: &str) -> String {
-    static DIV: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#"(?s)<div class="figure[^"]*">.*?</div>\n?"#).unwrap());
-    static FIGURE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?s)<figure\b.*?</figure>\n?").unwrap());
-    static IMG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<img\b[^>]*>").unwrap());
-    let out = DIV.replace_all(xhtml, "");
-    let out = FIGURE.replace_all(&out, "");
-    IMG.replace_all(&out, "").into_owned()
+    static VOID: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"<(br|hr|wbr)((?:\s[^<>]*?)?)\s*/?>").unwrap());
+    let doc = Document::from(format!("<body>{xhtml}</body>"));
+    doc.select(r#"img, figure, div[class^="figure"]"#).remove();
+    let body = doc.select("body");
+    let html = body.inner_html().replace("&nbsp;", "&#160;");
+    // The HTML serializer writes `<br>`; XHTML wants `<br/>`.
+    let out = VOID.replace_all(&html, "<$1$2/>").into_owned();
+    if roxmltree::Document::parse(&format!("<div>{out}</div>")).is_ok() {
+        return out;
+    }
+    // Block boundaries become line breaks, the rest of the markup goes, and each line is a
+    // paragraph.
+    static BLOCK: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)</?(?:p|div|li|ul|ol|h[1-6]|blockquote|pre|tr|table|br|hr)\b[^<>]*>")
+            .unwrap()
+    });
+    static TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^<>]*>").unwrap());
+    let lines = BLOCK.replace_all(&html, "\n");
+    let lines = html_escape::decode_html_entities(&TAG.replace_all(&lines, "")).into_owned();
+    lines
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| format!("<p>{}</p>", esc(l)))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn groups(out: &mut String, groups: &[Group], list: &str, class: &str) {
@@ -155,7 +180,7 @@ fn foot(s: &Saved) -> String {
     let mut out = format!("<div class=\"foot\">\n<p>{}</p>\n", bits.join(" · "));
     // A saved page's address is a path on the owner's disk, which is no use in a book.
     let url = r.source_url.trim();
-    if !url.is_empty() && !url.starts_with("file:") {
+    if !url.is_empty() && !url.to_ascii_lowercase().starts_with("file:") {
         let _ = writeln!(out, "<p class=\"url\">{}</p>", esc(url));
     }
     out.push_str("</div>\n");

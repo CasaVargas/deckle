@@ -780,3 +780,112 @@ fn an_empty_book_still_builds() {
     xml(text(&e, "OEBPS/contents.xhtml"));
     assert!(!e.keys().any(|k| k.contains("chapter-")));
 }
+
+/// A one-recipe store holding a page-text recipe with `body`, built and read back.
+fn page_text_chapter(body: &str, url: &str) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("cookbook"));
+    let mut r = blank("Page Text");
+    r.structured = false;
+    r.source_url = url.to_owned();
+    r.body_xhtml = Some(body.to_owned());
+    save(&store, r, "mains", at(10, 1));
+    let (e, _) = epub(&store, now());
+    for (name, bytes) in &e {
+        let hay = String::from_utf8_lossy(bytes);
+        assert!(!hay.contains("__DECKLE_IMG_"), "placeholder left in {name}");
+    }
+    text(&e, "OEBPS/chapter-mains.xhtml").to_owned()
+}
+
+#[test]
+fn nested_figures_are_removed_cleanly() {
+    let chapter = page_text_chapter(
+        "<p>Intro text.</p>\n\
+         <div class=\"figure gallery\">\
+         <div class=\"figure\"><img src=\"__DECKLE_IMG_0__\" alt=\"\"/><span class=\"caption\">Caption one</span></div>\
+         <div class=\"figure lead\"><img src=\"__DECKLE_IMG_1__\" alt=\"\"/><span class=\"caption\">Caption two</span></div>\
+         </div>\n\
+         <p>Outro text.<br/>Last line.</p>",
+        "https://kitchen.test/gallery",
+    );
+    let doc = xml(&chapter);
+    let body = doc
+        .descendants()
+        .find(|n| has_class(*n, "body"))
+        .expect("a body");
+    let flat = all_text(body);
+    assert!(flat.contains("Intro text."), "{flat}");
+    assert!(flat.contains("Outro text."), "{flat}");
+    assert!(flat.contains("Last line."), "{flat}");
+    assert!(
+        !flat.contains("Caption"),
+        "captions go with the figures: {flat}"
+    );
+    assert!(!body.descendants().any(|n| n.has_tag_name("img")));
+    assert!(
+        !chapter.contains("figure\""),
+        "no figure div left: {chapter}"
+    );
+    // The <br/> survived as an element, and the body div is balanced.
+    assert!(body.descendants().any(|n| n.has_tag_name("br")));
+}
+
+#[test]
+fn malformed_body_falls_back_to_text() {
+    // An undeclared namespace prefix is fine for an HTML parser and fatal for an XML one.
+    let chapter = page_text_chapter(
+        "<p>Stir the pot.</p><o:p>Odd tag</o:p><p>Serve &amp; enjoy.</p>",
+        "https://kitchen.test/odd",
+    );
+    let doc = xml(&chapter);
+    let body = doc
+        .descendants()
+        .find(|n| has_class(*n, "body"))
+        .expect("a body");
+    let paragraphs: Vec<String> = body
+        .children()
+        .filter(|n| n.has_tag_name("p"))
+        .map(all_text)
+        .collect();
+    assert_eq!(paragraphs, ["Stir the pot.", "Odd tag", "Serve & enjoy."]);
+    assert!(!chapter.contains("o:p"));
+}
+
+#[test]
+fn a_blank_chapter_name_is_untitled() {
+    let f = fixture();
+    let mut cfg = f.store.config().unwrap();
+    cfg.chapters
+        .iter_mut()
+        .find(|c| c.id == "soups")
+        .unwrap()
+        .name = "   ".to_owned();
+    f.store.save_config(&cfg).unwrap();
+    let (e, _) = epub(&f.store, now());
+    let soups = xml(text(&e, "OEBPS/chapter-soups.xhtml"));
+    let h1 = soups.descendants().find(|n| n.has_tag_name("h1")).unwrap();
+    assert_eq!(all_text(h1), "Untitled chapter");
+    for name in ["contents.xhtml", "nav.xhtml", "toc.ncx"] {
+        let src = text(&e, &format!("OEBPS/{name}"));
+        assert!(src.contains("Untitled chapter"), "{name}");
+    }
+    let nav = xml(text(&e, "OEBPS/nav.xhtml"));
+    assert!(
+        nav.descendants()
+            .filter(|n| n.has_tag_name("a"))
+            .all(|n| !all_text(n).trim().is_empty()),
+        "no empty nav link"
+    );
+}
+
+#[test]
+fn file_urls_are_not_printed_in_any_case() {
+    for url in ["file:///Users/x/p.html", "FILE:///Users/x/p.html"] {
+        let chapter = page_text_chapter("<p>Body.</p>", url);
+        assert!(!chapter.contains("/Users/x"), "{url}: {chapter}");
+        assert!(!chapter.contains("class=\"url\""), "{url}");
+    }
+    let chapter = page_text_chapter("<p>Body.</p>", "https://kitchen.test/ok");
+    assert!(chapter.contains("https://kitchen.test/ok"));
+}

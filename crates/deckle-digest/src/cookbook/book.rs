@@ -32,7 +32,9 @@ const CSS: &str = include_str!("book/cookbook.css");
 pub struct Built {
     pub path: PathBuf,
     /// The first 16 hex digits of the SHA-256 of the EPUB's sorted `(name, bytes)` entries: the
-    /// same recipes, notes and pictures give the same id, whatever the zip's timestamps say.
+    /// same recipes, notes, pictures and `now` give the same id, whatever the zip's timestamps
+    /// say. It also changes when a recipe's star ages out, because the contents page depends on
+    /// `now`.
     pub build_id: String,
     pub recipes: usize,
     pub title: String,
@@ -171,7 +173,10 @@ pub fn build(store: &Store, now: DateTime<Utc>, out: &Path) -> Result<Built, Str
         let slug = slug(&chapter.id, &taken);
         taken.insert(slug.clone());
         parts.push(Part {
-            name: chapter.name.trim().to_owned(),
+            name: match chapter.name.trim() {
+                "" => "Untitled chapter".to_owned(),
+                name => name.to_owned(),
+            },
             file: format!("chapter-{slug}.xhtml"),
             slug,
             entries,
