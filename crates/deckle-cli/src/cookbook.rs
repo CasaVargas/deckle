@@ -13,6 +13,7 @@ use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE};
 use serde::Serialize;
 
 use super::cli::{CookbookCommand, PictureArg};
+use super::cookbook_delivery::{self, KindleStatus};
 use super::emit;
 
 pub fn run(json: bool, action: CookbookCommand) -> Result<ExitCode, String> {
@@ -63,6 +64,7 @@ pub fn run(json: bool, action: CookbookCommand) -> Result<ExitCode, String> {
         }
         CookbookCommand::Chapters => chapters(json, &store)?,
         CookbookCommand::Build { out } => build(&store, &out)?,
+        CookbookCommand::Send { to } => send(json, &store, to.as_deref())?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -216,30 +218,82 @@ fn list(json: bool, store: &Store, chapter: Option<&str>) -> Result<(), String> 
             url: &s.recipe.source_url,
         })
         .collect();
-    emit(json, &rows, || {
-        if recipes.is_empty() {
-            return "No recipes yet".to_owned();
-        }
-        recipes
+    let kindles = kindle_statuses(store);
+    #[derive(Serialize)]
+    struct Listing<'a> {
+        recipes: &'a [Row<'a>],
+        kindles: &'a [KindleStatus],
+    }
+    emit(
+        json,
+        &Listing {
+            recipes: &rows,
+            kindles: &kindles,
+        },
+        || {
+            let mut lines: Vec<String> = if recipes.is_empty() {
+                vec!["No recipes yet".to_owned()]
+            } else {
+                recipes
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{}  {}  {}  {}  {}  picture: {}",
+                            s.id,
+                            title(s),
+                            chapter_name(&chapters, &s.chapter),
+                            s.added.format("%Y-%m-%d"),
+                            if s.recipe.structured {
+                                "recipe data"
+                            } else {
+                                "page text"
+                            },
+                            picture_word(s.picture),
+                        )
+                    })
+                    .collect()
+            };
+            // Where each Kindle stands (cookbook design §9); nothing when none is known.
+            if !kindles.is_empty() {
+                lines.push(String::new());
+                lines.extend(kindles.iter().map(|k| format!("{}: {}", k.name, k.status)));
+            }
+            lines.join("\n")
+        },
+    )
+}
+
+/// Every Kindle the cookbook knows, by name: the ones named in `digest.toml` and any with a
+/// delivery on record (named by its id when it has no name), each with how its book stands. A
+/// Kindle left out with `cookbook = false` reads "Off".
+fn kindle_statuses(store: &Store) -> Vec<KindleStatus> {
+    let sync = deckle_digest::Config::load(&deckle_digest::config::default_path())
+        .unwrap_or_default()
+        .sync;
+    let mut kindles: Vec<(String, String)> = sync
+        .named()
+        .map(|(id, name)| (name.to_owned(), id.to_owned()))
+        .collect();
+    let delivered = cookbook_delivery::Delivered::load(store).unwrap_or_default();
+    for id in delivered.ids() {
+        if !kindles
             .iter()
-            .map(|s| {
-                format!(
-                    "{}  {}  {}  {}  {}  picture: {}",
-                    s.id,
-                    title(s),
-                    chapter_name(&chapters, &s.chapter),
-                    s.added.format("%Y-%m-%d"),
-                    if s.recipe.structured {
-                        "recipe data"
-                    } else {
-                        "page text"
-                    },
-                    picture_word(s.picture),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    })
+            .any(|(_, known)| deckle_core::sync::same_kindle(known, id))
+        {
+            kindles.push((
+                sync.device_name(id).unwrap_or_else(|| id.to_owned()),
+                id.to_owned(),
+            ));
+        }
+    }
+    let mut statuses = cookbook_delivery::status(store, &kindles);
+    for k in &mut statuses {
+        if !sync.for_device(&k.id).cookbook {
+            k.status = "Off".to_owned();
+        }
+    }
+    statuses.sort_by_key(|k| (k.name.to_lowercase(), k.id.clone()));
+    statuses
 }
 
 /// The title the book prints: the owner's, else the site's.
@@ -325,4 +379,94 @@ fn build(store: &Store, out: &Path) -> Result<(), String> {
     println!("{}", built.path.display());
     println!("build {}", built.build_id);
     Ok(())
+}
+
+/// What `send` did, as `--json` gives it.
+#[derive(Serialize)]
+struct Sent<'a> {
+    build: &'a str,
+    /// "sent", "up_to_date", "off", "queued" or "exported".
+    result: &'static str,
+    /// The Kindle's name (or sync id).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kindle: Option<String>,
+    /// The EPUB, for an export.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exported: Option<&'a Path>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<&'a super::DigestOutcome>,
+}
+
+/// Builds the book when it changed (a book that hasn't is sent as it is), then sends it: to a
+/// connected Kindle through the same offer, push and record `digest push` uses, or as an EPUB
+/// into the folder `--to` names, which no Kindle's record hears of. With no Kindle connected it
+/// waits for each one's next plug-in.
+fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
+    // A book that was never built is due, so this builds it.
+    if let Some(b) = cookbook_delivery::rebuild_if_dirty(store, None)? {
+        eprintln!(
+            "built {} {}",
+            b.recipes,
+            if b.recipes == 1 { "recipe" } else { "recipes" }
+        );
+    }
+    let build = cookbook_delivery::current_build(store)
+        .ok_or("no recipes yet; add one with `deckle cookbook add`")?;
+    let reply = |s: Sent, text: String| emit(json, &s, || text);
+    let sent = |result, kindle, exported, outcome| Sent {
+        build: &build,
+        result,
+        kindle,
+        exported,
+        outcome,
+    };
+    if let Some(folder) = to.filter(|t| *t != "device") {
+        let dir = Path::new(folder);
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        let out = dir.join(EPUB_NAME);
+        std::fs::copy(cookbook_delivery::epub_path(store), &out)
+            .map_err(|e| format!("{}: {e}", out.display()))?;
+        return reply(
+            sent("exported", None, Some(&out), None),
+            format!("Exported to {}", out.display()),
+        );
+    }
+    let Some(target) = super::detect_kindle() else {
+        return reply(
+            sent("queued", None, None, None),
+            "Queued: goes to each Kindle on its next plug-in".to_owned(),
+        );
+    };
+    let id = deckle_core::sync::device_id(&target);
+    let path = deckle_digest::config::default_path();
+    let papers = if path.exists() {
+        super::all_papers(&path)?
+    } else {
+        vec![deckle_digest::Config::default()]
+    };
+    let cfg = &papers[0];
+    let name = cfg.sync.device_name(&id).unwrap_or_else(|| id.clone());
+    let on = cfg.sync.for_device(&id).cookbook;
+    let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+    let outcome = super::push_queued(&path, &queue, &papers, Some(target))?;
+    let took = outcome.flush.as_ref().is_some_and(|f| {
+        f.delivered
+            .iter()
+            .any(|p| p.file_name().is_some_and(|n| n == book::DEVICE_NAME))
+    });
+    let (result, text) = if took {
+        (
+            "sent",
+            format!("Sent to {name}\n{}", outcome.describe(&queue)),
+        )
+    } else if !on {
+        (
+            "off",
+            format!("{name} is left out of the cookbook (cookbook = false in digest.toml)"),
+        )
+    } else {
+        ("up_to_date", format!("{name} is up to date"))
+    };
+    reply(sent(result, Some(name), None, Some(&outcome)), text)
 }

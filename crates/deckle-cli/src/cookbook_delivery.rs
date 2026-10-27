@@ -78,6 +78,11 @@ fn write_atomic(path: &Path, text: &str) -> Result<(), String> {
     std::fs::rename(&tmp, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The newest build's EPUB (`build/cookbook.epub`); there once [`current_build`] is `Some`.
+pub(crate) fn epub_path(store: &Store) -> PathBuf {
+    build_dir(store).join("cookbook.epub")
+}
+
 /// The newest build's id; `None` before the first build (or after the last recipe went).
 pub(crate) fn current_build(store: &Store) -> Option<String> {
     read_trimmed(&build_id_path(store))
@@ -123,6 +128,11 @@ impl Delivered {
                     .map(|(_, b)| b)
             })
             .map(String::as_str)
+    }
+
+    /// Every Kindle id with a record.
+    pub(crate) fn ids(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
     }
 
     /// Records that `kindle` took `build`, under the id it has now.
@@ -310,7 +320,7 @@ fn rebuild(
         .path;
     let dir = build_dir(store);
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let epub = dir.join("cookbook.epub");
+    let epub = epub_path(store);
     let part = dir.join("cookbook.part.epub");
     let mut built = book::build(store, &part)?;
     std::fs::rename(&part, &epub).map_err(|e| format!("{}: {e}", epub.display()))?;
@@ -463,7 +473,6 @@ fn status_of(delivered: Option<&str>, current: Option<&str>, history: &[String])
 }
 
 /// Each Kindle in `kindles` ((name, id)) with how its cookbook stands.
-#[allow(dead_code)] // the `cookbook list` footer and the desktop's Delivery (Task 3.4)
 pub(crate) fn status(store: &Store, kindles: &[(String, String)]) -> Vec<KindleStatus> {
     let delivered = Delivered::load(store).unwrap_or_default();
     let current = current_build(store);

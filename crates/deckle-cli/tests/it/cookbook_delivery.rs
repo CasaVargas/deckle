@@ -132,6 +132,22 @@ impl Home {
             .unwrap()
     }
 
+    /// `deckle cookbook <args>` with `plugged` connected.
+    fn cookbook_cmd(&self, plugged: &[&Path], args: &[&str]) -> std::process::Output {
+        self.deckle(plugged)
+            .arg("cookbook")
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    /// A mount that holds no Kindle: `DECKLE_MOUNTS` can't be empty (that looks at real drives).
+    fn nothing(&self) -> PathBuf {
+        let dir = self.tmp.path().join("mounts/empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     /// Runs `digest watch` with `plugged` connected until `done` holds for its output, then
     /// `linger` more, and stops it. Its output.
     fn watch(
@@ -485,4 +501,202 @@ fn empty_cookbook_sends_nothing() {
     assert!(h.build_id().is_none());
     assert!(books(&h.mom).is_empty());
     assert!(h.queued().is_none());
+}
+
+fn stdout(o: &std::process::Output) -> String {
+    String::from_utf8_lossy(&o.stdout).into_owned()
+}
+
+#[test]
+fn send_builds_and_pushes_to_connected_kindle() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    assert!(h.build_id().is_none());
+
+    let o = h.cookbook_cmd(&[&h.mom], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let built = h.build_id().expect("send builds when there's no build yet");
+    assert_eq!(books(&h.mom), [DEVICE_NAME]);
+    assert_eq!(h.delivered_to(&h.mom), Some(built));
+    assert!(stdout(&o).contains("Sent to Mom's Kindle"), "{}", text(&o));
+    assert!(h.queued().is_none());
+}
+
+#[test]
+fn send_reuses_the_current_build() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    let built = h.build_id().unwrap();
+    let stamp = std::fs::metadata(h.cookbook.join("build/build_id"))
+        .unwrap()
+        .modified()
+        .unwrap();
+
+    // Nothing changed: no rebuild, and the Kindle that hasn't the book gets this build.
+    let o = h.cookbook_cmd(&[&h.dad], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(h.build_id(), Some(built.clone()));
+    assert_eq!(
+        std::fs::metadata(h.cookbook.join("build/build_id"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        stamp,
+        "not rebuilt"
+    );
+    assert_eq!(h.delivered_to(&h.dad), Some(built));
+
+    // A Kindle that's up to date says so and is left alone.
+    let written = modified(&h.dad);
+    let o = h.cookbook_cmd(&[&h.dad], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(stdout(&o).contains("up to date"), "{}", text(&o));
+    assert_eq!(modified(&h.dad), written);
+}
+
+#[test]
+fn send_rebuilds_a_changed_cookbook() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    let first = h.build_id().unwrap();
+    h.add("Plum Cake", 2);
+
+    let o = h.cookbook_cmd(&[&h.mom], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let second = h.build_id().unwrap();
+    assert_ne!(first, second);
+    assert_eq!(h.delivered_to(&h.mom), Some(second));
+}
+
+#[test]
+fn send_without_kindle_says_it_waits() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    let none = h.nothing();
+
+    for args in [&["send"][..], &["send", "--to", "device"][..]] {
+        let o = h.cookbook_cmd(&[&none], args);
+        assert!(o.status.success(), "{}", text(&o));
+        assert!(
+            stdout(&o)
+                .lines()
+                .any(|l| l == "Queued: goes to each Kindle on its next plug-in"),
+            "{}",
+            text(&o)
+        );
+    }
+    assert!(h.build_id().is_some(), "it still builds");
+    assert!(h.delivered().is_empty());
+}
+
+#[test]
+fn send_with_no_recipes_says_so() {
+    let h = setup();
+    let o = h.cookbook_cmd(&[&h.mom], &["send"]);
+    assert!(!o.status.success(), "{}", text(&o));
+    assert!(books(&h.mom).is_empty());
+}
+
+#[test]
+fn send_to_a_folder_exports_without_recording() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    let folder = h.tmp.path().join("export");
+
+    let o = h
+        .deckle(&[&h.mom])
+        .args(["cookbook", "send", "--to"])
+        .arg(&folder)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(folder.join("cookbook.epub").is_file(), "{}", text(&o));
+    assert!(h.delivered().is_empty(), "a folder isn't a Kindle");
+    assert!(books(&h.mom).is_empty(), "nor did Mom's Kindle get it");
+    assert!(h.queued().is_none());
+}
+
+#[test]
+fn send_leaves_out_a_kindle_with_cookbook_false() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    let o = h.cookbook_cmd(&[&h.attic], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(books(&h.attic).is_empty());
+    assert_eq!(h.delivered_to(&h.attic), None);
+    assert!(stdout(&o).contains("cookbook = false"), "{}", text(&o));
+}
+
+#[test]
+fn list_footer_shows_each_kindle_status() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    h.add("Plum Cake", 2);
+    let o = h.cookbook_cmd(&[&h.dad], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+
+    let none = h.nothing();
+    let o = h.cookbook_cmd(&[&none], &["list"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let out = stdout(&o);
+    let footer: Vec<&str> = out
+        .lines()
+        .skip_while(|l| !l.starts_with("Attic Kindle"))
+        .collect();
+    assert_eq!(
+        footer,
+        [
+            "Attic Kindle: Off",
+            "Dad's Kindle: Up to date",
+            "Mom's Kindle: 1 change behind"
+        ],
+        "{out}"
+    );
+
+    let o = h.cookbook_cmd(&[&none], &["list", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["recipes"].as_array().unwrap().len(), 2);
+    let kindles = v["kindles"].as_array().unwrap();
+    assert_eq!(kindles.len(), 3);
+    let mom = kindles
+        .iter()
+        .find(|k| k["name"] == "Mom's Kindle")
+        .unwrap();
+    assert_eq!(mom["id"], id(&h.mom));
+    assert_eq!(mom["status"], "1 change behind");
+}
+
+/// A fresh home: no `digest.toml`.
+fn forget_config(h: &Home) {
+    let dir = if cfg!(target_os = "macos") {
+        "Library/Application Support/deckle"
+    } else {
+        "deckle"
+    };
+    std::fs::remove_file(h.home.join(dir).join("digest.toml")).unwrap();
+}
+
+#[test]
+fn send_works_without_a_digest_config() {
+    let h = setup();
+    forget_config(&h);
+    h.add("Lemon Bars", 1);
+    let o = h.cookbook_cmd(&[&h.mom], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(books(&h.mom), [DEVICE_NAME]);
+    assert_eq!(h.delivered_to(&h.mom), h.build_id());
+}
+
+#[test]
+fn list_has_no_footer_when_no_kindle_is_known() {
+    let h = setup();
+    forget_config(&h);
+    h.add("Lemon Bars", 1);
+    let none = h.nothing();
+    let o = h.cookbook_cmd(&[&none], &["list"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(stdout(&o).lines().count(), 1, "{}", text(&o));
 }
