@@ -3131,7 +3131,8 @@ fn digest(
                     .map(|id| sync_actions(&cfg, id))
                     .unwrap_or_default();
                 // Queued before the outbox is read, so it rides this connection's push.
-                if let Some(id) = &id {
+                let cookbook_kindle = kindle.as_ref().and_then(cookbook_delivery::kindle_id);
+                if let Some(id) = &cookbook_kindle {
                     let on = actions.push && cfg.sync.for_device(id).cookbook;
                     say_once(
                         &mut offer_error,
@@ -3140,11 +3141,20 @@ fn digest(
                 }
                 let pending = queue.pending();
                 let plan = watcher.tick(id.as_deref(), &pending, actions);
-                if let (Some(target), Some(id), false) = (&kindle, &id, plan.is_empty()) {
+                if let (Some(target), false) = (&kindle, plan.is_empty()) {
+                    // The build that goes now, read before the push takes the entry.
+                    let pushed = cookbook_kindle
+                        .as_deref()
+                        .and_then(|k| cookbook_delivery::queued_build(&queue, k));
                     match sync_to(&path, &queue, &papers, target, plan) {
                         Ok(o) => {
-                            if let Some(flush) = &o.flush
-                                && let Err(e) = cookbook_delivery::record(&cookbook, id, flush)
+                            if let (Some(flush), Some(k)) = (&o.flush, &cookbook_kindle)
+                                && let Err(e) = cookbook_delivery::record(
+                                    &cookbook,
+                                    k,
+                                    flush,
+                                    pushed.as_deref(),
+                                )
                             {
                                 eprintln!("cookbook: {e}");
                             }
@@ -3196,6 +3206,43 @@ fn digest(
                 std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+
+    /// The Daily's prefix is `deckle-daily-` and the date after it, which the Kitchen Book's
+    /// name never matches; it's exempt by name all the same (cookbook design §9).
+    #[test]
+    fn the_dailys_prune_exempts_the_kitchen_book() {
+        let device = deckle_digest::cookbook::book::DEVICE_NAME;
+        let paper = deckle_digest::Config {
+            paper: Some(deckle_digest::config::PaperRef {
+                slug: "kid-courier".into(),
+                state_dir: PathBuf::from("/nonexistent"),
+            }),
+            ..Default::default()
+        };
+        let prune = digest_prune(&paper);
+        assert_eq!(prune.exempt, [device]);
+        let names = [
+            device.to_owned(),
+            "deckle-daily-kid-courier-2026-10-01.kfx".to_owned(),
+            "deckle-daily-kid-courier-2026-10-02.kfx".to_owned(),
+        ];
+        assert_eq!(
+            deckle_core::deliver::prunable_except(names, &prune.prefix, 1, &prune.exempt),
+            ["deckle-daily-kid-courier-2026-10-01.kfx"]
+        );
+        // The main paper's own exemptions (the Morgue's) keep it too.
+        assert!(
+            digest_prune(&deckle_digest::Config::default())
+                .exempt
+                .iter()
+                .any(|n| n == device)
+        );
     }
 }
 
@@ -4123,11 +4170,12 @@ fn push_queued(
     target: Option<Target>,
 ) -> Result<DigestOutcome, String> {
     let cfg = &papers[0];
-    // The Kitchen Book rides along when this Kindle hasn't the newest build (cookbook §9).
+    // The Kitchen Book rides along when this Kindle hasn't the newest build (cookbook §9). A
+    // folder is an export, not a Kindle: it gets none.
     let cookbook = deckle_digest::cookbook::store::Store::new(
         deckle_digest::cookbook::store::Store::default_dir(),
     );
-    let id = target.as_ref().map(deckle_core::sync::device_id);
+    let id = target.as_ref().and_then(cookbook_delivery::kindle_id);
     if let Some(id) = &id
         && let Err(e) =
             cookbook_delivery::offer(&cookbook, queue, id, cfg.sync.for_device(id).cookbook)
@@ -4150,9 +4198,13 @@ fn push_queued(
             ..Default::default()
         });
     };
+    // The build that goes now, read before the push takes the entry.
+    let pushed = id
+        .as_deref()
+        .and_then(|k| cookbook_delivery::queued_build(queue, k));
     let outcome = sync_to(main, queue, papers, &target, plan)?;
     if let (Some(flush), Some(id)) = (&outcome.flush, &id)
-        && let Err(e) = cookbook_delivery::record(&cookbook, id, flush)
+        && let Err(e) = cookbook_delivery::record(&cookbook, id, flush, pushed.as_deref())
     {
         eprintln!("cookbook: {e}");
     }

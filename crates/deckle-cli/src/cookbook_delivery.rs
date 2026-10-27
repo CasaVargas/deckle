@@ -9,7 +9,9 @@
 //!   delivered.json        sync id → build id last delivered
 //!   build/
 //!     cookbook.epub       the newest build
-//!     queue/              a private Queue holding one prepared entry, DEVICE_NAME
+//!     queue/              a private Queue holding one prepared entry, DEVICE_NAME, tagged
+//!                         with its build id (`build_id` inside it); prepared in `queue.next/`
+//!                         and swapped in whole
 //!     history             build ids, oldest first, the newest 50
 //!     build_id            the newest build's id; written last
 //! ```
@@ -45,6 +47,13 @@ fn history_path(store: &Store) -> PathBuf {
 /// The private queue the prepared cookbook waits in.
 fn private_queue(store: &Store) -> Queue {
     Queue::new(build_dir(store).join("queue"))
+}
+
+/// The id `sync::device_id` gives `target` when it's a Kindle; `None` for a folder, which is an
+/// export (`push --to <folder>`), not a Kindle the cookbook stands on.
+pub(crate) fn kindle_id(target: &Target) -> Option<String> {
+    matches!(target, Target::Mtp(_) | Target::MassStorage(_))
+        .then(|| deckle_core::sync::device_id(target))
 }
 
 /// The prepared entry in a queue: `Deckle Kitchen Book.book`.
@@ -215,6 +224,38 @@ fn run_options(previewer: PathBuf) -> RunOptions {
     }
 }
 
+/// Removes the folder `dir` if it's there.
+fn remove_dir(dir: &Path) -> Result<(), String> {
+    match std::fs::remove_dir_all(dir) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            Err(format!("{}: {e}", dir.display()))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Puts the folder `next` in place of `live`: the old one is renamed aside first, put back if
+/// the new one can't be moved in, and removed once it is.
+fn swap_in(next: &Path, live: &Path) -> Result<(), String> {
+    let mut old = live.as_os_str().to_owned();
+    old.push(".old");
+    let old = PathBuf::from(old);
+    remove_dir(&old)?;
+    let had_live = live.exists();
+    if had_live {
+        std::fs::rename(live, &old).map_err(|e| format!("{}: {e}", live.display()))?;
+    }
+    if let Err(e) = std::fs::rename(next, live) {
+        if had_live {
+            let _ = std::fs::rename(&old, live);
+        }
+        return Err(format!("{}: {e}", live.display()));
+    }
+    // The new build is in; a leftover is cleared before the next swap.
+    let _ = remove_dir(&old);
+    Ok(())
+}
+
 /// Removes the build, so nothing is offered (the last recipe went).
 fn forget_build(store: &Store) -> Result<(), String> {
     let path = build_id_path(store);
@@ -298,10 +339,15 @@ fn rebuild(
             .unwrap_or_else(|| "the cookbook wasn't converted".into())
     })?;
     prepared.name = Some(DEVICE_NAME.into());
-    let entry = queue
+    // Prepared and tagged beside the live queue, then swapped in whole: a failure anywhere
+    // leaves the old entry and `build_id` as they were.
+    let next = Queue::new(dir.join("queue.next"));
+    remove_dir(&next.dir)?;
+    let tagged = next
         .add_prepared(&prepared, DEVICE_NAME, None)
-        .map_err(|e| format!("{}: {e}", queue.dir.display()))?;
-    write_atomic(&entry.join(ENTRY_BUILD), &built.build_id)?;
+        .map_err(|e| format!("{}: {e}", next.dir.display()))?;
+    write_atomic(&tagged.join(ENTRY_BUILD), &built.build_id)?;
+    swap_in(&next.dir, &queue.dir)?;
     let ids = appended(history(store), &built.build_id);
     write_atomic(&history_path(store), &(ids.join("\n") + "\n"))?;
     write_atomic(&id_path, &built.build_id)?;
@@ -310,8 +356,9 @@ fn rebuild(
 }
 
 /// Queues the newest build in `outbox` for the Kindle `kindle_id` when `on` (its `cookbook`
-/// switch) and it hasn't taken that build yet. `true` when it was queued now; `false` when it's
-/// off, there's no build, the Kindle is up to date, or it's already queued for it. An entry of
+/// switch) and it hasn't taken that build yet (or an older build still waits for it). `true`
+/// when it was queued now; `false` when it's off, there's no build, the Kindle is up to date,
+/// or the newest is already queued for it. An entry of
 /// the same name meant for another Kindle (a push cut short) is replaced: that Kindle's record
 /// never moved, so it's offered again on its next plug-in.
 pub(crate) fn offer(
@@ -333,13 +380,16 @@ pub(crate) fn offer(
             entry.display()
         ));
     }
-    if Delivered::load(store)?.get(kindle_id) == Some(current.as_str()) {
+    let up_to_date = Delivered::load(store)?.get(kindle_id) == Some(current.as_str());
+    let queued = entry_in(outbox);
+    let queued_for_it = Queue::owner(&queued).is_some_and(|o| same_kindle(&o, kindle_id));
+    let queued_build = read_trimmed(&queued.join(ENTRY_BUILD));
+    if queued_for_it && queued_build.as_deref() == Some(current.as_str()) {
         return Ok(false);
     }
-    let queued = entry_in(outbox);
-    let already = Queue::owner(&queued).is_some_and(|o| same_kindle(&o, kindle_id))
-        && read_trimmed(&queued.join(ENTRY_BUILD)).as_deref() == Some(current.as_str());
-    if already {
+    // An older build still waiting for an up-to-date Kindle would take it back a version; it's
+    // replaced by the newest instead.
+    if up_to_date && !queued_for_it {
         return Ok(false);
     }
     outbox
@@ -348,21 +398,40 @@ pub(crate) fn offer(
     Ok(true)
 }
 
+/// The build the cookbook entry in `outbox` was made from, when the next push to `kindle_id`
+/// would deliver it (it's meant for that Kindle, or for anyone). Read before the push: the
+/// entry is gone after it.
+pub(crate) fn queued_build(outbox: &Queue, kindle_id: &str) -> Option<String> {
+    let entry = entry_in(outbox);
+    let goes = match Queue::owner(&entry) {
+        Some(owner) => same_kindle(&owner, kindle_id),
+        None => true,
+    };
+    goes.then(|| read_trimmed(&entry.join(ENTRY_BUILD)))
+        .flatten()
+}
+
 /// After a push to `kindle_id`: when the cookbook was among what it delivered, records that the
-/// Kindle has the newest build.
-pub(crate) fn record(store: &Store, kindle_id: &str, report: &FlushReport) -> Result<(), String> {
+/// Kindle has `pushed`, the build [`queued_build`] read before the push. Not the newest build:
+/// another process may have rebuilt since. Without a tag nothing is recorded.
+pub(crate) fn record(
+    store: &Store,
+    kindle_id: &str,
+    report: &FlushReport,
+    pushed: Option<&str>,
+) -> Result<(), String> {
     let sent = report
         .delivered
         .iter()
         .any(|p| p.file_name().is_some_and(|n| n == DEVICE_NAME));
-    let Some(current) = current_build(store).filter(|_| sent) else {
+    let Some(pushed) = pushed.filter(|_| sent) else {
         return Ok(());
     };
     let mut delivered = Delivered::load(store)?;
-    if delivered.get(kindle_id) == Some(current.as_str()) {
+    if delivered.get(kindle_id) == Some(pushed) {
         return Ok(());
     }
-    delivered.set(kindle_id, &current);
+    delivered.set(kindle_id, pushed);
     delivered.save(store)
 }
 
@@ -552,13 +621,45 @@ mod tests {
     #[test]
     fn record_needs_the_cookbook_among_what_was_delivered() {
         let (_tmp, store) = store();
-        fake_build(&store, "b1");
-        record(&store, MOM, &flushed(&["deckle-daily-2026-10-27.kfx"])).unwrap();
+        fake_build(&store, "b2");
+        let b1 = Some("b1");
+        record(&store, MOM, &flushed(&["deckle-daily-2026-10-27.kfx"]), b1).unwrap();
         assert_eq!(Delivered::load(&store).unwrap().get(MOM), None);
-        record(&store, MOM, &flushed(&[])).unwrap();
+        record(&store, MOM, &flushed(&[]), b1).unwrap();
         assert_eq!(Delivered::load(&store).unwrap().get(MOM), None);
-        record(&store, MOM, &flushed(&["x.kfx", DEVICE_NAME])).unwrap();
+        // No tag: what went can't be told, so nothing is recorded.
+        record(&store, MOM, &flushed(&[DEVICE_NAME]), None).unwrap();
+        assert_eq!(Delivered::load(&store).unwrap().get(MOM), None);
+        // The build that was pushed, not the newest.
+        record(&store, MOM, &flushed(&["x.kfx", DEVICE_NAME]), b1).unwrap();
         assert_eq!(Delivered::load(&store).unwrap().get(MOM), Some("b1"));
+    }
+
+    #[test]
+    fn queued_build_is_the_tag_of_the_entry_this_kindle_takes() {
+        let (tmp, store) = store();
+        let outbox = Queue::new(tmp.path().join("outbox"));
+        assert_eq!(queued_build(&outbox, MOM), None);
+        fake_build(&store, "b1");
+        offer(&store, &outbox, MOM, true).unwrap();
+        assert_eq!(queued_build(&outbox, MOM).as_deref(), Some("b1"));
+        assert_eq!(queued_build(&outbox, DAD), None, "it waits for Mom");
+    }
+
+    #[test]
+    fn an_up_to_date_kindle_with_an_older_build_waiting_gets_the_newest() {
+        let (tmp, store) = store();
+        let outbox = Queue::new(tmp.path().join("outbox"));
+        fake_build(&store, "b1");
+        assert!(offer(&store, &outbox, MOM, true).unwrap());
+        // Mom took b2 by another route while b1 still waited for her.
+        fake_build(&store, "b2");
+        let mut d = Delivered::default();
+        d.set(MOM, "b2");
+        d.save(&store).unwrap();
+        assert!(offer(&store, &outbox, MOM, true).unwrap());
+        assert_eq!(queued_build(&outbox, MOM).as_deref(), Some("b2"));
+        assert!(!offer(&store, &outbox, MOM, true).unwrap());
     }
 
     #[test]
@@ -697,6 +798,41 @@ mod tests {
         assert!(store.is_dirty());
     }
 
+    fn fake_pv() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh")
+    }
+
+    /// Another process rebuilds between the offer and the push: the Kindle got the build that
+    /// was queued, and its record says so.
+    #[cfg(unix)]
+    #[test]
+    fn rebuild_between_offer_and_push_records_the_pushed_build() {
+        let (tmp, store) = store();
+        let outbox = Queue::new(tmp.path().join("outbox"));
+        let kindle = tmp.path().join("kindle");
+        std::fs::create_dir_all(&kindle).unwrap();
+        let target = Target::Folder(kindle.clone());
+        let id = deckle_core::sync::device_id(&target);
+        add(&store, "lemon-bars");
+        let first = rebuild_if_dirty(&store, Some(&fake_pv())).unwrap().unwrap();
+        assert!(offer(&store, &outbox, &id, true).unwrap());
+        let pushed = queued_build(&outbox, &id);
+        assert_eq!(pushed.as_deref(), Some(first.build_id.as_str()));
+
+        add(&store, "plum-cake");
+        let second = rebuild_if_dirty(&store, Some(&fake_pv())).unwrap().unwrap();
+        assert_ne!(first.build_id, second.build_id);
+        let report = outbox.flush(&target, None).unwrap();
+        assert!(kindle.join(DEVICE_NAME).is_file());
+        record(&store, &id, &report, pushed.as_deref()).unwrap();
+        assert_eq!(
+            Delivered::load(&store).unwrap().get(&id),
+            Some(first.build_id.as_str())
+        );
+        let kindles = [("Kitchen".to_owned(), id.clone())];
+        assert_eq!(status(&store, &kindles)[0].status, "1 change behind");
+    }
+
     #[cfg(unix)]
     #[test]
     fn rebuild_prepares_one_entry_and_writes_the_id_last() {
@@ -717,6 +853,8 @@ mod tests {
             Some(built.build_id.clone())
         );
         assert_eq!(history(&store), std::slice::from_ref(&built.build_id));
+        assert!(!build_dir(&store).join("queue.next").exists());
+        assert!(!build_dir(&store).join("queue.old").exists());
         assert!(!due(&store));
         assert!(rebuild_if_dirty(&store, Some(&pv)).unwrap().is_none());
 
@@ -734,5 +872,54 @@ mod tests {
         assert_ne!(second.build_id, built.build_id);
         assert_eq!(history(&store), [built.build_id, second.build_id.clone()]);
         assert_eq!(queue.pending().len(), 1);
+    }
+
+    /// A build that fails after the Previewer (here: the old queue can't be cleared away) or in
+    /// it leaves the last good build in place: its entry, its tag and `build_id`.
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_build_keeps_the_last_good_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_tmp, store) = store();
+        add(&store, "lemon-bars");
+        let first = rebuild_if_dirty(&store, Some(&fake_pv())).unwrap().unwrap();
+        let entry = entry_in(&private_queue(&store));
+        let intact = |store: &Store| {
+            assert_eq!(current_build(store), Some(first.build_id.clone()));
+            assert_eq!(
+                read_trimmed(&entry.join(ENTRY_BUILD)),
+                Some(first.build_id.clone())
+            );
+            assert!(entry.join("book.kpf").is_file());
+            assert_eq!(history(store), std::slice::from_ref(&first.build_id));
+            assert!(store.is_dirty(), "tried again on the next check");
+        };
+
+        // The Previewer fails.
+        add(&store, "plum-cake");
+        let failed = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../deckle-core/tests/fake_previewer/failed.sh");
+        assert!(rebuild_if_dirty(&store, Some(&failed)).is_err());
+        intact(&store);
+
+        // Prepared, but the swap can't start: a leftover `queue.old` that won't go.
+        let stuck = build_dir(&store).join("queue.old/stuck");
+        std::fs::create_dir_all(&stuck).unwrap();
+        std::fs::write(stuck.join("f"), b"x").unwrap();
+        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let err = rebuild_if_dirty(&store, Some(&fake_pv())).unwrap_err();
+        std::fs::set_permissions(&stuck, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(err.contains("queue.old"), "{err}");
+        intact(&store);
+
+        // Once it can, the next check builds, clearing the leftovers.
+        let second = rebuild_if_dirty(&store, Some(&fake_pv())).unwrap().unwrap();
+        assert_eq!(current_build(&store), Some(second.build_id.clone()));
+        assert_eq!(
+            read_trimmed(&entry.join(ENTRY_BUILD)),
+            Some(second.build_id)
+        );
+        assert!(!build_dir(&store).join("queue.next").exists());
+        assert!(!build_dir(&store).join("queue.old").exists());
     }
 }

@@ -426,24 +426,28 @@ fn interrupted_push_redelivers_later() {
 }
 
 #[test]
-fn queued_cookbook_never_pruned() {
+fn export_folder_push_gets_no_cookbook() {
     let h = setup();
-    // `keep = 1`: the Daily keeps one edition, and leaves the cookbook alone.
-    for day in 1..=3 {
-        std::fs::write(
-            h.mom
-                .join(format!("documents/deckle-daily-2026-10-0{day}.kfx")),
-            b"KFX",
-        )
-        .unwrap();
-    }
     h.add("Lemon Bars", 1);
     h.plug_in(&h.mom);
+
+    // `push --to <folder>` is an export, not a Kindle: the cookbook stays out of it.
+    let folder = h.tmp.path().join("export");
+    let o = h
+        .deckle(&[&h.mom])
+        .args(["--json", "digest", "push", "--to"])
+        .arg(&folder)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(!folder.join(DEVICE_NAME).exists(), "{}", text(&o));
     assert_eq!(
-        books(&h.mom),
-        [DEVICE_NAME, "deckle-daily-2026-10-03.kfx"],
-        "pruned with the push, cookbook kept"
+        h.delivered().len(),
+        1,
+        "only Mom's Kindle: {:?}",
+        h.delivered()
     );
+    assert!(h.queued().is_none());
 }
 
 #[test]
