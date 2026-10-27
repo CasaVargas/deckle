@@ -11,7 +11,7 @@ Add `--json` (before or after the subcommand) for machine-readable output.
 | Command | What it does |
 |---|---|
 | `deckle cookbook add <url\|file>... [--chapter <id>] [--note <text>]` | Keep recipes from web addresses, `.webloc`/`.url` link files or saved `.html` pages and file each into a chapter. Prints the chapter and the picture. |
-| `deckle cookbook list [--chapter <id>]` | The recipes: id, title, chapter, added, recipe data or page text, picture. Below them, one `<Kindle>: <status>` line per known Kindle (see Delivery); none when no Kindle is known. `--json` gives `{recipes, kindles}`, with `kindles` as `[{name, id, status}]`. |
+| `deckle cookbook list [--chapter <id>]` | The recipes: id, title, chapter, added, recipe data or page text, picture. Below them, a footer (see Delivery): `Changes not built yet: <why>` while the book has changes no build has picked up, then one `<Kindle>: <status>` line per known Kindle; nothing when there is nothing to say. `--json` gives `{recipes, kindles, pending_build, build_error}` (plus `kindles_error` when the delivery record can't be read), with `kindles` as `[{name, id, status, state, behind}]`. |
 | `deckle cookbook move <id\|url> <chapter>` | File a recipe into another chapter. |
 | `deckle cookbook remove <id\|url>` | Delete a recipe and its pictures. |
 | `deckle cookbook note <id\|url> <text>` | Set a recipe's note; an empty string clears it. |
@@ -31,7 +31,9 @@ adding five recipes in a row costs one build.
 - A Kindle connected (`--to device`, the default): sent the way `deckle digest push` sends, so
   it also carries anything else waiting in the outbox. The Kindle is skipped, and the command
   says why, when it already has this build or is left out with `cookbook = false`.
-- No Kindle connected: prints `Queued: goes to each Kindle on its next plug-in` and exits 0.
+- A Kindle that didn't take the book and doesn't have this build on record is an error (`not sent to <name>: <reason>`, exit 1), never "up to date".
+- No Kindle connected: prints `Every Kindle already has this build` when every known Kindle (bar those left out) is up to date, else `Queued: goes to each Kindle on its next plug-in`; exits 0. `--json` `result` is `all_current` or `queued`.
+- Only one build runs at a time (`cookbook/build/.lock`): `send` waits for a running build; `digest watch` skips the tick and tries again.
 - `--to <folder>`: copies `cookbook.epub` there. A folder isn't a Kindle, so nothing is recorded.
 
 ## Delivery
@@ -53,4 +55,9 @@ cookbook = false
 
 Status in the `list` footer: `Up to date`, `<n> changes behind` (builds since the one it
 has), `Behind`, `Never sent`, or `Off` for a Kindle with `cookbook = false`. Kindles listed are
-the ones named in `digest.toml` plus any with a delivery on record.
+the ones named in `digest.toml` plus any with a delivery on record. In `--json`, `state` is
+`up_to_date`, `behind`, `never_sent` or `off`, and `behind` is the number of builds behind (0 when
+up to date; `null` when never sent, off, or the build it has is no longer in the history).
+
+A failed build is kept in `cookbook/build/error` until a build succeeds; the footer's `Changes not
+built yet:` line shows it, and `pending_build` / `build_error` carry it in `--json`.

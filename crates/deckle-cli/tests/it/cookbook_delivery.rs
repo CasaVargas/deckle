@@ -698,5 +698,97 @@ fn list_has_no_footer_when_no_kindle_is_known() {
     let none = h.nothing();
     let o = h.cookbook_cmd(&[&none], &["list"]);
     assert!(o.status.success(), "{}", text(&o));
-    assert_eq!(stdout(&o).lines().count(), 1, "{}", text(&o));
+    // The recipe, then only what's not built yet: no Kindle line.
+    let out = stdout(&o);
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(lines.len(), 3, "{out}");
+    assert_eq!(
+        lines[2], "Changes not built yet: waiting for the next build",
+        "{out}"
+    );
+}
+
+#[test]
+fn send_reports_a_failed_offer() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    // The record is damaged: the cookbook can't be offered to anyone.
+    std::fs::write(h.cookbook.join("delivered.json"), "{ nope").unwrap();
+
+    let o = h.cookbook_cmd(&[&h.dad], &["send"]);
+    assert!(!o.status.success(), "{}", text(&o));
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(err.contains("not sent to Dad's Kindle"), "{err}");
+    assert!(err.contains("delivered.json"), "{err}");
+    assert!(!text(&o).contains("up to date"), "{}", text(&o));
+    assert!(books(&h.dad).is_empty());
+}
+
+#[test]
+fn list_shows_changes_not_built_after_a_failed_build() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    let none = h.nothing();
+    // No Previewer to build with.
+    let o = h
+        .deckle(&[&none])
+        .env("DECKLE_PREVIEWER", h.tmp.path().join("no-previewer"))
+        .args(["cookbook", "send"])
+        .output()
+        .unwrap();
+    assert!(!o.status.success(), "{}", text(&o));
+
+    let o = h.cookbook_cmd(&[&none], &["list"]);
+    let out = stdout(&o);
+    let line = out
+        .lines()
+        .find(|l| l.starts_with("Changes not built yet: "))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(line.contains("can't build the cookbook yet"), "{line}");
+    let o = h.cookbook_cmd(&[&none], &["list", "--json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["pending_build"], true);
+    assert!(
+        v["build_error"]
+            .as_str()
+            .unwrap()
+            .contains("can't build the cookbook yet")
+    );
+
+    // A good build clears both.
+    let o = h.cookbook_cmd(&[&none], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    let out = stdout(&h.cookbook_cmd(&[&none], &["list"]));
+    assert!(!out.contains("Changes not built yet"), "{out}");
+    let v: serde_json::Value =
+        serde_json::from_slice(&h.cookbook_cmd(&[&none], &["list", "--json"]).stdout).unwrap();
+    assert_eq!(v["pending_build"], false);
+    assert!(v["build_error"].is_null());
+}
+
+#[test]
+fn send_with_every_kindle_current_says_so() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    h.plug_in(&h.dad);
+    h.plug_in(&h.guest);
+    // Mom, Dad and the Guest have it; the Attic's Kindle is left out. Nobody is waiting.
+    let none = h.nothing();
+    let o = h.cookbook_cmd(&[&none], &["send"]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(stdout(&o).trim(), "Every Kindle already has this build");
+    let o = h.cookbook_cmd(&[&none], &["--json", "send"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["result"], "all_current");
+
+    // A change makes someone wait again.
+    h.add("Plum Cake", 2);
+    let o = h.cookbook_cmd(&[&none], &["send"]);
+    assert!(
+        stdout(&o).contains("Queued: goes to each Kindle on its next plug-in"),
+        "{}",
+        text(&o)
+    );
 }

@@ -3279,6 +3279,10 @@ struct DigestOutcome {
     /// Books left queued for other Kindles: (queue name, the Kindle's name or id).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     waiting: Vec<(String, String)>,
+    /// Why the Kitchen Book wasn't offered to this Kindle, or its delivery wasn't recorded
+    /// (also said on stderr).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cookbook_error: Option<String>,
 }
 
 /// "2 books wait for Mom's Kindle", one line per Kindle, from (queue name, Kindle) pairs.
@@ -4176,11 +4180,13 @@ fn push_queued(
         deckle_digest::cookbook::store::Store::default_dir(),
     );
     let id = target.as_ref().and_then(cookbook_delivery::kindle_id);
+    let mut cookbook_error = None;
     if let Some(id) = &id
         && let Err(e) =
             cookbook_delivery::offer(&cookbook, queue, id, cfg.sync.for_device(id).cookbook)
     {
         eprintln!("cookbook: {e}");
+        cookbook_error = Some(e);
     }
     let empty = queue.pending().is_empty();
     let Some(target) = target else {
@@ -4195,6 +4201,7 @@ fn push_queued(
     let Some(plan) = push_plan(actions, empty) else {
         return Ok(DigestOutcome {
             flush: Some(Default::default()),
+            cookbook_error,
             ..Default::default()
         });
     };
@@ -4202,12 +4209,14 @@ fn push_queued(
     let pushed = id
         .as_deref()
         .and_then(|k| cookbook_delivery::queued_build(queue, k));
-    let outcome = sync_to(main, queue, papers, &target, plan)?;
+    let mut outcome = sync_to(main, queue, papers, &target, plan)?;
     if let (Some(flush), Some(id)) = (&outcome.flush, &id)
         && let Err(e) = cookbook_delivery::record(&cookbook, id, flush, pushed.as_deref())
     {
         eprintln!("cookbook: {e}");
+        cookbook_error = Some(e);
     }
+    outcome.cookbook_error = cookbook_error;
     Ok(outcome)
 }
 

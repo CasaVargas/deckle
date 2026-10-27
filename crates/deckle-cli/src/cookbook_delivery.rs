@@ -14,6 +14,8 @@
 //!                         and swapped in whole
 //!     history             build ids, oldest first, the newest 50
 //!     build_id            the newest build's id; written last
+//!     error               why the last build failed; gone after a good one
+//!     .lock               held while building (the watcher and `cookbook send` take turns)
 //! ```
 
 use std::collections::BTreeMap;
@@ -24,6 +26,7 @@ use deckle_core::deliver::Target;
 use deckle_core::pipeline::{RunOptions, XRayMode, prepare};
 use deckle_core::queue::{FlushReport, Queue};
 use deckle_core::sync::same_kindle;
+use deckle_digest::config::SyncConfig;
 use deckle_digest::cookbook::book::{self, Built, DEVICE_NAME};
 use deckle_digest::cookbook::store::Store;
 
@@ -42,6 +45,34 @@ fn build_id_path(store: &Store) -> PathBuf {
 
 fn history_path(store: &Store) -> PathBuf {
     build_dir(store).join("history")
+}
+
+fn error_path(store: &Store) -> PathBuf {
+    build_dir(store).join("error")
+}
+
+/// Takes the build lock (`build/.lock`): `wait` blocks until it is free; without it, `None`
+/// means someone else is building. Held until the returned file is dropped.
+fn build_lock(store: &Store, wait: bool) -> Result<Option<std::fs::File>, String> {
+    let dir = build_dir(store);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join(".lock");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if wait {
+        file.lock()
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        return Ok(Some(file));
+    }
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(e)) => Err(format!("{}: {e}", path.display())),
+    }
 }
 
 /// The private queue the prepared cookbook waits in.
@@ -282,17 +313,53 @@ fn forget_build(store: &Store) -> Result<(), String> {
     Ok(())
 }
 
+/// Whether the book has changes no build has picked up ([`due`]), and why the last attempt failed
+/// (only said while changes wait).
+pub(crate) fn unbuilt(store: &Store) -> (bool, Option<String>) {
+    let pending = due(store);
+    (
+        pending,
+        read_trimmed(&error_path(store)).filter(|_| pending),
+    )
+}
+
 /// Rebuilds the cookbook when it changed ([`due`]): the EPUB to `build/cookbook.epub`, prepared
 /// (Kindle Previewer at `previewer`, else found as `deckle run` finds it) into the private queue,
 /// its id appended to the history and written to `build/build_id` last. `Some` when there's a
 /// new build; `None` when nothing changed, the book came out the same, or there are no recipes.
+/// This is the watcher's: when another process is building (the build lock is taken) it does
+/// nothing this time, and the next tick looks again.
 ///
 /// `dirty` is cleared before the store is read, so a recipe saved during the build marks it
-/// again; a failed build marks it again too, so the next check retries.
+/// again; a failed build marks it again too, so the next check retries, and says why in
+/// `build/error`.
 pub(crate) fn rebuild_if_dirty(
     store: &Store,
     previewer: Option<&Path>,
 ) -> Result<Option<Built>, String> {
+    rebuild_when_due(store, previewer, false)
+}
+
+/// [`rebuild_if_dirty`] for `cookbook send`: waits its turn when another process is building.
+pub(crate) fn rebuild_waiting(
+    store: &Store,
+    previewer: Option<&Path>,
+) -> Result<Option<Built>, String> {
+    rebuild_when_due(store, previewer, true)
+}
+
+fn rebuild_when_due(
+    store: &Store,
+    previewer: Option<&Path>,
+    wait: bool,
+) -> Result<Option<Built>, String> {
+    if !due(store) {
+        return Ok(None);
+    }
+    let Some(_lock) = build_lock(store, wait)? else {
+        return Ok(None);
+    };
+    // Whoever held the lock may have built it already.
     if !due(store) {
         return Ok(None);
     }
@@ -300,8 +367,15 @@ pub(crate) fn rebuild_if_dirty(
     let started = SystemTime::now();
     store.clear_dirty()?;
     let r = rebuild(store, previewer, started);
-    if r.is_err() {
-        store.mark_dirty()?;
+    match &r {
+        Ok(_) => {
+            let _ = std::fs::remove_file(error_path(store));
+        }
+        Err(e) => {
+            store.mark_dirty()?;
+            // Best effort: the build's own error is what's returned.
+            let _ = write_atomic(&error_path(store), e);
+        }
     }
     r
 }
@@ -385,8 +459,13 @@ pub(crate) fn offer(
     };
     let entry = entry_in(&private_queue(store));
     if !entry.is_dir() {
+        // Marked changed, so the next check rebuilds it instead of waiting for an edit.
+        let marked = match store.mark_dirty() {
+            Ok(()) => "it's rebuilt on the next check".to_owned(),
+            Err(e) => format!("it couldn't be marked for a rebuild: {e}"),
+        };
         return Err(format!(
-            "{}: the cookbook's build is missing; it's rebuilt on the next change",
+            "{}: the cookbook's build is missing; {marked}",
             entry.display()
         ));
     }
@@ -445,46 +524,100 @@ pub(crate) fn record(
     delivered.save(store)
 }
 
+/// Where a Kindle stands with the cookbook.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum KindleState {
+    UpToDate,
+    Behind,
+    NeverSent,
+    /// Left out with `cookbook = false`.
+    Off,
+}
+
 /// One Kindle's line on the Delivery list.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub(crate) struct KindleStatus {
     pub name: String,
     pub id: String,
-    /// "Up to date", "<n> changes behind", "Behind" or "Never sent".
+    /// "Up to date", "<n> changes behind", "Behind", "Never sent" or "Off".
     pub status: String,
+    pub state: KindleState,
+    /// Builds behind: 0 when up to date; `None` when it never took one, is left out, or the
+    /// build it has has aged out of the history.
+    pub behind: Option<usize>,
 }
 
 /// How far `delivered` is behind `current`, given the build history (oldest first).
-fn status_of(delivered: Option<&str>, current: Option<&str>, history: &[String]) -> String {
+fn status_of(
+    delivered: Option<&str>,
+    current: Option<&str>,
+    history: &[String],
+) -> (KindleState, Option<usize>, String) {
     let Some(delivered) = delivered else {
-        return "Never sent".to_owned();
+        return (KindleState::NeverSent, None, "Never sent".to_owned());
     };
     if current.is_none_or(|c| c == delivered) {
-        return "Up to date".to_owned();
+        return (KindleState::UpToDate, Some(0), "Up to date".to_owned());
     }
     match history.iter().rposition(|b| b == delivered) {
         Some(at) => match history.len() - 1 - at {
-            0 => "Behind".to_owned(),
-            1 => "1 change behind".to_owned(),
-            n => format!("{n} changes behind"),
+            0 => (KindleState::Behind, None, "Behind".to_owned()),
+            1 => (KindleState::Behind, Some(1), "1 change behind".to_owned()),
+            n => (KindleState::Behind, Some(n), format!("{n} changes behind")),
         },
-        None => "Behind".to_owned(),
+        None => (KindleState::Behind, None, "Behind".to_owned()),
     }
 }
 
-/// Each Kindle in `kindles` ((name, id)) with how its cookbook stands.
-pub(crate) fn status(store: &Store, kindles: &[(String, String)]) -> Vec<KindleStatus> {
-    let delivered = Delivered::load(store).unwrap_or_default();
+/// Each Kindle in `kindles` ((name, id)) with how its cookbook stands; one that `sync` leaves
+/// out (`cookbook = false`) is Off. A record that can't be read is an error, not "Never sent".
+pub(crate) fn status(
+    store: &Store,
+    sync: &SyncConfig,
+    kindles: &[(String, String)],
+) -> Result<Vec<KindleStatus>, String> {
+    let delivered = Delivered::load(store)?;
     let current = current_build(store);
     let history = history(store);
-    kindles
+    Ok(kindles
         .iter()
-        .map(|(name, id)| KindleStatus {
-            name: name.clone(),
-            id: id.clone(),
-            status: status_of(delivered.get(id), current.as_deref(), &history),
+        .map(|(name, id)| {
+            let (state, behind, status) = if sync.for_device(id).cookbook {
+                status_of(delivered.get(id), current.as_deref(), &history)
+            } else {
+                (KindleState::Off, None, "Off".to_owned())
+            };
+            KindleStatus {
+                name: name.clone(),
+                id: id.clone(),
+                status,
+                state,
+                behind,
+            }
         })
-        .collect()
+        .collect())
+}
+
+/// Every Kindle the cookbook knows, as `status` gives them, sorted by name: the ones named in
+/// `sync` and any with a delivery on record (called by its id when it has no name).
+pub(crate) fn statuses(store: &Store, sync: &SyncConfig) -> Result<Vec<KindleStatus>, String> {
+    let mut kindles: Vec<(String, String)> = sync
+        .named()
+        .map(|(id, name)| (name.to_owned(), id.to_owned()))
+        .collect();
+    let delivered = Delivered::load(store)?;
+    for id in delivered.ids() {
+        if !kindles.iter().any(|(_, known)| same_kindle(known, id)) {
+            kindles.push((
+                sync.device_name(id).unwrap_or_else(|| id.to_owned()),
+                id.to_owned(),
+            ));
+        }
+    }
+    let mut all = status(store, sync, &kindles)?;
+    all.sort_by_key(|k| (k.name.to_lowercase(), k.id.clone()));
+    Ok(all)
 }
 
 #[cfg(test)]
@@ -589,7 +722,9 @@ mod tests {
         d.set(DAD, "b1");
         d.set("G000OLD", "gone");
         d.save(&store).unwrap();
-        let lines: Vec<String> = status(&store, &kindles)
+        let sync = SyncConfig::default();
+        let lines: Vec<String> = status(&store, &sync, &kindles)
+            .unwrap()
             .into_iter()
             .map(|s| format!("{}: {}", s.name, s.status))
             .collect();
@@ -604,7 +739,43 @@ mod tests {
         );
         d.set(DAD, "b3");
         d.save(&store).unwrap();
-        assert_eq!(status(&store, &kindles)[1].status, "1 change behind");
+        let all = status(&store, &sync, &kindles).unwrap();
+        assert_eq!(all[1].status, "1 change behind");
+        // The machine fields: how many behind, and where it stands.
+        assert_eq!(
+            (all[0].state, all[0].behind),
+            (KindleState::UpToDate, Some(0))
+        );
+        assert_eq!(
+            (all[1].state, all[1].behind),
+            (KindleState::Behind, Some(1))
+        );
+        assert_eq!(
+            (all[2].state, all[2].behind),
+            (KindleState::NeverSent, None)
+        );
+        assert_eq!((all[3].state, all[3].behind), (KindleState::Behind, None));
+
+        // A Kindle left out is Off, whatever it took before.
+        let mut off = SyncConfig::default();
+        off.devices.insert(
+            MOM.into(),
+            deckle_digest::config::DeviceSync {
+                cookbook: Some(false),
+                ..Default::default()
+            },
+        );
+        let all = status(&store, &off, &kindles).unwrap();
+        assert_eq!(
+            (all[0].status.as_str(), all[0].state, all[0].behind),
+            ("Off", KindleState::Off, None)
+        );
+        assert_eq!(all[1].state, KindleState::Behind);
+
+        // A record that won't parse is an error, not "Never sent".
+        std::fs::write(Delivered::path(&store), "{ nope").unwrap();
+        assert!(status(&store, &sync, &kindles).is_err());
+        assert!(statuses(&store, &sync).is_err());
     }
 
     #[test]
@@ -721,8 +892,10 @@ mod tests {
         std::fs::remove_dir_all(entry_in(&private_queue(&store))).unwrap();
         std::fs::write(build_id_path(&store), "b2").unwrap();
 
+        assert!(!store.is_dirty());
         let err = offer(&store, &outbox, DAD, true).unwrap_err();
         assert!(err.contains("missing"), "{err}");
+        assert!(store.is_dirty(), "marked, so the next check rebuilds it");
         let queued = entry_in(&outbox);
         assert_eq!(Queue::owner(&queued).as_deref(), Some(MOM));
         assert_eq!(
@@ -799,12 +972,82 @@ mod tests {
         assert!(err.contains("can't build the cookbook yet"), "{err}");
         assert!(store.is_dirty());
         assert!(current_build(&store).is_none());
+        // Why, for whoever lists the book.
+        let (pending, why) = unbuilt(&store);
+        assert!(pending);
+        assert_eq!(why.as_deref(), Some(err.as_str()));
 
         // A recipe file that won't parse fails the build the same way.
         std::fs::write(store.dir.join("recipes/0123456789ab.json"), "{").unwrap();
         let err = rebuild_if_dirty(&store, None).unwrap_err();
         assert!(err.contains("0123456789ab.json"), "{err}");
         assert!(store.is_dirty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_good_build_clears_the_error_and_the_pending_flag() {
+        let (tmp, store) = store();
+        add(&store, "lemon-bars");
+        assert_eq!(unbuilt(&store), (true, None));
+        rebuild_if_dirty(&store, Some(&tmp.path().join("no-previewer"))).unwrap_err();
+        assert!(unbuilt(&store).1.is_some());
+        rebuild_if_dirty(&store, Some(&fake_pv())).unwrap().unwrap();
+        assert_eq!(unbuilt(&store), (false, None));
+        assert!(!error_path(&store).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_watcher_skips_a_tick_while_someone_else_builds() {
+        let (_tmp, store) = store();
+        add(&store, "lemon-bars");
+        let held = build_lock(&store, true).unwrap().unwrap();
+
+        // The watcher doesn't wait, build or touch the flag.
+        assert!(
+            rebuild_if_dirty(&store, Some(&fake_pv()))
+                .unwrap()
+                .is_none()
+        );
+        assert!(current_build(&store).is_none());
+        assert!(store.is_dirty());
+        assert!(!build_dir(&store).join("queue.next").exists());
+
+        // Once the lock is free, the next tick builds.
+        drop(held);
+        let built = rebuild_if_dirty(&store, Some(&fake_pv())).unwrap().unwrap();
+        assert_eq!(current_build(&store), Some(built.build_id));
+        assert!(!store.is_dirty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn send_waits_for_the_lock_then_finds_the_book_built() {
+        let (_tmp, store) = store();
+        add(&store, "lemon-bars");
+        let held = build_lock(&store, true).unwrap().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiting = {
+            let dir = store.dir.clone();
+            std::thread::spawn(move || {
+                let store = Store::new(dir);
+                tx.send(()).unwrap();
+                rebuild_waiting(&store, Some(&fake_pv()))
+            })
+        };
+        rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(current_build(&store).is_none(), "still waiting");
+        // The holder built it meanwhile (here: nothing is due any more).
+        store.clear_dirty().unwrap();
+        fake_build(&store, "b1");
+        drop(held);
+        assert!(
+            waiting.join().unwrap().unwrap().is_none(),
+            "due is re-checked"
+        );
+        assert_eq!(current_build(&store).as_deref(), Some("b1"));
     }
 
     fn fake_pv() -> PathBuf {
@@ -839,7 +1082,8 @@ mod tests {
             Some(first.build_id.as_str())
         );
         let kindles = [("Kitchen".to_owned(), id.clone())];
-        assert_eq!(status(&store, &kindles)[0].status, "1 change behind");
+        let all = status(&store, &SyncConfig::default(), &kindles).unwrap();
+        assert_eq!(all[0].status, "1 change behind");
     }
 
     #[cfg(unix)]
