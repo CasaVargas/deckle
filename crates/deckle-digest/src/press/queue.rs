@@ -202,6 +202,32 @@ pub(crate) fn validate_data(data: &JournalData) -> bool {
     }
     let mut editions = HashSet::new();
     for o in &data.outputs {
+        for auth in [&o.shared_deletion, &o.archive_deletion]
+            .into_iter()
+            .flatten()
+        {
+            let mut paths = HashSet::new();
+            if !auth
+                .members
+                .iter()
+                .any(|m| m.relative.is_empty() && m.directory)
+                || (o.published_at.is_some() && o.removed_at.is_none())
+                || auth.members.iter().any(|m| {
+                    !paths.insert(&m.relative)
+                        || (!m.relative.is_empty()
+                            && (m.relative.contains('\\')
+                                || m.relative
+                                    .split('/')
+                                    .any(|p| p.is_empty() || p == "." || p == "..")
+                                || std::path::Path::new(&m.relative)
+                                    .components()
+                                    .any(|p| !matches!(p, std::path::Component::Normal(_)))))
+                })
+            {
+                return false;
+            }
+        }
+
         if o.stages.iter().any(|s| {
             s.generation == 0
                 || s.generation > 3
@@ -811,6 +837,10 @@ pub(crate) struct OutputRecord {
     pub deletion_completed_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub stages: Vec<StageRecord>,
+    #[serde(default)]
+    pub shared_deletion: Option<DeletionAuthorization>,
+    #[serde(default)]
+    pub archive_deletion: Option<DeletionAuthorization>,
 }
 impl PressJournal {
     pub(crate) fn record_intent(
@@ -841,6 +871,8 @@ impl PressJournal {
                 deleted: false,
                 deletion_completed_at: None,
                 stages: Vec::new(),
+                shared_deletion: None,
+                archive_deletion: None,
             });
         }
         self.commit(data)
@@ -1009,6 +1041,57 @@ impl PressJournal {
             return Err(conflict());
         }
         data.outputs.retain(|o| o.lease.job_id != job);
+        self.commit(data)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ObjectIdentity {
+    pub volume: u64,
+    pub file: u64,
+    pub created: Option<(u64, u32)>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DeletionMember {
+    pub relative: String,
+    pub directory: bool,
+    pub identity: ObjectIdentity,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DeletionAuthorization {
+    pub members: Vec<DeletionMember>,
+}
+impl PressJournal {
+    pub(crate) fn authorize_deletion(
+        &mut self,
+        edition: Uuid,
+        local: bool,
+        authorization: DeletionAuthorization,
+    ) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        let mut data = self.data.clone();
+        let o = data
+            .outputs
+            .iter_mut()
+            .find(|o| o.result.edition_id == edition)
+            .ok_or_else(conflict)?;
+        if !self.job_terminal(o.lease.job_id)
+            || (o.published_at.is_some() && o.removed_at.is_none())
+        {
+            return Err(conflict());
+        }
+        let saved = if local {
+            &mut o.archive_deletion
+        } else {
+            &mut o.shared_deletion
+        };
+        if let Some(old) = saved {
+            if old != &authorization {
+                return Err(conflict());
+            }
+            return Ok(());
+        }
+        *saved = Some(authorization);
         self.commit(data)
     }
 }
