@@ -3,6 +3,7 @@
 
 mod cli;
 mod cookbook;
+mod cookbook_delivery;
 mod highlights;
 mod inbox;
 mod series;
@@ -3089,6 +3090,12 @@ fn digest(
             // A reMarkable answers on its USB link; one push per connection, as for the others.
             let rm_queue = remarkable_queue();
             let mut rm_watcher = deckle_core::sync::Watcher::default();
+            // The Kitchen Book, rebuilt when it changes and offered to each Kindle that plugs in
+            // (cookbook design §9). Each error is said once, not every tick.
+            let cookbook = deckle_digest::cookbook::store::Store::new(
+                deckle_digest::cookbook::store::Store::default_dir(),
+            );
+            let (mut build_error, mut offer_error) = (None, None);
             loop {
                 // A new or edited paper applies without a restart; a file that fails keeps the
                 // last good set, and its error is said once (many papers plan).
@@ -3105,17 +3112,44 @@ fn digest(
                     Err(_) => {}
                 }
                 scan_inbox(&cfg);
-                let pending = queue.pending();
+                say_once(
+                    &mut build_error,
+                    cookbook_delivery::rebuild_if_dirty(&cookbook, None).map(|built| {
+                        if let Some(b) = built {
+                            eprintln!(
+                                "cookbook: rebuilt with {} {}, sent when each Kindle connects",
+                                b.recipes,
+                                if b.recipes == 1 { "recipe" } else { "recipes" }
+                            );
+                        }
+                    }),
+                );
                 let kindle = detect_kindle();
                 let id = kindle.as_ref().map(deckle_core::sync::device_id);
                 let actions = id
                     .as_deref()
                     .map(|id| sync_actions(&cfg, id))
                     .unwrap_or_default();
+                // Queued before the outbox is read, so it rides this connection's push.
+                if let Some(id) = &id {
+                    let on = actions.push && cfg.sync.for_device(id).cookbook;
+                    say_once(
+                        &mut offer_error,
+                        cookbook_delivery::offer(&cookbook, &queue, id, on).map(|_| ()),
+                    );
+                }
+                let pending = queue.pending();
                 let plan = watcher.tick(id.as_deref(), &pending, actions);
-                if let (Some(target), false) = (&kindle, plan.is_empty()) {
+                if let (Some(target), Some(id), false) = (&kindle, &id, plan.is_empty()) {
                     match sync_to(&path, &queue, &papers, target, plan) {
-                        Ok(o) => emit(json, &o, || o.describe(&queue))?,
+                        Ok(o) => {
+                            if let Some(flush) = &o.flush
+                                && let Err(e) = cookbook_delivery::record(&cookbook, id, flush)
+                            {
+                                eprintln!("cookbook: {e}");
+                            }
+                            emit(json, &o, || o.describe(&queue))?
+                        }
                         Err(e) => eprintln!("error: {e}"),
                     }
                 }
@@ -3162,6 +3196,18 @@ fn digest(
                 std::thread::sleep(std::time::Duration::from_secs(interval.max(1)));
             }
         }
+    }
+}
+
+/// Says a cookbook error once: again only when it changes, or after a success.
+fn say_once(said: &mut Option<String>, r: Result<(), String>) {
+    match r {
+        Ok(()) => *said = None,
+        Err(e) if said.as_ref() != Some(&e) => {
+            eprintln!("cookbook: {e}");
+            *said = Some(e);
+        }
+        Err(_) => {}
     }
 }
 
@@ -3698,11 +3744,15 @@ fn digest_prune(cfg: &deckle_digest::Config) -> deckle_core::queue::Prune {
     deckle_core::queue::Prune {
         prefix: deckle_digest::edition_prefix(cfg),
         keep: cfg.keep.max(1),
-        // Editions sent again from the Morgue are the main paper's.
+        // Editions sent again from the Morgue are the main paper's. The Kitchen Book is never
+        // pruned (cookbook design §9), whatever the prefix.
         exempt: match cfg.paper {
             None => morgue_exempt(),
             Some(_) => Vec::new(),
-        },
+        }
+        .into_iter()
+        .chain([deckle_digest::cookbook::book::DEVICE_NAME.to_owned()])
+        .collect(),
     }
 }
 
@@ -4073,6 +4123,17 @@ fn push_queued(
     target: Option<Target>,
 ) -> Result<DigestOutcome, String> {
     let cfg = &papers[0];
+    // The Kitchen Book rides along when this Kindle hasn't the newest build (cookbook §9).
+    let cookbook = deckle_digest::cookbook::store::Store::new(
+        deckle_digest::cookbook::store::Store::default_dir(),
+    );
+    let id = target.as_ref().map(deckle_core::sync::device_id);
+    if let Some(id) = &id
+        && let Err(e) =
+            cookbook_delivery::offer(&cookbook, queue, id, cfg.sync.for_device(id).cookbook)
+    {
+        eprintln!("cookbook: {e}");
+    }
     let empty = queue.pending().is_empty();
     let Some(target) = target else {
         return Ok(DigestOutcome {
@@ -4089,7 +4150,13 @@ fn push_queued(
             ..Default::default()
         });
     };
-    sync_to(main, queue, papers, &target, plan)
+    let outcome = sync_to(main, queue, papers, &target, plan)?;
+    if let (Some(flush), Some(id)) = (&outcome.flush, &id)
+        && let Err(e) = cookbook_delivery::record(&cookbook, id, flush)
+    {
+        eprintln!("cookbook: {e}");
+    }
+    Ok(outcome)
 }
 
 /// What `digest push` runs: the outbox with the device's actions, or (empty outbox) just the

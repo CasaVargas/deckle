@@ -1,0 +1,485 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! The Kitchen Book's standing delivery (cookbook design §9): `digest watch` rebuilds a changed
+//! cookbook and every Kindle gets the newest build on its next plug-in, one file under a fixed
+//! name and ASIN. Simulated mass-storage Kindles (`DECKLE_MOUNTS`) and the fake Previewer
+//! (`DECKLE_PREVIEWER`); unix only, the fake Previewer is a shell script.
+#![cfg(unix)]
+
+use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, Instant, SystemTime};
+
+use assert_cmd::Command;
+use deckle_core::deliver::{Conn, Target};
+use deckle_digest::chrono::{TimeZone, Utc};
+use deckle_digest::cookbook::Recipe;
+use deckle_digest::cookbook::book::DEVICE_NAME;
+use deckle_digest::cookbook::store::Store;
+
+struct Home {
+    tmp: tempfile::TempDir,
+    home: PathBuf,
+    cookbook: PathBuf,
+    mom: PathBuf,
+    dad: PathBuf,
+    /// Named in `digest.toml` with `cookbook = false`.
+    attic: PathBuf,
+    /// Never named: a Kindle Deckle hasn't seen.
+    guest: PathBuf,
+    runs: AtomicUsize,
+}
+
+fn kindle(root: &Path) {
+    std::fs::create_dir_all(root.join("documents")).unwrap();
+    std::fs::create_dir_all(root.join("system")).unwrap();
+    std::fs::write(
+        root.join("system/version.txt"),
+        "Kindle 5.16.2.1.1 (4184940002)\n",
+    )
+    .unwrap();
+}
+
+/// The id `sync::device_id` gives a fake Kindle at `root` (no USB serial).
+fn id(root: &Path) -> String {
+    format!(
+        "Kindle 5.16.2.1.1 (4184940002)/{}",
+        root.file_name().unwrap().to_string_lossy()
+    )
+}
+
+fn fake_previewer() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh")
+}
+
+fn setup() -> Home {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let dir = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/deckle")
+    } else {
+        home.join("deckle")
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    let mounts = tmp.path().join("mounts");
+    let (mom, dad, attic, guest) = (
+        mounts.join("Mom"),
+        mounts.join("Dad"),
+        mounts.join("Attic"),
+        mounts.join("Guest"),
+    );
+    for k in [&mom, &dad, &attic, &guest] {
+        kindle(k);
+    }
+    std::fs::write(
+        dir.join("digest.toml"),
+        format!(
+            "title = \"The Morning Deckle\"\nsections = [\"horoscope\"]\nkeep = 1\n\n\
+             [sync.devices.'{}']\nname = \"Mom's Kindle\"\n\n\
+             [sync.devices.'{}']\nname = \"Dad's Kindle\"\n\n\
+             [sync.devices.'{}']\nname = \"Attic Kindle\"\ncookbook = false\n",
+            id(&mom),
+            id(&dad),
+            id(&attic),
+        ),
+    )
+    .unwrap();
+    Home {
+        cookbook: tmp.path().join("cookbook"),
+        tmp,
+        home,
+        mom,
+        dad,
+        attic,
+        guest,
+        runs: AtomicUsize::new(0),
+    }
+}
+
+fn text(o: &std::process::Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&o.stdout),
+        String::from_utf8_lossy(&o.stderr)
+    )
+}
+
+impl Home {
+    fn env(&self, plugged: &[&Path]) -> Vec<(&'static str, std::ffi::OsString)> {
+        vec![
+            ("HOME", self.home.clone().into()),
+            ("XDG_CONFIG_HOME", self.home.clone().into()),
+            ("APPDATA", self.home.clone().into()),
+            ("LOCALAPPDATA", self.home.clone().into()),
+            ("XDG_CACHE_HOME", self.home.join("cache").into()),
+            ("DECKLE_MOUNTS", std::env::join_paths(plugged).unwrap()),
+            ("DECKLE_PREVIEWER", fake_previewer().into()),
+            ("DECKLE_COOKBOOK_DIR", self.cookbook.clone().into()),
+        ]
+    }
+
+    fn deckle(&self, plugged: &[&Path]) -> Command {
+        let mut c = Command::cargo_bin("deckle").unwrap();
+        c.envs(self.env(plugged));
+        c
+    }
+
+    /// `deckle --json digest push` with `plugged` connected.
+    fn push(&self, plugged: &[&Path]) -> std::process::Output {
+        self.deckle(plugged)
+            .args(["--json", "digest", "push"])
+            .output()
+            .unwrap()
+    }
+
+    /// Runs `digest watch` with `plugged` connected until `done` holds for its output, then
+    /// `linger` more, and stops it. Its output.
+    fn watch(
+        &self,
+        plugged: &[&Path],
+        what: &str,
+        linger: Duration,
+        done: impl Fn(&str) -> bool,
+    ) -> String {
+        assert!(
+            !plugged.is_empty(),
+            "an empty DECKLE_MOUNTS looks at real drives"
+        );
+        let n = self.runs.fetch_add(1, Ordering::SeqCst);
+        let log = self.tmp.path().join(format!("watch-{n}.log"));
+        let out = std::fs::File::create(&log).unwrap();
+        let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin("deckle"))
+            .envs(self.env(plugged))
+            .args(["digest", "watch", "--interval", "1"])
+            .stdout(out.try_clone().unwrap())
+            .stderr(out)
+            .spawn()
+            .unwrap();
+        let read = || std::fs::read_to_string(&log).unwrap_or_default();
+        let start = Instant::now();
+        while !done(&read()) {
+            if let Ok(Some(status)) = child.try_wait() {
+                panic!("watch exited ({status}) before {what}:\n{}", read());
+            }
+            if start.elapsed() > Duration::from_secs(120) {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("timed out waiting for {what}:\n{}", read());
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        std::thread::sleep(linger);
+        let _ = child.kill();
+        let _ = child.wait();
+        read()
+    }
+
+    /// Watches with `kindle` plugged in until it has the newest build.
+    fn plug_in(&self, kindle: &Path) {
+        self.watch(
+            &[kindle],
+            "the cookbook on the Kindle",
+            Duration::ZERO,
+            |_| {
+                let built = self.build_id();
+                built.is_some() && self.delivered_to(kindle) == built
+            },
+        );
+    }
+
+    fn store(&self) -> Store {
+        Store::new(self.cookbook.clone())
+    }
+
+    /// Saves a recipe (which marks the cookbook changed), added on 2026-10-`day`.
+    fn add(&self, title: &str, day: u32) {
+        let recipe = Recipe {
+            title: title.to_owned(),
+            description: None,
+            yield_: None,
+            prep: None,
+            cook: None,
+            total: None,
+            ingredients: vec![],
+            steps: vec![],
+            category: vec![],
+            cuisine: None,
+            author: None,
+            image_url: None,
+            source_url: format!("https://example.com/{}", title.replace(' ', "-")),
+            site_name: "example.com".to_owned(),
+            structured: true,
+            body_xhtml: None,
+        };
+        let key = recipe.source_url.clone();
+        let at = Utc.with_ymd_and_hms(2026, 10, day, 12, 0, 0).unwrap();
+        self.store().put(recipe, &key, None, None, at).unwrap();
+    }
+
+    fn build_id(&self) -> Option<String> {
+        std::fs::read_to_string(self.cookbook.join("build/build_id"))
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty())
+    }
+
+    fn delivered(&self) -> BTreeMap<String, String> {
+        std::fs::read(self.cookbook.join("delivered.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    fn delivered_to(&self, kindle: &Path) -> Option<String> {
+        self.delivered().get(&id(kindle)).cloned()
+    }
+
+    fn outbox(&self) -> PathBuf {
+        let cache = if cfg!(target_os = "macos") {
+            self.home.join("Library/Caches")
+        } else {
+            self.home.join("cache")
+        };
+        cache.join("deckle/outbox")
+    }
+
+    /// The cookbook's entry in the outbox, when one is queued.
+    fn queued(&self) -> Option<PathBuf> {
+        let stem = DEVICE_NAME.strip_suffix(".kfx").unwrap();
+        Some(self.outbox().join(format!("{stem}.book"))).filter(|p| p.exists())
+    }
+}
+
+/// The KFX files in a Kindle's `documents/`, sorted.
+fn books(kindle: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(kindle.join("documents"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".kfx"))
+        .collect();
+    names.sort();
+    names
+}
+
+fn asin(kindle: &Path) -> String {
+    let target = Target::Folder(kindle.join("documents"));
+    let inv = deckle_core::inventory::list_on(&mut Conn::new(&target), None).unwrap();
+    inv.books
+        .iter()
+        .find(|b| b.file == DEVICE_NAME)
+        .and_then(|b| b.asin.clone())
+        .expect("the cookbook on the Kindle has an ASIN")
+}
+
+fn modified(kindle: &Path) -> SystemTime {
+    std::fs::metadata(kindle.join("documents").join(DEVICE_NAME))
+        .unwrap()
+        .modified()
+        .unwrap()
+}
+
+fn delivered_json(o: &std::process::Output) -> Vec<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    v["flush"]["delivered"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn two_builds_one_device_file_same_asin() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    let first = h.build_id().unwrap();
+    assert_eq!(books(&h.mom), [DEVICE_NAME]);
+    let first_asin = asin(&h.mom);
+    let first_written = modified(&h.mom);
+
+    h.add("Plum Cake", 2);
+    h.watch(&[&h.mom], "the second build", Duration::ZERO, |_| {
+        h.delivered_to(&h.mom).is_some_and(|b| b != first)
+    });
+    let second = h.build_id().unwrap();
+    assert_ne!(first, second);
+    assert_eq!(h.delivered_to(&h.mom), Some(second));
+    assert_eq!(books(&h.mom), [DEVICE_NAME], "one file, overwritten");
+    assert!(
+        modified(&h.mom) > first_written,
+        "the second build was written"
+    );
+    assert_eq!(asin(&h.mom), first_asin);
+}
+
+#[test]
+fn rename_keeps_one_device_file() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    let first = h.build_id().unwrap();
+    let first_asin = asin(&h.mom);
+
+    // The owner renames the book by hand: `cookbook.toml` changes, and no `dirty` is written.
+    std::fs::write(
+        h.cookbook.join("cookbook.toml"),
+        "title = \"Grandma's Recipes\"\n",
+    )
+    .unwrap();
+    assert!(!h.cookbook.join("dirty").exists());
+    h.watch(&[&h.mom], "the renamed build", Duration::ZERO, |_| {
+        h.delivered_to(&h.mom).is_some_and(|b| b != first)
+    });
+    assert_eq!(books(&h.mom), [DEVICE_NAME]);
+    assert_eq!(asin(&h.mom), first_asin);
+}
+
+#[test]
+fn both_kindles_get_the_build() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    let built = h.build_id().unwrap();
+    // The outbox entry went to Mom's Kindle; Dad's still gets the same build.
+    assert!(h.queued().is_none());
+    h.plug_in(&h.dad);
+    assert_eq!(h.build_id(), Some(built.clone()), "no rebuild in between");
+    assert_eq!(books(&h.dad), [DEVICE_NAME]);
+    assert_eq!(h.delivered_to(&h.mom), Some(built.clone()));
+    assert_eq!(h.delivered_to(&h.dad), Some(built));
+    assert_eq!(asin(&h.mom), asin(&h.dad));
+}
+
+#[test]
+fn up_to_date_kindle_gets_no_push() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    let written = modified(&h.mom);
+
+    let o = h.push(&[&h.mom]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(delivered_json(&o).is_empty(), "{}", text(&o));
+    assert_eq!(modified(&h.mom), written);
+    assert!(h.queued().is_none());
+}
+
+#[test]
+fn kindle_with_cookbook_false_gets_nothing() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+
+    let o = h.push(&[&h.attic]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert!(delivered_json(&o).is_empty(), "{}", text(&o));
+    assert!(books(&h.attic).is_empty());
+    assert_eq!(h.delivered_to(&h.attic), None);
+    assert!(h.queued().is_none(), "nothing queued for it either");
+}
+
+#[test]
+fn new_kindle_gets_it_on_first_plug_in() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    // A Kindle `digest.toml` doesn't name gets the cookbook too (on by default).
+    h.plug_in(&h.guest);
+    assert_eq!(books(&h.guest), [DEVICE_NAME]);
+    assert_eq!(h.delivered_to(&h.guest), h.build_id());
+}
+
+#[test]
+fn interrupted_push_redelivers_later() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    // Built with only the Attic's Kindle plugged in, which doesn't take it.
+    h.watch(&[&h.attic], "the first build", Duration::ZERO, |_| {
+        h.build_id().is_some()
+    });
+    let built = h.build_id().unwrap();
+    assert!(h.queued().is_none());
+
+    // Mom's push fails partway: her Kindle won't take the file.
+    let docs = h.mom.join("documents");
+    std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let o = h.push(&[&h.mom]);
+    assert!(!o.status.success(), "{}", text(&o));
+    let entry = h.queued().expect("the cookbook stays queued for Mom");
+    let owner = std::fs::read_to_string(format!("{}.for", entry.display())).unwrap();
+    assert_eq!(owner.trim(), id(&h.mom));
+    assert_eq!(h.delivered_to(&h.mom), None);
+
+    // Dad plugs in: the queued entry is his now.
+    let o = h.push(&[&h.dad]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(books(&h.dad), [DEVICE_NAME]);
+    assert_eq!(h.delivered_to(&h.dad), Some(built.clone()));
+    assert!(h.queued().is_none());
+
+    // Mom's next connection still gets it: her record never moved.
+    std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let o = h.push(&[&h.mom]);
+    assert!(o.status.success(), "{}", text(&o));
+    assert_eq!(books(&h.mom), [DEVICE_NAME]);
+    assert_eq!(h.delivered_to(&h.mom), Some(built));
+}
+
+#[test]
+fn queued_cookbook_never_pruned() {
+    let h = setup();
+    // `keep = 1`: the Daily keeps one edition, and leaves the cookbook alone.
+    for day in 1..=3 {
+        std::fs::write(
+            h.mom
+                .join(format!("documents/deckle-daily-2026-10-0{day}.kfx")),
+            b"KFX",
+        )
+        .unwrap();
+    }
+    h.add("Lemon Bars", 1);
+    h.plug_in(&h.mom);
+    assert_eq!(
+        books(&h.mom),
+        [DEVICE_NAME, "deckle-daily-2026-10-03.kfx"],
+        "pruned with the push, cookbook kept"
+    );
+}
+
+#[test]
+fn broken_recipe_is_said_once() {
+    let h = setup();
+    h.add("Lemon Bars", 1);
+    // A hand edit gone wrong: the book can't be built until it's fixed.
+    std::fs::write(h.cookbook.join("recipes/0123456789ab.json"), "{ not json").unwrap();
+    let log = h.watch(
+        &[&h.mom],
+        "the build error",
+        Duration::from_millis(2500),
+        |log| log.contains("0123456789ab.json"),
+    );
+    assert_eq!(
+        log.lines()
+            .filter(|l| l.contains("0123456789ab.json"))
+            .count(),
+        1,
+        "{log}"
+    );
+    assert!(h.build_id().is_none());
+    assert!(books(&h.mom).is_empty());
+    assert!(h.cookbook.join("dirty").exists(), "tried again once fixed");
+}
+
+#[test]
+fn empty_cookbook_sends_nothing() {
+    let h = setup();
+    std::fs::create_dir_all(&h.cookbook).unwrap();
+    h.store().mark_dirty().unwrap();
+    h.watch(&[&h.mom], "a tick", Duration::from_millis(1500), |log| {
+        log.contains("watching")
+    });
+    assert!(h.build_id().is_none());
+    assert!(books(&h.mom).is_empty());
+    assert!(h.queued().is_none());
+}
