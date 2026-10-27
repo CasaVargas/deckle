@@ -541,3 +541,81 @@ fn remove_marks_dirty_even_if_an_image_will_not_delete() {
     assert!(store.find(URL).unwrap().is_none());
     assert!(store.is_dirty());
 }
+
+#[test]
+fn save_config_keeps_unknown_keys() {
+    let (_d, store) = store();
+    store.save_config(&BookConfig::default()).unwrap();
+    let path = store.dir.join("cookbook.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    // A key a newer Deckle wrote at the top, one in a chapter, one in [illustrations], and a
+    // whole table of its own.
+    let text = text
+        .replacen("title = ", "future = \"keep me\"\ntitle = ", 1)
+        .replacen(
+            "[[chapters]]\nid = \"salads\"",
+            "[[chapters]]\nid = \"salads\"\ncolor = \"green\"",
+            1,
+        );
+    let text = format!("{text}\n[extra]\nnote = \"mine\"\n");
+    std::fs::write(&path, text).unwrap();
+    let mut cfg = store.config().unwrap();
+    cfg.title = "The Vargas Kitchen Book".to_owned();
+    cfg.illustrations.enabled = true;
+    store.save_config(&cfg).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("future = \"keep me\""), "{text}");
+    assert!(text.contains("color = \"green\""), "{text}");
+    assert!(text.contains("[extra]\nnote = \"mine\""), "{text}");
+    assert!(text.contains("The Vargas Kitchen Book"), "{text}");
+    assert_eq!(store.config().unwrap(), cfg);
+}
+
+#[test]
+fn save_config_leaves_out_an_empty_endpoint_and_model() {
+    let (_d, store) = store();
+    let mut cfg = BookConfig::default();
+    cfg.illustrations.enabled = true;
+    store.save_config(&cfg).unwrap();
+    let path = store.dir.join("cookbook.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("endpoint"), "{text}");
+    assert!(!text.contains("model"), "{text}");
+    // Set, then cleared: the keys go from the file again.
+    cfg.illustrations.endpoint = "http://localhost:8080".to_owned();
+    cfg.illustrations.model = "m".to_owned();
+    store.save_config(&cfg).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(
+        text.contains("endpoint = \"http://localhost:8080\""),
+        "{text}"
+    );
+    cfg.illustrations.endpoint.clear();
+    cfg.illustrations.model.clear();
+    store.save_config(&cfg).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("endpoint"), "{text}");
+    assert!(!text.contains("model"), "{text}");
+    assert_eq!(store.config().unwrap(), cfg);
+}
+
+#[test]
+fn save_config_drops_a_removed_chapter_but_keeps_the_others_keys() {
+    let (_d, store) = store();
+    store.save_config(&BookConfig::default()).unwrap();
+    let path = store.dir.join("cookbook.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let text = text.replacen(
+        "[[chapters]]\nid = \"mains\"",
+        "[[chapters]]\nid = \"mains\"\ncolor = \"red\"",
+        1,
+    );
+    std::fs::write(&path, text).unwrap();
+    let mut cfg = store.config().unwrap();
+    cfg.chapters.retain(|c| c.id != "salads");
+    store.save_config(&cfg).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(!text.contains("id = \"salads\""), "{text}");
+    assert!(text.contains("color = \"red\""), "{text}");
+    assert_eq!(store.config().unwrap(), cfg);
+}
