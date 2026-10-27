@@ -16,10 +16,6 @@ fn at(m: u32, d: u32) -> DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, m, d, 12, 0, 0).unwrap()
 }
 
-fn now() -> DateTime<Utc> {
-    at(10, 27)
-}
-
 fn blank(title: &str) -> Recipe {
     Recipe {
         title: title.to_owned(),
@@ -169,12 +165,9 @@ fn fixture() -> Fixture {
 
 type Entries = BTreeMap<String, Vec<u8>>;
 
-fn built(
-    store: &Store,
-    now: DateTime<Utc>,
-) -> (tempfile::TempDir, deckle_digest::cookbook::book::Built) {
+fn built(store: &Store) -> (tempfile::TempDir, deckle_digest::cookbook::book::Built) {
     let out = tempfile::tempdir().unwrap();
-    let b = build(store, now, &out.path().join("book.epub")).unwrap();
+    let b = build(store, &out.path().join("book.epub")).unwrap();
     (out, b)
 }
 
@@ -198,8 +191,8 @@ fn text<'a>(e: &'a Entries, name: &str) -> &'a str {
     .unwrap()
 }
 
-fn epub(store: &Store, now: DateTime<Utc>) -> (Entries, deckle_digest::cookbook::book::Built) {
-    let (_out, b) = built(store, now);
+fn epub(store: &Store) -> (Entries, deckle_digest::cookbook::book::Built) {
+    let (_out, b) = built(store);
     (entries(&b.path), b)
 }
 
@@ -263,7 +256,7 @@ fn identifier_is_fixed() {
     assert_eq!(BOOK_UID, "urn:deckle:cookbook:default");
     assert_eq!(DEVICE_NAME, "Deckle Kitchen Book.kfx");
     let f = fixture();
-    let (e, b) = epub(&f.store, now());
+    let (e, b) = epub(&f.store);
     let opf = text(&e, "OEBPS/content.opf");
     assert!(
         opf.contains("<dc:identifier id=\"uid\">urn:deckle:cookbook:default</dc:identifier>"),
@@ -279,7 +272,7 @@ fn identifier_is_fixed() {
     let mut cfg = f.store.config().unwrap();
     cfg.title = "Vargas Kitchen".to_owned();
     f.store.save_config(&cfg).unwrap();
-    let (e, b) = epub(&f.store, now());
+    let (e, b) = epub(&f.store);
     let opf = text(&e, "OEBPS/content.opf");
     assert!(opf.contains("urn:deckle:cookbook:default"), "{opf}");
     assert!(opf.contains("<dc:title>Vargas Kitchen</dc:title>"), "{opf}");
@@ -289,7 +282,7 @@ fn identifier_is_fixed() {
 #[test]
 fn chapters_in_config_order_empty_omitted() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let chapters: Vec<String> = spine(&e)
         .into_iter()
         .filter(|h| h.starts_with("chapter-"))
@@ -323,7 +316,7 @@ fn chapters_in_config_order_empty_omitted() {
 #[test]
 fn recipes_alphabetical_in_chapter() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let baking = xml(text(&e, "OEBPS/chapter-baking.xhtml"));
     // Case-insensitive: "apple Loaf" before "Zucchini Bread".
     assert_eq!(recipe_ids(&baking), [f.loaf.id.clone(), f.bread.id.clone()]);
@@ -337,7 +330,7 @@ fn title_override_is_the_displayed_title() {
     let mut s = f.chili.clone();
     s.title_override = Some("Zesty Chili".to_owned());
     f.store.update(&s).unwrap();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let soups = xml(text(&e, "OEBPS/chapter-soups.xhtml"));
     // Sorted by the displayed title: "Roasted Squash Soup" < "Zesty Chili".
     assert_eq!(recipe_ids(&soups), [f.soup.id.clone(), f.chili.id.clone()]);
@@ -352,7 +345,7 @@ fn title_override_is_the_displayed_title() {
 #[test]
 fn deleted_chapter_prints_under_everything_else() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let other = xml(text(&e, "OEBPS/chapter-other.xhtml"));
     assert_eq!(recipe_ids(&other), [f.mystery.id.as_str()]);
     let h1 = other.descendants().find(|n| n.has_tag_name("h1")).unwrap();
@@ -367,9 +360,14 @@ fn deleted_chapter_prints_under_everything_else() {
 }
 
 #[test]
-fn star_on_recipes_newer_than_7_days() {
-    let f = fixture();
-    let (e, _) = epub(&f.store, now());
+fn stars_follow_the_latest_addition() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("cookbook"));
+    let newest = save(&store, blank("Newest"), "mains", at(10, 20));
+    let day_old = save(&store, blank("One day"), "mains", at(10, 19));
+    let five = save(&store, blank("Five days"), "mains", at(10, 15));
+    let ten = save(&store, blank("Ten days"), "mains", at(10, 10));
+    let (e, _) = epub(&store);
     let doc = xml(text(&e, "OEBPS/contents.xhtml"));
     let entry = |id: &str| -> String {
         let a = doc
@@ -382,22 +380,32 @@ fn star_on_recipes_newer_than_7_days() {
             .unwrap_or_else(|| panic!("no contents link for {id}"));
         all_text(a.parent().unwrap())
     };
-    // Squash soup (Oct 25) and the mystery dish (Oct 21) are within 7 days of Oct 27;
-    // the chili (Sep 1) and the bread (Oct 1) are not.
-    assert!(entry(&f.soup.id).contains('★'), "{}", entry(&f.soup.id));
-    assert!(entry(&f.mystery.id).contains('★'));
-    assert!(!entry(&f.chili.id).contains('★'));
-    assert!(!entry(&f.bread.id).contains('★'));
-    // Eight days on, the soup has lost its star.
-    let (e, _) = epub(&f.store, at(11, 2));
+    // Within 7 days of the newest, the newest itself included; ten days back has none.
+    assert!(entry(&newest.id).contains('★'));
+    assert!(entry(&day_old.id).contains('★'));
+    assert!(entry(&five.id).contains('★'));
+    assert!(!entry(&ten.id).contains('★'));
+    assert!(all_text(doc.root_element()).contains("Latest additions: 3"));
+    // Exactly 7 days older is outside.
+    let seven = save(&store, blank("Seven days"), "mains", at(10, 13));
+    let (e, _) = epub(&store);
     let doc = xml(text(&e, "OEBPS/contents.xhtml"));
-    assert!(!all_text(doc.root_element()).contains('★'));
+    let flat = all_text(doc.root_element());
+    assert!(flat.contains("Latest additions: 3"), "{flat}");
+    let a = doc
+        .descendants()
+        .find(|n| {
+            n.attribute("href")
+                .is_some_and(|h| h.ends_with(&format!("#r-{}", seven.id)))
+        })
+        .unwrap();
+    assert!(!all_text(a.parent().unwrap()).contains('★'));
 }
 
 #[test]
-fn contents_counts_and_new_this_week_line() {
+fn contents_counts_and_latest_additions_line() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let contents = text(&e, "OEBPS/contents.xhtml");
     let doc = xml(contents);
     let flat = all_text(doc.root_element());
@@ -406,8 +414,9 @@ fn contents_counts_and_new_this_week_line() {
     assert!(flat.contains("Mains"), "{flat}");
     assert!(flat.contains("1 recipe"), "{flat}");
     assert!(flat.contains("Index by ingredient"), "{flat}");
-    // Soup (Oct 25) and mystery (Oct 21) are new this week.
-    assert!(flat.contains("New this week: 2"), "{flat}");
+    // Soup (Oct 25) and mystery (Oct 21) are within 7 days of the newest, Oct 25.
+    assert!(flat.contains("Latest additions: 2"), "{flat}");
+    assert!(!flat.contains("New this week"), "{flat}");
     // The chapters link to their files, the index to its page.
     let hrefs: Vec<_> = doc
         .descendants()
@@ -423,7 +432,7 @@ fn contents_counts_and_new_this_week_line() {
 #[test]
 fn recipe_page_sections() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let doc = xml(text(&e, "OEBPS/chapter-soups.xhtml"));
     let sec = recipe_section(&doc, &f.soup.id);
     let kids: Vec<Node> = sec.children().filter(|n| n.is_element()).collect();
@@ -511,7 +520,7 @@ fn recipe_page_sections() {
 #[test]
 fn hostile_text_is_escaped() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let other = text(&e, "OEBPS/chapter-other.xhtml");
     let doc = xml(other);
     let sec = recipe_section(&doc, &f.mystery.id);
@@ -525,7 +534,7 @@ fn hostile_text_is_escaped() {
 #[test]
 fn unstructured_recipe_prints_body() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     for (name, bytes) in &e {
         let hay = String::from_utf8_lossy(bytes);
         assert!(!hay.contains("__DECKLE_IMG_"), "placeholder left in {name}");
@@ -556,7 +565,7 @@ fn unstructured_recipe_prints_body() {
 #[test]
 fn index_links_resolve() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let index = text(&e, "OEBPS/index.xhtml");
     let doc = xml(index);
     let flat = all_text(doc.root_element());
@@ -656,7 +665,7 @@ fn printed_picture_resolution() {
 #[test]
 fn default_picture_follows_book_setting() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     // Site is the default: the soup, bread and roast print their photos; the loaf its drawing.
     let soups = text(&e, "OEBPS/chapter-soups.xhtml");
     assert!(soups.contains(&format!("images/{}.jpg", f.soup.id)));
@@ -670,7 +679,7 @@ fn default_picture_follows_book_setting() {
         ..f.store.config().unwrap()
     };
     f.store.save_config(&cfg).unwrap();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let soups = text(&e, "OEBPS/chapter-soups.xhtml");
     assert!(!soups.contains("<img"), "{soups}");
     assert!(!e.contains_key(&format!("OEBPS/images/{}.jpg", f.soup.id)));
@@ -683,25 +692,39 @@ fn default_picture_follows_book_setting() {
 #[test]
 fn same_store_same_build_id() {
     let f = fixture();
-    let (_a, a) = built(&f.store, now());
-    let (_b, b) = built(&f.store, now());
+    let (_a, a) = built(&f.store);
+    let (_b, b) = built(&f.store);
     assert_eq!(a.build_id, b.build_id);
     assert_eq!(a.build_id.len(), 16);
     assert!(a.build_id.bytes().all(|c| c.is_ascii_hexdigit()));
-    // The zip's timestamps don't count, and neither does a later build on the same day.
+    assert_eq!(a.recipes, 6);
+    assert_eq!(a.chapters, 4);
+}
+
+#[test]
+fn same_store_same_build_id_on_any_day() {
+    // `build` takes no clock, so nothing but the store can reach the book: not the day, not the
+    // zip's timestamps (two seconds apart is enough to change those), not a star ageing out.
+    let f = fixture();
+    let (_a, a) = built(&f.store);
     std::thread::sleep(std::time::Duration::from_millis(2100));
-    let (_c, c) = built(&f.store, now());
-    assert_eq!(a.build_id, c.build_id);
+    let (_b, b) = built(&f.store);
+    assert_eq!(a.build_id, b.build_id);
+    let dates = |p: &Path| -> Vec<_> {
+        let zip = zip::ZipArchive::new(std::fs::File::open(p).unwrap()).unwrap();
+        zip.file_names().count().to_string().into_bytes()
+    };
+    assert_eq!(dates(&a.path), dates(&b.path));
 }
 
 #[test]
 fn note_changes_build_id() {
     let f = fixture();
-    let (_a, a) = built(&f.store, now());
+    let (_a, a) = built(&f.store);
     let mut s = f.chili.clone();
     s.note = Some("Add more cumin.".to_owned());
     f.store.update(&s).unwrap();
-    let (_b, b) = built(&f.store, now());
+    let (_b, b) = built(&f.store);
     assert_ne!(a.build_id, b.build_id);
 }
 
@@ -709,14 +732,14 @@ fn note_changes_build_id() {
 fn build_leaves_the_dirty_flag_alone() {
     let f = fixture();
     assert!(f.store.is_dirty());
-    let _ = built(&f.store, now());
+    let _ = built(&f.store);
     assert!(f.store.is_dirty(), "only delivery clears it");
 }
 
 #[test]
 fn every_xhtml_well_formed() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let mut seen = 0;
     for (name, bytes) in &e {
         if name.ends_with(".xhtml") || name.ends_with(".opf") || name.ends_with(".ncx") {
@@ -732,7 +755,7 @@ fn every_xhtml_well_formed() {
 #[test]
 fn manifest_hrefs_exist() {
     let f = fixture();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     assert!(e.contains_key("mimetype"));
     assert!(e.contains_key("META-INF/container.xml"));
     let opf = text(&e, "OEBPS/content.opf");
@@ -775,9 +798,12 @@ fn manifest_hrefs_exist() {
 fn an_empty_book_still_builds() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::new(dir.path().join("cookbook"));
-    let (e, b) = epub(&store, now());
+    let (e, b) = epub(&store);
     assert_eq!(b.recipes, 0);
-    xml(text(&e, "OEBPS/contents.xhtml"));
+    assert_eq!(b.chapters, 0);
+    let contents = text(&e, "OEBPS/contents.xhtml");
+    xml(contents);
+    assert!(!contents.contains("Latest additions"), "{contents}");
     assert!(!e.keys().any(|k| k.contains("chapter-")));
 }
 
@@ -790,7 +816,7 @@ fn page_text_chapter(body: &str, url: &str) -> String {
     r.source_url = url.to_owned();
     r.body_xhtml = Some(body.to_owned());
     save(&store, r, "mains", at(10, 1));
-    let (e, _) = epub(&store, now());
+    let (e, _) = epub(&store);
     for (name, bytes) in &e {
         let hay = String::from_utf8_lossy(bytes);
         assert!(!hay.contains("__DECKLE_IMG_"), "placeholder left in {name}");
@@ -862,7 +888,7 @@ fn a_blank_chapter_name_is_untitled() {
         .unwrap()
         .name = "   ".to_owned();
     f.store.save_config(&cfg).unwrap();
-    let (e, _) = epub(&f.store, now());
+    let (e, _) = epub(&f.store);
     let soups = xml(text(&e, "OEBPS/chapter-soups.xhtml"));
     let h1 = soups.descendants().find(|n| n.has_tag_name("h1")).unwrap();
     assert_eq!(all_text(h1), "Untitled chapter");
@@ -888,4 +914,28 @@ fn file_urls_are_not_printed_in_any_case() {
     }
     let chapter = page_text_chapter("<p>Body.</p>", "https://kitchen.test/ok");
     assert!(chapter.contains("https://kitchen.test/ok"));
+}
+
+#[test]
+fn a_saved_page_without_a_site_has_no_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new(dir.path().join("cookbook"));
+    let mut r = blank("Saved Page");
+    r.site_name = "a saved page".to_owned();
+    r.author = Some("Ada Cook".to_owned());
+    r.ingredients = vec![group(None, &["1 egg"])];
+    save(&store, r, "mains", at(10, 1));
+    let mut r = blank("Bare Page");
+    r.site_name = "a saved page".to_owned();
+    save(&store, r, "mains", at(10, 2));
+    let (e, _) = epub(&store);
+    let chapter = text(&e, "OEBPS/chapter-mains.xhtml");
+    xml(chapter);
+    assert!(!chapter.contains("From"), "{chapter}");
+    assert!(!chapter.contains("a saved page"), "{chapter}");
+    assert!(
+        chapter.contains("<p>By Ada Cook · saved Oct 1, 2026</p>"),
+        "{chapter}"
+    );
+    assert!(chapter.contains("<p>Saved Oct 2, 2026</p>"), "{chapter}");
 }

@@ -392,6 +392,13 @@ fn build_writes_epub_offline() {
     let count = lines.next().unwrap();
     assert_eq!(count, "2 recipes in 2 chapters");
     assert_eq!(lines.next().unwrap(), epub.to_string_lossy());
+    let id = lines
+        .next()
+        .unwrap()
+        .strip_prefix("build ")
+        .expect("a build line");
+    assert_eq!(id.len(), 16, "{id}");
+    assert!(id.bytes().all(|c| c.is_ascii_hexdigit()), "{id}");
     // An export, not a delivery: the flag stays as it was.
     assert!(dirty.exists(), "build must not clear the dirty flag");
 }

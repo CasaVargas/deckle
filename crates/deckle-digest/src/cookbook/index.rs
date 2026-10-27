@@ -48,7 +48,7 @@ fn is_quantity(token: &str) -> bool {
             .all(|c| c.is_numeric() || matches!(c, '.' | ',' | '/' | '⁄' | '-' | '–' | '—'))
 }
 
-/// Singularizes a word: `-ies` to `-y`, `-oes` to `-o`, `-leaves` to `-leaf`, `-loaves` to `-loaf`, a trailing `-s` (but not `-ss` or `-us`)
+/// Singularizes a word: `-ies` to `-y`, `-ches`/`-shes`/`-xes`/`-zes` to the stem, `-oes` to `-o`, `-leaves` to `-leaf`, `-loaves` to `-loaf`, a trailing `-s` (but not `-ss` or `-us`)
 /// dropped.
 fn singular(word: &str) -> String {
     if let Some(stem) = word.strip_suffix("ies").filter(|s| !s.is_empty()) {
@@ -61,6 +61,19 @@ fn singular(word: &str) -> String {
     }
     if let Some(stem) = word.strip_suffix("oes").filter(|s| !s.is_empty()) {
         return format!("{stem}o");
+    }
+    // peaches, radishes, boxes, quizzes: `es` goes after ch, sh, x and z. The French ones
+    // that end in a silent `e` keep it.
+    if !matches!(word, "quiches" | "brioches" | "cloches")
+        && ["ches", "shes", "xes", "zes"]
+            .iter()
+            .any(|e| word.ends_with(e))
+    {
+        let stem = &word[..word.len() - 2];
+        // quizzes: the doubled z was only there for the plural.
+        return stem
+            .strip_suffix("zz")
+            .map_or(stem.to_owned(), |q| format!("{q}z"));
     }
     if word.len() > 2 && word.ends_with('s') && !word.ends_with("ss") && !word.ends_with("us") {
         return word[..word.len() - 1].to_owned();
@@ -150,7 +163,19 @@ pub fn key_ingredient(line: &str) -> Option<String> {
     // 1. Lowercase; drop anything in parentheses.
     let line = without_parens(&line.to_lowercase().replace('&', " and "));
     // A heading such as "For the dressing:" is not an ingredient.
-    let line = line.trim();
+    let mut line = line.trim();
+    // "juice of 1 lemon" is lemon.
+    for lead in [
+        "zest and juice of ",
+        "juice and zest of ",
+        "zest of ",
+        "juice of ",
+    ] {
+        if let Some(rest) = line.strip_prefix(lead) {
+            line = rest.trim_start();
+            break;
+        }
+    }
     if line.ends_with(':') || line.starts_with("for the ") || line.starts_with("for ") {
         return None;
     }

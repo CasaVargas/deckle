@@ -2,7 +2,6 @@
 //! `deckle cookbook`: keep, file and tidy the recipes of the Kitchen Book (cookbook design §8.1).
 //! These commands change the folder and nothing else; the book is built from it later.
 
-use std::collections::HashSet;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -307,15 +306,7 @@ const EPUB_NAME: &str = "cookbook.epub";
 /// Writes the book to `<out>/cookbook.epub`. An export: it leaves the dirty flag alone, which
 /// only a delivery clears.
 fn build(store: &Store, out: &Path) -> Result<(), String> {
-    let built = book::build(store, Utc::now(), &out.join(EPUB_NAME))?;
-    // The chapters that made it into the book: those holding a recipe, a recipe whose chapter
-    // is gone counting under "Everything else", as the book files it.
-    let chapters = store.config()?.chapters;
-    let filled: HashSet<String> = store
-        .all()?
-        .iter()
-        .map(|s| home(&chapters, &s.chapter).to_owned())
-        .collect();
+    let built = book::build(store, &out.join(EPUB_NAME))?;
     println!(
         "{} {} in {} {}",
         built.recipes,
@@ -324,13 +315,14 @@ fn build(store: &Store, out: &Path) -> Result<(), String> {
         } else {
             "recipes"
         },
-        filled.len(),
-        if filled.len() == 1 {
+        built.chapters,
+        if built.chapters == 1 {
             "chapter"
         } else {
             "chapters"
         },
     );
     println!("{}", built.path.display());
+    println!("build {}", built.build_id);
     Ok(())
 }

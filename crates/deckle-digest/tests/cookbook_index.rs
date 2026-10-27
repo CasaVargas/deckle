@@ -107,6 +107,22 @@ fn key_ingredient_table() {
         ("4 garlic cloves", "garlic"),
         ("1 tbsp butter, plus more", "butter"),
         ("1 tsp vanilla (optional)", "vanilla"),
+        // Plurals: es after ch, sh, x and z; the others keep the plain rule.
+        ("3 ripe peaches", "peach"),
+        ("6 radishes", "radish"),
+        ("2 cheese boxes", "cheese box"),
+        ("2 jumbo quizzes", "jumbo quiz"),
+        ("1 slice brioche", "brioche"),
+        ("2 tomatoes", "tomato"),
+        // Chili in its spellings.
+        ("2 chilies", "chili"),
+        ("2 chillies", "chili"),
+        ("1 chilly", "chili"),
+        ("1 chily", "chili"),
+        // Juice and zest of a fruit is the fruit.
+        ("juice of 1 lemon", "lemon"),
+        ("Zest of 2 limes", "lime"),
+        ("zest and juice of 1 orange", "orange"),
     ];
     for (line, want) in cases {
         assert_eq!(key_ingredient(line).as_deref(), Some(want), "{line:?}");

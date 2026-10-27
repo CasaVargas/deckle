@@ -12,6 +12,9 @@ use serde_json::Value;
 use crate::sources::feeds::host;
 use crate::{article, web_book};
 
+/// The site name of a page with neither an `og:site_name` nor a web address.
+pub const SAVED_PAGE: &str = "a saved page";
+
 /// The longest description kept, in characters (§4.1).
 const DESCRIPTION_MAX: usize = 300;
 
@@ -62,7 +65,7 @@ pub fn parse_recipe(html: &str, url: &str) -> Result<Recipe, String> {
         .map(|s| clean(&s))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| match host(&source_url) {
-            "" => "a saved page".to_owned(),
+            "" => SAVED_PAGE.to_owned(),
             h => h.to_owned(),
         });
 

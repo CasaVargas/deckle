@@ -8,7 +8,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
 
 use self::pages::{Entry, Part};
@@ -31,12 +30,13 @@ const CSS: &str = include_str!("book/cookbook.css");
 #[derive(Clone, Debug)]
 pub struct Built {
     pub path: PathBuf,
-    /// The first 16 hex digits of the SHA-256 of the EPUB's sorted `(name, bytes)` entries: the
-    /// same recipes, notes, pictures and `now` give the same id, whatever the zip's timestamps
-    /// say. It also changes when a recipe's star ages out, because the contents page depends on
-    /// `now`.
+    /// The first 16 hex digits of the SHA-256 of the EPUB's sorted `(name, bytes)` entries. It
+    /// depends only on the store (recipes, notes, settings, pictures), not on the day or the zip's
+    /// timestamps, so an unchanged store always gives the same id.
     pub build_id: String,
     pub recipes: usize,
+    /// The chapters printed: those holding at least one recipe.
+    pub chapters: usize,
     pub title: String,
 }
 
@@ -127,7 +127,7 @@ const CONTAINER: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
 
 /// Writes the whole book to `out`. This is an export: it leaves the store's dirty flag alone,
 /// which only a delivery clears.
-pub fn build(store: &Store, now: DateTime<Utc>, out: &Path) -> Result<Built, String> {
+pub fn build(store: &Store, out: &Path) -> Result<Built, String> {
     let cfg = store.config()?;
     let all = store.all()?;
     let title = match cfg.title.trim() {
@@ -205,10 +205,8 @@ pub fn build(store: &Store, now: DateTime<Utc>, out: &Path) -> Result<Built, Str
     let cover =
         crate::cover::render_cookbook(&title, &cfg.subtitle, all.len(), last_added.as_deref())?;
 
-    let modified = all
-        .iter()
-        .map(|s| s.added)
-        .max()
+    let newest = all.iter().map(|s| s.added).max();
+    let modified = newest
         .unwrap_or_default()
         .format("%Y-%m-%dT%H:%M:%SZ")
         .to_string();
@@ -233,7 +231,7 @@ pub fn build(store: &Store, now: DateTime<Utc>, out: &Path) -> Result<Built, Str
         ("OEBPS/cover.jpg".into(), cover),
         (
             "OEBPS/contents.xhtml".into(),
-            pages::contents(&parts, has_index, now),
+            pages::contents(&parts, has_index, newest),
         ),
     ];
     for p in &parts {
@@ -252,6 +250,7 @@ pub fn build(store: &Store, now: DateTime<Utc>, out: &Path) -> Result<Built, Str
         path: out.to_path_buf(),
         build_id: hash(&files),
         recipes: all.len(),
+        chapters: parts.len(),
         title,
     })
 }

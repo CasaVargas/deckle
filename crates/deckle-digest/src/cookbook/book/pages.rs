@@ -9,7 +9,7 @@ use chrono::{DateTime, Duration, Utc};
 use dom_query::Document;
 use regex::Regex;
 
-use crate::cookbook::recipe::Group;
+use crate::cookbook::recipe::{Group, SAVED_PAGE};
 use crate::cookbook::store::{Picture, Saved};
 use crate::esc;
 
@@ -51,9 +51,10 @@ pub(super) fn recipes(n: usize) -> String {
     }
 }
 
-/// Added in the last 7 days (a recipe dated in the future counts as new).
-pub(super) fn is_new(added: DateTime<Utc>, now: DateTime<Utc>) -> bool {
-    now.signed_duration_since(added) < Duration::days(7)
+/// Added within 7 days of the newest recipe (which counts itself): the book's "latest
+/// additions". Anchored to the store, not to a clock, so a rebuilt book never changes by itself.
+pub(super) fn is_latest(added: DateTime<Utc>, newest: DateTime<Utc>) -> bool {
+    newest.signed_duration_since(added) < Duration::days(7)
 }
 
 /// `href` of a recipe: its chapter's file and its section.
@@ -123,6 +124,7 @@ fn facts(s: &Saved) -> String {
 fn without_photos(xhtml: &str) -> String {
     static VOID: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"<(br|hr|wbr)((?:\s[^<>]*?)?)\s*/?>").unwrap());
+    // Relies on `article::extract`'s writer emitting `br` as its only void element.
     let doc = Document::from(format!("<body>{xhtml}</body>"));
     doc.select(r#"img, figure, div[class^="figure"]"#).remove();
     let body = doc.select("body");
@@ -166,8 +168,10 @@ fn groups(out: &mut String, groups: &[Group], list: &str, class: &str) {
 fn foot(s: &Saved) -> String {
     let r = &s.recipe;
     let mut bits: Vec<String> = Vec::new();
-    if !r.site_name.trim().is_empty() {
-        bits.push(format!("From <em>{}</em>", esc(r.site_name.trim())));
+    // A saved page with no canonical link or site name has only the placeholder.
+    let site = r.site_name.trim();
+    if !site.is_empty() && site != SAVED_PAGE {
+        bits.push(format!("From <em>{}</em>", esc(site)));
     }
     if let Some(a) = r.author.as_deref().filter(|a| !a.trim().is_empty()) {
         bits.push(format!("by {}", esc(a.trim())));
@@ -259,9 +263,9 @@ pub(super) fn chapter(part: &Part) -> Vec<u8> {
     xhtml(&part.name, &body)
 }
 
-/// The contents: each chapter with its count and its recipes, a star on the new ones, the
-/// index, and a line for what is new this week.
-pub(super) fn contents(parts: &[Part], has_index: bool, now: DateTime<Utc>) -> Vec<u8> {
+/// The contents: each chapter with its count and its recipes, a star on the latest additions,
+/// the index, and a line counting them (left out of an empty book).
+pub(super) fn contents(parts: &[Part], has_index: bool, newest: Option<DateTime<Utc>>) -> Vec<u8> {
     let mut body = String::from("<h1>Contents</h1>\n");
     let mut new = 0;
     if parts.is_empty() {
@@ -276,7 +280,7 @@ pub(super) fn contents(parts: &[Part], has_index: bool, now: DateTime<Utc>) -> V
             recipes(p.entries.len())
         );
         for e in &p.entries {
-            let star = match is_new(e.saved.added, now) {
+            let star = match newest.is_some_and(|n| is_latest(e.saved.added, n)) {
                 true => {
                     new += 1;
                     " <span class=\"star\">★</span>"
@@ -297,7 +301,9 @@ pub(super) fn contents(parts: &[Part], has_index: bool, now: DateTime<Utc>) -> V
             "<p class=\"toc-index\"><a href=\"index.xhtml\">Index by ingredient</a></p>\n",
         );
     }
-    let _ = writeln!(body, "<p class=\"newweek\">New this week: {new}</p>");
+    if newest.is_some() {
+        let _ = writeln!(body, "<p class=\"latest\">Latest additions: {new}</p>");
+    }
     xhtml("Contents", &body)
 }
 

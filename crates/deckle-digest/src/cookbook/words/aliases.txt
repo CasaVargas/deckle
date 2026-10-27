@@ -13,3 +13,5 @@ caster sugar = sugar
 extra virgin olive oil = olive oil
 extra-virgin olive oil = olive oil
 garlic clove = garlic
+chily = chili
+chilly = chili
