@@ -552,7 +552,7 @@ fn other_places_are_their_own_rows_and_drop_alone() {
 
 fn subscribed_cfg(sections: &str) -> Config {
     Config::parse(&format!(
-        "sections = [{sections}]\n\n[[subscribed]]\nsite = \"thepilot.com\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\n\n[[subscribed]]\nsite = \"other.com\"\nsections = [\"opinion\"]\n"
+        "sections = [{sections}]\n\n[[subscribed]]\nsite = \"gazette.example\"\nname = \"The Gazette\"\nsections = [\"news\", \"sports\"]\n\n[[subscribed]]\nsite = \"other.com\"\nsections = [\"opinion\"]\n"
     ))
     .unwrap()
 }
@@ -572,8 +572,8 @@ fn a_subscribed_paper_is_a_row_per_slug_with_the_papers_name() {
         rows,
         [
             ("weather", "Weather"),
-            ("subscribed:thepilot.com:news", "The Pilot · News"),
-            ("subscribed:thepilot.com:sports", "The Pilot · Sports"),
+            ("subscribed:gazette.example:news", "The Gazette · News"),
+            ("subscribed:gazette.example:sports", "The Gazette · Sports"),
             ("subscribed:other.com:opinion", "other.com · Opinion"),
             ("lottery", "Lottery"),
         ]
@@ -590,10 +590,10 @@ fn a_subscribed_slug_drops_alone_and_the_last_one_takes_the_group_and_kind() {
         why: String::new(),
     };
     let mut c = subscribed_cfg("\"weather\", \"subscribed\"");
-    apply(&drop("subscribed:thepilot.com:sports"), &mut c).unwrap();
+    apply(&drop("subscribed:gazette.example:sports"), &mut c).unwrap();
     assert_eq!(c.subscribed[0].sections, ["news"]);
     assert_eq!(c.subscribed.len(), 2);
-    apply(&drop("subscribed:thepilot.com:news"), &mut c).unwrap();
+    apply(&drop("subscribed:gazette.example:news"), &mut c).unwrap();
     assert_eq!(c.subscribed.len(), 1);
     assert_eq!(c.subscribed[0].site, "other.com");
     assert!(c.sections.contains(&SectionKind::Subscribed));
@@ -603,7 +603,7 @@ fn a_subscribed_slug_drops_alone_and_the_last_one_takes_the_group_and_kind() {
     assert!(apply(&drop("subscribed:other.com:opinion"), &mut c).is_err());
     let up = deckle_readership::report::Suggestion {
         kind: SuggestionKind::MoveUp,
-        ..drop("subscribed:thepilot.com:news")
+        ..drop("subscribed:gazette.example:news")
     };
     assert!(apply(&up, &mut subscribed_cfg("\"subscribed\"")).is_err());
 }

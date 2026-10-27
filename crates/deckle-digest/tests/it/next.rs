@@ -921,11 +921,12 @@ fn url_only_feed_row_unchanged() {
 fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
     let mut s = Setup::new();
     s.cfg = Config::parse(
-        "sections = [\"weather\", \"subscribed\"]\n\n[[subscribed]]\nsite = \"thepilot.com\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\nmax_items = 5\n",
+        "sections = [\"weather\", \"subscribed\"]\n\n[[subscribed]]\nsite = \"gazette.example\"\nname = \"The Gazette\"\nsections = [\"news\", \"sports\"]\nmax_items = 5\n",
     )
     .unwrap();
     // max_items plus five spare, so a group after Local can refill
-    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=10&s=start_time&sd=desc";
+    let news =
+        "https://www.gazette.example/search/?f=rss&t=article&c=news&l=10&s=start_time&sd=desc";
     assert!(live_urls(&s.cfg).contains(&news.to_owned()));
     // the same twice-an-hour limit as a feed's
     let net = Counting::new();
@@ -946,18 +947,21 @@ fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
         .filter(|r| r.kind == SectionKind::Subscribed)
         .collect();
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].key, "subscribed:thepilot.com:news");
-    assert_eq!(rows[0].name, "The Pilot · News");
-    assert_eq!(rows[0].detail, "thepilot.com · news");
+    assert_eq!(rows[0].key, "subscribed:gazette.example:news");
+    assert_eq!(rows[0].name, "The Gazette · News");
+    assert_eq!(rows[0].detail, "gazette.example · news");
     assert_eq!(rows[0].items, Some(5));
     let r = rows[0].subscribed.as_ref().unwrap();
-    assert_eq!((r.site.as_str(), r.slug.as_str()), ("thepilot.com", "news"));
+    assert_eq!(
+        (r.site.as_str(), r.slug.as_str()),
+        ("gazette.example", "news")
+    );
     // the fetched headline leads (nothing local), and the other slug is a dashed slot
     assert_eq!(
         p.lead.clone().unwrap().title.as_deref(),
         Some("Council votes")
     );
-    assert!(labels(&p).contains(&"The Pilot · Sports · 5 slots".to_owned()));
+    assert!(labels(&p).contains(&"The Gazette · Sports · 5 slots".to_owned()));
     let json = serde_json::to_string(&p.plan[0]).unwrap();
     assert!(!json.contains("subscribed"), "{json}");
 }
@@ -966,12 +970,13 @@ fn a_subscribed_paper_has_a_row_per_slug_fetched_like_a_feed() {
 fn local_after_a_group_drops_the_groups_story_and_refills_as_the_press_does() {
     let mut s = Setup::new();
     s.cfg = Config::parse(
-        "sections = [\"subscribed\", \"local\"]\n\n[local]\nmax_items = 2\n\n[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 1\n",
+        "sections = [\"subscribed\", \"local\"]\n\n[local]\nmax_items = 2\n\n[[subscribed]]\nsite = \"gazette.example\"\nsections = [\"news\"]\nmax_items = 1\n",
     )
     .unwrap();
     s.cfg.local.google_news = String::new();
     s.cfg.local.feeds = vec![LOCAL.into()];
-    let news = "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=6&s=start_time&sd=desc";
+    let news =
+        "https://www.gazette.example/search/?f=rss&t=article&c=news&l=6&s=start_time&sd=desc";
     s.live.feeds.insert(
         news.into(),
         fetched(&[("Water tower vote", local(2026, 10, 22, 14, 0))]),
@@ -994,7 +999,7 @@ fn local_after_a_group_drops_the_groups_story_and_refills_as_the_press_does() {
     assert_eq!(
         labels(&p),
         [
-            "THEPILOT.COM · NEWS · 1 NEW SINCE 05:30 | Water tower vote",
+            "GAZETTE.EXAMPLE · NEWS · 1 NEW SINCE 05:30 | Water tower vote",
             "LOCAL · 2 NEW SINCE 05:30 | Fair opens"
         ]
     );

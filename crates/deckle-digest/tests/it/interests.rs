@@ -306,18 +306,18 @@ fn a_story_shared_with_local_or_an_earlier_interest_prints_once_and_the_later_re
             local_url,
             rss(&[
                 (
-                    "Panthers parade in Carthage - Pilot",
+                    "Panthers parade in Carthage - Gazette",
                     "https://ok.example/l1",
                     12,
                 ),
-                ("County fair opens - Pilot", "https://ok.example/l2", 11),
+                ("County fair opens - Gazette", "https://ok.example/l2", 11),
             ]),
         ),
         (
             search("\"Panthers\""),
             rss(&[
                 (
-                    "Panthers parade in Carthage - Pilot",
+                    "Panthers parade in Carthage - Gazette",
                     "https://ok.example/l1",
                     12,
                 ),

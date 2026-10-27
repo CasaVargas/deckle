@@ -732,7 +732,7 @@ mod tests {
                 (
                     b,
                     crate::publisher::Access::Walled {
-                        site: "thepilot.com".into(),
+                        site: "gazette.example".into(),
                         why: self.1.clone(),
                     },
                 )
@@ -743,16 +743,16 @@ mod tests {
     fn item() -> Item {
         Item {
             title: "Council votes".into(),
-            source: Some("The Pilot".into()),
+            source: Some("The Gazette".into()),
             published: None,
             paragraphs: vec!["The feed's own summary.".into()],
-            link: Some("https://www.thepilot.com/story".into()),
+            link: Some("https://www.gazette.example/story".into()),
         }
     }
 
     fn walled() -> crate::publisher::Access {
         crate::publisher::Access::Walled {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             why: crate::publisher::Walled::NotSignedIn,
         }
     }
@@ -764,7 +764,7 @@ mod tests {
         assert!(a.body.contains("own summary."));
         assert!(
             a.body
-                .contains("Subscriber story (not signed in to thepilot.com).")
+                .contains("Subscriber story (not signed in to gazette.example).")
         );
         assert!(!a.body.contains("LOGIN"));
         assert_eq!(a.extra.access, walled());
@@ -795,14 +795,17 @@ mod tests {
             let a = full_article(&item(), &Config::default(), &net);
             assert!(a.body.contains("word word"), "{}", a.body);
             assert!(!a.body.contains("own summary."), "{}", a.body);
-            let note = format!("<p class=\"note\">{}</p>", esc(&why.note("thepilot.com")));
+            let note = format!(
+                "<p class=\"note\">{}</p>",
+                esc(&why.note("gazette.example"))
+            );
             assert!(a.body.contains(&note), "{}", a.body);
             // the note sits before the source line, as the headline-only fallback has it
             assert!(a.body.find(&note) < a.body.find("<p class=\"source\">"));
             assert_eq!(
                 a.extra.access,
                 crate::publisher::Access::Walled {
-                    site: "thepilot.com".into(),
+                    site: "gazette.example".into(),
                     why
                 }
             );

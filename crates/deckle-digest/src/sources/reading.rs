@@ -264,7 +264,7 @@ mod tests {
     fn entry(tries: u32) -> Entry {
         Entry {
             id: "r-1".into(),
-            url: Some("https://www.thepilot.com/news/a.html".into()),
+            url: Some("https://www.gazette.example/news/a.html".into()),
             file: None,
             title: None,
             saved_at: "2026-10-20T14:03:11Z".parse().unwrap(),
@@ -291,7 +291,7 @@ mod tests {
 
     fn walled() -> Access {
         Access::Walled {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             why: Walled::NoAdapter,
         }
     }
@@ -330,7 +330,7 @@ mod tests {
                 "r-1".to_owned(),
                 Outcome::Waiting(
                     "no readable article: Subscriber story (Deckle doesn't know how \
-                     thepilot.com signs in yet)."
+                     gazette.example signs in yet)."
                         .into()
                 )
             )]

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel><title>Example Pilot - News</title><link>https://www.thepilot.com/</link><description>Synthetic BLOX section feed for tests</description>
-<item><title>Town board weighs a new water tower</title><link>https://www.thepilot.com/news/article_n1.html</link><description><![CDATA[<p>A synthetic summary of the water tower story.</p>]]></description><pubDate>Tue, 20 Oct 2026 20:00:00 +0000</pubDate></item>
-<item><title>Library reopens after roof repairs</title><link>https://www.thepilot.com/news/article_n2.html</link><description><![CDATA[<p>A synthetic summary of the library story.</p>]]></description><pubDate>Tue, 20 Oct 2026 18:00:00 +0000</pubDate></item>
+<rss version="2.0"><channel><title>Example Gazette - News</title><link>https://www.gazette.example/</link><description>Synthetic BLOX section feed for tests</description>
+<item><title>Town board weighs a new water tower</title><link>https://www.gazette.example/news/article_n1.html</link><description><![CDATA[<p>A synthetic summary of the water tower story.</p>]]></description><pubDate>Tue, 20 Oct 2026 20:00:00 +0000</pubDate></item>
+<item><title>Library reopens after roof repairs</title><link>https://www.gazette.example/news/article_n2.html</link><description><![CDATA[<p>A synthetic summary of the library story.</p>]]></description><pubDate>Tue, 20 Oct 2026 18:00:00 +0000</pubDate></item>
 </channel></rss>

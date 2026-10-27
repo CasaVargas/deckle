@@ -537,7 +537,7 @@ fn digest_subscribe_lists_none_on_a_starter_config() {
 #[test]
 fn digest_subscribe_needs_a_username_for_a_new_site() {
     let (ok, _, err) =
-        subscribe_with_starter(&["thepilot.com", "--stdin"], "not-a-real-password\n");
+        subscribe_with_starter(&["gazette.example", "--stdin"], "not-a-real-password\n");
     assert!(!ok);
     assert!(err.contains("--username"), "{err}");
     assert!(!err.contains("not-a-real-password"), "{err}");
@@ -546,9 +546,9 @@ fn digest_subscribe_needs_a_username_for_a_new_site() {
 #[test]
 fn digest_subscribe_refuses_a_site_that_names_another_host() {
     for site in [
-        "thepilot.com@evil.com",
-        "thepilot.com:8443",
-        "thepilot.com.",
+        "gazette.example@evil.com",
+        "gazette.example:8443",
+        "gazette.example.",
     ] {
         let (ok, _, err) = subscribe_with_starter(
             &[site, "--username", "me@x.test", "--stdin"],
@@ -556,7 +556,7 @@ fn digest_subscribe_refuses_a_site_that_names_another_host() {
         );
         assert!(!ok, "{site} was accepted");
         assert!(
-            err.contains("use a host like thepilot.com"),
+            err.contains("use a host like yourpaper.com"),
             "{site}: {err}"
         );
     }
@@ -573,7 +573,7 @@ fn digest_subscribe_refuses_an_empty_password_and_saves_nothing() {
         .arg(&cfg)
         .args([
             "subscribe",
-            "thepilot.com",
+            "gazette.example",
             "--username",
             "me@x.test",
             "--stdin",
@@ -593,7 +593,7 @@ fn digest_subscribe_refuses_an_empty_password_and_saves_nothing() {
 fn digest_subscribe_normalizes_the_site_in_the_config() {
     let (ok, _, err) = subscribe_with_starter(
         &[
-            "https://www.ThePilot.com/",
+            "https://www.Gazette.example/",
             "--username",
             "me@x.test",
             "--forget",
@@ -601,7 +601,7 @@ fn digest_subscribe_normalizes_the_site_in_the_config() {
         "",
     );
     assert!(!ok);
-    assert!(err.contains("no subscription for thepilot.com"), "{err}");
+    assert!(err.contains("no subscription for gazette.example"), "{err}");
 }
 
 /// `deckle` with HOME (so the config and cache folders) under `home`.

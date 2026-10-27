@@ -589,7 +589,7 @@ for USB as before and the run's report says why. `--to <folder>` and `digest pus
 ## Papers you subscribe to
 
 If you pay for a newspaper's website, the Daily can sign in as you and read its full articles.
-The Pilot and most small-town US papers run on BLOX (TownNews): sign in once
+Most small-town US papers run on BLOX (TownNews): sign in once
 (`deckle digest subscribe`) and the paper's stories print in full. A story your plan doesn't
 cover, or one the site withholds, prints as a stranger sees it, with a note saying why. Any other
 site's stories print as a stranger would see them: a free story in full, and a story the site
@@ -603,7 +603,7 @@ Add the account to `digest.toml` (one block per site; the password is not stored
 # A newspaper you subscribe to: the paper signs in as you to read its full articles. The
 # password is not stored here; it goes in the system keychain. One block per site.
 # [[subscriptions]]
-# site = "thepilot.com"           # just the host, no https:// or path
+# site = "yourpaper.com"          # just the host, no https:// or path
 # username = "you@example.com"
 ```
 
@@ -615,8 +615,8 @@ or a paper's file under `papers/`; the site should also have a `[[subscriptions]
 # should also be in [[subscriptions]] above. Sections for a BLOX site: news, sports, opinion,
 # obituaries, business, lifestyles.
 # [[subscribed]]
-# site = "thepilot.com"
-# name = "The Pilot"              # optional heading; the site is used without it
+# site = "yourpaper.com"
+# name = "Your Paper"             # optional heading; the site is used without it
 # sections = ["news", "sports"]   # in print order
 # max_items = 8                   # per section; defaults to [local] max_items
 # max_age_hours = 48              # defaults to [local] max_age_hours
@@ -639,12 +639,12 @@ If the site has a `[[subscribed]]` block but no account in `[[subscriptions]]`, 
 
 ```sh
 deckle digest subscribe                     # list your sites and their state
-deckle digest subscribe thepilot.com --username you@example.com
+deckle digest subscribe yourpaper.com --username you@example.com
                                             # add or update the account, ask for the password
                                             # without echo, save it, sign in once
-deckle digest subscribe thepilot.com --stdin   # read the password from one line of stdin
-deckle digest subscribe thepilot.com --test    # sign in only, to check the password
-deckle digest subscribe thepilot.com --forget  # remove the account, keychain entry and session
+deckle digest subscribe yourpaper.com --stdin   # read the password from one line of stdin
+deckle digest subscribe yourpaper.com --test    # sign in only, to check the password
+deckle digest subscribe yourpaper.com --forget  # remove the account, keychain entry and session
 ```
 
 The same fields are in **Daily → The paper → Subscriptions**: site, username, a write-only
@@ -654,13 +654,13 @@ password, **Save password**, **Test sign-in** and **Remove**. `deckle digest lin
 - **The password** lives in the system keychain: service `com.casavargas.deckle.site`, account
   `<username>@<site>`. With no keychain at all (Linux without Secret Service, CI),
   `DECKLE_SITE_PASSWORD_<SITE>` is read instead: the site uppercased, anything that isn't a letter
-  or digit as `_` (`DECKLE_SITE_PASSWORD_THEPILOT_COM`).
+  or digit as `_` (`DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE`).
 - **The session** (the cookies from signing in) is kept in `sessions/<site>.json` beside
   `digest.toml`, one file per site, readable only by you, and only ever sent to the site over
   HTTPS (a plain `http://` link is fetched signed out). Delete it to sign out; the next run signs
   in again. `--forget` deletes it too, and works without a keychain (there is just no password to
   delete).
-- **The site** must be a bare host: no user name, port or trailing dot (`thepilot.com`).
+- **The site** must be a bare host: no user name, port or trailing dot (`yourpaper.com`).
 
 ## Export folders: an iPad, a Boox, any folder
 

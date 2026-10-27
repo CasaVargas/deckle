@@ -960,7 +960,7 @@ pub struct SubscriptionConfig {
 }
 
 impl SubscriptionConfig {
-    /// `site` as a bare host: `https://www.ThePilot.com/` becomes `thepilot.com`. A path, query
+    /// `site` as a bare host: `https://www.Gazette.example/` becomes `gazette.example`. A path, query
     /// or fragment after the host is an error, as is anything that isn't a dotted host.
     pub fn normalized_site(raw: &str) -> Result<String, String> {
         let bad = |why: &str| format!("[[subscriptions]] site = {raw:?}: {why}");
@@ -974,10 +974,10 @@ impl SubscriptionConfig {
             None => (s, ""),
         };
         if !rest.is_empty() && rest != "/" {
-            return Err(bad("use just the site's host, like thepilot.com"));
+            return Err(bad("use just the site's host, like yourpaper.com"));
         }
         let host = host.strip_prefix("www.").unwrap_or(host);
-        let like = "use a host like thepilot.com";
+        let like = "use a host like yourpaper.com";
         // The session's cookies and, later, the password go to `https://{site}/`: anything that
         // could make that URL name another host (`user@host`, a port, `\`) is refused outright.
         if host.is_empty()
@@ -1414,15 +1414,15 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # A newspaper you subscribe to: the paper signs in as you to read its full articles. The
 # password is not stored here; it goes in the system keychain. One block per site.
 # [[subscriptions]]
-# site = "thepilot.com"           # just the host, no https:// or path
+# site = "yourpaper.com"          # just the host, no https:// or path
 # username = "you@example.com"
 
 # Print a subscribed newspaper's own sections in full, as a group in the paper. The site
 # should also be in [[subscriptions]] above. Sections for a BLOX site: news, sports, opinion,
 # obituaries, business, lifestyles.
 # [[subscribed]]
-# site = "thepilot.com"
-# name = "The Pilot"              # optional heading; the site is used without it
+# site = "yourpaper.com"
+# name = "Your Paper"             # optional heading; the site is used without it
 # sections = ["news", "sports"]   # in print order
 # max_items = 8                   # per section; defaults to [local] max_items
 # max_age_hours = 48              # defaults to [local] max_age_hours
@@ -1492,8 +1492,8 @@ feeds = []
 # [[subscriptions]]). Sections for a BLOX site: news, sports, opinion, obituaries, business,
 # lifestyles.
 # [[subscribed]]
-# site = "thepilot.com"
-# name = "The Pilot"
+# site = "yourpaper.com"
+# name = "Your Paper"
 # sections = ["news", "sports"]
 "#;
 
@@ -2472,14 +2472,14 @@ mod tests {
 
     #[test]
     fn subscriptions_parse_and_round_trip() {
-        let text = "[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"me@example.com\"\n";
+        let text = "[[subscriptions]]\nsite = \"gazette.example\"\nusername = \"me@example.com\"\n";
         let cfg = Config::parse(text).unwrap();
         assert_eq!(cfg.subscriptions.len(), 1);
-        assert_eq!(cfg.subscriptions[0].site, "thepilot.com");
+        assert_eq!(cfg.subscriptions[0].site, "gazette.example");
         assert_eq!(cfg.subscriptions[0].kind, None);
-        assert!(cfg.subscription("www.thepilot.com").is_some());
-        assert!(cfg.subscription("thepilot.com").is_some());
-        assert!(cfg.subscription("notthepilot.com").is_none());
+        assert!(cfg.subscription("www.gazette.example").is_some());
+        assert!(cfg.subscription("gazette.example").is_some());
+        assert!(cfg.subscription("notgazette.example").is_none());
         let empty = Config::default();
         assert!(!toml::to_string(&empty).unwrap().contains("subscriptions"));
     }
@@ -2487,32 +2487,32 @@ mod tests {
     #[test]
     fn a_site_is_a_bare_host() {
         assert_eq!(
-            SubscriptionConfig::normalized_site("https://www.ThePilot.com/").unwrap(),
-            "thepilot.com"
+            SubscriptionConfig::normalized_site("https://www.Gazette.example/").unwrap(),
+            "gazette.example"
         );
         assert_eq!(
-            SubscriptionConfig::normalized_site("thepilot.com").unwrap(),
-            "thepilot.com"
+            SubscriptionConfig::normalized_site("gazette.example").unwrap(),
+            "gazette.example"
         );
-        let e = SubscriptionConfig::normalized_site("thepilot.com/news").unwrap_err();
+        let e = SubscriptionConfig::normalized_site("gazette.example/news").unwrap_err();
         assert!(e.contains("site"), "{e}");
         assert!(SubscriptionConfig::normalized_site("").is_err());
         assert!(SubscriptionConfig::normalized_site("localhost").is_err());
-        assert!(SubscriptionConfig::normalized_site("the pilot.com").is_err());
+        assert!(SubscriptionConfig::normalized_site("the gazette.example").is_err());
     }
 
     #[test]
     fn a_site_that_could_name_another_host_is_refused() {
         for raw in [
-            "thepilot.com@evil.com",
-            "user:pw@thepilot.com",
-            "https://thepilot.com@evil.com/",
-            "thepilot.com:8443",
-            "https://thepilot.com:443/",
-            "thepilot.com\\@evil.com",
-            "evil.com\\thepilot.com",
-            "thepilot.com.",
-            "the\tpilot.com",
+            "gazette.example@evil.com",
+            "user:pw@gazette.example",
+            "https://gazette.example@evil.com/",
+            "gazette.example:8443",
+            "https://gazette.example:443/",
+            "gazette.example\\@evil.com",
+            "evil.com\\gazette.example",
+            "gazette.example.",
+            "the\tgazette.example",
             "thepil%6ft.com",
             "[::1]",
             "127.0.0.1:80",
@@ -2523,9 +2523,9 @@ mod tests {
             );
         }
         for (raw, want) in [
-            ("HTTPS://WWW.ThePilot.com/", "thepilot.com"),
-            ("http://thepilot.com", "thepilot.com"),
-            ("  news.thepilot.com  ", "news.thepilot.com"),
+            ("HTTPS://WWW.Gazette.example/", "gazette.example"),
+            ("http://gazette.example", "gazette.example"),
+            ("  news.gazette.example  ", "news.gazette.example"),
             ("my-paper.co.uk/", "my-paper.co.uk"),
         ] {
             assert_eq!(
@@ -2534,8 +2534,8 @@ mod tests {
                 "{raw:?}"
             );
         }
-        let cfg =
-            Config::parse("[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"\"\n").unwrap();
+        let cfg = Config::parse("[[subscriptions]]\nsite = \"gazette.example\"\nusername = \"\"\n")
+            .unwrap();
         assert!(
             cfg.subscriptions[0]
                 .validate()
@@ -2547,10 +2547,10 @@ mod tests {
     #[test]
     fn a_loaded_site_is_normalized_and_bad_ones_refused() {
         let cfg = Config::parse(
-            "[[subscriptions]]\nsite = \"https://WWW.ThePilot.com/\"\nusername = \"me\"\n",
+            "[[subscriptions]]\nsite = \"https://WWW.Gazette.example/\"\nusername = \"me\"\n",
         )
         .unwrap();
-        assert_eq!(cfg.subscriptions[0].site, "thepilot.com");
+        assert_eq!(cfg.subscriptions[0].site, "gazette.example");
         assert!(
             Config::parse("[[subscriptions]]\nsite = \"a.com/x\"\nusername = \"me\"\n").is_err()
         );
@@ -2573,7 +2573,7 @@ mod tests {
                 .contains("\n[[subscriptions]]")
         );
         c.subscriptions.push(SubscriptionConfig {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             username: "me@example.com".into(),
             kind: None,
         });
@@ -2602,16 +2602,16 @@ mod tests {
         );
         let subs = Config::parse(&text).unwrap().subscriptions;
         assert_eq!(subs.len(), 1);
-        assert_eq!(subs[0].site, "thepilot.com");
+        assert_eq!(subs[0].site, "yourpaper.com");
     }
 
     #[test]
     fn subscribed_groups_parse_round_trip_and_leave_an_empty_list_out() {
-        let text = "[[subscribed]]\nsite = \"https://www.ThePilot.com/\"\nname = \"The Pilot\"\nsections = [\"news\", \"sports\"]\nmax_items = 8\nmax_age_hours = 48\n";
+        let text = "[[subscribed]]\nsite = \"https://www.Gazette.example/\"\nname = \"The Gazette\"\nsections = [\"news\", \"sports\"]\nmax_items = 8\nmax_age_hours = 48\n";
         let cfg = Config::parse(text).unwrap();
         assert_eq!(cfg.subscribed.len(), 1);
-        assert_eq!(cfg.subscribed[0].site, "thepilot.com");
-        assert_eq!(cfg.subscribed[0].title(), "The Pilot");
+        assert_eq!(cfg.subscribed[0].site, "gazette.example");
+        assert_eq!(cfg.subscribed[0].title(), "The Gazette");
         assert_eq!(cfg.subscribed[0].sections, ["news", "sports"]);
         assert_eq!(cfg.subscribed[0].max_items, Some(8));
         let back = Config::parse(&toml::to_string(&cfg).unwrap()).unwrap();
@@ -2619,9 +2619,9 @@ mod tests {
         let empty = Config::default();
         assert!(!toml::to_string(&empty).unwrap().contains("subscribed"));
         let bare =
-            Config::parse("[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\n")
+            Config::parse("[[subscribed]]\nsite = \"gazette.example\"\nsections = [\"news\"]\n")
                 .unwrap();
-        assert_eq!(bare.subscribed[0].title(), "thepilot.com");
+        assert_eq!(bare.subscribed[0].title(), "gazette.example");
         assert!(
             Config::parse("[[subscribed]]\nsite = \"a.com\"\nsections = [\"news\"]\nx = 1\n")
                 .is_err()
@@ -2630,15 +2630,19 @@ mod tests {
 
     #[test]
     fn subscribed_rejects_an_unknown_or_missing_section() {
-        let e = Config::parse("[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"obits\"]\n")
-            .unwrap_err();
+        let e =
+            Config::parse("[[subscribed]]\nsite = \"gazette.example\"\nsections = [\"obits\"]\n")
+                .unwrap_err();
         assert_eq!(
             e,
-            "[[subscribed]] thepilot.com: unknown section \"obits\"; known: news, sports, opinion, obituaries, business, lifestyles"
+            "[[subscribed]] gazette.example: unknown section \"obits\"; known: news, sports, opinion, obituaries, business, lifestyles"
         );
-        let e =
-            Config::parse("[[subscribed]]\nsite = \"thepilot.com\"\nsections = []\n").unwrap_err();
-        assert!(e.contains("thepilot.com") && e.contains("sections"), "{e}");
+        let e = Config::parse("[[subscribed]]\nsite = \"gazette.example\"\nsections = []\n")
+            .unwrap_err();
+        assert!(
+            e.contains("gazette.example") && e.contains("sections"),
+            "{e}"
+        );
         assert!(
             Config::parse("[[subscribed]]\nsite = \"a.com/x\"\nsections = [\"news\"]\n").is_err()
         );
@@ -2647,31 +2651,31 @@ mod tests {
     #[test]
     fn subscribed_rejects_repeats_and_an_empty_budget() {
         let e = Config::parse(
-            "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\", \"sports\", \"news\"]\n",
+            "[[subscribed]]\nsite = \"gazette.example\"\nsections = [\"news\", \"sports\", \"news\"]\n",
         )
         .unwrap_err();
         assert_eq!(
             e,
-            "[[subscribed]] thepilot.com: section \"news\" is listed twice"
+            "[[subscribed]] gazette.example: section \"news\" is listed twice"
         );
         // the same site twice, however it's spelled
         let e = Config::parse(
-            "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\n\n[[subscribed]]\nsite = \"https://www.ThePilot.com/\"\nsections = [\"sports\"]\n",
+            "[[subscribed]]\nsite = \"gazette.example\"\nsections = [\"news\"]\n\n[[subscribed]]\nsite = \"https://www.Gazette.example/\"\nsections = [\"sports\"]\n",
         )
         .unwrap_err();
-        assert_eq!(e, "[[subscribed]] thepilot.com appears twice");
+        assert_eq!(e, "[[subscribed]] gazette.example appears twice");
         let e = Config::parse(
-            "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 0\n",
+            "[[subscribed]]\nsite = \"gazette.example\"\nsections = [\"news\"]\nmax_items = 0\n",
         )
         .unwrap_err();
         assert_eq!(
             e,
-            "[[subscribed]] thepilot.com: max_items must be at least 1"
+            "[[subscribed]] gazette.example: max_items must be at least 1"
         );
         // two different sites are fine
         assert!(
             Config::parse(
-                "[[subscribed]]\nsite = \"thepilot.com\"\nsections = [\"news\"]\nmax_items = 1\n\n[[subscribed]]\nsite = \"journalnow.com\"\nsections = [\"news\"]\n",
+                "[[subscribed]]\nsite = \"gazette.example\"\nsections = [\"news\"]\nmax_items = 1\n\n[[subscribed]]\nsite = \"journalnow.com\"\nsections = [\"news\"]\n",
             )
             .is_ok()
         );
@@ -2690,7 +2694,7 @@ mod tests {
                 .contains("\n[[subscribed]]")
         );
         c.subscribed.push(SubscribedConfig {
-            site: "https://www.thepilot.com".into(),
+            site: "https://www.gazette.example".into(),
             name: None,
             sections: vec!["news".into()],
             max_items: None,
@@ -2698,7 +2702,7 @@ mod tests {
         });
         save(&path, &c).unwrap();
         let back = Config::load(&path).unwrap();
-        assert_eq!(back.subscribed[0].site, "thepilot.com");
+        assert_eq!(back.subscribed[0].site, "gazette.example");
         c.subscribed[0].sections = vec!["obits".into()];
         assert!(save(&path, &c).unwrap_err().contains("unknown section"));
     }
@@ -2706,15 +2710,15 @@ mod tests {
     #[test]
     fn subscribed_keys_and_kind() {
         assert_eq!(
-            subscribed_key("thepilot.com", "news"),
-            "subscribed:thepilot.com:news"
+            subscribed_key("gazette.example", "news"),
+            "subscribed:gazette.example:news"
         );
         assert_eq!(
             section_key(
                 SectionKind::Subscribed,
-                Some("subscribed:thepilot.com:news")
+                Some("subscribed:gazette.example:news")
             ),
-            "subscribed:thepilot.com:news"
+            "subscribed:gazette.example:news"
         );
         assert_eq!(section_key(SectionKind::Subscribed, None), "subscribed");
         assert_eq!(
@@ -2748,7 +2752,7 @@ mod tests {
             };
             let got = Config::parse(&text).unwrap().subscribed;
             assert_eq!(got.len(), 1);
-            assert_eq!(got[0].site, "thepilot.com");
+            assert_eq!(got[0].site, "yourpaper.com");
         }
     }
 

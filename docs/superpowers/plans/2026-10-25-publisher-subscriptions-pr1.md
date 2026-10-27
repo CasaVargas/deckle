@@ -26,7 +26,7 @@ which `full_article`, Your Reading and web articles call; the CLI and the app bu
 
 - Keychain service for sites: `com.casavargas.deckle.site`; account `<username>@<site>`.
 - Headless env fallback: `DECKLE_SITE_PASSWORD_<SITE>` where `<SITE>` is the site uppercased
-  with every non-alphanumeric character as `_` (`thepilot.com` → `THEPILOT_COM`); read only
+  with every non-alphanumeric character as `_` (`gazette.example` → `GAZETTE_EXAMPLE`); read only
   when there is no keychain at all, as `DECKLE_SMTP_PASSWORD` is.
 - A password never appears in `digest.toml`, a report, a log, an error string, a `Debug`
   output or a Tauri result.
@@ -44,11 +44,11 @@ which `full_article`, Your Reading and web articles call; the CLI and the app bu
 
 ## Review Focus
 
-1. `site = "https://www.thepilot.com/"` or `"ThePilot.com"`: the config loader normalizes to
+1. `site = "https://www.gazette.example/"` or `"Gazette.example"`: the config loader normalizes to
    a bare lowercase host without `www.`, or rejects a value with a scheme or path with a
    message naming the field. (Task 1.)
-2. A story URL on `www.thepilot.com` when `site = "thepilot.com"`: the session matches the
-   host itself and any subdomain, never `notthepilot.com`. (Task 5.)
+2. A story URL on `www.gazette.example` when `site = "gazette.example"`: the session matches the
+   host itself and any subdomain, never `notgazette.example`. (Task 5.)
 3. A corrupt or stale `sessions/<site>.json`: the run starts with an empty jar and a note,
    never a crash or a refused run. (Task 4.)
 4. A scheduled 05:30 run on a locked keychain: `Walled { NotSignedIn }` with the
@@ -94,32 +94,32 @@ which `full_article`, Your Reading and web articles call; the CLI and the app bu
 ```rust
 #[test]
 fn subscriptions_parse_and_round_trip() {
-    let text = "[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"me@example.com\"\n";
+    let text = "[[subscriptions]]\nsite = \"gazette.example\"\nusername = \"me@example.com\"\n";
     let cfg = Config::parse(text).unwrap();
     assert_eq!(cfg.subscriptions.len(), 1);
-    assert_eq!(cfg.subscriptions[0].site, "thepilot.com");
+    assert_eq!(cfg.subscriptions[0].site, "gazette.example");
     assert_eq!(cfg.subscriptions[0].kind, None);
-    assert!(cfg.subscription("www.thepilot.com").is_some());
-    assert!(cfg.subscription("thepilot.com").is_some());
-    assert!(cfg.subscription("notthepilot.com").is_none());
+    assert!(cfg.subscription("www.gazette.example").is_some());
+    assert!(cfg.subscription("gazette.example").is_some());
+    assert!(cfg.subscription("notgazette.example").is_none());
     let empty = Config::default();
     assert!(!toml::to_string(&empty).unwrap().contains("subscriptions"));
 }
 
 #[test]
 fn a_site_is_a_bare_host() {
-    assert_eq!(SubscriptionConfig::normalized_site("https://www.ThePilot.com/").unwrap(), "thepilot.com");
-    assert_eq!(SubscriptionConfig::normalized_site("thepilot.com").unwrap(), "thepilot.com");
-    let e = SubscriptionConfig::normalized_site("thepilot.com/news").unwrap_err();
+    assert_eq!(SubscriptionConfig::normalized_site("https://www.Gazette.example/").unwrap(), "gazette.example");
+    assert_eq!(SubscriptionConfig::normalized_site("gazette.example").unwrap(), "gazette.example");
+    let e = SubscriptionConfig::normalized_site("gazette.example/news").unwrap_err();
     assert!(e.contains("site"), "{e}");
-    let cfg = Config::parse("[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"\"\n").unwrap();
+    let cfg = Config::parse("[[subscriptions]]\nsite = \"gazette.example\"\nusername = \"\"\n").unwrap();
     assert!(cfg.subscriptions[0].validate().unwrap_err().contains("username"));
 }
 
 #[test]
 fn the_starter_subscriptions_block_parses_once_uncommented() {
     // Same shape as the existing `[email]` starter test: uncomment the block, parse, assert
-    // one subscription for "thepilot.com".
+    // one subscription for "gazette.example".
 }
 ```
 
@@ -178,7 +178,7 @@ git commit -m "feat(daily): [[subscriptions]] household config for publisher acc
   ```rust
   pub const SITE_SERVICE: &str = "com.casavargas.deckle.site";
   pub fn site_account(sub: &SubscriptionConfig) -> String;          // "<username>@<site>"
-  pub fn site_env(site: &str) -> String;                            // "DECKLE_SITE_PASSWORD_THEPILOT_COM"
+  pub fn site_env(site: &str) -> String;                            // "DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE"
   pub fn site_password(sub: &SubscriptionConfig, keys: &dyn Keyring, env: &dyn Fn(&str) -> Option<String>)
       -> Result<(Zeroizing<String>, Source), SecretError>;
   pub fn has_site_password(sub, keys, env) -> bool;
@@ -201,8 +201,8 @@ git commit -m "feat(daily): [[subscriptions]] household config for publisher acc
 #[test]
 fn site_entries_live_in_their_own_service() {
     assert_eq!(SITE_SERVICE, "com.casavargas.deckle.site");
-    assert_eq!(site_account(&sub()), "me@example.com@thepilot.com");
-    assert_eq!(site_env("thepilot.com"), "DECKLE_SITE_PASSWORD_THEPILOT_COM");
+    assert_eq!(site_account(&sub()), "me@example.com@gazette.example");
+    assert_eq!(site_env("gazette.example"), "DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE");
     let keys = MemoryKeyring::default();
     set(&cfg(), &keys, "smtp-pw").unwrap();
     assert!(!has_site_password(&sub(), &keys, &env_with(None)), "the SMTP entry isn't a site entry");
@@ -211,7 +211,7 @@ fn site_entries_live_in_their_own_service() {
 #[test]
 fn site_password_keychain_then_env_then_error() {
     // keychain wins; keychain without entry => NotSet whose message contains
-    // "deckle digest subscribe thepilot.com"; unavailable keychain reads the site env var
+    // "deckle digest subscribe gazette.example"; unavailable keychain reads the site env var
 }
 
 #[test]
@@ -291,8 +291,8 @@ fn the_registry_is_empty_and_nothing_is_detected() {
 }
 #[test]
 fn walled_notes() {
-    assert_eq!(Walled::NotSignedIn.note("thepilot.com"), "Subscriber story (not signed in to thepilot.com).");
-    assert_eq!(Walled::NoAdapter.note("thepilot.com"), "Subscriber story (Deckle doesn't know how thepilot.com signs in yet).");
+    assert_eq!(Walled::NotSignedIn.note("gazette.example"), "Subscriber story (not signed in to gazette.example).");
+    assert_eq!(Walled::NoAdapter.note("gazette.example"), "Subscriber story (Deckle doesn't know how gazette.example signs in yet).");
 }
 #[test]
 fn a_closure_net_is_open() {
@@ -427,8 +427,8 @@ fn the_cookie_goes_back_only_to_its_host() {
 #[test] fn no_password_means_not_signed_in_without_a_login_attempt() { /* password None => Walled NotSignedIn, logins empty, status().state == NoPassword(..) */ }
 #[test] fn an_account_without_an_adapter_is_walled_no_adapter() { /* kind None and empty adapters */ }
 #[test] fn only_the_site_and_its_subdomains_use_the_session() {
-    // site_for("https://www.thepilot.com/a") == Some("thepilot.com");
-    // site_for("https://notthepilot.com/") == None; get_page_as there is Access::Open through inner
+    // site_for("https://www.gazette.example/a") == Some("gazette.example");
+    // site_for("https://notgazette.example/") == None; get_page_as there is Access::Open through inner
 }
 #[test] fn the_login_form_carries_the_credentials_encoded() { /* username "a&b@x.test", password "p+w d": the posted body contains "username=a%26b%40x.test" and "password=p%2Bw+d" (fetch::encode) */ }
 #[test] fn status_never_carries_the_password() { /* format!("{:?}", status()) and serde_json of it lack the password */ }
@@ -464,9 +464,9 @@ fn the_cookie_goes_back_only_to_its_host() {
 ```rust
 #[test]
 fn a_walled_story_prints_the_feeds_text_with_the_reason() {
-    // a Net whose get_page_as returns (b"<html>LOGIN</html>", Walled{site:"thepilot.com", why: NotSignedIn});
+    // a Net whose get_page_as returns (b"<html>LOGIN</html>", Walled{site:"gazette.example", why: NotSignedIn});
     // full_article => body from item.paragraphs, meta/note contains
-    // "Subscriber story (not signed in to thepilot.com).", extra.access == that Walled
+    // "Subscriber story (not signed in to gazette.example).", extra.access == that Walled
 }
 #[test]
 fn an_open_story_is_unchanged() { /* closure Net: extra.access == Open; same body as before this task */ }
@@ -497,7 +497,7 @@ fn an_open_story_is_unchanged() { /* closure Net: extra.access == Open; same bod
   ```rust
   /// Papers you subscribe to: sign Deckle in with your own account.
   Subscribe {
-      /// The paper's site, e.g. thepilot.com. Alone: list every subscription and its state.
+      /// The paper's site, e.g. gazette.example. Alone: list every subscription and its state.
       site: Option<String>,
       #[arg(long)] username: Option<String>,
       /// Read the password from one line of stdin instead of asking.
@@ -522,10 +522,10 @@ fn an_open_story_is_unchanged() { /* closure Net: extra.access == Open; same bod
 ```rust
 #[test] fn digest_subscribe_is_listed_with_its_flags() { /* `digest subscribe --help` mentions username, stdin, test, forget */ }
 #[test] fn digest_subscribe_lists_none_on_a_starter_config() { /* stdout contains "no subscriptions" */ }
-#[test] fn digest_subscribe_needs_a_username_for_a_new_site() { /* `subscribe thepilot.com --stdin` with no --username: exit 1, stderr contains "--username" */ }
+#[test] fn digest_subscribe_needs_a_username_for_a_new_site() { /* `subscribe gazette.example --stdin` with no --username: exit 1, stderr contains "--username" */ }
 #[test] fn digest_subscribe_normalizes_the_site_in_the_config() {
-    // `subscribe https://www.ThePilot.com/ --username me@x.test --forget` on a starter:
-    // --forget on an unknown site exits 1 with "no subscription for thepilot.com" (normalized name in the message)
+    // `subscribe https://www.Gazette.example/ --username me@x.test --forget` on a starter:
+    // --forget on an unknown site exits 1 with "no subscription for gazette.example" (normalized name in the message)
 }
 ```
 
@@ -562,7 +562,7 @@ fn an_open_story_is_unchanged() { /* closure Net: extra.access == Open; same bod
   externally-tagged form), `api.subscriptionsStatus/subscriptionSetPassword/subscriptionTest/subscriptionForget`,
   and `subscriptionLine(s: SiteStatus): string` with exact copy:
   - `NotTried` → `Not signed in yet`
-  - `SignedIn { service: "Pilot Plus" }` → `Signed in · Pilot Plus, active`; `service: null` → `Signed in`
+  - `SignedIn { service: "Gazette Plus" }` → `Signed in · Gazette Plus, active`; `service: null` → `Signed in`
   - `LoginFailed(e)` → `Sign-in failed: <e>`
   - `NoAdapter` → `Deckle doesn't know how <site> signs in yet`
   - `NoPassword(e)` → `No password: <e>`
@@ -583,16 +583,16 @@ fn subscriptions_status_never_returns_the_password() {
 ```ts
 test("subscription lines", () => {
   expect(subscriptionLine({ ...s, state: "NotTried" })).toBe("Not signed in yet");
-  expect(subscriptionLine({ ...s, state: { SignedIn: { service: "Pilot Plus" } } })).toBe("Signed in · Pilot Plus, active");
+  expect(subscriptionLine({ ...s, state: { SignedIn: { service: "Gazette Plus" } } })).toBe("Signed in · Gazette Plus, active");
   expect(subscriptionLine({ ...s, state: { LoginFailed: "bad password" } })).toBe("Sign-in failed: bad password");
-  expect(subscriptionLine({ ...s, site: "thepilot.com", state: "NoAdapter" })).toBe("Deckle doesn't know how thepilot.com signs in yet");
+  expect(subscriptionLine({ ...s, site: "gazette.example", state: "NoAdapter" })).toBe("Deckle doesn't know how gazette.example signs in yet");
 });
 ```
 
 - [ ] **Step 2: Run** `cargo test -p deckle-desktop subscriptions_status` and `npm --prefix apps/desktop test -- subscriptions` → FAIL.
 - [ ] **Step 3: Implement** the commands (a `subscriptions_status_with(cfg, keys, env)` the
   test calls, like `email_status_with`), the TS types, the helper and the card.
-- [ ] **Step 4: Run** both test commands → PASS; then `npm --prefix apps/desktop run build` → no type errors; open the app (`cargo tauri dev` or the project's run skill) and check the card renders with one row, saves a site, and *Test sign-in* shows `Deckle doesn't know how thepilot.com signs in yet`.
+- [ ] **Step 4: Run** both test commands → PASS; then `npm --prefix apps/desktop run build` → no type errors; open the app (`cargo tauri dev` or the project's run skill) and check the card renders with one row, saves a site, and *Test sign-in* shows `Deckle doesn't know how gazette.example signs in yet`.
 - [ ] **Step 5: Commit** — `git commit -m "feat(app): Subscriptions card on the Daily tab"`.
 
 ### Task 9: Docs
@@ -603,7 +603,7 @@ test("subscription lines", () => {
 
 - [ ] **Step 1: Write** the section: the config block from spec §3, the `subscribe` command
   forms, where the password lives, the jar file and how to delete it, and that no paper is
-  supported yet ("The first paper, The Pilot and other BLOX sites, comes in the next
+  supported yet ("The first paper, The Gazette and other BLOX sites, comes in the next
   release"). CHANGELOG under Unreleased: "The Daily: accounts for the papers you subscribe to
   (`deckle digest subscribe`), with the password in the keychain. No publisher is supported
   yet; stories still print as headlines, now saying why."

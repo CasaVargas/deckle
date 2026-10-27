@@ -14,20 +14,20 @@ const s: SiteStatus = {
 
 test("subscription lines", () => {
   expect(subscriptionLine({ ...s, state: "NotTried" })).toBe("Not signed in yet");
-  expect(subscriptionLine({ ...s, state: { SignedIn: { service: "Pilot Plus" } } })).toBe("Signed in · Pilot Plus, active");
+  expect(subscriptionLine({ ...s, state: { SignedIn: { service: "Gazette Plus" } } })).toBe("Signed in · Gazette Plus, active");
   expect(subscriptionLine({ ...s, state: { SignedIn: { service: null } } })).toBe("Signed in");
   expect(subscriptionLine({ ...s, state: { LoginFailed: "bad password" } })).toBe("Sign-in failed: bad password");
   expect(subscriptionLine({ ...s, state: { EntitlementUnknown: "couldn't read your plan: x" } })).toBe("Signed in, but couldn't read your plan: x");
-  expect(subscriptionLine({ ...s, site: "thepilot.com", state: "NoAdapter" })).toBe("Deckle doesn't know how thepilot.com signs in yet");
+  expect(subscriptionLine({ ...s, site: "gazette.example", state: "NoAdapter" })).toBe("Deckle doesn't know how gazette.example signs in yet");
   expect(subscriptionLine({ ...s, state: { NoPassword: "none saved" } })).toBe("No password: none saved");
 });
 
 test("a tested failure shows until the password changes, then the fresh status", () => {
-  const fresh: SiteStatus = { ...s, site: "thepilot.com", has_password: true, state: "NotTried" };
-  let tested = { "thepilot.com": { NoPassword: "none saved" } };
-  expect(subscriptionLine(shownStatus([fresh], tested, "ThePilot.com")!)).toBe("No password: none saved");
-  tested = forgetTested(tested, "https://www.thepilot.com/") as typeof tested;
-  expect(subscriptionLine(shownStatus([fresh], tested, "thepilot.com")!)).toBe("Not signed in yet");
+  const fresh: SiteStatus = { ...s, site: "gazette.example", has_password: true, state: "NotTried" };
+  let tested = { "gazette.example": { NoPassword: "none saved" } };
+  expect(subscriptionLine(shownStatus([fresh], tested, "Gazette.example")!)).toBe("No password: none saved");
+  tested = forgetTested(tested, "https://www.gazette.example/") as typeof tested;
+  expect(subscriptionLine(shownStatus([fresh], tested, "gazette.example")!)).toBe("Not signed in yet");
 });
 
 import { groupFor, removeGroup, renameGroup, setMaxItems, toggleGroup, toggleSlug } from "./subscriptions";
@@ -36,8 +36,8 @@ import type { DailyConfig } from "./types";
 const cfgOf = (sections: string[], subscribed?: unknown[]) => ({ sections, subscribed }) as unknown as DailyConfig;
 
 test("toggling a paper on adds news and slots subscribed after local", () => {
-  const c = toggleGroup(cfgOf(["reading", "local", "feeds"]), "thepilot.com");
-  expect(c.subscribed).toEqual([{ site: "thepilot.com", sections: ["news"] }]);
+  const c = toggleGroup(cfgOf(["reading", "local", "feeds"]), "gazette.example");
+  expect(c.subscribed).toEqual([{ site: "gazette.example", sections: ["news"] }]);
   expect(c.sections).toEqual(["reading", "local", "subscribed", "feeds"]);
 });
 
@@ -69,8 +69,8 @@ test("unticking the last slug removes the group; other slugs toggle freely", () 
 });
 
 test("groupFor matches by normalized site", () => {
-  const c = cfgOf(["subscribed"], [{ site: "thepilot.com", sections: ["news"] }]);
-  expect(groupFor(c, "https://www.ThePilot.com/")?.site).toBe("thepilot.com");
+  const c = cfgOf(["subscribed"], [{ site: "gazette.example", sections: ["news"] }]);
+  expect(groupFor(c, "https://www.Gazette.example/")?.site).toBe("gazette.example");
   expect(groupFor(c, "other.com")).toBeUndefined();
 });
 
@@ -123,7 +123,7 @@ test("an account still being set up stays out of the save and in the draft", () 
     sections: ["local", "subscribed"],
     subscriptions: [
       { site: "a.com", username: "me" },
-      { site: "thepilot.com", username: "" },
+      { site: "gazette.example", username: "" },
       { site: "", username: "" },
       { site: "B.com", username: " you " },
     ],
@@ -136,7 +136,7 @@ test("an account still being set up stays out of the save and in the draft", () 
   const saved = { ...cfg, subscriptions: [{ site: "a.com", username: "me" }, { site: "b.com", username: "you" }] };
   expect(keepUnfinished(saved, cfg).subscriptions).toEqual([
     { site: "a.com", username: "me" },
-    { site: "thepilot.com", username: "" },
+    { site: "gazette.example", username: "" },
     { site: "", username: "" },
     { site: "b.com", username: "you" },
   ]);

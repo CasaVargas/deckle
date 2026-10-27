@@ -251,7 +251,7 @@ A typical edition's bundle grows from about 4 MB to about 15 MB.
 
 ```json
 { "file": "media/….jpg", "width": 2400, "height": 1600, "lead": true, "motion": null,
-  "caption": "Stall holders at the freight shed on Saturday.", "credit": "Jane Doe / The Pilot",
+  "caption": "Stall holders at the freight shed on Saturday.", "credit": "Jane Doe / The Gazette",
   "alt": "A crowd under a steel roof", "focus": { "x": 0.62, "y": 0.41 }, "color": "#8a6f52" }
 ```
 

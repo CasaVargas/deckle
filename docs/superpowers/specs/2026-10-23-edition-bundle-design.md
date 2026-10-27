@@ -152,7 +152,7 @@ Each story:
   "body": { "format": "xhtml", "text": "<p>…</p><div class=\"figure lead\"><img src=\"media/3f9a1c0e5b7d.jpg\" alt=\"\"/></div>…" },
   "photos": [
     { "file": "media/3f9a1c0e5b7d.jpg", "width": 2400, "height": 1536, "lead": true, "motion": null,
-      "caption": "Stall holders at the freight shed on Saturday.", "credit": "Jane Doe / The Pilot",
+      "caption": "Stall holders at the freight shed on Saturday.", "credit": "Jane Doe / The Gazette",
       "alt": "A crowd under a steel roof", "focus": { "x": 0.62, "y": 0.41 }, "color": "#8a6f52" }
   ],
   "long_read": null,

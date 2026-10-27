@@ -158,7 +158,7 @@ fn origin(site: &str) -> String {
 }
 
 /// The login form: its action and its hidden fields. The access modal's form, else the login
-/// page's own (`form.user-login-form`, which The Pilot serves since 2026-10), else the first
+/// page's own (`form.user-login-form`, which The Gazette serves since 2026-10), else the first
 /// form with a password field.
 fn login_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     let doc = Document::from(html);
@@ -185,7 +185,7 @@ fn login_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     Some((action, hidden))
 }
 
-/// TownNews BLOX: The Pilot and many other community papers.
+/// TownNews BLOX: The Gazette and many other community papers.
 pub struct Blox;
 
 impl Publisher for Blox {
@@ -305,7 +305,7 @@ pub fn fixture_page(opts: Page) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     let form = if opts.login_form {
-        r#"<form id="access-modal-login-form" method="post" action="https://www.thepilot.com/users/login/">
+        r#"<form id="access-modal-login-form" method="post" action="https://www.gazette.example/users/login/">
 <input type="hidden" name="referer_url" value="">
 <input type="text" name="username" id="user-username">
 <input type="password" name="password" id="user-password">
@@ -327,7 +327,7 @@ pub fn fixture_page(opts: Page) -> String {
     }
     format!(
         r#"<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><title>A synthetic story | thepilot.com</title>
+<html lang="en"><head><meta charset="utf-8"><title>A synthetic story | gazette.example</title>
 <script src="https://bloximages.example.test/tncms/tncms.js"></script>
 <script>var tncms = tncms || {{}}; tncms.subscription = tncms.subscription || {{}};
 tncms.subscription.paid_access_service_ids = [{ids}];</script>
@@ -488,7 +488,7 @@ mod tests {
             login_form: false,
         });
         let out = Blox.unlock(&page, &ent(&["3"])).unwrap();
-        let x = crate::article::extract(&out, "https://www.thepilot.com/news/x.html")
+        let x = crate::article::extract(&out, "https://www.gazette.example/news/x.html")
             .expect("a full story");
         assert!(x.words >= 120, "{}", x.words);
         assert!(x.xhtml.contains("closingpremium5."), "{}", x.xhtml);
@@ -498,11 +498,11 @@ mod tests {
     #[test]
     fn parse_services_accepts_the_shapes_we_expect() {
         let e = parse_services(
-            r#"[{"id": 3, "active": true, "name": "Pilot Plus"}, {"id": "4", "active": false}]"#,
+            r#"[{"id": 3, "active": true, "name": "Gazette Plus"}, {"id": "4", "active": false}]"#,
         )
         .unwrap();
         assert_eq!(e.services, vec!["3"]);
-        assert_eq!(e.names.get("3").map(String::as_str), Some("Pilot Plus"));
+        assert_eq!(e.names.get("3").map(String::as_str), Some("Gazette Plus"));
         let e = parse_services(
             r#"{"services": [{"id": 5, "is_active": true}, {"id": 6, "status": "active"}, {"id": 7, "status": "expired"}]}"#,
         )
@@ -587,14 +587,15 @@ mod tests {
             ..Default::default()
         });
         let c = Recorder {
-            pages: vec![("https://thepilot.com/users/login/".into(), login_page())],
+            pages: vec![("https://gazette.example/users/login/".into(), login_page())],
             post_reply: member,
             ..Default::default()
         };
-        Blox.login("thepilot.com", "a@b.test", "p+w", &c).unwrap();
+        Blox.login("gazette.example", "a@b.test", "p+w", &c)
+            .unwrap();
         let posts = c.posts.lock().unwrap();
         assert_eq!(posts.len(), 1);
-        assert_eq!(posts[0].0, "https://www.thepilot.com/users/login/");
+        assert_eq!(posts[0].0, "https://www.gazette.example/users/login/");
         let body = &posts[0].1;
         assert!(body.contains("referer_url="), "{body}");
         assert!(body.contains("username=a%40b.test"), "{body}");
@@ -609,23 +610,23 @@ mod tests {
         });
         let c = Recorder {
             pages: vec![
-                ("https://thepilot.com/users/login/".into(), login_page()),
-                ("https://www.thepilot.com/".into(), member),
+                ("https://gazette.example/users/login/".into(), login_page()),
+                ("https://www.gazette.example/".into(), member),
             ],
             post_reply: "<html>redirecting</html>".into(),
             ..Default::default()
         };
-        Blox.login("thepilot.com", "a@b.test", "pw", &c).unwrap();
+        Blox.login("gazette.example", "a@b.test", "pw", &c).unwrap();
         let stranger = Recorder {
             pages: vec![
-                ("https://thepilot.com/users/login/".into(), login_page()),
-                ("https://www.thepilot.com/".into(), login_page()),
+                ("https://gazette.example/users/login/".into(), login_page()),
+                ("https://www.gazette.example/".into(), login_page()),
             ],
             post_reply: "<html>Wrong password for a@b.test</html>".into(),
             ..Default::default()
         };
         let e = Blox
-            .login("thepilot.com", "a@b.test", "pw", &stranger)
+            .login("gazette.example", "a@b.test", "pw", &stranger)
             .unwrap_err();
         assert_eq!(e, "the site refused the login");
     }
@@ -636,41 +637,42 @@ mod tests {
             signed_in: true,
             ..Default::default()
         });
-        let page = login_page().replace("https://www.thepilot.com/users/login/", "/users/login/");
+        let page =
+            login_page().replace("https://www.gazette.example/users/login/", "/users/login/");
         let c = Recorder {
-            pages: vec![("https://thepilot.com/users/login/".into(), page)],
+            pages: vec![("https://gazette.example/users/login/".into(), page)],
             finals: vec![(
-                "https://thepilot.com/users/login/".into(),
-                "https://www.thepilot.com/users/login/".into(),
+                "https://gazette.example/users/login/".into(),
+                "https://www.gazette.example/users/login/".into(),
             )],
             post_reply: member,
             ..Default::default()
         };
-        Blox.login("thepilot.com", "a@b.test", "pw", &c).unwrap();
+        Blox.login("gazette.example", "a@b.test", "pw", &c).unwrap();
         let posts = c.posts.lock().unwrap();
-        assert_eq!(posts[0].0, "https://www.thepilot.com/users/login/");
+        assert_eq!(posts[0].0, "https://www.gazette.example/users/login/");
     }
 
     #[test]
     fn a_mixed_case_site_matches_its_own_host() {
         let c = Recorder {
-            pages: vec![("https://thepilot.com/users/login/".into(), login_page())],
+            pages: vec![("https://gazette.example/users/login/".into(), login_page())],
             post_reply: fixture_page(Page {
                 signed_in: true,
                 ..Default::default()
             }),
             ..Default::default()
         };
-        Blox.login("ThePilot.COM", "a", "b", &c).unwrap();
+        Blox.login("Gazette.EXAMPLE", "a", "b", &c).unwrap();
         assert_eq!(c.posts.lock().unwrap().len(), 1);
     }
 
     #[test]
     fn login_uses_the_login_pages_own_form_without_the_modal() {
-        // The Pilot's /users/login/ as of 2026-10: logout forms first, then a classed form.
+        // The Gazette's /users/login/ as of 2026-10: logout forms first, then a classed form.
         let page = r#"<html><body>
-<form method="post" action="https://www.thepilot.com/users/logout/" id="user-logout-form-2150589"></form>
-<form class="user-login-form form-horizontal" role="form" method="post" action="https://www.thepilot.com/users/login/?referer_url=/">
+<form method="post" action="https://www.gazette.example/users/logout/" id="user-logout-form-2150589"></form>
+<form class="user-login-form form-horizontal" role="form" method="post" action="https://www.gazette.example/users/login/?referer_url=/">
 <input type="hidden" name="referer_url" value="/">
 <input id="user-username" class="form-control" name="username" type="text" value="" required>
 <input id="user-password" class="form-control" name="password" type="password" autocomplete="off" required >
@@ -679,7 +681,7 @@ mod tests {
         let (action, hidden) = login_form(page).unwrap();
         assert_eq!(
             action,
-            "https://www.thepilot.com/users/login/?referer_url=/"
+            "https://www.gazette.example/users/login/?referer_url=/"
         );
         assert_eq!(hidden, vec![("referer_url".to_string(), "/".to_string())]);
         // Any other password form, when neither is there.
@@ -693,17 +695,17 @@ mod tests {
         for action in [
             "https://evil.test/login",
             "//evil.test/users/login/",
-            "https://www.thepilot.com@evil.test/users/login/",
-            "https://thepilot.com.evil.test/users/login/",
-            "http://www.thepilot.com/users/login/",
+            "https://www.gazette.example@evil.test/users/login/",
+            "https://gazette.example.evil.test/users/login/",
+            "http://www.gazette.example/users/login/",
         ] {
-            let page = login_page().replace("https://www.thepilot.com/users/login/", action);
+            let page = login_page().replace("https://www.gazette.example/users/login/", action);
             let c = Recorder {
-                pages: vec![("https://thepilot.com/users/login/".into(), page)],
+                pages: vec![("https://gazette.example/users/login/".into(), page)],
                 ..Default::default()
             };
             let e = Blox
-                .login("thepilot.com", "a@b.test", "pw", &c)
+                .login("gazette.example", "a@b.test", "pw", &c)
                 .unwrap_err();
             assert_eq!(e, "the login form points at another host", "{action}");
             assert!(c.posts.lock().unwrap().is_empty(), "{action}");
@@ -714,12 +716,12 @@ mod tests {
     fn a_login_page_without_the_form_is_an_error() {
         let c = Recorder {
             pages: vec![(
-                "https://thepilot.com/users/login/".into(),
+                "https://gazette.example/users/login/".into(),
                 fixture_page(Page::default()),
             )],
             ..Default::default()
         };
-        assert!(Blox.login("thepilot.com", "a", "b", &c).is_err());
+        assert!(Blox.login("gazette.example", "a", "b", &c).is_err());
         assert!(c.posts.lock().unwrap().is_empty());
     }
 
@@ -727,13 +729,13 @@ mod tests {
     fn entitlement_reads_the_services_page() {
         let c = Recorder {
             pages: vec![(
-                "https://www.thepilot.com/tncms/subscription/services/".into(),
+                "https://www.gazette.example/tncms/subscription/services/".into(),
                 r#"[{"id": 3, "active": true}]"#.into(),
             )],
             ..Default::default()
         };
         assert_eq!(
-            Blox.entitlement("thepilot.com", &c).unwrap().services,
+            Blox.entitlement("gazette.example", &c).unwrap().services,
             vec!["3"]
         );
     }
@@ -741,8 +743,8 @@ mod tests {
     #[test]
     fn feed_urls_use_the_www_origin() {
         assert_eq!(
-            Blox.feed_url("thepilot.com", "news", 15),
-            "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=15&s=start_time&sd=desc"
+            Blox.feed_url("gazette.example", "news", 15),
+            "https://www.gazette.example/search/?f=rss&t=article&c=news&l=15&s=start_time&sd=desc"
         );
         assert_eq!(Blox.sections().len(), 6);
         assert_eq!(Blox.kind(), "blox");

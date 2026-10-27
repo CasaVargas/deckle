@@ -146,7 +146,7 @@ export default function SubscriptionsCard({
                 <span className="label">Site</span>
                 <input
                   value={s.site}
-                  placeholder="thepilot.com"
+                  placeholder="yourpaper.com"
                   spellCheck={false}
                   onFocus={() => (siteAtFocus.current[i] = s.site)}
                   onChange={(e) => edit(i, { site: e.target.value })}

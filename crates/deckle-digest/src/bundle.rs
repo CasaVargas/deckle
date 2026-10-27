@@ -859,7 +859,7 @@ mod tests {
         assert_eq!(kind_name("feeds:Hacker News"), "feeds");
         assert_eq!(kind_name("local:Asheville, NC"), "local");
         assert_eq!(kind_name("weather"), "weather");
-        assert_eq!(kind_name("subscribed:thepilot.com:news"), "subscribed");
+        assert_eq!(kind_name("subscribed:gazette.example:news"), "subscribed");
     }
 
     #[test]
@@ -867,12 +867,12 @@ mod tests {
         use crate::publisher::{Access, Walled};
         assert_eq!(access_name(&Access::Open), "open");
         let sub = Access::Subscription {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             service: "BLOX".into(),
         };
         assert_eq!(access_name(&sub), "subscription");
         let walled = Access::Walled {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             why: Walled::NotInPlan,
         };
         assert_eq!(access_name(&walled), "walled");

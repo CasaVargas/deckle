@@ -57,13 +57,13 @@ test("another town needs only its name: Google News is searched for it", () => {
 });
 
 test("a subscribed paper gets an account to fill in and its News in the paper, after Local", () => {
-  const a = addSubscription(cfg({ sections: ["reading", "weather", "local", "lottery"] }), "https://www.ThePilot.com/");
-  expect(a?.cfg.subscriptions).toEqual([{ site: "thepilot.com", username: "" }]);
-  expect(a?.cfg.subscribed).toEqual([{ site: "thepilot.com", sections: ["news"] }]);
+  const a = addSubscription(cfg({ sections: ["reading", "weather", "local", "lottery"] }), "https://www.Gazette.example/");
+  expect(a?.cfg.subscriptions).toEqual([{ site: "gazette.example", username: "" }]);
+  expect(a?.cfg.subscribed).toEqual([{ site: "gazette.example", sections: ["news"] }]);
   expect(a?.cfg.sections).toEqual(["reading", "weather", "local", "subscribed", "lottery"]);
-  expect(a?.row).toBe("subscribed:thepilot.com:news");
+  expect(a?.row).toBe("subscribed:gazette.example:news");
   // An account that's already there isn't added twice
-  expect(addSubscription(a!.cfg, "thepilot.com")?.cfg.subscriptions).toHaveLength(1);
+  expect(addSubscription(a!.cfg, "gazette.example")?.cfg.subscriptions).toHaveLength(1);
   expect(addSubscription(cfg(), "  ")).toBeNull();
 });
 
