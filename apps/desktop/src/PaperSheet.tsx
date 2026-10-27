@@ -46,12 +46,18 @@ export default function PaperSheet({
     }, 300);
     return () => clearTimeout(t);
   }, [title]);
+  // Focus once, on opening: an effect that re-ran with each new `onClose` pulled focus out of
+  // the field being typed in whenever the Daily tab re-rendered (a save, the device poll).
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
     sheet.current?.focus();
+  }, []);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && close.current();
+    window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
+  }, []);
 
   const card = (f: Face) => {
     const on = choice === f.key;

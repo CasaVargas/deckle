@@ -235,6 +235,10 @@ export default function DailyView({
     return queue.push({ c, slug: live.current.paper });
   };
   const typing = useRef(debounce(() => draftRef.current && push(draftRef.current), 500)).current;
+  const closeSheet = useCallback(() => {
+    typing.flush();
+    setSheetOpen(false);
+  }, [typing]);
   useEffect(() => () => typing.flush(), [typing]);
 
   /** An edit: switches and menus save at once, typing once it pauses (or the field is left). */
@@ -719,10 +723,7 @@ export default function DailyView({
           configPath={state.config_path}
           edit={edit}
           flush={typing.flush}
-          onClose={() => {
-            typing.flush();
-            setSheetOpen(false);
-          }}
+          onClose={closeSheet}
         />
       )}
     </div>
