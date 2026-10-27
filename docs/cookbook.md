@@ -40,18 +40,26 @@ adding five recipes in a row costs one build.
 
 Drop recipe links (`.webloc`, `.url`, `.txt` with one address per line) or saved pages (`.html`,
 `.htm`) into `Recipes/` inside the Inbox (`~/Deckle/Inbox/Recipes` unless `[reading] inbox` moves
-it). `deckle digest watch` (and `digest run`/`push`) adds them to the book, then moves each file
-to `Recipes/Sent`; one that can't be read goes to `Recipes/Unreadable` with a `.txt` giving the
-reason (a page that's down is the same as a page with no recipe: drop the file back in to try
-again). Recipes saved this way never appear in the Daily's Your Reading, and articles dropped in
-the main Inbox never reach the cookbook. A recipe from a site you're signed into goes in as a
-saved `.html` page. An iPhone Shortcut ("Save File") pointed at the iCloud Inbox's `Recipes`
-folder is the phone path.
+it). Only `deckle digest watch` adds them (a one-shot `digest build`, `run` or `push` leaves the
+folder alone, so fetching a backlog can't delay the paper). Each file is moved to `Recipes/Sent`
+once added. Recipes saved this way never appear in the Daily's Your Reading, and articles
+dropped in the main Inbox never reach the cookbook. A recipe from a site you're signed into goes
+in as a saved `.html` page. An iPhone Shortcut ("Save File") pointed at the iCloud Inbox's
+`Recipes` folder is the phone path.
+
+A link that can't be fetched yet (no network when the Mac wakes, a timeout, a server error, a
+file that hasn't finished downloading from iCloud) stays in `Recipes/` and is tried again, at
+most every two minutes, for a day; `watch` says `waits for the next try`. After a day it moves
+to `Recipes/Unreadable` with the reason `Couldn't fetch for a day: …`. A site that says no
+(404, 403, 410…), a page with no recipe on it, or a file of another kind goes to
+`Recipes/Unreadable` at once, with a `.txt` giving the reason. When a `.txt` with several
+addresses fails part way, the reason lists the ones that were added; dropping the file back in
+is safe. Drop an Unreadable file back in to try again.
 
 ### Save recipe bookmarklet
 
 `deckle save --bookmarklet` prints a second bookmarklet beside the paper's, **Save recipe**. Drag it
-to the bookmarks bar; on a recipe page, click it. A small popup says "Saved to your cookbook" and
+to the bookmarks bar; on a recipe page, click it. A small popup says "Sent to your cookbook" and
 `deckle digest watch` adds the recipe on its next scan (every few seconds). It works like the
 paper's bookmarklet (a popup to `127.0.0.1:47219` with the same token, so it needs `watch`
 running), but the listener only writes a link file, named after the page's title, into

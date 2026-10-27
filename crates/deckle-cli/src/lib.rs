@@ -2464,7 +2464,7 @@ fn digest(
             let date = parse_date(date.as_deref())?;
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            scan_inbox(&cfg);
+            scan_inbox(&cfg, false);
             let net = household_net(&path, &cfg);
             let built = deckle_digest::build_gathered(
                 &cfg,
@@ -2588,7 +2588,7 @@ fn digest(
             let converted = work.join("kfx");
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            scan_inbox(&cfg);
+            scan_inbox(&cfg, false);
             let net = household_net(&path, &cfg);
             let first = deckle_digest::build_gathered(
                 &cfg,
@@ -3115,7 +3115,7 @@ fn digest(
                     }
                     Err(_) => {}
                 }
-                scan_inbox(&cfg);
+                scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,
                     cookbook_delivery::rebuild_if_dirty(&cookbook, None).map(|built| {
@@ -5175,8 +5175,9 @@ fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::Reading
 }
 
 /// Queues what was dropped in the Inbox folder: articles for the paper, books for the
-/// outbox (design §10). Says so when it found anything.
-fn scan_inbox(cfg: &deckle_digest::Config) {
+/// outbox (design §10). Says so when it found anything. Recipes for the cookbook are added
+/// only with `recipes` (the watcher): fetching a backlog of them must not hold up a build.
+fn scan_inbox(cfg: &deckle_digest::Config, recipes: bool) {
     let dir = deckle_digest::inbox::expand_home(&cfg.reading.inbox);
     let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
     let kindles: Vec<(String, String)> = cfg
@@ -5224,7 +5225,9 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
     for (file, why) in &r.retry {
         eprintln!("inbox: {} waits for the next scan: {why}", file.display());
     }
-    scan_recipes_folder(&dir);
+    if recipes {
+        scan_recipes_folder(&dir);
+    }
 }
 
 /// Adds what was dropped in the Inbox's `Recipes/` folder to the cookbook (cookbook design
@@ -5253,6 +5256,9 @@ fn scan_recipes_folder(dir: &Path) {
             "inbox: couldn't add {} to the cookbook: {why}",
             file.display()
         );
+    }
+    for (file, why) in &r.retry {
+        eprintln!("inbox: {} waits for the next try: {why}", file.display());
     }
 }
 

@@ -10,14 +10,15 @@
 //! `Recipes/` is the cookbook's: what is dropped there goes to the cookbook, never to Your
 //! Reading ([`scan_recipes`], cookbook design §8.3). It keeps its own `Sent/` and `Unreadable/`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
-use std::time::{Duration, SystemTime};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use chrono::Utc;
 use regex::Regex;
 
-use crate::cookbook::add::{AddOptions, add};
+use crate::cookbook::add::{AddError, AddOptions, add_classified};
 use crate::cookbook::store::Store;
 use crate::fetch::Net;
 use crate::reading::{Added, ReadingQueue};
@@ -314,50 +315,157 @@ fn visible_files(dir: &Path) -> Vec<PathBuf> {
     files
 }
 
+/// Least time between tries at one link file that couldn't be fetched, so a dead site
+/// doesn't hold up every watch tick.
+pub const RECIPE_RETRY_GAP: Duration = Duration::from_secs(2 * 60);
+
+/// How long a link that can't be fetched keeps being tried before it goes to `Unreadable/`.
+const RECIPE_GIVE_UP: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// When each link file that failed to fetch may next be tried (this process only).
+static NEXT_TRY: LazyLock<Mutex<HashMap<PathBuf, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Adds what was dropped in `inbox/Recipes/` to the cookbook (never to Your Reading): each
 /// settled `.webloc`, `.url` or `.txt` (one address per line) is fetched, each `.html` or
 /// `.htm` page is read from disk. Added files move to `Recipes/Sent/`; ones that can't be
-/// read move to `Recipes/Unreadable/` with a `.txt` saying why. The owner picks recipe or
-/// article by the folder; nothing is guessed from the content. An empty folder costs one
-/// directory read and touches neither the network nor the book.
+/// read move to `Recipes/Unreadable/` with a `.txt` saying why. A fetch that fails (offline,
+/// a timeout, a server error: phone-saved links sync in before Wi-Fi is up) leaves the file
+/// for a later scan, tried at most every [`RECIPE_RETRY_GAP`] and for a day; a server that
+/// says no (404, 403…) doesn't. The owner picks recipe or article by the folder; nothing is
+/// guessed from the content. An empty folder costs one directory read and touches neither the
+/// network nor the book.
 pub fn scan_recipes(inbox: &Path, store: &Store, net: &dyn Net, now: SystemTime) -> ScanReport {
+    scan_recipes_spaced(inbox, store, net, now, RECIPE_RETRY_GAP)
+}
+
+/// [`scan_recipes`] with `gap` between tries at a link that can't be fetched.
+pub fn scan_recipes_spaced(
+    inbox: &Path,
+    store: &Store,
+    net: &dyn Net,
+    now: SystemTime,
+    gap: Duration,
+) -> ScanReport {
     let mut report = ScanReport::default();
     for file in visible_files(&inbox.join(RECIPES_FOLDER)) {
         if !settled(&file, now) {
+            continue;
+        }
+        let waiting = NEXT_TRY
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&file).copied())
+            .is_some_and(|at| Instant::now() < at);
+        if waiting {
             continue;
         }
         let ext = file
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
-        let targets = match ext.as_str() {
-            "webloc" | "url" | "txt" => urls_in(&file, &ext),
-            "html" | "htm" => Ok(vec![file.to_string_lossy().into_owned()]),
-            _ => Err(
-                "the cookbook reads .webloc, .url, .txt and .html files, not other kinds".into(),
-            ),
-        };
-        let opts = AddOptions {
-            chapter: None,
-            note: None,
-        };
-        // The file moves to Sent only when every address in it was added; a failure leaves
-        // the earlier ones added, and the file in Unreadable says which one failed.
-        let result = targets.and_then(|targets| {
-            for t in targets {
-                add(store, &t, net, &opts, Utc::now()).map_err(|e| format!("{t}: {e}"))?;
-                report.recipes += 1;
+        let outcome = recipe_file(&file, &ext, store, net, &mut report);
+        match outcome {
+            Err(RecipeFail::Fetch(why)) => {
+                let age = std::fs::metadata(&file)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|m| now.duration_since(m).ok())
+                    .unwrap_or_default();
+                if age >= RECIPE_GIVE_UP {
+                    forget(&file);
+                    report.skip(
+                        file,
+                        Skip::Unreadable(format!("Couldn't fetch for a day: {why}")),
+                    );
+                } else {
+                    if let Ok(mut m) = NEXT_TRY.lock() {
+                        m.insert(file.clone(), Instant::now() + gap);
+                    }
+                    report.skip(file, Skip::Retry(why));
+                }
             }
-            Ok(())
-        });
-        match result {
+            Err(RecipeFail::Other(why)) => {
+                forget(&file);
+                report.skip(file, Skip::Unreadable(why));
+            }
             Ok(()) => {
+                forget(&file);
                 move_to(&file, "Sent");
             }
-            Err(why) => report.skip(file, Skip::Unreadable(why)),
         }
     }
     report
+}
+
+fn forget(file: &Path) {
+    if let Ok(mut m) = NEXT_TRY.lock() {
+        m.remove(file);
+    }
+}
+
+enum RecipeFail {
+    Fetch(String),
+    Other(String),
+}
+
+/// Adds each recipe in one file. Only when every address was added is the file done; a
+/// failure leaves the earlier ones added, and the reason lists them (adding again is safe).
+fn recipe_file(
+    file: &Path,
+    ext: &str,
+    store: &Store,
+    net: &dyn Net,
+    report: &mut ScanReport,
+) -> Result<(), RecipeFail> {
+    let targets = match ext {
+        "webloc" | "url" | "txt" => {
+            // A synced file that hasn't downloaded yet won't open: that is the moment, not
+            // the content.
+            std::fs::read(file).map_err(|e| RecipeFail::Fetch(e.to_string()))?;
+            urls_in(file, ext).map_err(RecipeFail::Other)?
+        }
+        "html" | "htm" => vec![file.to_string_lossy().into_owned()],
+        _ => {
+            return Err(RecipeFail::Other(
+                "the cookbook reads .webloc, .url, .txt and .html files, not other kinds".into(),
+            ));
+        }
+    };
+    let opts = AddOptions {
+        chapter: None,
+        note: None,
+    };
+    let mut added: Vec<String> = Vec::new();
+    for t in targets {
+        match add_classified(store, &t, net, &opts, Utc::now()) {
+            Ok(_) => {
+                report.recipes += 1;
+                added.push(t);
+            }
+            Err(e) => {
+                let (fetch, e) = match e {
+                    AddError::Fetch(e) => (true, e),
+                    AddError::Other(e) => (false, e),
+                };
+                let why = if added.is_empty() {
+                    format!("{t}: {e}")
+                } else {
+                    format!(
+                        "Added before this failed: {}. Failed: {t}: {e}. \
+                         Dropping the file back in is safe.",
+                        added.join(", ")
+                    )
+                };
+                return Err(if fetch {
+                    RecipeFail::Fetch(why)
+                } else {
+                    RecipeFail::Other(why)
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 impl ScanReport {

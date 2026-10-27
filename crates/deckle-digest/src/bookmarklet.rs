@@ -173,7 +173,7 @@ pub fn handle(
             return match write_recipe_link(recipes_inbox, &url, title.as_deref()) {
                 Ok(()) => (
                     200,
-                    page("Saved to your cookbook", title.as_deref().unwrap_or(&url)),
+                    page("Sent to your cookbook", "It appears after the next scan."),
                 ),
                 Err(e) => (500, page("Not saved", &e)),
             };
@@ -332,8 +332,8 @@ mod tests {
         let line = "GET /save?token=abc&kind=recipe&url=https%3A%2F%2Fex.com%2Fr%3Fx%3D1&title=Mom%27s%20Best%20Pie%20%26%20More HTTP/1.1";
         let (status, body) = handle(line, "abc", &q, &inbox, now());
         assert_eq!(status, 200);
-        assert!(body.contains("Saved to your cookbook"), "{body}");
-        assert!(body.contains("Mom&#39;s Best Pie &amp; More"), "{body}");
+        assert!(body.contains("Sent to your cookbook"), "{body}");
+        assert!(body.contains("It appears after the next scan."), "{body}");
         assert_eq!(recipe_files(&inbox), ["mom-s-best-pie-more.url"]);
         // Never fetched, never queued for the paper.
         assert!(q.load().is_empty());

@@ -62,8 +62,10 @@ stay in the Inbox until it's installed.
 
 Recipes have their own folder, `Inbox/Recipes` (made on the first scan): links (`.webloc`, `.url`,
 `.txt`) and saved pages (`.html`) dropped there go to the cookbook instead of Your Reading, and
-move to `Inbox/Recipes/Sent`, or to `Inbox/Recipes/Unreadable` with a `.txt` saying why. Deckle
-doesn't guess which kind a link is: the folder you drop it in decides. An iPhone Shortcut pointed
+move to `Inbox/Recipes/Sent`, or to `Inbox/Recipes/Unreadable` with a `.txt` saying why. Only
+`watch` adds them (not `build`, `run` or `push`). A link it can't fetch yet, such as one that
+syncs in before Wi-Fi is up, waits and is retried for a day; a page that's gone (404) or isn't a
+recipe goes to `Unreadable` at once. Deckle doesn't guess which kind a link is: the folder you drop it in decides. An iPhone Shortcut pointed
 at the iCloud Inbox's `Recipes` folder saves recipes from your phone. `Recipes` is reserved, so a
 Kindle named "Recipes" gets no Inbox folder of its own (`watch` says so once). The Save recipe
 bookmarklet drops its link there too. See [the cookbook](cookbook.md).
