@@ -16,6 +16,8 @@ import { bindable } from "./bindList";
 import ArticleField from "./ArticleField";
 import { parseAddresses } from "./articles";
 import { runSummary } from "./bookStatus";
+import CookbookView from "./CookbookView";
+import type { Incoming } from "./CookbookAdd";
 import DailyView from "./DailyView";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
@@ -74,7 +76,10 @@ export default function App() {
   const [binding, setBinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState<string | null>(null);
-  const [tab, setTab] = useState<"books" | "daily" | "kindle">("books");
+  const [tab, setTab] = useState<"books" | "daily" | "cookbook" | "kindle">("books");
+  /** The Cookbook tab: a counter that sends focus to Add's link box, and what was pasted or dropped on the tab. */
+  const [focusAdd, setFocusAdd] = useState(0);
+  const [incoming, setIncoming] = useState<Incoming | null>(null);
   const [library, setLibrary] = useState<LibraryStatus | null>(null);
   /** The Books tab's library (Books and Kindle design §8): Deckle's, calibre's and your folders' books. */
   const [catalog, setCatalog] = useState<CatalogView | null>(null);
@@ -88,6 +93,8 @@ export default function App() {
   const articleInput = useRef<HTMLInputElement>(null);
   /** Whether ⌘V should open the article field: Books tab showing, nothing running. */
   const pasteReady = useRef(false);
+  /** Whether ⌘V should go to the Cookbook tab's Add: that tab showing, settings closed. */
+  const cookbookPasteReady = useRef(false);
   const settingsOpen = useRef(false);
 
   const addRows = useCallback((rows: BookRow[]) => {
@@ -214,6 +221,13 @@ export default function App() {
       else if (ev.payload.type === "leave") setDragging(false);
       else if (ev.payload.type === "drop") {
         setDragging(false);
+        // On the Cookbook tab, link files and saved pages are recipes for Add; nothing else belongs there.
+        if (tabRef.current === "cookbook") {
+          const files = ev.payload.paths.filter((p) => ARTICLE_FILE.test(p));
+          if (files.length > 0) setIncoming((c) => ({ seq: (c?.seq ?? 0) + 1, targets: files }));
+          else setNotice("Drop .webloc, .url or .html files to add recipes.");
+          return;
+        }
         addPaths(ev.payload.paths);
       }
     });
@@ -255,11 +269,15 @@ export default function App() {
     // A pasted web address on the Books tab (not into a text field) becomes an article.
     const onPaste = (ev: ClipboardEvent) => {
       const el = ev.target as HTMLElement | null;
-      if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
+      if (el?.closest("input, textarea, select, [contenteditable]")) return;
+      const cookbook = cookbookPasteReady.current;
+      if (!pasteReady.current && !cookbook) return;
       const urls = parseAddresses(ev.clipboardData?.getData("text") ?? "");
       if (urls.length === 0) return;
       ev.preventDefault();
-      addArticles(urls);
+      // On the Cookbook tab a pasted address is a recipe for Add; on Books it's an article.
+      if (cookbook) setIncoming((c) => ({ seq: (c?.seq ?? 0) + 1, targets: urls }));
+      else addArticles(urls);
     };
     document.addEventListener("paste", onPaste);
     // The Mac webview sends no paste event unless a text field has focus, so ⌘V (Ctrl+V) on the
@@ -274,7 +292,13 @@ export default function App() {
         return;
       }
       if (ev.key.toLowerCase() !== "v" || !(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey) return;
-      if (!pasteReady.current || el?.closest("input, textarea, select, [contenteditable]")) return;
+      if (el?.closest("input, textarea, select, [contenteditable]")) return;
+      if (cookbookPasteReady.current) {
+        // Add's link box is always on the tab; the paste then lands in it
+        document.getElementById("cookbook-link")?.focus();
+        return;
+      }
+      if (!pasteReady.current) return;
       flushSync(() => setArticleOpen(true));
       articleInput.current?.focus();
     };
@@ -427,6 +451,7 @@ export default function App() {
 
   const doneCount = books.filter((b) => b.status === "done").length;
   pasteReady.current = tab === "books" && settingsPage === null && !busy;
+  cookbookPasteReady.current = tab === "cookbook" && settingsPage === null;
   settingsOpen.current = settingsPage !== null;
 
   const openSettings = (page: SettingsPage = lastPage.current) => setSettingsPage(page);
@@ -505,6 +530,9 @@ export default function App() {
             <button role="tab" aria-selected={tab === "daily"} className={tab === "daily" ? "on" : ""} onClick={() => setTab("daily")}>
               Daily
             </button>
+            <button role="tab" aria-selected={tab === "cookbook"} className={tab === "cookbook" ? "on" : ""} onClick={() => setTab("cookbook")}>
+              Cookbook
+            </button>
             <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
               Kindle
             </button>
@@ -549,6 +577,7 @@ export default function App() {
                   <button role="menuitem" onClick={() => { setAddOpen(false); pickBooks(); }}>Books and documents…</button>
                   <button role="menuitem" onClick={() => { setAddOpen(false); setArticleOpen(true); }}>Web article…</button>
                   <button role="menuitem" onClick={() => { setAddOpen(false); pickNotes(); }}>Notes folder…</button>
+                  <button role="menuitem" onClick={() => { setAddOpen(false); setTab("cookbook"); setFocusAdd((n) => n + 1); }}>Recipe…</button>
                 </div>
               )}
             </div>
@@ -559,6 +588,7 @@ export default function App() {
         </header>
 
         {tab === "daily" && <DailyView onNotice={setNotice} />}
+        {tab === "cookbook" && <CookbookView onNotice={setNotice} focusAdd={focusAdd} incoming={incoming} />}
         {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
         {tab === "books" && articleOpen && (
           <ArticleField

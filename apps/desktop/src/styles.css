@@ -948,3 +948,20 @@ input[type=checkbox] { padding: 0; }
 .set-card .set-row:last-child { border-bottom: 0; }
 .set-card.set-device h3 { margin: 0; }
 .set-card .set-row { padding: 10px 0; }
+
+/* The Cookbook tab (cookbook design §8.2): Add reuses the Daily's columns, cards and the paper switcher */
+.cookbook-preview { display: flex; flex-direction: column; gap: 4px; }
+.cookbook-preview label { display: block; }
+.cookbook-preview select, .cookbook-preview input[type="text"] { width: 100%; box-sizing: border-box; }
+.cookbook-preview-body { display: flex; gap: 14px; align-items: flex-start; }
+.cookbook-photo { width: 132px; height: 132px; flex: none; object-fit: cover; border-radius: 8px; background: var(--line); }
+.cookbook-photo.off { opacity: 0.35; }
+.cookbook-photo.none { display: grid; place-items: center; }
+.cookbook-facts { min-width: 0; }
+.cookbook-facts h3 { overflow-wrap: anywhere; }
+.cookbook-facts p { margin: 2px 0; }
+.cookbook-add-actions { margin-top: 12px; }
+.cookbook-book-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; }
+.cookbook-book-head h3 { overflow-wrap: anywhere; }
+.cookbook-book-head p { margin: 2px 0; }
+.cookbook-cover { width: 84px; aspect-ratio: 5 / 8; flex: none; object-fit: cover; border-radius: 4px; background: var(--line); box-shadow: 0 1px 4px rgba(0,0,0,.25); }

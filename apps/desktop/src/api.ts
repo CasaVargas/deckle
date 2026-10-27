@@ -2,7 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -25,6 +25,7 @@ export const api = {
   appVersion: () => invoke<string>("app_version"),
   takePreloadedBooks: () => invoke<string[]>("take_preloaded_books"),
   takePreloadedTarget: () => invoke<string | null>("take_preloaded_target"),
+  // `--daily` and `--kindle` start on their tabs; the Cookbook tab is never a start tab.
   startTab: () => invoke<"books" | "daily" | "kindle">("start_tab"),
   inspectBooks: (paths: string[]) => invoke<BookRow[]>("inspect_books", { paths }),
   /** The Books tab's library; `device` is the footer's Kindle, for "on this Kindle". */
@@ -142,4 +143,23 @@ export const api = {
   subscriptionSetPassword: (site: string, password: string) => invoke<SiteStatus[]>("subscription_set_password", { site, password }),
   subscriptionTest: (site: string) => invoke<SessionState>("subscription_test", { site }),
   subscriptionForget: (site: string) => invoke<SiteStatus[]>("subscription_forget", { site }),
+
+  // The Cookbook tab. Preview reads a page and writes nothing; add is the one call that commits.
+  cookbookPreview: (target: string) => invoke<RecipePreview>("cookbook_preview", { target }),
+  cookbookAdd: (target: string, chapter: string | null, note: string | null, picture: CookbookPicture | null) =>
+    invoke<CookbookSaved>("cookbook_add", { target, chapter, note, picture }),
+  cookbookBook: () => invoke<CookbookBook>("cookbook_book"),
+  cookbookUpdate: (id: string, patch: CookbookPatch) => invoke<CookbookSaved>("cookbook_update", { id, patch }),
+  cookbookRemove: (id: string) => invoke<void>("cookbook_remove", { id }),
+  cookbookSaveConfig: (cfg: CookbookConfig) => invoke<void>("cookbook_save_config", { cfg }),
+  cookbookSendNow: () => invoke<CookbookSend>("cookbook_send_now"),
+  /** Builds the book; resolves to the EPUB's path. */
+  cookbookPreviewBook: () => invoke<string>("cookbook_preview_book"),
+  cookbookDelivery: () => invoke<CookbookDelivery>("cookbook_delivery"),
+  cookbookSetKindle: (id: string, on: boolean) => invoke<void>("cookbook_set_kindle", { id, on }),
+  /** Draws one recipe's picture (`id`) or every recipe's (`all`); progress comes as `cookbook-illustrate` events. */
+  cookbookIllustrate: (id: string | null, all: boolean, redraw: boolean) => invoke<CookbookIllustrated>("cookbook_illustrate", { id, all, redraw }),
+  cookbookIllustrateStop: () => invoke<void>("cookbook_illustrate_stop"),
+  onCookbookIllustrate: (cb: (e: CookbookIllustrateEvent) => void): Promise<UnlistenFn> =>
+    listen<CookbookIllustrateEvent>("cookbook-illustrate", (ev) => cb(ev.payload)),
 };

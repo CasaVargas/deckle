@@ -921,3 +921,139 @@ export interface DailyEditorConfig {
   model: string;
   endpoint: string;
 }
+
+// The Cookbook tab (cookbook design §8.2). These mirror the DTOs in src-tauri/src/cookbook.rs.
+
+/** Which picture a recipe, or the whole book, prints. `default` is a recipe following the book. */
+export type CookbookPicture = "site" | "illustration" | "none" | "default";
+
+export interface CookbookChapter {
+  id: string;
+  name: string;
+  /** Match keywords; edited in cookbook.toml only. */
+  match: string[];
+}
+
+export interface CookbookConfig {
+  title: string;
+  subtitle: string;
+  picture: Exclude<CookbookPicture, "default">;
+  chapters: CookbookChapter[];
+  illustrations: { enabled: boolean; endpoint: string; model: string };
+}
+
+/** A fetched page, as it would be filed. Nothing is written until it is added. */
+export interface RecipePreview {
+  title: string;
+  site_name: string;
+  source_url: string;
+  description: string | null;
+  yield: string | null;
+  /** Minutes. */
+  prep: number | null;
+  cook: number | null;
+  total: number | null;
+  ingredients: number;
+  steps: number;
+  /** Read from recipe data (true) or from the page text (false). */
+  structured: boolean;
+  chapter: string;
+  chapter_name: string;
+  /** Already in the book: adding says "Updated". */
+  exists: boolean;
+  /** A JPEG data URL. */
+  picture: string | null;
+}
+
+export interface CookbookRecipe {
+  id: string;
+  title: string;
+  site_title: string;
+  title_override: string | null;
+  chapter: string;
+  home: string;
+  home_name: string;
+  added: string;
+  is_new: boolean;
+  structured: boolean;
+  site_name: string;
+  url: string;
+  note: string | null;
+  picture: CookbookPicture;
+  printed: Exclude<CookbookPicture, "default">;
+  has_illustration: boolean;
+  thumb: string | null;
+  ingredients: string[];
+}
+
+export interface CookbookSaved extends CookbookRecipe {
+  stored: "added" | "updated";
+  picture_note: string | null;
+}
+
+export interface CookbookChapterRows {
+  id: string;
+  name: string;
+  match: string[];
+  recipes: CookbookRecipe[];
+}
+
+export interface CookbookBook {
+  config: CookbookConfig;
+  chapters: CookbookChapterRows[];
+  recipes: number;
+  printed_chapters: number;
+  newest: { id: string; title: string; added: string } | null;
+  /** A JPEG data URL: the cover as it will print. */
+  cover: string | null;
+  pending_build: boolean;
+  build_error: string | null;
+  config_path: string;
+}
+
+export interface CookbookPatch {
+  title_override?: string;
+  chapter?: string;
+  picture?: CookbookPicture;
+  note?: string;
+}
+
+export interface CookbookSend {
+  build: string;
+  result: "sent" | "up_to_date" | "off" | "all_current" | "queued";
+  kindle: string | null;
+  message: string;
+  built: number | null;
+}
+
+export type CookbookKindleState = "up_to_date" | "behind" | "never_sent" | "off";
+
+export interface CookbookKindle {
+  name: string;
+  id: string;
+  status: string;
+  state: CookbookKindleState;
+  behind: number | null;
+}
+
+export interface CookbookDelivery {
+  kindles: CookbookKindle[];
+  watcher_installed: boolean;
+  error: string | null;
+}
+
+export interface CookbookIllustrateEvent {
+  n: number;
+  total: number;
+  id: string;
+  title: string;
+  result: "start" | "drawn" | "kept_photo";
+}
+
+export interface CookbookIllustrated {
+  total: number;
+  drawn: number;
+  kept: number;
+  already: number;
+  stopped: boolean;
+}
