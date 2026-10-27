@@ -71,25 +71,27 @@ fn config(root: &Path) -> Config {
     ] {
         put(root, p, b"scheduled sentinel");
     }
-    let mut c = Config::default();
-    c.paper_id = Some(Uuid::parse_str("ea249ae5-771c-4d2b-9f11-5119fbe3feda").unwrap());
-    c.sections = vec![
-        SectionKind::Feeds,
-        SectionKind::Puzzle,
-        SectionKind::Shelf,
-        SectionKind::Weather,
-    ];
-    c.feeds = vec![FeedConfig {
-        name: "Wire".into(),
-        url: FEED.into(),
-        max_items: 10,
+    let mut c = Config {
+        paper_id: Some(Uuid::parse_str("ea249ae5-771c-4d2b-9f11-5119fbe3feda").unwrap()),
+        sections: vec![
+            SectionKind::Feeds,
+            SectionKind::Puzzle,
+            SectionKind::Shelf,
+            SectionKind::Weather,
+        ],
+        feeds: vec![FeedConfig {
+            name: "Wire".into(),
+            url: FEED.into(),
+            max_items: 10,
+            ..Default::default()
+        }],
+        full_text: false,
+        photos: false,
+        latitude: Some(35.4),
+        longitude: Some(-79.5),
+        max_age_hours: 24 * 365,
         ..Default::default()
-    }];
-    c.full_text = false;
-    c.photos = false;
-    c.latitude = Some(35.4);
-    c.longitude = Some(-79.5);
-    c.max_age_hours = 24 * 365;
+    };
     c.reading.inbox = root.join("Inbox").display().to_string();
     c.reading.queue_path = Some(root.join("reading.jsonl"));
     c.reading.long_read_words = 200;

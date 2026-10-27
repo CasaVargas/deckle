@@ -1,0 +1,762 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Deterministic admission and generation-fenced lifecycle, with injected UTC time.
+use super::*;
+use chrono::Duration;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobLease {
+    pub job_id: Uuid,
+    pub edition_id: Uuid,
+    pub producer_id: Uuid,
+    pub paper_id: Uuid,
+    pub root: PathBuf,
+    pub generation: u64,
+    pub attempt: u8,
+    pub started_at: DateTime<Utc>,
+    pub deadline: DateTime<Utc>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Binding {
+    root: PathBuf,
+    producer_id: Uuid,
+    paper_id: Uuid,
+    enabled: bool,
+    stopped: bool,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Entry {
+    request: PressRequest,
+    hash: String,
+    first_seen: DateTime<Utc>,
+    status: PressStatus,
+}
+#[derive(Clone, Serialize, Deserialize)]
+pub(crate) struct Job {
+    id: Uuid,
+    edition: Uuid,
+    producer: Uuid,
+    paper: Uuid,
+    root: PathBuf,
+    first_seen: DateTime<Utc>,
+    lease: Option<JobLease>,
+    terminal: bool,
+}
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub(crate) struct JournalData {
+    bindings: Vec<Binding>,
+    entries: Vec<Entry>,
+    jobs: Vec<Job>,
+}
+pub(crate) fn validate_data(data: &JournalData) -> bool {
+    use std::collections::{HashMap, HashSet};
+    let mut roots = HashSet::new();
+    let mut bindings = HashSet::new();
+    for b in &data.bindings {
+        if !b.root.is_absolute()
+            || !roots.insert(&b.root)
+            || !bindings.insert((b.producer_id, b.paper_id))
+        {
+            return false;
+        }
+    }
+    let mut jobs = HashMap::new();
+    let mut pending_jobs = HashSet::new();
+    let mut active = 0;
+    for j in &data.jobs {
+        if jobs.insert(j.id, j).is_some()
+            || !data
+                .bindings
+                .iter()
+                .any(|b| b.root == j.root && b.producer_id == j.producer && b.paper_id == j.paper)
+        {
+            return false;
+        }
+        if let Some(l) = &j.lease {
+            if l.job_id != j.id
+                || l.edition_id != j.edition
+                || l.root != j.root
+                || l.producer_id != j.producer
+                || l.paper_id != j.paper
+                || !(1..=3).contains(&l.attempt)
+                || l.generation != u64::from(l.attempt)
+                || l.deadline != l.started_at + Duration::minutes(15)
+            {
+                return false;
+            }
+            if !j.terminal {
+                active += 1;
+            }
+        } else if !j.terminal && !pending_jobs.insert((j.producer, j.paper)) {
+            return false;
+        }
+    }
+    if active > 1 {
+        return false;
+    }
+    let mut requests = HashSet::new();
+    let mut pending_counts = HashMap::new();
+    let mut live_jobs = HashSet::new();
+    for e in &data.entries {
+        if !requests.insert(e.request.request_id) {
+            return false;
+        }
+        let Some(b) = data
+            .bindings
+            .iter()
+            .find(|b| b.producer_id == e.request.producer_id && b.paper_id == e.request.paper_id)
+        else {
+            return false;
+        };
+        let binding = PressBinding {
+            root: b.root.clone(),
+            producer_id: b.producer_id,
+            paper_id: b.paper_id,
+        };
+        if e.status.request_id != e.request.request_id {
+            return false;
+        }
+        let Ok(bytes) = serde_json::to_vec(&e.request) else {
+            return false;
+        };
+        if let Err(error) = decode_request(
+            &bytes,
+            Path::new(&format!(
+                ".deckle-press/requests/{}/{}.json",
+                e.request.reader_id, e.request.request_id
+            )),
+            &binding,
+            e.first_seen,
+        ) && (e.status.job_id.is_some()
+            || !matches!(
+                error.code,
+                PressErrorCode::Expired | PressErrorCode::ClockMismatch
+            )
+            || e.status.error_code != Some(error.code))
+        {
+            return false;
+        }
+        let Ok(bytes) = serde_json::to_vec(&e.status) else {
+            return false;
+        };
+        if decode_status(
+            &bytes,
+            Path::new(&format!(
+                ".deckle-press/status/{}.json",
+                e.request.request_id
+            )),
+            &binding,
+        )
+        .is_err()
+        {
+            return false;
+        }
+        let Some(job_id) = e.status.job_id else {
+            if !matches!(e.status.state, PressState::Failed | PressState::Expired)
+                || e.status.started_at.is_some()
+                || !e.status.error_code.is_some_and(rejection_code)
+            {
+                return false;
+            }
+            continue;
+        };
+        let Some(j) = jobs.get(&job_id) else {
+            return false;
+        };
+        if j.producer != binding.producer_id || j.paper != binding.paper_id {
+            return false;
+        }
+        if e.status
+            .result
+            .as_ref()
+            .is_some_and(|r| r.edition_id != j.edition)
+        {
+            return false;
+        }
+        if e.status.started_at != j.lease.as_ref().map(|l| l.started_at)
+            && e.status.state != PressState::Expired
+            && e.status.state != PressState::Failed
+        {
+            return false;
+        }
+        if !terminal(e.status.state) {
+            if j.terminal || (e.status.state == PressState::Building) != j.lease.is_some() {
+                return false;
+            }
+            live_jobs.insert(j.id);
+            let count = pending_counts.entry(e.request.paper_id).or_insert(0);
+            *count += 1;
+            if *count > 100 {
+                return false;
+            }
+        } else if matches!(
+            e.status.state,
+            PressState::Published | PressState::ResultRemoved
+        ) && (!j.terminal || j.lease.is_none())
+        {
+            return false;
+        }
+    }
+    data.jobs
+        .iter()
+        .all(|j| j.terminal || live_jobs.contains(&j.id))
+}
+fn conflict() -> PressError {
+    PressError::new(PressErrorCode::ProtocolConflict)
+}
+fn terminal(state: PressState) -> bool {
+    !matches!(state, PressState::Queued | PressState::Building)
+}
+fn policy(b: &Binding) -> Result<(), PressError> {
+    if !b.enabled {
+        return Err(PressError::new(PressErrorCode::Disabled));
+    }
+    if b.stopped {
+        return Err(PressError::new(PressErrorCode::PressesStopped));
+    }
+    Ok(())
+}
+impl PressJournal {
+    /// Register routing from validated local setup; request bytes cannot supply paths.
+    pub fn register_binding(
+        &mut self,
+        binding: PressBinding,
+        enabled: bool,
+        stopped: bool,
+    ) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        let root = std::fs::canonicalize(binding.root).map_err(|_| journal::storage())?;
+        let mut data = self.data.clone();
+        if data.bindings.iter().any(|b| {
+            b.root == root
+                && (b.producer_id != binding.producer_id || b.paper_id != binding.paper_id)
+        }) {
+            return Err(conflict());
+        }
+        if let Some(b) = data
+            .bindings
+            .iter_mut()
+            .find(|b| b.producer_id == binding.producer_id && b.paper_id == binding.paper_id)
+        {
+            if b.root != root {
+                return Err(conflict());
+            }
+            b.enabled = enabled;
+            b.stopped = stopped;
+        } else {
+            data.bindings.push(Binding {
+                root,
+                producer_id: binding.producer_id,
+                paper_id: binding.paper_id,
+                enabled,
+                stopped,
+            });
+        }
+        self.commit(data)
+    }
+    pub fn accept(
+        &mut self,
+        request: PressRequest,
+        content_hash: &str,
+        now: DateTime<Utc>,
+    ) -> Result<PressStatus, PressError> {
+        self.ensure_healthy()?;
+        if let Some(e) = self
+            .data
+            .entries
+            .iter()
+            .find(|e| e.request.request_id == request.request_id)
+        {
+            if e.hash != content_hash || e.request != request {
+                return Err(conflict());
+            }
+            let mut data = self.data.clone();
+            if expire_queued(&mut data, now)? {
+                self.commit(data)?;
+            }
+            return self.status(request.request_id).ok_or_else(conflict);
+        }
+        let b = self
+            .data
+            .bindings
+            .iter()
+            .find(|b| b.producer_id == request.producer_id && b.paper_id == request.paper_id)
+            .ok_or_else(conflict)?;
+        policy(b)?;
+        let binding = PressBinding {
+            root: b.root.clone(),
+            producer_id: b.producer_id,
+            paper_id: b.paper_id,
+        };
+        let bytes = serde_json::to_vec(&request).map_err(|_| conflict())?;
+        decode_request(
+            &bytes,
+            Path::new(&format!(
+                ".deckle-press/requests/{}/{}.json",
+                request.reader_id, request.request_id
+            )),
+            &binding,
+            now,
+        )?;
+        let mut data = self.data.clone();
+        expire_queued(&mut data, now)?;
+        if data
+            .entries
+            .iter()
+            .filter(|e| e.request.paper_id == request.paper_id && !terminal(e.status.state))
+            .count()
+            >= 100
+        {
+            return Err(PressError::new(PressErrorCode::Busy));
+        }
+        let idx = if let Some(idx) = data
+            .jobs
+            .iter()
+            .position(|j| j.paper == b.paper_id && j.producer == b.producer_id && !j.terminal)
+        {
+            idx
+        } else {
+            data.jobs.push(Job {
+                id: Uuid::new_v4(),
+                edition: Uuid::new_v4(),
+                producer: b.producer_id,
+                paper: b.paper_id,
+                root: b.root.clone(),
+                first_seen: now,
+                lease: None,
+                terminal: false,
+            });
+            data.jobs.len() - 1
+        };
+        let j = &data.jobs[idx];
+        let status = PressStatus {
+            format: "deckle-press-status".into(),
+            version: 1,
+            request_id: request.request_id,
+            producer_id: request.producer_id,
+            paper_id: request.paper_id,
+            revision: 1,
+            state: if j.lease.is_some() {
+                PressState::Building
+            } else {
+                PressState::Queued
+            },
+            updated_at: now,
+            job_id: Some(j.id),
+            started_at: j.lease.as_ref().map(|l| l.started_at),
+            error_code: None,
+            result: None,
+            removed_at: None,
+            message: None,
+        };
+        data.entries.push(Entry {
+            request,
+            hash: content_hash.to_owned(),
+            first_seen: now,
+            status: status.clone(),
+        });
+        self.commit(data)?;
+        Ok(status)
+    }
+    /// Caller must acquire the existing build run_lock before this call. Waiting does
+    /// not start the deadline. This supervisor lock must cover all papers locally.
+    pub fn admit(&mut self, now: DateTime<Utc>) -> Result<Option<JobLease>, PressError> {
+        self.ensure_healthy()?;
+        let mut data = self.data.clone();
+        let changed = expire_queued(&mut data, now)?;
+        if data.jobs.iter().any(|j| j.lease.is_some() && !j.terminal) {
+            if changed {
+                self.commit(data)?;
+            }
+            return Ok(None);
+        }
+        let selected = data
+            .jobs
+            .iter()
+            .filter(|j| !j.terminal && j.lease.is_none())
+            .filter(|j| {
+                !data.jobs.iter().any(|previous| {
+                    previous.paper == j.paper
+                        && previous
+                            .lease
+                            .as_ref()
+                            .is_some_and(|l| now < l.started_at + Duration::minutes(5))
+                })
+            })
+            .min_by_key(|j| (j.first_seen, j.id))
+            .map(|j| j.id);
+        let lease = selected.map(|id| {
+            let j = data.jobs.iter_mut().find(|j| j.id == id).unwrap();
+            let lease = JobLease {
+                job_id: id,
+                edition_id: j.edition,
+                producer_id: j.producer,
+                paper_id: j.paper,
+                root: j.root.clone(),
+                generation: 1,
+                attempt: 1,
+                started_at: now,
+                deadline: now + Duration::minutes(15),
+            };
+            j.lease = Some(lease.clone());
+            for e in &mut data.entries {
+                if e.status.job_id == Some(id) && e.status.state == PressState::Queued {
+                    e.status.state = PressState::Building;
+                    e.status.started_at = Some(now);
+                    e.status.updated_at = now;
+                    e.status.revision += 1;
+                }
+            }
+            lease
+        });
+        if lease.is_some() || changed {
+            self.commit(data)?;
+        }
+        Ok(lease)
+    }
+    pub fn status(&self, request_id: Uuid) -> Option<PressStatus> {
+        self.data
+            .entries
+            .iter()
+            .find(|e| e.request.request_id == request_id)
+            .map(|e| e.status.clone())
+    }
+    pub fn active(&self) -> Option<JobLease> {
+        self.data
+            .jobs
+            .iter()
+            .find(|j| !j.terminal && j.lease.is_some())
+            .and_then(|j| j.lease.clone())
+    }
+    pub fn validate_lease(&self, lease: &JobLease, now: DateTime<Utc>) -> Result<(), PressError> {
+        self.check_generation(lease)?;
+        if now >= lease.deadline {
+            return Err(PressError::new(PressErrorCode::TimedOut));
+        }
+        Ok(())
+    }
+    /// Final filesystem transaction executes while this journal owns the supervisor
+    /// lock. Verify expensive assets/binding first, then sample `now` immediately
+    /// before calling. The finalizer must check the deadline again before rename if
+    /// it performs appreciable work. It cannot release this journal's local lock.
+    pub fn publish(
+        &mut self,
+        lease: &JobLease,
+        result: PressResult,
+        now: DateTime<Utc>,
+        finalize: impl FnOnce() -> Result<(), PressError>,
+    ) -> Result<(), PressError> {
+        self.validate_lease(lease, now)?;
+        validate_result(lease, &result)?;
+        finalize()?;
+        self.commit_result(lease, result, now)
+    }
+}
+
+impl PressJournal {
+    /// Regenerate shared status after a crash; callers write only committed snapshots.
+    pub fn statuses(&self) -> Vec<PressStatus> {
+        self.data.entries.iter().map(|e| e.status.clone()).collect()
+    }
+    /// Recover only after confirming the previous worker has exited or been terminated.
+    /// Keep the build run_lock held throughout recovery. Never extend the first deadline.
+    pub fn recover(
+        &mut self,
+        previous: &JobLease,
+        now: DateTime<Utc>,
+    ) -> Result<JobLease, PressError> {
+        self.check_generation(previous)?;
+        let error = if now >= previous.deadline {
+            Some(PressErrorCode::TimedOut)
+        } else if previous.attempt >= 3 {
+            Some(PressErrorCode::BuildFailed)
+        } else {
+            None
+        };
+        if let Some(code) = error {
+            self.fail(previous, code, now)?;
+            return Err(PressError::new(code));
+        }
+        let mut data = self.data.clone();
+        let mut lease = previous.clone();
+        lease.attempt += 1;
+        lease.generation += 1;
+        data.jobs
+            .iter_mut()
+            .find(|j| j.id == lease.job_id)
+            .unwrap()
+            .lease = Some(lease.clone());
+        for e in &mut data.entries {
+            if e.status.job_id == Some(lease.job_id) && !terminal(e.status.state) {
+                e.status.updated_at = now;
+                e.status.revision += 1;
+            }
+        }
+        self.commit(data)?;
+        Ok(lease)
+    }
+    /// Fences the generation before failure statuses can be written. Caller must stop
+    /// the previous worker before releasing the build slot or admitting another job.
+    pub fn fail(
+        &mut self,
+        lease: &JobLease,
+        code: PressErrorCode,
+        now: DateTime<Utc>,
+    ) -> Result<(), PressError> {
+        self.check_generation(lease)?;
+        if !matches!(
+            code,
+            PressErrorCode::SourceFailure
+                | PressErrorCode::BuildFailed
+                | PressErrorCode::TimedOut
+                | PressErrorCode::StorageUnavailable
+        ) {
+            return Err(conflict());
+        }
+        let mut data = self.data.clone();
+        data.jobs
+            .iter_mut()
+            .find(|j| j.id == lease.job_id)
+            .unwrap()
+            .terminal = true;
+        for e in &mut data.entries {
+            if e.status.job_id == Some(lease.job_id) && !terminal(e.status.state) {
+                e.status.state = PressState::Failed;
+                e.status.error_code = Some(code);
+                e.status.updated_at = now;
+                e.status.revision += 1;
+            }
+        }
+        self.commit(data)
+    }
+    fn check_generation(&self, lease: &JobLease) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        if self
+            .data
+            .jobs
+            .iter()
+            .any(|j| !j.terminal && j.lease.as_ref() == Some(lease))
+        {
+            Ok(())
+        } else {
+            Err(conflict())
+        }
+    }
+}
+
+fn validate_result(lease: &JobLease, result: &PressResult) -> Result<(), PressError> {
+    if result.edition_id != lease.edition_id
+        || result.bundle != format!(".deckle-press/editions/{}.deckle", lease.edition_id)
+        || result.manifest_sha256.len() != 64
+        || !result
+            .manifest_sha256
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(conflict());
+    }
+    Ok(())
+}
+impl PressJournal {
+    /// Reconcile only a fully verified immutable final output that already exists.
+    /// This recovery path never creates/renames an output and runs before deciding
+    /// timeout. Verification must check job identity, binding, manifest and assets.
+    pub fn reconcile_published(
+        &mut self,
+        lease: &JobLease,
+        result: PressResult,
+        now: DateTime<Utc>,
+        verify_committed: impl FnOnce() -> Result<(), PressError>,
+    ) -> Result<(), PressError> {
+        self.check_generation(lease)?;
+        validate_result(lease, &result)?;
+        verify_committed()?;
+        self.commit_result(lease, result, now)
+    }
+    pub fn binding_for_request(&self, request_id: Uuid) -> Option<PressBinding> {
+        let entry = self
+            .data
+            .entries
+            .iter()
+            .find(|e| e.request.request_id == request_id)?;
+        let b = self.data.bindings.iter().find(|b| {
+            b.producer_id == entry.request.producer_id && b.paper_id == entry.request.paper_id
+        })?;
+        Some(PressBinding {
+            root: b.root.clone(),
+            producer_id: b.producer_id,
+            paper_id: b.paper_id,
+        })
+    }
+
+    fn commit_result(
+        &mut self,
+        lease: &JobLease,
+        result: PressResult,
+        now: DateTime<Utc>,
+    ) -> Result<(), PressError> {
+        let mut data = self.data.clone();
+        data.jobs
+            .iter_mut()
+            .find(|j| j.id == lease.job_id)
+            .unwrap()
+            .terminal = true;
+        for e in &mut data.entries {
+            if e.status.job_id == Some(lease.job_id) && !terminal(e.status.state) {
+                e.status.state = PressState::Published;
+                e.status.result = Some(result.clone());
+                e.status.updated_at = now;
+                e.status.revision += 1;
+            }
+        }
+        self.commit(data)
+    }
+}
+
+fn expire_queued(data: &mut JournalData, now: DateTime<Utc>) -> Result<bool, PressError> {
+    let mut changed = false;
+    for e in &mut data.entries {
+        if e.status.state == PressState::Queued {
+            let b = data
+                .bindings
+                .iter()
+                .find(|b| {
+                    b.paper_id == e.request.paper_id && b.producer_id == e.request.producer_id
+                })
+                .ok_or_else(conflict)?;
+            let error = if now >= e.request.expires_at {
+                Some(PressErrorCode::Expired)
+            } else {
+                policy(b).err().map(|e| e.code)
+            };
+            if let Some(code) = error {
+                e.status.state = if code == PressErrorCode::Expired {
+                    PressState::Expired
+                } else {
+                    PressState::Failed
+                };
+                e.status.error_code = Some(code);
+                e.status.revision += 1;
+                e.status.updated_at = now;
+                changed = true;
+            }
+        }
+    }
+    for j in &mut data.jobs {
+        if !j.terminal
+            && !data
+                .entries
+                .iter()
+                .any(|e| e.status.job_id == Some(j.id) && !terminal(e.status.state))
+        {
+            j.terminal = true;
+            changed = true;
+        }
+    }
+
+    Ok(changed)
+}
+
+fn rejection_code(code: PressErrorCode) -> bool {
+    matches!(
+        code,
+        PressErrorCode::Busy
+            | PressErrorCode::Disabled
+            | PressErrorCode::PressesStopped
+            | PressErrorCode::Expired
+            | PressErrorCode::ClockMismatch
+    )
+}
+impl PressJournal {
+    /// Durably refuse a safely bound, typed request. Its immutable ID remains terminal;
+    /// a later explicit retry needs a new ID. Malformed/unbound controls are diagnostics.
+    /// Existing accepted or rejected IDs return their original committed status.
+    pub fn reject(
+        &mut self,
+        request: PressRequest,
+        content_hash: &str,
+        code: PressErrorCode,
+        now: DateTime<Utc>,
+    ) -> Result<PressStatus, PressError> {
+        self.ensure_healthy()?;
+        if self
+            .data
+            .entries
+            .iter()
+            .any(|e| e.request.request_id == request.request_id)
+        {
+            return self.accept(request, content_hash, now);
+        }
+        if !rejection_code(code) {
+            return Err(conflict());
+        }
+        let b = self
+            .data
+            .bindings
+            .iter()
+            .find(|b| b.producer_id == request.producer_id && b.paper_id == request.paper_id)
+            .ok_or_else(conflict)?;
+        let binding = PressBinding {
+            root: b.root.clone(),
+            producer_id: b.producer_id,
+            paper_id: b.paper_id,
+        };
+        let bytes = serde_json::to_vec(&request).map_err(|_| conflict())?;
+        match decode_request(
+            &bytes,
+            Path::new(&format!(
+                ".deckle-press/requests/{}/{}.json",
+                request.reader_id, request.request_id
+            )),
+            &binding,
+            now,
+        ) {
+            Ok(_)
+                if matches!(
+                    code,
+                    PressErrorCode::Expired | PressErrorCode::ClockMismatch
+                ) =>
+            {
+                return Err(conflict());
+            }
+            Err(error)
+                if error.code == code
+                    && matches!(
+                        code,
+                        PressErrorCode::Expired | PressErrorCode::ClockMismatch
+                    ) => {}
+            Err(error) => return Err(error),
+            Ok(_) => (),
+        }
+        let status = PressStatus {
+            format: "deckle-press-status".into(),
+            version: 1,
+            request_id: request.request_id,
+            producer_id: request.producer_id,
+            paper_id: request.paper_id,
+            revision: 1,
+            state: if code == PressErrorCode::Expired {
+                PressState::Expired
+            } else {
+                PressState::Failed
+            },
+            updated_at: now,
+            job_id: None,
+            started_at: None,
+            error_code: Some(code),
+            result: None,
+            removed_at: None,
+            message: None,
+        };
+        let mut data = self.data.clone();
+        data.entries.push(Entry {
+            request,
+            hash: content_hash.to_owned(),
+            first_seen: now,
+            status: status.clone(),
+        });
+        self.commit(data)?;
+        Ok(status)
+    }
+}

@@ -32,3 +32,5 @@ mod sun;
 mod template_photos;
 mod weather_page;
 mod web_book;
+
+mod press_queue;
