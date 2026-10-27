@@ -797,6 +797,10 @@ pub struct SyncConfig {
     pub readership: bool,
     /// Take a snapshot of what's on the Kindle for From Your Shelf (shelf design §6).
     pub shelf: bool,
+    /// Put the Kitchen Book (the cookbook) on the Kindle (cookbook design §9). On by default,
+    /// so it's only written to the file when turned off.
+    #[serde(skip_serializing_if = "is_true")]
+    pub cookbook: bool,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, DeviceSync>,
 }
@@ -809,6 +813,7 @@ impl Default for SyncConfig {
             clippings: false,
             readership: true,
             shelf: true,
+            cookbook: true,
             devices: BTreeMap::new(),
         }
     }
@@ -828,6 +833,8 @@ pub struct DeviceSync {
     pub readership: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shelf: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cookbook: Option<bool>,
     /// What From Your Shelf calls this Kindle ("Mom's Kindle"); else the model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -841,6 +848,11 @@ pub struct SyncActions {
     pub clippings: bool,
     pub readership: bool,
     pub shelf: bool,
+    pub cookbook: bool,
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 impl SyncConfig {
@@ -860,6 +872,7 @@ impl SyncConfig {
             clippings: exact.clippings.or(older.clippings),
             readership: exact.readership.or(older.readership),
             shelf: exact.shelf.or(older.shelf),
+            cookbook: exact.cookbook.or(older.cookbook),
             name: exact.name.or_else(|| older.name.clone()),
         }
     }
@@ -877,6 +890,7 @@ impl SyncConfig {
             clippings: d.clippings.unwrap_or(self.clippings),
             readership: d.readership.unwrap_or(self.readership),
             shelf: d.shelf.unwrap_or(self.shelf),
+            cookbook: d.cookbook.unwrap_or(self.cookbook),
         }
     }
 
@@ -2298,6 +2312,7 @@ mod tests {
             clippings: false,
             readership: true,
             shelf: true,
+            cookbook: true,
         };
         assert_eq!(c.sync.for_device("G000"), want);
         assert_eq!(
@@ -2319,6 +2334,7 @@ mod tests {
             clippings,
             readership: true,
             shelf: true,
+            cookbook: true,
         };
         assert_eq!(c.sync.for_device("G000"), actions(false, true, false));
         assert_eq!(
@@ -2327,6 +2343,61 @@ mod tests {
         );
         assert_eq!(c.sync.for_device("other"), actions(true, false, false));
         assert!(c.sync.any_clippings());
+    }
+
+    #[test]
+    fn cookbook_defaults_on() {
+        let c = Config::parse("").unwrap();
+        assert!(c.sync.cookbook);
+        assert!(c.sync.for_device("G000").cookbook);
+        assert!(
+            Config::parse(STARTER)
+                .unwrap()
+                .sync
+                .for_device("G000")
+                .cookbook
+        );
+    }
+
+    #[test]
+    fn device_override_turns_off() {
+        let c = Config::parse(
+            "[sync.devices.\"G000\"]\ncookbook = false\n\n\
+             [sync.devices.\"Kindle/Kindle\"]\nname = \"Den\"\n",
+        )
+        .unwrap();
+        assert!(!c.sync.for_device("G000").cookbook);
+        assert!(c.sync.for_device("Kindle/Kindle").cookbook);
+        assert!(c.sync.for_device("other").cookbook);
+        // The household switch turns it off everywhere a Kindle doesn't say otherwise.
+        let c =
+            Config::parse("[sync]\ncookbook = false\n\n[sync.devices.\"G000\"]\ncookbook = true\n")
+                .unwrap();
+        assert!(c.sync.for_device("G000").cookbook);
+        assert!(!c.sync.for_device("other").cookbook);
+    }
+
+    #[test]
+    fn round_trips_without_writing_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("digest.toml");
+        std::fs::write(
+            &path,
+            "[sync]\npush = true\n\n[sync.devices.\"G000\"]\nname = \"Den\"\n",
+        )
+        .unwrap();
+        let c = Config::load(&path).unwrap();
+        save(&path, &c).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(!text.contains("cookbook"), "no key gained:\n{text}");
+        // A value that isn't the default is written, and read back.
+        let mut c = Config::load(&path).unwrap();
+        c.sync.cookbook = false;
+        c.sync.devices.get_mut("G000").unwrap().cookbook = Some(true);
+        save(&path, &c).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("cookbook = false"), "{text}");
+        assert_eq!(Config::load(&path).unwrap(), c);
     }
 
     #[test]
