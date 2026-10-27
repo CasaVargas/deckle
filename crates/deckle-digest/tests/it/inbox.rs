@@ -419,3 +419,31 @@ fn the_article_scan_makes_the_recipes_folder() {
     scan(&inbox, &q, later());
     assert!(inbox.join("Recipes").is_dir());
 }
+
+#[test]
+fn a_bookmarklet_link_is_added_by_the_next_scan() {
+    let (d, q, inbox, store) = recipes_setup();
+    let line = format!(
+        "GET /save?token=t&kind=recipe&url={}&title=Oat%20Cookies HTTP/1.1",
+        deckle_digest::fetch::encode(RECIPE_URL)
+    );
+    let (status, _) = deckle_digest::bookmarklet::handle(
+        &line,
+        "t",
+        &q,
+        &inbox.join("Recipes"),
+        chrono::Utc::now(),
+    );
+    assert_eq!(status, 200);
+    let net = Web::new();
+    assert!(
+        net.0.lock().unwrap().is_empty(),
+        "the handler fetched nothing"
+    );
+    let r = scan_recipes(&inbox, &store, &net, later());
+    assert_eq!(r.recipes, 1, "{:?}", r.unreadable);
+    assert_eq!(store.all().unwrap()[0].recipe.title, "Oat Cookies");
+    assert!(inbox.join("Recipes/Sent/oat-cookies.url").exists());
+    assert!(q.load().is_empty());
+    drop(d);
+}

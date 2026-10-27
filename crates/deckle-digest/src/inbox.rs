@@ -82,7 +82,7 @@ pub fn expand_home(p: &str) -> PathBuf {
 }
 
 /// `dir/name`, or `dir/name (2).ext`… when taken.
-fn free_name(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn free_name(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
         return first;

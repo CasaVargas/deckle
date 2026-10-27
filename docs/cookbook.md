@@ -48,6 +48,17 @@ the main Inbox never reach the cookbook. A recipe from a site you're signed into
 saved `.html` page. An iPhone Shortcut ("Save File") pointed at the iCloud Inbox's `Recipes`
 folder is the phone path.
 
+### Save recipe bookmarklet
+
+`deckle save --bookmarklet` prints a second bookmarklet beside the paper's, **Save recipe**. Drag it
+to the bookmarks bar; on a recipe page, click it. A small popup says "Saved to your cookbook" and
+`deckle digest watch` adds the recipe on its next scan (every few seconds). It works like the
+paper's bookmarklet (a popup to `127.0.0.1:47219` with the same token, so it needs `watch`
+running), but the listener only writes a link file, named after the page's title, into
+`Inbox/Recipes`; the scan does the fetching. It sends the page's address only, never its HTML.
+For a recipe behind a login, save the page as `.html` and drop it into `Inbox/Recipes`. If the
+popup says the bookmarklet is out of date, run `deckle save --bookmarklet` again.
+
 `Recipes` is reserved in the Inbox: a Kindle actually named "Recipes" can't have a folder there,
 and `watch` says so once.
 

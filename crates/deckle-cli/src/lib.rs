@@ -3064,8 +3064,12 @@ fn digest(
                 .transpose()
             {
                 Ok(Some(token)) => {
+                    // Save recipe drops its link file in the Inbox's Recipes folder, where
+                    // the scan below adds it to the cookbook.
+                    let recipes = deckle_digest::inbox::expand_home(&cfg.reading.inbox)
+                        .join(deckle_digest::inbox::RECIPES_FOLDER);
                     std::thread::spawn(move || {
-                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token) {
+                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token, recipes) {
                             eprintln!(
                                 "bookmarklet: can't listen on 127.0.0.1:{}: {e}",
                                 deckle_digest::bookmarklet::PORT
@@ -5266,9 +5270,12 @@ fn save(
         let dir = queue.path.parent().unwrap_or(Path::new("."));
         let token = deckle_digest::bookmarklet::token(dir).map_err(|e| e.to_string())?;
         println!(
-            "Drag this to your bookmarks bar (or make a bookmark with it as the address).\n\
-             It works while `deckle digest watch` is running.\n\n{}",
-            deckle_digest::bookmarklet::javascript(&token)
+            "Drag these to your bookmarks bar (or make a bookmark with each as the address).\n\
+             They work while `deckle digest watch` is running.\n\n\
+             Save to paper (an article for tomorrow's Daily):\n{}\n\n\
+             Save recipe (a recipe for the cookbook):\n{}",
+            deckle_digest::bookmarklet::javascript(&token),
+            deckle_digest::bookmarklet::recipe_javascript(&token)
         );
         return Ok(ExitCode::SUCCESS);
     }
