@@ -269,7 +269,7 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     if !e.place.is_empty() {
         c.right(&f.bold, 26.0, y, &e.place.to_uppercase());
     }
-    c.centered(&f.italic, 26.0, y, "All the news that fits", BLACK);
+    c.centered(&f.italic, 26.0, y, "Printed this morning", BLACK);
     y += 18.0;
     c.rule(y, 2.0);
     let size = fit(&f.black, 200.0, &e.paper, inner);
