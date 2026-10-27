@@ -1676,20 +1676,32 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
 /// `old` takes `new`'s keys and values; a value that changed keeps its comments, one that
 /// didn't is left alone, and keys `new` lacks (cleared options) are removed.
 pub(crate) fn merge_table(old: &mut toml_edit::Table, new: &toml_edit::Table) {
+    merge_tables(old, new, true)
+}
+
+/// [`merge_table`] for a file with keys this build doesn't know (a newer Deckle's, or the
+/// owner's own): keys `new` lacks stay. The caller removes the ones it knows are cleared.
+pub(crate) fn merge_table_keeping(old: &mut toml_edit::Table, new: &toml_edit::Table) {
+    merge_tables(old, new, false)
+}
+
+fn merge_tables(old: &mut toml_edit::Table, new: &toml_edit::Table, prune: bool) {
     use toml_edit::Item;
-    let gone: Vec<String> = old
-        .iter()
-        .map(|(k, _)| k.to_owned())
-        .filter(|k| !new.contains_key(k))
-        .collect();
-    for k in gone {
-        old.remove(&k);
+    if prune {
+        let gone: Vec<String> = old
+            .iter()
+            .map(|(k, _)| k.to_owned())
+            .filter(|k| !new.contains_key(k))
+            .collect();
+        for k in gone {
+            old.remove(&k);
+        }
     }
     for (k, item) in new.iter() {
         match (old.get_mut(k), item) {
-            (Some(Item::Table(o)), Item::Table(n)) => merge_table(o, n),
+            (Some(Item::Table(o)), Item::Table(n)) => merge_tables(o, n, prune),
             (Some(Item::Table(o)), Item::Value(toml_edit::Value::InlineTable(n))) => {
-                merge_table(o, &n.clone().into_table())
+                merge_tables(o, &n.clone().into_table(), prune)
             }
             (Some(Item::Value(o)), Item::Value(n)) => {
                 if o.to_string().trim() != n.to_string().trim() {
@@ -1722,7 +1734,7 @@ pub(crate) fn merge_table(old: &mut toml_edit::Table, new: &toml_edit::Table) {
                         Some(ot) => ot.clone(),
                         None => nt.clone(),
                     };
-                    merge_table(&mut t, &nt);
+                    merge_tables(&mut t, &nt, prune);
                     t.set_position(slots.next());
                     merged.push(t);
                 }

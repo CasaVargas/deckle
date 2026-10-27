@@ -3,6 +3,7 @@
 
 mod cli;
 mod cookbook;
+pub mod cookbook_api;
 mod cookbook_delivery;
 mod highlights;
 mod inbox;
@@ -4177,17 +4178,29 @@ fn push_queued(
     papers: &[deckle_digest::Config],
     target: Option<Target>,
 ) -> Result<DigestOutcome, String> {
-    let cfg = &papers[0];
-    // The Kitchen Book rides along when this Kindle hasn't the newest build (cookbook §9). A
-    // folder is an export, not a Kindle: it gets none.
     let cookbook = deckle_digest::cookbook::store::Store::new(
         deckle_digest::cookbook::store::Store::default_dir(),
     );
+    push_queued_with(main, queue, papers, target, &cookbook)
+}
+
+/// [`push_queued`] with the cookbook folder given (`cookbook send` builds into one and must
+/// offer from the same).
+fn push_queued_with(
+    main: &Path,
+    queue: &deckle_core::queue::Queue,
+    papers: &[deckle_digest::Config],
+    target: Option<Target>,
+    cookbook: &deckle_digest::cookbook::store::Store,
+) -> Result<DigestOutcome, String> {
+    let cfg = &papers[0];
+    // The Kitchen Book rides along when this Kindle hasn't the newest build (cookbook §9). A
+    // folder is an export, not a Kindle: it gets none.
     let id = target.as_ref().and_then(cookbook_delivery::kindle_id);
     let mut cookbook_error = None;
     if let Some(id) = &id
         && let Err(e) =
-            cookbook_delivery::offer(&cookbook, queue, id, cfg.sync.for_device(id).cookbook)
+            cookbook_delivery::offer(cookbook, queue, id, cfg.sync.for_device(id).cookbook)
     {
         eprintln!("cookbook: {e}");
         cookbook_error = Some(e);
@@ -4215,7 +4228,7 @@ fn push_queued(
         .and_then(|k| cookbook_delivery::queued_build(queue, k));
     let mut outcome = sync_to(main, queue, papers, &target, plan)?;
     if let (Some(flush), Some(id)) = (&outcome.flush, &id)
-        && let Err(e) = cookbook_delivery::record(&cookbook, id, flush, pushed.as_deref())
+        && let Err(e) = cookbook_delivery::record(cookbook, id, flush, pushed.as_deref())
     {
         eprintln!("cookbook: {e}");
         cookbook_error = Some(e);

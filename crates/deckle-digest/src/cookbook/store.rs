@@ -52,7 +52,13 @@ fn default_picture() -> Picture {
 #[serde(default)]
 pub struct IllustrationsConfig {
     pub enabled: bool,
+    /// Empty means [`illustrate::DEFAULT_ENDPOINT`](super::illustrate::DEFAULT_ENDPOINT); then
+    /// the key is left out of the file.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub endpoint: String,
+    /// Empty means [`illustrate::DEFAULT_MODEL`](super::illustrate::DEFAULT_MODEL); then the
+    /// key is left out of the file.
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub model: String,
 }
 
@@ -196,7 +202,9 @@ impl Store {
     }
 
     /// Writes `cfg` into `cookbook.toml`, keeping the comments, key order and every value that
-    /// didn't change, as `config::save` does for `digest.toml`.
+    /// didn't change, as `config::save` does for `digest.toml`. Keys this build doesn't know
+    /// (a newer Deckle's, or the owner's own, at the top, in a chapter or in `[illustrations]`)
+    /// stay; the options it does know and `cfg` leaves empty are removed.
     pub fn save_config(&self, cfg: &BookConfig) -> Result<(), String> {
         let path = self.config_path();
         let text = match std::fs::read_to_string(&path) {
@@ -209,7 +217,19 @@ impl Store {
             .map_err(|e| format!("{}: {e}", path.display()))?;
         let mut new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
         spread_tables(new.as_table_mut());
-        crate::config::merge_table(doc.as_table_mut(), new.as_table());
+        // An empty endpoint or model isn't serialized: clearing one must still remove it.
+        if let Some(ill) = doc
+            .get_mut("illustrations")
+            .and_then(|i| i.as_table_like_mut())
+        {
+            let kept = new.get("illustrations").and_then(|i| i.as_table_like());
+            for key in ["endpoint", "model"] {
+                if kept.is_none_or(|t| !t.contains_key(key)) {
+                    ill.remove(key);
+                }
+            }
+        }
+        crate::config::merge_table_keeping(doc.as_table_mut(), new.as_table());
         write_atomic(&path, doc.to_string())
     }
 

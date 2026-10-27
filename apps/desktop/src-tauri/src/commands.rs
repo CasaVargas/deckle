@@ -51,6 +51,9 @@ pub struct Settings {
     pub llm_endpoint: String,
     /// Optional; empty falls back to ANTHROPIC_API_KEY / OPENAI_API_KEY in the environment.
     pub llm_api_key: String,
+    /// The key the cookbook's illustrations send to their image endpoint (cookbook §7.2); empty
+    /// uses OPENAI_API_KEY. Never used by X-Ray.
+    pub illustrations_api_key: String,
     pub xray: bool,
     /// Word Wise sidecar on EBOK books (M4); the first use downloads Deckle's database.
     pub word_wise: bool,
@@ -79,6 +82,7 @@ impl Default for Settings {
             llm_model: String::new(),
             llm_endpoint: String::new(),
             llm_api_key: String::new(),
+            illustrations_api_key: String::new(),
             xray: true,
             word_wise: true,
             word_wise_level: 5,
@@ -673,6 +677,19 @@ pub fn save_settings_to(file: &Path, s: &Settings) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Changes the illustrations key and nothing else in the settings file. A file that is there but
+/// can't be read is left alone (the error says so) rather than rewritten from defaults.
+pub fn set_illustrations_key_at(file: &Path, key: &str) -> Result<(), String> {
+    let mut s = match std::fs::read(file) {
+        Ok(b) => serde_json::from_slice::<Settings>(&b)
+            .map_err(|e| format!("Can't read the settings file, so the key was not saved: {e}"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
+        Err(e) => return Err(format!("Can't read the settings file: {e}")),
+    };
+    s.illustrations_api_key = key.trim().to_owned();
+    save_settings_to(file, &s)
+}
+
 /// The LLM settings as a pipeline config; `off` (or anything unknown) disables it.
 pub fn llm_config(settings: &Settings) -> Option<LlmConfig> {
     use deckle_xray::llm::Provider;
@@ -1102,6 +1119,13 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 #[tauri::command]
 pub fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
     save_settings_to(&state.settings_file, &settings)
+}
+
+/// Sets only the cookbook's image key (Book settings), so the other settings can't be lost to a
+/// stale copy in the page.
+#[tauri::command]
+pub fn set_illustrations_key(state: State<'_, AppState>, key: String) -> Result<(), String> {
+    set_illustrations_key_at(&state.settings_file, &key)
 }
 
 #[tauri::command]
@@ -1572,9 +1596,51 @@ mod tests {
         changed.typography = true;
         changed.generated_cover = false;
         changed.popup_notes = true;
+        changed.illustrations_api_key = "sk-image".into();
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
         assert_eq!(load_settings_from(&file), changed);
+    }
+
+    #[test]
+    fn an_old_settings_file_has_no_illustrations_key_and_keeps_the_llm_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, br#"{"llm_api_key":"sk-ant-x"}"#).unwrap();
+        let s = load_settings_from(&file);
+        assert_eq!(s.illustrations_api_key, "");
+        assert_eq!(s.llm_api_key, "sk-ant-x");
+    }
+
+    #[test]
+    fn setting_the_illustrations_key_changes_that_field_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        let s = Settings {
+            llm_api_key: "sk-ant-x".into(),
+            cde: "ebok".into(),
+            ..Settings::default()
+        };
+        save_settings_to(&file, &s).unwrap();
+        set_illustrations_key_at(&file, "  sk-image ").unwrap();
+        let back = load_settings_from(&file);
+        assert_eq!(back.illustrations_api_key, "sk-image");
+        assert_eq!(back.llm_api_key, "sk-ant-x");
+        assert_eq!(back.cde, "ebok");
+        // No file yet: one is started
+        let fresh = dir.path().join("new").join("settings.json");
+        set_illustrations_key_at(&fresh, "k").unwrap();
+        assert_eq!(load_settings_from(&fresh).illustrations_api_key, "k");
+    }
+
+    #[test]
+    fn a_settings_file_that_cannot_be_read_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("settings.json");
+        std::fs::write(&file, b"{ not json").unwrap();
+        let err = set_illustrations_key_at(&file, "k").unwrap_err();
+        assert!(err.contains("not saved"), "{err}");
+        assert_eq!(std::fs::read(&file).unwrap(), b"{ not json");
     }
 
     fn golden_kfx() -> PathBuf {

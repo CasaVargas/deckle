@@ -346,10 +346,11 @@ An engraving-style drawing of the dish, generated once per recipe and kept.
   changes a recipe's picture to Illustration.
 - **Provider:** an OpenAI-compatible image generation endpoint
   (`POST {endpoint}/images/generations`), configured like X-Ray's LLM: `endpoint` and
-  `model`. The key is found the same way X-Ray and the Daily editor find theirs:
-  `OPENAI_API_KEY` from the environment, or the desktop's existing `llm_api_key` setting.
-  (The desktop app launched from Finder doesn't see shell variables, so the setting is the
-  desktop path.) The key never goes in `cookbook.toml`. A local compatible server is fine.
+  `model`. The key is `OPENAI_API_KEY` from the environment, or the desktop's own
+  `illustrations_api_key` setting, used only for illustrations. X-Ray's `llm_api_key` is never
+  used: it may belong to another provider and would be sent to this endpoint. (The desktop app
+  launched from Finder doesn't see shell variables, so the setting is the desktop path.) The key
+  never goes in `cookbook.toml`. A local compatible server is fine.
 - **Prompt:** a fixed template with the recipe title, the chapter name and up to eight key
   ingredients (§6.4). For example: "A single plated dish, *Roasted squash soup*, drawn as a
   19th-century copperplate engraving: black ink line work and cross-hatching on white, no
@@ -465,8 +466,8 @@ closes it), and saves as it changes:
   says they'll print under *Everything else* until moved (§6.2). Match keywords are edited
   in `cookbook.toml` only.
 - **Illustrations**: its switch, a line on exactly what is sent (title, chapter, ingredient
-  names) and where, the endpoint, model and key fields while on (the key goes to the
-  desktop's existing `llm_api_key` setting, as with the AI editor), and **Illustrate all**
+  names) and where, the endpoint, model and image API key fields while on (the key goes to the
+  desktop's `illustrations_api_key` setting, used only for illustrations), and **Illustrate all**
   with progress and Stop.
 - `cookbook.toml`'s path and **Show the file** at the foot.
 

@@ -527,7 +527,7 @@ pub(crate) fn record(
 /// Where a Kindle stands with the cookbook.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum KindleState {
+pub enum KindleState {
     UpToDate,
     Behind,
     NeverSent,
@@ -537,7 +537,7 @@ pub(crate) enum KindleState {
 
 /// One Kindle's line on the Delivery list.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-pub(crate) struct KindleStatus {
+pub struct KindleStatus {
     pub name: String,
     pub id: String,
     /// "Up to date", "<n> changes behind", "Behind", "Never sent" or "Off".

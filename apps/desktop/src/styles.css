@@ -948,3 +948,46 @@ input[type=checkbox] { padding: 0; }
 .set-card .set-row:last-child { border-bottom: 0; }
 .set-card.set-device h3 { margin: 0; }
 .set-card .set-row { padding: 10px 0; }
+
+/* The Cookbook tab (cookbook design §8.2): Add reuses the Daily's columns, cards and the paper switcher */
+.cookbook-preview { display: flex; flex-direction: column; gap: 4px; }
+.cookbook-preview label { display: block; }
+.cookbook-preview select, .cookbook-preview input[type="text"] { width: 100%; box-sizing: border-box; }
+.cookbook-preview-body { display: flex; gap: 14px; align-items: flex-start; }
+.cookbook-photo { width: 132px; height: 132px; flex: none; object-fit: cover; border-radius: 8px; background: var(--line); }
+.cookbook-photo.off { opacity: 0.35; }
+.cookbook-photo.none { display: grid; place-items: center; }
+.cookbook-facts { min-width: 0; }
+.cookbook-facts h3 { overflow-wrap: anywhere; }
+.cookbook-facts p { margin: 2px 0; }
+.cookbook-add-actions { margin-top: 12px; }
+.cookbook-book-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 12px; }
+.cookbook-book-head h3 { overflow-wrap: anywhere; }
+.cookbook-book-head p { margin: 2px 0; }
+.cookbook-cover { width: 84px; aspect-ratio: 5 / 8; flex: none; object-fit: cover; border-radius: 4px; background: var(--line); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+
+/* The Cookbook tab's Recipes, Delivery and Book settings (cookbook design §8.2) */
+.recipe-search { width: 100%; max-width: 420px; box-sizing: border-box; }
+.recipe-list ul { list-style: none; margin: 0; padding: 0; }
+.recipe-group { list-style: none; border-top: 1px solid var(--line); }
+.recipe-group:first-child { border-top: 0; }
+.recipe-chapter { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 8px 14px; background: var(--bg); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.recipe-chapter strong { font-weight: 700; }
+.recipe-row { list-style: none; border-top: 1px solid var(--line); }
+.recipe-head { display: grid; grid-template-columns: 52px minmax(0, 1fr) 26px; gap: 12px; align-items: center; padding: 8px 12px; }
+.recipe-thumb { width: 52px; height: 36px; object-fit: cover; border-radius: 4px; background: var(--line); display: block; }
+.recipe-new { color: var(--accent); }
+.recipe-body .sec-field input[type="text"], .recipe-body .sec-field select { width: 100%; box-sizing: border-box; }
+.recipe-pictures { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.recipe-source { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.recipe-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; border-top: 1px solid var(--line); padding-top: 10px; align-self: stretch; }
+.ghost.small { padding: 3px 10px; font-size: 12px; }
+.cookbook-dl-head { grid-template-columns: 10px minmax(0, 1fr) auto 34px; }
+.book-sheet input[type="text"], .book-sheet input:not([type]), .book-sheet input[type="password"] { width: 100%; box-sizing: border-box; }
+.book-sheet label { display: block; }
+.book-sheet .check { display: flex; }
+.chapter-head { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 6px 10px; }
+.chapter-head .handle { background: none; border: 0; padding: 2px 0; color: var(--muted); font-size: 12px; letter-spacing: -2px; cursor: grab; }
+.chapter-head .handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chapter-count { white-space: nowrap; }
+.chapter-warning { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 10px 10px 42px; }
