@@ -469,7 +469,7 @@ fn places_print_after_local_each_from_its_own_search() {
         Some("News from around Asheville, NC")
     );
     assert!(!asheville.articles.is_empty());
-    // its own search, and only Local and Asheville search Google News
+    // its own search; Boone, with none, searches its name
     let asked = asked.lock().unwrap();
     assert!(
         asked.iter().any(|u| u.contains("q=Asheville+NC")),
@@ -479,34 +479,84 @@ fn places_print_after_local_each_from_its_own_search() {
         .iter()
         .filter(|u| u.starts_with("https://news.google.com/rss/search"))
         .count();
-    assert_eq!(searches, 2, "{asked:?}");
-    // Boone's feed is down: its section says so, and nothing else is touched
+    assert_eq!(searches, 3, "{asked:?}");
+    // Boone's feed is down: its name's search still prints, and nothing else is touched
     let boone = &g.edition.sections[at + 2];
-    assert!(
-        boone
-            .unavailable
-            .as_deref()
-            .unwrap()
-            .contains("boone.example"),
-        "{boone:?}"
-    );
+    assert!(!boone.articles.is_empty(), "{boone:?}");
     assert!(g.edition.sections[at].unavailable.is_none());
     // all three are news, but only Local is the local tier
     assert!(g.news.contains(&(at + 1)) && g.news.contains(&(at + 2)));
 }
 
+/// The Google News searches `c`'s paper asked for, and the paper.
+fn searches_for(c: &Config) -> (Vec<String>, deckle_digest::Gathered) {
+    let asked = std::sync::Mutex::new(Vec::<String>::new());
+    let net = |url: &str| {
+        asked.lock().unwrap().push(url.to_owned());
+        fake(url)
+    };
+    let g = gather(c, date(), now(), &net);
+    let asked = asked.into_inner().unwrap();
+    let searches = asked
+        .into_iter()
+        .filter(|u| u.starts_with("https://news.google.com/rss/search"))
+        .collect();
+    (searches, g)
+}
+
+#[test]
+fn a_place_with_only_a_name_searches_its_name() {
+    let mut c = config();
+    c.local.places = vec![place("Pinehurst, NC", "  ")];
+    let (searches, g) = searches_for(&c);
+    assert!(
+        searches
+            .iter()
+            .any(|u| u.contains("q=Pinehurst%2C+NC+when")),
+        "{searches:?}"
+    );
+    let s = g
+        .edition
+        .sections
+        .iter()
+        .find(|s| s.key == "local:Pinehurst, NC")
+        .unwrap();
+    assert!(s.unavailable.is_none(), "{s:?}");
+    assert!(!s.articles.is_empty());
+}
+
+#[test]
+fn a_places_own_search_wins_over_its_name() {
+    let mut c = config();
+    c.local.places = vec![place("Pinehurst, NC", "Pinehurst golf")];
+    let (searches, _) = searches_for(&c);
+    assert!(
+        searches.iter().any(|u| u.contains("q=Pinehurst+golf+when")),
+        "{searches:?}"
+    );
+    assert!(
+        !searches.iter().any(|u| u.contains("q=Pinehurst%2C+NC")),
+        "{searches:?}"
+    );
+}
+
 #[test]
 fn a_place_with_nothing_to_read_says_so() {
     let mut c = config();
-    c.local.places = vec![place("Nowhere", "")];
+    c.local.places = vec![place("", "")];
     let g = gather(&c, date(), now(), &fake);
     let s = g
         .edition
         .sections
         .iter()
-        .find(|s| s.key == "local:Nowhere")
+        .find(|s| s.key == "local:")
         .unwrap();
-    assert!(s.unavailable.as_deref().unwrap().contains("for Nowhere"));
+    assert!(
+        s.unavailable
+            .as_deref()
+            .unwrap()
+            .contains("a name or local feeds")
+    );
 }
 
 #[test]
@@ -1609,10 +1659,11 @@ fn the_cover_is_drawn_in_the_chosen_masthead_face() {
         c.masthead = face;
         deckle_digest::cover::render(&gather(&c, date(), now(), &fake)).unwrap()
     };
-    let black = jpeg(MastheadFont::Blackletter);
-    assert_ne!(black, jpeg(MastheadFont::Serif));
-    assert_ne!(black, jpeg(MastheadFont::Sans));
-    assert_eq!(black, jpeg(MastheadFont::Blackletter), "and it is stable");
+    let consent = jpeg(MastheadFont::Consent);
+    assert_ne!(consent, jpeg(MastheadFont::Unifraktur));
+    assert_ne!(consent, jpeg(MastheadFont::Serif));
+    assert_ne!(consent, jpeg(MastheadFont::Bodoni));
+    assert_eq!(consent, jpeg(MastheadFont::Consent), "and it is stable");
 }
 
 #[test]
@@ -1621,7 +1672,7 @@ fn a_bad_masthead_file_falls_back_and_says_so() {
     let mut c = config();
     c.masthead = MastheadFont::File("/no/such/font.ttf".into());
     let g = gather(&c, date(), now(), &fake);
-    assert!(g.edition.masthead.is_blackletter());
+    assert_eq!(g.edition.masthead.name(), "ManufacturingConsent-Regular");
     assert!(
         g.notes.iter().any(|n| n.starts_with("Masthead font:")),
         "{:?}",
@@ -1642,14 +1693,24 @@ fn the_pdf_embeds_the_chosen_masthead_face() {
         Screen::Remarkable2,
         Photos::Gray,
     );
-    assert!(has(&default, b"UnifrakturMaguntia-Book"));
-    c.masthead = MastheadFont::Serif;
+    assert!(has(&default, b"ManufacturingConsent-Regular"));
+    c.masthead = MastheadFont::Unifraktur;
+    let unifraktur = render(
+        &gather(&c, date(), now(), &fake),
+        Screen::Remarkable2,
+        Photos::Gray,
+    );
+    assert!(has(&unifraktur, b"UnifrakturMaguntia-Book"));
+    c.masthead = MastheadFont::File(format!(
+        "{}/fonts/OldStandard-Italic.ttf",
+        env!("CARGO_MANIFEST_DIR")
+    ));
     let serif = render(
         &gather(&c, date(), now(), &fake),
         Screen::Remarkable2,
         Photos::Gray,
     );
-    assert!(!has(&serif, b"UnifrakturMaguntia-Book"));
+    assert!(!has(&serif, b"ManufacturingConsent-Regular"));
     assert!(has(&serif, b"/Masthead"));
 }
 

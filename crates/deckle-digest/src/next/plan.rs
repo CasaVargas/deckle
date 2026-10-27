@@ -301,9 +301,9 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     Some(n),
                     None,
                     &p.name,
-                    local_detail(&p.google_news, &p.feeds),
+                    local_detail(p.search(), &p.feeds),
                     max,
-                    local_stories(&p.google_news, &p.feeds, cfg, i.live),
+                    local_stories(p.search(), &p.feeds, cfg, i.live),
                 ));
             }
             out

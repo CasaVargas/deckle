@@ -321,7 +321,7 @@ pub struct LocalConfig {
 pub struct PlaceNews {
     /// The section's title in the paper.
     pub name: String,
-    /// A Google News search. Empty: none.
+    /// A Google News search. Empty: the name, as typed.
     #[serde(default)]
     pub google_news: String,
     /// Local paper RSS/Atom feeds, merged with the search.
@@ -330,6 +330,15 @@ pub struct PlaceNews {
     /// Stories kept; `[local] max_items` when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_items: Option<usize>,
+}
+
+impl PlaceNews {
+    /// The Google News search: `google_news`, or the name as typed (Local's search isn't
+    /// quoted either, and "Asheville, NC" in quotes would miss "Asheville, N.C.").
+    pub fn search(&self) -> &str {
+        let q = self.google_news.trim();
+        if q.is_empty() { self.name.trim() } else { q }
+    }
 }
 
 impl Default for LocalConfig {
@@ -1271,7 +1280,8 @@ title = "The Deckle Daily"
 # reader = "the whole house"      # who it's for, on its card in the Daily tab
 # kindle = "Mom's Kindle"         # only this Kindle gets it (its name or sync id); unset: any
 # large_print = true              # a layout for big type; set the size itself on the Kindle (Aa)
-# masthead = "blackletter"        # the title's typeface: "serif", "sans", or the path to a .ttf
+# masthead = "consent"            # the title's face: consent, grenze, pirata, texturina, unifraktur,
+#                                 # playfair, bodoni, caslon, serif, sans, or the path to a .ttf
 place = "New York, NY"            # shown on the masthead and the weather page
 latitude = 40.71                  # for the forecast (Open-Meteo, no key)
 longitude = -74.01
@@ -1299,7 +1309,7 @@ max_age_hours = 72                # local news moves slower
 # Other places' local news, each its own section after Local: a relative's town, a trip.
 # [[local.places]]
 # name = "Asheville, NC"          # the section's title
-# google_news = "Asheville NC"
+# google_news = "Asheville NC"   # optional; the name is searched when empty
 # feeds = []
 
 # Things you care about, each its own section: a Google News search per interest, filtered

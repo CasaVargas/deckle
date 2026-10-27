@@ -195,13 +195,13 @@ counts every earlier section as reached in *How far you read* (see below).
 
 Keep up with a relative's town or a trip: each extra place gets its own local news section,
 printed right after your own Local and built the same way (its Google News search and any local
-feeds, merged, newest first). Weather, the almanac and the cover stay on your place. Add places in
+feeds, merged, newest first). The search is the place's name unless you give your own. Weather, the almanac and the cover stay on your place. Add places in
 the Daily tab (**The paper → Other places**), or in `digest.toml`:
 
 ```toml
 [[local.places]]
 name = "Asheville, NC"          # the section's title
-google_news = "Asheville NC"
+google_news = "Asheville NC"    # optional; empty searches the name
 feeds = []                      # local paper RSS feeds, merged in
 # max_items = 6                 # stories; default: [local] max_items
 ```
@@ -505,22 +505,30 @@ large_print = true                # a layout for big type (below)
 
 ## The title's typeface
 
-The paper's name is drawn on the cover, and at the top of the PDF edition, in a blackletter face
-(UnifrakturMaguntia). `masthead` at the top of `digest.toml` changes it, or **The paper → Title
-font** in the app:
+The paper's name is drawn on the cover, and at the top of the PDF edition, in one of ten faces
+that come with Deckle. The app shows each with your paper's name in it, under **Paper settings →
+Masthead** (the paper menu on the Daily tab). In `digest.toml` it's `masthead`:
 
 ```toml
-masthead = "blackletter"   # the default; or "serif" (Old Standard Bold), "sans" (Inter Bold),
-                           # or the path to a .ttf file, e.g. "~/Fonts/Fraktur.ttf"
+masthead = "consent"   # the default: Manufacturing Consent
+# Blackletter: "consent", "grenze" (Grenze Gotisch), "pirata" (Pirata One), "texturina",
+#              "unifraktur" (UnifrakturMaguntia, the old default; "blackletter" still means it)
+# No blackletter: "playfair", "bodoni", "caslon" (Libre Caslon Display),
+#                 "serif" (Old Standard Bold), "sans" (Inter Bold)
+# Or the path to a .ttf file, e.g. "~/Fonts/Fraktur.ttf"
 ```
 
+- Every face is under the SIL Open Font License; each licence is beside its font in
+  `crates/deckle-digest/fonts`.
 - Only the title changes: the date band, the ears and the headlines keep their own faces.
 - A file must be **TrueType (`.ttf`)**; `.otf` and `.ttc` aren't read.
-- A missing file, one that isn't TrueType, or a font without a letter of your title falls back
-  to the blackletter, and the run says why ("Masthead font: …"). The paper still comes out.
+- A missing file, one that isn't TrueType, or a face without a letter of your title falls back
+  to Manufacturing Consent, then to Old Standard when that lacks a letter too, and the run says
+  why ("Masthead font: …"). The paper still comes out. The app marks the faces that can't draw
+  your title.
 - **Inside the book the title is your Kindle's own font**, because a Kindle sets the text in the
   font you picked on it (Aa → Font). This setting can't reach that.
-- A long read's "Deckle Reads" cover keeps the blackletter.
+- A long read's "Deckle Reads" cover uses Manufacturing Consent.
 
 ## Email to Kindle (opt-in)
 
