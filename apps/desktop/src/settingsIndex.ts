@@ -53,6 +53,7 @@ export const INDEX: Entry[] = [
   { label: "What Deckle sends online", page: "online", words: "online privacy network internet send" },
   { label: "Checking for updates", page: "online", words: "update github online privacy" },
   { label: "Credits", page: "about", words: "credits licence license wiktionary" },
+  { label: "Made by Casa Vargas", page: "about", words: "casa vargas studio developer support buy beltr onescribe" },
 ];
 
 /** Search settings: the entries matching every word of `query` (label, words or page title). */

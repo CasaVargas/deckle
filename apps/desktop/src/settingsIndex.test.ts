@@ -11,6 +11,8 @@ describe("Search settings", () => {
     expect(searchSettings("API key").map((e) => e.label)).toEqual(["API key"]);
     expect(searchSettings("calibre")[0].page).toBe("library");
     expect(searchSettings("clippings")[0].page).toBe("highlights");
+    expect(searchSettings("casa vargas").map((e) => e.page)).toEqual(["about"]);
+    expect(searchSettings("beltr")[0].label).toBe("Made by Casa Vargas");
     expect(searchSettings("previewer")[0].page).toBe("sending");
   });
   it("needs every word, and nothing for nothing", () => {
