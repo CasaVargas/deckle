@@ -1916,7 +1916,8 @@ fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, furniture: &Furniture) -> Vec<u
             0 => Vec::new(),
             _ => folio(fonts, lay, furniture, n),
         };
-        for op in ops.iter().chain(&folio) {
+        // the folio first, so text extraction and read-back meet it first
+        for op in folio.iter().chain(ops) {
             match op {
                 Op::Text {
                     x,

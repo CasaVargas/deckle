@@ -1173,6 +1173,35 @@ fn the_pdf_edition_reads_back_with_its_titles_and_outline() {
 }
 
 #[test]
+fn the_pdf_edition_reads_back_with_folios_and_page_labels() {
+    use deckle_digest::config::Photos;
+    use deckle_digest::pdf::{Screen, render};
+    let g = gather(&config(), date(), now(), &fake);
+    let bytes = render(&g, Screen::Remarkable2, Photos::Gray);
+    let pdfium = deckle_pdf::engine::pdfium().expect("PDFium (tools/fetch-pdfium.sh)");
+    let doc = pdfium.load_pdf_from_byte_slice(&bytes, None).unwrap();
+    let pages = doc.pages();
+    assert_eq!(pages.get(0).unwrap().label(), Some("A1"));
+    let mut letters = Vec::new();
+    for (n, page) in pages.iter().enumerate().skip(1) {
+        let label = page.label().expect("every page has a label").to_owned();
+        let text = page.text().unwrap().all();
+        // the folio comes first: the page's own label, then the paper
+        let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            flat.starts_with(&format!("{label} {}", g.edition.paper)),
+            "page {n}: {flat}"
+        );
+        letters.push(label.chars().next().unwrap());
+    }
+    letters.dedup();
+    assert!(letters.len() >= 2, "more than one book: {letters:?}");
+    let front = pages.get(0).unwrap().text().unwrap().all();
+    let flat = front.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains(&format!("{} pages", pages.len())), "{flat}");
+}
+
+#[test]
 fn every_screen_lays_the_paper_out() {
     use deckle_digest::config::Photos;
     use deckle_digest::pdf::{Screen, render};
