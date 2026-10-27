@@ -43,7 +43,7 @@ export default function TomorrowsPaper({ next, masthead, onSections }: { next: N
         <div className="front">
           <div className="ears">
             <span>NO. {next.number}</span>
-            <span className="motto">All the news that fits</span>
+            <span className="motto">Printed this morning</span>
             <span>{next.place.toUpperCase()}</span>
           </div>
           <div className="masthead-name" style={{ fontFamily: `${faceFamily(face === "file" ? "consent" : face)}, ui-serif, Georgia, serif` }}>

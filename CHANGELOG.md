@@ -1,14 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 — many papers, interests, and a redesigned app
 
+- **A redesigned app.** Every tab was rebuilt, one at a time.
+  - **Books:** one Add menu, Send at the foot of To send, search in the top bar, a selection
+    bar, one-line statuses, and a drawer for each book with a details editor (description,
+    tags, publisher, dates, ISBN, sort names) where Open Library suggests what a book is missing.
+  - **Kindle:** the Kindle in the top bar and a Shelf that reads first, a drawer for each book
+    on the Kindle, Upgrades as pick-then-one-button, This Kindle in two columns, Make room by
+    why, and, unplugged, the shelf as Deckle sent it.
+  - **Settings:** an Overview with search and a sidebar that says what's to do; Sending as a
+    choice you can see; Word Wise and X-Ray on one Reading aids page; everything that goes
+    online in one Online & privacy page; Library, Kindles, and Highlights & reading regrouped.
+  - **The Daily:** tabs, a paper switcher and Today; Sections as one list, saved as you go;
+    Add a section; the paper's own settings; Delivery in two groups.
+- **Interests.** A section that hunts: a topic ("Rust", a team) searched every morning and
+  kept only when a headline names it. The paper notices what you read and suggests new
+  interests, the AI editor (when on) scores each story's relevance, and the paper can nudge
+  you toward one.
+- **The cover's top line reads "Printed this morning".** It used to borrow a magazine's old motto.
 - **Other places need only a name.** The Daily searches Google News for a place's name; the second box is now an optional custom search. A place with just a name no longer prints "Unavailable today".
 - **Ten masthead faces, and a new default.** The Daily's title can be drawn in Manufacturing Consent (the new default), Grenze Gotisch, Pirata One, Texturina, UnifrakturMaguntia (the old default; `masthead = "blackletter"` still picks it), Playfair, Bodoni, Caslon, Old Standard or Inter, all under the SIL Open Font License. A face without a letter of your title falls back to Manufacturing Consent, then Old Standard.
 - **Local no longer repeats a story.** The Daily's Local section skips a story an earlier section already printed and refills with its next one.
 - **The Daily: a paper you subscribe to prints in full.** The Pilot and other BLOX (TownNews) papers: sign in once, pick its sections, and they print as their own section group. Stories your plan doesn't cover print as a stranger sees them, with the reason.
 - **Papers you subscribe to.** The Daily: accounts for the papers you subscribe to (`deckle digest
-  subscribe`), with the password in the keychain. No publisher is supported yet; stories print as a
-  stranger would see them, and one the site withholds prints as a headline saying why.
+  subscribe`), with the password in the keychain. A story the site withholds prints as a headline
+  saying why.
 - **Many papers.** One Mac can print a paper for each Kindle: `papers/<slug>.toml` beside
   `digest.toml`, with its own title, sections, keep and email address. `kindle = "Mom's Kindle"`
   sends a paper only to that Kindle. `deckle digest papers` lists them, and `--paper <slug>`
