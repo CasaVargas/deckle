@@ -1,0 +1,22 @@
+# Keys that never get an index entry (§6.4). Whole keys only: "olive oil" is kept.
+salt
+pepper
+water
+oil
+ice
+sugar substitute
+salt and pepper
+pepper and salt
+salt or pepper
+black pepper
+sea salt
+flaky salt
+flaky sea salt
+table salt
+fine salt
+white pepper
+ground pepper
+cracked pepper
+kosher salt
+cooking spray
+nonstick spray

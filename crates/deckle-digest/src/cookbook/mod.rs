@@ -4,6 +4,7 @@
 
 pub mod add;
 pub mod filing;
+pub mod index;
 pub mod picture;
 pub mod recipe;
 pub mod store;
