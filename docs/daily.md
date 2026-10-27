@@ -56,6 +56,14 @@ is) and waits in the outbox with the paper; see below for how it's finished on p
 with a `.txt` saying why it couldn't be converted. Books need Kindle Previewer; without it they
 stay in the Inbox until it's installed.
 
+Recipes have their own folder, `Inbox/Recipes` (made on the first scan): links (`.webloc`, `.url`,
+`.txt`) and saved pages (`.html`) dropped there go to the cookbook instead of Your Reading, and
+move to `Inbox/Recipes/Sent`, or to `Inbox/Recipes/Unreadable` with a `.txt` saying why. Deckle
+doesn't guess which kind a link is: the folder you drop it in decides. An iPhone Shortcut pointed
+at the iCloud Inbox's `Recipes` folder saves recipes from your phone. `Recipes` is reserved, so a
+Kindle named "Recipes" gets no Inbox folder of its own (`watch` says so once). See
+[the cookbook](cookbook.md).
+
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
 

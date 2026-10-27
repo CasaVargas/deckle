@@ -6,6 +6,9 @@
 //! Books (`.epub`, `.docx`, `.kfx`) dropped here are sent later (design §10): the caller
 //! converts each one and adds it to the outbox, then it moves to `Sent/`. Converting needs
 //! `deckle-core`, which this crate doesn't depend on, so that step is passed in.
+//!
+//! `Recipes/` is the cookbook's: what is dropped there goes to the cookbook, never to Your
+//! Reading ([`scan_recipes`], cookbook design §8.3). It keeps its own `Sent/` and `Unreadable/`.
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
@@ -14,6 +17,9 @@ use std::time::{Duration, SystemTime};
 use chrono::Utc;
 use regex::Regex;
 
+use crate::cookbook::add::{AddOptions, add};
+use crate::cookbook::store::Store;
+use crate::fetch::Net;
 use crate::reading::{Added, ReadingQueue};
 
 /// Files modified more recently than this may still be being written.
@@ -30,7 +36,18 @@ pub struct ScanReport {
     pub retry: Vec<(PathBuf, String)>,
     /// Subfolders that aren't the Inbox's own and aren't named after a Kindle: left alone.
     pub other_folders: Vec<PathBuf>,
+    /// Recipes added to (or refreshed in) the cookbook, from [`scan_recipes`].
+    pub recipes: usize,
+    /// Things the owner should hear about once (a Kindle called `Recipes`).
+    pub warnings: Vec<String>,
 }
+
+/// The Inbox subfolder for the cookbook.
+pub const RECIPES_FOLDER: &str = "Recipes";
+
+/// Said when a Kindle is named like the cookbook's folder.
+pub const RECIPES_KINDLE_WARNING: &str =
+    "A Kindle named Recipes can't have an Inbox folder: Recipes/ is for the cookbook";
 
 /// Why a file wasn't queued: its content (moved aside) or the moment (left for later).
 #[derive(Debug)]
@@ -141,7 +158,7 @@ pub fn scan_with_books(
 pub type SendLater<'a> = dyn FnMut(&Path, Option<&str>) -> Result<(), Skip> + 'a;
 
 /// Folders the Inbox makes itself, never a Kindle's.
-const OWN_FOLDERS: [&str; 3] = ["Sent", "Saved", "Unreadable"];
+const OWN_FOLDERS: [&str; 4] = ["Sent", "Saved", "Unreadable", RECIPES_FOLDER];
 
 /// Like [`scan_with_books`], also scanning each subfolder named after a Kindle in `kindles`
 /// ((name, id), names matched ignoring case): its books go to `send_later` with that Kindle's
@@ -157,6 +174,14 @@ pub fn scan_for_kindles(
     let mut report = ScanReport::default();
     if std::fs::create_dir_all(dir).is_err() {
         return report;
+    }
+    // Made on first run, so there is somewhere to drop a recipe (a Shortcut points at it).
+    let _ = std::fs::create_dir_all(dir.join(RECIPES_FOLDER));
+    if kindles
+        .iter()
+        .any(|(n, _)| n.trim().eq_ignore_ascii_case(RECIPES_FOLDER))
+    {
+        report.warnings.push(RECIPES_KINDLE_WARNING.to_owned());
     }
     scan_files(dir, queue, now, None, send_later, &mut report);
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -190,6 +215,13 @@ pub fn scan_for_kindles(
     report
 }
 
+/// Whether `file` was last changed long enough ago to be done being written.
+fn settled(file: &Path, now: SystemTime) -> bool {
+    std::fs::metadata(file)
+        .and_then(|m| m.modified())
+        .is_ok_and(|m| now.duration_since(m).is_ok_and(|age| age >= SETTLE))
+}
+
 /// The settled files directly in `dir`: books to `send_later` (with `owner`), articles queued.
 fn scan_files(
     dir: &Path,
@@ -213,10 +245,7 @@ fn scan_files(
         .collect();
     files.sort();
     for file in files {
-        let settled = std::fs::metadata(&file)
-            .and_then(|m| m.modified())
-            .is_ok_and(|m| now.duration_since(m).is_ok_and(|age| age >= SETTLE));
-        if !settled {
+        if !settled(&file, now) {
             continue;
         }
         let ext = file
@@ -265,6 +294,70 @@ fn scan_files(
             Err(skip) => report.skip(file, skip),
         }
     }
+}
+
+/// Files directly in `dir` that are visible, in name order.
+fn visible_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.path())
+        .filter(|p| {
+            !p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// Adds what was dropped in `inbox/Recipes/` to the cookbook (never to Your Reading): each
+/// settled `.webloc`, `.url` or `.txt` (one address per line) is fetched, each `.html` or
+/// `.htm` page is read from disk. Added files move to `Recipes/Sent/`; ones that can't be
+/// read move to `Recipes/Unreadable/` with a `.txt` saying why. The owner picks recipe or
+/// article by the folder; nothing is guessed from the content. An empty folder costs one
+/// directory read and touches neither the network nor the book.
+pub fn scan_recipes(inbox: &Path, store: &Store, net: &dyn Net, now: SystemTime) -> ScanReport {
+    let mut report = ScanReport::default();
+    for file in visible_files(&inbox.join(RECIPES_FOLDER)) {
+        if !settled(&file, now) {
+            continue;
+        }
+        let ext = file
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let targets = match ext.as_str() {
+            "webloc" | "url" | "txt" => urls_in(&file, &ext),
+            "html" | "htm" => Ok(vec![file.to_string_lossy().into_owned()]),
+            _ => Err(
+                "the cookbook reads .webloc, .url, .txt and .html files, not other kinds".into(),
+            ),
+        };
+        let opts = AddOptions {
+            chapter: None,
+            note: None,
+        };
+        // The file moves to Sent only when every address in it was added; a failure leaves
+        // the earlier ones added, and the file in Unreadable says which one failed.
+        let result = targets.and_then(|targets| {
+            for t in targets {
+                add(store, &t, net, &opts, Utc::now()).map_err(|e| format!("{t}: {e}"))?;
+                report.recipes += 1;
+            }
+            Ok(())
+        });
+        match result {
+            Ok(()) => {
+                move_to(&file, "Sent");
+            }
+            Err(why) => report.skip(file, Skip::Unreadable(why)),
+        }
+    }
+    report
 }
 
 impl ScanReport {

@@ -5188,6 +5188,13 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
         &kindles,
         &mut inbox::with_readers(reader_seen().then(epub_queue), inbox::pipeline()),
     );
+    // Said once per run: the watcher scans every few seconds.
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        for w in &r.warnings {
+            eprintln!("inbox: {w}");
+        }
+    });
     for folder in &r.other_folders {
         eprintln!(
             "inbox: left {} alone: no Kindle is called that (name one with `deckle devices name`)",
@@ -5212,6 +5219,36 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
     }
     for (file, why) in &r.retry {
         eprintln!("inbox: {} waits for the next scan: {why}", file.display());
+    }
+    scan_recipes_folder(&dir);
+}
+
+/// Adds what was dropped in the Inbox's `Recipes/` folder to the cookbook (cookbook design
+/// §8.3). An empty folder costs one directory read. The cookbook delivery picks the new
+/// recipes up on its next tick.
+fn scan_recipes_folder(dir: &Path) {
+    let store = deckle_digest::cookbook::store::Store::new(
+        deckle_digest::cookbook::store::Store::default_dir(),
+    );
+    let r = deckle_digest::inbox::scan_recipes(
+        dir,
+        &store,
+        &deckle_digest::Http,
+        std::time::SystemTime::now(),
+    );
+    if r.recipes > 0 {
+        eprintln!(
+            "inbox: added {} {} to the cookbook from {}",
+            r.recipes,
+            if r.recipes == 1 { "recipe" } else { "recipes" },
+            dir.join(deckle_digest::inbox::RECIPES_FOLDER).display()
+        );
+    }
+    for (file, why) in &r.unreadable {
+        eprintln!(
+            "inbox: couldn't add {} to the cookbook: {why}",
+            file.display()
+        );
     }
 }
 

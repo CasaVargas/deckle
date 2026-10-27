@@ -36,6 +36,21 @@ adding five recipes in a row costs one build.
 - Only one build runs at a time (`cookbook/build/.lock`): `send` waits for a running build; `digest watch` skips the tick and tries again.
 - `--to <folder>`: copies `cookbook.epub` there. A folder isn't a Kindle, so nothing is recorded.
 
+## Saving from the Inbox
+
+Drop recipe links (`.webloc`, `.url`, `.txt` with one address per line) or saved pages (`.html`,
+`.htm`) into `Recipes/` inside the Inbox (`~/Deckle/Inbox/Recipes` unless `[reading] inbox` moves
+it). `deckle digest watch` (and `digest run`/`push`) adds them to the book, then moves each file
+to `Recipes/Sent`; one that can't be read goes to `Recipes/Unreadable` with a `.txt` giving the
+reason (a page that's down is the same as a page with no recipe: drop the file back in to try
+again). Recipes saved this way never appear in the Daily's Your Reading, and articles dropped in
+the main Inbox never reach the cookbook. A recipe from a site you're signed into goes in as a
+saved `.html` page. An iPhone Shortcut ("Save File") pointed at the iCloud Inbox's `Recipes`
+folder is the phone path.
+
+`Recipes` is reserved in the Inbox: a Kindle actually named "Recipes" can't have a folder there,
+and `watch` says so once.
+
 ## Delivery
 
 Every Kindle gets the newest build (not just the first one to plug in). `cookbook/delivered.json`
