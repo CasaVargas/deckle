@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { DailyConfig, SessionState, SiteStatus, SubscribedConfig } from "./types";
+import type { DailyConfig, SessionState, SiteStatus, SubscribedConfig, SubscriptionConfig } from "./types";
 
 /** One line on where a subscription's session stands. */
 export function subscriptionLine(s: SiteStatus): string {
@@ -30,6 +30,24 @@ export function shownStatus(statuses: SiteStatus[], tested: Tested, site: string
 export function forgetTested(tested: Tested, site: string): Tested {
   const { [statusKey(site)]: _gone, ...rest } = tested;
   return rest;
+}
+
+/** An account the save would refuse or drop: a row still being filled in, without its site or username. */
+const unfinished = (s: SubscriptionConfig) => !s.site.trim() || !s.username.trim();
+
+/** `cfg` as it can be saved: the accounts still being filled in stay in the draft only. */
+export function savable(cfg: DailyConfig): DailyConfig {
+  if (!(cfg.subscriptions ?? []).some(unfinished)) return cfg;
+  return { ...cfg, subscriptions: cfg.subscriptions!.filter((s) => !unfinished(s)) };
+}
+
+/** The saved config with `sent`'s unfinished accounts back in their places, so a row being set up
+ * outlives the save that left it out. */
+export function keepUnfinished(saved: DailyConfig, sent: DailyConfig): DailyConfig {
+  const subs = sent.subscriptions ?? [];
+  if (!subs.some(unfinished)) return saved;
+  const done = [...(saved.subscriptions ?? [])];
+  return { ...saved, subscriptions: subs.map((s) => (unfinished(s) ? s : (done.shift() ?? s))) };
 }
 
 /** BLOX's section slugs and their display names (publisher subscriptions design §3). */

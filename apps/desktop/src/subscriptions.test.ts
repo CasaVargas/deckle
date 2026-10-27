@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { forgetTested, shownStatus, subscriptionLine } from "./subscriptions";
+import { forgetTested, keepUnfinished, savable, shownStatus, subscriptionLine } from "./subscriptions";
 import type { SiteStatus } from "./types";
 
 const s: SiteStatus = {
@@ -116,4 +116,31 @@ test("renaming onto a site that already has a group keeps that one", () => {
   c = renameGroup(c, "a.com", "b.com");
   expect(c.subscribed).toHaveLength(1);
   expect(groupFor(c, "b.com")?.sections).toEqual(["news", "opinion"]);
+});
+
+test("an account still being set up stays out of the save and in the draft", () => {
+  const cfg = {
+    sections: ["local", "subscribed"],
+    subscriptions: [
+      { site: "a.com", username: "me" },
+      { site: "thepilot.com", username: "" },
+      { site: "", username: "" },
+      { site: "B.com", username: " you " },
+    ],
+  } as unknown as DailyConfig;
+  expect(savable(cfg).subscriptions).toEqual([
+    { site: "a.com", username: "me" },
+    { site: "B.com", username: " you " },
+  ]);
+  // The backend normalizes what it saved; the unfinished rows go back where they were.
+  const saved = { ...cfg, subscriptions: [{ site: "a.com", username: "me" }, { site: "b.com", username: "you" }] };
+  expect(keepUnfinished(saved, cfg).subscriptions).toEqual([
+    { site: "a.com", username: "me" },
+    { site: "thepilot.com", username: "" },
+    { site: "", username: "" },
+    { site: "b.com", username: "you" },
+  ]);
+  const done = { ...cfg, subscriptions: [{ site: "a.com", username: "me" }] };
+  expect(savable(done)).toBe(done);
+  expect(keepUnfinished(saved, done)).toBe(saved);
 });
