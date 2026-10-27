@@ -185,8 +185,15 @@ pub fn build_fresh(
     if let Some(paper) = &mut isolated.paper {
         paper.state_dir = inputs.join("paper");
     }
-    // Rendering is explicit below; other destination preferences must not request formats.
-    isolated.export.clear();
+    // Gathering uses bundle desire to collect full-size photo masters. Keep only this
+    // private target; rendering below never invokes the export/delivery pipeline.
+    isolated.export = vec![crate::config::ExportConfig {
+        name: "Fresh bundle".into(),
+        dir: context.work_dir.display().to_string(),
+        format: crate::config::ExportFormat::Bundle,
+        books: context.books,
+        ..Default::default()
+    }];
     isolated.remarkable.enabled = false;
     isolated.email.enabled = false;
     // Bundles retain original-color assets; compatible clients choose their display mode.
@@ -195,6 +202,8 @@ pub fn build_fresh(
     // inside the fresh paper instead of pointing to an EPUB that will not be delivered.
     if !context.books {
         isolated.reading.long_read_words = usize::MAX;
+        // Scheduled inline preferences also impose a word cap; fresh full text must not.
+        isolated.reading.inline.clear();
     }
     let gathered =
         crate::gather_with(&isolated, date, context.started_at, net, opts).without_nudges();

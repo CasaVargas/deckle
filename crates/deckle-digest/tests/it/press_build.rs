@@ -524,3 +524,104 @@ fn saved_page_photos_are_snapshotted_with_the_html() {
     );
     assert_eq!(before, snapshot(&protected));
 }
+
+#[test]
+fn fresh_bundles_keep_full_size_photo_masters() {
+    const PHOTO: &str = "https://example.invalid/photo.jpg";
+    let d = tempfile::tempdir().unwrap();
+    let protected = d.path().join("protected");
+    let mut c = config(&protected);
+    c.sections = vec![SectionKind::Reading];
+    c.photos = true;
+    let q = deckle_digest::reading::ReadingQueue::new(c.reading.queue_path.clone().unwrap());
+    q.add_url(PAGE, None, "test", now()).unwrap();
+    let before = snapshot(&protected);
+    let html = String::from_utf8(page()).unwrap().replace(
+        "</head>",
+        &format!("<meta property=\"og:image\" content=\"{PHOTO}\"></head>"),
+    );
+    let mut photo = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(1800, 1200, image::Rgb([210, 80, 40]))
+        .write_to(&mut photo, image::ImageFormat::Jpeg)
+        .unwrap();
+    let network = |url: &str| match url {
+        PAGE => Ok(html.as_bytes().to_vec()),
+        PHOTO => Ok(photo.get_ref().clone()),
+        _ => net(url),
+    };
+    let result = build_fresh(
+        &c,
+        &context(&d.path().join("job"), now(), false),
+        &network,
+        &GatherOptions::default(),
+    )
+    .unwrap();
+    let v = manifest(&result.bundle);
+    let reading = v["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["key"] == "reading")
+        .unwrap();
+    let bundled_photo = &reading["stories"][0]["photos"][0];
+    let image = image::open(result.bundle.join(bundled_photo["file"].as_str().unwrap())).unwrap();
+    assert_eq!((image.width(), image.height()), (1800, 1200));
+    assert_eq!(bundled_photo["width"], 1800);
+    assert_eq!(bundled_photo["height"], 1200);
+    assert_eq!(before, snapshot(&protected));
+}
+
+#[test]
+fn fresh_inline_reading_keeps_the_tail_beyond_the_scheduled_word_cap() {
+    const TAIL: &str =
+        "The final archival marker confirms the entire account survived publication.";
+    let d = tempfile::tempdir().unwrap();
+    let protected = d.path().join("protected");
+    let mut c = config(&protected);
+    c.sections = vec![SectionKind::Reading];
+    let q = deckle_digest::reading::ReadingQueue::new(c.reading.queue_path.clone().unwrap());
+    let added = q.add_url(PAGE, None, "test", now()).unwrap();
+    let id = match added {
+        deckle_digest::reading::Added::New(id) | deckle_digest::reading::Added::Duplicate(id) => id,
+    };
+    c.reading.inline = vec![id];
+    let before = snapshot(&protected);
+    let html = format!(
+        "<html><head><title>Complete saved account</title></head><body><article><h1>Complete saved account</h1>{}<p>{TAIL}</p></article></body></html>",
+        "<p>The town council debated the public library and its overdue roof repairs before voting on the budget.</p>".repeat(500),
+    );
+    let network = |url: &str| {
+        if url == PAGE {
+            Ok(html.as_bytes().to_vec())
+        } else {
+            net(url)
+        }
+    };
+    let date = now()
+        .with_timezone(&deckle_digest::tz::local_tz())
+        .date_naive();
+    let scheduled = deckle_digest::gather(&c, date, now(), &network);
+    assert!(scheduled.long_reads.is_empty());
+    assert!(
+        !scheduled.edition.sections[0].articles[0]
+            .body
+            .contains(TAIL),
+        "scheduled inline reading retains its existing cap"
+    );
+    let result = build_fresh(
+        &c,
+        &context(&d.path().join("job"), now(), false),
+        &network,
+        &GatherOptions::default(),
+    )
+    .unwrap();
+    let v = manifest(&result.bundle);
+    let story = &v["sections"][0]["stories"][0];
+    assert!(
+        story["body"]["text"].as_str().unwrap().contains(TAIL),
+        "fresh reading must retain the final paragraph beyond 6000 words"
+    );
+    assert!(story["words"].as_u64().unwrap() > 6000);
+    assert!(story["long_read"].is_null());
+    assert_eq!(before, snapshot(&protected));
+}
