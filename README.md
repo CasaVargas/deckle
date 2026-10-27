@@ -226,6 +226,10 @@ Converting and sending a book is offline. Deckle goes online only for:
 | Amazon edition lookup (Open Library) | books for MTP Kindles | off |
 | Metadata fill (Open Library) | each book sent | off |
 
+<p align="center">
+  <img src="docs/screenshots/readme/settings-online.jpg" width="720" alt="Settings, Online and privacy: each optional lookup with what it sends and where, and the two that always run, with what they carry">
+</p>
+
 The app lists all of it on one page, **Settings → Online & privacy**. A book sent with features
 carries an ASIN, so the Kindle itself may ask Amazon about it. That's the Kindle, not Deckle.
 Sending cover-first avoids it.
