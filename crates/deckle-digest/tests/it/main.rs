@@ -7,6 +7,7 @@ mod cookbook_add;
 mod cookbook_book;
 mod cookbook_cover;
 mod cookbook_filing;
+mod cookbook_illustrate;
 mod cookbook_index;
 mod cookbook_recipe;
 mod cookbook_store;
