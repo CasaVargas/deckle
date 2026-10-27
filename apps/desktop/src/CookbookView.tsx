@@ -11,7 +11,7 @@ import CookbookAdd from "./CookbookAdd";
 import type { Incoming } from "./CookbookAdd";
 import CookbookDeliveryRoom from "./CookbookDelivery";
 import CookbookRecipes from "./CookbookRecipes";
-import { COOKBOOK_ROOMS, illustrateSummary, recipeCount } from "./cookbookRooms";
+import { COOKBOOK_ROOMS, failedDelivery, illustrateSummary, recipeCount } from "./cookbookRooms";
 import type { CookbookRoom } from "./cookbookRooms";
 import type { CookbookBook, CookbookDelivery } from "./types";
 
@@ -31,7 +31,7 @@ export default function CookbookView({
   focusTaken: MutableRefObject<number>;
   /** An address or file pasted or dropped on the tab: it goes to Add. */
   incoming: Incoming | null;
-  /** The desktop's `llm_api_key` setting, and how to change it: Illustrate all draws with it. */
+  /** The desktop's `illustrations_api_key` setting (used only for illustrations), and how to change it. */
   apiKey: string;
   onApiKey: (key: string) => Promise<void>;
   /** Go to the Daily tab's Delivery room. */
@@ -54,7 +54,7 @@ export default function CookbookView({
     () =>
       Promise.all([
         api.cookbookBook().then(setBook).catch((e) => onNotice(String(e))),
-        api.cookbookDelivery().then(setDelivery).catch(() => setDelivery(null)),
+        api.cookbookDelivery().then(setDelivery).catch((e) => setDelivery(failedDelivery(String(e)))),
       ]).then(() => {}),
     [onNotice],
   );
@@ -77,6 +77,7 @@ export default function CookbookView({
     setRun(null);
     load();
   };
+  const closeSheet = useCallback(() => setSheetOpen(false), []);
   const stopIllustrating = () => {
     setRun((r) => (r ? { ...r, stopping: true } : r));
     api.cookbookIllustrateStop().catch((e) => onNotice(String(e)));
@@ -135,7 +136,7 @@ export default function CookbookView({
           onIllustrateAll={illustrateAll}
           onStop={stopIllustrating}
           onChanged={load}
-          onClose={() => setSheetOpen(false)}
+          onClose={closeSheet}
         />
       )}
     </div>

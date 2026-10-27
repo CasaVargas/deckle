@@ -34,7 +34,7 @@ export default function BookSheet({
   onClose,
 }: {
   book: CookbookBook;
-  /** The desktop's `llm_api_key` setting, which Illustrate all draws with. */
+  /** The desktop's `illustrations_api_key` setting: the key illustrations (and only they) draw with. */
   apiKey: string;
   onApiKey: (key: string) => Promise<void>;
   run: IllustrateRun | null;
@@ -59,8 +59,8 @@ export default function BookSheet({
   // The last non-blank name of each chapter: a blank one is never saved
   const lastName = useRef<Record<string, string>>(Object.fromEntries(book.config.chapters.map((c) => [c.id, c.name])));
 
-  const live = useRef({ onChanged, onApiKey });
-  live.current = { onChanged, onApiKey };
+  const live = useRef({ onChanged, onApiKey, onClose });
+  live.current = { onChanged, onApiKey, onClose };
 
   const queue = useRef(
     saveQueue<CookbookConfig>(
@@ -76,6 +76,8 @@ export default function BookSheet({
     ),
   ).current;
 
+  /** The newest save's promise: it resolves when the queue is idle. */
+  const lastPush = useRef<Promise<void>>(Promise.resolve());
   const push = () => {
     const c = structuredClone(draftRef.current);
     c.chapters = c.chapters.map((ch) => {
@@ -83,7 +85,8 @@ export default function BookSheet({
       return { ...ch, name: ch.name.trim() || lastName.current[ch.id] || "Chapter" };
     });
     setSaving(true);
-    return queue.push(c);
+    lastPush.current = queue.push(c);
+    return lastPush.current;
   };
   const typing = useRef(debounce(() => void push(), 500)).current;
   useEffect(() => () => typing.flush(), [typing]);
@@ -113,12 +116,23 @@ export default function BookSheet({
     return () => p.flush();
   }, []);
 
+  // Focus goes to the sheet once, when it opens, never again as it re-renders
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
     sheet.current?.focus();
+  }, []);
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && live.current.onClose();
+    window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
+  }, []);
+  // The key follows Settings when it changes elsewhere, unless it is being typed in
+  const keyFocused = useRef(false);
+  useEffect(() => {
+    if (!keyFocused.current && apiKey !== keyRef.current) {
+      keyRef.current = apiKey;
+      setKey(apiKey);
+    }
+  }, [apiKey]);
 
   const counts = Object.fromEntries(book.chapters.map((c) => [c.id, c.recipes.length]));
   const other = draft.chapters.find((c) => c.id === OTHER_CHAPTER)?.name ?? "Everything else";
@@ -127,8 +141,8 @@ export default function BookSheet({
   /** Illustrate all draws from what is on disk and in Settings, so anything still waiting is saved first. */
   const illustrateAll = async () => {
     keyPush.current.flush();
-    typing.cancel();
-    await Promise.all([keyDone.current, push()]);
+    typing.flush();
+    await Promise.all([keyDone.current, lastPush.current]);
     onIllustrateAll();
   };
 
@@ -342,7 +356,7 @@ export default function BookSheet({
                 </label>
               </div>
               <label>
-                <span className="label">API key</span>
+                <span className="label">Image API key</span>
                 <input
                   type="password"
                   value={key}
@@ -353,11 +367,15 @@ export default function BookSheet({
                     keyRef.current = e.target.value;
                     keyPush.current.call();
                   }}
-                  onBlur={() => keyPush.current.flush()}
+                  onFocus={() => (keyFocused.current = true)}
+                  onBlur={() => {
+                    keyFocused.current = false;
+                    keyPush.current.flush();
+                  }}
                 />
               </label>
               <p className="muted small">
-                Uses the API key from Settings → Reading aids, stored on this Mac; empty uses OPENAI_API_KEY. X-Ray uses the same key, so it has to be one this endpoint accepts. It is never written to cookbook.toml.
+                Stored in Deckle's settings on this Mac and used only for illustrations; empty uses OPENAI_API_KEY from the environment. It goes only to the endpoint above and is never written to cookbook.toml.
               </p>
               <div className="paper-actions">
                 <button className="ghost" disabled={running} onClick={illustrateAll}>

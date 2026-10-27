@@ -60,6 +60,7 @@ pub fn run() {
             commands::previewer_status,
             commands::get_settings,
             commands::set_settings,
+            commands::set_illustrations_key,
             commands::run_books,
             commands::reveal,
             commands::start_tab,

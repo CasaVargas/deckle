@@ -21,7 +21,7 @@ use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE, book};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::{AppState, load_settings_from};
+use crate::commands::{AppState, Settings, load_settings_from};
 
 /// The folder the commands work on: `DECKLE_COOKBOOK_DIR`, else beside `digest.toml`.
 fn store() -> Store {
@@ -648,12 +648,13 @@ fn set_kindle_at(digest: &Path, id: &str, on: bool) -> Result<(), String> {
     deckle_digest::config::save(digest, &cfg)
 }
 
-/// The key to draw with: the one typed in Settings, else `OPENAI_API_KEY`.
-fn image_key_from(settings_key: &str, env_key: Option<String>) -> Option<String> {
-    let typed = settings_key.trim();
+/// The key to draw with: the image key typed in Book settings (`illustrations_api_key`), else
+/// `OPENAI_API_KEY`. X-Ray's `llm_api_key` is never used: it may belong to another provider.
+fn image_key(s: &Settings, env: Option<String>) -> Option<String> {
+    let typed = s.illustrations_api_key.trim();
     match typed.is_empty() {
         false => Some(typed.to_owned()),
-        true => env_key,
+        true => env.filter(|k| !k.trim().is_empty()),
     }
 }
 
@@ -839,7 +840,7 @@ impl Drop for Drawing {
 /// Draws recipe `id`, or with `all` every recipe without a drawing (every one with `redraw`),
 /// one at a time, emitting `cookbook-illustrate` ([`IllustrateEvent`]) as each finishes.
 /// `cookbook_illustrate_stop` ends it after the one being drawn. The key is Settings'
-/// `llm_api_key`, else `OPENAI_API_KEY`.
+/// `illustrations_api_key`, else `OPENAI_API_KEY` (never X-Ray's `llm_api_key`).
 #[tauri::command]
 pub async fn cookbook_illustrate(
     app: AppHandle,
@@ -848,8 +849,8 @@ pub async fn cookbook_illustrate(
     all: bool,
     redraw: bool,
 ) -> Result<IllustrateDto, String> {
-    let key = image_key_from(
-        &load_settings_from(&state.settings_file).llm_api_key,
+    let key = image_key(
+        &load_settings_from(&state.settings_file),
         illustrate::api_key(),
     );
     if ILLUSTRATING.swap(true, Ordering::SeqCst) {
@@ -1545,15 +1546,23 @@ mod tests {
     }
 
     #[test]
-    fn the_key_is_the_settings_key_else_the_environment() {
+    fn the_key_is_the_image_key_else_the_environment_and_never_the_llm_key() {
+        let mut s = Settings {
+            llm_api_key: "sk-ant-x".into(),
+            ..Settings::default()
+        };
+        assert_eq!(image_key(&s, None), None, "X-Ray's key is not for images");
         assert_eq!(
-            image_key_from(" sk-typed ", Some("env".to_owned())).as_deref(),
-            Some("sk-typed")
-        );
-        assert_eq!(
-            image_key_from("", Some("env".to_owned())).as_deref(),
+            image_key(&s, Some("env".to_owned())).as_deref(),
             Some("env")
         );
-        assert_eq!(image_key_from("  ", None), None);
+        s.illustrations_api_key = " sk-typed ".into();
+        assert_eq!(
+            image_key(&s, Some("env".to_owned())).as_deref(),
+            Some("sk-typed")
+        );
+        s.illustrations_api_key = "  ".into();
+        assert_eq!(image_key(&s, None), None);
+        assert_eq!(image_key(&s, Some("  ".to_owned())), None);
     }
 }

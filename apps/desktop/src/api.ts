@@ -54,6 +54,8 @@ export const api = {
   previewerStatus: () => invoke<PreviewerStatus>("previewer_status"),
   getSettings: () => invoke<Settings>("get_settings"),
   setSettings: (settings: Settings) => invoke<void>("set_settings", { settings }),
+  /** Changes only the cookbook's image key in the settings file. */
+  setIllustrationsKey: (key: string) => invoke<void>("set_illustrations_key", { key }),
   runBooks: (books: RunRequest[], target: RunTarget) =>
     invoke<void>("run_books", { books, target }),
   /** Books Deckle didn't send, sorted, with their originals; reads every book once (slow over MTP the first time). */

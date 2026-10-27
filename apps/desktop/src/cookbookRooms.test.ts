@@ -6,7 +6,9 @@ import {
   canRemoveChapter,
   chapterSlug,
   edited,
+  failedDelivery,
   failedSave,
+  shouldAutoDraw,
   groupByChapter,
   illustrateSummary,
   illustrateProgress,
@@ -351,4 +353,24 @@ test("the illustrations switch says exactly what is sent and where", () => {
   expect(illustrationSends("")).toBe(`Each drawing sends ${sent} to api.openai.com. Nothing else goes: no web address, description, note or photo.`);
   expect(illustrationSends("http://localhost:11434/v1")).toBe(`Each drawing sends ${sent} to localhost:11434. Nothing else goes: no web address, description, note or photo.`);
   expect(illustrationSends("my image box")).toBe(`Each drawing sends ${sent} to my image box. Nothing else goes: no web address, description, note or photo.`);
+});
+
+test("a saved picture choice draws only for a new Illustration, with illustrations on and no run going", () => {
+  const ask = (patch: { picture?: "site" | "illustration" | "none" | "default" }, pick: "site" | "illustration" | "none" | "default", on: boolean, has: boolean, all: boolean) =>
+    shouldAutoDraw(patch, pick, "site", on, has, all);
+  expect(ask({ picture: "illustration" }, "illustration", true, false, false)).toBe(true);
+  // the save didn't change the picture (a note, say)
+  expect(ask({}, "illustration", true, false, false)).toBe(false);
+  expect(ask({ picture: "illustration" }, "illustration", false, false, false)).toBe(false);
+  expect(ask({ picture: "illustration" }, "illustration", true, true, false)).toBe(false);
+  // Illustrate all is drawing: one at a time
+  expect(ask({ picture: "illustration" }, "illustration", true, false, true)).toBe(false);
+  expect(shouldAutoDraw({ picture: "default" }, "default", "illustration", true, false, false)).toBe(true);
+});
+
+test("when the Kindles can't be listed the reason is kept to show on Delivery", () => {
+  const d = failedDelivery("Can't read digest.toml");
+  expect(d.error).toBe("Can't read digest.toml");
+  expect(d.kindles).toEqual([]);
+  expect(d.watcher_installed).toBe(true);
 });

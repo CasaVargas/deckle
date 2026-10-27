@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS: Settings = {
   llm_model: "",
   llm_endpoint: "",
   llm_api_key: "",
+  illustrations_api_key: "",
   xray: true,
   word_wise: true,
   word_wise_level: 5,
@@ -603,8 +604,12 @@ export default function App() {
             focusAdd={focusAdd}
             focusTaken={focusTaken}
             incoming={incoming}
-            apiKey={settings.llm_api_key}
-            onApiKey={(llm_api_key) => saveSettings({ ...settings, llm_api_key })}
+            apiKey={settings.illustrations_api_key}
+            onApiKey={async (illustrations_api_key) => {
+              // Only this field is written (in Rust), so a stale copy here can't undo other settings
+              await api.setIllustrationsKey(illustrations_api_key).catch((e) => setNotice(String(e)));
+              setSettings((s) => ({ ...s, illustrations_api_key }));
+            }}
             onDailyDelivery={() => {
               setDailyRoom("delivery");
               setTab("daily");

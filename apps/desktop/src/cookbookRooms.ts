@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Cookbook tab's pure parts (cookbook design §8.2): its tabs and the lines of copy that are
 // worked out from the book. Beside the tab, as dailyRooms.ts is beside the Daily.
-import type { CookbookChapter, CookbookChapterRows, CookbookIllustrated, CookbookIllustrateEvent, CookbookKindle, CookbookPatch, CookbookPicture, CookbookRecipe } from "./types";
+import type { CookbookChapter, CookbookChapterRows, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookKindle, CookbookPatch, CookbookPicture, CookbookRecipe } from "./types";
 
 /** The Cookbook tab's tabs: add a recipe, see what's in the book, see where it goes. */
 export type CookbookRoom = "add" | "recipes" | "delivery";
@@ -299,4 +299,21 @@ export function illustrationSends(endpoint: string): string {
     }
   }
   return `Each drawing sends the recipe's title, its chapter's name and up to eight ingredient names to ${where}. Nothing else goes: no web address, description, note or photo.`;
+}
+
+/** After a save: draw at once only for an Illustration just chosen, with illustrations on, none drawn, and no Illustrate all going. */
+export function shouldAutoDraw(
+  patch: CookbookPatch,
+  pick: CookbookPicture,
+  bookDefault: Exclude<CookbookPicture, "default">,
+  illustrationsOn: boolean,
+  hasIllustration: boolean,
+  drawingAll: boolean,
+): boolean {
+  return patch.picture !== undefined && !drawingAll && wantsDrawing(pick, bookDefault, illustrationsOn, hasIllustration);
+}
+
+/** Delivery when the Kindles couldn't be listed: no rows, and the reason to show. */
+export function failedDelivery(reason: string): CookbookDelivery {
+  return { kindles: [], watcher_installed: true, error: reason };
 }

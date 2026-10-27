@@ -9,7 +9,7 @@ import { api } from "./api";
 import { debounce, saveQueue } from "./saveQueue";
 import type { SaveQueue } from "./saveQueue";
 import Icon from "./Icon";
-import { chipPicture, edited, failedSave, groupByChapter, recipeDetail, recipeDraft, recipePatch, rowSaveLine, savedRow, wantsDrawing, webUrl } from "./cookbookRooms";
+import { chipPicture, edited, failedSave, groupByChapter, recipeDetail, recipeDraft, recipePatch, rowSaveLine, savedRow, shouldAutoDraw, webUrl } from "./cookbookRooms";
 import type { RowState } from "./cookbookRooms";
 import type { CookbookBook, CookbookPicture, CookbookRecipe } from "./types";
 
@@ -42,14 +42,15 @@ export default function CookbookRecipes({
   const [open, setOpen] = useState<string | null>(initialOpen);
   const [query, setQuery] = useState("");
   const [confirm, setConfirm] = useState<string | null>(null);
-  const [drawing, setDrawing] = useState<string | null>(null);
+  /** Recipes being drawn now: each row says so beside its chips, and the save queue never waits on it. */
+  const [drawing, setDrawing] = useState<Record<string, boolean>>({});
   // The open rows' state: the newest edit is in rowsRef (a save reads it), state mirrors it for display
   const rowsRef = useRef<Record<string, RowState>>({});
   const [rows, setRowsState] = useState<Record<string, RowState>>({});
   const mounted = useRef(true);
 
-  const live = useRef({ book, onChanged, onNotice });
-  live.current = { book, onChanged, onNotice };
+  const live = useRef({ book, onChanged, onNotice, drawingAll, open });
+  live.current = { book, onChanged, onNotice, drawingAll, open };
 
   const setRow = useCallback((id: string, f: (r: RowState) => RowState) => {
     const cur = rowsRef.current[id];
@@ -57,6 +58,31 @@ export default function CookbookRecipes({
     rowsRef.current = { ...rowsRef.current, [id]: f(cur) };
     setRowsState(rowsRef.current);
   }, []);
+
+  /** Where a failure shows: on the row while it is open, and in the notice bar when it is not. */
+  const fail = (id: string, reason: string) => {
+    if (mounted.current && rowsRef.current[id]) setRow(id, (r) => failedSave(r, reason));
+    if (!mounted.current || live.current.open !== id) live.current.onNotice(reason);
+  };
+
+  /** Draws (or redraws) one recipe's picture, outside any save queue. */
+  const drawFor = async (id: string, redraw: boolean) => {
+    setDrawing((d) => ({ ...d, [id]: true }));
+    try {
+      await api.cookbookIllustrate(id, false, redraw);
+      if (mounted.current) setRow(id, (r) => ({ ...r, error: null }));
+    } catch (e) {
+      const reason = String(e);
+      if (mounted.current && rowsRef.current[id]) setRow(id, (r) => ({ ...r, error: reason }));
+      if (!mounted.current || live.current.open !== id) live.current.onNotice(reason);
+    }
+    setDrawing((d) => {
+      const rest = { ...d };
+      delete rest[id];
+      return rest;
+    });
+    live.current.onChanged();
+  };
 
   // One save queue and one typing pause per recipe, made when first needed
   const savers = useRef(new Map<string, { queue: SaveQueue<void>; typing: ReturnType<typeof debounce> }>());
@@ -74,22 +100,14 @@ export default function CookbookRecipes({
           }
           const saved = await api.cookbookUpdate(id, patch);
           setRow(id, (r) => savedRow(r, recipeDraft(saved)));
-          // Choosing Illustration, with illustrations on and nothing drawn yet, draws it
+          // Choosing Illustration, with illustrations on and nothing drawn yet, draws it: on its own,
+          // so edits made meanwhile are not held up behind the drawing
           const b = live.current.book;
-          if (patch.picture !== undefined && b && wantsDrawing(saved.picture, b.config.picture, b.config.illustrations.enabled, saved.has_illustration)) {
-            setDrawing(id);
-            try {
-              await api.cookbookIllustrate(id, false, false);
-            } catch (e) {
-              setRow(id, (r) => failedSave(r, String(e)));
-            }
-            setDrawing(null);
-          }
+          if (b && shouldAutoDraw(patch, saved.picture, b.config.picture, b.config.illustrations.enabled, saved.has_illustration, live.current.drawingAll)) void drawFor(id, false);
         },
         (e) => {
-          // Reasons show on the row; a row that is gone has nowhere to show it
-          if (mounted.current && rowsRef.current[id]) setRow(id, (r) => failedSave(r, String(e)));
-          else live.current.onNotice(String(e));
+          // The reason shows on the row, and in the notice bar too once the row is closed
+          fail(id, String(e));
         },
         () => live.current.onChanged(),
       );
@@ -177,18 +195,6 @@ export default function CookbookRecipes({
     onChanged();
   };
 
-  const redraw = async (r: CookbookRecipe) => {
-    setDrawing(r.id);
-    try {
-      await api.cookbookIllustrate(r.id, false, true);
-      setRow(r.id, (x) => ({ ...x, error: null }));
-    } catch (e) {
-      setRow(r.id, (x) => failedSave(x, String(e)));
-    }
-    setDrawing(null);
-    onChanged();
-  };
-
   if (!book) return <p className="muted">Loading the book…</p>;
   const groups = groupByChapter(book.chapters, query);
   const illustrationsOn = book.config.illustrations.enabled;
@@ -242,11 +248,12 @@ export default function CookbookRecipes({
               })}
             </div>
             {illustrationsOn && chosen === "illustration" && (
-              <button className="ghost small" disabled={drawingAll || drawing !== null} onClick={() => redraw(r)}>
-                {drawing === r.id ? "Drawing…" : r.has_illustration ? "Redraw" : "Draw it"}
+              <button className="ghost small" disabled={drawingAll || Object.keys(drawing).length > 0} onClick={() => void drawFor(r.id, true)}>
+                {drawing[r.id] ? "Drawing…" : r.has_illustration ? "Redraw" : "Draw it"}
               </button>
             )}
           </div>
+          {drawing[r.id] && !(illustrationsOn && chosen === "illustration") && <span className="muted small">Drawing…</span>}
           {row.draft.picture === "default" && <span className="muted small">Follows the book: {PICTURE_NAME[book.config.picture]}.</span>}
         </div>
         <label className="sec-field">

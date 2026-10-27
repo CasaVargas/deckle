@@ -200,6 +200,8 @@ export interface Settings {
   llm_model: string;
   llm_endpoint: string;
   llm_api_key: string;
+  /** The key the cookbook's illustrations send to their image endpoint; empty uses OPENAI_API_KEY. Never X-Ray's. */
+  illustrations_api_key: string;
   xray: boolean;
   word_wise: boolean;
   word_wise_level: number;
