@@ -61,8 +61,17 @@ pub fn printed_picture(store: &Store, saved: &Saved, cfg: &BookConfig) -> Pictur
     }
 }
 
+/// Whether a recipe added at `added` carries the contents' star: within 7 days of `newest`, the
+/// store's newest addition (which counts itself).
+pub fn is_latest_addition(
+    added: chrono::DateTime<chrono::Utc>,
+    newest: chrono::DateTime<chrono::Utc>,
+) -> bool {
+    pages::is_latest(added, newest)
+}
+
 /// The title the book shows for a recipe.
-pub(super) fn shown_title(s: &Saved) -> String {
+pub fn shown_title(s: &Saved) -> String {
     [s.title_override.as_deref(), Some(&s.recipe.title)]
         .into_iter()
         .flatten()

@@ -3,6 +3,7 @@
 
 mod books;
 mod commands;
+mod cookbook;
 mod daily;
 mod kindle;
 mod morgue;
@@ -62,6 +63,18 @@ pub fn run() {
             commands::run_books,
             commands::reveal,
             commands::start_tab,
+            cookbook::cookbook_preview,
+            cookbook::cookbook_add,
+            cookbook::cookbook_book,
+            cookbook::cookbook_update,
+            cookbook::cookbook_remove,
+            cookbook::cookbook_save_config,
+            cookbook::cookbook_send_now,
+            cookbook::cookbook_preview_book,
+            cookbook::cookbook_delivery,
+            cookbook::cookbook_set_kindle,
+            cookbook::cookbook_illustrate,
+            cookbook::cookbook_illustrate_stop,
             daily::daily_state,
             daily::papers_list,
             daily::masthead_missing,

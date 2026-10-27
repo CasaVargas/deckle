@@ -16,6 +16,7 @@ use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE};
 use serde::Serialize;
 
 use super::cli::{CookbookCommand, PictureArg};
+use super::cookbook_api::SendSummary;
 use super::cookbook_delivery::{self, KindleState, KindleStatus};
 use super::emit;
 
@@ -301,11 +302,7 @@ fn list(json: bool, store: &Store, chapter: Option<&str>) -> Result<(), String> 
 /// `digest.toml`'s `[sync]`: the household's settings and the Kindles it names. No file is no
 /// settings; one that won't load is an error.
 fn sync_config() -> Result<deckle_digest::config::SyncConfig, String> {
-    let path = deckle_digest::config::default_path();
-    if !path.exists() {
-        return Ok(Default::default());
-    }
-    Ok(deckle_digest::Config::load(&path)?.sync)
+    super::cookbook_api::sync_config_at(&deckle_digest::config::default_path())
 }
 
 /// The title the book prints: the owner's, else the site's.
@@ -401,7 +398,7 @@ struct Sent<'a> {
     result: &'static str,
     /// The Kindle's name (or sync id).
     #[serde(skip_serializing_if = "Option::is_none")]
-    kindle: Option<String>,
+    kindle: Option<&'a str>,
     /// The EPUB, for an export.
     #[serde(skip_serializing_if = "Option::is_none")]
     exported: Option<&'a Path>,
@@ -409,28 +406,50 @@ struct Sent<'a> {
     outcome: Option<&'a super::DigestOutcome>,
 }
 
-/// Builds the book when it changed (a book that hasn't is sent as it is), then sends it: to a
-/// connected Kindle through the same offer, push and record `digest push` uses, or as an EPUB
-/// into the folder `--to` names, which no Kindle's record hears of. With no Kindle connected it
-/// waits for each one's next plug-in. It says "up to date" only when the record agrees.
 fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
-    // A book that was never built is due, so this builds it; it waits if the watcher is
-    // building right now.
-    if let Some(b) = cookbook_delivery::rebuild_waiting(store, None)? {
+    let sent = send_core(store, to, &mut |b| {
         eprintln!(
             "built {} {}",
             b.recipes,
             if b.recipes == 1 { "recipe" } else { "recipes" }
-        );
+        )
+    })?;
+    let reply = Sent {
+        build: &sent.build,
+        result: sent.result,
+        kindle: sent.kindle.as_deref(),
+        exported: sent.exported.as_deref(),
+        outcome: sent.outcome.as_ref(),
+    };
+    emit(json, &reply, || sent.message.clone())
+}
+
+/// Builds the book when it changed (a book that hasn't is sent as it is), then sends it: to a
+/// connected Kindle through the same offer, push and record `digest push` uses, or as an EPUB
+/// into the folder `to` names, which no Kindle's record hears of. With no Kindle connected it
+/// waits for each one's next plug-in. It says "up to date" only when the record agrees.
+/// `built` hears of a build made on the way. `deckle cookbook send` and the desktop's Send now
+/// both run this.
+pub(super) fn send_core(
+    store: &Store,
+    to: Option<&str>,
+    built: &mut dyn FnMut(&book::Built),
+) -> Result<SendSummary, String> {
+    // A book that was never built is due, so this builds it; it waits if the watcher is
+    // building right now.
+    let made = cookbook_delivery::rebuild_waiting(store, None)?;
+    if let Some(b) = &made {
+        built(b);
     }
     let build = cookbook_delivery::current_build(store)
         .ok_or("no recipes yet; add one with `deckle cookbook add`")?;
-    let reply = |s: Sent, text: String| emit(json, &s, || text);
-    let sent = |result, kindle, exported, outcome| Sent {
-        build: &build,
+    let summary = |result, kindle, exported, outcome, message| SendSummary {
+        build: build.clone(),
         result,
         kindle,
         exported,
+        message,
+        built: made.as_ref().map(|b| b.recipes),
         outcome,
     };
     if let Some(folder) = to.filter(|t| *t != "device") {
@@ -440,10 +459,8 @@ fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
         let out = dir.join(EPUB_NAME);
         std::fs::copy(cookbook_delivery::epub_path(store), &out)
             .map_err(|e| format!("{}: {e}", out.display()))?;
-        return reply(
-            sent("exported", None, Some(&out), None),
-            format!("Exported to {}", out.display()),
-        );
+        let message = format!("Exported to {}", out.display());
+        return Ok(summary("exported", None, Some(out), None, message));
     }
     let path = deckle_digest::config::default_path();
     let Some(target) = super::detect_kindle() else {
@@ -456,17 +473,23 @@ fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
                         .iter()
                         .all(|k| matches!(k.state, KindleState::UpToDate | KindleState::Off))
             });
-        return if current {
-            reply(
-                sent("all_current", None, None, None),
+        return Ok(if current {
+            summary(
+                "all_current",
+                None,
+                None,
+                None,
                 "Every Kindle already has this build".to_owned(),
             )
         } else {
-            reply(
-                sent("queued", None, None, None),
+            summary(
+                "queued",
+                None,
+                None,
+                None,
                 "Queued: goes to each Kindle on its next plug-in".to_owned(),
             )
-        };
+        });
     };
     let id = deckle_core::sync::device_id(&target);
     let papers = if path.exists() {
@@ -478,7 +501,7 @@ fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
     let name = cfg.sync.device_name(&id).unwrap_or_else(|| id.clone());
     let on = cfg.sync.for_device(&id).cookbook;
     let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
-    let outcome = super::push_queued(&path, &queue, &papers, Some(target))?;
+    let outcome = super::push_queued_with(&path, &queue, &papers, Some(target), store)?;
     let flush = outcome.flush.as_ref();
     let took = flush.is_some_and(|f| {
         f.delivered
@@ -517,7 +540,7 @@ fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
     if let (true, Some(e)) = (took, &outcome.cookbook_error) {
         text = format!("{text}\nwarning: cookbook: {e}");
     }
-    reply(sent(result, Some(name), None, Some(&outcome)), text)
+    Ok(summary(result, Some(name), None, Some(outcome), text))
 }
 
 /// A 256x256 gray PNG, the stand-in image endpoint's answer.

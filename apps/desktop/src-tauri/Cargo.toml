@@ -37,6 +37,7 @@ deckle-readership.workspace = true
 deckle-shelf.workspace = true
 deckle-morgue.workspace = true
 base64 = "0.23"
+image.workspace = true
 tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2.4"
