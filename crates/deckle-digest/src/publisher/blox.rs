@@ -157,10 +157,19 @@ fn origin(site: &str) -> String {
     }
 }
 
-/// The login form: its action and its hidden fields.
+/// The login form: its action and its hidden fields. The access modal's form, else the login
+/// page's own (`form.user-login-form`, which The Pilot serves since 2026-10), else the first
+/// form with a password field.
 fn login_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
     let doc = Document::from(html);
-    let form = doc.select("form#access-modal-login-form");
+    let form = [
+        "form#access-modal-login-form",
+        "form.user-login-form",
+        "form:has(input[type=password])",
+    ]
+    .iter()
+    .map(|sel| doc.select(sel).first())
+    .find(|f| f.exists())?;
     let action = form.attr("action")?.trim().to_string();
     let hidden = form
         .select("input[type=hidden]")
@@ -654,6 +663,29 @@ mod tests {
         };
         Blox.login("ThePilot.COM", "a", "b", &c).unwrap();
         assert_eq!(c.posts.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn login_uses_the_login_pages_own_form_without_the_modal() {
+        // The Pilot's /users/login/ as of 2026-10: logout forms first, then a classed form.
+        let page = r#"<html><body>
+<form method="post" action="https://www.thepilot.com/users/logout/" id="user-logout-form-2150589"></form>
+<form class="user-login-form form-horizontal" role="form" method="post" action="https://www.thepilot.com/users/login/?referer_url=/">
+<input type="hidden" name="referer_url" value="/">
+<input id="user-username" class="form-control" name="username" type="text" value="" required>
+<input id="user-password" class="form-control" name="password" type="password" autocomplete="off" required >
+<button type="submit" class="btn btn-primary btn-full-xs">Log In</button>
+</form></body></html>"#;
+        let (action, hidden) = login_form(page).unwrap();
+        assert_eq!(
+            action,
+            "https://www.thepilot.com/users/login/?referer_url=/"
+        );
+        assert_eq!(hidden, vec![("referer_url".to_string(), "/".to_string())]);
+        // Any other password form, when neither is there.
+        let bare = r#"<form action="/login"><input type="hidden" name="t" value="1"><input type="password" name="password"></form>"#;
+        assert_eq!(login_form(bare).unwrap().0, "/login");
+        assert!(login_form(r#"<form action="/users/logout/"></form>"#).is_none());
     }
 
     #[test]

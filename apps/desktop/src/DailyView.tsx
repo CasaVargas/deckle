@@ -23,6 +23,7 @@ import TomorrowsPaper from "./TomorrowsPaper";
 import DeliveryTab from "./DeliveryTab";
 import { exportParts, remarkablePart } from "./exportsView";
 import { anyKindleHint } from "./papersView";
+import { keepUnfinished, savable } from "./subscriptions";
 import type { DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, NextPaper, PagePlanRow, PapersView, ReadershipView, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL } from "./types";
 
@@ -189,11 +190,11 @@ export default function DailyView({ onNotice }: { onNotice: (m: string) => void 
         const at = seq.current;
         const { papers: ps, next: n, state: before } = live.current;
         const daysBefore = (before?.config?.schedule?.days ?? []).join();
-        const st = await api.dailySave(c, slug === "main" ? null : slug);
+        const st = await api.dailySave(savable(c), slug === "main" ? null : slug);
         if (slug !== live.current.paper) return;
         setState(st);
         if (seq.current === at && st.config) {
-          draftRef.current = structuredClone(st.config);
+          draftRef.current = structuredClone(keepUnfinished(st.config, c));
           setDraft(draftRef.current);
         }
         // New days move an installed job: it's reinstalled with them.
