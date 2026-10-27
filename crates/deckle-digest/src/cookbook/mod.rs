@@ -3,6 +3,7 @@
 //! (docs/superpowers/specs/2026-10-26-cookbook-design.md).
 
 pub mod add;
+pub mod book;
 pub mod filing;
 pub mod index;
 pub(crate) mod ornament;
