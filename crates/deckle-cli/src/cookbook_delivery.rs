@@ -1050,6 +1050,8 @@ mod tests {
         assert_eq!(current_build(&store).as_deref(), Some("b1"));
     }
 
+    /// The fake Previewer is a shell script, so only the Unix tests use it.
+    #[cfg(unix)]
     fn fake_pv() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh")
     }
