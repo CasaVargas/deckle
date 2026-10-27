@@ -68,6 +68,9 @@ pub enum Units {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
+    /// Stable identity of this paper, independent of its display name or slug.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paper_id: Option<uuid::Uuid>,
     #[serde(skip_serializing_if = "crate::editor::EditorConfig::is_default")]
     pub llm: crate::editor::EditorConfig,
     pub title: String,
@@ -246,6 +249,7 @@ impl ScheduleConfig {
 impl Default for Config {
     fn default() -> Self {
         Config {
+            paper_id: None,
             llm: Default::default(),
             title: "The Deckle Daily".into(),
             masthead: crate::masthead::MastheadFont::default(),
@@ -1174,6 +1178,9 @@ impl EmailConfig {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ExportConfig {
+    /// Permit bounded fresh-edition requests from compatible folder clients.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub press_enabled: bool,
     /// What the app and the report call it; unique among the exports.
     pub name: String,
     /// The folder; `~` is the home folder, as in `[reading] inbox`.
@@ -1191,6 +1198,7 @@ pub struct ExportConfig {
 impl Default for ExportConfig {
     fn default() -> Self {
         ExportConfig {
+            press_enabled: false,
             name: String::new(),
             dir: String::new(),
             format: ExportFormat::Epub,

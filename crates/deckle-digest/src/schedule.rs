@@ -642,6 +642,119 @@ fn linux_instructions_all(jobs: &[Schedule], exe: &Path, config: Option<&Path>) 
     )
 }
 
+/// OS service boundary for watcher-only setup. Implementations must use the existing
+/// watcher identity and must never install, remove or reschedule edition jobs.
+pub trait WatcherService {
+    fn matches(&mut self, exe: &Path, config: &Path) -> Result<bool, String>;
+    fn install(&mut self, exe: &Path, config: &Path) -> Result<(), String>;
+    fn start(&mut self) -> Result<(), String>;
+}
+
+/// Ensure the single watcher is configured and started, preserving all edition schedules.
+pub fn ensure_watcher_with(
+    exe: &Path,
+    config: &Path,
+    service: &mut impl WatcherService,
+) -> Result<(), String> {
+    if !service.matches(exe, config)? {
+        service.install(exe, config)?;
+    }
+    service.start()
+}
+
+struct NativeWatcher;
+fn watch_schedule(exe: &Path, config: &Path) -> Schedule {
+    Schedule {
+        hour: 0,
+        minute: 0,
+        days: Vec::new(),
+        slug: MAIN.to_owned(),
+        exe: exe.to_owned(),
+        config: Some(config.to_owned()),
+    }
+}
+
+fn task_action(xml: &str) -> Result<(String, String), String> {
+    let doc = roxmltree::Document::parse(xml).map_err(|e| e.to_string())?;
+    let exec = doc
+        .descendants()
+        .find(|n| n.has_tag_name("Exec"))
+        .ok_or("Watcher task has no action")?;
+    let text = |tag| {
+        exec.children()
+            .find(|n| n.has_tag_name(tag))
+            .and_then(|n| n.text())
+            .unwrap_or_default()
+            .to_owned()
+    };
+    Ok((text("Command"), text("Arguments")))
+}
+impl WatcherService for NativeWatcher {
+    fn matches(&mut self, exe: &Path, config: &Path) -> Result<bool, String> {
+        if cfg!(target_os = "macos") {
+            let home = home()?;
+            let path = home
+                .join("Library/LaunchAgents")
+                .join(format!("{WATCH_LABEL}.plist"));
+            let expected =
+                launchd_watch_plist(exe, Some(config), &home.join("Library/Logs/Deckle")).1;
+            if std::fs::read_to_string(path).ok().as_deref() != Some(&expected) {
+                return Ok(false);
+            }
+            Ok(run(Command::new("launchctl")
+                .args(["print", &format!("{}/{WATCH_LABEL}", gui_domain()?)]))
+            .is_ok())
+        } else if cfg!(target_os = "windows") {
+            let Ok(xml) =
+                run(Command::new("schtasks").args(["/Query", "/TN", &task_name("watch"), "/XML"]))
+            else {
+                return Ok(false);
+            };
+            Ok(
+                task_action(&xml)?
+                    == task_action(&task_xml(&watch_schedule(exe, config), "watch"))?,
+            )
+        } else {
+            Err(linux_instructions_all(&[], exe, Some(config)))
+        }
+    }
+    fn install(&mut self, exe: &Path, config: &Path) -> Result<(), String> {
+        if cfg!(target_os = "macos") {
+            let job = launchd_watch_plist(exe, Some(config), &macos_logs()?);
+            macos_load(&[job])?;
+            Ok(())
+        } else if cfg!(target_os = "windows") {
+            windows_create(
+                &task_name("watch"),
+                &task_xml(&watch_schedule(exe, config), "watch"),
+            )?;
+            Ok(())
+        } else {
+            Err(linux_instructions_all(&[], exe, Some(config)))
+        }
+    }
+    fn start(&mut self) -> Result<(), String> {
+        if cfg!(target_os = "macos") {
+            run(Command::new("launchctl")
+                .args(["kickstart", &format!("{}/{WATCH_LABEL}", gui_domain()?)]))?;
+        } else if cfg!(target_os = "windows") {
+            run(Command::new("schtasks").args(["/Run", "/TN", &task_name("watch")]))?;
+        } else {
+            return Err("Watcher installation is unsupported on this platform".into());
+        }
+        Ok(())
+    }
+}
+
+/// Install/start only the existing watcher using the supported platform scheduler. Service
+/// failure is returned to setup; a scheduled edition's time and weekdays are never changed.
+pub fn ensure_watcher(exe: &Path, config: &Path) -> Result<(), String> {
+    if dry_run() {
+        return Err("Watcher setup was not performed in schedule dry-run mode".into());
+    }
+    ensure_watcher_with(exe, config, &mut NativeWatcher)
+}
+
 /// Installs every paper's job in `jobs` and the watcher, then removes the jobs of papers that
 /// are gone (many papers §5). The main paper's job is replaced only when `jobs` has one for it.
 pub fn install_all(

@@ -278,3 +278,5 @@ mod tests {
 
 mod protocol;
 pub use protocol::*;
+
+pub mod setup;
