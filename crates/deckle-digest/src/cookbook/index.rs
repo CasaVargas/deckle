@@ -85,6 +85,37 @@ fn without_parens(line: &str) -> String {
         .collect()
 }
 
+/// Words that may precede a stop key ("kosher salt", "freshly ground black pepper").
+const SEASONING_MODIFIERS: [&str; 16] = [
+    "black", "white", "ground", "cracked", "freshly", "coarse", "coarsely", "fine", "finely",
+    "kosher", "sea", "flaky", "table", "diamond", "crystal", "morton",
+];
+
+/// Phrases that end a line without naming an ingredient.
+const TRAILING_PHRASES: [&str; 9] = [
+    " to taste",
+    " for serving",
+    " for garnish",
+    " for the pan",
+    " as needed",
+    " or more",
+    " plus more",
+    " optional",
+    " if desired",
+];
+
+/// Strips serving phrases from the end of a (lowercase) line, with or without a comma.
+fn without_trailing_phrases(line: &str) -> &str {
+    let mut line = line;
+    loop {
+        line = line.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, ',' | '.' | ';'));
+        match TRAILING_PHRASES.iter().find_map(|p| line.strip_suffix(p)) {
+            Some(rest) => line = rest,
+            None => return line,
+        }
+    }
+}
+
 /// Cuts the line at its first comma (not one inside a number such as "1,000") or semicolon.
 fn before_comma(line: &str) -> &str {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
@@ -109,37 +140,43 @@ pub fn key_ingredient(line: &str) -> Option<String> {
     if line.ends_with(':') || line.starts_with("for the ") || line.starts_with("for ") {
         return None;
     }
+    // Serving phrases at the end of the line go first, with or without a comma.
+    let line = without_trailing_phrases(line);
     // 4a. Anything after the first comma goes.
     let line = before_comma(line);
 
     let mut words: Vec<String> = Vec::new();
+    // The leading run: quantities, units and "of" before the first real word. A unit word
+    // after that is part of the name ("prime rib", "ground cloves", "fish sticks").
     let mut leading = true;
     for raw in line.split_whitespace() {
         let token = raw.trim_matches(|c: char| !c.is_alphanumeric());
         if token.is_empty() {
             continue;
         }
-        // 2. Leading quantities, fractions and ranges, with the "to" or "or" joining a range.
+        // 2. Quantities, fractions and ranges, with the "to" or "or" joining a range.
         if is_quantity(token) {
             continue;
         }
-        if leading && matches!(token, "to" | "or" | "x") {
+        if leading {
+            if matches!(token, "to" | "or" | "x" | "of") {
+                continue;
+            }
+            // 3. Units: "400g", "2tbsp", "9-inch" (a quantity stuck to its unit), and "cloves".
+            let bare = token.trim_start_matches(|c: char| {
+                c.is_numeric() || matches!(c, '.' | ',' | '/' | '⁄' | '-' | '–' | '—')
+            });
+            if listed(&lists.units, token)
+                || (bare.len() < token.len() && !bare.is_empty() && listed(&lists.units, bare))
+            {
+                continue;
+            }
+        }
+        // 4b. Preparation words (anywhere; they do not end the leading run).
+        if listed(&lists.prep, token) {
             continue;
         }
         leading = false;
-        // "400g", "2tbsp", "9-inch": a quantity stuck to its unit.
-        let bare = token.trim_start_matches(|c: char| {
-            c.is_numeric() || matches!(c, '.' | ',' | '/' | '⁄' | '-' | '–' | '—')
-        });
-        let token = if bare.len() < token.len() && !bare.is_empty() && listed(&lists.units, bare) {
-            bare
-        } else {
-            token
-        };
-        // 3 and 4b. Units and preparation words.
-        if listed(&lists.units, token) || listed(&lists.prep, token) {
-            continue;
-        }
         words.push(token.to_owned());
     }
     // "flour or cornstarch": the first alternative is the key; and/or never lead or trail.
@@ -156,7 +193,13 @@ pub fn key_ingredient(line: &str) -> Option<String> {
     let last = words.pop()?;
     words.push(singular(&last));
     let key = words.join(" ");
-    if lists.stop.contains(&key) {
+    // Seasoning modifiers count only for the stop check: "freshly ground black pepper" is
+    // pepper, but "bell pepper" and "celery salt" are not.
+    let plain: Vec<&str> = key
+        .split(' ')
+        .skip_while(|w| SEASONING_MODIFIERS.contains(w))
+        .collect();
+    if lists.stop.contains(&key) || lists.stop.contains(&plain.join(" ")) {
         return None;
     }
     // 6. Aliases.

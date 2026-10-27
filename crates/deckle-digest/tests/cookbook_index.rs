@@ -49,6 +49,8 @@ fn blank_recipe() -> deckle_digest::cookbook::Recipe {
     }
 }
 
+const PARSED_FIXTURES: usize = 19;
+
 #[test]
 fn key_ingredient_table() {
     let cases = [
@@ -69,6 +71,32 @@ fn key_ingredient_table() {
         ("400g spaghetti", "spaghetti"),
         ("3 ripe berries", "berry"),
         ("hummus", "hummus"),
+        // A unit word after the first real word is part of the name.
+        ("prime rib", "prime rib"),
+        ("1 tsp ground cloves", "ground clove"),
+        ("fish sticks", "fish stick"),
+        ("1 head garlic", "garlic"),
+        ("loaf pan", "loaf pan"),
+        ("1 cinnamon stick", "cinnamon stick"),
+        ("1 (9-inch) pie crust", "pie crust"),
+        // "hot" and "extra" are not prep words.
+        ("1 tbsp hot sauce", "hot sauce"),
+        ("2 hot dogs", "hot dog"),
+        ("2 tbsp extra virgin olive oil", "olive oil"),
+        ("2 tbsp extra-virgin olive oil", "olive oil"),
+        // Serving phrases come off the end first.
+        ("Tortillas for serving", "tortilla"),
+        ("Parsley as needed", "parsley"),
+        ("Parsley, chopped, for garnish", "parsley"),
+        ("1 cup flour or more", "flour"),
+        ("Butter for the pan", "butter"),
+        ("Cilantro if desired", "cilantro"),
+        // Seasoning modifiers do not make a different key unless something else does.
+        ("1 bell pepper", "bell pepper"),
+        ("1 tsp red pepper flakes", "red pepper flake"),
+        ("1 jalapeño pepper", "jalapeño pepper"),
+        ("1 tsp celery salt", "celery salt"),
+        ("1 cup cream of tartar", "cream of tartar"),
     ];
     for (line, want) in cases {
         assert_eq!(key_ingredient(line).as_deref(), Some(want), "{line:?}");
@@ -87,6 +115,14 @@ fn key_ingredient_rejects_junk() {
         "   ",
         "and",
         "1/2",
+        "Salt to taste",
+        "Salt and pepper to taste",
+        "Freshly ground black pepper",
+        "Coarse kosher salt",
+        "Fine sea salt",
+        "Diamond Crystal kosher salt",
+        "Cracked black pepper",
+        "Flaky salt",
     ] {
         assert_eq!(key_ingredient(line), None, "{line:?}");
     }
@@ -147,6 +183,8 @@ fn fixture_index_snapshot() {
             })
         })
         .collect();
+    // The fixtures that are not recipes at all fail to parse and are skipped.
+    assert_eq!(all.len(), PARSED_FIXTURES, "fixtures that parsed");
     let refs: Vec<&Saved> = all.iter().collect();
     let title = |id: &str| {
         all.iter()
@@ -162,6 +200,7 @@ fn fixture_index_snapshot() {
     let path = dir.join("index.txt");
     if std::env::var_os("UPDATE_SNAPSHOT").is_some() {
         std::fs::write(&path, &text).unwrap();
+        return;
     }
     let want = std::fs::read_to_string(&path).unwrap_or_default();
     assert_eq!(text, want, "regenerate with UPDATE_SNAPSHOT=1");

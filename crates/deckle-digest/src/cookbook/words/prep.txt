@@ -4,7 +4,6 @@
 a
 an
 the
-of
 some
 about
 approximately
@@ -48,7 +47,6 @@ small
 big
 extra-large
 mixed
-extra
 boneless
 skinless
 ripe
@@ -64,6 +62,5 @@ serving
 garnish
 cold
 warm
-hot
 room
 temperature
