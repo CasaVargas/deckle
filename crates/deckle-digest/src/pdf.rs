@@ -1224,6 +1224,29 @@ struct Layout<'a> {
 /// A laid-out line: its pieces and their widths.
 type Line = Vec<(Face, f32, String, f32)>;
 
+/// How a line ends (print layout §4.5).
+#[derive(Clone, Debug, Default, PartialEq)]
+struct End {
+    /// The line ends with the head of this word and a hyphen.
+    hyphen: Option<String>,
+    /// The line starts with the rest of the word the line before broke.
+    continues: bool,
+    /// A paragraph's last line, or one ending at a forced break: never justified.
+    last: bool,
+}
+
+/// The stretch each space between words takes for `line` to fill `width`, or `None` when the
+/// line stays ragged: it has no spaces, or one would stretch past 2.5 times `space`.
+fn justify(line: &Line, width: f32, space: f32) -> Option<f32> {
+    let gaps = line.iter().skip(1).filter(|p| p.2.starts_with(' ')).count();
+    if gaps == 0 {
+        return None;
+    }
+    let extra = (width - line.iter().map(|p| p.3).sum::<f32>()).max(0.0);
+    let per = extra / gaps as f32;
+    (per <= space * 1.5).then_some(per)
+}
+
 impl<'a> Layout<'a> {
     fn new(fonts: &'a Fonts, page: (f32, f32), t: Type, anchors: usize) -> Self {
         let (page_w, page_h) = page;
@@ -1283,6 +1306,15 @@ impl<'a> Layout<'a> {
 
     /// Breaks `runs` into lines no wider than `width`.
     fn lines(&self, runs: &[Run], width: f32) -> Vec<Line> {
+        self.lines_with(runs, width, false)
+            .into_iter()
+            .map(|(line, _)| line)
+            .collect()
+    }
+
+    /// [`Layout::lines`], with how each line ends, hyphenating words that don't fit when
+    /// `hyphenate` (column text, print layout §4.5).
+    fn lines_with(&self, runs: &[Run], width: f32, hyphenate: bool) -> Vec<(Line, End)> {
         // Words with the spaces before them, each in its run's style.
         let mut words: Vec<(Face, f32, String, bool)> = Vec::new();
         let mut space = false;
@@ -1311,25 +1343,59 @@ impl<'a> Layout<'a> {
                 }
             }
         }
-        let mut lines: Vec<Line> = vec![Vec::new()];
+        let mut lines: Vec<(Line, End)> = vec![(Vec::new(), End::default())];
         let mut x = 0.0f32;
+        // hyphenated lines in a row
+        let mut hyphens = 0;
         for (face, size, word, spaced) in words {
             if word == "\n" {
-                lines.push(Vec::new());
+                lines.last_mut().expect("a line").1.last = true;
+                lines.push((Vec::new(), End::default()));
                 x = 0.0;
                 continue;
             }
-            let sp = if spaced && !lines.last().is_some_and(Vec::is_empty) {
+            let sp = if spaced && !lines.last().is_some_and(|l| l.0.is_empty()) {
                 self.fonts.width(face, size, " ")
             } else {
                 0.0
             };
+            let mut word = word;
             let w = self.fonts.width(face, size, &word);
-            if x + sp + w > width && !lines.last().is_some_and(Vec::is_empty) {
-                lines.push(Vec::new());
-                x = 0.0;
+            if x + sp + w > width && !lines.last().is_some_and(|l| l.0.is_empty()) {
+                let split = (hyphenate && hyphens < 2)
+                    .then(|| self.split_word(face, size, &word, width - x - sp))
+                    .flatten();
+                match split {
+                    Some((head, tail)) => {
+                        let hw = self.fonts.width(face, size, &head);
+                        let (line, end) = lines.last_mut().expect("a line");
+                        line.push((
+                            face,
+                            size,
+                            format!("{}{head}", if sp > 0.0 { " " } else { "" }),
+                            sp + hw,
+                        ));
+                        end.hyphen = Some(word.clone());
+                        hyphens += 1;
+                        lines.push((
+                            Vec::new(),
+                            End {
+                                continues: true,
+                                ..End::default()
+                            },
+                        ));
+                        x = 0.0;
+                        word = tail;
+                    }
+                    None => {
+                        hyphens = 0;
+                        lines.push((Vec::new(), End::default()));
+                        x = 0.0;
+                    }
+                }
             }
-            let line = lines.last_mut().expect("a line");
+            let w = self.fonts.width(face, size, &word);
+            let (line, _) = lines.last_mut().expect("a line");
             let sp = if line.is_empty() { 0.0 } else { sp };
             if w <= width {
                 line.push((
@@ -1347,13 +1413,13 @@ impl<'a> Layout<'a> {
             for c in word.chars() {
                 let cw = self.fonts.width(face, size, &c.to_string());
                 if pw + cw > width - x && !piece.is_empty() {
-                    lines.last_mut().expect("a line").push((
+                    lines.last_mut().expect("a line").0.push((
                         face,
                         size,
                         std::mem::take(&mut piece),
                         pw,
                     ));
-                    lines.push(Vec::new());
+                    lines.push((Vec::new(), End::default()));
                     x = 0.0;
                     pw = 0.0;
                 }
@@ -1363,11 +1429,69 @@ impl<'a> Layout<'a> {
             lines
                 .last_mut()
                 .expect("a line")
+                .0
                 .push((face, size, piece, pw));
             x += pw;
         }
-        lines.retain(|l| !l.is_empty());
-        lines
+        if let Some((_, end)) = lines.last_mut() {
+            end.last = true;
+        }
+        // An empty line (a forced break at the end) carries its `last` to the line before.
+        let mut out: Vec<(Line, End)> = Vec::with_capacity(lines.len());
+        for (line, end) in lines {
+            if line.is_empty() {
+                if let Some(prev) = out.last_mut() {
+                    prev.1.last |= end.last;
+                }
+                continue;
+            }
+            out.push((line, end));
+        }
+        out
+    }
+
+    /// `word` broken to fit `room`: its longest head that fits, with a hyphen (or its own
+    /// hyphen), and the rest. Only words of five letters or more with no digit, `@`, `/` or
+    /// `.`, at least two letters before the break and three after (print layout §4.5).
+    fn split_word(&self, face: Face, size: f32, word: &str, room: f32) -> Option<(String, String)> {
+        let lead = word.len()
+            - word
+                .trim_start_matches(|c: char| !c.is_alphanumeric())
+                .len();
+        let core_end = word.trim_end_matches(|c: char| !c.is_alphanumeric()).len();
+        if core_end <= lead {
+            return None;
+        }
+        let (prefix, core, suffix) = (&word[..lead], &word[lead..core_end], &word[core_end..]);
+        let letters = core.chars().filter(|c| c.is_alphabetic()).count();
+        if letters < 5
+            || core
+                .chars()
+                .any(|c| c.is_ascii_digit() || "@/.".contains(c))
+        {
+            return None;
+        }
+        // Where it may break: after its own hyphens, else between syllables.
+        let breaks: Vec<(usize, bool)> = if core.contains('-') {
+            core.match_indices('-')
+                .map(|(i, _)| (i + 1, false))
+                .filter(|(i, _)| *i < core.len())
+                .collect()
+        } else {
+            let mut at = 0;
+            hypher::hyphenate_bounded(core, hypher::Lang::English, 2, 3)
+                .map(|syllable| {
+                    at += syllable.len();
+                    (at, true)
+                })
+                .filter(|(i, _)| *i < core.len())
+                .collect()
+        };
+        breaks.into_iter().rev().find_map(|(i, add)| {
+            let head = format!("{prefix}{}{}", &core[..i], if add { "-" } else { "" });
+            (self.fonts.width(face, size, &head) <= room)
+                .then(|| (head, format!("{}{suffix}", &core[i..])))
+        })
     }
 
     fn line_height(&self, line: &Line) -> f32 {
@@ -2431,6 +2555,137 @@ mod tests {
                 .iter()
                 .all(|line| line.iter().map(|p| p.3).sum::<f32>() <= 100.5)
         );
+    }
+
+    fn run(text: &str) -> Vec<Run> {
+        vec![Run {
+            face: Face::Regular,
+            size: 10.0,
+            text: text.into(),
+        }]
+    }
+
+    fn words_of(lines: &[(Line, End)]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|(l, _)| l.iter().map(|p| p.2.as_str()).collect::<String>())
+            .collect()
+    }
+
+    #[test]
+    fn a_long_word_breaks_at_a_syllable_inside_its_bounds() {
+        let f = fonts();
+        let l = layout(&f);
+        let text = "The council voted unquestionably for the extraordinarily complicated plan";
+        let width = 120.0;
+        let lines = l.lines_with(&run(text), width, true);
+        let got = words_of(&lines);
+        let broken: Vec<&(Line, End)> = lines.iter().filter(|(_, e)| e.hyphen.is_some()).collect();
+        assert!(!broken.is_empty(), "{got:?}");
+        for (i, (line, end)) in lines.iter().enumerate() {
+            let w: f32 = line.iter().map(|p| p.3).sum();
+            assert!(w <= width + 0.5, "{w}: {got:?}");
+            if let Some(word) = &end.hyphen {
+                let head = line.last().unwrap().2.trim().trim_end_matches('-');
+                let tail = lines[i + 1].0[0].2.trim();
+                assert!(
+                    head.chars().count() >= 2 && tail.chars().count() >= 3,
+                    "{head}|{tail}"
+                );
+                assert_eq!(format!("{head}{tail}"), *word);
+                assert!(lines[i + 1].1.continues);
+            }
+        }
+        // every word comes back once, whole
+        let joined = got.join("").replace("-", "");
+        assert_eq!(
+            joined.split_whitespace().collect::<Vec<_>>().join(" "),
+            text
+        );
+        assert!(lines.last().unwrap().1.last);
+    }
+
+    #[test]
+    fn a_hyphenated_compound_breaks_at_its_own_hyphen() {
+        let f = fonts();
+        let l = layout(&f);
+        let width = f.width(Face::Regular, 10.0, "A well-") + 2.0;
+        let lines = l.lines_with(&run("A well-known name"), width, true);
+        assert_eq!(words_of(&lines)[0], "A well-");
+        assert_eq!(lines[0].1.hyphen.as_deref(), Some("well-known"));
+    }
+
+    #[test]
+    fn numbers_addresses_and_short_words_never_break() {
+        let f = fonts();
+        let l = layout(&f);
+        for word in [
+            "1234567890",
+            "example.com",
+            "a@b.org",
+            "path/to/thing",
+            "cats",
+        ] {
+            let text = format!("Seven words come first here and then {word}");
+            let lines = l.lines_with(&run(&text), 140.0, true);
+            assert!(lines.iter().all(|(_, e)| e.hyphen.is_none()), "{word}");
+        }
+    }
+
+    #[test]
+    fn never_three_hyphens_in_a_row() {
+        let f = fonts();
+        let l = layout(&f);
+        let text = [
+            "extraordinarily",
+            "unquestionably",
+            "notwithstanding",
+            "incomprehensibility",
+        ]
+        .repeat(6)
+        .join(" ");
+        for width in [70.0, 85.0, 100.0, 120.0] {
+            let lines = l.lines_with(&run(&text), width, true);
+            let mut row = 0;
+            for (_, e) in &lines {
+                row = if e.hyphen.is_some() { row + 1 } else { 0 };
+                assert!(row <= 2, "{width}: {:?}", words_of(&lines));
+            }
+        }
+    }
+
+    #[test]
+    fn without_hyphenation_the_lines_are_todays() {
+        let f = fonts();
+        let l = layout(&f);
+        let text = "The mill stood by the river for a hundred years and more, extraordinarily.";
+        let plain: Vec<Line> = l
+            .lines_with(&run(text), 90.0, false)
+            .into_iter()
+            .map(|(l, _)| l)
+            .collect();
+        assert_eq!(plain, l.lines(&run(text), 90.0));
+    }
+
+    #[test]
+    fn justified_lines_fill_the_column_and_last_lines_dont() {
+        let f = fonts();
+        let l = layout(&f);
+        let width = 150.0;
+        let space = f.width(Face::Regular, 10.0, " ");
+        let text = "The fence comes down in March and the first market is set for the second \
+                    Saturday in April, rain or shine, and the wheel will be turning when it opens.";
+        let lines = l.lines_with(&run(text), width, true);
+        for (line, end) in &lines[..lines.len() - 1] {
+            let stretch = justify(line, width, space).expect("a full line justifies");
+            let w: f32 = line.iter().map(|p| p.3).sum();
+            let gaps = line.iter().skip(1).filter(|p| p.2.starts_with(' ')).count() as f32;
+            assert!((w + stretch * gaps - width).abs() < 0.5, "{w} {stretch}");
+            assert!(end.hyphen.is_some() || !end.last);
+        }
+        // a line with too few gaps to fill stays ragged
+        let lonely = l.lines_with(&run("Short words"), width, true);
+        assert_eq!(justify(&lonely[0].0, width, space), None);
     }
 
     #[test]
