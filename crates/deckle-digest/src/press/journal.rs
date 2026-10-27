@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Private local snapshots. Keep this directory outside all synced exports.
-use super::queue::{JournalData, validate_data};
+use super::queue::{JournalData, migrate_bindings, validate_data};
 use super::{PressError, PressErrorCode};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -54,7 +54,8 @@ impl PressJournal {
                         && snapshot.version == 1
                         && snapshot.sequence > 0
                         && snapshot.sha256 == checksum(snapshot.payload.as_bytes())
-                        && let Ok(data) = serde_json::from_str::<JournalData>(&snapshot.payload)
+                        && let Ok(mut data) = serde_json::from_str::<JournalData>(&snapshot.payload)
+                        && migrate_bindings(&mut data)
                         && validate_data(&data)
                     {
                         snapshots.push((snapshot.sequence, data));

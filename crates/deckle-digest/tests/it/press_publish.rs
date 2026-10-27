@@ -475,3 +475,53 @@ fn press_publish_returns_live_coalesced_status_when_first_queued_request_expired
     assert_eq!(s.state, PressState::Published);
     assert_eq!(s.request_id, second_id);
 }
+#[test]
+fn press_publish_unavailable_old_binding_does_not_block_other_statuses() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut j, b) = setup(d.path());
+    let (_, old_id) = admit(&mut j, &b, now());
+    let other = d.path().join("other");
+    fs::create_dir(&other).unwrap();
+    let other = PressBinding {
+        root: other.canonicalize().unwrap(),
+        paper_id: Uuid::new_v4(),
+        ..b.clone()
+    };
+    setup::write_manifest(
+        &other,
+        &ProducerManifest {
+            format: "deckle-press".into(),
+            version: 1,
+            producer_id: other.producer_id,
+            paper_id: other.paper_id,
+            paper_name: "Other".into(),
+            enabled: true,
+            operations: vec![PressOperation::FreshFull],
+            updated_at: now(),
+        },
+    )
+    .unwrap();
+    j.register_binding(other.clone(), true, false).unwrap();
+    let request = PressRequest {
+        format: "deckle-press-request".into(),
+        version: 1,
+        request_id: Uuid::new_v4(),
+        reader_id: Uuid::new_v4(),
+        producer_id: other.producer_id,
+        paper_id: other.paper_id,
+        operation: PressOperation::FreshFull,
+        created_at: now(),
+        expires_at: now() + Duration::hours(24),
+    };
+    let id = request.request_id;
+    j.accept(request, "other", now()).unwrap();
+    fs::rename(&b.root, d.path().join("offline")).unwrap();
+    assert!(flush_statuses(&mut j).is_err());
+    assert!(
+        other
+            .root
+            .join(format!(".deckle-press/status/{id}.json"))
+            .exists()
+    );
+    assert_eq!(j.binding_for_request(old_id).unwrap(), b);
+}

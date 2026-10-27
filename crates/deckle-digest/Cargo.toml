@@ -64,3 +64,6 @@ jsonschema = { version = "0.33", default-features = false }
 zip.workspace = true
 image.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

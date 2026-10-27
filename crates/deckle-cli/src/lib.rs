@@ -7,6 +7,7 @@ pub mod cookbook_api;
 mod cookbook_delivery;
 mod highlights;
 mod inbox;
+pub mod press_worker;
 mod series;
 
 use std::path::{Path, PathBuf};
@@ -2441,6 +2442,10 @@ fn digest(
     let path = config.unwrap_or_else(deckle_digest::config::default_path);
     let paper = paper.as_deref();
     match action {
+        cli::DigestCommand::PressWorker { job } => {
+            press_worker::run_job(&job)?;
+            Ok(ExitCode::SUCCESS)
+        }
         cli::DigestCommand::Init { force } => {
             if path.exists() && !force {
                 return Err(format!(
@@ -3049,6 +3054,8 @@ fn digest(
             let mut papers = all_papers(&path)?;
             let mut cfg = papers[0].clone();
             let mut papers_error: Option<String> = None;
+            let mut press_supervisor = press_worker::PressSupervisor::new(path.clone())?;
+            let mut press_error = None;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             eprintln!(
                 "watching for a Kindle, a Kobo, a PocketBook or a reMarkable every {interval}s; \
@@ -3116,6 +3123,10 @@ fn digest(
                     }
                     Err(_) => {}
                 }
+                say_once(
+                    &mut press_error,
+                    press_supervisor.tick(&papers, deckle_digest::chrono::Utc::now()),
+                );
                 scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,

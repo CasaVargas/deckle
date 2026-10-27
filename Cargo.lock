@@ -1159,6 +1159,7 @@ dependencies = [
  "jsonschema",
  "keyring",
  "lettre",
+ "libc",
  "pdf-writer",
  "rand 0.9.5",
  "regex",

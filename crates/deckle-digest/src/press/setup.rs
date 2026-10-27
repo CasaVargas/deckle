@@ -390,6 +390,15 @@ pub fn reconcile_with_watcher(
     }
 }
 
+/// Installation-wide durable private press state, never a purgeable cache or synced export.
+/// Setup and watcher must use this same location; explicit paper TOML paths do not relocate it.
+pub fn private_root() -> PathBuf {
+    crate::config::default_path()
+        .parent()
+        .expect("configuration parent")
+        .join("press")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

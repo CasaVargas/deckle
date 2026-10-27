@@ -36,3 +36,5 @@ mod web_book;
 mod press_queue;
 
 mod press_publish;
+
+mod press_scan;

@@ -529,3 +529,97 @@ fn press_queue_replaying_expired_queued_request_expires_it_while_build_lock_is_b
     );
     assert!(j.admit(now() + Duration::days(2)).unwrap().is_none());
 }
+#[test]
+fn press_queue_two_roots_never_coalesce_or_reroute_and_old_root_can_be_disabled_offline() {
+    let dir = tempfile::tempdir().unwrap();
+    let first = dir.path().join("first");
+    let second = dir.path().join("second");
+    std::fs::create_dir(&first).unwrap();
+    std::fs::create_dir(&second).unwrap();
+    let b = binding(&first);
+    let other = PressBinding {
+        root: second.canonicalize().unwrap(),
+        ..b.clone()
+    };
+    let root = dir.path().join("journal");
+    let mut j = PressJournal::open(&root).unwrap();
+    j.register_binding(b.clone(), true, false).unwrap();
+    j.register_binding(other.clone(), true, false).unwrap();
+    let a = request(&b, now());
+    let r = request(&other, now());
+    let s = j.accept_in(&b, a.clone(), "a", now()).unwrap();
+    assert_eq!(
+        j.accept_in(&other, r.clone(), "r", now()).unwrap_err().code,
+        PressErrorCode::Busy
+    );
+    let first_lease = j.admit(now()).unwrap().unwrap();
+    let t = j.accept_in(&other, r.clone(), "r", now()).unwrap();
+    assert_ne!(s.job_id, t.job_id);
+    assert_eq!(
+        j.accept_in(&other, a.clone(), "a", now()).unwrap_err().code,
+        PressErrorCode::ProtocolConflict
+    );
+    drop(j);
+    let mut j = PressJournal::open(&root).unwrap();
+    assert_eq!(j.binding_for_request(a.request_id).unwrap(), b);
+    assert_eq!(j.binding_for_request(r.request_id).unwrap(), other);
+    std::fs::remove_dir(first).unwrap();
+    j.set_binding_policy(&b, false, false).unwrap();
+    j.fail(&first_lease, PressErrorCode::BuildFailed, now())
+        .unwrap();
+    let lease = j.admit(now() + Duration::minutes(5)).unwrap().unwrap();
+    assert_eq!(lease.root, other.root);
+    assert_eq!(j.binding_for_request(a.request_id).unwrap(), b);
+}
+#[test]
+fn press_queue_legacy_snapshot_migrates_request_root_before_second_binding() {
+    use sha2::{Digest, Sha256};
+    let dir = tempfile::tempdir().unwrap();
+    let b = binding(dir.path());
+    let root = dir.path().join("journal");
+    let mut j = PressJournal::open(&root).unwrap();
+    j.register_binding(b.clone(), true, false).unwrap();
+    let r = request(&b, now());
+    j.reject(r.clone(), "old", PressErrorCode::Busy, now())
+        .unwrap();
+    drop(j);
+    for name in ["journal.json", "journal.backup.json"] {
+        let path = root.join(name);
+        let mut snapshot: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let mut data: serde_json::Value =
+            serde_json::from_str(snapshot["payload"].as_str().unwrap()).unwrap();
+        for e in data["entries"].as_array_mut().unwrap() {
+            e.as_object_mut().unwrap().remove("root");
+        }
+        let payload = serde_json::to_string(&data).unwrap();
+        snapshot["sha256"] = Sha256::digest(payload.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+            .into();
+        snapshot["payload"] = payload.into();
+        std::fs::write(path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+    }
+    let mut j = PressJournal::open(&root).unwrap();
+    let other = dir.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    j.register_binding(
+        PressBinding {
+            root: other,
+            ..b.clone()
+        },
+        true,
+        false,
+    )
+    .unwrap();
+    assert_eq!(j.binding_for_request(r.request_id).unwrap(), b);
+    drop(j);
+    assert_eq!(
+        PressJournal::open(&root)
+            .unwrap()
+            .binding_for_request(r.request_id)
+            .unwrap(),
+        b
+    );
+}

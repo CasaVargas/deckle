@@ -311,40 +311,47 @@ pub fn recover_result(
     flush_statuses(j)?;
     Ok(Some(s))
 }
-/// Retry committed snapshots without rebuilding. An unavailable/foreign root stops writes.
+/// Retry every committed snapshot independently. An unavailable/foreign folder cannot
+/// block healthy folders; return the first failure after attempting all status writes.
 pub fn flush_statuses(j: &mut PressJournal) -> Result<(), PressError> {
     j.ensure_healthy()?;
+    let mut error = None;
     for s in j.statuses() {
-        let b = j.binding_for_request(s.request_id).ok_or_else(conflict)?;
-        check_binding(&b)?;
-        let parent = b.root.join(".deckle-press/status");
-        directory(&parent, true)?;
-        let dest = parent.join(format!("{}.json", s.request_id));
-        if let Ok(meta) = fs::symlink_metadata(&dest) {
-            if meta.len() > MAX_CONTROL_BYTES as u64 || !meta.file_type().is_file() {
-                return Err(conflict());
-            }
-            let existing = decode_status(
-                &regular(&dest)?,
-                Path::new(&format!(".deckle-press/status/{}.json", s.request_id)),
-                &b,
-            )?;
-            if existing.revision > s.revision || (existing.revision == s.revision && existing != s)
-            {
-                return Err(conflict());
-            }
-            if existing == s {
-                continue;
-            }
+        if let Err(e) = flush_status(j, s) {
+            error.get_or_insert(e);
         }
-        let temp = parent.join(format!(".{}-{}.tmp", s.request_id, Uuid::new_v4()));
-        let bytes = serde_json::to_vec(&s).map_err(|_| storage())?;
-        write_new(&temp, &bytes)?;
-        check_binding(&b)?;
-        directory(&parent, false)?;
-        fs::rename(temp, dest).map_err(|_| storage())?;
-        sync_dir(&parent)?;
     }
+    error.map_or(Ok(()), Err)
+}
+fn flush_status(j: &PressJournal, s: PressStatus) -> Result<(), PressError> {
+    let b = j.binding_for_request(s.request_id).ok_or_else(conflict)?;
+    check_binding(&b)?;
+    let parent = b.root.join(".deckle-press/status");
+    directory(&parent, true)?;
+    let dest = parent.join(format!("{}.json", s.request_id));
+    if let Ok(meta) = fs::symlink_metadata(&dest) {
+        if meta.len() > MAX_CONTROL_BYTES as u64 || !meta.file_type().is_file() {
+            return Err(conflict());
+        }
+        let existing = decode_status(
+            &regular(&dest)?,
+            Path::new(&format!(".deckle-press/status/{}.json", s.request_id)),
+            &b,
+        )?;
+        if existing.revision > s.revision || (existing.revision == s.revision && existing != s) {
+            return Err(conflict());
+        }
+        if existing == s {
+            return Ok(());
+        }
+    }
+    let temp = parent.join(format!(".{}-{}.tmp", s.request_id, Uuid::new_v4()));
+    let bytes = serde_json::to_vec(&s).map_err(|_| storage())?;
+    write_new(&temp, &bytes)?;
+    check_binding(&b)?;
+    directory(&parent, false)?;
+    fs::rename(temp, dest).map_err(|_| storage())?;
+    sync_dir(&parent)?;
     Ok(())
 }
 

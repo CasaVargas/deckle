@@ -27,6 +27,8 @@ pub(crate) struct Binding {
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Entry {
+    #[serde(default)]
+    root: PathBuf,
     request: PressRequest,
     hash: String,
     first_seen: DateTime<Utc>,
@@ -58,7 +60,7 @@ pub(crate) fn validate_data(data: &JournalData) -> bool {
     for b in &data.bindings {
         if !b.root.is_absolute()
             || !roots.insert(&b.root)
-            || !bindings.insert((b.producer_id, b.paper_id))
+            || !bindings.insert((b.producer_id, b.paper_id, &b.root))
         {
             return false;
         }
@@ -104,11 +106,11 @@ pub(crate) fn validate_data(data: &JournalData) -> bool {
         if !requests.insert(e.request.request_id) {
             return false;
         }
-        let Some(b) = data
-            .bindings
-            .iter()
-            .find(|b| b.producer_id == e.request.producer_id && b.paper_id == e.request.paper_id)
-        else {
+        let Some(b) = data.bindings.iter().find(|b| {
+            b.producer_id == e.request.producer_id
+                && b.paper_id == e.request.paper_id
+                && b.root == e.root
+        }) else {
             return false;
         };
         let binding = PressBinding {
@@ -166,7 +168,10 @@ pub(crate) fn validate_data(data: &JournalData) -> bool {
         let Some(j) = jobs.get(&job_id) else {
             return false;
         };
-        if j.producer != binding.producer_id || j.paper != binding.paper_id {
+        if j.producer != binding.producer_id
+            || j.paper != binding.paper_id
+            || j.root != binding.root
+        {
             return false;
         }
         if e.status
@@ -291,14 +296,9 @@ impl PressJournal {
         }) {
             return Err(conflict());
         }
-        if let Some(b) = data
-            .bindings
-            .iter_mut()
-            .find(|b| b.producer_id == binding.producer_id && b.paper_id == binding.paper_id)
-        {
-            if b.root != root {
-                return Err(conflict());
-            }
+        if let Some(b) = data.bindings.iter_mut().find(|b| {
+            b.producer_id == binding.producer_id && b.paper_id == binding.paper_id && b.root == root
+        }) {
             b.enabled = enabled;
             b.stopped = stopped;
         } else {
@@ -318,6 +318,18 @@ impl PressJournal {
         content_hash: &str,
         now: DateTime<Utc>,
     ) -> Result<PressStatus, PressError> {
+        let binding = self.unique_binding(&request)?;
+        self.accept_in(&binding, request, content_hash, now)
+    }
+    /// Accept within a validated local folder. Identical IDs in another root conflict;
+    /// request bytes never select routing, and jobs coalesce only within this binding.
+    pub fn accept_in(
+        &mut self,
+        binding: &PressBinding,
+        request: PressRequest,
+        content_hash: &str,
+        now: DateTime<Utc>,
+    ) -> Result<PressStatus, PressError> {
         self.ensure_healthy()?;
         if let Some(e) = self
             .data
@@ -325,7 +337,12 @@ impl PressJournal {
             .iter()
             .find(|e| e.request.request_id == request.request_id)
         {
-            if e.hash != content_hash || e.request != request {
+            if e.hash != content_hash
+                || e.request != request
+                || e.root != binding.root
+                || binding.producer_id != request.producer_id
+                || binding.paper_id != request.paper_id
+            {
                 return Err(conflict());
             }
             let mut data = self.data.clone();
@@ -338,7 +355,13 @@ impl PressJournal {
             .data
             .bindings
             .iter()
-            .find(|b| b.producer_id == request.producer_id && b.paper_id == request.paper_id)
+            .find(|b| {
+                b.producer_id == request.producer_id
+                    && b.paper_id == request.paper_id
+                    && b.root == binding.root
+                    && b.producer_id == binding.producer_id
+                    && b.paper_id == binding.paper_id
+            })
             .ok_or_else(conflict)?;
         policy(b)?;
         let binding = PressBinding {
@@ -367,13 +390,18 @@ impl PressJournal {
         {
             return Err(PressError::new(PressErrorCode::Busy));
         }
-        let idx = if let Some(idx) = data
-            .jobs
-            .iter()
-            .position(|j| j.paper == b.paper_id && j.producer == b.producer_id && !j.terminal)
-        {
+        let idx = if let Some(idx) = data.jobs.iter().position(|j| {
+            j.paper == b.paper_id && j.producer == b.producer_id && j.root == b.root && !j.terminal
+        }) {
             idx
         } else {
+            if data
+                .jobs
+                .iter()
+                .any(|j| j.paper == b.paper_id && !j.terminal && j.lease.is_none())
+            {
+                return Err(PressError::new(PressErrorCode::Busy));
+            }
             data.jobs.push(Job {
                 id: Uuid::new_v4(),
                 edition: Uuid::new_v4(),
@@ -408,6 +436,7 @@ impl PressJournal {
             message: None,
         };
         data.entries.push(Entry {
+            root: binding.root.clone(),
             request,
             hash: content_hash.to_owned(),
             first_seen: now,
@@ -638,7 +667,9 @@ impl PressJournal {
             .iter()
             .find(|e| e.request.request_id == request_id)?;
         let b = self.data.bindings.iter().find(|b| {
-            b.producer_id == entry.request.producer_id && b.paper_id == entry.request.paper_id
+            b.producer_id == entry.request.producer_id
+                && b.paper_id == entry.request.paper_id
+                && b.root == entry.root
         })?;
         Some(PressBinding {
             root: b.root.clone(),
@@ -686,7 +717,9 @@ fn expire_queued(data: &mut JournalData, now: DateTime<Utc>) -> Result<bool, Pre
                 .bindings
                 .iter()
                 .find(|b| {
-                    b.paper_id == e.request.paper_id && b.producer_id == e.request.producer_id
+                    b.paper_id == e.request.paper_id
+                        && b.producer_id == e.request.producer_id
+                        && b.root == e.root
                 })
                 .ok_or_else(conflict)?;
             let error = if now >= e.request.expires_at {
@@ -743,6 +776,17 @@ impl PressJournal {
         code: PressErrorCode,
         now: DateTime<Utc>,
     ) -> Result<PressStatus, PressError> {
+        let binding = self.unique_binding(&request)?;
+        self.reject_in(&binding, request, content_hash, code, now)
+    }
+    pub fn reject_in(
+        &mut self,
+        binding: &PressBinding,
+        request: PressRequest,
+        content_hash: &str,
+        code: PressErrorCode,
+        now: DateTime<Utc>,
+    ) -> Result<PressStatus, PressError> {
         self.ensure_healthy()?;
         if self
             .data
@@ -750,7 +794,7 @@ impl PressJournal {
             .iter()
             .any(|e| e.request.request_id == request.request_id)
         {
-            return self.accept(request, content_hash, now);
+            return self.accept_in(binding, request, content_hash, now);
         }
         if !rejection_code(code) {
             return Err(conflict());
@@ -759,7 +803,13 @@ impl PressJournal {
             .data
             .bindings
             .iter()
-            .find(|b| b.producer_id == request.producer_id && b.paper_id == request.paper_id)
+            .find(|b| {
+                b.producer_id == request.producer_id
+                    && b.paper_id == request.paper_id
+                    && b.root == binding.root
+                    && b.producer_id == binding.producer_id
+                    && b.paper_id == binding.paper_id
+            })
             .ok_or_else(conflict)?;
         let binding = PressBinding {
             root: b.root.clone(),
@@ -815,6 +865,7 @@ impl PressJournal {
         };
         let mut data = self.data.clone();
         data.entries.push(Entry {
+            root: binding.root.clone(),
             request,
             hash: content_hash.to_owned(),
             first_seen: now,
@@ -1092,6 +1143,86 @@ impl PressJournal {
             return Ok(());
         }
         *saved = Some(authorization);
+        self.commit(data)
+    }
+}
+
+/// Old snapshots had exactly one binding per producer/paper. Resolve absent entry roots
+/// before validation, and refuse ambiguous migrations rather than reroute rejected IDs.
+pub(crate) fn migrate_bindings(data: &mut JournalData) -> bool {
+    for entry in &mut data.entries {
+        if entry.root.as_os_str().is_empty() {
+            let mut matches = data.bindings.iter().filter(|b| {
+                b.producer_id == entry.request.producer_id && b.paper_id == entry.request.paper_id
+            });
+            let Some(binding) = matches.next() else {
+                return false;
+            };
+            if matches.next().is_some() {
+                return false;
+            }
+            entry.root = binding.root.clone();
+        }
+    }
+    true
+}
+impl PressJournal {
+    fn unique_binding(&self, request: &PressRequest) -> Result<PressBinding, PressError> {
+        self.ensure_healthy()?;
+        if let Some(binding) = self.binding_for_request(request.request_id) {
+            return Ok(binding);
+        }
+        let mut matches = self
+            .data
+            .bindings
+            .iter()
+            .filter(|b| b.producer_id == request.producer_id && b.paper_id == request.paper_id);
+        let b = matches.next().ok_or_else(conflict)?;
+        if matches.next().is_some() {
+            return Err(conflict());
+        }
+        Ok(PressBinding {
+            root: b.root.clone(),
+            producer_id: b.producer_id,
+            paper_id: b.paper_id,
+        })
+    }
+    /// Known durable roots, including disabled/offline roots. These identities are local.
+    pub fn bindings(&self) -> Vec<PressBinding> {
+        self.data
+            .bindings
+            .iter()
+            .map(|b| PressBinding {
+                root: b.root.clone(),
+                producer_id: b.producer_id,
+                paper_id: b.paper_id,
+            })
+            .collect()
+    }
+    /// Change policy for an already registered exact root without accessing that folder.
+    /// This lets local opt-out remain effective while its sync provider is unavailable.
+    pub fn set_binding_policy(
+        &mut self,
+        binding: &PressBinding,
+        enabled: bool,
+        stopped: bool,
+    ) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        let mut data = self.data.clone();
+        let b = data
+            .bindings
+            .iter_mut()
+            .find(|b| {
+                b.root == binding.root
+                    && b.paper_id == binding.paper_id
+                    && b.producer_id == binding.producer_id
+            })
+            .ok_or_else(conflict)?;
+        if b.enabled == enabled && b.stopped == stopped {
+            return Ok(());
+        }
+        b.enabled = enabled;
+        b.stopped = stopped;
         self.commit(data)
     }
 }
