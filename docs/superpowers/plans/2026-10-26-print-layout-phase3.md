@@ -42,36 +42,36 @@
 
 ### Task 1: The hyphenating breaker and justification
 
-- [ ] **Tests first:**
+- [x] **Tests first:**
   - `lines_with` breaks a long word at a syllable, with ≥2 letters before and ≥3 after;
   - "well-known" breaks after its own hyphen;
   - words with digits, URLs and short words never break;
   - never three hyphenated lines in a row;
   - without `hyphenate`, lines are identical to `lines`;
   - a justified line fills the column to within 0.5 pt, and the last line and a ragged fallback don't.
-- [ ] Implement: `lines_with`, `struct End { hyphen: Option<String>, continues: bool, forced: bool, last: bool }`, and `fn justify(line, width) -> Option<f32>` (the per-gap stretch, or `None` when the line stays ragged).
+- [x] Implement: `lines_with`, `struct End { hyphen: Option<String>, continues: bool, forced: bool, last: bool }`, and `fn justify(line, width) -> Option<f32>` (the per-gap stretch, or `None` when the line stays ragged).
 
 ### Task 2: Column runs
 
-- [ ] **Tests first:**
+- [x] **Tests first:**
   - the column count per screen (2, 2, 1, 2, 2), and 1 for large print;
   - a run's text comes out in reading order;
   - a balanced last page's columns differ by at most one line;
   - no column ends with a paragraph's first line alone, or starts with its last line alone;
   - a run longer than a page snakes to the next page;
   - hairlines are drawn between columns.
-- [ ] Implement: `Block::Columns`, `columnize` in `story_body` and the front-page opening, and `Layout::columns` (units, `pack`, balance, draw).
+- [x] Implement: `Block::Columns`, `columnize` in `story_body` and the front-page opening, and `Layout::columns` (units, `pack`, balance, draw).
 
 ### Task 3: Searchable hyphenation
 
-- [ ] **Tests first:**
+- [x] **Tests first:**
   - a hyphenated word's halves are wrapped in `BeginActual(word)` … `EndActual`, then `BeginActual("")` … `EndActual`;
   - the written PDF holds `/ActualText`.
-- [ ] Implement: the ops, and `write`'s marked content.
+- [x] Implement: the ops, and `write`'s marked content.
 
 ### Task 4: Verify and ship
 
-- [ ] Add `hypher` and `HYPHENATION-NOTICE.txt`. Amend the spec: refers stay full-width rows.
-- [ ] Run the whole `deckle-digest` suite (with PDFium), `deckle-morgue`, clippy and fmt.
-- [ ] Build a real edition's PDF (scratch-`HOME` recipe), render the front page, a section's first page and a long story with PDFKit, and look at them.
-- [ ] Push `claude/print-layout-columns`. Open a PR against #212's branch with "Stacked on #212" in its body.
+- [x] Add `hypher` and `HYPHENATION-NOTICE.txt`. Amend the spec: refers stay full-width rows.
+- [x] Run the whole `deckle-digest` suite (with PDFium), `deckle-morgue`, clippy and fmt.
+- [x] Build a real edition's PDF (scratch-`HOME` recipe), render the front page, a section's first page and a long story with PDFKit, and look at them.
+- [x] Push `claude/print-layout-columns`. Open a PR against #212's branch with "Stacked on #212" in its body.

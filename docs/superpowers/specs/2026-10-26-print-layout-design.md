@@ -114,7 +114,8 @@ The lead (from `front_plan`) jumps when its story has more after its opening:
 - **Slug:** the headline's first word that isn't a stopword (a short fixed list: a, an, and,
   the, of, to, in, on, for, at, by, with, is, are, was, will, be, as, from, after, how, why,
   what, new, and the labels sites put before a headline: video, watch, photos, live, breaking,
-  update, exclusive, opinion, analysis, review), upper-cased, letters only. "Mill Yard Will Be a Market Again" gives MILL,
+  update, exclusive, opinion, analysis, review), upper-cased, letters only, keeping a
+  compound whole ("Multi-state" gives MULTI-STATE). "Mill Yard Will Be a Market Again" gives MILL,
   "Council Weighs a Night Bus to the Hospital" gives COUNCIL. When the optional editor runs
   (daily LLM editor design), it may suggest a slug. A suggestion is used only if it's one word
   from the headline, so the slug always matches what the reader sees.
