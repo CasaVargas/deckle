@@ -48,7 +48,7 @@ fn is_quantity(token: &str) -> bool {
             .all(|c| c.is_numeric() || matches!(c, '.' | ',' | '/' | '⁄' | '-' | '–' | '—'))
 }
 
-/// Singularizes a word: `-ies` to `-y`, `-ches`/`-shes`/`-xes`/`-zes` to the stem, `-oes` to `-o`, `-leaves` to `-leaf`, `-loaves` to `-loaf`, a trailing `-s` (but not `-ss` or `-us`)
+/// Singularizes a word: `-ies` to `-y`, `-ches`/`-shes`/`-xes` to the stem, `-zzes` to `-z`, `-oes` to `-o`, `-leaves` to `-leaf`, `-loaves` to `-loaf`, a trailing `-s` (but not `-ss` or `-us`)
 /// dropped.
 fn singular(word: &str) -> String {
     if let Some(stem) = word.strip_suffix("ies").filter(|s| !s.is_empty()) {
@@ -65,12 +65,13 @@ fn singular(word: &str) -> String {
     // peaches, radishes, boxes, quizzes: `es` goes after ch, sh, x and z. The French ones
     // that end in a silent `e` keep it.
     if !matches!(word, "quiches" | "brioches" | "cloches")
-        && ["ches", "shes", "xes", "zes"]
+        && ["ches", "shes", "xes", "zzes"]
             .iter()
             .any(|e| word.ends_with(e))
     {
         let stem = &word[..word.len() - 2];
-        // quizzes: the doubled z was only there for the plural.
+        // quizzes: the doubled z was only there for the plural. Single-z words (glazes, sizes)
+        // take the plain rule below.
         return stem
             .strip_suffix("zz")
             .map_or(stem.to_owned(), |q| format!("{q}z"));

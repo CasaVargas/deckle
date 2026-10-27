@@ -112,6 +112,7 @@ fn key_ingredient_table() {
         ("6 radishes", "radish"),
         ("2 cheese boxes", "cheese box"),
         ("2 jumbo quizzes", "jumbo quiz"),
+        ("2 tbsp apricot glazes", "apricot glaze"),
         ("1 slice brioche", "brioche"),
         ("2 tomatoes", "tomato"),
         // Chili in its spellings.

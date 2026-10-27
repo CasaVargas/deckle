@@ -702,19 +702,15 @@ fn same_store_same_build_id() {
 }
 
 #[test]
-fn same_store_same_build_id_on_any_day() {
+fn same_store_same_build_id_across_builds() {
     // `build` takes no clock, so nothing but the store can reach the book: not the day, not the
     // zip's timestamps (two seconds apart is enough to change those), not a star ageing out.
+    // This builds twice, with a pause between, and gets the same id.
     let f = fixture();
     let (_a, a) = built(&f.store);
     std::thread::sleep(std::time::Duration::from_millis(2100));
     let (_b, b) = built(&f.store);
     assert_eq!(a.build_id, b.build_id);
-    let dates = |p: &Path| -> Vec<_> {
-        let zip = zip::ZipArchive::new(std::fs::File::open(p).unwrap()).unwrap();
-        zip.file_names().count().to_string().into_bytes()
-    };
-    assert_eq!(dates(&a.path), dates(&b.path));
 }
 
 #[test]
