@@ -18,7 +18,7 @@ a new key prefix `subscribed:<site>:<slug>`. The bundle gains `story.access` (sc
 
 **Spec:** `docs/superpowers/specs/2026-10-25-publisher-subscriptions-design.md` (§3 `[[subscribed]]`,
 §6.1–§6.3, §7, §12 rulings, §14 PR 2, §15 build notes from PR 1). Builds on PR 1
-(`claude/pilot-subscription-paywall-gaps-19dee0`); this branch is stacked on it.
+(an earlier branch); this branch is stacked on it.
 
 ## Global Constraints
 
@@ -31,10 +31,10 @@ a new key prefix `subscribed:<site>:<slug>`. The bundle gains `story.access` (sc
   unchanged. On the wire a block's text is the HTML-escaped ROT47 of the paragraph's HTML
   (`html_escape(rot47("<p>…</p>"))`), verified on a live page: the DOM parser unescapes, then
   the adapter shifts. The fixture builder writes `html_escape(rot47(para_html))`.
-- **Canonical host.** `https://thepilot.com/` answers 301 to `https://www.thepilot.com/`
+- **Canonical host.** `https://gazette.example/` answers 301 to `https://www.gazette.example/`
   (verified). The adapter never hard-codes the bare host for a POST: it GETs
   `https://<site>/users/login/` (following redirects), takes the login form's absolute
-  `action` (today `https://www.thepilot.com/users/login/`) and POSTs there, and uses that
+  `action` (today `https://www.gazette.example/users/login/`) and POSTs there, and uses that
   response's origin (`https://www.<site>` here) as the site's **origin** for the services URL
   and the feeds. The action's host must be the site or a subdomain of it, else
   `Err("the login form points at another host")`. The PR 1 jar is scoped to the site and its
@@ -95,7 +95,7 @@ a new key prefix `subscribed:<site>:<slug>`. The bundle gains `story.access` (sc
    is in Task 1's scope too, one small match arm.)
 4. The same story in Local (via Google News) and in the group prints once, in whichever
    section comes first in `sections`. (Task 3.)
-5. A Readership "Drop" on `subscribed:thepilot.com:sports` removes only that slug, and
+5. A Readership "Drop" on `subscribed:gazette.example:sports` removes only that slug, and
    dropping the last slug removes the group. (Task 4.)
 
 ---
@@ -156,16 +156,16 @@ a new key prefix `subscribed:<site>:<slug>`. The bundle gains `story.access` (sc
 #[test] fn unlocked_page_extracts_to_the_full_story() { /* article::extract on the unlocked fixture (premium: 6 paragraphs of ~30 words) yields words >= 120 and the last premium sentence */ }
 #[test] fn parse_services_accepts_the_shapes_we_expect() { /* array of {id, active}; {services:[…]}; bare ids; status:"active"; inactive excluded; garbage → Err */ }
 #[test] fn paid_access_ids_parse() { /* `tncms.subscription.paid_access_service_ids = [3, "4"];` → ["3","4"]; absent → [] */ }
-#[test] fn login_posts_to_the_forms_action_with_the_fields_encoded() { /* fake SiteClient records; the login page's form action is https://www.thepilot.com/users/login/ with hidden referer_url; the POST goes to that action; body has referer_url, username=a%40b.test, password=p%2Bw */ }
+#[test] fn login_posts_to_the_forms_action_with_the_fields_encoded() { /* fake SiteClient records; the login page's form action is https://www.gazette.example/users/login/ with hidden referer_url; the POST goes to that action; body has referer_url, username=a%40b.test, password=p%2Bw */ }
 #[test] fn login_refuses_a_form_that_points_elsewhere() { /* action https://evil.test/login → Err, no POST recorded */ }
 #[test] fn a_services_reply_we_cant_read_is_an_error_not_a_panic() { /* parse_services("<html>") → Err */ }
-#[test] fn feed_urls_use_the_www_origin() { assert_eq!(Blox.feed_url("thepilot.com", "news", 15), "https://www.thepilot.com/search/?f=rss&t=article&c=news&l=15&s=start_time&sd=desc"); }
+#[test] fn feed_urls_use_the_www_origin() { assert_eq!(Blox.feed_url("gazette.example", "news", 15), "https://www.gazette.example/search/?f=rss&t=article&c=news&l=15&s=start_time&sd=desc"); }
 #[test] fn the_registry_detects_blox() { assert_eq!(detect_kind(&fixture_page(Default::default())), Some("blox")); }
 ```
 
 - [ ] **Step 2: Run** `cargo test -p deckle-digest --lib -- publisher::blox` → compile errors.
 - [ ] **Step 3: Implement** as the interface says. `fixture_page` builds the page from the
-  public Pilot markup's skeleton (header with both `aplus-user` blocks and an empty or filled
+  public BLOX markup's skeleton (header with both `aplus-user` blocks and an empty or filled
   `tn-user-screenname`, `#access-modal-login-form` with the three fields, a `<script>` line
   `tncms.subscription.paid_access_service_ids = [...]`, `div.asset-body` with
   `p.subscriber-preview` then `div.subscriber-only.encrypted-content` blocks whose inner HTML
@@ -207,7 +207,7 @@ a new key prefix `subscribed:<site>:<slug>`. The bundle gains `story.access` (sc
   parse (`Config::parse`, and `save` plus the app's `daily_save` normalize step, like
   `subscriptions`): site normalized with `SubscriptionConfig::normalized_site`; `sections`
   non-empty; each slug in `blox::SECTIONS`, else
-  `[[subscribed]] thepilot.com: unknown section "obits"; known: news, sports, opinion, obituaries, business, lifestyles`.
+  `[[subscribed]] gazette.example: unknown section "obits"; known: news, sports, opinion, obituaries, business, lifestyles`.
   `Config.subscribed` is a paper-file setting: `papers.rs` neither refuses nor copies it.
 
 - [ ] **Step 1: Tests** — parse and round-trip; empty list left out of a save; unknown slug
@@ -268,7 +268,7 @@ a new key prefix `subscribed:<site>:<slug>`. The bundle gains `story.access` (sc
 - `report.rs`: `KINDS` gains `Subscribed`; `kind_of` excludes it like `Feeds`; `current_keys`
   gets a `Subscribed` arm yielding one key per `subscribed_sections(cfg)` entry; `paper_name`
   gains a `cfg: &Config` parameter (update its callers) and returns `"<group title> · <display>"`
-  for a `subscribed:` key (`"The Pilot · Sports"`, or `"thepilot.com · Sports"` without a
+  for a `subscribed:` key (`"The Gazette · Sports"`, or `"gazette.example · Sports"` without a
   name); `apply(Drop, "subscribed:<site>:<slug>")` removes the slug from that group's
   `sections` and removes the group when it is left empty (Review Focus 5); `MoveUp` stays
   feeds-only; the `starts_with("feeds:")` suggestion branch treats `subscribed:` the same way
@@ -322,7 +322,7 @@ a new key prefix `subscribed:<site>:<slug>`. The bundle gains `story.access` (sc
 
 ### Task 7: Docs and checks
 
-- `docs/daily.md`: the `[[subscribed]]` block, the BLOX paragraph ("The Pilot and most
+- `docs/daily.md`: the `[[subscribed]]` block, the BLOX paragraph ("The Gazette and most
   small-town papers"), what prints when the account is missing; the spec's §15 gains "Build
   notes, PR 2" (the signed-in marker chosen and that spike 1 confirms it; the lenient
   services parser; the canonical `www` origin from the form's action; dedupe by title; one

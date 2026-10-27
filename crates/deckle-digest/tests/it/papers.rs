@@ -117,7 +117,7 @@ fn a_paper_inherits_the_households_subscriptions() {
     std::fs::write(
         &main,
         format!(
-            "{text}\n[[subscriptions]]\nsite = \"thepilot.com\"\nusername = \"me@example.com\"\n"
+            "{text}\n[[subscriptions]]\nsite = \"gazette.example\"\nusername = \"me@example.com\"\n"
         ),
     )
     .unwrap();

@@ -135,23 +135,23 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(e.label().as_deref(), Some("3"));
-        e.names.insert("3".into(), "Pilot Plus".into());
-        assert_eq!(e.label().as_deref(), Some("Pilot Plus"));
+        e.names.insert("3".into(), "Gazette Plus".into());
+        assert_eq!(e.label().as_deref(), Some("Gazette Plus"));
         assert_eq!(Entitlement::default().label(), None);
     }
     #[test]
     fn walled_notes() {
         assert_eq!(
-            Walled::NotSignedIn.note("thepilot.com"),
-            "Subscriber story (not signed in to thepilot.com)."
+            Walled::NotSignedIn.note("gazette.example"),
+            "Subscriber story (not signed in to gazette.example)."
         );
         assert_eq!(
-            Walled::NoAdapter.note("thepilot.com"),
-            "Subscriber story (Deckle doesn't know how thepilot.com signs in yet)."
+            Walled::NoAdapter.note("gazette.example"),
+            "Subscriber story (Deckle doesn't know how gazette.example signs in yet)."
         );
         assert_eq!(
-            Walled::PlanUnknown.note("thepilot.com"),
-            "Subscriber story (couldn't read your thepilot.com plan)."
+            Walled::PlanUnknown.note("gazette.example"),
+            "Subscriber story (couldn't read your gazette.example plan)."
         );
     }
     #[test]

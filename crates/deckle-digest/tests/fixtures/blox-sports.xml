@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel><title>Example Pilot - Sports</title><link>https://www.thepilot.com/</link><description>Synthetic BLOX section feed for tests</description>
-<item><title>Rams win the county final</title><link>https://www.thepilot.com/sports/article_s1.html</link><description><![CDATA[<p>A synthetic summary of the county final.</p>]]></description><pubDate>Tue, 20 Oct 2026 19:00:00 +0000</pubDate></item>
-<item><title>Cross-country team heads to regionals</title><link>https://www.thepilot.com/sports/article_s2.html</link><description><![CDATA[<p>A synthetic summary of the regionals story.</p>]]></description><pubDate>Tue, 20 Oct 2026 17:00:00 +0000</pubDate></item>
+<rss version="2.0"><channel><title>Example Gazette - Sports</title><link>https://www.gazette.example/</link><description>Synthetic BLOX section feed for tests</description>
+<item><title>Rams win the county final</title><link>https://www.gazette.example/sports/article_s1.html</link><description><![CDATA[<p>A synthetic summary of the county final.</p>]]></description><pubDate>Tue, 20 Oct 2026 19:00:00 +0000</pubDate></item>
+<item><title>Cross-country team heads to regionals</title><link>https://www.gazette.example/sports/article_s2.html</link><description><![CDATA[<p>A synthetic summary of the regionals story.</p>]]></description><pubDate>Tue, 20 Oct 2026 17:00:00 +0000</pubDate></item>
 </channel></rss>

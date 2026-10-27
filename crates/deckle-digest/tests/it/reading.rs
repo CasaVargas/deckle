@@ -87,7 +87,7 @@ fn a_withheld_entry_waits_with_its_reason_and_keeps_its_tries() {
     let q = queue(&dir);
     let d = NaiveDate::from_ymd_opt(2026, 10, 20).unwrap();
     let Added::New(id) = q
-        .add_url("https://www.thepilot.com/a", None, "cli", now())
+        .add_url("https://www.gazette.example/a", None, "cli", now())
         .unwrap()
     else {
         panic!()

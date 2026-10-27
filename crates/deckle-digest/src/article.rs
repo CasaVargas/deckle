@@ -731,7 +731,7 @@ fn tidy(fragment: &str, curl_quotes: bool) -> String {
         .to_owned()
 }
 
-/// A caption split from the credit it ends with: "Stalls at the shed. (Jane Doe / The Pilot)",
+/// A caption split from the credit it ends with: "Stalls at the shed. (Jane Doe / The Gazette)",
 /// "… Photo: Jane Doe", "… Jane Doe/AP".
 pub fn split_credit(caption: &str) -> (Option<String>, Option<String>) {
     static MARKED: LazyLock<Regex> = LazyLock::new(|| {
@@ -821,7 +821,7 @@ mod tests {
     fn captions_credits_and_alt_text_ride_with_their_photos() {
         let html = page(concat!(
             "<figure><img src=\"https://cdn.example/a.jpg\" alt=\"A crowd under a steel roof\"/>",
-            "<figcaption>Stall holders at the freight shed on Saturday. (Photo: Jane Doe / The Pilot)</figcaption></figure>",
+            "<figcaption>Stall holders at the freight shed on Saturday. (Photo: Jane Doe / The Gazette)</figcaption></figure>",
             "<p>More words about the shed and the market, the stalls and the people who will run them.</p>",
             "<figure><img src=\"https://cdn.example/b.jpg\"/><figcaption>The yard in 1952.</figcaption></figure>",
         ));
@@ -832,7 +832,7 @@ mod tests {
             x.photo_meta[a],
             PhotoMeta {
                 caption: Some("Stall holders at the freight shed on Saturday.".into()),
-                credit: Some("Jane Doe / The Pilot".into()),
+                credit: Some("Jane Doe / The Gazette".into()),
                 alt: Some("A crowd under a steel roof".into()),
             }
         );

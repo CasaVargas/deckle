@@ -131,7 +131,7 @@ export default function AddSection({ draft, onAdd }: { draft: DailyConfig; onAdd
               () => add(addSubscription(draft, name)),
               <label>
                 <span className="label">Its website</span>
-                <input autoFocus value={name} placeholder="thepilot.com" spellCheck={false} onChange={(e) => setName(e.target.value)} />
+                <input autoFocus value={name} placeholder="yourpaper.com" spellCheck={false} onChange={(e) => setName(e.target.value)} />
               </label>,
               !!name.trim(),
             )}

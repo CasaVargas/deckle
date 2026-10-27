@@ -3454,7 +3454,7 @@ fn digest_subscribe(
     let mut cfg = load_digest_config(path)?;
     let Some(raw) = site else {
         if username.is_some() || stdin || test || forget {
-            return Err("name the site, e.g. `deckle digest subscribe thepilot.com`".into());
+            return Err("name the site, e.g. `deckle digest subscribe yourpaper.com`".into());
         }
         let statuses = household_net_quiet(path, &cfg).status();
         emit(json, &statuses, || {

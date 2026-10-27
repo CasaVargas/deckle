@@ -3,7 +3,7 @@
 # signed-in subscriber. Run it yourself with your own account; it prints shapes, never
 # secrets (the auth token and the password are redacted or never shown).
 #
-#   tools/blox-spike.sh thepilot.com you@example.com 'https://www.thepilot.com/news/.../article_….html'
+#   tools/blox-spike.sh gazette.example you@example.com 'https://www.gazette.example/news/.../article_….html'
 #
 # It asks for the password without echo, signs in through the site's own login form, then
 # reports: the cookie names the site set, the decoded `tncms-user` cookie with its token
@@ -11,7 +11,7 @@
 # ROT47 `encrypted-content`), and what `/tncms/subscription/services/` returns. Paste the
 # output into the PR; nothing in it identifies the account beyond what you choose to keep.
 set -euo pipefail
-site=${1:?site, e.g. thepilot.com}
+site=${1:?site, e.g. gazette.example}
 user=${2:?username (email)}
 page=${3:?a premium article URL on the site}
 ua='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'

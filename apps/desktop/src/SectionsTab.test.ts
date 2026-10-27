@@ -23,5 +23,5 @@ test("a row keeps its identity when it's renamed", () => {
   expect(rowId(row({ kind: "interests", interest: 0 }))).toBe("interests:0");
   expect(rowId(row({ kind: "local", place: 1 }))).toBe("town:1");
   expect(rowId(row({ kind: "local" }))).toBe("local");
-  expect(rowId(row({ kind: "subscribed", subscribed: { site: "thepilot.com", slug: "sports" } }))).toBe("subscribed:thepilot.com:sports");
+  expect(rowId(row({ kind: "subscribed", subscribed: { site: "gazette.example", slug: "sports" } }))).toBe("subscribed:gazette.example:sports");
 });

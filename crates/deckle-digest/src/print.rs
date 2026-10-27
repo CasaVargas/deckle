@@ -623,7 +623,7 @@ mod tests {
     fn books_change_with_the_kind_and_skip_nudges() {
         let s = keys(&[
             "local",
-            "subscribed:thepilot.com:news",
+            "subscribed:gazette.example:news",
             "weather",
             "local:Raleigh",
             "puzzle",

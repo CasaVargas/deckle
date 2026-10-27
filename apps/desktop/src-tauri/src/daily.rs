@@ -831,9 +831,9 @@ mod tests {
         assert_eq!(j(S::NotTried), r#""NotTried""#);
         assert_eq!(
             j(S::SignedIn {
-                service: Some("Pilot Plus".into())
+                service: Some("Gazette Plus".into())
             }),
-            r#"{"SignedIn":{"service":"Pilot Plus"}}"#
+            r#"{"SignedIn":{"service":"Gazette Plus"}}"#
         );
         assert_eq!(
             j(S::SignedIn { service: None }),
@@ -858,7 +858,7 @@ mod tests {
                     kind: None,
                 },
                 deckle_digest::config::SubscriptionConfig {
-                    site: "https://www.ThePilot.com/".into(),
+                    site: "https://www.Gazette.example/".into(),
                     username: " me ".into(),
                     kind: None,
                 },
@@ -867,7 +867,7 @@ mod tests {
         };
         normalize_subscriptions(&mut cfg).unwrap();
         assert_eq!(cfg.subscriptions.len(), 1);
-        assert_eq!(cfg.subscriptions[0].site, "thepilot.com");
+        assert_eq!(cfg.subscriptions[0].site, "gazette.example");
         assert_eq!(cfg.subscriptions[0].username, "me");
     }
 
@@ -876,19 +876,19 @@ mod tests {
         use deckle_digest::config::SubscriptionConfig;
         use deckle_digest::secret::MemoryKeyring;
         let sub = SubscriptionConfig {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             username: "reader@example.com".into(),
             kind: None,
         };
         let keys = MemoryKeyring::default();
-        secret::set_site(&sub, &keys, "hunter2-pilot").unwrap();
+        secret::set_site(&sub, &keys, "hunter2-gazette").unwrap();
         let cfg = vec![sub];
         let out =
             subscriptions_status_with(&cfg, Path::new("/nowhere/digest.toml"), &keys, &|_| None);
         let json = serde_json::to_string(&out).unwrap();
         assert!(json.contains("\"has_password\":true"), "{json}");
-        assert!(json.contains("thepilot.com"));
-        assert!(!json.contains("hunter2-pilot"), "{json}");
+        assert!(json.contains("gazette.example"));
+        assert!(!json.contains("hunter2-gazette"), "{json}");
     }
 
     #[test]

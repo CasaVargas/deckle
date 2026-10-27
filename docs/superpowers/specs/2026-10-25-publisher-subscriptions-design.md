@@ -9,7 +9,7 @@ subscriptions only), `2026-10-21-send-to-kindle-email-design.md` (the keychain p
 (household settings live in `digest.toml`), `2026-10-23-pdf-edition-design.md` and
 `2026-10-23-other-readers-design.md` §9 (PDF delivery, reMarkable).
 
-The owner subscribes to *The Pilot* (Southern Pines, NC). Today its stories reach the Deckle
+The owner subscribes to a local paper on BLOX. Today its stories reach the Deckle
 Daily as headlines: the site serves the body only to a signed-in subscriber, and Deckle never
 signs in. This design lets Deckle sign in to a paper the owner pays for, print its stories in
 full in their own section, and, on print days, deliver the paper's own e-edition PDF to a
@@ -24,16 +24,16 @@ subscription; the app should use it.
 
 **Success**, on a Wednesday morning:
 
-- `digest.toml` has a `[[subscriptions]]` entry for `thepilot.com`; the password went into
-  the keychain once from the Daily tab, and the card says *Signed in · Pilot Plus, active*.
-- The paper prints **The Pilot** as a section group after Local: News, Sports, Opinion,
+- `digest.toml` has a `[[subscriptions]]` entry for `gazette.example`; the password went into
+  the keychain once from the Daily tab, and the card says *Signed in · Gazette Plus, active*.
+- The paper prints **The Gazette** as a section group after Local: News, Sports, Opinion,
   Obituaries, each with its stories whole, with photos, bylines and the usual typography pass.
-- The Daily tab's section list shows *The Pilot · 14 stories, all in full*.
+- The Daily tab's section list shows *The Gazette · 14 stories, all in full*.
 - Because Wednesday is a print day, the morning's e-edition PDF went to the reMarkable outbox
   (or the export folder) beside the Deckle Daily's own PDF.
-- A `deckle digest lint <pilot url>` shows the story's paragraphs, not "no readable story".
-- On a day the session expired and the login failed, every Pilot story prints as a headline
-  with "Sign in to The Pilot failed; see the Daily tab", the rest of the paper is unaffected,
+- A `deckle digest lint <story url>` shows the story's paragraphs, not "no readable story".
+- On a day the session expired and the login failed, every Gazette story prints as a headline
+  with "Sign in to The Gazette failed; see the Daily tab", the rest of the paper is unaffected,
   and the card on the Daily tab is red.
 
 ## 2. Goals, non-goals, anti-goals
@@ -45,7 +45,7 @@ subscription; the app should use it.
 2. **A session per publisher** the fetch layer keeps and reuses: log in once, carry the cookies
    across the edition and across days, log in again when the site bounces (§5).
 3. **A publisher adapter** that turns the signed-in page into the full story. The first is
-   BLOX (TownNews), which powers *The Pilot* and most small-town papers in the country (§6).
+   BLOX (TownNews), which powers *The Gazette* and most small-town papers in the country (§6).
 4. **The subscribed paper as its own section group** fed from the paper's own feeds, not a
    Google News search (§7).
 5. **The e-edition**, the paper as printed, as a PDF for a reMarkable, a Scribe or an export
@@ -83,10 +83,10 @@ for `[email]` (many-papers §call 2).
 
 ```toml
 # Papers you subscribe to. The password isn't stored here: run
-# `deckle digest subscribe thepilot.com` (or use the Daily tab), which saves it in the system
+# `deckle digest subscribe gazette.example` (or use the Daily tab), which saves it in the system
 # keychain. Deckle signs in as you and prints the stories your subscription covers.
 [[subscriptions]]
-site = "thepilot.com"            # the paper's domain; the login goes only there, over HTTPS
+site = "gazette.example"            # the paper's domain; the login goes only there, over HTTPS
 username = "you@example.com"
 # kind = "blox"                  # the paper's CMS; detected from the site when unset
 ```
@@ -94,11 +94,11 @@ username = "you@example.com"
 Then, where the paper goes:
 
 ```toml
-# A section group for a subscribed paper, in `sections` as "subscribed:thepilot.com".
+# A section group for a subscribed paper, in `sections` as "subscribed:gazette.example".
 # ("papers" is taken: `papers/<slug>.toml` are the household's own papers.)
 [[subscribed]]
-site = "thepilot.com"
-name = "The Pilot"               # the group's title; default: the site's own name
+site = "gazette.example"
+name = "The Gazette"               # the group's title; default: the site's own name
 sections = ["news", "sports", "opinion", "obituaries"]   # the paper's own sections, in order
 # max_items = 6                  # stories per section; default: [local] max_items
 # max_age_hours = 72             # default: [local] max_age_hours
@@ -106,10 +106,10 @@ sections = ["news", "sports", "opinion", "obituaries"]   # the paper's own secti
 ```
 
 - `site` is a bare host. It must match a `[[subscriptions]]` entry, or the group prints its
-  stories as a stranger sees them and notes "no subscription for thepilot.com".
+  stories as a stranger sees them and notes "no subscription for gazette.example".
 - `sections` are the adapter's section slugs (§6.3 lists BLOX's). Unknown slugs are a config
   error that names the known ones.
-- `[[subscribed]]` is per paper file: Dad's paper can carry the Pilot's sports page only.
+- `[[subscribed]]` is per paper file: Dad's paper can carry the Gazette's sports page only.
 - `deny_unknown_fields` applies; saves go through the `toml_edit` merge.
 
 ## 4. The account and the keychain
@@ -129,7 +129,7 @@ Generalizes `secret.rs`, which today knows one SMTP entry.
     the UI asks `subscriptions_status()` → `[{site, username, has_password, session}]`.
 - **Reading it:** only inside the login request, as `Zeroizing<String>`, never logged.
 - **Headless fallback:** with no keychain at all (Linux without Secret Service, CI),
-  `DECKLE_SITE_PASSWORD_<SITE>` is read instead (`thepilot.com` → `DECKLE_SITE_PASSWORD_THEPILOT_COM`),
+  `DECKLE_SITE_PASSWORD_<SITE>` is read instead (`gazette.example` → `DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE`),
   and the report says so. A keychain that lacks the entry is "not set", not a reason to read
   the variable (email §13).
 - **Code shape:** `secret.rs` grows a `Purpose { Smtp, Site(host) }` (or a second service
@@ -196,7 +196,7 @@ pub enum Walled { NotSignedIn, LoginFailed(String), NotInPlan, NoAdapter }
   story on it prints as a headline without retrying (one bad password must not hammer the
   publisher or lock the account). The counter and the cached entitlement are per process, so
   per paper run.
-- **Only the site's own host** (and its subdomains) ever sees the jar: a Pilot story's photo
+- **Only the site's own host** (and its subdomains) ever sees the jar: a Gazette story's photo
   on `bloximages.newyork1.vip.townnews.com` is fetched anonymously, as today.
 - **Timeouts and the 20 MB limit** stay. The browser user agent is used for signed-in fetches,
   as for pages today, including `services/`.
@@ -225,7 +225,7 @@ pub struct Entitlement { pub services: Vec<String> }     // the account's active
 Everything after that (extraction, lint, photos, typography, teaser) is unchanged, which is the
 point: the adapter's only job is to produce the page a subscriber's browser would show.
 
-### 6.1 BLOX (TownNews): what the site does (verified 2026-10-25 on thepilot.com)
+### 6.1 BLOX (TownNews): what the site does (verified 2026-10-25 on gazette.example)
 
 - **The body is in the page for everyone.** A premium story's paragraphs sit in
   `<div class="asset-body" data-subscription-required-class="asset-body">` as one
@@ -239,17 +239,17 @@ point: the adapter's only job is to produce the page a subscriber's browser woul
   page shows the user's screen name in `.aplus-user`; a stranger's shows *Log in*.
 - **Login:** `POST /users/login/`, form-encoded, with exactly the fields the public page's
   `#access-modal-login-form` carries: `referer_url` (hidden), `username`, `password`. No CSRF
-  token on The Pilot's form today; the adapter still copies every hidden input it finds, so a
+  token on The Gazette's form today; the adapter still copies every hidden input it finds, so a
   site that adds one keeps working. Success is a redirect plus the session cookies; failure
   re-renders the form with an error block. The cookie names and the exact `services/` JSON
   need an account to see (spike 1); the fixtures are built from the public form and the
   owner's sanitized capture, in that order.
 - **Feeds:** `/search/?f=rss&t=article&c=<section>&l=<n>&s=start_time&sd=desc`; `c=` is the
-  section slug (`news`, `sports`, `opinion`, `obituaries`, `business`, `lifestyles` on The
-  Pilot). Open, no login. Items link straight to the article page (no Google News hop).
+  section slug (`news`, `sports`, `opinion`, `obituaries`, `business`, `lifestyles` on a typical
+  BLOX paper). Open, no login. Items link straight to the article page (no Google News hop).
 - **E-edition:** `/eedition/` lists editions; each edition page has its page previews
   (`/eedition/<a>/<bc>/<uuid>/<id>.preview-300.jpg`) and, for a subscriber, per-page PDFs and
-  a whole-edition download. The exact download URL pattern is a spike (§11); The Pilot prints
+  a whole-edition download. The exact download URL pattern is a spike (§11); The Gazette prints
   Wednesday and Sunday.
 
 ### 6.2 BLOX: what Deckle does
@@ -276,7 +276,7 @@ point: the adapter's only job is to produce the page a subscriber's browser woul
 `kind` unset: on first use, fetch the site's home page anonymously and ask each adapter's
 `detect`. Save the result into the config (`kind = "blox"`) so later runs don't guess. No
 adapter matching never blocks a run: stories on that site print as today with the note
-*subscriber story (Deckle doesn't know how thepilot.com signs in yet)*, `Access::Walled
+*subscriber story (Deckle doesn't know how gazette.example signs in yet)*, `Access::Walled
 { why: NoAdapter }`, and the Subscriptions card says the same.
 
 ## 7. The subscribed paper in the Daily
@@ -289,7 +289,7 @@ adapter matching never blocks a run: stories on that site print as today with th
   `sources/feeds.rs` unchanged; only the divider and the keys are new.
 - **Kicker:** the paper's name; the section title is the slug's display name ("Obituaries").
 - **Dedupe:** the existing rule, by URL, in `sections` order: whichever section comes first
-  prints the story. With `sections = ["local", "subscribed:thepilot.com", …]` Local keeps
+  prints the story. With `sections = ["local", "subscribed:gazette.example", …]` Local keeps
   what its search found and the group prints the rest; the other way round the group wins.
 - **Lead:** only Local leads by rule; a subscribed paper's stories count like a feed's.
 - **Readership and the page plan:** one row per section, keyed `subscribed:<site>:<slug>`; a
@@ -346,7 +346,7 @@ The paper as printed, for the devices that can show a page.
 
 ## 11. Spikes before code
 
-1. **BLOX login by hand with `curl`** against thepilot.com with the owner's account: the
+1. **BLOX login by hand with `curl`** against gazette.example with the owner's account: the
    cookie names, the redirect, and what `services/` returns (the form fields are already known,
    §6.1). Record it in the build notes without the values. **The owner runs this**, since it
    needs the account; PR 2's fixtures start from the public form and a synthetic `services/`
@@ -362,7 +362,7 @@ The paper as printed, for the devices that can show a page.
 ## 12. Rulings (the owner's open questions, approved 2026-10-25)
 
 1. **A subscribed paper doesn't feed Local.** Local stays the Google News search plus
-   whatever feeds it lists; the Pilot gets its own group. The owner trims Local if it turns
+   whatever feeds it lists; the Gazette gets its own group. The owner trims Local if it turns
    redundant.
 2. **The e-edition is opt in** (`eedition = "remarkable"`), never sent by default; the files
    are big.
@@ -382,7 +382,7 @@ The paper as printed, for the devices that can show a page.
   against a stranger's jar log in exactly once**; two failures mark the site and stop retries
   for the run; the jar is sent to the site and its subdomains only; the jar round-trips
   through its file and an expired cookie is dropped on load.
-- **BLOX adapter (fixtures: a real Pilot page with the values replaced):** `detect`;
+- **BLOX adapter (fixtures: a real BLOX page with the values replaced):** `detect`;
   `signed_in` on a stranger's page, a signed-in page without the service, and one with it;
   `unlock` decodes ROT47 and entities correctly, **and returns `None` without the service**;
   `extract` on the unlocked page yields the paragraphs, the byline and the lead photo; the
@@ -413,7 +413,7 @@ L overall; ships in three PRs that each leave the app working:
    `eedition` CLI.
 
 What CI can't check is a real sign-in and a real e-edition download. Those are the owner's
-check with `deckle digest subscribe thepilot.com --test` and `deckle digest eedition -o`.
+check with `deckle digest subscribe gazette.example --test` and `deckle digest eedition -o`.
 
 ## 15. Build notes, PR 1 (rulings made while building)
 
@@ -444,7 +444,7 @@ check with `deckle digest subscribe thepilot.com --test` and `deckle digest eedi
 
 ### 16.1 What the live site turned out to do (read from its public scripts, 2026-10-26)
 
-Found after PR 2's code was written, from `user.js` and the `tnt.access.*` scripts a Pilot page
+Found after PR 2's code was written, from `user.js` and the `tnt.access.*` scripts a BLOX page
 loads; none of it needed an account, and all of it changes PR 2's entitlement source:
 
 - **Sign-in state lives in cookies, not the page.** `user.js` fills `__tnt.user` from the

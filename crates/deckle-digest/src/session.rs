@@ -777,7 +777,7 @@ mod tests {
         // cookie_store's serde form, as `save_json` writes it: a JSON array of cookies.
         let jar = |name: &str, http: &str, rfc3339: &str| {
             format!(
-                r#"[{{"raw_cookie":"{name}=v; Path=/; Expires={http}","path":["/",true],"domain":{{"HostOnly":"thepilot.com"}},"expires":{{"AtUtc":"{rfc3339}"}}}}]"#
+                r#"[{{"raw_cookie":"{name}=v; Path=/; Expires={http}","path":["/",true],"domain":{{"HostOnly":"gazette.example"}},"expires":{{"AtUtc":"{rfc3339}"}}}}]"#
             )
         };
         let s = UreqSite::new("a");
@@ -974,7 +974,7 @@ mod net_tests {
 
     fn account(username: &str, password: Option<&str>, kind: Option<&str>) -> SiteAccount {
         SiteAccount {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             username: username.into(),
             kind: kind.map(str::to_string),
             password: password.map(|p| Zeroizing::new(p.to_string())),
@@ -991,7 +991,7 @@ mod net_tests {
         )
     }
 
-    const STORY: &str = "https://www.thepilot.com/news/a-story.html";
+    const STORY: &str = "https://www.gazette.example/news/a-story.html";
 
     #[test]
     fn a_strangers_page_logs_in_once_then_refetches() {
@@ -1002,7 +1002,7 @@ mod net_tests {
         assert_eq!(
             access,
             Access::Subscription {
-                site: "thepilot.com".into(),
+                site: "gazette.example".into(),
                 service: "plus".into()
             }
         );
@@ -1034,7 +1034,7 @@ mod net_tests {
         let site = FakeSite::new(false, true);
         let n = net(&site, account("me", Some(PW), Some("fake")));
         let urls: Vec<String> = (0..8)
-            .map(|i| format!("https://www.thepilot.com/news/{i}.html"))
+            .map(|i| format!("https://www.gazette.example/news/{i}.html"))
             .collect();
         let got = crate::sources::feeds::par_map(&urls, |u| n.get_page_as(u).unwrap().1);
         assert_eq!(site.logins().len(), 1);
@@ -1053,7 +1053,7 @@ mod net_tests {
             assert_eq!(
                 access,
                 Access::Walled {
-                    site: "thepilot.com".into(),
+                    site: "gazette.example".into(),
                     why: Walled::LoginFailed("bad password".into())
                 }
             );
@@ -1065,7 +1065,7 @@ mod net_tests {
         );
         // A forced sign-in is also refused once the site has failed twice.
         assert_eq!(
-            n.sign_in("thepilot.com"),
+            n.sign_in("gazette.example"),
             SessionState::LoginFailed("bad password".into())
         );
         assert_eq!(site.logins().len(), 2);
@@ -1082,7 +1082,7 @@ mod net_tests {
             assert_eq!(
                 access,
                 Access::Walled {
-                    site: "thepilot.com".into(),
+                    site: "gazette.example".into(),
                     why: Walled::LoginFailed(
                         "signed in, but the site still served a stranger's page".into()
                     )
@@ -1100,7 +1100,7 @@ mod net_tests {
         site.0.lock().unwrap().stick_for = Some(1);
         let n = net(&site, account("me", Some(PW), Some("fake")));
         let urls: Vec<String> = (0..8)
-            .map(|i| format!("https://www.thepilot.com/news/{i}.html"))
+            .map(|i| format!("https://www.gazette.example/news/{i}.html"))
             .collect();
         let got = crate::sources::feeds::par_map(&urls, |u| n.get_page_as(u).unwrap());
         assert!(site.logins().len() <= 2, "{:?}", site.logins());
@@ -1126,7 +1126,7 @@ mod net_tests {
         let site = FakeSite::new(false, false);
         let n = net(&site, account("me", Some(PW), Some("fake")));
         let urls: Vec<String> = (0..8)
-            .map(|i| format!("https://www.thepilot.com/news/{i}.html"))
+            .map(|i| format!("https://www.gazette.example/news/{i}.html"))
             .collect();
         let got = crate::sources::feeds::par_map(&urls, |u| n.get_page_as(u).unwrap().1);
         assert_eq!(site.logins().len(), 2);
@@ -1134,7 +1134,7 @@ mod net_tests {
             assert_eq!(
                 a,
                 Access::Walled {
-                    site: "thepilot.com".into(),
+                    site: "gazette.example".into(),
                     why: Walled::LoginFailed("bad password".into())
                 }
             );
@@ -1149,7 +1149,7 @@ mod net_tests {
         assert_eq!(
             access,
             Access::Walled {
-                site: "thepilot.com".into(),
+                site: "gazette.example".into(),
                 why: Walled::NotSignedIn
             }
         );
@@ -1176,7 +1176,7 @@ mod net_tests {
             assert_eq!(
                 access,
                 Access::Walled {
-                    site: "thepilot.com".into(),
+                    site: "gazette.example".into(),
                     why: Walled::NoAdapter
                 }
             );
@@ -1185,7 +1185,7 @@ mod net_tests {
         let home = site
             .gets()
             .iter()
-            .filter(|u| *u == "https://thepilot.com/")
+            .filter(|u| *u == "https://gazette.example/")
             .count();
         assert_eq!(home, 1, "the home page is fetched once to detect the kind");
         assert_eq!(n.status()[0].state, SessionState::NoAdapter);
@@ -1204,28 +1204,28 @@ mod net_tests {
         let site = FakeSite::new(true, true);
         let n = net(&site, account("me", Some(PW), Some("fake")));
         assert_eq!(
-            n.site_for("https://www.thepilot.com/a").as_deref(),
-            Some("thepilot.com")
+            n.site_for("https://www.gazette.example/a").as_deref(),
+            Some("gazette.example")
         );
         assert_eq!(
-            n.site_for("https://thepilot.com/a").as_deref(),
-            Some("thepilot.com")
+            n.site_for("https://gazette.example/a").as_deref(),
+            Some("gazette.example")
         );
-        assert_eq!(n.site_for("https://notthepilot.com/"), None);
+        assert_eq!(n.site_for("https://notgazette.example/"), None);
         assert_eq!(
             n.site_for("https://bloximages.newyork1.vip.townnews.com/x.jpg"),
             None
         );
         assert_eq!(n.site_for("not a url"), None);
         // Plain HTTP never uses the session: fetched anonymously, as a stranger.
-        assert_eq!(n.site_for("http://www.thepilot.com/a"), None);
-        assert_eq!(n.site_for("http://thepilot.com/a"), None);
+        assert_eq!(n.site_for("http://www.gazette.example/a"), None);
+        assert_eq!(n.site_for("http://gazette.example/a"), None);
         let mut acct = account("me", Some(PW), Some("fake"));
-        acct.site = " ThePilot.com ".into();
+        acct.site = " Gazette.example ".into();
         let mixed = net(&site, acct);
         assert_eq!(
-            mixed.site_for("https://www.thepilot.com/a").as_deref(),
-            Some("thepilot.com")
+            mixed.site_for("https://www.gazette.example/a").as_deref(),
+            Some("gazette.example")
         );
         // Another host goes through the anonymous client (a local server here).
         let (url, _) = super::tests::fixture(1);
@@ -1243,7 +1243,7 @@ mod net_tests {
         let logins = site.logins();
         assert_eq!(logins.len(), 1);
         let (url, body) = &logins[0];
-        assert_eq!(url, "https://thepilot.com/users/login/");
+        assert_eq!(url, "https://gazette.example/users/login/");
         assert!(body.contains("username=a%26b%40x.test"), "{body}");
         assert!(body.contains("password=p%2Bw+d"), "{body}");
     }
@@ -1253,7 +1253,7 @@ mod net_tests {
         let site = FakeSite::new(false, true);
         let n = net(&site, account("me", Some(PW), Some("fake")));
         assert_eq!(
-            n.sign_in("thepilot.com"),
+            n.sign_in("gazette.example"),
             SessionState::SignedIn {
                 service: Some("plus".into())
             }
@@ -1313,7 +1313,7 @@ mod net_tests {
         assert_eq!(
             access,
             Access::Walled {
-                site: "thepilot.com".into(),
+                site: "gazette.example".into(),
                 why: Walled::PlanUnknown
             }
         );
@@ -1321,7 +1321,7 @@ mod net_tests {
             "couldn't read your plan: the services reply isn't JSON".into(),
         );
         assert_eq!(n.status()[0].state, unknown);
-        assert_eq!(n.sign_in("thepilot.com"), unknown);
+        assert_eq!(n.sign_in("gazette.example"), unknown);
     }
 
     /// A BLOX site whose member pages come back but whose plan reply is an HTML page.
@@ -1367,7 +1367,7 @@ mod net_tests {
             login_form: false,
         });
         let walled = Access::Walled {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             why: Walled::PlanUnknown,
         };
         // a free page (nothing encrypted) is open; only an encrypted one is walled
@@ -1459,7 +1459,7 @@ mod net_tests {
                     services: vec!["plus".into()],
                     ..Default::default()
                 };
-                e.names.insert("plus".into(), "Pilot Plus".into());
+                e.names.insert("plus".into(), "Gazette Plus".into());
                 Ok(e)
             }
             fn unlock(&self, html: &str, ent: &Entitlement) -> Option<String> {
@@ -1485,8 +1485,8 @@ mod net_tests {
         assert_eq!(
             access,
             Access::Subscription {
-                site: "thepilot.com".into(),
-                service: "Pilot Plus".into()
+                site: "gazette.example".into(),
+                service: "Gazette Plus".into()
             }
         );
     }
@@ -1558,7 +1558,7 @@ mod net_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("digest.toml");
         let mut cfg = crate::Config::default();
-        for site in ["thepilot.com", "example.com"] {
+        for site in ["gazette.example", "example.com"] {
             cfg.subscriptions.push(SubscriptionConfig {
                 site: site.into(),
                 username: "me".into(),
@@ -1566,17 +1566,17 @@ mod net_tests {
             });
         }
         crate::config::save(&path, &cfg).unwrap();
-        let jar = jar_path(dir.path(), "thepilot.com");
+        let jar = jar_path(dir.path(), "gazette.example");
         std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
         std::fs::write(&jar, "[]").unwrap();
         let got = forget_subscription(
             &path,
             &mut cfg,
-            "https://www.thepilot.com/",
+            "https://www.gazette.example/",
             &MemoryKeyring::unavailable(),
         )
         .unwrap();
-        assert_eq!(got.site, "thepilot.com");
+        assert_eq!(got.site, "gazette.example");
         assert!(!got.keychain_entry);
         assert_eq!(got.notes.len(), 1, "{:?}", got.notes);
         assert!(
@@ -1608,7 +1608,7 @@ mod net_tests {
         use crate::secret::MemoryKeyring;
         let dir = tempfile::tempdir().unwrap();
         let sub = SubscriptionConfig {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             username: "me".into(),
             kind: Some("fake".into()),
         };
@@ -1641,7 +1641,7 @@ mod net_tests {
         assert_eq!(
             access,
             Access::Walled {
-                site: "thepilot.com".into(),
+                site: "gazette.example".into(),
                 why: Walled::NotSignedIn
             }
         );
@@ -1673,7 +1673,7 @@ mod net_tests {
         use crate::secret::{MemoryKeyring, set_site};
         let dir = tempfile::tempdir().unwrap();
         let sub = SubscriptionConfig {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             username: "me".into(),
             kind: None,
         };
@@ -1684,7 +1684,7 @@ mod net_tests {
         };
         let keys = MemoryKeyring::default();
         set_site(&sub, &keys, PW).unwrap();
-        let jar = jar_path(dir.path(), "thepilot.com");
+        let jar = jar_path(dir.path(), "gazette.example");
         std::fs::create_dir_all(jar.parent().unwrap()).unwrap();
         std::fs::write(&jar, "not json").unwrap();
         let n = SessionNet::from_config(
@@ -1695,10 +1695,10 @@ mod net_tests {
         );
         let st = n.status();
         assert_eq!(st.len(), 2);
-        let pilot = st.iter().find(|s| s.site == "thepilot.com").unwrap();
-        assert!(pilot.has_password);
-        assert!(pilot.jar_note.is_some(), "{pilot:?}");
-        assert_eq!(pilot.state, SessionState::NotTried);
+        let gazette = st.iter().find(|s| s.site == "gazette.example").unwrap();
+        assert!(gazette.has_password);
+        assert!(gazette.jar_note.is_some(), "{gazette:?}");
+        assert_eq!(gazette.state, SessionState::NotTried);
         let ex = st.iter().find(|s| s.site == "example.com").unwrap();
         assert!(!ex.has_password);
         assert!(ex.jar_note.is_none());

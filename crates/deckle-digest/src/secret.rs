@@ -188,7 +188,7 @@ pub fn site_account(sub: &SubscriptionConfig) -> String {
     format!("{}@{}", sub.username.trim(), sub.site.trim())
 }
 
-/// The headless fallback for `site`: `thepilot.com` is `DECKLE_SITE_PASSWORD_THEPILOT_COM`.
+/// The headless fallback for `site`: `gazette.example` is `DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE`.
 pub fn site_env(site: &str) -> String {
     format!(
         "DECKLE_SITE_PASSWORD_{}",
@@ -479,7 +479,7 @@ mod tests {
 
     fn sub() -> SubscriptionConfig {
         SubscriptionConfig {
-            site: "thepilot.com".into(),
+            site: "gazette.example".into(),
             username: "me@example.com".into(),
             kind: None,
         }
@@ -487,7 +487,7 @@ mod tests {
 
     fn site_env_with(v: Option<&'static str>) -> impl Fn(&str) -> Option<String> {
         move |k: &str| {
-            (k == "DECKLE_SITE_PASSWORD_THEPILOT_COM")
+            (k == "DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE")
                 .then_some(v)
                 .flatten()
                 .map(str::to_owned)
@@ -497,10 +497,10 @@ mod tests {
     #[test]
     fn site_entries_live_in_their_own_service() {
         assert_eq!(SITE_SERVICE, "com.casavargas.deckle.site");
-        assert_eq!(site_account(&sub()), "me@example.com@thepilot.com");
+        assert_eq!(site_account(&sub()), "me@example.com@gazette.example");
         assert_eq!(
-            site_env("thepilot.com"),
-            "DECKLE_SITE_PASSWORD_THEPILOT_COM"
+            site_env("gazette.example"),
+            "DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE"
         );
         assert_eq!(site_env("a-b.co.uk"), "DECKLE_SITE_PASSWORD_A_B_CO_UK");
         let keys = MemoryKeyring::default();
@@ -540,7 +540,7 @@ mod tests {
         assert!(matches!(e, SecretError::NotSet { .. }), "{e}");
         assert!(
             e.to_string()
-                .contains("deckle digest subscribe thepilot.com"),
+                .contains("deckle digest subscribe gazette.example"),
             "{e}"
         );
 
@@ -550,7 +550,8 @@ mod tests {
         let e = site_password(&sub(), &none, &site_env_with(None)).unwrap_err();
         assert!(matches!(e, SecretError::NoSiteKeychain { .. }), "{e}");
         assert!(
-            e.to_string().contains("DECKLE_SITE_PASSWORD_THEPILOT_COM"),
+            e.to_string()
+                .contains("DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE"),
             "{e}"
         );
         let e = site_password(&sub(), &none, &site_env_with(Some(""))).unwrap_err();

@@ -614,7 +614,7 @@ pub enum DigestCommand {
     },
     /// Papers you subscribe to: sign Deckle in with your own account.
     Subscribe {
-        /// The paper's site, e.g. thepilot.com. Alone: list every subscription and its state.
+        /// The paper's site, e.g. gazette.example. Alone: list every subscription and its state.
         site: Option<String>,
         #[arg(long)]
         username: Option<String>,

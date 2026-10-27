@@ -72,7 +72,7 @@ finish. Deckle sets one each morning:
   interests, on this machine only.
 - **Papers for the whole house.** A paper per reader, each with its own sections, schedule, days
   and Kindle, and a large-print layout for big type.
-- **Papers you pay for.** Sign in to a BLOX (TownNews) paper you subscribe to, such as The Pilot,
+- **Papers you pay for.** Sign in to a BLOX (TownNews) paper you subscribe to,,
   and it prints in full as its own section group. The password lives in the keychain.
 - **The Morgue.** Every edition kept as a plain folder for a year: a month of front pages, full-text
   search, how far you read, and any old paper sent back to the reader.
