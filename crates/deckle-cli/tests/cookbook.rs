@@ -373,3 +373,48 @@ fn a_deleted_chapter_files_under_other_in_list_and_chapters() {
         serde_json::from_str(&book.ok(&["list", "--chapter", "soups", "--json"])).unwrap();
     assert!(soups.is_empty());
 }
+
+#[test]
+fn build_writes_epub_offline() {
+    let book = Book::new();
+    let id = book.add_soup();
+    book.ok(&["move", &id, "soups"]);
+    let text = text_page();
+    book.ok(&["add", &text.to_string_lossy(), "--chapter", "mains"]);
+    let dirty = book.cookbook().join("dirty");
+    assert!(dirty.exists(), "adding marks the book dirty");
+
+    let out = book.dir.path().join("out");
+    let said = book.ok(&["build", "-o", &out.to_string_lossy()]);
+    let epub = out.join("cookbook.epub");
+    assert!(epub.is_file(), "no EPUB at {}", epub.display());
+    let mut lines = said.lines();
+    let count = lines.next().unwrap();
+    assert_eq!(count, "2 recipes in 2 chapters");
+    assert_eq!(lines.next().unwrap(), epub.to_string_lossy());
+    // An export, not a delivery: the flag stays as it was.
+    assert!(dirty.exists(), "build must not clear the dirty flag");
+}
+
+#[test]
+fn build_counts_only_chapters_with_recipes() {
+    let book = Book::new();
+    let id = book.add_soup();
+    book.ok(&["move", &id, "mains"]);
+    let out = book.dir.path().join("out");
+    let said = book.ok(&["build", "-o", &out.to_string_lossy()]);
+    assert_eq!(
+        said.lines().next().unwrap(),
+        "1 recipe in 1 chapter",
+        "{said}"
+    );
+}
+
+#[test]
+fn build_of_an_empty_book_still_writes_one() {
+    let book = Book::new();
+    let out = book.dir.path().join("out");
+    let said = book.ok(&["build", "-o", &out.to_string_lossy()]);
+    assert_eq!(said.lines().next().unwrap(), "0 recipes in 0 chapters");
+    assert!(out.join("cookbook.epub").is_file());
+}

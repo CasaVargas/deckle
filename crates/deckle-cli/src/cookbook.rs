@@ -2,10 +2,13 @@
 //! `deckle cookbook`: keep, file and tidy the recipes of the Kitchen Book (cookbook design §8.1).
 //! These commands change the folder and nothing else; the book is built from it later.
 
+use std::collections::HashSet;
+use std::path::Path;
 use std::process::ExitCode;
 
 use deckle_digest::chrono::Utc;
 use deckle_digest::cookbook::add::{self, AddOptions};
+use deckle_digest::cookbook::book;
 use deckle_digest::cookbook::store::{Picture, Saved, Store, Stored};
 use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE};
 use serde::Serialize;
@@ -60,6 +63,7 @@ pub fn run(json: bool, action: CookbookCommand) -> Result<ExitCode, String> {
             store.update(&saved)?;
         }
         CookbookCommand::Chapters => chapters(json, &store)?,
+        CookbookCommand::Build { out } => build(&store, &out)?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -295,4 +299,38 @@ fn chapters(json: bool, store: &Store) -> Result<(), String> {
             .collect::<Vec<_>>()
             .join("\n")
     })
+}
+
+/// The book's file name inside the folder `build` writes to.
+const EPUB_NAME: &str = "cookbook.epub";
+
+/// Writes the book to `<out>/cookbook.epub`. An export: it leaves the dirty flag alone, which
+/// only a delivery clears.
+fn build(store: &Store, out: &Path) -> Result<(), String> {
+    let built = book::build(store, Utc::now(), &out.join(EPUB_NAME))?;
+    // The chapters that made it into the book: those holding a recipe, a recipe whose chapter
+    // is gone counting under "Everything else", as the book files it.
+    let chapters = store.config()?.chapters;
+    let filled: HashSet<String> = store
+        .all()?
+        .iter()
+        .map(|s| home(&chapters, &s.chapter).to_owned())
+        .collect();
+    println!(
+        "{} {} in {} {}",
+        built.recipes,
+        if built.recipes == 1 {
+            "recipe"
+        } else {
+            "recipes"
+        },
+        filled.len(),
+        if filled.len() == 1 {
+            "chapter"
+        } else {
+            "chapters"
+        },
+    );
+    println!("{}", built.path.display());
+    Ok(())
 }
