@@ -353,7 +353,7 @@ Deckle Daily/
 - **A major version** is a field removed or its meaning changed. A reader refuses a major version it doesn't know and says "update the app".
 - **Deckle writes one version at a time.** If a major version is ever needed, `format = "bundle"` keeps writing the old major until a `bundle_version` key asks for the new one.
 - **The JSON Schema** (`docs/formats/edition-bundle.schema.json`, MIT) is the reference for each version, and the writer's tests validate against it.
-- **1.3** adds the print plan (§6.7). It's specced; Deckle writes 1.2 until it's built.
+- **1.3** adds the print plan (§6.7). Deckle writes it.
 
 ## 11. Phasing
 

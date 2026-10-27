@@ -1346,7 +1346,7 @@ fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
     assert!(errors.is_empty(), "{errors:#?}");
 
     assert_eq!(v["format"], "deckle-edition");
-    assert_eq!(v["version"], "1.2");
+    assert_eq!(v["version"], "1.3");
     assert_eq!(v["edition"]["date"], "2026-10-20");
     let sections = v["sections"].as_array().unwrap();
     // 1.2: every story says how it was fetched; nothing here is subscribed or walled.
@@ -1516,6 +1516,116 @@ fn a_bundle_carries_full_size_photos_with_captions_and_story_details() {
             s["id"]
         );
     }
+}
+
+/// [`fake_with_articles`], but every story page quotes someone in its fourth paragraph, where
+/// the print plan finds a pull quote, and local news is offline, so a long feed story leads.
+fn fake_with_pulls(url: &str) -> Result<Vec<u8>, String> {
+    if url.starts_with("https://news.google.com/") {
+        return Err(format!("offline: {url}"));
+    }
+    if url.ends_with(".jpg") || !url.starts_with("http") || fake(url).is_ok() {
+        return fake_with_articles(url);
+    }
+    let para = "The council met on Tuesday night to talk about the old rail yard and what it could become. ".repeat(12);
+    let paras: String = (0..8)
+        .map(|i| {
+            if i == 3 {
+                "<p>“We have waited forty years for somebody to do something with that yard,” said one stall holder.</p>".to_owned()
+            } else {
+                format!("<p>{para}</p>")
+            }
+        })
+        .collect();
+    Ok(format!(
+        "<html lang=\"en\"><head><title>A Story</title></head><body><article><h1>A Story</h1>{paras}</article></body></html>"
+    )
+    .into_bytes())
+}
+
+#[test]
+fn a_bundle_carries_the_print_plan() {
+    let out = tempfile::tempdir().unwrap();
+    let mut c = config();
+    bundle_export(&mut c, out.path(), false);
+    let r = build(&c, date(), now(), out.path(), &fake_with_pulls).unwrap();
+    let mut v = edition_json(r.bundle(false).unwrap());
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../docs/formats/edition-bundle.schema.json"
+    ))
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let errors: Vec<String> = validator.iter_errors(&v).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    assert_eq!(v["version"], "1.3");
+
+    let sections = v["sections"].as_array().unwrap();
+    // The front page is A1: the first book is A, and books never go back.
+    assert_eq!(sections[0]["book"], "A");
+    let books: Vec<&str> = sections.iter().filter_map(|s| s["book"].as_str()).collect();
+    assert!(books.windows(2).all(|w| w[0] <= w[1]), "{books:?}");
+    let ids: Vec<&str> = sections
+        .iter()
+        .flat_map(|s| s["stories"].as_array().unwrap())
+        .map(|s| s["id"].as_str().unwrap())
+        .collect();
+    for t in v["front"]["skybox"].as_array().into_iter().flatten() {
+        assert!(ids.contains(&t.as_str().unwrap()), "{t}");
+    }
+
+    // The lead is long: the front prints its opening paragraph and jumps.
+    let front = &v["front"];
+    assert_eq!(front["lead_layout"], "jump");
+    assert_eq!(front["jump"]["story"], front["lead"]);
+    assert_eq!(front["jump"]["opening"], 1);
+    assert!(!front["jump"]["slug"].as_str().unwrap().is_empty());
+
+    // Every pull sits two paragraphs after the one it quotes, counted over the whole body,
+    // the lead's included.
+    let mut pulled = Vec::new();
+    for s in sections
+        .iter()
+        .flat_map(|s| s["stories"].as_array().unwrap())
+    {
+        let Some(after) = s["pull"]["after"].as_u64() else {
+            continue;
+        };
+        assert_eq!(
+            s["pull"]["text"],
+            "\u{201c}We have waited forty years for somebody to do something with that yard\u{201d}"
+        );
+        let body = format!("<div>{}</div>", s["body"]["text"].as_str().unwrap());
+        let doc = roxmltree::Document::parse(&body).unwrap();
+        let paras: Vec<String> = doc
+            .root_element()
+            .children()
+            .filter(|n| n.has_tag_name("p"))
+            .map(|n| n.descendants().filter_map(|d| d.text()).collect())
+            .collect();
+        let quoted = &paras[after as usize - 2];
+        assert!(quoted.contains("forty years"), "{}: {quoted}", s["id"]);
+        pulled.push(s["id"].as_str().unwrap());
+    }
+    assert!(
+        pulled.contains(&front["lead"].as_str().unwrap()),
+        "{pulled:?}"
+    );
+    assert!(pulled.len() > 1, "{pulled:?}");
+
+    // A bundle without a print plan (1.0–1.2) is still a valid 1.x bundle.
+    for s in v["sections"].as_array_mut().unwrap() {
+        s.as_object_mut().unwrap().remove("book");
+        for story in s["stories"].as_array_mut().unwrap() {
+            story.as_object_mut().unwrap().remove("pull");
+        }
+    }
+    let front = v["front"].as_object_mut().unwrap();
+    for key in ["skybox", "lead_layout", "jump"] {
+        front.remove(key);
+    }
+    v["version"] = "1.2".into();
+    let errors: Vec<String> = validator.iter_errors(&v).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
 }
 
 #[test]
