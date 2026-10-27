@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { COOKBOOK_ROOMS, addResultLine, bookLine, chipPicture, recipeCount, deliveryLine, factsLine, lastAddedLine, sourceLine, webUrl, wantsDrawing } from "./cookbookRooms";
+import { COOKBOOK_ROOMS, addResultLine, bookLine, chipPicture, recipeCount, takeNext, waitingLine, addIsCurrent, deliveryLine, factsLine, lastAddedLine, sourceLine, webUrl, wantsDrawing } from "./cookbookRooms";
 import type { CookbookKindle } from "./types";
 
 const kindle = (name: string, state: CookbookKindle["state"], behind: number | null = null): CookbookKindle => ({
@@ -77,6 +77,23 @@ test("the menu counts recipes", () => {
   expect(recipeCount(0)).toBe("0 recipes");
   expect(recipeCount(1)).toBe("1 recipe");
   expect(recipeCount(23)).toBe("23 recipes");
+});
+
+test("the next waiting address comes off the front of the queue", () => {
+  expect(takeNext([])).toEqual({ next: null, rest: [] });
+  expect(takeNext(["a"])).toEqual({ next: "a", rest: [] });
+  expect(takeNext(["a", "b", "c"])).toEqual({ next: "a", rest: ["b", "c"] });
+});
+
+test("the waiting line counts what is left", () => {
+  expect(waitingLine(0)).toBeNull();
+  expect(waitingLine(1)).toBe("1 more waiting");
+  expect(waitingLine(3)).toBe("3 more waiting");
+});
+
+test("an add moves on only if nothing newer was fetched while it ran", () => {
+  expect(addIsCurrent(4, 4)).toBe(true);
+  expect(addIsCurrent(4, 5)).toBe(false);
 });
 
 test("last added names the newest recipe", () => {

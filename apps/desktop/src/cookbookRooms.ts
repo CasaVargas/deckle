@@ -58,6 +58,21 @@ export function factsLine(p: { ingredients: number; steps: number; yield: string
   return [plural(p.ingredients, "ingredient"), plural(p.steps, "step"), p.yield, time ? minutes(time) : null].filter(Boolean).join(" · ");
 }
 
+/** The next address to fetch from those waiting, and the ones left behind it. */
+export function takeNext(queue: string[]): { next: string | null; rest: string[] } {
+  return queue.length === 0 ? { next: null, rest: [] } : { next: queue[0], rest: queue.slice(1) };
+}
+
+/** "2 more waiting"; null when none are. */
+export function waitingLine(n: number): string | null {
+  return n > 0 ? `${n} more waiting` : null;
+}
+
+/** Whether an add that has finished should move on: nothing newer was fetched while it ran. */
+export function addIsCurrent(startedAt: number, now: number): boolean {
+  return startedAt === now;
+}
+
 /** "23 recipes", beside the title on the book menu. */
 export function recipeCount(n: number): string {
   return plural(n, "recipe");

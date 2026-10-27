@@ -29,7 +29,8 @@ export default function CookbookView({
   const [, setOpenRecipe] = useState<string | null>(null);
   /** Task 6.3: the Book settings sheet. */
   const [, setSheetOpen] = useState(false);
-  const taken = useRef(0);
+  // What was pasted or dropped before this tab was shown again is not new
+  const taken = useRef(incoming?.seq ?? 0);
 
   const load = useCallback(() => {
     api.cookbookBook().then(setBook).catch((e) => onNotice(String(e)));

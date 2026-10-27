@@ -222,7 +222,7 @@ export default function App() {
       else if (ev.payload.type === "drop") {
         setDragging(false);
         // On the Cookbook tab, link files and saved pages are recipes for Add; nothing else belongs there.
-        if (tabRef.current === "cookbook") {
+        if (cookbookPasteReady.current) {
           const files = ev.payload.paths.filter((p) => ARTICLE_FILE.test(p));
           if (files.length > 0) setIncoming((c) => ({ seq: (c?.seq ?? 0) + 1, targets: files }));
           else setNotice("Drop .webloc, .url or .html files to add recipes.");
@@ -294,7 +294,9 @@ export default function App() {
       if (ev.key.toLowerCase() !== "v" || !(ev.metaKey || ev.ctrlKey) || ev.shiftKey || ev.altKey) return;
       if (el?.closest("input, textarea, select, [contenteditable]")) return;
       if (cookbookPasteReady.current) {
-        // Add's link box is always on the tab; the paste then lands in it
+        // Bring Add forward first (the link box is hidden on the other rooms), then focus it;
+        // the paste then lands in it
+        flushSync(() => setFocusAdd((n) => n + 1));
         document.getElementById("cookbook-link")?.focus();
         return;
       }

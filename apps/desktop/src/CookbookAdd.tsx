@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { api } from "./api";
 import { parseAddresses } from "./articles";
-import { addResultLine, bookLine, chipPicture, deliveryLine, factsLine, lastAddedLine, sourceLine, wantsDrawing, webUrl } from "./cookbookRooms";
+import { addIsCurrent, addResultLine, bookLine, chipPicture, deliveryLine, factsLine, lastAddedLine, sourceLine, takeNext, wantsDrawing, waitingLine, webUrl } from "./cookbookRooms";
 import type { CookbookBook, CookbookDelivery, CookbookPicture, CookbookSaved, RecipePreview } from "./types";
 
 /** Addresses and files handed to the tab from outside it (a paste or a drop). `seq` tells new from seen. */
@@ -57,7 +57,12 @@ export default function CookbookAdd({
   const [saved, setSaved] = useState<CookbookSaved | null>(null);
   const [drawing, setDrawing] = useState(false);
   /** More addresses waiting behind the one on the card (a paste or drop of several). */
-  const [queue, setQueue] = useState<string[]>([]);
+  const queue = useRef<string[]>([]);
+  const [waiting, setWaiting] = useState(0);
+  const setQueue = (q: string[]) => {
+    queue.current = q;
+    setWaiting(q.length);
+  };
   const input = useRef<HTMLInputElement | null>(null);
   const asked = useRef(0);
 
@@ -89,12 +94,14 @@ export default function CookbookAdd({
   fetchRef.current = fetchTarget;
 
   // The next waiting address, once the card in front of it is done
-  const advance = (rest = queue) => {
+  const advance = () => {
     setPreview(null);
-    if (rest.length === 0) return;
-    setQueue(rest.slice(1));
-    setText(rest[0]);
-    fetchRef.current(rest[0], true);
+    setProblem(null);
+    const { next, rest } = takeNext(queue.current);
+    if (next === null) return;
+    setQueue(rest);
+    setText(next);
+    fetchRef.current(next, true);
   };
 
   // The Books tab's Recipe… entry: the link box takes focus
@@ -119,12 +126,16 @@ export default function CookbookAdd({
   const add = async () => {
     if (!preview || adding) return;
     setAdding(true);
+    // A paste or drop while this runs starts a newer fetch; its card and queue are left alone
+    const mine = asked.current;
     try {
       const s = await api.cookbookAdd(preview.target, chapter, note.trim() || null, pick === "default" ? null : pick);
       setSaved(s);
-      setText("");
       onChanged();
-      advance();
+      if (addIsCurrent(mine, asked.current)) {
+        setText("");
+        advance();
+      }
       if (wantsDrawing(s.picture, bookPicture, illustrationsOn, s.has_illustration)) {
         setDrawing(true);
         try {
@@ -188,7 +199,20 @@ export default function CookbookAdd({
             </button>
           </form>
           <p className="muted small">Paste anywhere on this tab, or drop .webloc, .url and .html files.</p>
-          {problem && <p className="fail small">{problem}</p>}
+          {problem && (
+            <p className="fail small">
+              {problem}
+              {waiting > 0 && (
+                <>
+                  {" "}
+                  <span className="muted">{waitingLine(waiting)}.</span>{" "}
+                  <button className="link" onClick={advance}>
+                    Try the next one
+                  </button>
+                </>
+              )}
+            </p>
+          )}
           {saved && (
             <p className="run-result ok" role="status">
               {addResultLine(saved.stored, saved.home_name)}: {saved.title}.{" "}
@@ -259,11 +283,11 @@ export default function CookbookAdd({
               <button className="primary" disabled={adding} onClick={add}>
                 {adding ? "Adding…" : "Add to the book"}
               </button>
-              <button className="ghost" disabled={adding} onClick={() => advance()}>
+              <button className="ghost" disabled={adding} onClick={advance}>
                 Not this one
               </button>
               {p.exists && <span className="muted small">Already in the book: adding updates it.</span>}
-              {queue.length > 0 && <span className="muted small">{queue.length} more waiting</span>}
+              {waiting > 0 && <span className="muted small">{waitingLine(waiting)}</span>}
             </div>
           </section>
         )}
