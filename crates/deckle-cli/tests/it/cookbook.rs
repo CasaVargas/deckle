@@ -57,7 +57,12 @@ impl Book {
 
     fn cmd(&self, args: &[&str]) -> Command {
         let mut c = Command::cargo_bin("deckle").unwrap();
+        // A home of its own, so `list` doesn't read the owner's `digest.toml` for Kindles.
+        let home = self.dir.path().join("home");
         c.env("DECKLE_COOKBOOK_DIR", self.cookbook())
+            .env("HOME", &home)
+            .env("XDG_CONFIG_HOME", &home)
+            .env("APPDATA", &home)
             .arg("cookbook")
             .args(args);
         c
@@ -86,11 +91,16 @@ impl Book {
         self.list_json()[0]["id"].as_str().unwrap().to_owned()
     }
 
+    /// `list --json`'s `recipes`.
     fn list_json(&self) -> Vec<serde_json::Value> {
-        let out = self.cmd(&["list"]).arg("--json").output().unwrap();
-        assert!(out.status.success());
-        serde_json::from_slice(&out.stdout).unwrap()
+        recipes_of(&self.ok(&["list", "--json"]))
     }
+}
+
+/// The `recipes` of a `list --json` listing (`{recipes, kindles}`).
+fn recipes_of(listing: &str) -> Vec<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_str(listing).unwrap();
+    v["recipes"].as_array().unwrap().clone()
 }
 
 #[test]
@@ -279,7 +289,7 @@ fn list_json_shape() {
             .output()
             .unwrap();
         assert!(out.status.success());
-        serde_json::from_slice::<Vec<serde_json::Value>>(&out.stdout).unwrap()
+        recipes_of(&String::from_utf8(out.stdout).unwrap())
     };
     assert_eq!(filtered("soups").len(), 1);
     assert!(filtered("mains").is_empty());
@@ -365,12 +375,10 @@ fn a_deleted_chapter_files_under_other_in_list_and_chapters() {
         serde_json::from_str(&book.ok(&["chapters", "--json"])).unwrap();
     let other = rows.iter().find(|r| r["id"] == "other").unwrap();
     assert_eq!(other["recipes"], 1);
-    let listed = book.ok(&["list", "--chapter", "other", "--json"]);
-    let listed: Vec<serde_json::Value> = serde_json::from_str(&listed).unwrap();
+    let listed = recipes_of(&book.ok(&["list", "--chapter", "other", "--json"]));
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["id"], id);
-    let soups: Vec<serde_json::Value> =
-        serde_json::from_str(&book.ok(&["list", "--chapter", "soups", "--json"])).unwrap();
+    let soups = recipes_of(&book.ok(&["list", "--chapter", "soups", "--json"]));
     assert!(soups.is_empty());
 }
 

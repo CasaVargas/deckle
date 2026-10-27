@@ -13,6 +13,7 @@ use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE};
 use serde::Serialize;
 
 use super::cli::{CookbookCommand, PictureArg};
+use super::cookbook_delivery::{self, KindleState, KindleStatus};
 use super::emit;
 
 pub fn run(json: bool, action: CookbookCommand) -> Result<ExitCode, String> {
@@ -63,6 +64,7 @@ pub fn run(json: bool, action: CookbookCommand) -> Result<ExitCode, String> {
         }
         CookbookCommand::Chapters => chapters(json, &store)?,
         CookbookCommand::Build { out } => build(&store, &out)?,
+        CookbookCommand::Send { to } => send(json, &store, to.as_deref())?,
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -216,30 +218,85 @@ fn list(json: bool, store: &Store, chapter: Option<&str>) -> Result<(), String> 
             url: &s.recipe.source_url,
         })
         .collect();
-    emit(json, &rows, || {
-        if recipes.is_empty() {
-            return "No recipes yet".to_owned();
-        }
-        recipes
-            .iter()
-            .map(|s| {
-                format!(
-                    "{}  {}  {}  {}  {}  picture: {}",
-                    s.id,
-                    title(s),
-                    chapter_name(&chapters, &s.chapter),
-                    s.added.format("%Y-%m-%d"),
-                    if s.recipe.structured {
-                        "recipe data"
-                    } else {
-                        "page text"
-                    },
-                    picture_word(s.picture),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-    })
+    // Where each Kindle stands and what's not built yet (cookbook design §9). A record that
+    // can't be read is said, never shown as "Never sent".
+    let (kindles, kindles_error) =
+        match sync_config().and_then(|sync| cookbook_delivery::statuses(store, &sync)) {
+            Ok(k) => (k, None),
+            Err(e) => (Vec::new(), Some(e)),
+        };
+    let (pending_build, build_error) = cookbook_delivery::unbuilt(store);
+    #[derive(Serialize)]
+    struct Listing<'a> {
+        recipes: &'a [Row<'a>],
+        kindles: &'a [KindleStatus],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        kindles_error: Option<&'a str>,
+        pending_build: bool,
+        build_error: Option<&'a str>,
+    }
+    emit(
+        json,
+        &Listing {
+            recipes: &rows,
+            kindles: &kindles,
+            kindles_error: kindles_error.as_deref(),
+            pending_build,
+            build_error: build_error.as_deref(),
+        },
+        || {
+            let mut lines: Vec<String> = if recipes.is_empty() {
+                vec!["No recipes yet".to_owned()]
+            } else {
+                recipes
+                    .iter()
+                    .map(|s| {
+                        format!(
+                            "{}  {}  {}  {}  {}  picture: {}",
+                            s.id,
+                            title(s),
+                            chapter_name(&chapters, &s.chapter),
+                            s.added.format("%Y-%m-%d"),
+                            if s.recipe.structured {
+                                "recipe data"
+                            } else {
+                                "page text"
+                            },
+                            picture_word(s.picture),
+                        )
+                    })
+                    .collect()
+            };
+            let mut footer = Vec::new();
+            if pending_build {
+                footer.push(format!(
+                    "Changes not built yet: {}",
+                    build_error
+                        .as_deref()
+                        .unwrap_or("waiting for the next build")
+                ));
+            }
+            if let Some(e) = &kindles_error {
+                footer.push(format!("Kindles: can't tell where each stands: {e}"));
+            }
+            footer.extend(kindles.iter().map(|k| format!("{}: {}", k.name, k.status)));
+            if !footer.is_empty() {
+                lines.push(String::new());
+                lines.extend(footer);
+            }
+            lines.join("\n")
+        },
+    )
+}
+
+/// `digest.toml`'s `[sync]`: the household's settings and the Kindles it names. No file is no
+/// settings; one that won't load is an error.
+fn sync_config() -> Result<deckle_digest::config::SyncConfig, String> {
+    let path = deckle_digest::config::default_path();
+    if !path.exists() {
+        return Ok(Default::default());
+    }
+    Ok(deckle_digest::Config::load(&path)?.sync)
 }
 
 /// The title the book prints: the owner's, else the site's.
@@ -325,4 +382,131 @@ fn build(store: &Store, out: &Path) -> Result<(), String> {
     println!("{}", built.path.display());
     println!("build {}", built.build_id);
     Ok(())
+}
+
+/// What `send` did, as `--json` gives it.
+#[derive(Serialize)]
+struct Sent<'a> {
+    build: &'a str,
+    /// "sent", "up_to_date", "off", "all_current", "queued" or "exported".
+    result: &'static str,
+    /// The Kindle's name (or sync id).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kindle: Option<String>,
+    /// The EPUB, for an export.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exported: Option<&'a Path>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<&'a super::DigestOutcome>,
+}
+
+/// Builds the book when it changed (a book that hasn't is sent as it is), then sends it: to a
+/// connected Kindle through the same offer, push and record `digest push` uses, or as an EPUB
+/// into the folder `--to` names, which no Kindle's record hears of. With no Kindle connected it
+/// waits for each one's next plug-in. It says "up to date" only when the record agrees.
+fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
+    // A book that was never built is due, so this builds it; it waits if the watcher is
+    // building right now.
+    if let Some(b) = cookbook_delivery::rebuild_waiting(store, None)? {
+        eprintln!(
+            "built {} {}",
+            b.recipes,
+            if b.recipes == 1 { "recipe" } else { "recipes" }
+        );
+    }
+    let build = cookbook_delivery::current_build(store)
+        .ok_or("no recipes yet; add one with `deckle cookbook add`")?;
+    let reply = |s: Sent, text: String| emit(json, &s, || text);
+    let sent = |result, kindle, exported, outcome| Sent {
+        build: &build,
+        result,
+        kindle,
+        exported,
+        outcome,
+    };
+    if let Some(folder) = to.filter(|t| *t != "device") {
+        let dir = Path::new(folder);
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        let out = dir.join(EPUB_NAME);
+        std::fs::copy(cookbook_delivery::epub_path(store), &out)
+            .map_err(|e| format!("{}: {e}", out.display()))?;
+        return reply(
+            sent("exported", None, Some(&out), None),
+            format!("Exported to {}", out.display()),
+        );
+    }
+    let path = deckle_digest::config::default_path();
+    let Some(target) = super::detect_kindle() else {
+        // Nobody to hand it to: say whether anybody is waiting for it.
+        let current = sync_config()
+            .and_then(|sync| cookbook_delivery::statuses(store, &sync))
+            .is_ok_and(|all| {
+                all.iter().any(|k| k.state == KindleState::UpToDate)
+                    && all
+                        .iter()
+                        .all(|k| matches!(k.state, KindleState::UpToDate | KindleState::Off))
+            });
+        return if current {
+            reply(
+                sent("all_current", None, None, None),
+                "Every Kindle already has this build".to_owned(),
+            )
+        } else {
+            reply(
+                sent("queued", None, None, None),
+                "Queued: goes to each Kindle on its next plug-in".to_owned(),
+            )
+        };
+    };
+    let id = deckle_core::sync::device_id(&target);
+    let papers = if path.exists() {
+        super::all_papers(&path)?
+    } else {
+        vec![deckle_digest::Config::default()]
+    };
+    let cfg = &papers[0];
+    let name = cfg.sync.device_name(&id).unwrap_or_else(|| id.clone());
+    let on = cfg.sync.for_device(&id).cookbook;
+    let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
+    let outcome = super::push_queued(&path, &queue, &papers, Some(target))?;
+    let flush = outcome.flush.as_ref();
+    let took = flush.is_some_and(|f| {
+        f.delivered
+            .iter()
+            .any(|p| p.file_name().is_some_and(|n| n == book::DEVICE_NAME))
+    });
+    // Other books that went along (the Daily, say) are listed too.
+    let others = flush.is_some_and(|f| !f.delivered.is_empty());
+    let (result, mut text) = if took {
+        ("sent", format!("Sent to {name}"))
+    } else if !on {
+        (
+            "off",
+            format!("{name} is left out of the cookbook (cookbook = false in digest.toml)"),
+        )
+    } else {
+        // Nothing went. "Up to date" only if the record says it has this build; else why not.
+        match cookbook_delivery::Delivered::load(store) {
+            Ok(d) if d.get(&id) == Some(build.as_str()) => {
+                ("up_to_date", format!("{name} is up to date"))
+            }
+            other => {
+                let why = outcome
+                    .cookbook_error
+                    .clone()
+                    .or(other.err())
+                    .unwrap_or_else(|| "the Kindle didn't take the book".to_owned());
+                return Err(format!("not sent to {name}: {why}"));
+            }
+        }
+    };
+    if others {
+        text = format!("{text}\n{}", outcome.describe(&queue));
+    }
+    // It went, but couldn't be written down: the next push would send it again.
+    if let (true, Some(e)) = (took, &outcome.cookbook_error) {
+        text = format!("{text}\nwarning: cookbook: {e}");
+    }
+    reply(sent(result, Some(name), None, Some(&outcome)), text)
 }

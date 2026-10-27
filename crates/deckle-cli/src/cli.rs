@@ -358,6 +358,15 @@ pub enum CookbookCommand {
         #[arg(short, long)]
         out: PathBuf,
     },
+    /// Build the book if it changed (a book that hasn't is sent as it is) and send it. With a
+    /// Kindle connected it goes now, unless that Kindle already has this build or is left out
+    /// (`cookbook = false`); with none connected, it waits for each Kindle's next plug-in.
+    /// `--to <folder>` exports `cookbook.epub` there instead and records nothing.
+    Send {
+        /// `device` (the default) for a connected Kindle, or a folder to export the EPUB to.
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// Choose a recipe's picture.
     Picture {
         /// A recipe's id, or the address it was saved from.
