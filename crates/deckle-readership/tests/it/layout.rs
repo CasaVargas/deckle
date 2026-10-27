@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Where each story starts (learning plan, Task 2): found among a section's runs, looked up by
 //! position.
-mod common;
 
-use common::*;
+use crate::common::*;
 use deckle_kfx::text::Run;
 use deckle_readership::layout::{Layout, SectionStart, StoryStart, stories_from_runs, story_at};
 

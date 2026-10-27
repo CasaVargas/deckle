@@ -57,9 +57,9 @@ impl deckle_digest::Net for Counting {
     fn get(&self, url: &str) -> Result<Vec<u8>, String> {
         self.log.lock().unwrap().push(url.to_owned());
         if url.starts_with("https://news.google.com/") {
-            Ok(include_bytes!("fixtures/next/gnews.xml").to_vec())
+            Ok(include_bytes!("../fixtures/next/gnews.xml").to_vec())
         } else if url == SCIENCE || url == OTHER {
-            Ok(include_bytes!("fixtures/next/science.xml").to_vec())
+            Ok(include_bytes!("../fixtures/next/science.xml").to_vec())
         } else {
             Err(format!("offline: {url}"))
         }

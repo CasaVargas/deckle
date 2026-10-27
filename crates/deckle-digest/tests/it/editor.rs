@@ -145,7 +145,7 @@ fn edits_reach_epub_and_bundle_and_preserve_news_text() {
         json!(["A park was approved."])
     );
     let schema: Value = serde_json::from_str(include_str!(
-        "../../../docs/formats/edition-bundle.schema.json"
+        "../../../../docs/formats/edition-bundle.schema.json"
     ))
     .unwrap();
     assert!(jsonschema::validator_for(&schema).unwrap().is_valid(&v));

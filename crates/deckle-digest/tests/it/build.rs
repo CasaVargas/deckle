@@ -1338,7 +1338,7 @@ fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
     let v = edition_json(bundle);
 
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../docs/formats/edition-bundle.schema.json"
+        "../../../../docs/formats/edition-bundle.schema.json"
     ))
     .unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();
@@ -1449,7 +1449,7 @@ fn a_bundle_carries_full_size_photos_with_captions_and_story_details() {
     let bundle = r.bundle(false).unwrap();
     let v = edition_json(bundle);
     let schema: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../docs/formats/edition-bundle.schema.json"
+        "../../../../docs/formats/edition-bundle.schema.json"
     ))
     .unwrap();
     let validator = jsonschema::validator_for(&schema).unwrap();

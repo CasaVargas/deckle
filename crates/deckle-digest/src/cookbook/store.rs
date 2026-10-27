@@ -158,7 +158,13 @@ fn spread_tables(table: &mut toml_edit::Table) {
 impl Store {
     /// `DECKLE_COOKBOOK_DIR`, else `cookbook/` beside `digest.toml`.
     pub fn default_dir() -> PathBuf {
-        if let Some(p) = std::env::var_os("DECKLE_COOKBOOK_DIR").filter(|p| !p.is_empty()) {
+        Self::dir_for(std::env::var_os("DECKLE_COOKBOOK_DIR"))
+    }
+
+    /// [`default_dir`](Self::default_dir) for a given `DECKLE_COOKBOOK_DIR` value, so tests need
+    /// not touch the process environment.
+    pub fn dir_for(env: Option<std::ffi::OsString>) -> PathBuf {
+        if let Some(p) = env.filter(|p| !p.is_empty()) {
             return PathBuf::from(p);
         }
         crate::config::default_path()

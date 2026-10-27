@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Learning (interests design §5): candidates from taps, paper highlights and shelf authors;
 //! suggestions; accept and dismiss.
-mod common;
 
 use std::collections::HashSet;
 
+use crate::common::*;
 use chrono::{DateTime, NaiveDate, Utc};
-use common::*;
 use deckle_digest::Config;
 use deckle_digest::config::SectionKind;
 use deckle_digest::shelf::store::{BookSnap, KindleSnapshot, Shelf};

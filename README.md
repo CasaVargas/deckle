@@ -410,7 +410,8 @@ Rust (stable, 1.85+), Node 22, pnpm. Conversion needs macOS or Windows.
 
 ```sh
 git config core.hooksPath .githooks                # once: fmt + clippy before every push
-cargo test --workspace
+cargo nextest run --workspace                       # tests (cargo install cargo-nextest; `cargo test` works too)
+cargo nextest run -p deckle-core pipeline::           # a crate's tests are one `it` binary: filter by module
 cd apps/desktop && pnpm install && pnpm tauri dev   # app with hot reload
 pnpm tauri build                                   # installers in target/release/bundle
 ```

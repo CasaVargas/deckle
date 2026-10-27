@@ -28,7 +28,7 @@ fn cfg() -> Config {
 
 /// The saved New York forecast, with rain likely at 4 PM today.
 fn forecast() -> Forecast {
-    let mut f = parse(include_bytes!("fixtures/weather/forecast.json")).unwrap();
+    let mut f = parse(include_bytes!("../fixtures/weather/forecast.json")).unwrap();
     let i = f
         .hourly
         .time

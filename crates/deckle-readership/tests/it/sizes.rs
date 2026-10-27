@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Section sizes and the week, for tomorrow's paper (tomorrow's paper design §6.3, §7).
-mod common;
 
-use common::*;
+use crate::common::*;
 use deckle_digest::next::WeekState;
 use deckle_readership::layout::{Layout, SectionStart};
 use deckle_readership::sizes::{history, recent};

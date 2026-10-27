@@ -8,7 +8,7 @@ duplicate headings and one deliberately missing target. The importer tests verif
 manifest resources and local link targets. The pipeline also has an opt-in real Previewer test:
 
 ```sh
-cargo test -p deckle-core --test pipeline markdown_real_previewer_smoke -- --ignored
+cargo test -p deckle-core --test it pipeline::markdown_real_previewer_smoke -- --ignored
 ```
 
 That test passed for both inputs with Kindle Previewer 4 on macOS on 2026-10-24.

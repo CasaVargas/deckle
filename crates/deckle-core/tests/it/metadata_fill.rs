@@ -11,10 +11,10 @@ use deckle_core::metadata_fill::{
 use deckle_core::normalize::{NormalizeOptions, normalize};
 
 const ISBN: &str = "9780547928210";
-const EDITION: &str = include_str!("data/openlibrary/isbn-9780547928210.json");
-const WORK: &str = include_str!("data/openlibrary/works-OL27513W.json");
-const AUTHOR: &str = include_str!("data/openlibrary/authors-OL26320A.json");
-const SEARCH: &str = include_str!("data/openlibrary/search-fellowship.json");
+const EDITION: &str = include_str!("../data/openlibrary/isbn-9780547928210.json");
+const WORK: &str = include_str!("../data/openlibrary/works-OL27513W.json");
+const AUTHOR: &str = include_str!("../data/openlibrary/authors-OL26320A.json");
+const SEARCH: &str = include_str!("../data/openlibrary/search-fellowship.json");
 
 /// Answers the saved records by URL and logs every request.
 fn saved(log: &mut Vec<String>) -> impl FnMut(&str) -> Result<String, String> + '_ {

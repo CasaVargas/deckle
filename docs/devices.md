@@ -69,7 +69,7 @@ the first send, then shown in the card).
    `feature` is `Cover`, `Kfx`, `Xray` or `WordWise`, and `on_send: false` keeps it to the
    device card (use it when the pipeline already says the same thing). Say what to do in the
    message, not just what breaks.
-3. Add a case to `crates/deckle-core/tests/compat.rs` with a firmware inside the range and one
+3. Add a case to `crates/deckle-core/tests/it/compat.rs` with a firmware inside the range and one
    just outside it.
 
 ## Spikes 2 and 3 (M2, need the Scribe)

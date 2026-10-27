@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-mod common;
 
-use common::*;
+use crate::common::*;
 use deckle_digest::Config;
 use deckle_digest::config::SectionKind;
 use deckle_readership::layout::{Layout, SectionStart};
