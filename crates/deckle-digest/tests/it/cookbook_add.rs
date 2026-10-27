@@ -7,7 +7,9 @@ use std::sync::Mutex;
 
 use chrono::{DateTime, TimeZone, Utc};
 use deckle_digest::Net;
-use deckle_digest::cookbook::add::{AddOptions, add, preview, site_picture};
+use deckle_digest::cookbook::add::{
+    AddError, AddOptions, add, add_classified, preview, site_picture,
+};
 use deckle_digest::cookbook::store::{ImageKind, Store, Stored, recipe_id};
 
 const PAGE_URL: &str = "https://fetch.test/recipes/oat-cookies?utm_source=feed";
@@ -386,4 +388,62 @@ fn image_write_failure_stores_nothing() {
     assert!(store.find(KEY).unwrap().is_none());
     assert!(store.all().unwrap().is_empty());
     assert!(!store.image_path(&id, ImageKind::Orig).exists());
+}
+
+/// Answers every page with the same error text.
+struct Failing(&'static str);
+
+impl Net for Failing {
+    fn get(&self, _url: &str) -> Result<Vec<u8>, String> {
+        Err(self.0.to_owned())
+    }
+}
+
+#[test]
+fn failures_are_told_apart_by_whether_asking_again_could_help() {
+    let (_d, store) = store();
+    let kind = |net: &dyn Net| add_classified(&store, PAGE_URL, net, &opts(), at(26)).unwrap_err();
+    for retry in [
+        "offline: no route",
+        "http status: 408",
+        "http status: 429",
+        "http status: 500",
+        "http status: 503",
+    ] {
+        assert!(
+            matches!(kind(&Failing(retry)), AddError::Fetch(e) if e == retry),
+            "{retry}"
+        );
+    }
+    for gone in ["http status: 404", "http status: 403", "http status: 410"] {
+        assert!(
+            matches!(kind(&Failing(gone)), AddError::Other(e) if e == gone),
+            "{gone}"
+        );
+    }
+    // A page that loads but isn't a recipe is the content's fault.
+    let net = Fixture::new(&[(PAGE_URL, b"<html><body>hi</body></html>".to_vec())]);
+    assert!(matches!(kind(&net), AddError::Other(_)));
+    // `add` keeps its plain message.
+    assert_eq!(
+        add(&store, PAGE_URL, &Failing("offline: x"), &opts(), at(26)).unwrap_err(),
+        "offline: x"
+    );
+}
+
+#[test]
+fn a_saved_page_that_cant_be_read_is_a_fetch_failure() {
+    let (d, store) = store();
+    // A directory with the page's name reads as an error, like a file that never downloaded.
+    let dir_page = d.path().join("dir.html");
+    std::fs::create_dir(&dir_page).unwrap();
+    let e = add_classified(
+        &store,
+        dir_page.to_str().unwrap(),
+        &Fixture::new(&[]),
+        &opts(),
+        at(26),
+    )
+    .unwrap_err();
+    assert!(matches!(e, AddError::Fetch(_)), "{e:?}");
 }

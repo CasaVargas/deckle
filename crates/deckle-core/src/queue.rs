@@ -155,6 +155,21 @@ fn remove_entry(entry: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Copies the folder `from` to `to`, all the way down.
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)? {
+        let e = e?;
+        let dest = to.join(e.file_name());
+        if e.file_type()?.is_dir() {
+            copy_dir(&e.path(), &dest)?;
+        } else {
+            std::fs::copy(e.path(), &dest)?;
+        }
+    }
+    Ok(())
+}
+
 impl Queue {
     /// `<cache dir>/outbox`.
     pub fn default_dir() -> PathBuf {
@@ -352,6 +367,38 @@ impl Queue {
         let dest = self.dir.join(format!("{stem}.{PREPARED_EXT}"));
         if let Some(owner) = owner {
             std::fs::write(owner_file(&dest), owner)?;
+        }
+        std::fs::rename(&part, &dest)?;
+        Ok(dest)
+    }
+
+    /// Copies `entry`, queued in another [`Queue`] (a prepared `.book` folder or a finished
+    /// `.kfx`), into this one under the same queue name, meant for the Kindle `owner` (its id):
+    /// one prepared book fanned out to each Kindle that gets it. An entry of that name is
+    /// dropped first. As in [`Queue::add_for`], the owner is written first and the copy made
+    /// aside and renamed, so a `watch` never hands it to another Kindle or sees half of it.
+    pub fn adopt_for(&self, entry: &Path, owner: &str) -> std::io::Result<PathBuf> {
+        let file = entry.file_name().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "an entry has a name")
+        })?;
+        let dest = self.dir.join(file);
+        if dest == entry {
+            // Making room would delete the very entry to copy.
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "an entry is adopted from another queue",
+            ));
+        }
+        self.make_room(&queue_name(entry), None, &[])?;
+        std::fs::write(owner_file(&dest), owner)?;
+        let mut part = file.to_owned();
+        part.push(".part");
+        let part = self.dir.join(part);
+        if entry.is_dir() {
+            let _ = std::fs::remove_dir_all(&part);
+            copy_dir(entry, &part)?;
+        } else {
+            std::fs::copy(entry, &part)?;
         }
         std::fs::rename(&part, &dest)?;
         Ok(dest)
@@ -713,6 +760,116 @@ mod tests {
                 "deckle-daily-kid-courier-2026-10-17.kfx",
                 "deckle-daily-kid-courier-2026-10-18.kfx",
             ]
+        );
+    }
+
+    /// A prepared entry as `add_prepared_for` leaves one, without the Previewer: a `.book`
+    /// folder holding a nested file too, so a copy has to go all the way down.
+    fn fake_prepared_entry(dir: &Path, stem: &str, marker: &str) -> PathBuf {
+        let entry = dir.join(format!("{stem}.book"));
+        std::fs::create_dir_all(entry.join("assets")).unwrap();
+        std::fs::write(entry.join("fallback.kfx"), format!("fallback {marker}")).unwrap();
+        std::fs::write(entry.join("book.kpf"), format!("kpf {marker}")).unwrap();
+        std::fs::write(entry.join("prepared.json"), b"{\"version\":1}").unwrap();
+        std::fs::write(entry.join("assets/cover.jpg"), format!("cover {marker}")).unwrap();
+        entry
+    }
+
+    #[test]
+    fn adopt_prepared_entry_keeps_name_and_owner() {
+        let tmp = tempfile::tempdir().unwrap();
+        let other = Queue::new(tmp.path().join("other"));
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = fake_prepared_entry(&other.dir, "kitchen-book", "one");
+
+        let dest = q.adopt_for(&src, "G000MOM").unwrap();
+        assert_eq!(dest, q.dir.join("kitchen-book.book"));
+        assert_eq!(q.pending(), std::slice::from_ref(&dest));
+        assert_eq!(queue_name(&dest), "kitchen-book.kfx");
+        assert_eq!(Queue::owner(&dest).as_deref(), Some("G000MOM"));
+        assert_eq!(
+            std::fs::read_to_string(dest.join("assets/cover.jpg")).unwrap(),
+            "cover one"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("book.kpf")).unwrap(),
+            "kpf one"
+        );
+        // The source stays where it was, and no half-copy is left aside.
+        assert!(src.join("book.kpf").exists());
+        assert!(
+            std::fs::read_dir(&q.dir)
+                .unwrap()
+                .flatten()
+                .all(|e| e.path().extension().is_none_or(|x| x != "part"))
+        );
+
+        // A plain finished file is adopted the same way.
+        let kfx = tmp.path().join("other/plain.kfx");
+        std::fs::write(&kfx, b"KFX").unwrap();
+        let dest = q.adopt_for(&kfx, "G000DAD").unwrap();
+        assert_eq!(dest, q.dir.join("plain.kfx"));
+        assert_eq!(std::fs::read(&dest).unwrap(), b"KFX");
+        assert_eq!(Queue::owner(&dest).as_deref(), Some("G000DAD"));
+    }
+
+    #[test]
+    fn adopt_replaces_same_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let other = Queue::new(tmp.path().join("other"));
+        let q = Queue::new(tmp.path().join("outbox"));
+        let old = fake_prepared_entry(&other.dir, "kitchen-book", "old");
+        q.adopt_for(&old, "G000MOM").unwrap();
+        // A stale file of the same name (and a stale extra in the old folder) goes.
+        let kept = fake_prepared_entry(&q.dir, "another-book", "kept");
+        std::fs::write(q.dir.join("kitchen-book.book/stale.txt"), b"x").unwrap();
+        std::fs::remove_dir_all(&old).unwrap();
+        let new = fake_prepared_entry(&other.dir, "kitchen-book", "new");
+
+        let dest = q.adopt_for(&new, "G000DAD").unwrap();
+        assert_eq!(q.pending(), [kept, dest.clone()]);
+        assert_eq!(
+            std::fs::read_to_string(dest.join("book.kpf")).unwrap(),
+            "kpf new"
+        );
+        assert!(!dest.join("stale.txt").exists());
+        assert_eq!(Queue::owner(&dest).as_deref(), Some("G000DAD"));
+
+        // A finished file of the same name makes way for it too.
+        let kfx = tmp.path().join("other/kitchen-book.kfx");
+        std::fs::write(&kfx, b"KFX").unwrap();
+        let dest = q.adopt_for(&kfx, "G000MOM").unwrap();
+        assert_eq!(q.pending().len(), 2, "one entry per name");
+        assert!(dest.is_file());
+        assert!(!q.dir.join("kitchen-book.book").exists());
+        assert!(!owner_file(&q.dir.join("kitchen-book.book")).exists());
+    }
+
+    #[test]
+    fn adopted_entry_waits_for_its_kindle() {
+        let tmp = tempfile::tempdir().unwrap();
+        let other = Queue::new(tmp.path().join("other"));
+        let q = Queue::new(tmp.path().join("outbox"));
+        let mom = tmp.path().join("mom");
+        let dad = tmp.path().join("dad");
+        let mom_id = crate::sync::device_id(&Target::Folder(mom.clone()));
+        let src = fake_prepared_entry(&other.dir, "kitchen-book", "one");
+        let entry = q.adopt_for(&src, &mom_id).unwrap();
+
+        let r = q
+            .flush_with(
+                &mut Conn::new(&Target::Folder(dad)),
+                None,
+                &Finishing::default(),
+                &mut |_, _, _| {},
+            )
+            .unwrap();
+        assert!(r.delivered.is_empty());
+        assert_eq!(r.waiting, [("kitchen-book.kfx".to_owned(), mom_id.clone())]);
+        assert_eq!(q.pending(), [entry]);
+        assert_eq!(
+            q.waiting_for_others(None),
+            [("kitchen-book.kfx".to_owned(), mom_id)]
         );
     }
 

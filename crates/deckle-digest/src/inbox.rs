@@ -6,14 +6,21 @@
 //! Books (`.epub`, `.docx`, `.kfx`) dropped here are sent later (design §10): the caller
 //! converts each one and adds it to the outbox, then it moves to `Sent/`. Converting needs
 //! `deckle-core`, which this crate doesn't depend on, so that step is passed in.
+//!
+//! `Recipes/` is the cookbook's: what is dropped there goes to the cookbook, never to Your
+//! Reading ([`scan_recipes`], cookbook design §8.3). It keeps its own `Sent/` and `Unreadable/`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
-use std::time::{Duration, SystemTime};
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime};
 
 use chrono::Utc;
 use regex::Regex;
 
+use crate::cookbook::add::{AddError, AddOptions, add_classified};
+use crate::cookbook::store::Store;
+use crate::fetch::Net;
 use crate::reading::{Added, ReadingQueue};
 
 /// Files modified more recently than this may still be being written.
@@ -30,7 +37,18 @@ pub struct ScanReport {
     pub retry: Vec<(PathBuf, String)>,
     /// Subfolders that aren't the Inbox's own and aren't named after a Kindle: left alone.
     pub other_folders: Vec<PathBuf>,
+    /// Recipes added to (or refreshed in) the cookbook, from [`scan_recipes`].
+    pub recipes: usize,
+    /// Things the owner should hear about once (a Kindle called `Recipes`).
+    pub warnings: Vec<String>,
 }
+
+/// The Inbox subfolder for the cookbook.
+pub const RECIPES_FOLDER: &str = "Recipes";
+
+/// Said when a Kindle is named like the cookbook's folder.
+pub const RECIPES_KINDLE_WARNING: &str =
+    "A Kindle named Recipes can't have an Inbox folder: Recipes/ is for the cookbook";
 
 /// Why a file wasn't queued: its content (moved aside) or the moment (left for later).
 #[derive(Debug)]
@@ -65,7 +83,7 @@ pub fn expand_home(p: &str) -> PathBuf {
 }
 
 /// `dir/name`, or `dir/name (2).ext`… when taken.
-fn free_name(dir: &Path, name: &str) -> PathBuf {
+pub(crate) fn free_name(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name);
     if !first.exists() {
         return first;
@@ -141,7 +159,7 @@ pub fn scan_with_books(
 pub type SendLater<'a> = dyn FnMut(&Path, Option<&str>) -> Result<(), Skip> + 'a;
 
 /// Folders the Inbox makes itself, never a Kindle's.
-const OWN_FOLDERS: [&str; 3] = ["Sent", "Saved", "Unreadable"];
+const OWN_FOLDERS: [&str; 4] = ["Sent", "Saved", "Unreadable", RECIPES_FOLDER];
 
 /// Like [`scan_with_books`], also scanning each subfolder named after a Kindle in `kindles`
 /// ((name, id), names matched ignoring case): its books go to `send_later` with that Kindle's
@@ -157,6 +175,14 @@ pub fn scan_for_kindles(
     let mut report = ScanReport::default();
     if std::fs::create_dir_all(dir).is_err() {
         return report;
+    }
+    // Made on first run, so there is somewhere to drop a recipe (a Shortcut points at it).
+    let _ = std::fs::create_dir_all(dir.join(RECIPES_FOLDER));
+    if kindles
+        .iter()
+        .any(|(n, _)| n.trim().eq_ignore_ascii_case(RECIPES_FOLDER))
+    {
+        report.warnings.push(RECIPES_KINDLE_WARNING.to_owned());
     }
     scan_files(dir, queue, now, None, send_later, &mut report);
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -190,6 +216,13 @@ pub fn scan_for_kindles(
     report
 }
 
+/// Whether `file` was last changed long enough ago to be done being written.
+fn settled(file: &Path, now: SystemTime) -> bool {
+    std::fs::metadata(file)
+        .and_then(|m| m.modified())
+        .is_ok_and(|m| now.duration_since(m).is_ok_and(|age| age >= SETTLE))
+}
+
 /// The settled files directly in `dir`: books to `send_later` (with `owner`), articles queued.
 fn scan_files(
     dir: &Path,
@@ -213,10 +246,7 @@ fn scan_files(
         .collect();
     files.sort();
     for file in files {
-        let settled = std::fs::metadata(&file)
-            .and_then(|m| m.modified())
-            .is_ok_and(|m| now.duration_since(m).is_ok_and(|age| age >= SETTLE));
-        if !settled {
+        if !settled(&file, now) {
             continue;
         }
         let ext = file
@@ -265,6 +295,177 @@ fn scan_files(
             Err(skip) => report.skip(file, skip),
         }
     }
+}
+
+/// Files directly in `dir` that are visible, in name order.
+fn visible_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.path())
+        .filter(|p| {
+            !p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// Least time between tries at one link file that couldn't be fetched, so a dead site
+/// doesn't hold up every watch tick.
+pub const RECIPE_RETRY_GAP: Duration = Duration::from_secs(2 * 60);
+
+/// How long a link that can't be fetched keeps being tried before it goes to `Unreadable/`.
+const RECIPE_GIVE_UP: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// When each link file that failed to fetch may next be tried (this process only).
+static NEXT_TRY: LazyLock<Mutex<HashMap<PathBuf, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Adds what was dropped in `inbox/Recipes/` to the cookbook (never to Your Reading): each
+/// settled `.webloc`, `.url` or `.txt` (one address per line) is fetched, each `.html` or
+/// `.htm` page is read from disk. Added files move to `Recipes/Sent/`; ones that can't be
+/// read move to `Recipes/Unreadable/` with a `.txt` saying why. A fetch that fails (offline,
+/// a timeout, a server error: phone-saved links sync in before Wi-Fi is up) leaves the file
+/// for a later scan, tried at most every [`RECIPE_RETRY_GAP`] and for a day; a server that
+/// says no (404, 403…) doesn't. The owner picks recipe or article by the folder; nothing is
+/// guessed from the content. An empty folder costs one directory read and touches neither the
+/// network nor the book.
+pub fn scan_recipes(inbox: &Path, store: &Store, net: &dyn Net, now: SystemTime) -> ScanReport {
+    scan_recipes_spaced(inbox, store, net, now, RECIPE_RETRY_GAP)
+}
+
+/// [`scan_recipes`] with `gap` between tries at a link that can't be fetched.
+pub fn scan_recipes_spaced(
+    inbox: &Path,
+    store: &Store,
+    net: &dyn Net,
+    now: SystemTime,
+    gap: Duration,
+) -> ScanReport {
+    let mut report = ScanReport::default();
+    for file in visible_files(&inbox.join(RECIPES_FOLDER)) {
+        if !settled(&file, now) {
+            continue;
+        }
+        let waiting = NEXT_TRY
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&file).copied())
+            .is_some_and(|at| Instant::now() < at);
+        if waiting {
+            continue;
+        }
+        let ext = file
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        let outcome = recipe_file(&file, &ext, store, net, &mut report);
+        match outcome {
+            Err(RecipeFail::Fetch(why)) => {
+                let age = std::fs::metadata(&file)
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|m| now.duration_since(m).ok())
+                    .unwrap_or_default();
+                if age >= RECIPE_GIVE_UP {
+                    forget(&file);
+                    report.skip(
+                        file,
+                        Skip::Unreadable(format!("Couldn't fetch for a day: {why}")),
+                    );
+                } else {
+                    if let Ok(mut m) = NEXT_TRY.lock() {
+                        m.insert(file.clone(), Instant::now() + gap);
+                    }
+                    report.skip(file, Skip::Retry(why));
+                }
+            }
+            Err(RecipeFail::Other(why)) => {
+                forget(&file);
+                report.skip(file, Skip::Unreadable(why));
+            }
+            Ok(()) => {
+                forget(&file);
+                move_to(&file, "Sent");
+            }
+        }
+    }
+    report
+}
+
+fn forget(file: &Path) {
+    if let Ok(mut m) = NEXT_TRY.lock() {
+        m.remove(file);
+    }
+}
+
+enum RecipeFail {
+    Fetch(String),
+    Other(String),
+}
+
+/// Adds each recipe in one file. Only when every address was added is the file done; a
+/// failure leaves the earlier ones added, and the reason lists them (adding again is safe).
+fn recipe_file(
+    file: &Path,
+    ext: &str,
+    store: &Store,
+    net: &dyn Net,
+    report: &mut ScanReport,
+) -> Result<(), RecipeFail> {
+    let targets = match ext {
+        "webloc" | "url" | "txt" => {
+            // A synced file that hasn't downloaded yet won't open: that is the moment, not
+            // the content.
+            std::fs::read(file).map_err(|e| RecipeFail::Fetch(e.to_string()))?;
+            urls_in(file, ext).map_err(RecipeFail::Other)?
+        }
+        "html" | "htm" => vec![file.to_string_lossy().into_owned()],
+        _ => {
+            return Err(RecipeFail::Other(
+                "the cookbook reads .webloc, .url, .txt and .html files, not other kinds".into(),
+            ));
+        }
+    };
+    let opts = AddOptions {
+        chapter: None,
+        note: None,
+    };
+    let mut added: Vec<String> = Vec::new();
+    for t in targets {
+        match add_classified(store, &t, net, &opts, Utc::now()) {
+            Ok(_) => {
+                report.recipes += 1;
+                added.push(t);
+            }
+            Err(e) => {
+                let (fetch, e) = match e {
+                    AddError::Fetch(e) => (true, e),
+                    AddError::Other(e) => (false, e),
+                };
+                let why = if added.is_empty() {
+                    format!("{t}: {e}")
+                } else {
+                    format!(
+                        "Added before this failed: {}. Failed: {t}: {e}. \
+                         Dropping the file back in is safe.",
+                        added.join(", ")
+                    )
+                };
+                return Err(if fetch {
+                    RecipeFail::Fetch(why)
+                } else {
+                    RecipeFail::Other(why)
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 impl ScanReport {

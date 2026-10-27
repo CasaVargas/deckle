@@ -3,6 +3,7 @@
 
 mod cli;
 mod cookbook;
+mod cookbook_delivery;
 mod highlights;
 mod inbox;
 mod series;
@@ -2463,7 +2464,7 @@ fn digest(
             let date = parse_date(date.as_deref())?;
             std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            scan_inbox(&cfg);
+            scan_inbox(&cfg, false);
             let net = household_net(&path, &cfg);
             let built = deckle_digest::build_gathered(
                 &cfg,
@@ -2587,7 +2588,7 @@ fn digest(
             let converted = work.join("kfx");
             std::fs::create_dir_all(&converted).map_err(|e| e.to_string())?;
             let now = deckle_digest::chrono::Utc::now();
-            scan_inbox(&cfg);
+            scan_inbox(&cfg, false);
             let net = household_net(&path, &cfg);
             let first = deckle_digest::build_gathered(
                 &cfg,
@@ -3063,8 +3064,12 @@ fn digest(
                 .transpose()
             {
                 Ok(Some(token)) => {
+                    // Save recipe drops its link file in the Inbox's Recipes folder, where
+                    // the scan below adds it to the cookbook.
+                    let recipes = deckle_digest::inbox::expand_home(&cfg.reading.inbox)
+                        .join(deckle_digest::inbox::RECIPES_FOLDER);
                     std::thread::spawn(move || {
-                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token) {
+                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token, recipes) {
                             eprintln!(
                                 "bookmarklet: can't listen on 127.0.0.1:{}: {e}",
                                 deckle_digest::bookmarklet::PORT
@@ -3089,6 +3094,12 @@ fn digest(
             // A reMarkable answers on its USB link; one push per connection, as for the others.
             let rm_queue = remarkable_queue();
             let mut rm_watcher = deckle_core::sync::Watcher::default();
+            // The Kitchen Book, rebuilt when it changes and offered to each Kindle that plugs in
+            // (cookbook design §9). Each error is said once, not every tick.
+            let cookbook = deckle_digest::cookbook::store::Store::new(
+                deckle_digest::cookbook::store::Store::default_dir(),
+            );
+            let (mut build_error, mut offer_error) = (None, None);
             loop {
                 // A new or edited paper applies without a restart; a file that fails keeps the
                 // last good set, and its error is said once (many papers plan).
@@ -3104,18 +3115,55 @@ fn digest(
                     }
                     Err(_) => {}
                 }
-                scan_inbox(&cfg);
-                let pending = queue.pending();
+                scan_inbox(&cfg, true);
+                say_once(
+                    &mut build_error,
+                    cookbook_delivery::rebuild_if_dirty(&cookbook, None).map(|built| {
+                        if let Some(b) = built {
+                            eprintln!(
+                                "cookbook: rebuilt with {} {}, sent when each Kindle connects",
+                                b.recipes,
+                                if b.recipes == 1 { "recipe" } else { "recipes" }
+                            );
+                        }
+                    }),
+                );
                 let kindle = detect_kindle();
                 let id = kindle.as_ref().map(deckle_core::sync::device_id);
                 let actions = id
                     .as_deref()
                     .map(|id| sync_actions(&cfg, id))
                     .unwrap_or_default();
+                // Queued before the outbox is read, so it rides this connection's push.
+                let cookbook_kindle = kindle.as_ref().and_then(cookbook_delivery::kindle_id);
+                if let Some(id) = &cookbook_kindle {
+                    let on = actions.push && cfg.sync.for_device(id).cookbook;
+                    say_once(
+                        &mut offer_error,
+                        cookbook_delivery::offer(&cookbook, &queue, id, on).map(|_| ()),
+                    );
+                }
+                let pending = queue.pending();
                 let plan = watcher.tick(id.as_deref(), &pending, actions);
                 if let (Some(target), false) = (&kindle, plan.is_empty()) {
+                    // The build that goes now, read before the push takes the entry.
+                    let pushed = cookbook_kindle
+                        .as_deref()
+                        .and_then(|k| cookbook_delivery::queued_build(&queue, k));
                     match sync_to(&path, &queue, &papers, target, plan) {
-                        Ok(o) => emit(json, &o, || o.describe(&queue))?,
+                        Ok(o) => {
+                            if let (Some(flush), Some(k)) = (&o.flush, &cookbook_kindle)
+                                && let Err(e) = cookbook_delivery::record(
+                                    &cookbook,
+                                    k,
+                                    flush,
+                                    pushed.as_deref(),
+                                )
+                            {
+                                eprintln!("cookbook: {e}");
+                            }
+                            emit(json, &o, || o.describe(&queue))?
+                        }
                         Err(e) => eprintln!("error: {e}"),
                     }
                 }
@@ -3165,6 +3213,55 @@ fn digest(
     }
 }
 
+#[cfg(test)]
+mod prune_tests {
+    use super::*;
+
+    /// The Daily's prefix is `deckle-daily-` and the date after it, which the Kitchen Book's
+    /// name never matches; it's exempt by name all the same (cookbook design §9).
+    #[test]
+    fn the_dailys_prune_exempts_the_kitchen_book() {
+        let device = deckle_digest::cookbook::book::DEVICE_NAME;
+        let paper = deckle_digest::Config {
+            paper: Some(deckle_digest::config::PaperRef {
+                slug: "kid-courier".into(),
+                state_dir: PathBuf::from("/nonexistent"),
+            }),
+            ..Default::default()
+        };
+        let prune = digest_prune(&paper);
+        assert_eq!(prune.exempt, [device]);
+        let names = [
+            device.to_owned(),
+            "deckle-daily-kid-courier-2026-10-01.kfx".to_owned(),
+            "deckle-daily-kid-courier-2026-10-02.kfx".to_owned(),
+        ];
+        assert_eq!(
+            deckle_core::deliver::prunable_except(names, &prune.prefix, 1, &prune.exempt),
+            ["deckle-daily-kid-courier-2026-10-01.kfx"]
+        );
+        // The main paper's own exemptions (the Morgue's) keep it too.
+        assert!(
+            digest_prune(&deckle_digest::Config::default())
+                .exempt
+                .iter()
+                .any(|n| n == device)
+        );
+    }
+}
+
+/// Says a cookbook error once: again only when it changes, or after a success.
+fn say_once(said: &mut Option<String>, r: Result<(), String>) {
+    match r {
+        Ok(()) => *said = None,
+        Err(e) if said.as_ref() != Some(&e) => {
+            eprintln!("cookbook: {e}");
+            *said = Some(e);
+        }
+        Err(_) => {}
+    }
+}
+
 /// What happened to the converted edition: delivered (with pruning), or left queued.
 #[derive(Debug, Default, serde::Serialize)]
 struct DigestOutcome {
@@ -3186,6 +3283,10 @@ struct DigestOutcome {
     /// Books left queued for other Kindles: (queue name, the Kindle's name or id).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     waiting: Vec<(String, String)>,
+    /// Why the Kitchen Book wasn't offered to this Kindle, or its delivery wasn't recorded
+    /// (also said on stderr).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cookbook_error: Option<String>,
 }
 
 /// "2 books wait for Mom's Kindle", one line per Kindle, from (queue name, Kindle) pairs.
@@ -3698,11 +3799,15 @@ fn digest_prune(cfg: &deckle_digest::Config) -> deckle_core::queue::Prune {
     deckle_core::queue::Prune {
         prefix: deckle_digest::edition_prefix(cfg),
         keep: cfg.keep.max(1),
-        // Editions sent again from the Morgue are the main paper's.
+        // Editions sent again from the Morgue are the main paper's. The Kitchen Book is never
+        // pruned (cookbook design §9), whatever the prefix.
         exempt: match cfg.paper {
             None => morgue_exempt(),
             Some(_) => Vec::new(),
-        },
+        }
+        .into_iter()
+        .chain([deckle_digest::cookbook::book::DEVICE_NAME.to_owned()])
+        .collect(),
     }
 }
 
@@ -4073,6 +4178,20 @@ fn push_queued(
     target: Option<Target>,
 ) -> Result<DigestOutcome, String> {
     let cfg = &papers[0];
+    // The Kitchen Book rides along when this Kindle hasn't the newest build (cookbook §9). A
+    // folder is an export, not a Kindle: it gets none.
+    let cookbook = deckle_digest::cookbook::store::Store::new(
+        deckle_digest::cookbook::store::Store::default_dir(),
+    );
+    let id = target.as_ref().and_then(cookbook_delivery::kindle_id);
+    let mut cookbook_error = None;
+    if let Some(id) = &id
+        && let Err(e) =
+            cookbook_delivery::offer(&cookbook, queue, id, cfg.sync.for_device(id).cookbook)
+    {
+        eprintln!("cookbook: {e}");
+        cookbook_error = Some(e);
+    }
     let empty = queue.pending().is_empty();
     let Some(target) = target else {
         return Ok(DigestOutcome {
@@ -4086,10 +4205,23 @@ fn push_queued(
     let Some(plan) = push_plan(actions, empty) else {
         return Ok(DigestOutcome {
             flush: Some(Default::default()),
+            cookbook_error,
             ..Default::default()
         });
     };
-    sync_to(main, queue, papers, &target, plan)
+    // The build that goes now, read before the push takes the entry.
+    let pushed = id
+        .as_deref()
+        .and_then(|k| cookbook_delivery::queued_build(queue, k));
+    let mut outcome = sync_to(main, queue, papers, &target, plan)?;
+    if let (Some(flush), Some(id)) = (&outcome.flush, &id)
+        && let Err(e) = cookbook_delivery::record(&cookbook, id, flush, pushed.as_deref())
+    {
+        eprintln!("cookbook: {e}");
+        cookbook_error = Some(e);
+    }
+    outcome.cookbook_error = cookbook_error;
+    Ok(outcome)
 }
 
 /// What `digest push` runs: the outbox with the device's actions, or (empty outbox) just the
@@ -5043,8 +5175,9 @@ fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::Reading
 }
 
 /// Queues what was dropped in the Inbox folder: articles for the paper, books for the
-/// outbox (design §10). Says so when it found anything.
-fn scan_inbox(cfg: &deckle_digest::Config) {
+/// outbox (design §10). Says so when it found anything. Recipes for the cookbook are added
+/// only with `recipes` (the watcher): fetching a backlog of them must not hold up a build.
+fn scan_inbox(cfg: &deckle_digest::Config, recipes: bool) {
     let dir = deckle_digest::inbox::expand_home(&cfg.reading.inbox);
     let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
     let kindles: Vec<(String, String)> = cfg
@@ -5060,6 +5193,13 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
         &kindles,
         &mut inbox::with_readers(reader_seen().then(epub_queue), inbox::pipeline()),
     );
+    // Said once per run: the watcher scans every few seconds.
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    WARNED.call_once(|| {
+        for w in &r.warnings {
+            eprintln!("inbox: {w}");
+        }
+    });
     for folder in &r.other_folders {
         eprintln!(
             "inbox: left {} alone: no Kindle is called that (name one with `deckle devices name`)",
@@ -5085,6 +5225,41 @@ fn scan_inbox(cfg: &deckle_digest::Config) {
     for (file, why) in &r.retry {
         eprintln!("inbox: {} waits for the next scan: {why}", file.display());
     }
+    if recipes {
+        scan_recipes_folder(&dir);
+    }
+}
+
+/// Adds what was dropped in the Inbox's `Recipes/` folder to the cookbook (cookbook design
+/// §8.3). An empty folder costs one directory read. The cookbook delivery picks the new
+/// recipes up on its next tick.
+fn scan_recipes_folder(dir: &Path) {
+    let store = deckle_digest::cookbook::store::Store::new(
+        deckle_digest::cookbook::store::Store::default_dir(),
+    );
+    let r = deckle_digest::inbox::scan_recipes(
+        dir,
+        &store,
+        &deckle_digest::Http,
+        std::time::SystemTime::now(),
+    );
+    if r.recipes > 0 {
+        eprintln!(
+            "inbox: added {} {} to the cookbook from {}",
+            r.recipes,
+            if r.recipes == 1 { "recipe" } else { "recipes" },
+            dir.join(deckle_digest::inbox::RECIPES_FOLDER).display()
+        );
+    }
+    for (file, why) in &r.unreadable {
+        eprintln!(
+            "inbox: couldn't add {} to the cookbook: {why}",
+            file.display()
+        );
+    }
+    for (file, why) in &r.retry {
+        eprintln!("inbox: {} waits for the next try: {why}", file.display());
+    }
 }
 
 fn save(
@@ -5101,9 +5276,12 @@ fn save(
         let dir = queue.path.parent().unwrap_or(Path::new("."));
         let token = deckle_digest::bookmarklet::token(dir).map_err(|e| e.to_string())?;
         println!(
-            "Drag this to your bookmarks bar (or make a bookmark with it as the address).\n\
-             It works while `deckle digest watch` is running.\n\n{}",
-            deckle_digest::bookmarklet::javascript(&token)
+            "Drag these to your bookmarks bar (or make a bookmark with each as the address).\n\
+             They work while `deckle digest watch` is running.\n\n\
+             Save to paper (an article for tomorrow's Daily):\n{}\n\n\
+             Save recipe (a recipe for the cookbook):\n{}",
+            deckle_digest::bookmarklet::javascript(&token),
+            deckle_digest::bookmarklet::recipe_javascript(&token)
         );
         return Ok(ExitCode::SUCCESS);
     }

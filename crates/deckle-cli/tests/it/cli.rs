@@ -426,6 +426,23 @@ fn bookmarklet_prints_javascript_with_token() {
 }
 
 #[test]
+fn bookmarklet_prints_save_recipe_beside_save_to_paper() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = dir.path().join("reading.jsonl");
+    let (ok, text) = save(&q, &["--bookmarklet"]);
+    assert!(ok, "{text}");
+    let scripts: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("javascript:"))
+        .collect();
+    assert_eq!(scripts.len(), 2, "{text}");
+    assert!(!scripts[0].contains("kind="), "the paper's comes first");
+    assert!(scripts[1].contains("&kind=recipe&url="), "{text}");
+    let token = |js: &str| js.split("token=").nth(1).map(|t| t[..32].to_owned());
+    assert_eq!(token(scripts[0]), token(scripts[1]), "one token for both");
+}
+
+#[test]
 fn digest_email_has_password_test_and_forget() {
     let out = Command::cargo_bin("deckle")
         .unwrap()

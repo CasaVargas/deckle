@@ -358,6 +358,15 @@ pub enum CookbookCommand {
         #[arg(short, long)]
         out: PathBuf,
     },
+    /// Build the book if it changed (a book that hasn't is sent as it is) and send it. With a
+    /// Kindle connected it goes now, unless that Kindle already has this build or is left out
+    /// (`cookbook = false`); with none connected, it waits for each Kindle's next plug-in.
+    /// `--to <folder>` exports `cookbook.epub` there instead and records nothing.
+    Send {
+        /// `device` (the default) for a connected Kindle, or a folder to export the EPUB to.
+        #[arg(long)]
+        to: Option<String>,
+    },
     /// Choose a recipe's picture.
     Picture {
         /// A recipe's id, or the address it was saved from.
@@ -368,6 +377,21 @@ pub enum CookbookCommand {
     /// The book's chapters, in book order, with their recipe counts. Add, rename, remove and
     /// reorder them by editing cookbook.toml.
     Chapters,
+    /// Draw an engraving-style illustration of a recipe (needs `[illustrations] enabled = true`
+    /// in cookbook.toml and OPENAI_API_KEY). Sends the recipe's title, chapter name and up to
+    /// eight key ingredients to the configured image endpoint, nothing else. The site's photo
+    /// is kept; the recipe prints the drawing when its picture is `illustration`.
+    Illustrate {
+        /// A recipe's id, or the address it was saved from.
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        who: Option<String>,
+        /// Every recipe without an illustration yet, one at a time.
+        #[arg(long)]
+        all: bool,
+        /// Draw again where there already is an illustration.
+        #[arg(long)]
+        redraw: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
