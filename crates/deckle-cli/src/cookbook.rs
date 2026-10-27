@@ -8,7 +8,10 @@ use std::process::ExitCode;
 use deckle_digest::chrono::Utc;
 use deckle_digest::cookbook::add::{self, AddOptions};
 use deckle_digest::cookbook::book;
-use deckle_digest::cookbook::store::{Picture, Saved, Store, Stored};
+use deckle_digest::cookbook::illustrate::{self, Post};
+use deckle_digest::cookbook::store::{
+    IllustrationsConfig, ImageKind, Picture, Saved, Store, Stored,
+};
 use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE};
 use serde::Serialize;
 
@@ -61,8 +64,14 @@ pub fn run(json: bool, action: CookbookCommand) -> Result<ExitCode, String> {
                 PictureArg::Default => Picture::Default,
             };
             store.update(&saved)?;
+            if saved.picture == Picture::Illustration {
+                draw_on_request(&store, &saved)?;
+            }
         }
         CookbookCommand::Chapters => chapters(json, &store)?,
+        CookbookCommand::Illustrate { who, all, redraw } => {
+            illustrate_cmd(&store, who.as_deref(), all, redraw)?
+        }
         CookbookCommand::Build { out } => build(&store, &out)?,
         CookbookCommand::Send { to } => send(json, &store, to.as_deref())?,
     }
@@ -509,4 +518,108 @@ fn send(json: bool, store: &Store, to: Option<&str>) -> Result<(), String> {
         text = format!("{text}\nwarning: cookbook: {e}");
     }
     reply(sent(result, Some(name), None, Some(&outcome)), text)
+}
+
+/// A 256x256 gray PNG, the stand-in image endpoint's answer.
+const FAKE_PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAAAAAB5Gfe6AAABOElEQVR42u3QgQAAAAwEofcnO6yBrBBaz02AAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAgQIECAAAECBAioAzVNC7mBbeXUAAAAAElFTkSuQmCC";
+
+/// Where a drawing is asked for: the real endpoint, or (`DECKLE_COOKBOOK_FAKE_IMAGES=1`, a test
+/// hook like `DECKLE_REMARKABLE_URL`) a stand-in that answers [`FAKE_PNG`] and sends nothing.
+struct Artist {
+    cfg: IllustrationsConfig,
+    key: String,
+    fake: bool,
+}
+
+impl Artist {
+    /// The book's illustrations settings and a key, or why there can be no drawing.
+    fn new(store: &Store) -> Result<Self, String> {
+        let cfg = store.config()?.illustrations;
+        if !cfg.enabled {
+            return Err("Turn on illustrations in cookbook.toml first".into());
+        }
+        let fake = std::env::var_os("DECKLE_COOKBOOK_FAKE_IMAGES").is_some_and(|v| v == "1");
+        let key = match fake {
+            true => "fake".to_owned(),
+            false => illustrate::api_key().ok_or("Set OPENAI_API_KEY to draw illustrations")?,
+        };
+        Ok(Artist { cfg, key, fake })
+    }
+
+    /// Draws one recipe. `Err` is the one generic line; nothing the endpoint said gets out.
+    fn draw(&self, store: &Store, saved: &Saved) -> Result<(), &'static str> {
+        let fake = |_: &str, _: &[(String, String)], _: &str| -> Result<String, String> {
+            Ok(format!(r#"{{"data":[{{"b64_json":"{FAKE_PNG}"}}]}}"#))
+        };
+        let real: Post = &deckle_xray::llm::http_post;
+        let post: Post = if self.fake { &fake } else { real };
+        illustrate::illustrate(store, saved, &self.cfg, Some(&self.key), post)
+    }
+}
+
+fn has_illustration(store: &Store, saved: &Saved) -> bool {
+    store.image_path(&saved.id, ImageKind::Ill).is_file()
+}
+
+/// `picture <who> illustration`: draws it when there is none yet, if the book allows. The choice
+/// is already saved; with illustrations off or no drawing made, the site photo prints meanwhile.
+fn draw_on_request(store: &Store, saved: &Saved) -> Result<(), String> {
+    if has_illustration(store, saved) {
+        return Ok(());
+    }
+    if !store.config()?.illustrations.enabled {
+        println!("Illustrations are off; the photo prints until you turn them on in cookbook.toml");
+        return Ok(());
+    }
+    let artist = Artist::new(store)?;
+    artist.draw(store, saved).map_err(str::to_owned)?;
+    println!("{}: drawn", title(saved));
+    Ok(())
+}
+
+/// `illustrate`: one recipe, or `--all` one at a time, skipping those with a drawing unless
+/// `--redraw`. Progress is `<n>/<total> <title>: drawn | kept the photo`.
+fn illustrate_cmd(store: &Store, who: Option<&str>, all: bool, redraw: bool) -> Result<(), String> {
+    let artist = Artist::new(store)?;
+    let wanted = match who {
+        Some(who) => vec![recipe(store, who)?],
+        None if all => store.all()?,
+        None => return Err("name a recipe, or use --all".into()),
+    };
+    let (todo, had): (Vec<Saved>, Vec<Saved>) = wanted
+        .into_iter()
+        .partition(|s| redraw || !has_illustration(store, s));
+    if who.is_some() && todo.is_empty() {
+        println!("Already has an illustration; --redraw draws it again");
+        return Ok(());
+    }
+    if todo.is_empty() {
+        println!("Nothing to draw");
+        return Ok(());
+    }
+    let mut kept = 0;
+    for (i, saved) in todo.iter().enumerate() {
+        use std::io::Write as _;
+        print!("{}/{} {}: ", i + 1, todo.len(), title(saved));
+        let _ = std::io::stdout().flush();
+        match artist.draw(store, saved) {
+            Ok(()) => println!("drawn"),
+            Err(_) => {
+                println!("kept the photo");
+                kept += 1;
+            }
+        }
+    }
+    if !had.is_empty() {
+        println!(
+            "{} already {} one (--redraw draws again)",
+            had.len(),
+            if had.len() == 1 { "has" } else { "have" }
+        );
+    }
+    match (kept, who) {
+        (0, _) => Ok(()),
+        (_, Some(_)) => Err(illustrate::FAILED.into()),
+        (n, None) => Err(format!("{n} of {} couldn't be drawn", todo.len())),
+    }
 }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! `deckle cookbook add / list / move / remove / note / picture / chapters` (cookbook design
-//! §8.1). A saved page stands in for the web, so nothing touches the network.
+//! `deckle cookbook add / list / move / remove / note / picture / chapters / illustrate`
+//! (cookbook design §8.1, §7.2). A saved page stands in for the web, so nothing touches the network.
 
 use std::path::{Path, PathBuf};
 
@@ -484,4 +484,197 @@ fn a_one_shot_build_leaves_the_recipes_folder_to_the_watcher() {
     assert!(dropped.exists(), "still waiting for the watcher");
     assert!(!recipes.join("Sent").exists());
     assert!(book.list_json().is_empty(), "nothing was added to the book");
+}
+
+// ---- illustrate (cookbook design §7.2). A stand-in image endpoint answers (`DECKLE_COOKBOOK_FAKE_IMAGES`),
+// or there is no key at all, so nothing here reaches the network.
+
+impl Book {
+    /// `[illustrations] enabled = true` in the book's `cookbook.toml`.
+    fn enable_illustrations(&self) {
+        std::fs::create_dir_all(self.cookbook()).unwrap();
+        std::fs::write(
+            self.cookbook().join("cookbook.toml"),
+            "[illustrations]\nenabled = true\n",
+        )
+        .unwrap();
+    }
+
+    /// A command whose image endpoint is the stand-in.
+    fn drawing(&self, args: &[&str]) -> Command {
+        let mut c = self.cmd(args);
+        c.env("DECKLE_COOKBOOK_FAKE_IMAGES", "1")
+            .env_remove("OPENAI_API_KEY");
+        c
+    }
+
+    fn drawing_ok(&self, args: &[&str]) -> String {
+        let out = self.drawing(args).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    fn ill(&self, id: &str) -> PathBuf {
+        self.cookbook().join("images").join(format!("{id}.ill.jpg"))
+    }
+
+    /// Adds the soup page and the text page; returns their ids.
+    fn add_two(&self) -> Vec<String> {
+        self.ok(&["add", &self.page().to_string_lossy()]);
+        self.ok(&["add", &text_page().to_string_lossy()]);
+        self.list_json()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_owned())
+            .collect()
+    }
+}
+
+#[test]
+fn illustrate_requires_enabled() {
+    let book = Book::new();
+    let id = book.add_soup();
+    for args in [vec!["illustrate", "--all"], vec!["illustrate", &id]] {
+        let err = book.drawing(&args).output().unwrap();
+        assert!(!err.status.success(), "{args:?}");
+        let err = String::from_utf8(err.stderr).unwrap();
+        assert!(
+            err.contains("Turn on illustrations in cookbook.toml first"),
+            "{err}"
+        );
+    }
+    assert!(!book.ill(&id).exists());
+}
+
+#[test]
+fn illustrate_needs_a_recipe_or_all() {
+    let book = Book::new();
+    book.enable_illustrations();
+    book.cmd(&["illustrate"]).assert().failure();
+    book.cmd(&["illustrate", "--all", "abcdef123456"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn illustrate_all_runs_each_once() {
+    let book = Book::new();
+    book.enable_illustrations();
+    let ids = book.add_two();
+    assert_eq!(ids.len(), 2);
+    let photo = std::fs::read(
+        book.cookbook()
+            .join("images")
+            .join(format!("{}.jpg", ids[0])),
+    );
+    let out = book.drawing_ok(&["illustrate", "--all"]);
+    let lines: Vec<&str> = out.lines().filter(|l| l.contains('/')).collect();
+    assert_eq!(lines.len(), 2, "{out}");
+    assert!(
+        lines[0].starts_with("1/2 ") && lines[0].ends_with(": drawn"),
+        "{out}"
+    );
+    assert!(
+        lines[1].starts_with("2/2 ") && lines[1].ends_with(": drawn"),
+        "{out}"
+    );
+    for id in &ids {
+        let bytes = std::fs::read(book.ill(id)).unwrap();
+        assert_eq!(&bytes[..2], &[0xff, 0xd8], "a JPEG");
+    }
+    // The site photo is never touched.
+    assert_eq!(
+        std::fs::read(
+            book.cookbook()
+                .join("images")
+                .join(format!("{}.jpg", ids[0]))
+        )
+        .ok(),
+        photo.ok()
+    );
+
+    // Each is drawn once: a second run has nothing to do...
+    let again = book.drawing_ok(&["illustrate", "--all"]);
+    assert!(!again.contains(": drawn"), "{again}");
+    assert!(again.contains("Nothing to draw"), "{again}");
+    // ...until a redraw is asked for.
+    let redraw = book.drawing_ok(&["illustrate", "--all", "--redraw"]);
+    assert_eq!(redraw.matches(": drawn").count(), 2, "{redraw}");
+}
+
+#[test]
+fn illustrate_one_recipe() {
+    let book = Book::new();
+    book.enable_illustrations();
+    let ids = book.add_two();
+    let out = book.drawing_ok(&["illustrate", &ids[0]]);
+    assert!(out.contains(": drawn"), "{out}");
+    assert!(book.ill(&ids[0]).exists());
+    assert!(!book.ill(&ids[1]).exists(), "only the one asked for");
+    // Drawn already: it says so rather than spend another request.
+    let out = book.drawing_ok(&["illustrate", &ids[0]]);
+    assert!(out.contains("--redraw"), "{out}");
+    assert!(!out.contains(": drawn"), "{out}");
+    assert!(
+        book.drawing_ok(&["illustrate", &ids[0], "--redraw"])
+            .contains(": drawn")
+    );
+    // An unknown recipe is an error.
+    let out = book
+        .drawing(&["illustrate", "000000000000"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+}
+
+#[test]
+fn illustrate_without_a_key_keeps_the_photo() {
+    let book = Book::new();
+    book.enable_illustrations();
+    let id = book.add_soup();
+    let out = book
+        .cmd(&["illustrate", "--all"])
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("DECKLE_COOKBOOK_FAKE_IMAGES")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8(out.stderr).unwrap();
+    assert!(err.contains("OPENAI_API_KEY"), "{err}");
+    assert!(!book.ill(&id).exists());
+}
+
+#[test]
+fn picture_illustration_draws_when_there_is_none() {
+    let book = Book::new();
+    book.enable_illustrations();
+    let id = book.add_soup();
+    book.drawing_ok(&["picture", &id, "illustration"]);
+    assert_eq!(book.list_json()[0]["picture"], "illustration");
+    assert!(book.ill(&id).exists());
+
+    // An illustration already there is not drawn again.
+    std::fs::write(book.ill(&id), b"kept").unwrap();
+    book.drawing_ok(&["picture", &id, "illustration"]);
+    assert_eq!(std::fs::read(book.ill(&id)).unwrap(), b"kept");
+
+    // Other choices draw nothing.
+    let other = Book::new();
+    other.enable_illustrations();
+    let id = other.add_soup();
+    other.drawing_ok(&["picture", &id, "site"]);
+    assert!(!other.ill(&id).exists());
+}
+
+#[test]
+fn picture_illustration_while_off_says_so_and_draws_nothing() {
+    let book = Book::new();
+    let id = book.add_soup();
+    let out = book.drawing_ok(&["picture", &id, "illustration"]);
+    assert_eq!(book.list_json()[0]["picture"], "illustration");
+    assert!(out.contains("Illustrations are off"), "{out}");
+    assert!(!book.ill(&id).exists());
 }

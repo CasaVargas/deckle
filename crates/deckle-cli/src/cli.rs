@@ -377,6 +377,21 @@ pub enum CookbookCommand {
     /// The book's chapters, in book order, with their recipe counts. Add, rename, remove and
     /// reorder them by editing cookbook.toml.
     Chapters,
+    /// Draw an engraving-style illustration of a recipe (needs `[illustrations] enabled = true`
+    /// in cookbook.toml and OPENAI_API_KEY). Sends the recipe's title, chapter name and up to
+    /// eight key ingredients to the configured image endpoint, nothing else. The site's photo
+    /// is kept; the recipe prints the drawing when its picture is `illustration`.
+    Illustrate {
+        /// A recipe's id, or the address it was saved from.
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        who: Option<String>,
+        /// Every recipe without an illustration yet, one at a time.
+        #[arg(long)]
+        all: bool,
+        /// Draw again where there already is an illustration.
+        #[arg(long)]
+        redraw: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
