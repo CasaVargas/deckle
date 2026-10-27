@@ -6,6 +6,8 @@ mod backup;
 mod bind;
 mod cli;
 mod cookbook;
+#[cfg(unix)]
+mod cookbook_delivery;
 mod export;
 mod fb2;
 mod highlights;

@@ -3,7 +3,6 @@
 //! cookbook and every Kindle gets the newest build on its next plug-in, one file under a fixed
 //! name and ASIN. Simulated mass-storage Kindles (`DECKLE_MOUNTS`) and the fake Previewer
 //! (`DECKLE_PREVIEWER`); unix only, the fake Previewer is a shell script.
-#![cfg(unix)]
 
 use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
