@@ -473,3 +473,73 @@ fn save_config_keeps_comment_on_renamed_chapter() {
     );
     assert_eq!(store.config().unwrap(), cfg);
 }
+
+#[test]
+fn all_skips_appledouble_and_junk_json() {
+    let (_d, store) = store();
+    let saved = added(
+        store
+            .put(
+                recipe("Tomato soup", URL, &["Soup"]),
+                URL,
+                None,
+                None,
+                at(1),
+            )
+            .unwrap(),
+    );
+    let dir = store.dir.join("recipes");
+    let text = std::fs::read_to_string(dir.join(format!("{}.json", saved.id))).unwrap();
+    // An AppleDouble file, a sync-conflict copy, and a stray config: none is a recipe.
+    std::fs::write(dir.join(format!("._{}.json", saved.id)), [0u8, 5, 22, 7]).unwrap();
+    std::fs::write(dir.join(format!("{} (conflict).json", saved.id)), &text).unwrap();
+    std::fs::write(dir.join("settings.json"), "{}").unwrap();
+    let all = store.all().unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].id, saved.id);
+}
+
+#[test]
+fn all_errors_on_corrupt_recipe_naming_it() {
+    let (_d, store) = store();
+    let dir = store.dir.join("recipes");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("0123456789ab.json"), "{ not json").unwrap();
+    let err = store.all().unwrap_err();
+    assert!(err.contains("0123456789ab.json"), "{err}");
+}
+
+#[test]
+fn empty_note_is_no_note() {
+    let (_d, store) = store();
+    let s = added(
+        store
+            .put(
+                recipe("Tomato soup", URL, &[]),
+                URL,
+                None,
+                Some("  "),
+                at(1),
+            )
+            .unwrap(),
+    );
+    assert_eq!(s.note, None);
+    assert_eq!(store.find(URL).unwrap().unwrap().note, None);
+}
+
+#[test]
+fn remove_marks_dirty_even_if_an_image_will_not_delete() {
+    let (_d, store) = store();
+    let saved = added(
+        store
+            .put(recipe("Tomato soup", URL, &[]), URL, None, None, at(1))
+            .unwrap(),
+    );
+    store.clear_dirty().unwrap();
+    // A non-empty directory where the picture should be: deleting it fails.
+    let blocker = store.image_path(&saved.id, ImageKind::Printed);
+    std::fs::create_dir_all(blocker.join("x")).unwrap();
+    assert!(store.remove(URL).is_err());
+    assert!(store.find(URL).unwrap().is_none());
+    assert!(store.is_dirty());
+}

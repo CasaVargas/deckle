@@ -167,3 +167,13 @@ fn plural_of_y_keyword() {
 fn title_fallback_when_categories_dont_match() {
     assert_eq!(file(&["Appetizer"], "Tomato soup"), "soups");
 }
+
+#[test]
+fn keyword_case_does_not_hide_its_plurals() {
+    let chapters = vec![Chapter {
+        id: "pastry".into(),
+        name: "Pastry".into(),
+        match_: vec!["PASTRY".into()],
+    }];
+    assert_eq!(file_into(&["Pastries".into()], "x", &chapters), "pastry");
+}

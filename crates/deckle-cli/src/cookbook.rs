@@ -31,7 +31,7 @@ pub fn run(json: bool, action: CookbookCommand) -> Result<ExitCode, String> {
             println!("Moved to {}", chapter_name(&chapters, &saved.chapter));
         }
         CookbookCommand::Remove { who } => {
-            if !store.remove(&who)? {
+            if !store.remove(&key(&who))? {
                 return Err(nothing_saved(&who));
             }
             println!("Removed");
@@ -68,8 +68,25 @@ fn nothing_saved(who: &str) -> String {
     format!("nothing saved as {who}")
 }
 
+/// What `who` names to the store: a saved page given as a path is keyed by its canonical
+/// path, as `add` keyed it; an id or a web address is as given.
+fn key(who: &str) -> String {
+    let path = std::path::Path::new(who);
+    let is_page = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"));
+    if is_page
+        && path.is_file()
+        && let Ok(full) = std::fs::canonicalize(path)
+    {
+        return full.to_string_lossy().into_owned();
+    }
+    who.to_owned()
+}
+
 fn recipe(store: &Store, who: &str) -> Result<Saved, String> {
-    store.find(who)?.ok_or_else(|| nothing_saved(who))
+    store.find(&key(who))?.ok_or_else(|| nothing_saved(who))
 }
 
 /// `id` must be one of the book's chapters; the error lists the valid ids.
@@ -82,6 +99,16 @@ fn known_chapter(chapters: &[Chapter], id: &str) -> Result<(), String> {
         "no chapter \"{id}\"; the chapters are: {}",
         ids.join(", ")
     ))
+}
+
+/// The chapter a recipe is printed in: its own, or "Everything else" when that chapter has
+/// since been deleted. `list --chapter` and `chapters` both go by this.
+fn home<'a>(chapters: &[Chapter], id: &'a str) -> &'a str {
+    if chapters.iter().any(|c| c.id == id) {
+        id
+    } else {
+        EVERYTHING_ELSE
+    }
 }
 
 /// A chapter's name; a recipe left in a chapter since deleted reads as "Everything else", as
@@ -120,7 +147,9 @@ fn add(
                     Stored::Added(s) => ("Added to", s),
                     Stored::Updated(s) => ("Updated ·", s),
                 };
-                let picture = if outcome.picture_note.is_some() {
+                // Only a recipe with no picture at all says so; one that kept its earlier
+                // picture still has a site photo.
+                let picture = if outcome.picture_note == Some(add::NO_PICTURE) {
                     "no picture"
                 } else {
                     "site photo"
@@ -169,7 +198,7 @@ fn list(json: bool, store: &Store, chapter: Option<&str>) -> Result<(), String> 
     let recipes: Vec<Saved> = store
         .all()?
         .into_iter()
-        .filter(|s| chapter.is_none_or(|c| s.chapter == c))
+        .filter(|s| chapter.is_none_or(|c| home(&chapters, &s.chapter) == c))
         .collect();
     let rows: Vec<Row> = recipes
         .iter()
@@ -237,18 +266,10 @@ struct ChapterRow<'a> {
 fn chapters(json: bool, store: &Store) -> Result<(), String> {
     let chapters = store.config()?.chapters;
     let recipes = store.all()?;
-    // A recipe left in a deleted chapter is counted where the book prints it.
     let count = |id: &str| {
         recipes
             .iter()
-            .filter(|s| {
-                let home = if chapters.iter().any(|c| c.id == s.chapter) {
-                    s.chapter.as_str()
-                } else {
-                    EVERYTHING_ELSE
-                };
-                home == id
-            })
+            .filter(|s| home(&chapters, &s.chapter) == id)
             .count()
     };
     let rows: Vec<ChapterRow> = chapters

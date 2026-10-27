@@ -150,7 +150,11 @@ pub fn iso_minutes(s: &str) -> Option<u32> {
         .get(5)
         .and_then(|m| m.as_str().parse::<u64>().ok())
         .unwrap_or(0);
-    let total = parts.iter().flatten().sum::<u64>() + seconds / 60;
+    // The pieces come from untrusted pages: an overflow is no time at all, not a panic.
+    let total = parts
+        .iter()
+        .flatten()
+        .try_fold(seconds / 60, |sum, n| sum.checked_add(*n))?;
     u32::try_from(total).ok()
 }
 
@@ -208,7 +212,7 @@ fn map_node(n: &Value, base: &str, source_url: &str, site_name: &str) -> Option<
     }
     let minutes = |key: &str| n.get(key).and_then(Value::as_str).and_then(iso_minutes);
     let (prep, cook) = (minutes("prepTime"), minutes("cookTime"));
-    let total = minutes("totalTime").or_else(|| Some(prep? + cook?));
+    let total = minutes("totalTime").or_else(|| prep?.checked_add(cook?));
     Some(Recipe {
         title,
         description: n

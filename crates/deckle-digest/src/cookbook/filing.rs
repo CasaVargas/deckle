@@ -71,6 +71,8 @@ pub fn default_chapters() -> Vec<Chapter> {
 /// A keyword and its plurals as regex alternatives: the keyword itself, with a trailing "s" or
 /// "es", and, when it ends in "y", with the "y" swapped for "ies" ("pastry" -> "pastries").
 fn forms(keyword: &str) -> Vec<String> {
+    let keyword = keyword.to_lowercase();
+    let keyword = keyword.as_str();
     let mut forms = vec![
         regex::escape(keyword),
         regex::escape(&format!("{keyword}s")),

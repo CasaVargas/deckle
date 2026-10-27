@@ -303,3 +303,22 @@ fn recipe_serializes_yield_under_its_plain_name() {
     let back: Recipe = serde_json::from_value(json).unwrap();
     assert_eq!(back, r);
 }
+
+#[test]
+fn total_overflow_is_dropped_not_panicked() {
+    let page = r#"<!doctype html><html><head><title>Big</title>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "Recipe", "name": "Big",
+ "prepTime": "PT4294967295M", "cookTime": "PT4294967295M",
+ "recipeIngredient": ["1 egg"], "recipeInstructions": ["Wait."]}
+</script></head><body><h1>Big</h1></body></html>"#;
+    let r = parse_recipe(page, URL).unwrap();
+    assert_eq!(r.prep, Some(u32::MAX));
+    assert_eq!(r.cook, Some(u32::MAX));
+    assert_eq!(r.total, None);
+}
+
+#[test]
+fn iso_durations_that_overflow_are_none() {
+    assert_eq!(iso_minutes("P1000000000000000W10000000000000000D"), None);
+}

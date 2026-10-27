@@ -123,6 +123,27 @@ fn add_without_a_picture_says_why() {
 }
 
 #[test]
+fn add_again_without_the_photo_keeps_the_earlier_picture() {
+    let book = Book::new();
+    let page = book.page();
+    book.ok(&["add", &page.to_string_lossy()]);
+    std::fs::remove_file(page.parent().unwrap().join("soup_files/soup.png")).unwrap();
+    let out = book.ok(&["add", &page.to_string_lossy()]);
+    assert!(
+        out.contains("Updated · Soups and stews · site photo\nKept the earlier picture"),
+        "{out}"
+    );
+}
+
+#[test]
+fn add_with_an_empty_note_stores_none() {
+    let book = Book::new();
+    let page = book.page();
+    book.ok(&["add", &page.to_string_lossy(), "--note", ""]);
+    assert!(book.list_json()[0]["note"].is_null());
+}
+
+#[test]
 fn add_takes_a_chapter_and_a_note() {
     let book = Book::new();
     let page = book.page();
@@ -169,13 +190,48 @@ fn remove_by_url() {
     let book = Book::new();
     let page = book.page();
     book.add_soup();
-    // `who` is an id or the address it was saved from (a saved page's is its path).
-    let key = std::fs::canonicalize(&page).unwrap();
-    let out = book.ok(&["remove", &key.to_string_lossy()]);
-    assert_eq!(out.trim(), "Removed");
+    // `who` is an id or the address it was saved from (a saved page's is its path), given
+    // however the shell has it: here a relative path.
+    let site = page.parent().unwrap();
+    let relative = "./Lentil Soup.html";
+    let out = book
+        .cmd(&["remove", relative])
+        .current_dir(site)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "Removed");
     assert!(book.list_json().is_empty());
-    let err = book.fails(&["remove", &key.to_string_lossy()]);
+    let err = book.fails(&["remove", &page.to_string_lossy()]);
     assert!(err.contains("nothing saved"), "{err}");
+}
+
+#[test]
+fn who_as_a_saved_page_path_reaches_every_command() {
+    let book = Book::new();
+    let page = book.page();
+    book.add_soup();
+    let site = page.parent().unwrap();
+    for args in [
+        vec!["move", "./Lentil Soup.html", "mains"],
+        vec!["note", "./Lentil Soup.html", "Good cold"],
+        vec!["picture", "./Lentil Soup.html", "none"],
+    ] {
+        let out = book.cmd(&args).current_dir(site).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let row = &book.list_json()[0];
+    assert_eq!(row["chapter"], "mains");
+    assert_eq!(row["note"], "Good cold");
+    assert_eq!(row["picture"], "none");
 }
 
 #[test]
@@ -291,4 +347,29 @@ fn who_that_is_unknown_is_an_error() {
         let err = book.fails(&args);
         assert!(err.contains("nothing saved"), "{args:?}: {err}");
     }
+}
+
+#[test]
+fn a_deleted_chapter_files_under_other_in_list_and_chapters() {
+    let book = Book::new();
+    let id = book.add_soup();
+    book.ok(&["move", &id, "mains"]);
+    // Delete "mains" from the config by hand.
+    let toml = book.cookbook().join("cookbook.toml");
+    std::fs::write(
+        &toml,
+        "[[chapters]]\nid = \"soups\"\nname = \"Soups\"\n\n[[chapters]]\nid = \"other\"\nname = \"Everything else\"\n",
+    )
+    .unwrap();
+    let rows: Vec<serde_json::Value> =
+        serde_json::from_str(&book.ok(&["chapters", "--json"])).unwrap();
+    let other = rows.iter().find(|r| r["id"] == "other").unwrap();
+    assert_eq!(other["recipes"], 1);
+    let listed = book.ok(&["list", "--chapter", "other", "--json"]);
+    let listed: Vec<serde_json::Value> = serde_json::from_str(&listed).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["id"], id);
+    let soups: Vec<serde_json::Value> =
+        serde_json::from_str(&book.ok(&["list", "--chapter", "soups", "--json"])).unwrap();
+    assert!(soups.is_empty());
 }

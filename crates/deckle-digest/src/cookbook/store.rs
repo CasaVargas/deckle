@@ -219,7 +219,7 @@ impl Store {
         now: DateTime<Utc>,
     ) -> Result<Stored, String> {
         let id = recipe_id(key);
-        let note = note.map(cap_note);
+        let note = note.filter(|n| !n.trim().is_empty()).map(cap_note);
         let stored = match self.find(&id)? {
             Some(old) => Stored::Updated(Saved {
                 recipe,
@@ -266,7 +266,11 @@ impl Store {
         let mut out = Vec::new();
         for entry in entries {
             let path = entry.map_err(|e| e.to_string())?.path();
-            if path.extension().is_some_and(|x| x == "json") {
+            // Only `<id>.json` is a recipe; macOS `._<id>.json` files and sync-conflict copies
+            // are not, and don't fail the book. A recipe file that won't parse still does.
+            let is_recipe = path.extension().is_some_and(|x| x == "json")
+                && path.file_stem().and_then(|s| s.to_str()).is_some_and(is_id);
+            if is_recipe {
                 out.extend(Self::read(&path)?);
             }
         }
@@ -314,6 +318,9 @@ impl Store {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
             Err(e) => return Err(format!("{}: {e}", path.display())),
         };
+        if existed {
+            self.mark_dirty()?;
+        }
         let images = self.dir.join("images");
         if let Ok(entries) = std::fs::read_dir(&images) {
             for entry in entries.flatten() {
@@ -322,9 +329,6 @@ impl Store {
                         .map_err(|e| format!("{}: {e}", entry.path().display()))?;
                 }
             }
-        }
-        if existed {
-            self.mark_dirty()?;
         }
         Ok(existed)
     }
