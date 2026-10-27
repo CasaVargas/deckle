@@ -280,3 +280,6 @@ mod protocol;
 pub use protocol::*;
 
 pub mod setup;
+
+pub mod build;
+pub use build::{FreshArtifact, FreshBuildContext, build_fresh};

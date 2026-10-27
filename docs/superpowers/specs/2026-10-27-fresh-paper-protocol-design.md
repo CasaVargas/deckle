@@ -108,7 +108,7 @@ Fresh client identity is `(paper_id, edition.id)` across library, caches, contro
 
 Group client archive by paper/date and sort by built_at descending within each date, with ID tie-break. Display “Fresh edition · 12:04 PM.” Keep scheduled editions accessible. Display names are never identity. Preserve old bundle/returns fixtures and add new ones.
 
-Do not write fresh output into date-keyed Morgue, daily readership layouts, scheduled receipts, email/device queues, or other export destinations. Read saved-reading queue without consuming it; do not scan/move Inbox files or mutate tomorrow's preview. Reuse an existing daily puzzle; if absent, generate deterministically in job-local storage without replacing scheduled puzzle/solve state. Auth-session refresh may persist through existing handling. Audit gather-time writes and route remaining transient state to job-local paths.
+Do not write fresh output into date-keyed Morgue, daily readership layouts, scheduled receipts, email/device queues, or other export destinations. Read saved-reading queue without consuming it; do not scan/move Inbox files or mutate tomorrow's preview. For fresh builds, a selected folder with `books = false` keeps long reads inline in the paper; `books = true` may include separate long-read EPUBs, while scheduled delivery keeps its existing behavior. Reuse an existing daily puzzle; if absent, generate deterministically in job-local storage without replacing scheduled puzzle/solve state. Auth-session refresh may persist through existing handling. Audit gather-time writes and route remaining transient state to job-local paths.
 
 Keep a local fresh-edition archive by paper/edition UUID for recovery; intraday desktop Morgue UI/search is deferred. client archive works in v1.
 
