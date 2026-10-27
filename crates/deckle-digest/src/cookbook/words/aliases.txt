@@ -1,0 +1,17 @@
+# from = to; applied to the finished key (§6.4), after singularizing.
+scallion = green onion
+spring onion = green onion
+aubergine = eggplant
+courgette = zucchini
+coriander = cilantro
+rocket = arugula
+garbanzo bean = chickpea
+capsicum = bell pepper
+confectioners sugar = powdered sugar
+icing sugar = powdered sugar
+caster sugar = sugar
+extra virgin olive oil = olive oil
+extra-virgin olive oil = olive oil
+garlic clove = garlic
+chily = chili
+chilly = chili

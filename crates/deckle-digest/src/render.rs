@@ -2,6 +2,8 @@
 //! An [`Edition`] → the EPUB's files: front page, one XHTML per section, nav, NCX, OPF.
 
 use crate::config::Photos;
+use crate::front::FrontPlan;
+use crate::print::{FRONT_LABEL, PrintPlan};
 use crate::{Edition, Gathered, esc, long_date};
 
 /// `(path inside the EPUB, bytes)`. `mimetype` and `META-INF/container.xml` included.
@@ -76,13 +78,23 @@ p.score { font-weight: bold; }
 p.back { font-size: 0.8em; margin: 0.8em 0 1.2em 0; }
 p.in-section { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.1em; margin: 0.6em 0 0.2em 0; }
 ul.toc { margin: 0 0 1em 0; padding-left: 1.2em; }
+.skybox { text-align: center; font-size: 0.75em; letter-spacing: 0.08em; border-bottom: 1px solid black;
+  padding-bottom: 0.3em; margin: 0 0 0.4em 0; }
+.folio { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.1em; border-bottom: 1px solid black;
+  padding-bottom: 0.2em; margin: 0 0 0.4em 0; }
+p.jump { text-align: right; font-weight: bold; font-style: italic; margin-top: 0.3em; }
+p.jumphead { font-size: 1.1em; margin: 1.2em 0 0.1em 0; }
+p.jumptitle { font-style: italic; margin: 0 0 0.3em 0; }
+p.pull { text-align: center; font-style: italic; font-size: 1.25em; border-top: 1px solid black;
+  border-bottom: 1px solid black; padding: 0.3em 0; margin: 0.6em 8%; }
+p.refer { font-style: italic; margin: 1em 0 0.5em 0; }
 "#;
 
 /// Large print (many papers §6), after [`STYLE`]: no text below body size (the crossword's
 /// clue numbers stay small inside their squares), heads 1.1×, heavier rules, and the strip as
 /// a list. A Kindle sets the size itself (Aa); this makes the paper read well when it's big.
 pub(crate) const LARGE_STYLE: &str = r#"
-.ears, .kicker, .meta, .link, .lo, .credit, .label, .small, .caption, .source,
+.ears, .kicker, .meta, .link, .lo, .credit, .label, .small, .caption, .source, .skybox, .folio,
 p.back, p.in-section, table.strip td, table.grid.small td { font-size: 1em; }
 .paper { font-size: 2.64em; }
 .section-head { font-size: 1.54em; border-top-width: 4px; border-bottom-width: 2px; }
@@ -152,23 +164,75 @@ fn photo_file(i: usize, j: usize, n: usize) -> String {
     format!("images/s{}a{}p{}.jpg", i + 1, j + 1, n + 1)
 }
 
-fn front_page(g: &Gathered) -> Vec<u8> {
+/// A story body with its photo tokens pointing at its photos' files.
+fn with_photos(body: &str, i: usize, j: usize, photos: usize) -> String {
+    let mut story = body.to_owned();
+    for n in 0..photos {
+        story = story.replace(&crate::sources::feeds::photo_token(n), &photo_file(i, j, n));
+    }
+    story
+}
+
+/// `body` with `pull` set after its top-level paragraph `pull.after` (print layout §2.4).
+fn with_pull(body: &str, pull: Option<&crate::print::Pull>) -> String {
+    let Some(p) = pull else {
+        return body.to_owned();
+    };
+    match crate::print::paragraph_ends(body).get(p.after) {
+        Some(&at) => format!(
+            "{}\n<p class=\"pull\">{}</p>{}",
+            &body[..at],
+            esc(&p.text),
+            &body[at..]
+        ),
+        None => body.to_owned(),
+    }
+}
+
+fn front_page(
+    g: &Gathered,
+    plan: &FrontPlan,
+    print: &PrintPlan,
+    labels: &[Option<String>],
+) -> Vec<u8> {
     let e = &g.edition;
     let mut ears = format!("No. {}", e.number());
     if !e.place.is_empty() {
         ears.push_str(&format!(" · {}", e.place));
     }
-    let mut body = format!(
+    let mut body = String::new();
+    if !print.skybox.is_empty() {
+        let teasers: Vec<String> = print
+            .skybox
+            .iter()
+            .map(|t| {
+                let label = labels[t.section]
+                    .as_ref()
+                    .map(|l| format!(" {l}"))
+                    .unwrap_or_default();
+                format!(
+                    "<a href=\"{}\">{}{}</a>",
+                    section_file(t.section),
+                    esc(&t.title),
+                    esc(&label)
+                )
+            })
+            .collect();
+        body.push_str(&format!(
+            "<p class=\"skybox\">{}</p>\n",
+            teasers.join(" · ")
+        ));
+    }
+    body.push_str(&format!(
         "<div class=\"masthead\"><p class=\"ears\">{}</p><h1 class=\"paper\">{}</h1>\
          <p class=\"dateline\">{}</p></div>\n",
         esc(&ears),
         esc(&e.paper),
         esc(&long_date(e.date))
-    );
+    ));
     if let Some(w) = &e.weather_line {
         body.push_str(&format!("<p class=\"weather\">{}</p>\n", esc(w)));
     }
-    let plan = crate::front::front_plan(g);
     let meta_of = |s: usize, a: usize| {
         let art = &e.sections[s].articles[a];
         let meta = match &art.meta {
@@ -177,10 +241,21 @@ fn front_page(g: &Gathered) -> Vec<u8> {
         };
         format!("<span class=\"meta\">{}</span>", esc(&meta))
     };
-    // A tile sits under its section's label already, so its meta leaves the section name out.
-    let tile_meta = |s: usize, a: usize| match &e.sections[s].articles[a].meta {
-        Some(m) => format!("<br/><span class=\"meta\">{}</span>", esc(m)),
-        None => String::new(),
+    // A tile sits under its section's label already, so its meta leaves the section name out;
+    // it starts with the section's page label instead.
+    let tile_meta = |s: usize, a: usize| {
+        let parts: Vec<&str> = labels[s]
+            .as_deref()
+            .into_iter()
+            .chain(e.sections[s].articles[a].meta.as_deref())
+            .collect();
+        match parts.is_empty() {
+            true => String::new(),
+            false => format!(
+                "<br/><span class=\"meta\">{}</span>",
+                esc(&parts.join(" · "))
+            ),
+        }
     };
     let link = |s: usize, a: usize| {
         format!(
@@ -196,8 +271,28 @@ fn front_page(g: &Gathered) -> Vec<u8> {
             link(s, a),
             meta_of(s, a)
         ));
-        if let Some(t) = &e.sections[s].articles[a].teaser {
-            body.push_str(&format!("<p>{}</p>\n", esc(t)));
+        let art = &e.sections[s].articles[a];
+        match &print.jump {
+            Some(j) if (j.section, j.article) == (s, a) => {
+                body.push_str(&with_photos(&j.opening, s, a, art.photos.len()));
+                let label = labels[s].as_deref().unwrap_or(&e.sections[s].title);
+                body.push_str(&format!(
+                    "\n<p class=\"jump\" id=\"jump\"><a href=\"{}#a{}\">Continued on {}: {} \u{203a}</a></p>\n",
+                    section_file(s),
+                    a + 1,
+                    esc(label),
+                    esc(&j.slug)
+                ));
+            }
+            _ if print.whole == Some((s, a)) => {
+                body.push_str(&with_photos(&art.body, s, a, art.photos.len()));
+                body.push('\n');
+            }
+            _ => {
+                if let Some(t) = &art.teaser {
+                    body.push_str(&format!("<p>{}</p>\n", esc(t)));
+                }
+            }
         }
     }
     if !plan.tiles.is_empty() {
@@ -231,22 +326,44 @@ fn front_page(g: &Gathered) -> Vec<u8> {
             (1, _) => "1 item".to_owned(),
             (n, _) => format!("{n} items"),
         };
+        let count = match &labels[i] {
+            Some(l) => format!("{l} · {count}"),
+            None => count,
+        };
         body.push_str(&format!(
-            "<li><a href=\"{}\">{}</a> <span class=\"meta\">{count}</span></li>\n",
+            "<li><a href=\"{}\">{}</a> <span class=\"meta\">{}</span></li>\n",
             section_file(i),
-            esc(&s.title)
+            esc(&s.title),
+            esc(&count)
         ));
     }
     body.push_str("</ul>\n");
     page(&e.full_title(), &body)
 }
 
-fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8> {
+fn section_page(
+    e: &Edition,
+    i: usize,
+    plan: &FrontPlan,
+    print: &PrintPlan,
+    labels: &[Option<String>],
+) -> Vec<u8> {
     let s = &e.sections[i];
-    let mut body = format!(
+    let mut body = String::new();
+    // the folio: where a page's would be, since a section starts on a fresh screen (§5.2)
+    if let Some(l) = &labels[i] {
+        body.push_str(&format!(
+            "<p class=\"folio\"><b>{}</b> · {} · {} · {}</p>\n",
+            esc(l),
+            esc(&s.title),
+            esc(&e.paper),
+            e.date.format("%a, %b %-d")
+        ));
+    }
+    body.push_str(&format!(
         "<h1 class=\"section-head\" id=\"top\">{}</h1>\n",
         esc(&s.title)
-    );
+    ));
     if let Some(k) = &s.kicker {
         body.push_str(&format!("<p class=\"kicker\">{}</p>\n", esc(k)));
     }
@@ -272,19 +389,41 @@ fn section_page(e: &Edition, i: usize, plan: &crate::front::FrontPlan) -> Vec<u8
         if j > 0 {
             body.push_str("<div class=\"rule\"></div>\n");
         }
-        body.push_str(&format!(
-            "<h2 class=\"headline\" id=\"a{}\">{}</h2>\n",
-            j + 1,
-            esc(&a.title)
-        ));
+        // the lead printed whole on the front page is a refer here (§5.4)
+        if print.whole == Some((i, j)) {
+            body.push_str(&format!(
+                "<p class=\"refer\" id=\"a{}\"><a href=\"front.xhtml#t{i}-{j}\">{}</a> — on {FRONT_LABEL}</p>\n",
+                j + 1,
+                esc(&a.title)
+            ));
+            continue;
+        }
+        let jump = print
+            .jump
+            .as_ref()
+            .filter(|x| (x.section, x.article) == (i, j));
+        match jump {
+            Some(x) => body.push_str(&format!(
+                "<p class=\"jumphead\" id=\"a{}\"><b>{}</b> · <a href=\"front.xhtml#jump\">Continued from {FRONT_LABEL}</a></p>\n\
+                 <p class=\"jumptitle\">{}</p>\n",
+                j + 1,
+                esc(&x.slug),
+                esc(&a.title)
+            )),
+            None => body.push_str(&format!(
+                "<h2 class=\"headline\" id=\"a{}\">{}</h2>\n",
+                j + 1,
+                esc(&a.title)
+            )),
+        }
         if let Some(m) = &a.meta {
             body.push_str(&format!("<p class=\"meta\">{}</p>\n", esc(m)));
         }
-        let mut story = a.body.clone();
-        for n in 0..a.photos.len() {
-            story = story.replace(&crate::sources::feeds::photo_token(n), &photo_file(i, j, n));
-        }
-        body.push_str(&story);
+        let story = with_pull(
+            jump.map_or(a.body.as_str(), |x| x.rest.as_str()),
+            print.pulls.get(&(i, j)),
+        );
+        body.push_str(&with_photos(&story, i, j, a.photos.len()));
         body.push('\n');
         // a nudge's page has one link, the tap that accepts it (interests design §7)
         if nudge {
@@ -455,6 +594,9 @@ pub fn render(g: &Gathered, cover: Vec<u8>) -> Files {
 /// [`render`] with the photos grayscale for e-ink, or as they were fetched.
 pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
     let e = &g.edition;
+    let plan = crate::front::front_plan(g);
+    let print = crate::print::print_plan(g, &plan);
+    let labels = crate::print::epub_labels(&print.book);
     let uid = format!("urn:deckle:digest:{}", e.date);
     let mut files: Files = vec![
         ("mimetype".into(), b"application/epub+zip".to_vec()),
@@ -471,16 +613,15 @@ pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
         ("OEBPS/nav.xhtml".into(), nav(e)),
         ("OEBPS/style.css".into(), stylesheet(e.large_print).into_bytes()),
         ("OEBPS/cover.jpg".into(), cover),
-        ("OEBPS/front.xhtml".into(), front_page(g)),
+        ("OEBPS/front.xhtml".into(), front_page(g, &plan, &print, &labels)),
     ];
     for (href, png) in &e.assets {
         files.push((format!("OEBPS/{href}"), png.clone()));
     }
-    let plan = crate::front::front_plan(g);
     for i in 0..e.sections.len() {
         files.push((
             format!("OEBPS/{}", section_file(i)),
-            section_page(e, i, &plan),
+            section_page(e, i, &plan, &print, &labels),
         ));
         for (j, a) in e.sections[i].articles.iter().enumerate() {
             for (n, jpeg) in a.photos.iter().enumerate() {

@@ -36,5 +36,6 @@ deckle-mobi.workspace = true
 zip.workspace = true
 rusqlite.workspace = true
 assert_cmd.workspace = true
+image.workspace = true
 predicates.workspace = true
 tempfile.workspace = true

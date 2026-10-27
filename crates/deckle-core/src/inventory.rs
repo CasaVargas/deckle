@@ -557,16 +557,16 @@ fn walk(
     }
 }
 
-/// `file` as an inventory names it: a book format, a name or `<folder>/<name>`, nothing that
-/// climbs out of `documents/`.
+/// `file` as an inventory names it: a book format, a name under at most [`SHELF_DEPTH`] folders
+/// (a Kindle files downloads in `Downloads/Items01/`), nothing that climbs out of `documents/`.
 fn check_file(file: &str) -> Result<Vec<&str>, DeliverError> {
     let parts: Vec<&str> = file.split('/').collect();
     let ok = !file.is_empty()
-        && parts.len() <= 2
+        && parts.len() <= SHELF_DEPTH + 1
         && parts
             .iter()
             .all(|p| !p.is_empty() && *p != "." && *p != ".." && !p.contains('\\'))
-        && !parts.first().is_some_and(|p| is_sdr(p))
+        && !parts[..parts.len() - 1].iter().any(|p| is_sdr(p))
         && format_of(file).is_some();
     if ok {
         Ok(parts)
@@ -826,7 +826,14 @@ mod tests {
 
     #[test]
     fn only_books_inside_documents_can_be_removed() {
-        for ok in ["a.kfx", "Sub/a.azw3", "x.PDF"] {
+        for ok in [
+            "a.kfx",
+            "Sub/a.azw3",
+            "x.PDF",
+            // Where a Kindle files what it downloads, as deep as the shelf looks.
+            "Downloads/Items01/a.azw3",
+            "a/b/c/d.kfx",
+        ] {
             assert!(check_file(ok).is_ok(), "{ok}");
         }
         for bad in [
@@ -834,9 +841,10 @@ mod tests {
             "../a.kfx",
             "a/../../b.kfx",
             "/a.kfx",
-            "a/b/c.kfx",
+            "a/b/c/d/e.kfx",
             "notes.txt.sdr",
             "a.sdr/x.kfx",
+            "Sub/a.sdr/x.kfx",
             "photo.jpg",
             "a\\b.kfx",
         ] {

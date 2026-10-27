@@ -35,7 +35,7 @@ struct Fonts<'a> {
     italic: FontRef<'a>,
 }
 
-struct Canvas {
+pub(crate) struct Canvas {
     img: GrayImage,
 }
 
@@ -113,7 +113,11 @@ impl Canvas {
             outlined.draw(|gx, gy, coverage| {
                 let px = bounds.min.x as i64 + i64::from(gx);
                 let py = bounds.min.y as i64 + i64::from(gy);
-                if px < 0 || py < 0 || px >= i64::from(WIDTH) || py >= i64::from(HEIGHT) {
+                if px < 0
+                    || py < 0
+                    || px >= i64::from(self.img.width())
+                    || py >= i64::from(self.img.height())
+                {
                     return;
                 }
                 let p = self.img.get_pixel_mut(px as u32, py as u32);
@@ -125,17 +129,26 @@ impl Canvas {
 
     fn centered(&mut self, font: &FontRef, size: f32, y: f32, text: &str, ink: u8) {
         let w = width_of(font, size, text);
-        self.text(font, size, (WIDTH as f32 - w) / 2.0, y, text, ink);
+        self.text(
+            font,
+            size,
+            (self.img.width() as f32 - w) / 2.0,
+            y,
+            text,
+            ink,
+        );
     }
 
     fn right(&mut self, font: &FontRef, size: f32, y: f32, text: &str) {
         let w = width_of(font, size, text);
-        self.text(font, size, WIDTH as f32 - MARGIN - w, y, text, BLACK);
+        let x = self.img.width() as f32 - MARGIN - w;
+        self.text(font, size, x, y, text, BLACK);
     }
 
     fn fill(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, ink: u8) {
-        for y in y0.max(0.0) as u32..(y1 as u32).min(HEIGHT) {
-            for x in x0.max(0.0) as u32..(x1 as u32).min(WIDTH) {
+        let (w, h) = self.img.dimensions();
+        for y in y0.max(0.0) as u32..(y1 as u32).min(h) {
+            for x in x0.max(0.0) as u32..(x1 as u32).min(w) {
                 self.img.put_pixel(x, y, Luma([ink]));
             }
         }
@@ -143,7 +156,45 @@ impl Canvas {
 
     /// A full-width horizontal rule with its top at `y`.
     fn rule(&mut self, y: f32, thickness: f32) {
-        self.fill(MARGIN, y, WIDTH as f32 - MARGIN, y + thickness, BLACK);
+        let right = self.img.width() as f32 - MARGIN;
+        self.fill(MARGIN, y, right, y + thickness, BLACK);
+    }
+
+    /// A blank white canvas.
+    pub(crate) fn new(width: u32, height: u32) -> Canvas {
+        Canvas {
+            img: GrayImage::from_pixel(width, height, Luma([WHITE])),
+        }
+    }
+
+    /// A stroke from `(x0, y0)` to `(x1, y1)`, `thickness` wide with round ends and soft
+    /// edges, in `ink`. Strokes only ever darken, so overlapping ones don't build up.
+    pub(crate) fn line(&mut self, from: (f32, f32), to: (f32, f32), thickness: f32, ink: u8) {
+        let (w, h) = self.img.dimensions();
+        let r = thickness / 2.0;
+        let (dx, dy) = (to.0 - from.0, to.1 - from.1);
+        let len = dx.hypot(dy);
+        let steps = (len * 2.0).ceil().max(1.0) as u32;
+        let reach = (r + 1.0).ceil() as i64;
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let (cx, cy) = (from.0 + dx * t, from.1 + dy * t);
+            for py in (cy as i64 - reach)..=(cy as i64 + reach) {
+                for px in (cx as i64 - reach)..=(cx as i64 + reach) {
+                    if px < 0 || py < 0 || px >= i64::from(w) || py >= i64::from(h) {
+                        continue;
+                    }
+                    let d = (px as f32 + 0.5 - cx).hypot(py as f32 + 0.5 - cy);
+                    let a = (r + 0.5 - d).clamp(0.0, 1.0);
+                    if a <= 0.0 {
+                        continue;
+                    }
+                    let shade = (f32::from(WHITE) * (1.0 - a) + f32::from(ink) * a).round() as u8;
+                    let p = self.img.get_pixel_mut(px as u32, py as u32);
+                    p.0[0] = p.0[0].min(shade);
+                }
+            }
+        }
     }
 }
 
@@ -196,9 +247,7 @@ pub fn render_reads(
 ) -> Result<Vec<u8>, String> {
     let f = fonts(Masthead::default())?;
     let inner = WIDTH as f32 - 2.0 * MARGIN;
-    let mut c = Canvas {
-        img: GrayImage::from_pixel(WIDTH, HEIGHT, Luma([WHITE])),
-    };
+    let mut c = Canvas::new(WIDTH, HEIGHT);
     let mut y = 220.0;
     c.centered(&f.black, 120.0, y, "Deckle Reads", BLACK);
     y += 50.0;
@@ -235,6 +284,51 @@ pub fn render_reads(
     jpeg(c)
 }
 
+/// The cookbook's cover (cookbook design §6.3), 1600 x 2560: the engraved dish near the top,
+/// the title large, the count spelled out in italics and "Last added" over a rule at the foot.
+pub fn render_cookbook(
+    title: &str,
+    subtitle: &str,
+    count: usize,
+    last_added: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    const W: u32 = 1600;
+    const H: u32 = 2560;
+    let f = fonts(Masthead::default())?;
+    let inner = W as f32 - 2.0 * MARGIN;
+    let mut c = Canvas::new(W, H);
+    crate::cookbook::ornament::draw(&mut c, W as f32 / 2.0, 640.0, 1.0);
+    let mut y = 740.0;
+    c.rule(y, 6.0);
+    c.rule(y + 12.0, 2.0);
+    let size = 150.0;
+    let lines = wrap(&f.bold, size, title, inner, 6);
+    let subtitle = crate::cookbook::subtitle_line(subtitle, count);
+    // Title and subtitle centered in the space between the rules.
+    let block = size * 1.15 * lines.len() as f32 + 70.0 + 70.0;
+    let foot = H as f32 - 170.0;
+    y = (y + 12.0 + foot) / 2.0 - block / 2.0 + size;
+    for line in &lines {
+        let s = fit(&f.bold, size, line, inner);
+        c.centered(&f.bold, s, y, line, BLACK);
+        y += size * 1.15;
+    }
+    y += 70.0;
+    let s = fit(&f.italic, 64.0, &subtitle, inner);
+    c.centered(&f.italic, s, y, &subtitle, BLACK);
+    if let Some(last) = last_added {
+        c.rule(foot, 2.0);
+        let text = format!("Last added · {last}");
+        let text = wrap(&f.serif, 48.0, &text, inner, 1)
+            .into_iter()
+            .next()
+            .unwrap_or_default();
+        let s = fit(&f.serif, 48.0, &text, inner);
+        c.centered(&f.serif, s, foot + 84.0, &text, BLACK);
+    }
+    jpeg(c)
+}
+
 /// The outlet in a story's meta line ("By Sentinel Staff · Sandhills Sentinel · Oct 20"):
 /// the first part that isn't a byline.
 fn outlet_of(meta: &str) -> Option<&str> {
@@ -252,9 +346,7 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     let f = fonts(g.edition.masthead)?;
     let e = &g.edition;
     let inner = WIDTH as f32 - 2.0 * MARGIN;
-    let mut c = Canvas {
-        img: GrayImage::from_pixel(WIDTH, HEIGHT, Luma([WHITE])),
-    };
+    let mut c = Canvas::new(WIDTH, HEIGHT);
 
     // Ears and masthead.
     let mut y = 78.0;
@@ -269,7 +361,7 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
     if !e.place.is_empty() {
         c.right(&f.bold, 26.0, y, &e.place.to_uppercase());
     }
-    c.centered(&f.italic, 26.0, y, "All the news that fits", BLACK);
+    c.centered(&f.italic, 26.0, y, "Printed this morning", BLACK);
     y += 18.0;
     c.rule(y, 2.0);
     let size = fit(&f.black, 200.0, &e.paper, inner);
