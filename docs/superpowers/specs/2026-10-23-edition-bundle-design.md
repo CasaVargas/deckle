@@ -239,6 +239,51 @@ Each story:
 - **Answers are in the bundle**, so a reader can check a solve on the device. A reader shouldn't show them before the owner asks.
 - **`ladder`** and **`yesterday`** are optional.
 
+### 6.7 The print plan (added in 1.3)
+
+The print layout design (`2026-10-26-print-layout-design.md` §2) computes a print plan for every
+edition. Version 1.3 carries it, so a reader can lay the paper out as pages (Deckle Reader's
+Edition mode) without reimplementing it. All of it is optional and additive. A 1.0–1.2 reader
+ignores it.
+
+```json
+"sections": [
+  { "key": "local", "kind": "local", "book": "B",
+    "stories": [ { "id": "2026-10-26/local/2", "pull": { "text": "“We have waited forty years for somebody to do something with that yard”", "after": 4 }, "…": "…" } ] }
+],
+"front": {
+  "lead": "2026-10-26/local/1",
+  "tiles": ["…"],
+  "skybox": ["2026-10-26/puzzle/1", "2026-10-26/reading/1"],
+  "lead_layout": "jump",
+  "jump": { "story": "2026-10-26/local/1", "slug": "MILL", "opening": 3 }
+}
+```
+
+- **`book`** (section): the section's letter (§2.1 of the print layout design). Runs follow the
+  page plan, so a reader numbers its own pages from it: a book's first page is 1, and the front
+  page is A1. Nudge sections, which only the Kindle's EPUB carries, never appear in a bundle.
+- **`front.skybox`:** up to three story ids, teased above the masthead, in order. Absent or
+  empty: no skybox.
+- **`front.lead_layout`:** how the front page prints the lead.
+  - `"jump"`: its opening, then a jump line to the rest inside.
+  - `"whole"`: all of it, with its section showing a refer in its place.
+  - `"teaser"`: its `teaser`, with the story whole in its section, as before 1.3.
+- **`front.jump`** (present when `lead_layout` is `"jump"`):
+  - **`slug`:** the word the jump line and the jump head share.
+  - **`opening`:** how many of the body's top-level `<p>` elements the front page prints, from
+    the first.
+  - **Figures:** a figure before or among those paragraphs isn't part of the opening. It heads
+    the continuation, in order. Everything else stays where it is.
+- **`pull`** (story): a pull quote from the print plan.
+  - **`text`:** plain text, the story's own quoted words with their marks.
+  - **`after`:** the index of the top-level `<p>` it follows, counted over the story's **whole**
+    body, from 0. For the lead, the reader subtracts `opening` when it prints the continuation.
+  - `pull_quote` (§6.3) is a different thing: a whole sentence of 60–200 characters picked for
+    its own sake, with no position. It stays as it is. A reader laying out pages uses `pull`.
+- **The schema** gains these as optional properties, and `version` 1.3. The writer's tests
+  validate a 1.3 bundle, and one without a print plan, against it.
+
 ## 7. Moving pictures
 
 **As built (1.1):** moving pictures are parallax, which the reader makes at view time from the still and its `focus`. `photos[].motion` stays `null`, and Deckle writes no clips. What follows is kept for a later version.
@@ -308,6 +353,7 @@ Deckle Daily/
 - **A major version** is a field removed or its meaning changed. A reader refuses a major version it doesn't know and says "update the app".
 - **Deckle writes one version at a time.** If a major version is ever needed, `format = "bundle"` keeps writing the old major until a `bundle_version` key asks for the new one.
 - **The JSON Schema** (`docs/formats/edition-bundle.schema.json`, MIT) is the reference for each version, and the writer's tests validate against it.
+- **1.3** adds the print plan (§6.7). Deckle writes it.
 
 ## 11. Phasing
 

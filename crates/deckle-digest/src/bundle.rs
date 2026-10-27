@@ -15,12 +15,13 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::config::Units;
+use crate::print::PrintPlan;
 use crate::sources::feeds::photo_token;
 use crate::{BuildReport, EDITION_PREFIX, Gathered};
 
 /// The format's name and the version this writer writes (§6.1, §10).
 pub const FORMAT: &str = "deckle-edition";
-pub const VERSION: &str = "1.2";
+pub const VERSION: &str = "1.3";
 
 /// The bundle's folder name for `date`.
 pub fn bundle_name(date: NaiveDate) -> String {
@@ -55,12 +56,37 @@ struct EditionInfo {
 struct Front {
     lead: Option<String>,
     tiles: Vec<String>,
+    // 1.3: the print plan (edition bundle design §6.7).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    skybox: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lead_layout: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jump: Option<JumpJson>,
+}
+
+#[derive(Serialize)]
+struct JumpJson {
+    story: String,
+    slug: String,
+    /// How many of the body's top-level paragraphs the front page prints, from the first.
+    opening: usize,
+}
+
+#[derive(Serialize, Debug, PartialEq, Eq)]
+struct PullJson {
+    text: String,
+    /// The top-level paragraph it follows, counted over the story's whole body.
+    after: usize,
 }
 
 #[derive(Serialize)]
 struct SectionJson {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     ai_brief: Vec<String>,
+    // 1.3: the book the section prints in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    book: Option<String>,
     key: String,
     kind: &'static str,
     title: String,
@@ -92,6 +118,9 @@ struct StoryJson {
     pull_quote: Option<String>,
     // 1.2: how the story was fetched.
     access: &'static str,
+    // 1.3: the print plan's pull quote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pull: Option<PullJson>,
 }
 
 #[derive(Serialize)]
@@ -382,6 +411,34 @@ fn numbers(rows: &[String]) -> Vec<[u32; 3]> {
     out
 }
 
+/// How the front page prints the lead (§6.7): its opening and a jump, all of it, or its teaser
+/// when its body has no paragraph to open with.
+fn lead_layout(print: &PrintPlan) -> &'static str {
+    if print.jump.is_some() {
+        "jump"
+    } else if print.whole.is_some() {
+        "whole"
+    } else {
+        "teaser"
+    }
+}
+
+/// The story's pull quote, its position counted over the whole body: the print plan counts the
+/// lead's in the continuation, after the opening's paragraphs.
+fn pull(print: &PrintPlan, section: usize, article: usize) -> Option<PullJson> {
+    let p = print.pulls.get(&(section, article))?;
+    let opening = match &print.jump {
+        Some(j) if (j.section, j.article) == (section, article) => {
+            crate::print::paragraph_ends(&j.opening).len()
+        }
+        _ => 0,
+    };
+    Some(PullJson {
+        text: p.text.clone(),
+        after: p.after + opening,
+    })
+}
+
 /// Writes the bundle of `gathered` (built as `built`) into `dir`, as `bundle_name(date)`, and
 /// returns its path. With `books`, the long reads' EPUBs go in `epub/` too.
 pub fn write(
@@ -430,6 +487,7 @@ pub fn write(
 
     let id = |s: usize, a: usize| format!("{}/{}/{}", e.date, e.sections[s].key, a + 1);
     let plan = crate::front::front_plan(gathered);
+    let print = crate::print::print_plan(gathered, &plan);
     let mut sections = Vec::new();
     for (i, s) in e.sections.iter().enumerate() {
         let mut stories = Vec::new();
@@ -486,6 +544,7 @@ pub fn write(
                 partial: crate::article::looks_cut_off(&text),
                 pull_quote: crate::article::pull_quote(&paragraphs(&body), n_words),
                 access: access_name(&a.extra.access),
+                pull: pull(&print, i, j),
                 words: n_words,
                 body: Body {
                     format: "xhtml",
@@ -567,6 +626,7 @@ pub fn write(
             }
         });
         sections.push(SectionJson {
+            book: print.book.get(i).copied().flatten().map(String::from),
             key: s.key.clone(),
             kind: kind_name(&s.key),
             title: s.title.clone(),
@@ -605,6 +665,17 @@ pub fn write(
         front: Front {
             lead: plan.lead.map(|(s, a)| id(s, a)),
             tiles: plan.tiles.iter().map(|&(s, a)| id(s, a)).collect(),
+            skybox: print
+                .skybox
+                .iter()
+                .map(|t| id(t.section, t.article))
+                .collect(),
+            lead_layout: plan.lead.map(|_| lead_layout(&print)),
+            jump: print.jump.as_ref().map(|j| JumpJson {
+                story: id(j.section, j.article),
+                slug: j.slug.clone(),
+                opening: crate::print::paragraph_ends(&j.opening).len(),
+            }),
         },
         sections,
         files: entries,
@@ -733,6 +804,54 @@ mod tests {
         assert_ne!(a, c);
         assert_eq!(f.by_path.len(), 2);
         assert!(a.starts_with("media/") && a.len() == "media/".len() + 12 + 4);
+    }
+
+    #[test]
+    fn the_leads_pull_counts_its_opening_and_others_count_as_they_are() {
+        use crate::print::{Jump, Pull};
+        let mut print = PrintPlan::default();
+        print.pulls.insert(
+            (0, 0),
+            Pull {
+                text: "“Lead”".into(),
+                after: 3,
+            },
+        );
+        print.pulls.insert(
+            (1, 2),
+            Pull {
+                text: "“Other”".into(),
+                after: 4,
+            },
+        );
+        assert_eq!(lead_layout(&print), "teaser");
+        print.whole = Some((0, 0));
+        assert_eq!(lead_layout(&print), "whole");
+        print.whole = None;
+        print.jump = Some(Jump {
+            section: 0,
+            article: 0,
+            slug: "MILL".into(),
+            // a figure among the opening's paragraphs isn't one of them
+            opening: "<p>one</p>\n<div class=\"figure\"><img src=\"x\"/></div>\n<p>two</p>".into(),
+            rest: String::new(),
+        });
+        assert_eq!(lead_layout(&print), "jump");
+        assert_eq!(
+            pull(&print, 0, 0),
+            Some(PullJson {
+                text: "“Lead”".into(),
+                after: 5
+            })
+        );
+        assert_eq!(
+            pull(&print, 1, 2),
+            Some(PullJson {
+                text: "“Other”".into(),
+                after: 4
+            })
+        );
+        assert_eq!(pull(&print, 1, 0), None);
     }
 
     #[test]
