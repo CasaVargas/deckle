@@ -20,6 +20,7 @@ mod moon;
 mod next;
 mod nudges;
 mod papers;
+mod press_protocol;
 mod puzzle;
 mod reading;
 mod seasons;

@@ -1,0 +1,187 @@
+[
+  {
+    "file": "manifest.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "manifest"
+  },
+  {
+    "file": "request.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "request"
+  },
+  {
+    "file": "status-published.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "status"
+  },
+  {
+    "file": "status-queued.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "status"
+  },
+  {
+    "file": "status-building.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "status"
+  },
+  {
+    "file": "status-failed.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "status"
+  },
+  {
+    "file": "status-expired.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "status"
+  },
+  {
+    "file": "status-result_removed.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "status"
+  },
+  {
+    "file": "invalid-request-version.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "request"
+  },
+  {
+    "file": "invalid-request-uuid.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "request"
+  },
+  {
+    "file": "invalid-request-operation.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "request"
+  },
+  {
+    "file": "invalid-status-version.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "status"
+  },
+  {
+    "file": "invalid-status-revision.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "status"
+  },
+  {
+    "file": "invalid-status-path.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "status"
+  },
+  {
+    "file": "invalid-status-hash.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "status"
+  },
+  {
+    "file": "invalid-status-missing-result.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "status"
+  },
+  {
+    "file": "invalid-status-unexpected-result.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "status"
+  },
+  {
+    "file": "invalid-status-missing-tombstone.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": false,
+    "definition": "status"
+  },
+  {
+    "file": "request-unknown-field.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "valid": true,
+    "definition": "request"
+  },
+  {
+    "file": "bundle-1.0.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": true
+  },
+  {
+    "file": "bundle-1.1.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": true
+  },
+  {
+    "file": "bundle-1.2.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": true
+  },
+  {
+    "file": "bundle-1.3.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": true
+  },
+  {
+    "file": "bundle-fresh.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": true
+  },
+  {
+    "file": "invalid-bundle-missing-id.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-bundle-missing-paper_id.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-bundle-missing-kind.json",
+    "schema": "docs/formats/edition-bundle.schema.json",
+    "valid": false
+  },
+  {
+    "file": "returns-legacy.json",
+    "schema": "docs/formats/deckle-returns.schema.json",
+    "valid": true
+  },
+  {
+    "file": "returns-fresh.json",
+    "schema": "docs/formats/deckle-returns.schema.json",
+    "valid": true
+  },
+  {
+    "file": "invalid-returns-missing-edition_id.json",
+    "schema": "docs/formats/deckle-returns.schema.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-returns-missing-paper_id.json",
+    "schema": "docs/formats/deckle-returns.schema.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-returns-missing-edition.json",
+    "schema": "docs/formats/deckle-returns.schema.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-manifest-timestamp.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "manifest",
+    "valid": false
+  }
+]

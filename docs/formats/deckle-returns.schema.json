@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CasaVargas/deckle/docs/formats/deckle-returns.schema.json",
+  "title": "Deckle returns versions 1.0 and 1.1",
+  "description": "SPDX-License-Identifier: MIT. Returns are client-owned reading state. Version 1.1 adds fresh edition identity and retains the edition date.",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "reader",
+    "edition",
+    "updated_at",
+    "read",
+    "puzzle",
+    "marks"
+  ],
+  "properties": {
+    "format": {
+      "const": "deckle-returns"
+    },
+    "version": {
+      "enum": [
+        "1.0",
+        "1.1"
+      ]
+    },
+    "reader": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "app"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string"
+        }
+      }
+    },
+    "edition": {
+      "type": "string",
+      "format": "date"
+    },
+    "edition_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "paper_id": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "read": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "story",
+          "fraction",
+          "seconds",
+          "last"
+        ],
+        "properties": {
+          "story": {
+            "type": "string"
+          },
+          "fraction": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "last": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    },
+    "puzzle": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "required": [
+            "grid",
+            "done",
+            "ladder"
+          ],
+          "properties": {
+            "grid": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "done": {
+              "type": "boolean"
+            },
+            "ladder": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "marks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "story",
+          "quote",
+          "note",
+          "at"
+        ],
+        "properties": {
+          "story": {
+            "type": "string"
+          },
+          "quote": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "version": {
+            "const": "1.1"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "edition_id",
+          "paper_id"
+        ],
+        "properties": {
+          "reader": {
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid",
+                "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "format": "deckle-edition",
+  "version": "1.4",
+  "generator": "Deckle fixture",
+  "edition": {
+    "paper": "Daily",
+    "date": "2026-10-27",
+    "number": 1,
+    "place": "Test",
+    "timezone": "UTC",
+    "built_at": "2026-10-27T16:00:00Z",
+    "cover": "cover.jpg",
+    "id": "1429eb21-019d-4da9-815d-f710561e08a8",
+    "paper_id": "ea249ae5-771c-4d2b-9f11-5119fbe3feda"
+  },
+  "front": {
+    "lead": null,
+    "tiles": []
+  },
+  "sections": [],
+  "files": []
+}

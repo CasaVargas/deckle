@@ -36,6 +36,7 @@ flate2 = "1"
 pdf-writer = "0.15"
 roxmltree.workspace = true
 sha2.workspace = true
+uuid = { workspace = true, features = ["serde"] }
 deckle-highlights.workspace = true
 deckle-core.workspace = true
 deckle-xray.workspace = true
