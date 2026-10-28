@@ -299,5 +299,19 @@
     "schema": "docs/formats/deckle-press.schema.json",
     "definition": "request",
     "valid": false
+  },
+  {
+    "file": "invalid-request-reading-empty-query-duplicate.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": true,
+    "runtime_valid": false
+  },
+  {
+    "file": "invalid-request-reading-tracking-empty-query-duplicate.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": true,
+    "runtime_valid": false
   }
 ]

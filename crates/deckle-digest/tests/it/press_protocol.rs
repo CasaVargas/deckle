@@ -413,6 +413,8 @@ fn reading_shared_url_fixtures_match_runtime_admission() {
     for name in [
         "invalid-request-reading-path-space",
         "invalid-request-reading-query-space",
+        "invalid-request-reading-empty-query-duplicate",
+        "invalid-request-reading-tracking-empty-query-duplicate",
         "invalid-request-reading-ipv4-hex-duplicate",
         "invalid-request-reading-ipv4-short-duplicate",
         "invalid-request-reading-malformed-percent",
