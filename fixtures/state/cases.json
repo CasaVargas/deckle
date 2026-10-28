@@ -106,5 +106,25 @@
   {
     "file": "lineage-peer-clear.json",
     "valid": true
+  },
+  {
+    "file": "slash-register-identifiers.json",
+    "valid": true
+  },
+  {
+    "file": "invalid-identifier-traversal.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-identifier-backslash.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-identifier-control.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-identifier-absolute.json",
+    "valid": false
   }
 ]
