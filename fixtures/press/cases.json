@@ -249,5 +249,55 @@
     "schema": "docs/formats/deckle-press.schema.json",
     "definition": "request",
     "valid": false
+  },
+  {
+    "file": "invalid-request-reading-path-space.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-query-space.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-ipv4-hex-duplicate.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": true,
+    "runtime_valid": false
+  },
+  {
+    "file": "invalid-request-reading-ipv4-short-duplicate.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": true,
+    "runtime_valid": false
+  },
+  {
+    "file": "request-reading-escaped-space.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": true
+  },
+  {
+    "file": "invalid-request-reading-malformed-percent.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-truncated-percent.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-backslash.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
   }
 ]

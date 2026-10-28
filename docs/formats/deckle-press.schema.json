@@ -119,9 +119,9 @@
             "type": "string",
             "maxLength": 2048,
             "format": "uri",
-            "pattern": "^[hH][tT][tT][pP][sS]?://[^\\s/?#@]+(?:[/?#][^\\x00-\\x20\\x7f]*)?$"
+            "pattern": "^(?!.*\\\\)(?!.*%(?![0-9a-fA-F]{2}))[hH][tT][tT][pP][sS]?://[^\\s/?#@]+(?:[/?#][^\\x00-\\x20\\x7f]*)?$"
           },
-          "description": "Ordered immutable selection. Runtime checks UTF-8 byte length, URL/userinfo safety, and uniqueness after stripping fragments and utm_* query keys."
+          "description": "Ordered immutable selection. Runtime checks UTF-8 byte length, URL/userinfo safety, and uniqueness after stripping fragments and utm_* query keys. Raw backslashes and malformed percent escapes are rejected by runtime URI validation."
         }
       },
       "allOf": [

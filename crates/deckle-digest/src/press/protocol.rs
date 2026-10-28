@@ -321,7 +321,18 @@ pub fn validate_input(
 }
 /// Strip tracking and fragment identity without rewriting retained signed query bytes.
 pub fn normalize_article_url(value: &str) -> Result<String, PressError> {
-    if value.is_empty() || value.chars().any(char::is_control) || value.trim() != value {
+    if value.is_empty()
+        || value.chars().any(char::is_control)
+        || value.contains([' ', '\\'])
+        || value.trim() != value
+        || value.as_bytes().iter().enumerate().any(|(index, byte)| {
+            *byte == b'%'
+                && !value
+                    .as_bytes()
+                    .get(index + 1..index + 3)
+                    .is_some_and(|pair| pair.iter().all(u8::is_ascii_hexdigit))
+        })
+    {
         return Err(unsupported());
     }
     let mut url = crate::url::Url::parse(value).map_err(|_| unsupported())?;

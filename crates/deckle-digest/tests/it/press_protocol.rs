@@ -326,6 +326,17 @@ fn reading_url_bounds_normalized_identity_and_signed_query_bytes() {
         normalize_article_url(signed).unwrap(),
         "https://example.org/a?sig=A%2fb+Z&x=&order=2%201"
     );
+    for (input, expected) in [
+        ("https://example.org/a/%2e%2E/b", "https://example.org/b"),
+        (
+            "https://bücher.example/a",
+            "https://xn--bcher-kva.example/a",
+        ),
+        ("https://0x08080808/a", "https://8.8.8.8/a"),
+        ("https://127.1/a", "https://127.0.0.1/a"),
+    ] {
+        assert_eq!(normalize_article_url(input).unwrap(), expected);
+    }
     let mut v = request();
     v["operation"] = json!("reading_edition");
     v["articles"] = json!([signed, "https://example.org/b?email=a@b"]);
@@ -394,4 +405,30 @@ fn reading_selection_exact_count_and_utf8_byte_limits() {
         .unwrap()
         .push(json!("https://example.org/20"));
     assert!(decode_request(&bytes(&v), &path(), &binding(), now()).is_err());
+}
+
+#[test]
+fn reading_shared_url_fixtures_match_runtime_admission() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/press");
+    for name in [
+        "invalid-request-reading-path-space",
+        "invalid-request-reading-query-space",
+        "invalid-request-reading-ipv4-hex-duplicate",
+        "invalid-request-reading-ipv4-short-duplicate",
+        "invalid-request-reading-malformed-percent",
+        "invalid-request-reading-truncated-percent",
+        "invalid-request-reading-backslash",
+    ] {
+        let data = std::fs::read(root.join(format!("{name}.json"))).unwrap();
+        assert!(
+            decode_request(&data, &path(), &binding(), now()).is_err(),
+            "{name}"
+        );
+    }
+    let data = std::fs::read(root.join("request-reading-escaped-space.json")).unwrap();
+    let request = decode_request(&data, &path(), &binding(), now()).unwrap();
+    assert_eq!(
+        request.articles.unwrap(),
+        ["https://example.org/a%20b?sig=A%2fb+Z&x=a%20b"]
+    );
 }
