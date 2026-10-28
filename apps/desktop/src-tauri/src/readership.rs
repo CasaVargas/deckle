@@ -74,6 +74,7 @@ pub fn accept_with_today(
     key: &str,
     today: deckle_digest::chrono::NaiveDate,
 ) -> Result<ReadershipView, String> {
+    let _lock = crate::press::config_write()?;
     let mut cfg = load_config(digest, paper)?;
     let path = learning_file(state);
     let mut learning = deckle_readership::Learning::load(&path);
@@ -120,6 +121,7 @@ pub fn apply_at(
     id: &str,
 ) -> Result<ReadershipView, String> {
     let s = suggestion(state, digest, paper, id)?;
+    let _lock = crate::press::config_write()?;
     let mut cfg = load_config(digest, paper)?;
     deckle_readership::apply(&s, &mut cfg)?;
     deckle_digest::papers::save(digest, &cfg)?;
@@ -144,6 +146,7 @@ pub fn dismiss_at(
 
 /// `[sync] readership` is a household setting, in `digest.toml`.
 pub fn set_at(state: &Path, digest: &Path, on: bool) -> Result<ReadershipView, String> {
+    let _lock = crate::press::config_write()?;
     let mut cfg = load_config(digest, None)?;
     if cfg.sync.readership != on {
         cfg.sync.readership = on;

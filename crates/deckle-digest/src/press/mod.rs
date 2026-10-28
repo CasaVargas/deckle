@@ -275,3 +275,24 @@ mod tests {
         assert_eq!(p.since, at(ny(), 2026, 10, 22, 0, 0).fixed_offset());
     }
 }
+
+mod protocol;
+pub use protocol::*;
+
+pub mod setup;
+
+pub mod build;
+pub use build::{FreshArtifact, FreshBuildContext, build_fresh};
+
+mod journal;
+mod queue;
+pub use journal::PressJournal;
+pub use queue::JobLease;
+
+pub mod publish;
+pub mod retention;
+mod safe_io;
+pub use publish::{archived_artifact, flush_statuses, publish_result, recover_result};
+pub use retention::prune_results;
+
+pub mod scan;

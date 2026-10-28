@@ -1,0 +1,12 @@
+{
+  "format": "deckle-press",
+  "version": 1,
+  "producer_id": "ba9e81c1-d5e3-43cb-bca1-acaf771caf79",
+  "paper_id": "ea249ae5-771c-4d2b-9f11-5119fbe3feda",
+  "paper_name": "Daily",
+  "enabled": true,
+  "operations": [
+    "fresh_full"
+  ],
+  "updated_at": "not-a-timestamp"
+}

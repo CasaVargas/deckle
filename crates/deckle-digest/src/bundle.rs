@@ -41,6 +41,12 @@ struct EditionJson {
 
 #[derive(Serialize)]
 struct EditionInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<crate::press::Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    paper_id: Option<crate::press::Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
     paper: String,
     date: String,
     number: u32,
@@ -448,7 +454,43 @@ pub fn write(
     books: bool,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<PathBuf, String> {
+    write_inner(gathered, built, dir, books, now, None)
+}
+
+/// Writes a fresh 1.4 bundle named by its immutable edition UUID. The destination must
+/// not exist; callers own the private build directory and publish separately.
+pub fn write_fresh(
+    gathered: &Gathered,
+    built: &BuildReport,
+    dir: &Path,
+    books: bool,
+    now: chrono::DateTime<chrono::Utc>,
+    identity: &crate::press::FreshIdentity,
+) -> Result<PathBuf, String> {
+    write_inner(gathered, built, dir, books, now, Some(identity))
+}
+
+fn write_inner(
+    gathered: &Gathered,
+    built: &BuildReport,
+    dir: &Path,
+    books: bool,
+    now: chrono::DateTime<chrono::Utc>,
+    identity: Option<&crate::press::FreshIdentity>,
+) -> Result<PathBuf, String> {
     let e = &gathered.edition;
+    let name = identity.map_or_else(
+        || bundle_name(e.date),
+        |i| format!("{}.deckle", i.edition_id),
+    );
+    let dest = dir.join(&name);
+    if identity.is_some() {
+        match std::fs::symlink_metadata(&dest) {
+            Ok(_) => return Err("fresh bundle already exists".into()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
     let mut files = Files::default();
 
     let cover = crate::cover::render(gathered).map_err(|err| format!("cover: {err}"))?;
@@ -650,9 +692,12 @@ pub fn write(
         .collect();
     let json = EditionJson {
         format: FORMAT,
-        version: VERSION,
+        version: if identity.is_some() { "1.4" } else { VERSION },
         generator: format!("Deckle {}", env!("CARGO_PKG_VERSION")),
         edition: EditionInfo {
+            id: identity.map(|i| i.edition_id),
+            paper_id: identity.map(|i| i.paper_id),
+            kind: identity.map(|_| "fresh"),
             paper: e.paper.clone(),
             date: e.date.to_string(),
             number: e.number(),
@@ -684,9 +729,13 @@ pub fn write(
 
     // Into a hidden folder, `edition.json` last, then renamed into place.
     std::fs::create_dir_all(dir).map_err(|err| format!("{}: {err}", dir.display()))?;
-    let name = bundle_name(e.date);
     let tmp = dir.join(format!(".{name}.tmp"));
-    let _ = std::fs::remove_dir_all(&tmp);
+    if identity.is_some() {
+        // Exclusive creation refuses stale staging and symlinks; a fresh attempt owns it.
+        std::fs::create_dir(&tmp).map_err(|err| format!("{}: {err}", tmp.display()))?;
+    } else {
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
     let io = |p: &Path, err: std::io::Error| format!("{}: {err}", p.display());
     for (path, bytes) in &files.by_path {
         let to = tmp.join(path);
@@ -697,8 +746,7 @@ pub fn write(
     }
     let edition = tmp.join("edition.json");
     std::fs::write(&edition, json).map_err(|err| io(&edition, err))?;
-    let dest = dir.join(&name);
-    if dest.exists() {
+    if identity.is_none() && dest.exists() {
         std::fs::remove_dir_all(&dest).map_err(|err| io(&dest, err))?;
     }
     std::fs::rename(&tmp, &dest).map_err(|err| io(&dest, err))?;

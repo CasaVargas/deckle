@@ -1050,6 +1050,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2 0.11.1",
  "tempfile",
  "zip 9.0.5",
 ]
@@ -1159,6 +1160,7 @@ dependencies = [
  "jsonschema",
  "keyring",
  "lettre",
+ "libc",
  "pdf-writer",
  "rand 0.9.5",
  "regex",
@@ -1172,6 +1174,8 @@ dependencies = [
  "toml_edit 0.25.17+spec-1.1.0",
  "ureq",
  "url",
+ "uuid",
+ "windows-sys 0.61.2",
  "zeroize",
  "zip 9.0.5",
 ]

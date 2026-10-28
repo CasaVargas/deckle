@@ -36,6 +36,7 @@ flate2 = "1"
 pdf-writer = "0.15"
 roxmltree.workspace = true
 sha2.workspace = true
+uuid = { workspace = true, features = ["serde"] }
 deckle-highlights.workspace = true
 deckle-core.workspace = true
 deckle-xray.workspace = true
@@ -48,6 +49,8 @@ keyring = { version = "3", features = ["apple-native"] }
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+# Stable native file identity for resumable, replacement-safe result deletion.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
@@ -61,3 +64,6 @@ jsonschema = { version = "0.33", default-features = false }
 zip.workspace = true
 image.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

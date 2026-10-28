@@ -1,0 +1,286 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CasaVargas/deckle/docs/formats/deckle-press.schema.json",
+  "title": "Deckle synced-folder press controls v1",
+  "description": "SPDX-License-Identifier: MIT. Independent compatible clients may implement this public file contract. Unknown optional fields are ignored.",
+  "$defs": {
+    "manifest": {
+      "type": "object",
+      "required": [
+        "format",
+        "version",
+        "producer_id",
+        "paper_id",
+        "paper_name",
+        "enabled",
+        "operations",
+        "updated_at"
+      ],
+      "properties": {
+        "format": {
+          "const": "deckle-press"
+        },
+        "version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "producer_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "paper_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "paper_name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "operations": {
+          "const": [
+            "fresh_full"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": [
+        "format",
+        "version",
+        "request_id",
+        "reader_id",
+        "producer_id",
+        "paper_id",
+        "operation",
+        "created_at",
+        "expires_at"
+      ],
+      "properties": {
+        "format": {
+          "const": "deckle-press-request"
+        },
+        "version": {
+          "const": 1,
+          "type": "integer"
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "reader_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "producer_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "paper_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "operation": {
+          "const": "fresh_full"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": [
+        "format",
+        "version",
+        "request_id",
+        "producer_id",
+        "paper_id",
+        "revision",
+        "state",
+        "updated_at"
+      ],
+      "properties": {
+        "format": {
+          "const": "deckle-press-status"
+        },
+        "version": {
+          "type": "integer",
+          "const": 1
+        },
+        "request_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "producer_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "paper_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "building",
+            "published",
+            "failed",
+            "expired",
+            "result_removed"
+          ]
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "job_id": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "error_code": {
+          "enum": [
+            "busy",
+            "clock_mismatch",
+            "expired",
+            "disabled",
+            "presses_stopped",
+            "unsupported",
+            "source_failure",
+            "build_failed",
+            "timed_out",
+            "storage_unavailable",
+            "protocol_conflict"
+          ]
+        },
+        "result": {
+          "type": "object",
+          "required": [
+            "edition_id",
+            "bundle",
+            "manifest_sha256"
+          ],
+          "properties": {
+            "edition_id": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "bundle": {
+              "type": "string",
+              "pattern": "^\\.deckle-press/editions/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.deckle$"
+            },
+            "manifest_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "removed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "message": {
+          "const": "Fresh edition is no longer available; print another"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "enum": [
+                  "published",
+                  "result_removed"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "result"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "result"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "state": {
+                "const": "result_removed"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "removed_at",
+              "message"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "removed_at"
+                  ]
+                },
+                {
+                  "required": [
+                    "message"
+                  ]
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/manifest"
+    },
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/status"
+    }
+  ]
+}

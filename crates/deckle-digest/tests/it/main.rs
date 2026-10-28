@@ -20,6 +20,9 @@ mod moon;
 mod next;
 mod nudges;
 mod papers;
+mod press_build;
+mod press_protocol;
+mod press_setup;
 mod puzzle;
 mod reading;
 mod seasons;
@@ -29,3 +32,9 @@ mod sun;
 mod template_photos;
 mod weather_page;
 mod web_book;
+
+mod press_queue;
+
+mod press_publish;
+
+mod press_scan;

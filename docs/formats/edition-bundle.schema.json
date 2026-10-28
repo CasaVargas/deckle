@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/CasaVargas/deckle/docs/formats/edition-bundle.schema.json",
-  "title": "Deckle edition bundle, edition.json, version 1.x (1.0 to 1.3)",
+  "title": "Deckle edition bundle, edition.json, version 1.x (1.0 to 1.4)",
   "description": "The paper as data for native readers (docs/superpowers/specs/2026-10-23-edition-bundle-design.md). This schema is offered under the MIT license, beside the repository's GPL-3.0. Readers ignore fields they don't know; a minor version only adds.",
   "type": "object",
   "required": ["format", "version", "generator", "edition", "front", "sections", "files"],
@@ -14,6 +14,9 @@
       "required": ["paper", "date", "number", "place", "timezone", "built_at", "cover"],
       "properties": {
         "paper": { "type": "string" },
+        "id": { "type": "string", "format": "uuid" },
+        "paper_id": { "type": "string", "format": "uuid" },
+        "kind": { "const": "fresh" },
         "date": { "$ref": "#/$defs/date" },
         "number": { "type": "integer", "minimum": 1 },
         "place": { "type": "string" },
@@ -57,6 +60,7 @@
       }
     }
   },
+  "allOf": [{ "if": { "properties": { "version": { "pattern": "^1\\.([4-9]|[1-9][0-9]+)$" } } }, "then": { "properties": { "edition": { "required": ["id", "paper_id", "kind"] } } } }],
   "$defs": {
     "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
     "path": {

@@ -523,6 +523,11 @@ pub enum LibraryCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum DigestCommand {
+    #[command(hide = true)]
+    PressWorker {
+        #[arg(long)]
+        job: PathBuf,
+    },
     /// Write a commented starter config.
     Init {
         /// Replace an existing config.

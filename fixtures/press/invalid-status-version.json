@@ -1,0 +1,15 @@
+{
+  "format": "deckle-press-status",
+  "version": 2,
+  "producer_id": "ba9e81c1-d5e3-43cb-bca1-acaf771caf79",
+  "paper_id": "ea249ae5-771c-4d2b-9f11-5119fbe3feda",
+  "request_id": "78c08b13-6bed-46c2-aab7-73376423bc9d",
+  "revision": 1,
+  "state": "published",
+  "updated_at": "2026-10-27T16:00:00Z",
+  "result": {
+    "edition_id": "1429eb21-019d-4da9-815d-f710561e08a8",
+    "bundle": ".deckle-press/editions/1429eb21-019d-4da9-815d-f710561e08a8.deckle",
+    "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

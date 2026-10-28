@@ -7,6 +7,8 @@ export interface SaveQueue<C> {
   push: (c: C) => Promise<void>;
   /** Whether a save is running or waiting. */
   busy: () => boolean;
+  /** Waits for current and queued saves without writing another copy. */
+  drain: () => Promise<void>;
 }
 
 /**
@@ -46,6 +48,7 @@ export function saveQueue<C>(save: (c: C) => Promise<void>, failed: (e: unknown)
       return done;
     },
     busy: () => running,
+    drain: () => running ? new Promise<void>((resolve) => waiters.push(resolve)) : Promise.resolve(),
   };
 }
 

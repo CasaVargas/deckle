@@ -1,0 +1,36 @@
+{
+  "format": "deckle-returns",
+  "version": "1.0",
+  "reader": {
+    "id": "legacy-reader",
+    "name": "Compatible client",
+    "app": "Fixture"
+  },
+  "edition": "2026-10-27",
+  "updated_at": "2026-10-27T16:00:00Z",
+  "read": [
+    {
+      "story": "2026-10-27/local/1",
+      "fraction": 1.0,
+      "seconds": 140,
+      "last": "2026-10-27T16:00:00Z"
+    }
+  ],
+  "puzzle": {
+    "grid": [
+      "#BAN#"
+    ],
+    "done": false,
+    "ladder": [
+      "MOON"
+    ]
+  },
+  "marks": [
+    {
+      "story": "2026-10-27/local/1",
+      "quote": "the mill stood by the river",
+      "note": "Example",
+      "at": "2026-10-27T16:00:00Z"
+    }
+  ]
+}

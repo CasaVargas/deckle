@@ -86,8 +86,15 @@ pub fn save_paper_with_history(
     state: &Path,
     learning: &Path,
 ) -> Result<(), String> {
+    let _lock = crate::press::config_write()?;
     let old = paper_config_at(main, paper)?;
     config.paper = old.paper.clone();
+    crate::press::guard_save(
+        main,
+        &deckle_digest::press::setup::private_root(),
+        &old,
+        &mut config,
+    )?;
     // A rename is a name that changed in place: same count, the new name unknown before, the
     // old one gone after. A removal or a reorder shifts positions and moves no history.
     let key = |s: &str| s.trim().to_lowercase();
@@ -469,6 +476,7 @@ pub fn papers_list() -> Result<PapersView, String> {
 
 /// Writes `papers/<slug>.toml` for a new paper; returns its slug.
 pub fn create_at(main: &Path, title: &str, reader: &str) -> Result<String, String> {
+    let _lock = crate::press::config_write()?;
     let title = title.trim();
     if title.is_empty() {
         return Err("Give the paper a name.".into());
@@ -491,6 +499,7 @@ pub fn paper_create(title: String, reader: String) -> Result<String, String> {
 /// First run: write the starter config.
 #[tauri::command]
 pub fn daily_setup() -> Result<DailyState, String> {
+    let _lock = crate::press::config_write()?;
     let path = config_path();
     if !path.exists() {
         if let Some(dir) = path.parent() {
@@ -662,6 +671,7 @@ pub fn schedule_get() -> deckle_digest::schedule::Status {
 
 /// Writes paper `paper`'s `[schedule] at` (`None` clears it), as `digest schedule` does.
 pub fn set_at_in(main: &Path, paper: Option<&str>, at: Option<&str>) -> Result<Config, String> {
+    let _lock = crate::press::config_write()?;
     let mut cfg = paper_config_at(main, paper)?;
     if let Some(at) = at {
         deckle_digest::schedule::parse_at(at)?;

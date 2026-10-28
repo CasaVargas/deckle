@@ -807,3 +807,83 @@ open or not, can read it. `deckle digest build --bundle -o <dir>` writes one by 
 A bundle is written into a hidden `.….deckle.tmp` folder and renamed into place, and its
 `edition.json` lists every file with its size and SHA-256: a reader waits until every listed
 file has arrived, so a half-synced iCloud Drive folder is never read as a whole paper.
+
+
+## Fresh-paper requests
+
+A compatible client can ask this computer to build a fresh full paper through one shared bundle
+folder. Requests are **off by default**. They use the existing Deckle watcher; setup does not
+add another scheduling service or change your morning schedule.
+
+1. Update Deckle and the compatible client to versions supporting the fresh-paper protocol.
+   In **Daily → Delivery**, add the existing synced folder and choose **Bundle** as its format.
+2. Turn on **Fresh-paper requests** for that folder. Deckle saves pending edits, checks that this
+   paper owns the folder, and installs or starts the existing watcher. **Ready** means this setup
+   succeeded now, not a continuing online-status or delivery guarantee.
+3. In the compatible client, select the same synced folder and wait for its request capability
+   to arrive before requesting a fresh paper. Keep this computer awake, signed in, and able to
+   reach the folder. The watcher and cloud-sync software must be running. Requests cannot wake
+   the computer, and either direction of sync can take time.
+
+One paper and one designated producing computer own each enabled folder; multiple compatible
+clients may use it. A fresh edition goes only to the folder that requested it. It is not sent by
+email, queued for USB, copied to other exports, or saved as a scheduled Morgue edition. It does
+not consume saved articles or advance scheduled puzzles. Stopped presses reject requests;
+scheduled weekdays do not restrict explicit requests. Existing optional model features use your
+configured providers and may incur their usual costs. There is no new hosted account or service.
+
+A request expires after 24 hours. The producer starts at most one fresh job per paper per five
+minutes, with one queued next job and one active fresh job across papers. Builds have a bounded
+15-minute deadline and at most three attempts. The folder retains seven fresh editions, keeping
+each for at least 48 hours and protecting pending results. Cloud delivery has no fixed deadline.
+
+### Turn off or change a folder
+
+Turn the switch off before moving a folder to another producing computer. Changing a bundle
+folder's format or removing it also disconnects the old advertisement before saving that edit.
+If the old root is unavailable, requests turn off locally and the edit reports a failure; reconnect
+the old root and retry so other clients can see the disabled notice. Do not assume the shared
+notice disappeared just because the local switch is off. Ordinary autosave cannot enable requests
+by copying `press_enabled = true`; activation requires the setup transaction.
+
+### A folder belongs to another producer
+
+Deckle never silently takes ownership. To deliberately reconnect an existing folder:
+
+1. On the old producing computer, turn off requests for that paper and folder. Keep that computer
+   disabled. Wait for the shared `.deckle-press/producer.json` to sync with `enabled: false`.
+2. Explicitly remove **only** that folder's `.deckle-press/producer.json`, and wait for the removal
+   to sync. Keep request, status, edition, return, and other files. The ordinary off switch keeps
+   the ownership record, so turning it off alone does not transfer ownership.
+3. On the new producing computer, check the selected paper and folder, then retry setup. Reopen
+   or refresh the compatible client's selected folder after the new advertisement syncs.
+
+If the old computer is unavailable, first ensure it cannot resume its watcher or write to this
+folder. Do not remove another active producer's record. A duplicate folder mapping to another
+paper on this computer must also be removed or corrected before setup can succeed.
+
+### Watcher and sync troubleshooting
+
+- **Needs attention / setup failure:** check that the actual synced folder is mounted, downloaded,
+  writable, and supports atomic file publication. Deckle does not create a replacement folder
+  when a sync root is missing. Use **Retry setup** after fixing access. A failed watcher start
+  never reports Ready.
+- **Enabled · not checked:** the saved opt-in exists, but this window has not checked its service
+  and shared binding. **Check setup** verifies the binding and starts the existing watcher.
+  Startup never turns a missing or disabled advertisement back on or rewrites your saved settings.
+  After an incomplete sync, missing advertisement, or watcher-start failure, use explicit setup
+  again. Automatic repair and automatic refresh of the advertised paper name are not promised.
+- **Watcher missing or stopped:** `deckle digest schedule` shows existing jobs without changing
+  them. Use **Check setup** or **Retry setup** to repair only the watcher. For foreground diagnostics,
+  `deckle digest watch` runs the existing watcher in a terminal; avoid running extra watcher
+  instances alongside its installed service. `deckle digest schedule --off` removes all edition
+  jobs and the watcher, so it is not the per-folder opt-out command.
+- **No response:** check both devices' clocks, the stopped-presses setting, that the same folder
+  is selected, and that the cloud provider has uploaded and downloaded hidden control files.
+  A visible request file is not proof it reached the producer. Let the client report expiry or
+  offer its explicit retry; do not delete control files to force another build.
+- **Identity unavailable:** restore this installation's private request state before reconnecting.
+  It lives under Deckle's persistent application configuration directory in `press/`, separate
+  from synced folders and disposable caches. Do not copy a producer identity between computers
+  or manually edit it. After reinstalling without that state, use the deliberate disconnect
+  procedure above before creating a new ownership record.
