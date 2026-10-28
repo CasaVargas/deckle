@@ -1426,7 +1426,8 @@ fn regression_inaccessible_and_corrupt_intent_recovery_releases_global_lock() {
             lease.edition_id
         ));
         if failure == "permission" {
-            std::fs::set_permissions(&f.binding.root, std::fs::Permissions::from_mode(0)).unwrap();
+            std::fs::set_permissions(&f.binding.root, std::fs::Permissions::from_mode(0o000))
+                .unwrap();
             assert!(
                 std::fs::read_dir(&f.binding.root).is_err(),
                 "test must actually deny access"
