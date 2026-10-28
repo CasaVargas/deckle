@@ -86,5 +86,25 @@
   {
     "file": "invalid-mark-binding.json",
     "valid": false
+  },
+  {
+    "file": "timestamp-lowercase.json",
+    "valid": true
+  },
+  {
+    "file": "lineage-old.json",
+    "valid": true
+  },
+  {
+    "file": "lineage-counter-rollback.json",
+    "valid": true
+  },
+  {
+    "file": "lineage-new-valid.json",
+    "valid": true
+  },
+  {
+    "file": "lineage-peer-clear.json",
+    "valid": true
   }
 ]
