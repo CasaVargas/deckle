@@ -879,15 +879,25 @@ fn press_worker_protocol_smoke_exchange() {
     let building = status(&f).unwrap();
     until(&f, &mut worker, PressState::Published);
     let published = status(&f).unwrap();
-    let other: press::PressStatus = serde_json::from_slice(
-        &std::fs::read(
-            f.binding
-                .root
-                .join(format!(".deckle-press/status/{}.json", second.request_id)),
-        )
-        .unwrap(),
-    )
-    .unwrap();
+    let other_path = f
+        .binding
+        .root
+        .join(format!(".deckle-press/status/{}.json", second.request_id));
+    let deadline = Instant::now() + Duration::from_secs(30);
+    // Each status is an independent file; one publication can arrive before another.
+    let other = loop {
+        let other: press::PressStatus =
+            serde_json::from_slice(&std::fs::read(&other_path).unwrap()).unwrap();
+        if other.state == PressState::Published {
+            break other;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "second coalesced status did not publish: {other:?}"
+        );
+        worker.tick(std::slice::from_ref(&f.cfg), now).unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+    };
     assert_eq!(other.state, PressState::Published);
     assert_eq!(published.job_id, other.job_id);
     assert_eq!(published.result, other.result);
