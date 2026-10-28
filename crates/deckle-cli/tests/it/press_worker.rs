@@ -191,6 +191,24 @@ fn status(f: &Fixture) -> Option<press::PressStatus> {
     )
     .ok()
 }
+// Published status can become visible before the publisher drops its directory handles.
+// Windows deliberately denies rename during that interval; wait for that operation only.
+fn rename_after_shared_operations(from: &Path, to: &Path) -> std::io::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if cfg!(windows)
+                    && error.raw_os_error() == Some(32)
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
 fn until(f: &Fixture, w: &mut PressSupervisor, want: PressState) {
     let end = Instant::now() + Duration::from_secs(30);
     while Instant::now() < end {
@@ -524,7 +542,8 @@ fn press_worker_same_paper_two_enabled_folders_and_offline_old_folder() {
     std::fs::write(path, serde_json::to_vec(&request).unwrap()).unwrap();
     f.cfg.export[0].press_enabled = false;
     deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
-    std::fs::rename(&f.binding.root, f.root.parent().unwrap().join("offline")).unwrap();
+    rename_after_shared_operations(&f.binding.root, &f.root.parent().unwrap().join("offline"))
+        .unwrap();
     *clock.lock().unwrap() += deckle_digest::chrono::Duration::minutes(6);
     let path = other.join(format!(".deckle-press/status/{}.json", request.request_id));
     let end = Instant::now() + Duration::from_secs(30);
@@ -1129,13 +1148,28 @@ fn regression_missing_root_after_intent_respects_deadline() {
         press::publish_result(&mut j, &lease, &artifact, || {
             calls += 1;
             if calls == 3 {
-                std::fs::rename(&f.binding.root, f.root.parent().unwrap().join("offline")).unwrap();
+                // Interrupt before commit, then disconnect after pinned handles are released.
+                // Windows correctly prevents a rename inside this protected transaction.
+                lease.deadline
+            } else {
+                Utc::now()
             }
-            Utc::now()
         })
         .is_err()
     );
     assert_eq!(calls, 3);
+    assert!(press::archived_artifact(&j, &lease).unwrap().is_some());
+    assert!(j.active().is_some());
+    assert!(
+        !f.binding
+            .root
+            .join(format!(
+                ".deckle-press/editions/{}.deckle",
+                lease.edition_id
+            ))
+            .exists()
+    );
+    std::fs::rename(&f.binding.root, f.root.parent().unwrap().join("offline")).unwrap();
     drop(j);
     f.options.clock =
         Arc::new(move || lease.deadline + deckle_digest::chrono::Duration::minutes(1));
