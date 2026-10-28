@@ -607,6 +607,16 @@ pub fn bookmarklet() -> Result<String, String> {
     Ok(deckle_digest::bookmarklet::javascript(&token))
 }
 
+/// **Save recipe** (cookbook design §8.3): the same listener and token as [`bookmarklet`].
+#[tauri::command]
+pub fn recipe_bookmarklet() -> Result<String, String> {
+    let cfg = Config::load(&config_path()).ok();
+    let q = queue_for(cfg.as_ref());
+    let dir = q.path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let token = deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
+    Ok(deckle_digest::bookmarklet::recipe_javascript(&token))
+}
+
 #[tauri::command]
 pub fn edition_preview(paper: Option<String>) -> Option<Preview> {
     let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir())

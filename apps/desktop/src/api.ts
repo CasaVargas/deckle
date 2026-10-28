@@ -127,6 +127,7 @@ export const api = {
   readingSave: (url: string) => invoke<string>("reading_save", { url }),
   readingRemove: (id: string) => invoke<boolean>("reading_remove", { id }),
   bookmarklet: () => invoke<string>("bookmarklet"),
+  recipeBookmarklet: () => invoke<string>("recipe_bookmarklet"),
   editionPreview: (paper: string | null = null) => invoke<EditionPreview | null>("edition_preview", { paper }),
   dailyRun: (send: boolean, paper: string | null = null) => invoke<void>("daily_run", { send, paper }),
   onDailyFinished: (cb: (r: RunResult) => void): Promise<UnlistenFn> =>

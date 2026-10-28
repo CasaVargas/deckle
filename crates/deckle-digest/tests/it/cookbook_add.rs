@@ -415,10 +415,17 @@ fn failures_are_told_apart_by_whether_asking_again_could_help() {
             "{retry}"
         );
     }
-    for gone in ["http status: 404", "http status: 403", "http status: 410"] {
+    for gone in ["http status: 404", "http status: 410"] {
         assert!(
             matches!(kind(&Failing(gone)), AddError::Other(e) if e == gone),
             "{gone}"
+        );
+    }
+    // A refusal won't change either, and says what works instead.
+    for refused in ["http status: 401", "http status: 403"] {
+        assert!(
+            matches!(kind(&Failing(refused)), AddError::Other(e) if e.contains("doesn't let apps")),
+            "{refused}"
         );
     }
     // A page that loads but isn't a recipe is the content's fault.
@@ -446,4 +453,105 @@ fn a_saved_page_that_cant_be_read_is_a_fetch_failure() {
     )
     .unwrap_err();
     assert!(matches!(e, AddError::Fetch(_)), "{e:?}");
+}
+
+/// What **Save recipe** carries from a page behind bot protection: its recipe block (with a
+/// string that tries to close the script), a block that isn't a recipe, and its metadata.
+fn carried(url: &str) -> Vec<u8> {
+    let recipe = format!(
+        r#"{{"@context":"https://schema.org","@type":"Recipe","name":"Oat Cookies",
+"description":"Crisp. </script><script>alert(1)</script>","image":{{"@type":"ImageObject","url":"{IMG_URL}"}},
+"recipeCategory":"Dessert","recipeIngredient":["1 cup oats","1 egg"],
+"recipeInstructions":[{{"@type":"HowToStep","text":"Bake them."}}]}}"#
+    );
+    let crumbs =
+        r#"{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[]}"#;
+    serde_json::json!({
+        "url": url,
+        "title": "Oat Cookies Recipe | Fetch Test",
+        "canonical": "https://fetch.test/recipes/oat-cookies",
+        "image": IMG_URL,
+        "site": "Fetch Test",
+        "blocks": [crumbs, recipe],
+    })
+    .to_string()
+    .into_bytes()
+}
+
+#[test]
+fn a_carried_page_is_read_without_fetching_and_keyed_by_its_address() {
+    let (d, store) = store();
+    let inbox = d.path().join("Inbox/Recipes");
+    let (status, _, answer) = deckle_digest::bookmarklet::handle_recipe(
+        "POST",
+        "token=abc",
+        Some("http://127.0.0.1:47219"),
+        &carried(PAGE_URL),
+        "abc",
+        &inbox,
+    );
+    assert_eq!(status, 200, "{answer}");
+    let file = inbox.join("oat-cookies-recipe-fetch-test.html");
+    let html = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        !html.contains("</script><script>"),
+        "nothing closes the script: {html}"
+    );
+
+    // Only the photo is fetched; the page itself never is.
+    let net = Fixture::new(&[(IMG_URL, png(1600, 1200))]);
+    let out = add(&store, &file.to_string_lossy(), &net, &opts(), at(27)).unwrap();
+    let s = saved(&out.stored);
+    assert_eq!(
+        s.id,
+        recipe_id(KEY),
+        "keyed by the page's address, not the file"
+    );
+    assert_eq!(s.recipe.title, "Oat Cookies");
+    assert_eq!(
+        s.recipe.source_url,
+        "https://fetch.test/recipes/oat-cookies"
+    );
+    assert!(
+        s.recipe
+            .description
+            .as_deref()
+            .unwrap_or("")
+            .starts_with("Crisp.")
+    );
+    assert_eq!(*net.asked.lock().unwrap(), vec![IMG_URL]);
+    assert_eq!(out.picture_note, None);
+
+    // Saving the same page again updates that recipe instead of adding a second.
+    deckle_digest::bookmarklet::handle_recipe(
+        "POST",
+        "token=abc",
+        Some("http://127.0.0.1:47219"),
+        &carried(PAGE_URL),
+        "abc",
+        &inbox,
+    );
+    let again = inbox.join("oat-cookies-recipe-fetch-test (2).html");
+    let out = add(&store, &again.to_string_lossy(), &net, &opts(), at(27)).unwrap();
+    assert!(matches!(out.stored, Stored::Updated(_)), "{:?}", out.stored);
+}
+
+#[test]
+fn a_site_that_refuses_apps_says_what_works() {
+    struct Refuses;
+    impl Net for Refuses {
+        fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+            Err(format!("{url}: http status: 403"))
+        }
+    }
+    let (_d, store) = store();
+    let url = "https://www.food.test/recipes/carbonara-1914140";
+    let Err(AddError::Other(e)) = add_classified(&store, url, &Refuses, &opts(), at(27)) else {
+        panic!("a refusal won't change by asking again")
+    };
+    assert!(
+        e.starts_with("food.test doesn't let apps read its pages."),
+        "{e}"
+    );
+    assert!(e.contains("Save recipe") && e.contains(".html"), "{e}");
 }
