@@ -1009,3 +1009,454 @@ fn press_worker_protocol_smoke_exchange() {
         .unwrap();
     }
 }
+
+fn regression_admission_boundary_change(change: &str) {
+    use std::sync::{
+        Barrier, Mutex,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
+    let mut f = fixture("Admission boundary");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let clock_calls = calls.clone();
+    let (entered, at_boundary) = mpsc::sync_channel(1);
+    let release = Arc::new(Barrier::new(2));
+    let clock_release = release.clone();
+    let sent = Mutex::new(Some(entered));
+    f.options.clock = Arc::new(move || {
+        // First sample drives scanning; the second occurs while holding run.lock,
+        // immediately before admission. Pause real supervisor execution at that boundary.
+        if clock_calls.fetch_add(1, Ordering::SeqCst) == 1 {
+            sent.lock().unwrap().take().unwrap().send(()).unwrap();
+            clock_release.wait();
+        }
+        Utc::now()
+    });
+    let launches = Arc::new(AtomicUsize::new(0));
+    let spawned = launches.clone();
+    f.options.launch = Arc::new(move |job| {
+        spawned.fetch_add(1, Ordering::SeqCst);
+        launch(job)
+    });
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    w.tick(std::slice::from_ref(&f.cfg), Utc::now()).unwrap();
+    at_boundary.recv_timeout(Duration::from_secs(5)).unwrap();
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&f.options.run_lock)
+        .unwrap();
+    assert!(matches!(
+        held.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    let error = match change {
+        "snapshot" => {
+            f.cfg.export[0].press_enabled = false;
+            deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
+
+            press::PressErrorCode::Disabled
+        }
+        "stop" => {
+            press::write_stop(
+                &f.cfg.press_state(),
+                Some(
+                    Utc::now()
+                        .with_timezone(&deckle_digest::tz::local_tz())
+                        .date_naive(),
+                ),
+            )
+            .unwrap();
+            press::PressErrorCode::PressesStopped
+        }
+        "binding" => {
+            let path = f.binding.root.join(".deckle-press/producer.json");
+            let mut manifest: ProducerManifest =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            manifest.enabled = false;
+            press::setup::write_manifest(&f.binding, &manifest).unwrap();
+            press::PressErrorCode::Disabled
+        }
+        _ => unreachable!(),
+    };
+    release.wait();
+    // Do not send more ticks: that would hide a stale policy bug by supplying a new revision.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && launches.load(Ordering::SeqCst) == 0
+        && !status(&f).is_some_and(|s| s.state == PressState::Failed)
+    {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        launches.load(Ordering::SeqCst),
+        0,
+        "obsolete policy launched a child after acquiring run.lock"
+    );
+    let rejected = status(&f).expect("durable rejection");
+    assert_eq!(rejected.error_code, Some(error));
+    assert!(rejected.started_at.is_none());
+}
+
+#[test]
+fn regression_disk_opt_out_after_lock() {
+    regression_admission_boundary_change("snapshot");
+}
+
+#[test]
+fn regression_missing_root_after_intent_respects_deadline() {
+    let mut f = fixture("Recovery offline");
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    j.register_binding(f.binding.clone(), true, false).unwrap();
+    j.accept(f.request.clone(), "fixture", Utc::now()).unwrap();
+    let lease = j.admit(Utc::now()).unwrap().unwrap();
+    let artifact = press::build_fresh(
+        &f.cfg,
+        &press::FreshBuildContext {
+            identity: press::FreshIdentity {
+                paper_id: lease.paper_id,
+                edition_id: lease.edition_id,
+            },
+            started_at: lease.started_at,
+            work_dir: f.root.join("prepared"),
+            books: false,
+        },
+        &|_: &str| Err("fake source".into()),
+        &deckle_digest::GatherOptions::default(),
+    )
+    .unwrap();
+    let mut calls = 0;
+    assert!(
+        press::publish_result(&mut j, &lease, &artifact, || {
+            calls += 1;
+            if calls == 3 {
+                std::fs::rename(&f.binding.root, f.root.parent().unwrap().join("offline")).unwrap();
+            }
+            Utc::now()
+        })
+        .is_err()
+    );
+    assert_eq!(calls, 3);
+    drop(j);
+    f.options.clock =
+        Arc::new(move || lease.deadline + deckle_digest::chrono::Duration::minutes(1));
+    f.options.launch = Arc::new(|_| panic!("expired job must not fetch"));
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    for _ in 0..10 {
+        let _ = w.tick(std::slice::from_ref(&f.cfg), Utc::now());
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let lock = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&f.options.run_lock)
+        .unwrap();
+    let locked = lock.try_lock().is_err();
+    assert!(!locked, "expired recovery retained the global lock");
+    drop(w);
+    let j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    assert!(
+        j.active().is_none(),
+        "expired recovery still active, scheduled lock held={locked}, status={:?}",
+        j.status(f.request.request_id)
+    );
+}
+
+fn prepare_artifact(
+    f: &Fixture,
+    j: &mut press::PressJournal,
+) -> (press::JobLease, press::FreshArtifact) {
+    j.register_binding(f.binding.clone(), true, false).unwrap();
+    j.accept(f.request.clone(), "fixture", Utc::now()).unwrap();
+    let lease = j.admit(Utc::now()).unwrap().unwrap();
+    let artifact = press::build_fresh(
+        &f.cfg,
+        &press::FreshBuildContext {
+            identity: press::FreshIdentity {
+                paper_id: lease.paper_id,
+                edition_id: lease.edition_id,
+            },
+            started_at: lease.started_at,
+            work_dir: f.root.join("prepared"),
+            books: false,
+        },
+        &|_: &str| Err("fake source".into()),
+        &deckle_digest::GatherOptions::default(),
+    )
+    .unwrap();
+    (lease, artifact)
+}
+#[test]
+fn regression_publication_rejects_replaced_editions_ancestor() {
+    let f = fixture("Replacement");
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    let (lease, artifact) = prepare_artifact(&f, &mut j);
+    let editions = f.binding.root.join(".deckle-press/editions");
+    let outside = f.root.parent().unwrap().join("outside");
+    let mut calls = 0;
+    let result = press::publish_result(&mut j, &lease, &artifact, || {
+        calls += 1;
+        if calls == 3 {
+            std::fs::rename(&editions, &outside).unwrap();
+            std::os::unix::fs::symlink(&outside, &editions).unwrap();
+        }
+        Utc::now()
+    });
+    let escaped = outside
+        .join(format!("{}.deckle", lease.edition_id))
+        .exists();
+    assert!(
+        !escaped,
+        "published outside configured root after editions ancestor replacement, returned={result:?}"
+    );
+    assert!(result.is_err());
+    assert_ne!(
+        j.status(f.request.request_id).unwrap().state,
+        PressState::Published
+    );
+}
+#[test]
+fn regression_terminal_retention_ignores_unavailable_other_folder() {
+    let f = fixture("Retention");
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    let (lease, artifact) = prepare_artifact(&f, &mut j);
+    press::publish_result(&mut j, &lease, &artifact, Utc::now).unwrap();
+    let root = f.root.parent().unwrap().join("other");
+    std::fs::create_dir(&root).unwrap();
+    let other = PressBinding {
+        root: root.clone(),
+        paper_id: Uuid::new_v4(),
+        ..f.binding.clone()
+    };
+    j.register_binding(other.clone(), true, false).unwrap();
+    let mut old = f.request.clone();
+    old.request_id = Uuid::new_v4();
+    old.paper_id = other.paper_id;
+    j.reject_in(&other, old, "old", press::PressErrorCode::Busy, Utc::now())
+        .unwrap();
+    std::fs::remove_dir(root).unwrap();
+    // The healthy first request is 31 days old and still retained as an output; add a
+    // terminal request in its available folder which should be pruned independently.
+    let mut rejected = f.request.clone();
+    rejected.request_id = Uuid::new_v4();
+    j.reject_in(
+        &f.binding,
+        rejected.clone(),
+        "healthy",
+        press::PressErrorCode::Busy,
+        Utc::now(),
+    )
+    .unwrap();
+    let result = press::prune_results(
+        &mut j,
+        Utc::now() + deckle_digest::chrono::Duration::days(31),
+    );
+    assert!(
+        j.status(rejected.request_id).is_none(),
+        "unavailable unrelated root blocked healthy terminal retention: {result:?}"
+    );
+}
+#[test]
+fn regression_ancient_request_is_not_rejournaled_after_retention() {
+    let f = fixture("Ancient replay");
+    let at = Utc::now();
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    j.register_binding(f.binding.clone(), true, false).unwrap();
+    let hash = "fixture";
+    j.reject_in(
+        &f.binding,
+        f.request.clone(),
+        hash,
+        press::PressErrorCode::Busy,
+        at,
+    )
+    .unwrap();
+    press::flush_statuses(&mut j).unwrap();
+    let later = at + deckle_digest::chrono::Duration::days(31);
+    press::prune_results(&mut j, later).unwrap();
+    assert!(j.status(f.request.request_id).is_none());
+    for event in
+        press::scan::scan_requests(&f.binding, &mut press::scan::ScanCursor::default(), later)
+    {
+        if let press::scan::ScanEvent::Request {
+            request,
+            hash,
+            rejection: Some(code),
+        } = event
+        {
+            j.reject_in(&f.binding, request, &hash, code, later)
+                .unwrap();
+        }
+    }
+    assert!(
+        j.status(f.request.request_id).is_none(),
+        "ancient request recreated a new terminal journal/status after pruning: {:?}",
+        j.status(f.request.request_id)
+    );
+}
+
+// Optional real-client bridge. Only a disposable, explicitly supplied root is used;
+// fake source responses and the normal child supervisor exercise the actual protocol.
+#[test]
+#[ignore]
+fn controller_exchange_bridge() {
+    let Some(root) = std::env::var_os("DECKLE_PRESS_CONTROLLER_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    assert!(!root.exists(), "bridge requires a new disposable root");
+    std::fs::create_dir(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let mut f = fixture("Controller bridge");
+    f.binding.root = root.clone();
+    f.cfg.export[0].dir = root.display().to_string();
+    deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
+    press::setup::write_manifest(
+        &f.binding,
+        &ProducerManifest {
+            format: "deckle-press".into(),
+            version: 1,
+            producer_id: f.binding.producer_id,
+            paper_id: f.binding.paper_id,
+            paper_name: "Controller bridge".into(),
+            enabled: true,
+            operations: vec![PressOperation::FreshFull],
+            updated_at: Utc::now(),
+        },
+    )
+    .unwrap();
+    let manifest = std::fs::read(root.join(".deckle-press/producer.json")).unwrap();
+    std::fs::write(root.join("bridge-ready"), b"ready").unwrap();
+    let mut supervisor = PressSupervisor::with_options(f.options.clone());
+    let deadline = Instant::now() + Duration::from_secs(240);
+    while !root.join("bridge-complete.json").exists() {
+        assert!(
+            Instant::now() < deadline,
+            "client did not complete controller exchange"
+        );
+        supervisor
+            .tick(std::slice::from_ref(&f.cfg), Utc::now())
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    drop(supervisor);
+    let proof: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(root.join("bridge-complete.json")).unwrap()).unwrap();
+    let id = Uuid::parse_str(proof["request_id"].as_str().unwrap()).unwrap();
+    let journal = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    let status = journal
+        .status(id)
+        .expect("actual client request must be journaled");
+    assert_eq!(status.state, PressState::Published);
+    assert_eq!(
+        status.result.unwrap().edition_id.to_string(),
+        proof["edition_id"].as_str().unwrap()
+    );
+    assert_eq!(
+        std::fs::read(root.join(".deckle-press/producer.json")).unwrap(),
+        manifest
+    );
+}
+
+#[test]
+fn regression_ancient_expiry_boundary_and_known_request_reconciliation() {
+    let f = fixture("Expiry horizon");
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    j.register_binding(f.binding.clone(), true, false).unwrap();
+    let at = Utc::now();
+    let known = j
+        .reject_in(
+            &f.binding,
+            f.request.clone(),
+            "known",
+            press::PressErrorCode::Busy,
+            at,
+        )
+        .unwrap();
+    for (seconds, retained) in [(1, true), (0, false), (-1, false)] {
+        let mut request = f.request.clone();
+        request.request_id = Uuid::new_v4();
+        request.expires_at = at - deckle_digest::chrono::Duration::days(30)
+            + deckle_digest::chrono::Duration::seconds(seconds);
+        request.created_at = request.expires_at - deckle_digest::chrono::Duration::hours(24);
+        j.reject_in(
+            &f.binding,
+            request.clone(),
+            "expired",
+            press::PressErrorCode::Expired,
+            at,
+        )
+        .unwrap();
+        assert_eq!(j.status(request.request_id).is_some(), retained);
+    }
+    let reconciled = j
+        .reject_in(
+            &f.binding,
+            f.request.clone(),
+            "known",
+            press::PressErrorCode::Expired,
+            at + deckle_digest::chrono::Duration::days(40),
+        )
+        .unwrap();
+    assert_eq!(reconciled, known);
+}
+
+#[cfg(unix)]
+#[test]
+fn regression_inaccessible_and_corrupt_intent_recovery_releases_global_lock() {
+    use std::os::unix::fs::PermissionsExt;
+    for failure in ["permission", "corrupt"] {
+        let mut f = fixture("Intent deadline");
+        let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+        let (lease, artifact) = prepare_artifact(&f, &mut j);
+        // Interrupt before final rename, leaving a durable intent and verified archive.
+        let mut samples = 0;
+        assert!(
+            press::publish_result(&mut j, &lease, &artifact, || {
+                samples += 1;
+                if samples >= 3 {
+                    lease.deadline
+                } else {
+                    lease.started_at
+                }
+            })
+            .is_err()
+        );
+        let final_path = f.binding.root.join(format!(
+            ".deckle-press/editions/{}.deckle",
+            lease.edition_id
+        ));
+        if failure == "permission" {
+            std::fs::set_permissions(&f.binding.root, std::fs::Permissions::from_mode(0)).unwrap();
+            assert!(
+                std::fs::read_dir(&f.binding.root).is_err(),
+                "test must actually deny access"
+            );
+        } else {
+            std::fs::create_dir(&final_path).unwrap();
+            std::fs::write(final_path.join("edition.json"), b"corrupt").unwrap();
+        }
+        assert!(press::recover_result(&mut j, &lease, lease.deadline).is_err());
+        drop(j);
+        f.options.clock =
+            Arc::new(move || lease.deadline + deckle_digest::chrono::Duration::seconds(1));
+        f.options.launch = Arc::new(|_| panic!("expired intent must not launch"));
+        let mut supervisor = PressSupervisor::with_options(f.options.clone());
+        for _ in 0..10 {
+            let _ = supervisor.tick(std::slice::from_ref(&f.cfg), Utc::now());
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let lock = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&f.options.run_lock)
+            .unwrap();
+        assert!(lock.try_lock().is_ok(), "{failure} retained global lock");
+        drop(lock);
+        drop(supervisor);
+        std::fs::set_permissions(&f.binding.root, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+        assert!(j.active().is_none());
+        assert_eq!(
+            j.status(f.request.request_id).unwrap().error_code,
+            Some(press::PressErrorCode::TimedOut)
+        );
+    }
+}

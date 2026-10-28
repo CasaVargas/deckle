@@ -442,7 +442,21 @@ impl Engine {
                     )?;
                     self.reconciled.insert(binding.root.clone(), stamp);
                 }
-                let enabled = press::setup::binding_is_enabled(papers, paper, index, producer);
+                let path = if paper.slug() == deckle_digest::papers::MAIN {
+                    self.options.config_path.clone()
+                } else {
+                    deckle_digest::papers::paper_path(&self.options.config_path, paper.slug())
+                };
+                let persisted_enabled = Config::load(&path).is_ok_and(|current| {
+                    current.paper_id == paper.paper_id
+                        && current.export.get(index).is_some_and(|saved| {
+                            saved.dir == export.dir
+                                && saved.format == export.format
+                                && saved.press_enabled
+                        })
+                });
+                let enabled = persisted_enabled
+                    && press::setup::binding_is_enabled(papers, paper, index, producer);
                 let today = now
                     .with_timezone(&deckle_digest::tz::local_tz())
                     .date_naive();
@@ -518,7 +532,9 @@ impl Engine {
                 // A failed child remains active for bounded recovery below.
             }
         }
-        let bindings = self.policies(papers, now)?;
+        let policy_result = self.policies(papers, now);
+        let policy_error = policy_result.as_ref().err().cloned();
+        let bindings = policy_result.unwrap_or_default();
         // One binding per cycle bounds total request candidates globally to 100.
         let selected = if bindings.is_empty() {
             None
@@ -570,14 +586,33 @@ impl Engine {
         }
         if self.running.is_none() {
             if let Some(previous) = self.journal.as_ref().unwrap().active() {
-                if self.lock()?
-                    && press::recover_result(
+                let recovery_now = (self.options.clock)();
+                let recover = if self.lock()? {
+                    match press::recover_result(
                         self.journal.as_mut().unwrap(),
                         &previous,
-                        (self.options.clock)(),
-                    )?
-                    .is_none()
-                {
+                        recovery_now,
+                    ) {
+                        Ok(Some(_)) => false,
+                        Ok(None) => true,
+                        Err(_) if self.journal.as_ref().unwrap().active().is_none() => false,
+                        Err(_) if recovery_now >= previous.deadline => {
+                            // No child remains. Fence durably before releasing the global slot,
+                            // even when the shared root cannot confirm an output intent.
+                            self.journal.as_mut().unwrap().fail(
+                                &previous,
+                                PressErrorCode::TimedOut,
+                                recovery_now,
+                            )?;
+                            self.lock = None;
+                            false
+                        }
+                        Err(error) => return Err(error),
+                    }
+                } else {
+                    false
+                };
+                if recover {
                     let lease = match self
                         .journal
                         .as_mut()
@@ -619,7 +654,10 @@ impl Engine {
                         }
                     }
                 }
-            } else if revision.load(Ordering::SeqCst) == rev && self.lock()? {
+            } else if policy_error.is_none()
+                && revision.load(Ordering::SeqCst) == rev
+                && self.lock()?
+            {
                 // Lock acquisition and the earlier scan may have taken time. Refresh
                 // current policy only after holding the lock, and never admit a snapshot
                 // superseded by a newer tick during either operation.
@@ -650,8 +688,13 @@ impl Engine {
         if self.running.is_none() && self.journal.as_ref().unwrap().active().is_none() {
             self.lock = None;
         }
-        press::flush_statuses(self.journal.as_mut().unwrap())?;
-        press::prune_results(self.journal.as_mut().unwrap(), (self.options.clock)())?;
+        let statuses = press::flush_statuses(self.journal.as_mut().unwrap());
+        let retention =
+            press::prune_results(self.journal.as_mut().unwrap(), (self.options.clock)());
+        statuses.and(retention)?;
+        if let Some(error) = policy_error {
+            return Err(error);
+        }
         Ok(())
     }
     fn spawn(&mut self, lease: JobLease, cfg: &Config, index: usize) -> Result<(), PressError> {

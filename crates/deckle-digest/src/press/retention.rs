@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Producer-recorded fresh outputs only; shared requests are never removed.
+use super::safe_io::Dir;
 use super::*;
 use super::{
     journal::storage,
@@ -197,7 +198,14 @@ fn remove_bundle(
     for member in authorization.members.iter().filter(|m| !m.directory) {
         check_parents(path, &member.relative, &authorization)?;
         if check_member(path, member)? {
-            fs::remove_file(path.join(&member.relative)).map_err(|_| storage())?;
+            let target = path.join(&member.relative);
+            let pinned = Dir::open(target.parent().ok_or_else(super::publish::conflict)?)?;
+            check_parents(path, &member.relative, &authorization)?;
+            check_member(path, member)?;
+            pinned.remove(
+                std::path::Path::new(target.file_name().ok_or_else(super::publish::conflict)?),
+                false,
+            )?;
         }
     }
     let mut dirs: Vec<_> = authorization
@@ -209,7 +217,18 @@ fn remove_bundle(
     for member in dirs {
         check_parents(path, &member.relative, &authorization)?;
         if check_member(path, member)? {
-            fs::remove_dir(path.join(&member.relative)).map_err(|_| storage())?;
+            let target = if member.relative.is_empty() {
+                path.to_owned()
+            } else {
+                path.join(&member.relative)
+            };
+            let pinned = Dir::open(target.parent().ok_or_else(super::publish::conflict)?)?;
+            check_parents(path, &member.relative, &authorization)?;
+            check_member(path, member)?;
+            pinned.remove(
+                std::path::Path::new(target.file_name().ok_or_else(super::publish::conflict)?),
+                true,
+            )?;
         }
     }
     sync_dir(path.parent().ok_or_else(super::publish::conflict)?)
@@ -218,106 +237,144 @@ fn remove_bundle(
 /// intents. Tombstones are committed and shared before deleting either owned copy.
 pub fn prune_results(j: &mut PressJournal, now: DateTime<Utc>) -> Result<(), PressError> {
     j.ensure_healthy()?;
-    for status in j.statuses() {
-        check_binding(
-            &j.binding_for_request(status.request_id)
-                .ok_or_else(super::publish::conflict)?,
-        )?;
-    }
+    let mut error = None;
     let mut outputs = j.outputs();
     outputs.sort_by_key(|o| std::cmp::Reverse((o.published_at, o.result.edition_id)));
     let mut counts = std::collections::HashMap::new();
     for o in outputs {
-        let active = j.active();
-        for stage in &o.stages {
-            if !j.job_terminal(o.lease.job_id)
-                && active
-                    .as_ref()
-                    .is_none_or(|l| l.job_id == o.lease.job_id && l.generation == stage.generation)
-            {
-                continue;
-            }
-            let parent = if stage.local {
-                archive(j, &o.lease, false)?.parent().unwrap().to_owned()
-            } else {
-                editions(&binding(&o.lease), false)?
-            };
-            let path = parent.join(&stage.name);
-            match fs::symlink_metadata(&path) {
-                Ok(m) if m.file_type().is_dir() => {
-                    fs::remove_dir_all(path).map_err(|_| storage())?;
-                    sync_dir(&parent)?;
+        let outcome = (|| -> Result<(), PressError> {
+            let active = j.active();
+            for stage in &o.stages {
+                if !j.job_terminal(o.lease.job_id)
+                    && active.as_ref().is_none_or(|l| {
+                        l.job_id == o.lease.job_id && l.generation == stage.generation
+                    })
+                {
+                    continue;
                 }
-                Ok(_) => return Err(super::publish::conflict()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-                Err(_) => return Err(storage()),
-            }
-        }
-
-        let Some(at) = o.published_at else {
-            if j.job_terminal(o.lease.job_id) {
-                let b = binding(&o.lease);
-                check_binding(&b)?;
-                let final_path = b.root.join(&o.result.bundle);
-                match fs::symlink_metadata(&final_path) {
+                let parent = if stage.local {
+                    archive(j, &o.lease, false)?.parent().unwrap().to_owned()
+                } else {
+                    editions(&binding(&o.lease), false)?
+                };
+                let path = parent.join(&stage.name);
+                match fs::symlink_metadata(&path) {
+                    Ok(m) if m.file_type().is_dir() => {
+                        remove_stage(&path)?;
+                        sync_dir(&parent)?;
+                    }
+                    Ok(_) => return Err(super::publish::conflict()),
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
                     Err(_) => return Err(storage()),
-                    Ok(_) => return Err(super::publish::conflict()),
                 }
-                if o.archive_deletion.is_some() {
-                    let local = archive(j, &o.lease, false)?;
-                    remove_bundle(j, &local, &o, true)?;
-                } else if let Some(artifact) = archived_artifact(j, &o.lease)? {
-                    remove_bundle(j, &artifact.bundle, &o, true)?;
-                }
-                j.forget_intent(o.lease.job_id)?;
             }
-            continue;
-        };
-        let count = counts.entry(o.lease.root.clone()).or_insert(0usize);
-        let remove = if o.removed_at.is_some() {
-            !o.deleted
-        } else {
-            *count += 1;
-            *count > 7 && now - at >= Duration::hours(48)
-        };
-        if !remove {
-            continue;
+
+            let Some(at) = o.published_at else {
+                if j.job_terminal(o.lease.job_id) {
+                    let b = binding(&o.lease);
+                    check_binding(&b)?;
+                    let final_path = b.root.join(&o.result.bundle);
+                    match fs::symlink_metadata(&final_path) {
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                        Err(_) => return Err(storage()),
+                        Ok(_) => return Err(super::publish::conflict()),
+                    }
+                    if o.archive_deletion.is_some() {
+                        let local = archive(j, &o.lease, false)?;
+                        remove_bundle(j, &local, &o, true)?;
+                    } else if let Some(artifact) = archived_artifact(j, &o.lease)? {
+                        remove_bundle(j, &artifact.bundle, &o, true)?;
+                    }
+                    j.forget_intent(o.lease.job_id)?;
+                }
+                return Ok(());
+            };
+            let count = counts.entry(o.lease.root.clone()).or_insert(0usize);
+            let remove = if o.removed_at.is_some() {
+                !o.deleted
+            } else {
+                *count += 1;
+                *count > 7 && now - at >= Duration::hours(48)
+            };
+            if !remove {
+                return Ok(());
+            }
+            let b = binding(&o.lease);
+            check_binding(&b)?;
+            if o.removed_at.is_none() {
+                j.mark_removed(o.result.edition_id, now)?;
+            }
+            for status in j
+                .statuses()
+                .into_iter()
+                .filter(|s| s.job_id == Some(o.lease.job_id))
+            {
+                super::publish::flush_status(j, status)?;
+            }
+            // Recheck after shared writes. A replaced/foreign folder cannot authorize deletion.
+            let parent = editions(&b, false)?;
+            remove_bundle(
+                j,
+                &parent.join(format!("{}.deckle", o.result.edition_id)),
+                &o,
+                false,
+            )?;
+            let local = archive(j, &o.lease, false)?;
+            remove_bundle(j, &local, &o, true)?;
+            j.mark_deleted(o.result.edition_id, now)?;
+            Ok(())
+        })();
+        if let Err(e) = outcome {
+            error.get_or_insert(e);
         }
-        let b = binding(&o.lease);
-        check_binding(&b)?;
-        if o.removed_at.is_none() {
-            j.mark_removed(o.result.edition_id, now)?;
-        }
-        flush_statuses(j)?;
-        // Recheck after shared writes. A replaced/foreign folder cannot authorize deletion.
-        let parent = editions(&b, false)?;
-        remove_bundle(
-            j,
-            &parent.join(format!("{}.deckle", o.result.edition_id)),
-            &o,
-            false,
-        )?;
-        let local = archive(j, &o.lease, false)?;
-        remove_bundle(j, &local, &o, true)?;
-        j.mark_deleted(o.result.edition_id, now)?;
     }
-    flush_statuses(j)?;
-    j.forget_old(now, |b, id| {
+    let expired = j.forget_old(now, |b, id| {
         check_binding(b)?;
         let parent = b.root.join(".deckle-press/status");
         directory(&parent, false)?;
         let path = parent.join(format!("{id}.json"));
         match fs::symlink_metadata(&path) {
             Ok(m) if m.file_type().is_file() => {
-                fs::remove_file(path).map_err(|_| storage())?;
-                sync_dir(&parent)
+                let pinned = Dir::open(&parent)?;
+                pinned.remove(
+                    std::path::Path::new(path.file_name().ok_or_else(super::publish::conflict)?),
+                    false,
+                )
             }
             Ok(_) => Err(PressError::new(PressErrorCode::ProtocolConflict)),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(_) => Err(storage()),
         }
-    })
+    });
+    if let Err(e) = expired {
+        error.get_or_insert(e);
+    }
+    error.map_or(Ok(()), Err)
+}
+
+// Staging is producer-recorded. Pin every directory before descending or unlinking;
+// never recurse through a replacement link or call ambient remove_dir_all.
+fn remove_stage(path: &std::path::Path) -> Result<(), PressError> {
+    let parent = Dir::open(path.parent().ok_or_else(super::publish::conflict)?)?;
+    let dir = Dir::open(path)?;
+    for entry in fs::read_dir(path).map_err(|_| storage())? {
+        let entry = entry.map_err(|_| storage())?;
+        let kind = entry.file_type().map_err(|_| storage())?;
+        if kind.is_dir() {
+            remove_stage(&entry.path())?;
+        } else if kind.is_file() {
+            dir.validate()?;
+            dir.remove(std::path::Path::new(&entry.file_name()), false)?;
+        } else {
+            return Err(super::publish::conflict());
+        }
+    }
+    dir.validate()?;
+    drop(dir);
+    parent.remove(
+        std::path::Path::new(path.file_name().ok_or_else(super::publish::conflict)?),
+        true,
+    )
 }
 
 #[cfg(test)]
@@ -421,6 +478,46 @@ mod tests {
         j.mark_removed(edition, now() + Duration::days(3)).unwrap();
         flush_statuses(&mut j).unwrap();
         (j, b, o, id)
+    }
+    #[test]
+    fn unavailable_history_does_not_block_healthy_result_tombstone_and_deletion() {
+        let d = tempfile::tempdir().unwrap();
+        let (mut j, b, o, id) = fixture(d.path());
+        let unavailable = d.path().join("unavailable");
+        fs::create_dir(&unavailable).unwrap();
+        let other = PressBinding {
+            root: unavailable.canonicalize().unwrap(),
+            paper_id: Uuid::new_v4(),
+            producer_id: b.producer_id,
+        };
+        j.register_binding(other.clone(), true, false).unwrap();
+        let request = PressRequest {
+            format: "deckle-press-request".into(),
+            version: 1,
+            request_id: Uuid::new_v4(),
+            reader_id: Uuid::new_v4(),
+            producer_id: other.producer_id,
+            paper_id: other.paper_id,
+            operation: PressOperation::FreshFull,
+            created_at: now(),
+            expires_at: now() + Duration::hours(24),
+        };
+        j.reject_in(
+            &other,
+            request.clone(),
+            "offline",
+            PressErrorCode::Busy,
+            now(),
+        )
+        .unwrap();
+        fs::remove_dir(&other.root).unwrap();
+        assert!(prune_results(&mut j, now() + Duration::days(31)).is_err());
+        assert!(!b.root.join(&o.result.bundle).exists());
+        assert!(j.status(request.request_id).is_some());
+        let bytes = fs::read(b.root.join(format!(".deckle-press/status/{id}.json"))).unwrap();
+        let status: PressStatus = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(status.state, PressState::ResultRemoved);
+        assert!(j.status(id).is_some());
     }
     #[test]
     fn partial_recursive_removal_resumes_after_restart_and_retains_tombstone() {

@@ -291,6 +291,7 @@ pub use queue::JobLease;
 
 pub mod publish;
 pub mod retention;
+mod safe_io;
 pub use publish::{archived_artifact, flush_statuses, publish_result, recover_result};
 pub use retention::prune_results;
 

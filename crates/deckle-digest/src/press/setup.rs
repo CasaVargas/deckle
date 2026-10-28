@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Explicit, fail-closed ownership of a configured bundle export. Shared files advertise
 //! configuration, not liveness; concurrent setup by different producers is unsupported.
+use super::safe_io::Dir;
 use super::{
     MAX_CONTROL_BYTES, PressBinding, PressError, PressErrorCode, PressOperation, ProducerManifest,
     Uuid, decode_manifest,
@@ -111,38 +112,16 @@ fn resolve_binding(
 }
 
 fn check_write_access(root: &Path) -> Result<(), PressError> {
-    let probe = root.join(format!(".deckle-write-check-{}", Uuid::new_v4()));
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&probe)
-        .map_err(|_| storage())?;
-    let checked = file
-        .write_all(b"write check")
-        .and_then(|()| file.sync_all());
-    drop(file);
-    let removed = fs::remove_file(probe);
-    checked.and(removed).map_err(|_| storage())?;
-    Ok(())
+    let pinned = Dir::open(root)?;
+    let probe = PathBuf::from(format!(".deckle-write-check-{}", Uuid::new_v4()));
+    pinned.write_new(&probe, b"write check")?;
+    pinned.remove(&probe, false)
 }
 
 fn control_dir(root: &Path, create: bool) -> Result<PathBuf, PressError> {
-    if !root.is_dir() {
-        return Err(storage());
-    }
-    let path = root.join(".deckle-press");
-    if create {
-        match fs::create_dir(&path) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(storage()),
-        }
-    }
-    match fs::symlink_metadata(&path) {
-        Ok(meta) if meta.file_type().is_dir() => Ok(path),
-        Ok(_) => Err(conflict()),
-        Err(_) => Err(storage()),
-    }
+    let pinned = Dir::open(root)?;
+    pinned.child(Path::new(".deckle-press"), create)?;
+    Ok(root.join(".deckle-press"))
 }
 
 fn bounded_regular(path: &Path) -> Result<Vec<u8>, PressError> {
@@ -195,7 +174,7 @@ pub fn write_manifest(
     binding: &PressBinding,
     manifest: &ProducerManifest,
 ) -> Result<(), PressError> {
-    write_manifest_using(binding, manifest, |from, to| fs::hard_link(from, to))
+    write_manifest_using(binding, manifest, |_, _| Ok(()))
 }
 
 fn write_manifest_using(
@@ -207,17 +186,11 @@ fn write_manifest_using(
     decode_manifest(&bytes, binding)?;
     let existing = owned_manifest(binding)?;
     let dir = control_dir(&binding.root, true)?;
+    let pinned = Dir::open(&dir)?;
     let path = dir.join("producer.json");
     let temp = dir.join(format!(".producer-{}.tmp", Uuid::new_v4()));
     let result = (|| {
-        let mut f = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp)
-            .map_err(|_| storage())?;
-        f.write_all(&bytes)
-            .and_then(|()| f.sync_all())
-            .map_err(|_| storage())?;
+        pinned.write_new(Path::new(temp.file_name().ok_or_else(conflict)?), &bytes)?;
         // Check ownership again after preparing bytes. Sync is not a distributed lock.
         if owned_manifest(binding)? != existing {
             return Err(conflict());
@@ -230,8 +203,15 @@ fn write_manifest_using(
                     storage()
                 }
             })?;
+            pinned.link_new(
+                Path::new(temp.file_name().ok_or_else(conflict)?),
+                Path::new("producer.json"),
+            )?;
         } else {
-            fs::rename(&temp, &path).map_err(|_| storage())?;
+            pinned.rename(
+                Path::new(temp.file_name().ok_or_else(conflict)?),
+                Path::new("producer.json"),
+            )?;
         }
         Ok(())
     })();
@@ -240,7 +220,7 @@ fn write_manifest_using(
     if fs::canonicalize(&binding.root).is_ok_and(|root| root == binding.root)
         && control_dir(&binding.root, false).is_ok()
     {
-        let _ = fs::remove_file(&temp);
+        let _ = pinned.remove(Path::new(temp.file_name().ok_or_else(conflict)?), false);
     }
     result
 }
@@ -250,17 +230,20 @@ fn write_manifest_using(
 pub fn disconnect_manifest(root: &Path, expected: &ProducerManifest) -> Result<(), PressError> {
     let root = fs::canonicalize(root).map_err(|_| storage())?;
     let dir = control_dir(&root, false)?;
-    let path = dir.join("producer.json");
     let binding = PressBinding {
         root,
         producer_id: expected.producer_id,
         paper_id: expected.paper_id,
     };
-    let current = decode_manifest(&bounded_regular(&path)?, &binding)?;
+    let pinned = Dir::open(&dir)?;
+    let current = decode_manifest(
+        &pinned.read(Path::new("producer.json"), MAX_CONTROL_BYTES)?,
+        &binding,
+    )?;
     if &current != expected {
         return Err(conflict());
     }
-    fs::remove_file(path).map_err(|_| storage())
+    pinned.remove(Path::new("producer.json"), false)
 }
 
 fn advertisement(paper: &Config, binding: &PressBinding, enabled: bool) -> ProducerManifest {

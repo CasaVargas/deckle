@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Immutable publication. The caller retains the local build lock throughout.
 use super::journal::storage;
+use super::safe_io::Dir;
 use super::*;
 use chrono::{DateTime, Utc};
 use sha2::{Digest, Sha256};
@@ -14,19 +15,14 @@ pub(crate) fn conflict() -> PressError {
     PressError::new(PressErrorCode::ProtocolConflict)
 }
 pub(crate) fn directory(path: &Path, create: bool) -> Result<(), PressError> {
-    if create {
-        match fs::create_dir(path) {
-            Ok(()) => sync_dir(path.parent().ok_or_else(conflict)?)?,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => (),
-            Err(_) => return Err(storage()),
-        }
-    }
-    if !fs::symlink_metadata(path)
-        .map_err(|_| storage())?
-        .file_type()
-        .is_dir()
-    {
+    if fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_dir()) {
         return Err(conflict());
+    }
+    if create {
+        Dir::open(path.parent().ok_or_else(conflict)?)?
+            .child(Path::new(path.file_name().ok_or_else(conflict)?), true)?;
+    } else {
+        Dir::open(path)?;
     }
     Ok(())
 }
@@ -53,14 +49,10 @@ pub(crate) fn editions(b: &PressBinding, create: bool) -> Result<PathBuf, PressE
     Ok(p)
 }
 fn regular(path: &Path) -> Result<Vec<u8>, PressError> {
-    if !fs::symlink_metadata(path)
-        .map_err(|_| storage())?
-        .file_type()
-        .is_file()
-    {
-        return Err(conflict());
-    }
-    fs::read(path).map_err(|_| storage())
+    Dir::open(path.parent().ok_or_else(conflict)?)?.read(
+        Path::new(path.file_name().ok_or_else(conflict)?),
+        usize::MAX - 1,
+    )
 }
 fn hash(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
@@ -69,11 +61,12 @@ fn hash(bytes: &[u8]) -> String {
         .collect()
 }
 fn file_hash(path: &Path, size: u64, expected: &str) -> Result<(), PressError> {
-    let meta = fs::symlink_metadata(path).map_err(|_| storage())?;
+    let mut file = Dir::open(path.parent().ok_or_else(conflict)?)?
+        .open_file(Path::new(path.file_name().ok_or_else(conflict)?), false)?;
+    let meta = file.metadata().map_err(|_| storage())?;
     if !meta.file_type().is_file() || meta.len() != size {
         return Err(conflict());
     }
-    let mut file = File::open(path).map_err(|_| storage())?;
     let mut hash = Sha256::new();
     let mut buf = [0u8; 65536];
     loop {
@@ -214,7 +207,9 @@ fn stage(
     Ok(staging)
 }
 pub(crate) fn archive(j: &PressJournal, l: &JobLease, create: bool) -> Result<PathBuf, PressError> {
-    let root = j.local_root().join("archive");
+    let root = fs::canonicalize(j.local_root())
+        .map_err(|_| storage())?
+        .join("archive");
     directory(&root, create)?;
     let paper = root.join(l.paper_id.to_string());
     directory(&paper, create)?;
@@ -236,7 +231,10 @@ pub fn publish_result(
         bundle: format!(".deckle-press/editions/{}.deckle", l.edition_id),
         manifest_sha256: a.manifest_sha256.clone(),
     };
-    verify(&a.bundle, l, &a.manifest_sha256)?;
+    let source = fs::canonicalize(a.bundle.parent().ok_or_else(conflict)?)
+        .map_err(|_| storage())?
+        .join(a.bundle.file_name().ok_or_else(conflict)?);
+    verify(&source, l, &a.manifest_sha256)?;
     j.record_intent(l, result.clone(), clock())?;
     let local = archive(j, l, true)?;
     if fs::symlink_metadata(&local).is_ok() {
@@ -244,7 +242,7 @@ pub fn publish_result(
     } else {
         let tmp = stage(
             j,
-            &a.bundle,
+            &source,
             local.parent().unwrap(),
             l,
             &a.manifest_sha256,
@@ -254,11 +252,48 @@ pub fn publish_result(
         sync_dir(local.parent().unwrap())?;
     }
     let parent = editions(&b, true)?;
+    let pinned = Dir::open(&parent)?;
     let final_path = parent.join(format!("{}.deckle", l.edition_id));
     if fs::symlink_metadata(&final_path).is_ok() {
         return recover_result(j, l, clock())?.ok_or_else(conflict);
     }
-    let temp = stage(j, &local, &parent, l, &a.manifest_sha256, false)?;
+    let paths = verify(&local, l, &a.manifest_sha256)?;
+    let name = format!(".{}-{}.tmp", l.edition_id, Uuid::new_v4());
+    j.record_stage(l, name.clone(), false)?;
+    let staging = pinned.child(Path::new(&name), true)?;
+    for rel in paths
+        .iter()
+        .map(String::as_str)
+        .chain(std::iter::once("edition.json"))
+    {
+        let parts: Vec<_> = Path::new(rel).components().collect();
+        // Traverse each asset parent from the pinned staging root, never an ambient path.
+        let mut dirs = Vec::new();
+        for part in &parts[..parts.len() - 1] {
+            let d = dirs
+                .last()
+                .unwrap_or(&staging)
+                .child(Path::new(part.as_os_str()), true)?;
+            dirs.push(d);
+        }
+        let target = dirs.last().unwrap_or(&staging);
+        let source = safe_file(&local, rel)?;
+        let mut from = Dir::open(source.parent().ok_or_else(conflict)?)?
+            .open_file(Path::new(source.file_name().ok_or_else(conflict)?), false)?;
+        let mut to = target.open_file(Path::new(parts.last().unwrap().as_os_str()), true)?;
+        std::io::copy(&mut from, &mut to)
+            .and_then(|_| to.sync_all())
+            .map_err(|_| storage())?;
+        drop(to);
+        target.sync()?;
+    }
+    staging.sync()?;
+    verify(&parent.join(&name), l, &a.manifest_sha256)?;
+    staging.validate()?;
+    let stage_identity = staging.object_id()?;
+    drop(staging);
+    pinned.validate()?;
+    let temp = PathBuf::from(name);
     check_binding(&b)?;
     let now = clock();
     j.publish(l, result, now, || {
@@ -269,8 +304,15 @@ pub fn publish_result(
         if fs::symlink_metadata(&final_path).is_ok() {
             return Err(conflict());
         }
-        fs::rename(&temp, &final_path).map_err(|_| storage())?;
-        sync_dir(&parent)
+        pinned.validate()?;
+        pinned.rename(
+            &temp,
+            Path::new(final_path.file_name().ok_or_else(conflict)?),
+        )?;
+        if Dir::open(&final_path)?.object_id()? != stage_identity {
+            return Err(conflict());
+        }
+        pinned.validate()
     })?;
     let status = j.job_status(l.job_id).ok_or_else(conflict)?;
     flush_statuses(j)?;
@@ -323,11 +365,12 @@ pub fn flush_statuses(j: &mut PressJournal) -> Result<(), PressError> {
     }
     error.map_or(Ok(()), Err)
 }
-fn flush_status(j: &PressJournal, s: PressStatus) -> Result<(), PressError> {
+pub(crate) fn flush_status(j: &PressJournal, s: PressStatus) -> Result<(), PressError> {
     let b = j.binding_for_request(s.request_id).ok_or_else(conflict)?;
     check_binding(&b)?;
     let parent = b.root.join(".deckle-press/status");
     directory(&parent, true)?;
+    let pinned = Dir::open(&parent)?;
     let dest = parent.join(format!("{}.json", s.request_id));
     if let Ok(meta) = fs::symlink_metadata(&dest) {
         if meta.len() > MAX_CONTROL_BYTES as u64 || !meta.file_type().is_file() {
@@ -347,11 +390,12 @@ fn flush_status(j: &PressJournal, s: PressStatus) -> Result<(), PressError> {
     }
     let temp = parent.join(format!(".{}-{}.tmp", s.request_id, Uuid::new_v4()));
     let bytes = serde_json::to_vec(&s).map_err(|_| storage())?;
-    write_new(&temp, &bytes)?;
+    pinned.write_new(Path::new(temp.file_name().ok_or_else(conflict)?), &bytes)?;
     check_binding(&b)?;
-    directory(&parent, false)?;
-    fs::rename(temp, dest).map_err(|_| storage())?;
-    sync_dir(&parent)?;
+    pinned.rename(
+        Path::new(temp.file_name().ok_or_else(conflict)?),
+        Path::new(dest.file_name().ok_or_else(conflict)?),
+    )?;
     Ok(())
 }
 
@@ -369,9 +413,10 @@ pub fn archived_artifact(
     else {
         return Ok(None);
     };
+    let local_root = fs::canonicalize(j.local_root()).map_err(|_| storage())?;
     for dir in [
-        j.local_root().join("archive"),
-        j.local_root().join("archive").join(l.paper_id.to_string()),
+        local_root.join("archive"),
+        local_root.join("archive").join(l.paper_id.to_string()),
     ] {
         match fs::symlink_metadata(&dir) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),

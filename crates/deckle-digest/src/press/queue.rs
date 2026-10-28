@@ -863,6 +863,11 @@ impl PressJournal {
             removed_at: None,
             message: None,
         };
+        // Already-known IDs returned above retain their full reconciliation history.
+        // Unknown controls at the terminal horizon do not renew their journal lifetime.
+        if code == PressErrorCode::Expired && now - request.expires_at >= Duration::days(30) {
+            return Ok(status);
+        }
         let mut data = self.data.clone();
         data.entries.push(Entry {
             root: binding.root.clone(),
@@ -1028,13 +1033,25 @@ impl PressJournal {
                     .map(|b| (b, e.request.request_id))
             })
             .collect();
+        let mut error = None;
+        let mut completed = std::collections::HashSet::new();
         for (binding, id) in removed {
-            remove_status(&binding, id)?;
+            match remove_status(&binding, id) {
+                Ok(()) => {
+                    completed.insert(id);
+                }
+                Err(e) => {
+                    error.get_or_insert(e);
+                }
+            }
         }
         data.entries
-            .retain(|e| !old.contains(&e.request.request_id));
+            .retain(|e| !completed.contains(&e.request.request_id));
         data.outputs.retain(|o| {
-            !o.deleted
+            data.entries
+                .iter()
+                .any(|e| e.status.job_id == Some(o.lease.job_id))
+                || !o.deleted
                 || o.deletion_completed_at
                     .is_none_or(|at| now - at < Duration::days(30))
         });
@@ -1043,7 +1060,8 @@ impl PressJournal {
                 || data.entries.iter().any(|e| e.status.job_id == Some(j.id))
                 || data.outputs.iter().any(|o| o.lease.job_id == j.id)
         });
-        self.commit(data)
+        self.commit(data)?;
+        error.map_or(Ok(()), Err)
     }
 }
 

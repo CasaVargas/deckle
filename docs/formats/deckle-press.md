@@ -75,3 +75,7 @@ check byte limits, exact TTL, local binding, path/ID agreement and manifest/asse
 hash consistency. `fixtures/press/cases.json` is the portable conformance matrix;
 `tools/validate-press-fixtures.py` validates it offline using the pinned test-only
 requirements. The Rust integration tests cover runtime clock and routing checks.
+
+### Shared storage and bounded recovery
+
+Producer shared writes and deletions pin the selected directory hierarchy and reject ancestor replacement. An unstarted job rechecks persisted local opt-in and exact export binding after acquiring the build lock. Recovery checks for a verifiable committed output before enforcing the persisted deadline; unavailable or corrupt output cannot extend that deadline or hold the global slot after workers have been reaped. Retention completes safe work in available bindings before reporting errors from unavailable historical bindings. Unknown expired requests with `now >= expires_at + 30 days` are ignored without deleting client-owned controls; known request IDs retain normal reconciliation.
