@@ -295,7 +295,8 @@ fn home() -> Result<PathBuf, String> {
 }
 
 fn run(cmd: &mut Command) -> Result<String, String> {
-    let out = cmd
+    // Every schtasks/launchctl call lands here: no console window on Windows.
+    let out = deckle_core::quiet::hide(cmd)
         .output()
         .map_err(|e| format!("{:?}: {e}", cmd.get_program()))?;
     if out.status.success() {

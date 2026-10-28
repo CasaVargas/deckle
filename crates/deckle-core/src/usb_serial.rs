@@ -5,7 +5,6 @@
 //! model and volume name alone, as before.
 
 use std::path::Path;
-use std::process::Command;
 
 /// The USB serial of the device `root` (a mounted volume) is on, when the OS will say.
 pub fn serial_for_mount(root: &Path) -> Option<String> {
@@ -51,7 +50,7 @@ pub fn serial_for_mount(root: &Path) -> Option<String> {
 
 #[allow(dead_code)]
 fn run(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program).args(args).output().ok()?;
+    let out = crate::quiet::command(program).args(args).output().ok()?;
     out.status
         .success()
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())

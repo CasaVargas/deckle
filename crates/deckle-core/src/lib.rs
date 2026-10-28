@@ -26,6 +26,7 @@ pub mod preflight;
 pub mod preset;
 pub mod previewer;
 pub mod queue;
+pub mod quiet;
 pub mod reader;
 pub mod remarkable;
 pub mod sync;

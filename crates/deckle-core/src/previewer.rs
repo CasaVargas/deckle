@@ -2,7 +2,6 @@
 //! Stage 4a: drive Kindle Previewer's command line to turn an EPUB into a KPF.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Instant;
 
 use serde::Serialize;
@@ -196,7 +195,7 @@ pub fn locate_in(
 }
 
 fn probe_version(path: &Path) -> std::io::Result<String> {
-    let o = Command::new(path).arg("--help").output()?;
+    let o = crate::quiet::command(path).arg("--help").output()?;
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&o.stdout),
@@ -223,7 +222,7 @@ pub fn convert(p: &Previewer, epub: &Path, out_dir: &Path) -> Result<KpfResult, 
     let epub = std::path::absolute(epub)?;
     let out_dir = std::path::absolute(out_dir)?;
     let started = Instant::now();
-    let mut cmd = Command::new(&p.path);
+    let mut cmd = crate::quiet::command(&p.path);
     cmd.arg(&epub);
     if p.major >= 4 {
         cmd.args(["--convert", "--locale", "en", "--output"])
