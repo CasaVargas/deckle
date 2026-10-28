@@ -18,11 +18,11 @@
   ],
   "puzzle": {
     "grid": [
-      "#BAN#",
-      "#####",
-      "#####",
-      "#####",
-      "#####"
+      "HEART",
+      "EMBER",
+      "ABUSE",
+      "RESIN",
+      "TREND"
     ],
     "done": false,
     "ladder": [
