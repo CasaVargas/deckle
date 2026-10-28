@@ -547,19 +547,26 @@ fn press_worker_same_paper_two_enabled_folders_and_offline_old_folder() {
     *clock.lock().unwrap() += deckle_digest::chrono::Duration::minutes(6);
     let path = other.join(format!(".deckle-press/status/{}.json", request.request_id));
     let end = Instant::now() + Duration::from_secs(30);
+    // Submit the changed config once. Repeated ticks increment the policy revision;
+    // on slower filesystems they can continually supersede admission's policy check.
+    // The supervisor continues processing its current config on its own timer.
+    let _ = w.tick(std::slice::from_ref(&f.cfg), Utc::now());
     let mut published = None;
+    let mut last_status = None;
     while Instant::now() < end {
-        let _ = w.tick(std::slice::from_ref(&f.cfg), Utc::now());
         if let Ok(bytes) = std::fs::read(&path) {
             let s: press::PressStatus = serde_json::from_slice(&bytes).unwrap();
             if s.state == PressState::Published {
                 published = Some(s);
                 break;
             }
+            last_status = Some(s);
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    let second_status = published.expect("second root must publish with first offline");
+    let second_status = published.unwrap_or_else(|| {
+        panic!("second root must publish with first offline; last status: {last_status:?}")
+    });
     assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 2);
     assert_ne!(first.job_id, second_status.job_id);
     assert_ne!(first.result, second_status.result);
