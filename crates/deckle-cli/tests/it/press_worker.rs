@@ -1184,6 +1184,7 @@ fn prepare_artifact(
     .unwrap();
     (lease, artifact)
 }
+#[cfg(unix)]
 #[test]
 fn regression_publication_rejects_replaced_editions_ancestor() {
     let f = fixture("Replacement");
