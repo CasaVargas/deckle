@@ -4,9 +4,12 @@
 //! which avoids the browser's mixed-content and CORS rules. The token keeps other local pages
 //! from adding to the queue blindly.
 //!
-//! A second bookmarklet, **Save recipe**, adds `kind=recipe`: the handler drops a `.url` link
-//! file in the Inbox's `Recipes/` folder and the Inbox scan does the fetching, so the listener
-//! never waits on the network. It sends the address only, never the page (cookbook design §8.3).
+//! A second bookmarklet, **Save recipe**, carries the recipe from the page you're looking at
+//! (cookbook design §8.3, amended): the page's recipe data travels in the fragment of a popup
+//! at `/recipe`, whose own script POSTs it back to this listener, and the listener writes a
+//! saved page into the Inbox's `Recipes/` folder. So a site that refuses apps (bot protection)
+//! still works, and the listener never waits on the network. A page with no recipe data falls
+//! back to `/save?…&kind=recipe`, a `.url` link file the Inbox scan fetches.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -52,9 +55,204 @@ pub fn javascript(token: &str) -> String {
     script(token, "")
 }
 
-/// **Save recipe**: like [`javascript`], for the cookbook (`kind=recipe`).
+/// **Save recipe**: the page's `ld+json` blocks that mention `Recipe`, with its address, title,
+/// canonical, `og:image` and `og:site_name`, as JSON in the fragment of a `/recipe` popup.
+/// Nothing else leaves the page. With no such block, the address alone (`kind=recipe`).
 pub fn recipe_javascript(token: &str) -> String {
-    script(token, "&kind=recipe")
+    format!(
+        "javascript:(()=>{{const q=s=>document.querySelector(s),u=encodeURIComponent,\
+         o='http://127.0.0.1:{PORT}',b=[...document.querySelectorAll('script[type=\"application/ld+json\"]')]\
+         .map(s=>s.textContent).filter(t=>t.includes('Recipe'));\
+         window.open(b.length?o+'/recipe?token={token}\\x23'+u(JSON.stringify({{url:location.href,\
+         title:document.title,canonical:(q('link[rel=canonical]')||{{}}).href||'',\
+         image:(q('meta[property=\"og:image\"]')||{{}}).content||'',\
+         site:(q('meta[property=\"og:site_name\"]')||{{}}).content||'',blocks:b}})):\
+         o+'/save?token={token}&kind=recipe&url='+u(location.href)+'&title='+u(document.title),\
+         'deckle','width=420,height=200')}})()"
+    )
+}
+
+/// The most a carried recipe may weigh, and the most blocks it may bring.
+const MAX_CARRIED: usize = 4 * 1024 * 1024;
+const MAX_BLOCKS: usize = 20;
+
+/// What **Save recipe** carries from the page (all but `url` may be empty).
+#[derive(serde::Deserialize)]
+struct Carried {
+    url: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    canonical: String,
+    #[serde(default)]
+    image: String,
+    #[serde(default)]
+    site: String,
+    #[serde(default)]
+    blocks: Vec<String>,
+}
+
+/// An address Deckle can keep: `http(s)`, no control characters (a line break would smuggle a
+/// second address into a link file).
+fn web_address(u: &str) -> bool {
+    (u.starts_with("http://") || u.starts_with("https://")) && !u.chars().any(char::is_control)
+}
+
+/// The `/recipe` popup: reads the recipe from its own fragment, clears it, POSTs it here and
+/// shows the answer. `token` is 32 hex characters, so it needs no escaping.
+fn recipe_popup(token: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Deckle</title>\
+         <style>body{{font:16px Georgia,serif;margin:24px;color:#1f1b16;background:#f6f3ee}}\
+         h1{{font-size:20px;margin:0 0 8px}}p{{margin:0 0 16px;color:#7a7169}}\
+         button{{font:inherit;padding:4px 14px}}</style></head><body>\
+         <h1 id=\"h\">Saving…</h1><p id=\"d\"></p><button onclick=\"window.close()\">Close</button>\
+         <script>const show=(h,d,ok)=>{{document.getElementById('h').textContent=h;\
+         document.getElementById('d').textContent=d;if(ok)setTimeout(()=>window.close(),2500)}};\
+         const f=location.hash.slice(1);history.replaceState(null,'',location.pathname+location.search);\
+         if(!f)show('Not saved','The page sent nothing: run `deckle save --bookmarklet` again.');\
+         else fetch('/recipe?token={token}',{{method:'POST',headers:{{'Content-Type':'application/json'}},\
+         body:decodeURIComponent(f)}}).then(r=>r.json().then(m=>show(m.heading,m.detail,r.ok)))\
+         .catch(()=>show('Not saved','Deckle didn\\'t answer: is `deckle digest watch` running?'))\
+         </script></body></html>"
+    )
+}
+
+/// `{{"heading", "detail"}}` for the popup.
+fn answer(heading: &str, detail: &str) -> String {
+    serde_json::json!({ "heading": heading, "detail": detail }).to_string()
+}
+
+/// The saved page a carried recipe becomes: the blocks re-serialized with every `<` escaped
+/// (nothing can close the script), the rest escaped, and `deckle:source` naming the address.
+fn carried_page(c: &Carried, blocks: &[serde_json::Value]) -> String {
+    let mut head = format!(
+        "<meta charset=\"utf-8\">\n<meta name=\"deckle:source\" content=\"{}\">\n<title>{}</title>\n",
+        esc(&c.url),
+        esc(c.title.trim())
+    );
+    let canonical = if web_address(&c.canonical) {
+        &c.canonical
+    } else {
+        &c.url
+    };
+    head.push_str(&format!(
+        "<link rel=\"canonical\" href=\"{}\">\n",
+        esc(canonical)
+    ));
+    if !c.image.trim().is_empty() {
+        head.push_str(&format!(
+            "<meta property=\"og:image\" content=\"{}\">\n",
+            esc(c.image.trim())
+        ));
+    }
+    if !c.site.trim().is_empty() {
+        head.push_str(&format!(
+            "<meta property=\"og:site_name\" content=\"{}\">\n",
+            esc(c.site.trim())
+        ));
+    }
+    for b in blocks {
+        head.push_str(&format!(
+            "<script type=\"application/ld+json\">{}</script>\n",
+            b.to_string().replace('<', "\\u003c")
+        ));
+    }
+    format!("<!doctype html>\n<html><head>\n{head}</head><body></body></html>\n")
+}
+
+/// Writes `name` into `recipes_inbox` whole (written aside, then renamed), under a free name.
+fn write_whole(recipes_inbox: &Path, name: &str, body: &str) -> Result<(), String> {
+    std::fs::create_dir_all(recipes_inbox).map_err(|e| e.to_string())?;
+    let dest = free_name(recipes_inbox, name);
+    let part = recipes_inbox.join(format!(".{}.part", rand::random::<u64>()));
+    std::fs::write(&part, body)
+        .and_then(|()| std::fs::rename(&part, &dest))
+        .map_err(|e| {
+            let _ = std::fs::remove_file(&part);
+            e.to_string()
+        })
+}
+
+/// One `/recipe` request → status, content type and body. `GET` is the popup (token checked);
+/// `POST` carries the recipe as JSON, from the listener's own origin only, and becomes
+/// `<slug>.html` in `recipes_inbox` for the Inbox scan. Nothing is fetched here.
+pub fn handle_recipe(
+    method: &str,
+    query: &str,
+    origin: Option<&str>,
+    body: &[u8],
+    token: &str,
+    recipes_inbox: &Path,
+) -> (u16, &'static str, String) {
+    const HTML: &str = "text/html; charset=utf-8";
+    const JSON: &str = "application/json";
+    let ok_token = query
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("token="))
+        .map(decode)
+        .as_deref()
+        == Some(token);
+    let stale = "This bookmarklet is out of date: run `deckle save --bookmarklet` again.";
+    match method {
+        "GET" if ok_token => (200, HTML, recipe_popup(token)),
+        "GET" => (403, HTML, page("Not saved", stale)),
+        "POST" => {
+            if !ok_token {
+                return (403, JSON, answer("Not saved", stale));
+            }
+            if origin != Some(&format!("http://127.0.0.1:{PORT}")) {
+                return (
+                    403,
+                    JSON,
+                    answer("Not saved", "Only Deckle's own page can save here."),
+                );
+            }
+            let unreadable = || {
+                (
+                    400,
+                    JSON,
+                    answer("Not saved", "Deckle couldn't read what the page sent."),
+                )
+            };
+            if body.len() > MAX_CARRIED {
+                return (
+                    413,
+                    JSON,
+                    answer("Not saved", "That page's recipe data is too big to carry."),
+                );
+            }
+            let Ok(c) = serde_json::from_slice::<Carried>(body) else {
+                return unreadable();
+            };
+            if !web_address(&c.url) {
+                return (
+                    400,
+                    JSON,
+                    answer("Not saved", "That page has no web address Deckle can keep."),
+                );
+            }
+            let blocks: Vec<serde_json::Value> = c
+                .blocks
+                .iter()
+                .take(MAX_BLOCKS)
+                .filter_map(|b| serde_json::from_str(b).ok())
+                .collect();
+            if blocks.is_empty() {
+                return unreadable();
+            }
+            let name = format!("{}.html", recipe_slug(&c.url, Some(c.title.as_str())));
+            match write_whole(recipes_inbox, &name, &carried_page(&c, &blocks)) {
+                Ok(()) => (
+                    200,
+                    JSON,
+                    answer("Sent to your cookbook", "It appears after the next scan."),
+                ),
+                Err(e) => (500, JSON, answer("Not saved", &e)),
+            }
+        }
+        _ => (404, HTML, page("Not found", "")),
+    }
 }
 
 /// `%XX` and `+` decoding of one query value.
@@ -103,15 +301,11 @@ fn recipe_slug(url: &str, title: Option<&str>) -> String {
 /// Writes `<recipes_inbox>/<slug>.url` for the Inbox scan to pick up, under a name that is
 /// free. The file appears whole (written aside, then renamed), so a scan never reads half.
 fn write_recipe_link(recipes_inbox: &Path, url: &str, title: Option<&str>) -> Result<(), String> {
-    std::fs::create_dir_all(recipes_inbox).map_err(|e| e.to_string())?;
-    let dest = free_name(recipes_inbox, &format!("{}.url", recipe_slug(url, title)));
-    let part = recipes_inbox.join(format!(".{}.part", rand::random::<u64>()));
-    std::fs::write(&part, format!("[InternetShortcut]\r\nURL={url}\r\n"))
-        .and_then(|()| std::fs::rename(&part, &dest))
-        .map_err(|e| {
-            let _ = std::fs::remove_file(&part);
-            e.to_string()
-        })
+    write_whole(
+        recipes_inbox,
+        &format!("{}.url", recipe_slug(url, title)),
+        &format!("[InternetShortcut]\r\nURL={url}\r\n"),
+    )
 }
 
 /// One request line (`GET /save?… HTTP/1.1`) → status and HTML body. An article is queued
@@ -201,6 +395,45 @@ pub fn handle(
     }
 }
 
+/// One request as the listener reads it: the method, the target, the `Origin` header and the
+/// body (`Content-Length` bytes, at most [`MAX_CARRIED`] + 1, so an oversize body is noticed
+/// without reading it all).
+struct Request {
+    line: String,
+    origin: Option<String>,
+    body: Vec<u8>,
+}
+
+fn read_request(stream: &std::net::TcpStream) -> Option<Request> {
+    let mut reader = BufReader::new(stream.take(MAX_CARRIED as u64 + 64 * 1024));
+    let mut line = String::new();
+    reader.read_line(&mut line).ok()?;
+    let mut origin = None;
+    let mut length = 0usize;
+    loop {
+        let mut h = String::new();
+        if reader.read_line(&mut h).ok()? == 0 || h.trim_end().is_empty() {
+            break;
+        }
+        if let Some((name, value)) = h.split_once(':') {
+            match name.trim().to_ascii_lowercase().as_str() {
+                "origin" => origin = Some(value.trim().to_owned()),
+                "content-length" => length = value.trim().parse().unwrap_or(0),
+                _ => {}
+            }
+        }
+    }
+    let mut body = Vec::new();
+    let _ = (&mut reader)
+        .take(length.min(MAX_CARRIED + 1) as u64)
+        .read_to_end(&mut body);
+    Some(Request {
+        line: line.trim_end().to_owned(),
+        origin,
+        body,
+    })
+}
+
 /// Serves the bookmarklets on `127.0.0.1:PORT`, one request per connection, until the
 /// process ends. Errors only when the port can't be bound.
 pub fn serve(queue: ReadingQueue, token: String, recipes_inbox: PathBuf) -> std::io::Result<()> {
@@ -208,23 +441,37 @@ pub fn serve(queue: ReadingQueue, token: String, recipes_inbox: PathBuf) -> std:
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let mut line = String::new();
-        let mut reader = BufReader::new((&stream).take(8 * 1024));
-        if reader.read_line(&mut line).is_err() {
+        let Some(req) = read_request(&stream) else {
             continue;
-        }
-        let (status, body) = handle(line.trim_end(), &token, &queue, &recipes_inbox, Utc::now());
+        };
+        let mut parts = req.line.split_whitespace();
+        let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+        let (path, query) = target.split_once('?').unwrap_or((target, ""));
+        let (status, kind, body) = if path == "/recipe" {
+            handle_recipe(
+                method,
+                query,
+                req.origin.as_deref(),
+                &req.body,
+                &token,
+                &recipes_inbox,
+            )
+        } else {
+            let (status, body) = handle(&req.line, &token, &queue, &recipes_inbox, Utc::now());
+            (status, "text/html; charset=utf-8", body)
+        };
         let reason = match status {
             200 => "OK",
             400 => "Bad Request",
             403 => "Forbidden",
+            413 => "Payload Too Large",
             500 => "Internal Server Error",
             _ => "Not Found",
         };
         let _ = write!(
             stream,
-            "HTTP/1.1 {status} {reason}\r\nContent-Type: text/html; charset=utf-8\r\n\
-             Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: {kind}\r\n\
+             Content-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
     }
@@ -421,19 +668,142 @@ mod tests {
     }
 
     #[test]
-    fn recipe_javascript_has_kind_recipe() {
+    fn recipe_javascript_carries_the_recipe_or_falls_back_to_the_address() {
         let js = recipe_javascript("abc");
-        assert!(js.contains("kind=recipe"), "{js}");
-        assert!(js.contains("127.0.0.1:47219/save?token=abc&"), "{js}");
-        assert!(js.contains("encodeURIComponent(location.href)"), "{js}");
-        assert!(js.contains("encodeURIComponent(document.title)"), "{js}");
+        assert!(js.starts_with("javascript:"), "{js}");
+        assert!(js.contains("127.0.0.1:47219"), "{js}");
         assert!(
-            !js.contains("outerHTML") && !js.contains("innerHTML"),
-            "the address only, never the page: {js}"
+            js.contains(r"/recipe?token=abc\x23'+u("),
+            "the data rides in the fragment: {js}"
         );
+        // A `javascript:` bookmark is a URL: a literal `#` would end it, a `%` would be decoded.
+        assert!(!js.contains('#') && !js.contains('%'), "{js}");
+        assert!(js.contains(r#"script[type="application/ld+json"]"#), "{js}");
+        assert!(
+            js.contains("t.includes('Recipe')"),
+            "only blocks that mention a recipe: {js}"
+        );
+        assert!(
+            js.contains("/save?token=abc&kind=recipe&url="),
+            "the fallback: {js}"
+        );
+        for never in [
+            "innerHTML",
+            "outerHTML",
+            "innerText",
+            "cookie",
+            "localStorage",
+            "fetch(",
+        ] {
+            assert!(!js.contains(never), "{never}: {js}");
+        }
+        assert!(!js.contains('\n'), "one line, so it pastes as a bookmark");
         assert!(
             !javascript("abc").contains("kind="),
             "the paper's is unchanged"
         );
+    }
+
+    const ORIGIN: Option<&str> = Some("http://127.0.0.1:47219");
+
+    fn carried(url: &str, blocks: &[&str]) -> Vec<u8> {
+        serde_json::json!({"url": url, "title": "Pie & <b>Co</b>", "canonical": "javascript:alert(1)",
+            "image": "https://img.test/p.jpg\"><x", "site": "Ex", "blocks": blocks})
+        .to_string()
+        .into_bytes()
+    }
+
+    const PIE: &str =
+        r#"{"@type":"Recipe","name":"Pie","description":"</script><script>alert(1)</script>"}"#;
+
+    #[test]
+    fn recipe_popup_needs_the_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let (status, kind, body) = handle_recipe("GET", "token=abc", None, b"", "abc", dir.path());
+        assert_eq!((status, kind), (200, "text/html; charset=utf-8"));
+        assert!(body.contains("fetch('/recipe?token=abc'"), "{body}");
+        assert!(body.contains("location.hash"), "{body}");
+        assert_eq!(
+            handle_recipe("GET", "token=nope", None, b"", "abc", dir.path()).0,
+            403
+        );
+        assert_eq!(
+            handle_recipe("PUT", "token=abc", ORIGIN, b"", "abc", dir.path()).0,
+            404
+        );
+    }
+
+    #[test]
+    fn a_carried_recipe_becomes_a_saved_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = dir.path().join("Recipes");
+        let body = carried("https://ex.com/pie", &["not json", PIE]);
+        let (status, kind, answer) =
+            handle_recipe("POST", "token=abc", ORIGIN, &body, "abc", &inbox);
+        assert_eq!((status, kind), (200, "application/json"), "{answer}");
+        assert!(answer.contains("Sent to your cookbook"), "{answer}");
+        assert_eq!(recipe_files(&inbox), ["pie-b-co-b.html"]);
+        let html = std::fs::read_to_string(inbox.join("pie-b-co-b.html")).unwrap();
+        assert!(
+            html.contains(r#"<meta name="deckle:source" content="https://ex.com/pie">"#),
+            "{html}"
+        );
+        // A canonical that isn't a web address is replaced by the page's own.
+        assert!(
+            html.contains(r#"<link rel="canonical" href="https://ex.com/pie">"#),
+            "{html}"
+        );
+        assert!(
+            html.contains("<title>Pie &amp; &lt;b&gt;Co&lt;/b&gt;</title>"),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"content="https://img.test/p.jpg&quot;&gt;&lt;x""#),
+            "{html}"
+        );
+        // The block is re-serialized, every `<` escaped; the one that wasn't JSON is dropped.
+        assert_eq!(html.matches("<script").count(), 1, "{html}");
+        assert!(
+            html.contains(r#"\u003c/script>\u003cscript>alert(1)\u003c/script>"#),
+            "{html}"
+        );
+        assert!(!html.contains("not json"), "{html}");
+    }
+
+    #[test]
+    fn a_carried_recipe_is_refused_unless_it_is_whole_and_from_deckle() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = dir.path().join("Recipes");
+        let good = carried("https://ex.com/pie", &[PIE]);
+        let cases: [(&str, Option<&str>, Vec<u8>, u16); 8] = [
+            ("token=nope", ORIGIN, good.clone(), 403),
+            ("", ORIGIN, good.clone(), 403),
+            ("token=abc", None, good.clone(), 403),
+            ("token=abc", Some("https://evil.test"), good.clone(), 403),
+            ("token=abc", ORIGIN, b"{not json".to_vec(), 400),
+            ("token=abc", ORIGIN, carried("about:blank", &[PIE]), 400),
+            (
+                "token=abc",
+                ORIGIN,
+                carried("https://ex.com/\r\nURL=https://evil.test", &[PIE]),
+                400,
+            ),
+            (
+                "token=abc",
+                ORIGIN,
+                carried("https://ex.com/pie", &["nope"]),
+                400,
+            ),
+        ];
+        for (query, origin, body, want) in cases {
+            let (status, _, answer) = handle_recipe("POST", query, origin, &body, "abc", &inbox);
+            assert_eq!(status, want, "{query} {origin:?}: {answer}");
+        }
+        let big = vec![b' '; MAX_CARRIED + 1];
+        assert_eq!(
+            handle_recipe("POST", "token=abc", ORIGIN, &big, "abc", &inbox).0,
+            413
+        );
+        assert!(recipe_files(&inbox).is_empty(), "nothing written");
     }
 }

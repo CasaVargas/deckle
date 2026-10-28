@@ -71,19 +71,38 @@ impl std::fmt::Display for AddError {
 }
 
 /// A failed fetch: worth retrying, unless the server answered with a 4xx that asking again
-/// won't change. `Net`s report a status as `http status: N` (ureq's wording).
-fn fetch_error(e: String) -> AddError {
+/// won't change. `Net`s report a status as `http status: N` (ureq's wording). A 401 or 403 is
+/// a site that refuses apps (bot protection or a login), so it says what works instead.
+fn fetch_error(e: String, url: &str) -> AddError {
     let status = e
         .split("http status: ")
         .nth(1)
         .and_then(|r| r.split(|c: char| !c.is_ascii_digit()).next())
         .and_then(|n| n.parse::<u16>().ok());
     match status {
+        Some(401 | 403) => AddError::Other(format!(
+            "{} doesn't let apps read its pages. Open the recipe in your browser and click Save \
+             recipe, or save the page as .html and add that.",
+            crate::sources::feeds::host(url)
+        )),
         Some(code) if (400..500).contains(&code) && code != 408 && code != 429 => {
             AddError::Other(e)
         }
         _ => AddError::Fetch(e),
     }
+}
+
+/// The address a **Save recipe** page was carried from (`<meta name="deckle:source">`, cookbook
+/// design §8.3): the recipe is keyed and resolved by it, not by the file's path.
+fn carried_source(html: &str) -> Option<String> {
+    let doc = dom_query::Document::from(html);
+    let u = doc
+        .select(r#"meta[name="deckle:source"]"#)
+        .nodes()
+        .iter()
+        .find_map(|n| n.attr("content").map(|c| c.trim().to_owned()))?;
+    ((u.starts_with("http://") || u.starts_with("https://")) && !u.chars().any(char::is_control))
+        .then_some(u)
 }
 
 /// The recipe at `target`, the key it is stored under, and the site photo's bytes (when it
@@ -98,7 +117,7 @@ fn read(target: &str, net: &dyn Net) -> Result<(Recipe, String, Option<Vec<u8>>)
             } else {
                 url
             };
-            let bytes = net.get_page(&url).map_err(fetch_error)?;
+            let bytes = net.get_page(&url).map_err(|e| fetch_error(e, &url))?;
             let key = normalize_url(&url);
             (String::from_utf8_lossy(&bytes).into_owned(), url, key)
         }
@@ -108,12 +127,14 @@ fn read(target: &str, net: &dyn Net) -> Result<(Recipe, String, Option<Vec<u8>>)
             let base = url::Url::from_file_path(&file).map_err(|_| {
                 AddError::Other(format!("{}: not an absolute path", file.display()))
             })?;
-            let key = file.to_string_lossy().into_owned();
-            (
-                String::from_utf8_lossy(&bytes).into_owned(),
-                base.to_string(),
-                key,
-            )
+            let html = String::from_utf8_lossy(&bytes).into_owned();
+            match carried_source(&html) {
+                Some(url) => {
+                    let key = normalize_url(&url);
+                    (html, url, key)
+                }
+                None => (html, base.to_string(), file.to_string_lossy().into_owned()),
+            }
         }
     };
     let recipe = parse_recipe(&html, &base).map_err(AddError::Other)?;

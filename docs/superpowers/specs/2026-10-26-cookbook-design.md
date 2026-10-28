@@ -484,14 +484,39 @@ link box focused.
   Kindle's name, so a Kindle actually named "Recipes" has to be skipped with a one-line
   warning. An iPhone Shortcut pointed at the iCloud Inbox's
   `Recipes/` folder is the phone path.
-- **Bookmarklet:** a second bookmarklet, **Save recipe**, beside the existing one. It works
-  exactly like the existing one (a GET popup to the same `127.0.0.1` listener with `url`,
-  `title` and the token), adding `kind=recipe`. Like the existing bookmarklet, it needs
-  `deckle digest watch` running. It sends **the address only**, never the page's HTML: posting
-  page bodies to `127.0.0.1` from HTTPS pages runs into local-network permission prompts and
-  site CSPs, and it would need a body parser on a listener that today reads one request line.
-  Recipes from signed-in sites go in as saved `.html` pages (Inbox or desktop drop).
-  *(My call.)*
+- **Bookmarklet:** a second bookmarklet, **Save recipe**, beside the existing one, on the same
+  `127.0.0.1:47219` listener and token, so it needs `deckle digest watch` running.
+  *Amended 2026-10-27 (owner): it carries the recipe from the page you're looking at.* Sites
+  behind bot protection (Food Network answers any app with 403 Access Denied) can't be
+  fetched, and Deckle doesn't pretend to be a browser to get past them. The browser already
+  has the page, so the bookmarklet hands Deckle what it shows:
+  - **What it collects:** the page's `<script type="application/ld+json">` blocks that
+    mention `Recipe`, the address, the title, `link[rel=canonical]`, `og:image` and
+    `og:site_name`. Nothing else: no cookies, no page text, no other scripts.
+  - **How it travels:** the bookmarklet opens a popup at
+    `http://127.0.0.1:47219/recipe?token=…` with the data as JSON in the URL **fragment**.
+    The page never makes a request to `127.0.0.1` itself (a top-level popup isn't subject to
+    local-network permission prompts or the site's CSP, and the fragment never leaves the
+    browser). The fragment survives a site's `Cross-Origin-Opener-Policy`, which a
+    `postMessage` handshake wouldn't. Deckle's popup page reads the fragment, clears it, and
+    POSTs it to its own origin.
+  - **The listener** parses one POST: the token must match, `Origin` must be the listener's
+    own, and the body is at most 4 MB of JSON. Each block must parse as JSON. The address
+    must be `http(s)` with no control characters. It writes a saved page, `<slug>.html`, into
+    `Inbox/Recipes/`, written aside and renamed in. The page holds the blocks re-serialized
+    (every `<` escaped as `\u003c`, so nothing can close the script), the escaped title,
+    canonical, image and site name, and `<meta name="deckle:source" content="<address>">`.
+  - **Reading it:** the Inbox scan reads it like any saved page. A `deckle:source` address
+    makes the recipe's key and base that address, not the file's path. So a re-save updates
+    the same recipe, the dedupe matches a pasted address, and relative links resolve against
+    the site. The photo is still fetched from its image address, and a blocked image leaves
+    the recipe without a photo.
+  - **No recipe data on the page:** the bookmarklet falls back to the address-only `.url`
+    link (`/save?…&kind=recipe`), fetched by the Inbox scan as before.
+
+  Recipes from signed-in sites can still go in as saved `.html` pages (Inbox or desktop
+  drop). A paste on the Cookbook tab, or a `.url` file, that a site refuses with 401 or 403
+  says so plainly and points to Save recipe or a saved page, instead of a raw HTTP error.
 
 Recipes never land in the Daily's Your Reading, and articles never land in the cookbook.
 The owner picks by the way they save. There's no content sniffing to guess which one a link

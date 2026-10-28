@@ -92,14 +92,24 @@ is safe. Drop an Unreadable file back in to try again.
 
 ### Save recipe bookmarklet
 
-`deckle save --bookmarklet` prints a second bookmarklet beside the paper's, **Save recipe**. Drag it
-to the bookmarks bar; on a recipe page, click it. A small popup says "Sent to your cookbook" and
-`deckle digest watch` adds the recipe on its next scan (every few seconds). It works like the
-paper's bookmarklet (a popup to `127.0.0.1:47219` with the same token, so it needs `watch`
-running), but the listener only writes a link file, named after the page's title, into
-`Inbox/Recipes`; the scan does the fetching. It sends the page's address only, never its HTML.
-For a recipe behind a login, save the page as `.html` and drop it into `Inbox/Recipes`. If the
-popup says the bookmarklet is out of date, run `deckle save --bookmarklet` again.
+Copy it from the Cookbook tab (**Copy bookmarklet**, under Add a recipe) or print it with
+`deckle save --bookmarklet`, then add a bookmark in your browser and paste it as the address.
+On a recipe page, click it: a small popup says "Sent to your cookbook", and the recipe appears
+after the next scan (every few seconds). It needs Deckle running (the app, or
+`deckle digest watch`).
+
+It takes the recipe **from the page you're looking at**, so it works on sites that refuse
+apps, like Food Network. It reads only the page's recipe data (its `ld+json` blocks that
+mention a recipe), the address, the title, and the page's canonical link, share image and site
+name. It never reads cookies, the page's text or anything else. The data rides in the fragment
+of a popup at `127.0.0.1:47219`, so the page itself never contacts Deckle. The popup hands it
+to Deckle, which saves it as an `.html` page in `Inbox/Recipes`. The recipe is kept under the
+page's address, so saving it again updates it. The photo is still downloaded from its image
+link.
+
+A page with no recipe data sends just its address, and the scan fetches it. For a recipe
+behind a login, save the page as `.html` and drop it into `Inbox/Recipes`. If the popup says
+the bookmarklet is out of date, copy it again.
 
 `Recipes` is reserved in the Inbox: a Kindle actually named "Recipes" can't have a folder there,
 and `watch` says so once.

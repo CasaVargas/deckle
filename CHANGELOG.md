@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Save recipe works on sites that block apps.** The Save recipe bookmarklet now takes the
+  recipe from the page you're looking at, so sites like Food Network that refuse Deckle's own
+  fetch work too. Copy the new bookmarklet from the Cookbook tab (or `deckle save
+  --bookmarklet`) and replace the old one.
+- **A site that refuses Deckle says so.** Pasting the address of such a site on the Cookbook
+  tab now says the site doesn't let apps read its pages and what to do instead, not a raw
+  HTTP error.
+
 ## 0.8.0 — the Kitchen Book, and a paper that looks printed
 
 - **The Kitchen Book.** A cookbook that grows on your Kindle. Save a recipe from a recipe site

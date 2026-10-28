@@ -88,6 +88,7 @@ pub fn run() {
             daily::reading_save,
             daily::reading_remove,
             daily::bookmarklet,
+            daily::recipe_bookmarklet,
             daily::edition_preview,
             daily::daily_run,
             daily::schedule_get,
