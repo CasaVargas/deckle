@@ -83,6 +83,8 @@ def main():
     Draft202012Validator.check_schema(schema)
     validator = Draft202012Validator(schema, format_checker=FormatChecker(), registry=Registry(retrieve=no_remote))
     cases = json.loads((FIXTURES / "cases.json").read_text())
+    for body_case in json.loads((FIXTURES / "body-hashes.json").read_text()):
+        assert hashlib.sha256(body_case["body"]["text"].encode("utf-8")).hexdigest() == body_case["sha256"]
     for case in cases:
         errors = validate((FIXTURES / case["file"]).read_bytes(), validator)
         assert bool(errors) != case["valid"], (case, errors)
