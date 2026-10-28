@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Local supervisor and isolated child. Shared request bytes never select process arguments.
 use deckle_digest::{
-    Config, GatherOptions, Net,
+    Config, Net,
     chrono::{DateTime, Utc},
     press::{self, *},
 };
@@ -258,7 +258,7 @@ fn build_job(path: &Path, mut job: JobDescriptor, net: &dyn Net) -> Result<(), S
         work_dir: job.work,
         books: job.books,
     };
-    let artifact = build_fresh(&job.config, &context, net, &GatherOptions::default())
+    let artifact = build_fresh(&job.config, &context, net, &crate::gather_options())
         .map_err(|e| e.to_string())?;
     save_new(
         &path.with_file_name("result.json"),
@@ -619,28 +619,34 @@ impl Engine {
                         }
                     }
                 }
-            } else if revision.load(Ordering::SeqCst) == rev
-                && self.lock()?
-                && let Some(lease) = self
-                    .journal
-                    .as_mut()
-                    .unwrap()
-                    .admit((self.options.clock)())?
-            {
-                if let Some((_, cfg, index)) = bindings
-                    .iter()
-                    .find(|(b, _, _)| b.paper_id == lease.paper_id && b.root == lease.root)
-                {
-                    self.spawn(lease, cfg, *index)?;
-                } else {
-                    self.journal.as_mut().unwrap().fail(
-                        &lease,
-                        PressErrorCode::BuildFailed,
-                        (self.options.clock)(),
-                    )?;
+            } else if revision.load(Ordering::SeqCst) == rev && self.lock()? {
+                // Lock acquisition and the earlier scan may have taken time. Refresh
+                // current policy only after holding the lock, and never admit a snapshot
+                // superseded by a newer tick during either operation.
+                let policy_now = (self.options.clock)();
+                if revision.load(Ordering::SeqCst) == rev {
+                    let bindings = self.policies(papers, policy_now)?;
+                    let admission_now = (self.options.clock)();
+                    if revision.load(Ordering::SeqCst) == rev
+                        && let Some(lease) = self.journal.as_mut().unwrap().admit(admission_now)?
+                    {
+                        if let Some((_, cfg, index)) = bindings
+                            .iter()
+                            .find(|(b, _, _)| b.paper_id == lease.paper_id && b.root == lease.root)
+                        {
+                            self.spawn(lease, cfg, *index)?;
+                        } else {
+                            self.journal.as_mut().unwrap().fail(
+                                &lease,
+                                PressErrorCode::BuildFailed,
+                                (self.options.clock)(),
+                            )?;
+                        }
+                    }
                 }
             }
         }
+
         if self.running.is_none() && self.journal.as_ref().unwrap().active().is_none() {
             self.lock = None;
         }

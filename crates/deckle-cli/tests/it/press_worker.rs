@@ -676,3 +676,129 @@ fn press_worker_private_state_cannot_be_placed_in_shared_export() {
     assert!(!invalid.exists());
     assert!(!f.binding.root.join(".deckle-press/editions").exists());
 }
+
+fn admission_boundary_change(change: &str) {
+    use std::sync::{
+        Barrier, Mutex,
+        atomic::{AtomicUsize, Ordering},
+        mpsc,
+    };
+    let mut f = fixture("Admission boundary");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let clock_calls = calls.clone();
+    let (entered, at_boundary) = mpsc::sync_channel(1);
+    let release = Arc::new(Barrier::new(2));
+    let clock_release = release.clone();
+    let sent = Mutex::new(Some(entered));
+    f.options.clock = Arc::new(move || {
+        // First sample drives scanning; the second occurs while holding run.lock,
+        // immediately before admission. Pause real supervisor execution at that boundary.
+        if clock_calls.fetch_add(1, Ordering::SeqCst) == 1 {
+            sent.lock().unwrap().take().unwrap().send(()).unwrap();
+            clock_release.wait();
+        }
+        Utc::now()
+    });
+    let launches = Arc::new(AtomicUsize::new(0));
+    let spawned = launches.clone();
+    f.options.launch = Arc::new(move |job| {
+        spawned.fetch_add(1, Ordering::SeqCst);
+        launch(job)
+    });
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    w.tick(std::slice::from_ref(&f.cfg), Utc::now()).unwrap();
+    at_boundary.recv_timeout(Duration::from_secs(5)).unwrap();
+    let held = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&f.options.run_lock)
+        .unwrap();
+    assert!(matches!(
+        held.try_lock(),
+        Err(std::fs::TryLockError::WouldBlock)
+    ));
+    let error = match change {
+        "snapshot" => {
+            f.cfg.export[0].press_enabled = false;
+            w.tick(std::slice::from_ref(&f.cfg), Utc::now()).unwrap();
+            press::PressErrorCode::Disabled
+        }
+        "stop" => {
+            press::write_stop(
+                &f.cfg.press_state(),
+                Some(
+                    Utc::now()
+                        .with_timezone(&deckle_digest::tz::local_tz())
+                        .date_naive(),
+                ),
+            )
+            .unwrap();
+            press::PressErrorCode::PressesStopped
+        }
+        "binding" => {
+            let path = f.binding.root.join(".deckle-press/producer.json");
+            let mut manifest: ProducerManifest =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            manifest.enabled = false;
+            press::setup::write_manifest(&f.binding, &manifest).unwrap();
+            press::PressErrorCode::Disabled
+        }
+        _ => unreachable!(),
+    };
+    release.wait();
+    // Do not send more ticks: that would hide a stale policy bug by supplying a new revision.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && launches.load(Ordering::SeqCst) == 0
+        && !status(&f).is_some_and(|s| s.state == PressState::Failed)
+    {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        launches.load(Ordering::SeqCst),
+        0,
+        "obsolete policy launched a child after acquiring run.lock"
+    );
+    let rejected = status(&f).expect("durable rejection");
+    assert_eq!(rejected.error_code, Some(error));
+    assert!(rejected.started_at.is_none());
+}
+#[test]
+fn press_worker_rechecks_latest_snapshot_after_lock() {
+    admission_boundary_change("snapshot");
+}
+#[test]
+fn press_worker_rechecks_stop_after_lock() {
+    admission_boundary_change("stop");
+}
+#[test]
+fn press_worker_rechecks_binding_after_lock() {
+    admission_boundary_change("binding");
+}
+
+#[test]
+fn press_worker_preserves_fraction_only_shelf_progress() {
+    let mut f = fixture("Shelf fraction");
+    f.cfg.sections = vec![deckle_digest::SectionKind::Shelf];
+    let bytes=serde_json::to_vec(&serde_json::json!({"kindles":{"test-device":{"name":"Test device","seen":Utc::now().to_rfc3339(),"books":[{"file":"a-book.kfx","title":"Test book","last_read":Utc::now().to_rfc3339(),"kindle_fraction":0.613}]}},"shown":{}})).unwrap();
+    std::fs::write(f.cfg.shelf_store(), &bytes).unwrap();
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut w, PressState::Published);
+    let result = status(&f).unwrap().result.unwrap();
+    let manifest: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(f.binding.root.join(result.bundle).join("edition.json")).unwrap(),
+    )
+    .unwrap();
+    let text = manifest["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["stories"].as_array().unwrap())
+        .filter_map(|s| s["body"]["text"].as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        text.contains("about 61%"),
+        "fresh shelf omitted supported fraction progress: {text}"
+    );
+    assert_eq!(std::fs::read(f.cfg.shelf_store()).unwrap(), bytes);
+}
