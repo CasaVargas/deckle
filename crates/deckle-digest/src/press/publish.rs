@@ -144,9 +144,9 @@ pub(crate) fn verify(
     }
     Ok(paths.into_iter().collect())
 }
-pub(crate) fn sync_dir(p: &Path) -> Result<(), PressError> {
+pub(crate) fn sync_dir(_path: &Path) -> Result<(), PressError> {
     #[cfg(unix)]
-    File::open(p)
+    File::open(_path)
         .and_then(|f| f.sync_all())
         .map_err(|_| storage())?;
     Ok(())
