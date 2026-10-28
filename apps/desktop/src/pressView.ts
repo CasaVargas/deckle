@@ -43,3 +43,16 @@ export function patchExport(folder: ExportConfig, patch: Partial<ExportConfig>):
   if (next.dir !== folder.dir || next.format !== folder.format) next.press_enabled = false;
   return next;
 }
+
+/** A failed edit blocks this attempt; only an applied authoritative refresh retires its error. */
+export async function setupWithRefresh(
+  setup: () => Promise<PressSetupStatus>,
+  refresh: () => Promise<boolean>,
+  discardSaveFailure: () => void,
+): Promise<PressSetupStatus> {
+  try {
+    return await setup();
+  } finally {
+    if (await refresh()) discardSaveFailure();
+  }
+}

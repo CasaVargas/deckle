@@ -3,7 +3,7 @@
 // far, when it goes to press, a link box and the week), Sections, Reading, Editions and Delivery,
 // all backed by digest.toml and the CLI. The paper switcher picks which paper they work on.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { setupSavedExport } from "./pressView";
+import { setupSavedExport, setupWithRefresh } from "./pressView";
 import { debounce, saveQueue } from "./saveQueue";
 import SectionsTab from "./SectionsTab";
 import type { Change } from "./SectionsTab";
@@ -284,25 +284,27 @@ export default function DailyView({
     const slug = live.current.paper;
     const paperArg = slug === "main" ? null : slug;
     try {
-      return await setupSavedExport(index, folder, enabled, async () => {
-        typing.flush();
-        await queue.drain();
-        return failed.current === null;
-      },
-        () => live.current.paper === slug ? draftRef.current?.export ?? [] : [],
-        (i, on, expected) => api.pressSetup(paperArg, i, on, expected));
-    } finally {
-      try {
-        const st = await api.dailyState(paperArg);
-        if (live.current.paper === slug) {
+      return await setupWithRefresh(
+        () => setupSavedExport(index, folder, enabled, async () => {
+          typing.flush();
+          await queue.drain();
+          return failed.current === null;
+        },
+          () => live.current.paper === slug ? draftRef.current?.export ?? [] : [],
+          (i, on, expected) => api.pressSetup(paperArg, i, on, expected)),
+        async () => {
+          const st = await api.dailyState(paperArg);
+          if (live.current.paper !== slug) return false;
           setState(st);
           draftRef.current = st.config ? structuredClone(st.config) : null;
           setDraft(draftRef.current);
-        }
-      } finally {
-        pressBusyRef.current = false;
-        setPressBusy(false);
-      }
+          return !!st.config && !st.error;
+        },
+        () => { failed.current = null; },
+      );
+    } finally {
+      pressBusyRef.current = false;
+      setPressBusy(false);
     }
   };
 

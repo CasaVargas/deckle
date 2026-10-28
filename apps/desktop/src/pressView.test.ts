@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test, vi } from "vitest";
-import { pressView, setupSavedExport, patchExport } from "./pressView";
+import { pressView, setupSavedExport, setupWithRefresh, patchExport } from "./pressView";
 import { newExport } from "./exportsView";
 import { saveQueue } from "./saveQueue";
 const folder = { ...newExport("/synced/paper", []), format: "bundle" as const };
@@ -45,4 +45,42 @@ test("changing format opts out instead of copying activation into a different bi
   expect(patchExport({ ...folder, press_enabled: true }, { format: "pdf" }).press_enabled).toBe(false);
   expect(patchExport(folder, { press_enabled: true }).press_enabled).not.toBe(true);
   expect(patchExport({ ...folder, press_enabled: true }, { books: true }).press_enabled).toBe(true);
+});
+
+
+test.each([true, false])("a failed pending edit blocks setup, then authoritative refresh permits explicit setup=%s", async (enabled) => {
+  const saved = [{ ...folder, press_enabled: true }];
+  let current = [{ ...saved[0], books: true }];
+  const failure: { current: string | null } = { current: null };
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const save = vi.fn(async () => { await gate; throw new Error("Binding needs setup"); });
+  const queue = saveQueue(save, (e) => { failure.current = String(e); });
+  void queue.push(undefined);
+  const setup = vi.fn(async () => ({ ...ready, enabled, watcher_ready: enabled }));
+  const run = () => setupWithRefresh(
+    () => setupSavedExport(0, saved[0], enabled,
+      async () => { await queue.drain(); return failure.current === null; },
+      () => current, setup),
+    async () => { current = structuredClone(saved); return true; },
+    () => { failure.current = null; },
+  );
+  const first = run();
+  const blocked = expect(first).rejects.toThrow(/save/i);
+  expect(setup).not.toHaveBeenCalled();
+  release();
+  await blocked;
+  expect(setup).not.toHaveBeenCalled();
+  expect(current).toEqual(saved);
+  expect(failure.current).toBeNull();
+  expect(await run()).toMatchObject({ enabled, error: null });
+  expect(setup).toHaveBeenCalledExactlyOnceWith(0, enabled, { dir: folder.dir, format: "bundle" });
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+test("an unsuccessful or unapplied settings refresh cannot discard a save failure", async () => {
+  const clear = vi.fn();
+  await expect(setupWithRefresh(async () => ready, async () => { throw new Error("offline"); }, clear)).rejects.toThrow("offline");
+  expect(await setupWithRefresh(async () => ready, async () => false, clear)).toEqual(ready);
+  expect(clear).not.toHaveBeenCalled();
 });
