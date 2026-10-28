@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.9.0 — no more black windows on Windows
 
+- **No more console windows on Windows.** Opening the Daily tab popped a burst of black
+  command-prompt windows (a Reddit reader spotted them on first launch). They were Deckle
+  asking Task Scheduler about its edition task; the same thing could happen when a Kindle was
+  plugged in or Kindle Previewer ran. Every such check now runs with no window at all.
 - **Save recipe works on sites that block apps.** The Save recipe bookmarklet now takes the
   recipe from the page you're looking at, so sites like Food Network that refuse Deckle's own
   fetch work too. Copy the new bookmarklet from the Cookbook tab (or `deckle save
