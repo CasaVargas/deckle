@@ -128,7 +128,7 @@ pub async fn morgue_send(date: String) -> Result<String, String> {
     date_of(&date)?;
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let out = std::process::Command::new(&exe)
+        let out = deckle_core::quiet::command(&exe)
             .args(["digest", "--json", "morgue", "send", &date])
             .output()
             .map_err(|e| format!("couldn't start {}: {e}", exe.display()))?;

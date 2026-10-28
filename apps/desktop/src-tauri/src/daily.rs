@@ -642,7 +642,7 @@ pub fn daily_run(app: AppHandle, send: bool, paper: Option<String>) -> Result<()
     std::fs::create_dir_all(&preview).map_err(|e| e.to_string())?;
     let args = run_args(send, &preview, paper.as_deref());
     std::thread::spawn(move || {
-        let result = match std::process::Command::new(&exe).args(&args).output() {
+        let result = match deckle_core::quiet::command(&exe).args(&args).output() {
             Ok(out) => parse_run(out.status.success(), &out.stdout, &out.stderr),
             Err(e) => RunResult {
                 ok: false,
