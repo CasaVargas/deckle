@@ -1,0 +1,428 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deckle.app/formats/deckle-state.schema.json",
+  "$comment": "SPDX-License-Identifier: MIT",
+  "title": "Compatible-client owned state snapshot v1",
+  "type": "object",
+  "properties": {
+    "format": {
+      "const": "deckle-state"
+    },
+    "version": {
+      "const": 1
+    },
+    "writer_id": {
+      "$ref": "#/$defs/uuid"
+    },
+    "writer_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "revision": {
+      "$ref": "#/$defs/counter"
+    },
+    "registers": {
+      "type": "array",
+      "maxItems": 10000,
+      "items": {
+        "$ref": "#/$defs/operation"
+      }
+    }
+  },
+  "required": [
+    "format",
+    "version",
+    "writer_id",
+    "writer_name",
+    "subject",
+    "revision",
+    "registers"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\\s\\S])"
+    },
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "counter": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}(?![\\s\\S])"
+    },
+    "text": {
+      "type": "string",
+      "maxLength": 16384
+    },
+    "context": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "$ref": "#/$defs/uuid"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/counter"
+      }
+    },
+    "subject": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "fresh"
+            },
+            "paper_id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "edition_id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "manifest_sha256": {
+              "$ref": "#/$defs/hash"
+            }
+          },
+          "required": [
+            "kind",
+            "paper_id",
+            "edition_id",
+            "manifest_sha256"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "legacy"
+            },
+            "date": {
+              "type": "string",
+              "format": "date"
+            },
+            "manifest_sha256": {
+              "$ref": "#/$defs/hash"
+            }
+          },
+          "required": [
+            "kind",
+            "date",
+            "manifest_sha256"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "range": {
+      "type": "object",
+      "properties": {
+        "location": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "location",
+        "length"
+      ],
+      "additionalProperties": false
+    },
+    "anchor": {
+      "type": "object",
+      "properties": {
+        "story_id": {
+          "$ref": "#/$defs/id"
+        },
+        "body_sha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "utf16_offset": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "quote": {
+          "$ref": "#/$defs/text"
+        }
+      },
+      "required": [
+        "story_id",
+        "body_sha256",
+        "utf16_offset",
+        "quote"
+      ],
+      "additionalProperties": false
+    },
+    "mark": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "story_id": {
+          "$ref": "#/$defs/id"
+        },
+        "body_sha256": {
+          "$ref": "#/$defs/hash"
+        },
+        "range": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/range"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quote": {
+          "$ref": "#/$defs/text"
+        },
+        "note": {
+          "$ref": "#/$defs/text"
+        }
+      },
+      "required": [
+        "id",
+        "story_id",
+        "body_sha256",
+        "range",
+        "quote",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "key": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "last_location"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "story_position"
+            },
+            "story_id": {
+              "$ref": "#/$defs/id"
+            }
+          },
+          "required": [
+            "kind",
+            "story_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "mark"
+            },
+            "id": {
+              "$ref": "#/$defs/uuid"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "crossword_cell"
+            },
+            "puzzle_id": {
+              "$ref": "#/$defs/id"
+            },
+            "row": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 999
+            },
+            "column": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 999
+            }
+          },
+          "required": [
+            "kind",
+            "puzzle_id",
+            "row",
+            "column"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "ladder"
+            },
+            "puzzle_id": {
+              "$ref": "#/$defs/id"
+            }
+          },
+          "required": [
+            "kind",
+            "puzzle_id"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "anchor"
+            },
+            "anchor": {
+              "$ref": "#/$defs/anchor"
+            }
+          },
+          "required": [
+            "kind",
+            "anchor"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "mark"
+            },
+            "mark": {
+              "$ref": "#/$defs/mark"
+            }
+          },
+          "required": [
+            "kind",
+            "mark"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "cell"
+            },
+            "letter": {
+              "type": "string",
+              "pattern": "^[A-Z](?![\\s\\S])"
+            }
+          },
+          "required": [
+            "kind",
+            "letter"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "ladder"
+            },
+            "words": {
+              "type": "array",
+              "maxItems": 1000,
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Z]{1,128}(?![\\s\\S])"
+              }
+            }
+          },
+          "required": [
+            "kind",
+            "words"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "operation": {
+      "type": "object",
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/key"
+        },
+        "value": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/value"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dot": {
+          "type": "object",
+          "properties": {
+            "writer_id": {
+              "$ref": "#/$defs/uuid"
+            },
+            "counter": {
+              "$ref": "#/$defs/counter"
+            }
+          },
+          "required": [
+            "writer_id",
+            "counter"
+          ],
+          "additionalProperties": false
+        },
+        "context": {
+          "$ref": "#/$defs/context"
+        },
+        "display_timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "key",
+        "value",
+        "dot",
+        "context",
+        "display_timestamp"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

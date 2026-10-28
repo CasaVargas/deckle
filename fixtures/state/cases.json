@@ -1,0 +1,90 @@
+[
+  {
+    "file": "snapshot.json",
+    "valid": true
+  },
+  {
+    "file": "concurrent.json",
+    "valid": true
+  },
+  {
+    "file": "resolved-clear.json",
+    "valid": true
+  },
+  {
+    "file": "mark.json",
+    "valid": true
+  },
+  {
+    "file": "legacy-mark.json",
+    "valid": true
+  },
+  {
+    "file": "immutable-context.json",
+    "valid": true
+  },
+  {
+    "file": "invalid-owner.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-self-context.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-payload.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-unsafe-key.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-counter.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-version.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-date.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-duplicate-key.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-note-bytes.json",
+    "valid": false
+  },
+  {
+    "file": "all-register-types.json",
+    "valid": true
+  },
+  {
+    "file": "invalid-story-binding.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-hash.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-uuid-newline.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-timestamp.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-range-overflow.json",
+    "valid": false
+  },
+  {
+    "file": "invalid-mark-binding.json",
+    "valid": false
+  }
+]

@@ -1,0 +1,21 @@
+[
+  {
+    "subject": {
+      "kind": "fresh",
+      "paper_id": "11111111-1111-4111-8111-111111111111",
+      "edition_id": "22222222-2222-4222-8222-222222222222",
+      "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "canonical_utf8": "[\"fresh\",\"11111111-1111-4111-8111-111111111111\",\"22222222-2222-4222-8222-222222222222\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]",
+    "key": "3276d4210f53dba34c48079980b29dba8d6063dcdf5c13ed4274d171c9b2dfa1"
+  },
+  {
+    "subject": {
+      "kind": "legacy",
+      "date": "2026-10-28",
+      "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "canonical_utf8": "[\"legacy\",\"2026-10-28\",\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]",
+    "key": "2c84c60253bba9bc003714bf6c6c9596024b11d317c3bbd4b82f11ecdc7fa8b4"
+  }
+]

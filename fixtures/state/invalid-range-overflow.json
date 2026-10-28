@@ -1,0 +1,41 @@
+{
+  "format": "deckle-state",
+  "version": 1,
+  "writer_id": "11111111-1111-4111-8111-111111111111",
+  "writer_name": "Desk",
+  "subject": {
+    "kind": "fresh",
+    "paper_id": "11111111-1111-4111-8111-111111111111",
+    "edition_id": "22222222-2222-4222-8222-222222222222",
+    "manifest_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "revision": 1,
+  "registers": [
+    {
+      "key": {
+        "kind": "mark",
+        "id": "11111111-1111-4111-8111-111111111111"
+      },
+      "value": {
+        "kind": "mark",
+        "mark": {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "story_id": "story-1",
+          "body_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "range": {
+            "location": 9007199254740991,
+            "length": 1
+          },
+          "quote": "Hello",
+          "note": "First note"
+        }
+      },
+      "dot": {
+        "writer_id": "11111111-1111-4111-8111-111111111111",
+        "counter": 1
+      },
+      "context": {},
+      "display_timestamp": "2026-10-28T12:00:00Z"
+    }
+  ]
+}
