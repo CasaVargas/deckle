@@ -2,6 +2,7 @@
 // Delivery (Daily tab redesign §8): where the paper goes, in two groups: the Kindle (over USB,
 // by email), then other readers (a reMarkable, each export folder, Kobo and PocketBook). A row
 // says how it gets there and where it stands, and opens to its settings.
+import { patchExport } from "./pressView";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import { deliveryGroups } from "./dailyRooms";
@@ -12,14 +13,18 @@ import { FolderSettings, addFolder } from "./ExportFolders";
 import Icon from "./Icon";
 import RemarkableCard from "./RemarkableCard";
 import type { Change } from "./SectionsTab";
-import type { DailyConfig } from "./types";
+import type { DailyConfig, ExportConfig, PressSetupStatus } from "./types";
 
 export default function DeliveryTab({
   draft,
   change,
   emailBody,
+  setupPress,
+  pressBusy = false,
 }: {
   draft: DailyConfig;
+  setupPress: (index: number, folder: ExportConfig, enabled: boolean) => Promise<PressSetupStatus>;
+  pressBusy?: boolean;
   change: Change;
   /** The email settings, which keep their own password and test state. */
   emailBody: ReactNode;
@@ -63,8 +68,10 @@ export default function DeliveryTab({
       if (!e) return null;
       return (
         <FolderSettings
+          key={`${i}:${e.dir}:${e.format}`}
           e={e}
-          onPatch={(p) => change((c) => ({ ...c, export: (c.export ?? []).map((x, j) => (j === i ? { ...x, ...p } : x)) }))}
+          onSetup={(enabled) => setupPress(i, e, enabled)}
+          onPatch={(p) => change((c) => ({ ...c, export: (c.export ?? []).map((x, j) => (j === i ? patchExport(x, p) : x)) }))}
           onRemove={() => {
             setOpen(null);
             change((c) => ({ ...c, export: (c.export ?? []).filter((_, j) => j !== i) }));
@@ -108,7 +115,7 @@ export default function DeliveryTab({
   };
 
   return (
-    <div className="sections-tab delivery-tab">
+    <fieldset disabled={pressBusy} className="sections-tab delivery-tab" style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }} aria-busy={pressBusy}>
       <div>
         <h2 className="daily-h2">Where it goes</h2>
         <p className="muted small">Each morning's paper goes to every place that's on. One that isn't plugged in gets it the next time.</p>
@@ -141,6 +148,6 @@ export default function DeliveryTab({
           </li>
         </ul>
       </section>
-    </div>
+    </fieldset>
   );
 }

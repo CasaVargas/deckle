@@ -55,6 +55,7 @@ pub fn forget_at(shelf: &Path, digest: &Path) -> Result<ShelfStatus, String> {
 
 /// Writes `[sync] shelf`, keeping the file's comments. Returns the new value.
 pub fn set_at(digest: &Path, on: bool) -> Result<bool, String> {
+    let _lock = crate::press::config_write()?;
     let mut cfg = load_config(digest)?;
     if cfg.sync.shelf != on || !digest.exists() {
         cfg.sync.shelf = on;

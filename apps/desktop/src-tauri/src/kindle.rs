@@ -318,6 +318,7 @@ pub fn shelf_on(
     }
     // What the connection teaches the main paper (interests design §5), after the reads and
     // the shelf it draws on are stored.
+    let _config_write = crate::press::config_write()?;
     if let Ok(cfg) = deckle_digest::Config::load(&digest) {
         let state = deckle_readership::State::load(&config.with_file_name("readership.json"));
         let shelf = deckle_digest::shelf::store::Shelf::load(&config.with_file_name("shelf.json"));
@@ -495,6 +496,7 @@ pub fn highlights_set_at(
     }
     st.save(state)
         .map_err(|e| format!("{}: {e}", state.display()))?;
+    let _lock = crate::press::config_write()?;
     let mut cfg = match digest.exists() {
         true => deckle_digest::Config::load(digest)?,
         false => deckle_digest::Config::parse(deckle_digest::config::STARTER)?,

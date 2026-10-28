@@ -348,8 +348,8 @@ pub fn binding_is_enabled(
             .is_ok_and(|m| m.is_some_and(|m| m.enabled))
 }
 
-/// Recover setup on startup. Never infer intent from a shared manifest alone. Owned incomplete
-/// activation is disabled; already opted-in setup can repair its watcher/advertisement.
+/// Reconcile only a current persisted binding. Explicit setup alone may activate or repair:
+/// stale watcher snapshots never rewrite configuration or advertise enabled capability.
 pub fn reconcile_with_watcher(
     configs: &[Config],
     paper: &mut Config,
@@ -358,36 +358,38 @@ pub fn reconcile_with_watcher(
     config_path: &Path,
     ensure_watcher: impl FnOnce() -> Result<(), String>,
 ) -> Result<(), PressError> {
-    let enabled = paper
-        .export
-        .get(export_index)
-        .ok_or_else(unsupported)?
-        .press_enabled;
-    if !enabled && paper.paper_id.is_none() {
+    let selected = paper.export.get(export_index).ok_or_else(unsupported)?;
+    if !selected.press_enabled && paper.paper_id.is_none() {
         return Ok(());
     }
-    if enabled {
-        match enable_with_watcher(
-            configs,
-            paper,
-            export_index,
-            producer_id,
-            config_path,
-            ensure_watcher,
-        ) {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                let _ = disable(configs, paper, export_index, producer_id, config_path);
-                Err(error)
-            }
-        }
-    } else {
-        let binding = prepare_binding(configs, paper, export_index, producer_id)?;
-        if owned_manifest(&binding)?.is_some_and(|m| m.enabled) {
-            write_manifest(&binding, &advertisement(paper, &binding, false))?;
-        }
-        Ok(())
+    let current = Config::load(config_path).map_err(|_| storage())?;
+    let persisted = current.export.get(export_index).ok_or_else(conflict)?;
+    if current.paper_id != paper.paper_id
+        || persisted.dir != selected.dir
+        || persisted.format != selected.format
+    {
+        return Err(conflict());
     }
+    if persisted.press_enabled != selected.press_enabled {
+        return Err(PressError::new(PressErrorCode::Disabled));
+    }
+    let binding = resolve_binding(configs, paper, export_index, producer_id)?;
+    let advertised = owned_manifest(&binding)?;
+    if selected.press_enabled {
+        if !advertised.is_some_and(|m| m.enabled) {
+            return Err(PressError::new(PressErrorCode::Disabled));
+        }
+        if ensure_watcher().is_err() {
+            // Failure may retract exact ownership, but cannot overwrite newer local settings.
+            let _ = write_manifest(&binding, &advertisement(paper, &binding, false));
+            return Err(storage());
+        }
+    } else if advertised.is_some_and(|m| m.enabled) {
+        // A concurrent explicit setup can at worst be retracted and require another setup;
+        // reconciliation never restores an opt-out or overwrites foreign ownership.
+        write_manifest(&binding, &advertisement(paper, &binding, false))?;
+    }
+    Ok(())
 }
 
 /// Installation-wide durable private press state, never a purgeable cache or synced export.

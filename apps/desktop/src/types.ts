@@ -362,7 +362,17 @@ export interface RemarkableConfig {
 }
 
 /** One `[[export]]` folder: an iCloud Drive folder for an iPad, a Dropbox one for a Boox. */
+export interface PressSetupStatus {
+  enabled: boolean;
+  watcher_ready: boolean;
+  error: string | null;
+  producer_id: string | null;
+  paper_id: string | null;
+}
+
 export interface ExportConfig {
+  /** Activated only by explicit request setup. */
+  press_enabled?: boolean;
   name: string;
   dir: string;
   format: "epub" | "pdf" | "bundle";

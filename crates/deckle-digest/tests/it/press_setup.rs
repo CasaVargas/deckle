@@ -229,9 +229,15 @@ fn press_setup_enable_rename_disable_and_recovery_preserve_schedule() {
     })
     .unwrap();
     assert!(binding_is_enabled(&[], &c, 0, producer()));
+    let old_name = read(&root).paper_name;
     c.title = "Renamed".into();
+    config::save(&path, &c).unwrap();
     reconcile_with_watcher(&[], &mut c, 0, producer(), &path, || Ok(())).unwrap();
-    assert_eq!(read(&root).paper_name, "Renamed");
+    assert_eq!(
+        read(&root).paper_name,
+        old_name,
+        "name repair requires explicit setup"
+    );
     assert_eq!(c.paper_id, id);
     assert!(
         reconcile_with_watcher(&[], &mut c, 0, producer(), &path, || Err(
@@ -240,8 +246,13 @@ fn press_setup_enable_rename_disable_and_recovery_preserve_schedule() {
         .is_err()
     );
     assert!(!read(&root).enabled);
-    assert!(!c.export[0].press_enabled);
+    assert!(
+        c.export[0].press_enabled,
+        "reconciliation must not rewrite config"
+    );
+    assert!(Config::load(&path).unwrap().export[0].press_enabled);
     enable_with_watcher(&[], &mut c, 0, producer(), &path, || Ok(())).unwrap();
+    assert_eq!(read(&root).paper_name, "Renamed");
     disable(&[], &mut c, 0, producer(), &path).unwrap();
     assert!(!read(&root).enabled);
     assert!(!binding_is_enabled(&[], &c, 0, producer()));
@@ -481,4 +492,76 @@ fn press_setup_transaction_propagates_injected_service_install_failure() {
     .unwrap();
     assert!(binding_is_enabled(&[], &c, 0, producer()));
     assert!(read(&root).enabled);
+}
+
+#[test]
+fn press_setup_stale_watcher_snapshot_cannot_restore_a_persisted_opt_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("shared");
+    std::fs::create_dir(&root).unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut current = paper(&root);
+    enable_with_watcher(&[], &mut current, 0, producer(), &path, || Ok(())).unwrap();
+    let mut stale = current.clone();
+    current.title = "New saved title".into();
+    current.keep = 14;
+    disable(&[], &mut current, 0, producer(), &path).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let mut watcher_called = false;
+    let result = reconcile_with_watcher(&[], &mut stale, 0, producer(), &path, || {
+        watcher_called = true;
+        Ok(())
+    });
+    let saved = Config::load(&path).unwrap();
+    assert!(
+        !saved.export[0].press_enabled,
+        "stale watcher reactivated an opted-out folder"
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "reconcile overwrote newer preferences"
+    );
+    assert!(!read(&root).enabled);
+    assert!(!watcher_called);
+    assert!(result.is_err());
+}
+
+#[test]
+fn press_setup_reconcile_never_reactivates_a_disabled_advertisement() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("shared");
+    std::fs::create_dir(&root).unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut c = paper(&root);
+    enable_with_watcher(&[], &mut c, 0, producer(), &path, || Ok(())).unwrap();
+    let binding = prepare_binding(&[], &c, 0, producer()).unwrap();
+    write_manifest(&binding, &manifest(&c, false)).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let result = reconcile_with_watcher(&[], &mut c, 0, producer(), &path, || Ok(()));
+    assert!(!read(&root).enabled);
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(result.is_err());
+}
+
+#[test]
+fn press_setup_reconcile_does_not_retract_after_persisted_identity_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("shared");
+    std::fs::create_dir(&root).unwrap();
+    let path = dir.path().join("digest.toml");
+    let mut c = paper(&root);
+    config::save(&path, &c).unwrap();
+    let binding = prepare_binding(&[], &c, 0, producer()).unwrap();
+    write_manifest(&binding, &manifest(&c, true)).unwrap();
+    let mut replacement = c.clone();
+    replacement.paper_id = Some(Uuid::new_v4());
+    config::save(&path, &replacement).unwrap();
+    let before = std::fs::read(root.join(".deckle-press/producer.json")).unwrap();
+    let result = reconcile_with_watcher(&[], &mut c, 0, producer(), &path, || Ok(()));
+    assert_eq!(
+        std::fs::read(root.join(".deckle-press/producer.json")).unwrap(),
+        before
+    );
+    assert!(result.is_err());
 }

@@ -11,7 +11,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::{
         Arc, Condvar, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -37,7 +37,7 @@ impl WorkerOptions {
             run_lock: deckle_core::wordwise::default_cache_dir().join("digest/run.lock"),
             config_path,
             launch: Arc::new(move |job| {
-                Command::new(&exe)
+                deckle_core::quiet::command(&exe)
                     .args(["digest", "press-worker", "--job"])
                     .arg(job)
                     .stdin(Stdio::null())

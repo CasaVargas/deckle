@@ -1022,12 +1022,23 @@ pub fn list_devices(state: State<'_, AppState>) -> Vec<DeviceRow> {
 /// Names the Kindle `sync_id` in the Daily's config at `path` (Kindle profiles design §2); an
 /// empty name clears it.
 pub fn name_kindle_at(path: &Path, sync_id: &str, name: &str) -> Result<(), String> {
+    name_kindle_with(path, sync_id, name, || {})
+}
+
+fn name_kindle_with(
+    path: &Path,
+    sync_id: &str,
+    name: &str,
+    before_save: impl FnOnce(),
+) -> Result<(), String> {
+    let _lock = crate::press::config_write()?;
     let mut cfg = match deckle_digest::Config::load(path) {
         Ok(c) => c,
         Err(_) if !path.exists() => deckle_digest::Config::default(),
         Err(e) => return Err(e.to_string()),
     };
     cfg.sync.set_device_name(sync_id, name)?;
+    before_save();
     deckle_digest::config::save(path, &cfg)
 }
 
@@ -1213,6 +1224,88 @@ pub fn devices_file(app: &AppHandle) -> PathBuf {
 mod tests {
     use super::*;
     use deckle_transport::usb::MtpInfo;
+
+    #[test]
+    fn unrelated_writer_cannot_restore_requests_after_disable() {
+        use deckle_digest::{
+            Config,
+            config::{ExportConfig, ExportFormat},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("digest.toml");
+        let private = dir.path().join("private");
+        let shared = dir.path().join("shared");
+        std::fs::create_dir(&shared).unwrap();
+        let cfg = Config {
+            export: vec![ExportConfig {
+                name: "Paper".into(),
+                dir: shared.display().to_string(),
+                format: ExportFormat::Bundle,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        deckle_digest::config::save(&main, &cfg).unwrap();
+        crate::press::setup_at(&main, &private, None, 0, true, None, || Ok(())).unwrap();
+        let (read_tx, read_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let writer_path = main.clone();
+        let writer = std::thread::spawn(move || {
+            name_kindle_with(&writer_path, "G000AAAA", "Kitchen", || {
+                read_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+            })
+            .unwrap()
+        });
+        read_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let disable_path = main.clone();
+        let disable = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let result =
+                crate::press::setup_at(&disable_path, &private, None, 0, false, None, || {
+                    panic!("disable must not install")
+                });
+            done_tx.send(result).unwrap();
+        });
+        started_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        let early = done_rx.recv_timeout(std::time::Duration::from_millis(50));
+        release_tx.send(()).unwrap();
+        writer.join().unwrap();
+        let was_early = early.is_ok();
+        let disabled = early
+            .unwrap_or_else(|_| {
+                done_rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .unwrap()
+            })
+            .unwrap();
+        disable.join().unwrap();
+        assert!(!disabled.enabled);
+        let final_config = Config::load(&main).unwrap();
+        assert!(
+            !final_config.export[0].press_enabled,
+            "stale unrelated snapshot reactivated requests"
+        );
+        assert!(
+            !was_early,
+            "disable must wait for the unrelated writer's read/write transaction"
+        );
+        assert_eq!(
+            final_config.sync.device_name("G000AAAA").as_deref(),
+            Some("Kitchen")
+        );
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(shared.join(".deckle-press/producer.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["enabled"], false);
+    }
 
     #[test]
     fn naming_a_kindle_writes_the_daily_config_and_refuses_a_clash() {

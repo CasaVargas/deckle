@@ -70,3 +70,23 @@ test("typing saves once it pauses, and leaving the field saves at once", () => {
   expect(f).toHaveBeenCalledTimes(2);
   vi.useRealTimers();
 });
+
+test("drain waits for pending edits without resaving a clean configuration", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const saved: number[] = [];
+  const q = saveQueue<number>(async (c) => { await gate; saved.push(c); }, () => {});
+  await q.drain();
+  expect(saved).toEqual([]);
+  void q.push(1);
+  void q.push(2);
+  let done = false;
+  const drained = q.drain().then(() => { done = true; });
+  await Promise.resolve();
+  expect(done).toBe(false);
+  release();
+  await drained;
+  expect(saved).toEqual([1, 2]);
+  await q.drain();
+  expect(saved).toEqual([1, 2]);
+});

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useState } from "react";
+import { pressView } from "./pressView";
 import { homeDir } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { hasFolder, iCloudDrive, newExport } from "./exportsView";
 import { Switch } from "./settings/Row";
 import { SCREEN_LABEL } from "./types";
-import type { ExportConfig, Screen } from "./types";
+import type { ExportConfig, PressSetupStatus, Screen } from "./types";
 
 /**
  * Export folders (other readers design §7, Daily tab redesign §8): each edition also goes to
@@ -28,7 +30,19 @@ export async function addFolder(current: ExportConfig[]): Promise<ExportConfig[]
 }
 
 /** One folder's settings: what goes there, how, and how many stay. */
-export function FolderSettings({ e, onPatch, onRemove }: { e: ExportConfig; onPatch: (p: Partial<ExportConfig>) => void; onRemove: () => void }) {
+export function FolderSettings({ e, onPatch, onRemove, onSetup }: { e: ExportConfig; onPatch: (p: Partial<ExportConfig>) => void; onRemove: () => void; onSetup: (enabled: boolean) => Promise<PressSetupStatus> }) {
+  const [status, setStatus] = useState<PressSetupStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const view = pressView(e, status);
+  const setup = async (enabled: boolean) => {
+    setBusy(true);
+    setStatus(null);
+    setFailure(null);
+    try { setStatus(await onSetup(enabled)); }
+    catch { setFailure("Could not complete setup. Save your settings, check the selected folder, and retry."); }
+    finally { setBusy(false); }
+  };
   return (
     <>
       <div className="export-row">
@@ -74,6 +88,16 @@ export function FolderSettings({ e, onPatch, onRemove }: { e: ExportConfig; onPa
           <Switch label={`Long reads to ${e.name}`} checked={e.books} onChange={(on) => onPatch({ books: on })} />
         </div>
       </div>
+      {view.visible && <div className="set-row" style={{ alignSelf: "stretch" }}>
+        <div className="set-label">
+          <div>Fresh-paper requests <span className="muted small" role="status">{busy ? "Setting up…" : failure ? "Needs attention" : view.label}</span></div>
+          <p className="muted small">{failure ?? view.message}</p>
+          <p className="muted small">Only this folder receives the fresh paper. Existing optional model features may incur their usual provider costs.</p>
+          {e.press_enabled && !busy && <button className="quiet" onClick={() => void setup(true)}>Check setup</button>}
+          {(failure || status?.error) && !busy && <button className="quiet" onClick={() => void setup(true)}>Retry setup</button>}
+        </div>
+        <Switch label={`Fresh-paper requests for ${e.name}`} checked={view.checked} disabled={busy} onChange={(on) => void setup(on)} />
+      </div>}
       <p className="muted small">An EPUB opens in any reader; Kindle Previewer isn't needed for these.</p>
       <button className="quiet" onClick={onRemove}>
         Stop putting the paper in {e.name}

@@ -8,6 +8,7 @@ mod daily;
 mod kindle;
 mod morgue;
 mod next;
+mod press;
 mod readership;
 mod shelf;
 mod upgrades;
@@ -82,6 +83,7 @@ pub fn run() {
             daily::paper_create,
             daily::daily_setup,
             daily::daily_save,
+            press::press_setup,
             daily::daily_day_preview,
             daily::geocode,
             daily::reading_list,

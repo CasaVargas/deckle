@@ -3,6 +3,7 @@
 // far, when it goes to press, a link box and the week), Sections, Reading, Editions and Delivery,
 // all backed by digest.toml and the CLI. The paper switcher picks which paper they work on.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { setupSavedExport } from "./pressView";
 import { debounce, saveQueue } from "./saveQueue";
 import SectionsTab from "./SectionsTab";
 import type { Change } from "./SectionsTab";
@@ -24,7 +25,7 @@ import DeliveryTab from "./DeliveryTab";
 import { exportParts, remarkablePart } from "./exportsView";
 import { anyKindleHint } from "./papersView";
 import { keepUnfinished, savable } from "./subscriptions";
-import type { DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, NextPaper, PagePlanRow, PapersView, ReadershipView, ReadingEntry, RunResult } from "./types";
+import type { ExportConfig, PressSetupStatus, DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, NextPaper, PagePlanRow, PapersView, ReadershipView, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL } from "./types";
 
 /** Amazon's Manage Your Content and Devices: the approved-sender list and the emailed Docs. */
@@ -106,6 +107,8 @@ export default function DailyView({
   }, []);
   const [readership, setReadership] = useState<ReadershipView | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [pressBusy, setPressBusy] = useState(false);
+  const pressBusyRef = useRef(false);
   // Your papers (many papers §7): the selected paper is the one every room works on
   const [papers, setPapers] = useState<PapersView | null>(null);
   const [paper, setPaper] = useState("main");
@@ -244,7 +247,7 @@ export default function DailyView({
   /** An edit: switches and menus save at once, typing once it pauses (or the field is left). */
   const change: Change = (f, how = "now") => {
     const d = draftRef.current;
-    if (!d) return;
+    if (!d || pressBusyRef.current) return;
     const c = f(structuredClone(d));
     draftRef.current = c;
     setDraft(c);
@@ -274,8 +277,37 @@ export default function DailyView({
     return failed.current === null;
   };
 
+  const setupPress = async (index: number, folder: ExportConfig, enabled: boolean): Promise<PressSetupStatus> => {
+    if (pressBusyRef.current) throw new Error("Setup is already running.");
+    pressBusyRef.current = true;
+    setPressBusy(true);
+    const slug = live.current.paper;
+    const paperArg = slug === "main" ? null : slug;
+    try {
+      return await setupSavedExport(index, folder, enabled, async () => {
+        typing.flush();
+        await queue.drain();
+        return failed.current === null;
+      },
+        () => live.current.paper === slug ? draftRef.current?.export ?? [] : [],
+        (i, on, expected) => api.pressSetup(paperArg, i, on, expected));
+    } finally {
+      try {
+        const st = await api.dailyState(paperArg);
+        if (live.current.paper === slug) {
+          setState(st);
+          draftRef.current = st.config ? structuredClone(st.config) : null;
+          setDraft(draftRef.current);
+        }
+      } finally {
+        pressBusyRef.current = false;
+        setPressBusy(false);
+      }
+    }
+  };
+
   const choosePaper = (slug: string) => {
-    if (slug === paper) return;
+    if (slug === paper || pressBusyRef.current) return;
     typing.flush();
     setPaper(slug);
   };
@@ -525,7 +557,7 @@ export default function DailyView({
       <nav className="kindle-tabs daily-tabs" aria-label="Daily">
         {switcher}
         {ROOMS.map((r) => (
-          <button key={r.key} className={room === r.key ? "on" : ""} aria-current={room === r.key ? "page" : undefined} onClick={() => setRoom(r.key)}>
+          <button key={r.key} disabled={pressBusy} className={room === r.key ? "on" : ""} aria-current={room === r.key ? "page" : undefined} onClick={() => setRoom(r.key)}>
             {r.title}
           </button>
         ))}
@@ -697,7 +729,7 @@ export default function DailyView({
           </>
         )}
 
-        {room === "delivery" && <DeliveryTab draft={draft} change={change} emailBody={emailBody} />}
+        {room === "delivery" && <DeliveryTab key={paper} draft={draft} change={change} emailBody={emailBody} setupPress={setupPress} pressBusy={pressBusy} />}
 
         {room === "sections" && (
           <SectionsTab

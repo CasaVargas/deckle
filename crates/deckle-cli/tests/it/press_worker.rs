@@ -246,6 +246,7 @@ fn press_worker_scheduled_lock_does_not_start_deadline_and_opt_out_rejects_queue
     until(&f, &mut w, PressState::Queued);
     assert!(status(&f).unwrap().started_at.is_none());
     f.cfg.export[0].press_enabled = false;
+    deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
     drop(lock);
     until(&f, &mut w, PressState::Failed);
     assert_eq!(
@@ -492,6 +493,7 @@ fn press_worker_same_paper_two_enabled_folders_and_offline_old_folder() {
         press_enabled: true,
         ..Default::default()
     });
+    deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
     press::setup::write_manifest(
         &second,
         &ProducerManifest {
@@ -521,6 +523,7 @@ fn press_worker_same_paper_two_enabled_folders_and_offline_old_folder() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, serde_json::to_vec(&request).unwrap()).unwrap();
     f.cfg.export[0].press_enabled = false;
+    deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
     std::fs::rename(&f.binding.root, f.root.parent().unwrap().join("offline")).unwrap();
     *clock.lock().unwrap() += deckle_digest::chrono::Duration::minutes(6);
     let path = other.join(format!(".deckle-press/status/{}.json", request.request_id));
@@ -719,6 +722,7 @@ fn admission_boundary_change(change: &str) {
     let error = match change {
         "snapshot" => {
             f.cfg.export[0].press_enabled = false;
+            deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
             w.tick(std::slice::from_ref(&f.cfg), Utc::now()).unwrap();
             press::PressErrorCode::Disabled
         }

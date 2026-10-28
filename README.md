@@ -284,7 +284,11 @@ so a feed that's down becomes a line in its section and the edition still builds
 is drawn in Rust with bundled open-licence fonts and becomes the EPUB's cover. Reading positions
 come back from the Kindle's `.yjf` files (Amazon's KRDS format), which is how the paper knows
 which sections you reach. Each edition can also be written as a documented, versioned data
-bundle for reader apps (spec CC-BY-4.0, schema MIT).
+bundle for reader apps (spec CC-BY-4.0, schema MIT). In **Daily → Delivery**, bundle folders can
+opt into **Fresh-paper requests** from compatible clients. The existing watcher builds a new
+full paper into that folder while this computer is awake; cloud sync adds delay. Requests are
+off by default. [Setup and troubleshooting](docs/daily.md#fresh-paper-requests) explains ownership,
+optional model costs, and disconnecting a folder.
 
 ## Command line
 
