@@ -295,7 +295,7 @@ impl Site {
 /// [`Http`] plus one signed-in session per `[[subscriptions]]` site (publisher
 /// subscriptions design §5). Only a site's host and its subdomains use its session.
 pub struct SessionNet {
-    inner: Http,
+    inner: Box<dyn Net>,
     sites: HashMap<String, Site>,
     adapters: Vec<Box<dyn Publisher>>,
 }
@@ -309,10 +309,26 @@ impl SessionNet {
         adapters: Vec<Box<dyn Publisher>>,
         jar_dir: Option<PathBuf>,
     ) -> Self {
+        Self::new_with_policy(inner, accounts, adapters, jar_dir, false)
+    }
+    fn new_with_policy(
+        inner: Http,
+        accounts: Vec<SiteAccount>,
+        adapters: Vec<Box<dyn Publisher>>,
+        jar_dir: Option<PathBuf>,
+        public_web: bool,
+    ) -> Self {
         let sites = accounts
             .into_iter()
             .map(|account| {
-                let client = Arc::new(UreqSite::new(&account.site));
+                let client = Arc::new(if public_web {
+                    UreqSite {
+                        site: account.site.clone(),
+                        agent: crate::press::web::agent(true),
+                    }
+                } else {
+                    UreqSite::new(&account.site)
+                });
                 let mut jar_note = None;
                 let jar = jar_dir.as_ref().map(|dir| {
                     let path = jar_path(dir, &account.site);
@@ -326,7 +342,11 @@ impl SessionNet {
             })
             .collect();
         SessionNet {
-            inner,
+            inner: if public_web {
+                Box::new(crate::press::web::PublicHttp)
+            } else {
+                Box::new(inner)
+            },
             sites,
             adapters,
         }
@@ -346,7 +366,7 @@ impl SessionNet {
             })
             .collect();
         SessionNet {
-            inner,
+            inner: Box::new(inner),
             sites,
             adapters,
         }
@@ -359,6 +379,25 @@ impl SessionNet {
         subs: &[SubscriptionConfig],
         keys: &dyn Keyring,
         env: &dyn Fn(&str) -> Option<String>,
+    ) -> Self {
+        Self::from_config_policy(config_path, subs, keys, env, false)
+    }
+    /// Shared selections require public-web-only connections for pages, authentication,
+    /// redirects and assets. Cookie refresh stays in memory unless explicitly saved.
+    pub fn from_config_public_web(
+        config_path: &Path,
+        subs: &[SubscriptionConfig],
+        keys: &dyn Keyring,
+        env: &dyn Fn(&str) -> Option<String>,
+    ) -> Self {
+        Self::from_config_policy(config_path, subs, keys, env, true)
+    }
+    fn from_config_policy(
+        config_path: &Path,
+        subs: &[SubscriptionConfig],
+        keys: &dyn Keyring,
+        env: &dyn Fn(&str) -> Option<String>,
+        public_web: bool,
     ) -> Self {
         let household = config_path
             .parent()
@@ -382,7 +421,7 @@ impl SessionNet {
                 }
             })
             .collect();
-        SessionNet::new(Http, accounts, registry(), Some(household))
+        SessionNet::new_with_policy(Http, accounts, registry(), Some(household), public_web)
     }
 
     /// The account whose site is the URL's host or a parent domain of it. Only `https` URLs
@@ -685,6 +724,28 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn public_web_policy_covers_anonymous_and_signed_in_site_clients() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let account = SiteAccount {
+            site: "localhost".into(),
+            username: "fixture".into(),
+            kind: None,
+            password: None,
+            password_from: None,
+            password_error: None,
+        };
+        let net = SessionNet::new_with_policy(Http, vec![account], Vec::new(), None, true);
+        let url = format!("https://localhost:{port}/article");
+        assert!(net.get(&url).is_err());
+        assert!(net.get_page(&url).is_err());
+        assert!(net.sites["localhost"].client.get(&url).is_err());
+        assert!(net.sites["localhost"].client.get_final(&url).is_err());
+        assert!(listener.accept().is_err());
+    }
 
     /// (Max-Age: ureq saves only persistent cookies, so a bare session cookie would not survive the jar file.)
     /// Serves `n` sequential requests, each answered with `Set-Cookie: sess=abc`; records

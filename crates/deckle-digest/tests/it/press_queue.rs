@@ -21,6 +21,7 @@ fn request(b: &PressBinding, at: chrono::DateTime<Utc>) -> PressRequest {
         producer_id: b.producer_id,
         paper_id: b.paper_id,
         operation: PressOperation::FreshFull,
+        articles: None,
         created_at: at,
         expires_at: at + Duration::hours(24),
     }
@@ -622,4 +623,93 @@ fn press_queue_legacy_snapshot_migrates_request_root_before_second_binding() {
             .unwrap(),
         b
     );
+}
+
+#[test]
+fn reading_selection_is_ordered_durable_and_never_coalesces_different_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let b = binding(dir.path());
+    let journal = dir.path().join("journal");
+    let mut j = PressJournal::open(&journal).unwrap();
+    j.register_binding(b.clone(), true, false).unwrap();
+    let mut r = request(&b, now());
+    r.operation = PressOperation::ReadingEdition;
+    r.articles = Some(vec![
+        "https://example.org/a".into(),
+        "https://example.org/b".into(),
+    ]);
+    let first = j.accept(r.clone(), "a", now()).unwrap();
+    let lease = j.admit(now()).unwrap().unwrap();
+    let mut same = r.clone();
+    same.request_id = Uuid::new_v4();
+    assert_eq!(first.job_id, j.accept(same, "b", now()).unwrap().job_id);
+    let mut reverse = r.clone();
+    reverse.request_id = Uuid::new_v4();
+    reverse.articles.as_mut().unwrap().reverse();
+    let second = j.accept(reverse.clone(), "c", now()).unwrap();
+    assert_ne!(first.job_id, second.job_id);
+    assert_eq!(
+        j.accept(request(&b, now()), "d", now()).unwrap_err().code,
+        PressErrorCode::Busy
+    );
+    drop(j);
+    let mut j = PressJournal::open(&journal).unwrap();
+    let recovered = j.recover(&lease, now() + Duration::seconds(1)).unwrap();
+    assert_eq!(j.job_input(&recovered).unwrap().articles, r.articles);
+    j.fail(&recovered, PressErrorCode::SourceFailure, now())
+        .unwrap();
+    let next = j.admit(now() + Duration::minutes(5)).unwrap().unwrap();
+    assert_eq!(j.job_input(&next).unwrap().articles, reverse.articles);
+}
+
+#[test]
+fn reading_job_input_legacy_default_and_corrupt_selection_are_checked_on_reopen() {
+    use sha2::{Digest, Sha256};
+    for corrupt in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let b = binding(dir.path());
+        let journal = dir.path().join("journal");
+        let mut j = PressJournal::open(&journal).unwrap();
+        j.register_binding(b.clone(), true, false).unwrap();
+        let r = request(&b, now());
+        j.accept(r, "a", now()).unwrap();
+        let lease = j.admit(now()).unwrap().unwrap();
+        drop(j);
+        for name in ["journal.json", "journal.backup.json"] {
+            let path = journal.join(name);
+            let mut envelope: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let mut payload: serde_json::Value =
+                serde_json::from_str(envelope["payload"].as_str().unwrap()).unwrap();
+            if corrupt {
+                payload["jobs"][0]["input"] = serde_json::json!({"operation":"reading_edition", "articles":["https://example.org/different"]});
+            } else {
+                payload["jobs"][0].as_object_mut().unwrap().remove("input");
+                payload["entries"][0]["request"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("articles");
+            }
+            let text = serde_json::to_string(&payload).unwrap();
+            envelope["sha256"] = serde_json::json!(
+                Sha256::digest(text.as_bytes())
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            );
+            envelope["payload"] = serde_json::json!(text);
+            std::fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+        }
+        if corrupt {
+            assert!(PressJournal::open(&journal).is_err());
+        } else {
+            assert_eq!(
+                PressJournal::open(&journal)
+                    .unwrap()
+                    .job_input(&lease)
+                    .unwrap(),
+                JobInput::default()
+            );
+        }
+    }
 }

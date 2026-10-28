@@ -627,3 +627,77 @@ fn fresh_inline_reading_keeps_the_tail_beyond_the_scheduled_word_cap() {
     assert!(story["long_read"].is_null());
     assert_eq!(before, snapshot(&protected));
 }
+
+#[test]
+fn reading_edition_contains_only_ordered_selected_full_text_and_preserves_state() {
+    use deckle_digest::press::build_reading;
+    let d = tempfile::tempdir().unwrap();
+    let protected = d.path().join("protected");
+    let c = config(&protected);
+    let before = snapshot(&protected);
+    let seen = Mutex::new(Vec::new());
+    let transport = |url: &str| {
+        seen.lock().unwrap().push(url.to_owned());
+        Ok(format!("<html><head><title>Selected long story</title></head><body><article><h1>Selected long story</h1>{}<p>SELECTION FINAL PARAGRAPH</p></article></body></html>", "<p>The library serves everyone in the town through its public reading program.</p>".repeat(600)).into_bytes())
+    };
+    let selected = vec![
+        "https://example.org/second".into(),
+        "https://example.org/first".into(),
+    ];
+    let ctx = context(&d.path().join("reading-job"), now(), true);
+    let built = build_reading(&c, &ctx, &selected, &transport).unwrap();
+    let v = manifest(&built.bundle);
+    assert_eq!(before, snapshot(&protected));
+    let sections = v["sections"].as_array().unwrap();
+    assert_eq!(sections.len(), 1);
+    let text = std::fs::read_to_string(built.bundle.join("edition.json")).unwrap();
+    assert!(!text.contains("Library reopened"));
+    let calls = seen.into_inner().unwrap();
+    assert_eq!(calls.len(), 2);
+    assert!(calls.iter().all(|u| selected.contains(u)));
+    // Reading editions always inline complete articles, even when this export wants books.
+    assert_eq!(sections[0]["stories"].as_array().unwrap().len(), 2);
+    for (i, url) in selected.iter().enumerate() {
+        let story = &sections[0]["stories"][i];
+        assert_eq!(story["url"], url.as_str());
+        assert!(
+            story["body"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("SELECTION FINAL PARAGRAPH")
+        );
+        assert!(story["words"].as_u64().unwrap() > 6000);
+        assert!(story["long_read"].is_null());
+    }
+    assert!(!ctx.work_dir.join("inputs").exists());
+}
+
+#[test]
+fn reading_edition_fails_whole_selection_when_one_source_is_unavailable() {
+    use deckle_digest::press::build_reading;
+    let d = tempfile::tempdir().unwrap();
+    let c = config(&d.path().join("protected"));
+    let ctx = context(&d.path().join("job"), now(), false);
+    let transport = |url: &str| {
+        if url.ends_with("/missing") {
+            Err("unavailable".into())
+        } else {
+            Ok(page())
+        }
+    };
+    let selected = vec![
+        "https://example.org/good".into(),
+        "https://example.org/missing".into(),
+    ];
+    assert_eq!(
+        build_reading(&c, &ctx, &selected, &transport)
+            .unwrap_err()
+            .code,
+        PressErrorCode::SourceFailure
+    );
+    assert!(
+        !ctx.work_dir
+            .join(format!("{}.deckle", ctx.identity.edition_id))
+            .exists()
+    );
+}

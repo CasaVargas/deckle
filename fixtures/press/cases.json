@@ -195,5 +195,59 @@
     "schema": "docs/formats/deckle-press.schema.json",
     "definition": "request",
     "valid": false
+  },
+  {
+    "file": "request-reading.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": true
+  },
+  {
+    "file": "manifest-reading.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "manifest",
+    "valid": true
+  },
+  {
+    "file": "invalid-request-reading-missing.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-empty.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-null.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-userinfo.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-duplicate.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-reading-scheme.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-full-articles.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
   }
 ]

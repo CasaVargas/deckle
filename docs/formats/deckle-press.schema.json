@@ -48,6 +48,10 @@
         "updated_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "reading_editions": {
+          "type": "boolean",
+          "description": "Optional selected-article build capability; absent means false. operations stays [fresh_full]."
         }
       }
     },
@@ -93,7 +97,10 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
         },
         "operation": {
-          "const": "fresh_full"
+          "enum": [
+            "fresh_full",
+            "reading_edition"
+          ]
         },
         "created_at": {
           "type": "string",
@@ -102,8 +109,44 @@
         "expires_at": {
           "type": "string",
           "format": "date-time"
+        },
+        "articles": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "maxLength": 2048,
+            "format": "uri",
+            "pattern": "^[hH][tT][tT][pP][sS]?://[^\\s/?#@]+(?:[/?#][^\\x00-\\x20\\x7f]*)?$"
+          },
+          "description": "Ordered immutable selection. Runtime checks UTF-8 byte length, URL/userinfo safety, and uniqueness after stripping fragments and utm_* query keys."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "reading_edition"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "articles"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "articles"
+              ]
+            }
+          }
+        }
+      ]
     },
     "status": {
       "type": "object",

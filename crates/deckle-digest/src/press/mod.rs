@@ -282,12 +282,12 @@ pub use protocol::*;
 pub mod setup;
 
 pub mod build;
-pub use build::{FreshArtifact, FreshBuildContext, build_fresh};
+pub use build::{FreshArtifact, FreshBuildContext, build_fresh, build_reading};
 
 mod journal;
 mod queue;
 pub use journal::PressJournal;
-pub use queue::JobLease;
+pub use queue::{JobInput, JobLease};
 
 pub mod publish;
 pub mod retention;
@@ -296,3 +296,5 @@ pub use publish::{archived_artifact, flush_statuses, publish_result, recover_res
 pub use retention::prune_results;
 
 pub mod scan;
+
+pub(crate) mod web;

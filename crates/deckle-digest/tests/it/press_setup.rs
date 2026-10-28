@@ -32,6 +32,7 @@ fn manifest(c: &Config, enabled: bool) -> ProducerManifest {
         paper_name: c.title.clone(),
         enabled,
         operations: vec![PressOperation::FreshFull],
+        reading_editions: true,
         updated_at: "2026-10-27T16:00:00Z".parse().unwrap(),
     }
 }
@@ -564,4 +565,23 @@ fn press_setup_reconcile_does_not_retract_after_persisted_identity_changes() {
         before
     );
     assert!(result.is_err());
+}
+
+#[test]
+fn press_setup_capability_refresh_requires_explicit_activation_and_preserves_opt_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut c = paper(dir.path());
+    let config_path = dir.path().join("digest.toml");
+    let b = enable_with_watcher(&[], &mut c, 0, producer(), &config_path, || Ok(())).unwrap();
+    assert!(read(dir.path()).reading_editions);
+    let mut old = read(dir.path());
+    old.reading_editions = false;
+    write_manifest(&b, &old).unwrap();
+    reconcile_with_watcher(&[], &mut c, 0, producer(), &config_path, || Ok(())).unwrap();
+    assert!(!read(dir.path()).reading_editions);
+    disable(&[], &mut c, 0, producer(), &config_path).unwrap();
+    reconcile_with_watcher(&[], &mut c, 0, producer(), &config_path, || Ok(())).unwrap();
+    assert!(!read(dir.path()).enabled);
+    enable_with_watcher(&[], &mut c, 0, producer(), &config_path, || Ok(())).unwrap();
+    assert!(read(dir.path()).enabled && read(dir.path()).reading_editions);
 }

@@ -166,12 +166,16 @@ struct JobDescriptor {
     reading: Option<PathBuf>,
     work: PathBuf,
     books: bool,
+    #[serde(default)]
+    input: JobInput,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WorkerResult {
     lease: JobLease,
     manifest_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    error_code: Option<PressErrorCode>,
 }
 fn storage() -> PressError {
     PressError::new(PressErrorCode::StorageUnavailable)
@@ -218,7 +222,8 @@ fn read_job(path: &Path) -> Result<JobDescriptor, String> {
     )
     .map_err(|_| bad())?;
     let job: JobDescriptor = serde_json::from_slice(&bytes).map_err(|_| bad())?;
-    if job.version != 1
+    if validate_input(job.input.operation, job.input.articles.as_deref()).is_err()
+        || job.version != 1
         || job.work != parent.join("attempt")
         || job.config.paper_id != Some(job.lease.paper_id)
         || !(1..=3).contains(&job.lease.attempt)
@@ -233,7 +238,16 @@ fn read_job(path: &Path) -> Result<JobDescriptor, String> {
 /// this entry point never calls save_jars or any scheduler/delivery/journal operation.
 pub fn run_job(path: &Path) -> Result<(), String> {
     let job = read_job(path)?;
-    let net = crate::household_net_quiet(&job.config_path, &job.config);
+    let net = if job.input.operation == PressOperation::ReadingEdition {
+        deckle_digest::SessionNet::from_config_public_web(
+            &job.config_path,
+            &job.config.subscriptions,
+            &deckle_digest::secret::SystemKeyring,
+            &|k| std::env::var(k).ok(),
+        )
+    } else {
+        crate::household_net_quiet(&job.config_path, &job.config)
+    };
     build_job(path, job, &net)
 }
 /// Same child pipeline with an injected source transport, for local process fixtures.
@@ -258,13 +272,37 @@ fn build_job(path: &Path, mut job: JobDescriptor, net: &dyn Net) -> Result<(), S
         work_dir: job.work,
         books: job.books,
     };
-    let artifact = build_fresh(&job.config, &context, net, &crate::gather_options())
-        .map_err(|e| e.to_string())?;
+    let artifact = match job.input.operation {
+        PressOperation::FreshFull => {
+            build_fresh(&job.config, &context, net, &crate::gather_options())
+                .map_err(|e| e.to_string())?
+        }
+        PressOperation::ReadingEdition => match build_reading(
+            &job.config,
+            &context,
+            job.input.articles.as_deref().unwrap_or_default(),
+            net,
+        ) {
+            Ok(artifact) => artifact,
+            Err(error) => {
+                return save_new(
+                    &path.with_file_name("result.json"),
+                    &WorkerResult {
+                        lease: job.lease,
+                        manifest_sha256: String::new(),
+                        error_code: Some(error.code),
+                    },
+                )
+                .map_err(|e| e.to_string());
+            }
+        },
+    };
     save_new(
         &path.with_file_name("result.json"),
         &WorkerResult {
             lease: job.lease,
             manifest_sha256: artifact.manifest_sha256,
+            error_code: None,
         },
     )
     .map_err(|e| e.to_string())
@@ -517,18 +555,35 @@ impl Engine {
                     if result.lease != running.lease {
                         return Err(build_error());
                     }
-                    let artifact = FreshArtifact {
-                        bundle: parent
-                            .join("attempt")
-                            .join(format!("{}.deckle", running.lease.edition_id)),
-                        manifest_sha256: result.manifest_sha256,
-                    };
-                    press::publish_result(
-                        self.journal.as_mut().unwrap(),
-                        &running.lease,
-                        &artifact,
-                        || (self.options.clock)(),
-                    )?;
+                    if let Some(code) = result.error_code {
+                        if !matches!(
+                            code,
+                            PressErrorCode::SourceFailure
+                                | PressErrorCode::BuildFailed
+                                | PressErrorCode::StorageUnavailable
+                                | PressErrorCode::Unsupported
+                        ) {
+                            return Err(build_error());
+                        }
+                        self.journal.as_mut().unwrap().fail(
+                            &running.lease,
+                            code,
+                            (self.options.clock)(),
+                        )?;
+                    } else {
+                        let artifact = FreshArtifact {
+                            bundle: parent
+                                .join("attempt")
+                                .join(format!("{}.deckle", running.lease.edition_id)),
+                            manifest_sha256: result.manifest_sha256,
+                        };
+                        press::publish_result(
+                            self.journal.as_mut().unwrap(),
+                            &running.lease,
+                            &artifact,
+                            || (self.options.clock)(),
+                        )?;
+                    }
                 }
                 cleanup_attempt(&running.descriptor)?;
                 // A failed child remains active for bounded recovery below.
@@ -720,6 +775,7 @@ impl Engine {
             reading: cfg.reading.queue_path.clone(),
             work: dir.join("attempt"),
             books: cfg.export[index].books,
+            input: self.journal.as_ref().unwrap().job_input(&lease)?,
         };
         save_new(&descriptor, &job)?;
         let child = (self.options.launch)(&descriptor).map_err(|_| build_error())?;

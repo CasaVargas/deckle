@@ -255,6 +255,7 @@ fn advertisement(paper: &Config, binding: &PressBinding, enabled: bool) -> Produ
         paper_name: paper.title.clone(),
         enabled,
         operations: vec![PressOperation::FreshFull],
+        reading_editions: true,
         updated_at: Utc::now(),
     }
 }

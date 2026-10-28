@@ -65,10 +65,12 @@ impl std::error::Error for PressError {}
 fn unsupported() -> PressError {
     PressError::new(PressErrorCode::Unsupported)
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PressOperation {
+    #[default]
     FreshFull,
+    ReadingEdition,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProducerManifest {
@@ -81,6 +83,8 @@ pub struct ProducerManifest {
     pub paper_name: String,
     pub enabled: bool,
     pub operations: Vec<PressOperation>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reading_editions: bool,
     pub updated_at: DateTime<Utc>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,6 +100,12 @@ pub struct PressRequest {
     #[serde(deserialize_with = "canonical_uuid")]
     pub paper_id: Uuid,
     pub operation: PressOperation,
+    #[serde(
+        default,
+        deserialize_with = "present_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub articles: Option<Vec<String>>,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
 }
@@ -222,6 +232,7 @@ pub fn decode_request(
     if r.format != "deckle-press-request" || r.version != 1 {
         return Err(unsupported());
     }
+    validate_input(r.operation, r.articles.as_deref())?;
     bound(r.producer_id, r.paper_id, binding)?;
     exact_path(
         relative,
@@ -287,4 +298,61 @@ pub fn decode_status(
         return Err(unsupported());
     }
     Ok(s)
+}
+
+/// Validate the immutable ordered selection independently of any filesystem routing.
+pub fn validate_input(
+    operation: PressOperation,
+    articles: Option<&[String]>,
+) -> Result<(), PressError> {
+    match (operation, articles) {
+        (PressOperation::FreshFull, None) => Ok(()),
+        (PressOperation::ReadingEdition, Some(urls)) if (1..=20).contains(&urls.len()) => {
+            let mut seen = std::collections::HashSet::new();
+            for value in urls {
+                if value.len() > 2048 || !seen.insert(normalize_article_url(value)?) {
+                    return Err(unsupported());
+                }
+            }
+            Ok(())
+        }
+        _ => Err(unsupported()),
+    }
+}
+/// Strip tracking and fragment identity without rewriting retained signed query bytes.
+pub fn normalize_article_url(value: &str) -> Result<String, PressError> {
+    if value.is_empty() || value.chars().any(char::is_control) || value.trim() != value {
+        return Err(unsupported());
+    }
+    let mut url = crate::url::Url::parse(value).map_err(|_| unsupported())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || value
+            .split("://")
+            .nth(1)
+            .is_some_and(|s| s.split(['/', '?', '#']).next().unwrap_or("").contains('@'))
+    {
+        return Err(unsupported());
+    }
+    url.set_fragment(None);
+    if let Some(query) = url.query() {
+        let retained = query
+            .split('&')
+            .filter(|pair| {
+                let key = pair.split('=').next().unwrap_or("");
+                !crate::url::form_urlencoded::parse(key.as_bytes())
+                    .next()
+                    .is_some_and(|(k, _)| k.starts_with("utm_"))
+            })
+            .collect::<Vec<_>>()
+            .join("&");
+        url.set_query(if retained.is_empty() {
+            None
+        } else {
+            Some(&retained)
+        });
+    }
+    Ok(url.to_string())
 }

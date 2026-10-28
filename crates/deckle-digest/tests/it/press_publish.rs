@@ -30,6 +30,7 @@ fn setup(root: &Path) -> (PressJournal, PressBinding) {
             paper_name: "Test".into(),
             enabled: true,
             operations: vec![PressOperation::FreshFull],
+            reading_editions: true,
             updated_at: now(),
         },
     )
@@ -47,6 +48,7 @@ fn admit(j: &mut PressJournal, b: &PressBinding, at: chrono::DateTime<Utc>) -> (
         producer_id: b.producer_id,
         paper_id: b.paper_id,
         operation: PressOperation::FreshFull,
+        articles: None,
         created_at: at,
         expires_at: at + Duration::hours(24),
     };
@@ -275,6 +277,7 @@ fn press_publish_retains_48_hours_then_tombstones_before_delete_and_keeps_seven(
         producer_id: b.producer_id,
         paper_id: b.paper_id,
         operation: PressOperation::FreshFull,
+        articles: None,
         created_at: now(),
         expires_at: now() + Duration::hours(24),
     };
@@ -459,6 +462,7 @@ fn press_publish_returns_live_coalesced_status_when_first_queued_request_expired
         producer_id: b.producer_id,
         paper_id: b.paper_id,
         operation: PressOperation::FreshFull,
+        articles: None,
         created_at,
         expires_at: created_at + Duration::hours(24),
     };
@@ -497,6 +501,7 @@ fn press_publish_unavailable_old_binding_does_not_block_other_statuses() {
             paper_name: "Other".into(),
             enabled: true,
             operations: vec![PressOperation::FreshFull],
+            reading_editions: true,
             updated_at: now(),
         },
     )
@@ -510,6 +515,7 @@ fn press_publish_unavailable_old_binding_does_not_block_other_statuses() {
         producer_id: other.producer_id,
         paper_id: other.paper_id,
         operation: PressOperation::FreshFull,
+        articles: None,
         created_at: now(),
         expires_at: now() + Duration::hours(24),
     };

@@ -17,6 +17,7 @@ fn fixture() -> (tempfile::TempDir, PressBinding, PressRequest) {
         producer_id: binding.producer_id,
         paper_id: binding.paper_id,
         operation: PressOperation::FreshFull,
+        articles: None,
         created_at: Utc::now(),
         expires_at: Utc::now() + Duration::hours(24),
     };

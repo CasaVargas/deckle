@@ -207,10 +207,19 @@ pub fn build_fresh(
     }
     let gathered =
         crate::gather_with(&isolated, date, context.started_at, net, opts).without_nudges();
+    render_fresh(cfg, context, &gathered)
+}
+
+fn render_fresh(
+    cfg: &Config,
+    context: &FreshBuildContext,
+    gathered: &crate::Gathered,
+) -> Result<FreshArtifact, PressError> {
+    let date = gathered.edition.date;
     let epub = context
         .work_dir
         .join(format!("{}.epub", crate::edition_stem(cfg, date)));
-    crate::write_edition(&gathered, &epub)
+    crate::write_edition(gathered, &epub)
         .map_err(|_| PressError::new(PressErrorCode::BuildFailed))?;
     let mut built = crate::report(&gathered.edition, epub);
     if context.books {
@@ -222,7 +231,7 @@ pub fn build_fresh(
         }
     }
     let bundle = crate::bundle::write_fresh(
-        &gathered,
+        gathered,
         &built,
         &context.work_dir,
         context.books,
@@ -239,4 +248,81 @@ pub fn build_fresh(
         bundle,
         manifest_sha256,
     })
+}
+
+/// Build exactly this frozen selection. This path never reads or mutates saved queues,
+/// scheduled inputs, or configured source sections. The caller supplies an authorized
+/// public-web transport in production; fixture transports remain injectable.
+pub fn build_reading(
+    cfg: &Config,
+    context: &FreshBuildContext,
+    articles: &[String],
+    net: &dyn Net,
+) -> Result<FreshArtifact, PressError> {
+    super::validate_input(super::PressOperation::ReadingEdition, Some(articles))?;
+    std::fs::create_dir(&context.work_dir).map_err(storage)?;
+    let date = context
+        .started_at
+        .with_timezone(&crate::tz::local_tz())
+        .date_naive();
+    let mut isolated = cfg.clone();
+    isolated.reading.long_read_words = usize::MAX;
+    isolated.reading.inline.clear();
+    isolated.force_color = true;
+    isolated.export = vec![crate::config::ExportConfig {
+        format: crate::config::ExportFormat::Bundle,
+        ..Default::default()
+    }];
+    let entries: Vec<_> = articles
+        .iter()
+        .enumerate()
+        .map(|(i, url)| Entry {
+            id: format!("selection-{i}"),
+            url: Some(url.clone()),
+            file: None,
+            title: None,
+            saved_at: context.started_at,
+            source: "press".into(),
+            state: crate::reading::State::Pending,
+            tries: 0,
+            printed_in: None,
+            note: None,
+            tried_on: None,
+            waits: 0,
+        })
+        .collect();
+    let (mut section, long_reads, outcomes) =
+        crate::sources::reading::section(&entries, &isolated, net, date);
+    if outcomes.len() != articles.len()
+        || outcomes
+            .iter()
+            .any(|(_, o)| *o != crate::reading::Outcome::Printed)
+        || section.articles.len() != articles.len()
+        || !long_reads.is_empty()
+    {
+        return Err(PressError::new(PressErrorCode::SourceFailure));
+    }
+    section.key = "reading".into();
+    let (masthead, _) = cfg.masthead.resolve_or_fall_back(&cfg.title);
+    let gathered = crate::Gathered {
+        edition: crate::Edition {
+            large_print: cfg.large_print,
+            paper: cfg.title.clone(),
+            date,
+            place: cfg.place.clone(),
+            weather_line: None,
+            masthead,
+            sections: vec![section],
+            assets: Vec::new(),
+        },
+        news: Vec::new(),
+        reading: Some(0),
+        long_reads,
+        reading_outcomes: outcomes,
+        notes: Vec::new(),
+        names: Vec::new(),
+    };
+    let mut inline_context = context.clone();
+    inline_context.books = false;
+    render_fresh(&isolated, &inline_context, &gathered)
 }

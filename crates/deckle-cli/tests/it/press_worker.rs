@@ -28,10 +28,14 @@ fn worker_fixture() {
         Some("TEST DELAY") => std::thread::sleep(Duration::from_millis(400)),
         _ => (),
     }
+    if data["config"]["title"] == "TEST PUBLIC WEB" {
+        deckle_cli::press_worker::run_job(Path::new(&job)).unwrap();
+        return;
+    }
     let count = std::sync::atomic::AtomicUsize::new(0);
     deckle_cli::press_worker::run_job_with_net(Path::new(&job), &|url: &str| -> Result<Vec<u8>,String> {
         count.fetch_add(1,std::sync::atomic::Ordering::SeqCst);
-        if url=="https://example.invalid/feed" {Ok(br#"<rss version="2.0"><channel><title>Fake wire</title><item><title>Library reopened</title><link>https://example.invalid/story</link><description>Repairs are complete.</description></item></channel></rss>"#.to_vec())}else{Err("fake source unavailable".into())}
+        if url.starts_with("https://example.invalid/selected-") { Ok(format!("<html><head><title>{url}</title></head><body><article><h1>{url}</h1>{}</article></body></html>", "<p>Fictional selected article about a town library and its repaired roof.</p>".repeat(100)).into_bytes()) } else if url=="https://example.invalid/feed" {Ok(br#"<rss version="2.0"><channel><title>Fake wire</title><item><title>Library reopened</title><link>https://example.invalid/story</link><description>Repairs are complete.</description></item></channel></rss>"#.to_vec())}else{Err("fake source unavailable".into())}
     }).unwrap();
     std::fs::write(
         Path::new(&job).with_file_name("source-count"),
@@ -150,6 +154,7 @@ fn fixture(title: &str) -> Fixture {
             paper_name: title.into(),
             enabled: true,
             operations: vec![PressOperation::FreshFull],
+            reading_editions: true,
             updated_at: Utc::now(),
         },
     )
@@ -163,6 +168,7 @@ fn fixture(title: &str) -> Fixture {
         producer_id: id,
         paper_id: binding.paper_id,
         operation: PressOperation::FreshFull,
+        articles: None,
         created_at: now,
         expires_at: now + deckle_digest::chrono::Duration::hours(24),
     };
@@ -522,6 +528,7 @@ fn press_worker_same_paper_two_enabled_folders_and_offline_old_folder() {
             paper_name: "Two folders".into(),
             enabled: true,
             operations: vec![PressOperation::FreshFull],
+            reading_editions: true,
             updated_at: Utc::now(),
         },
     )
@@ -1001,6 +1008,7 @@ fn press_worker_protocol_smoke_exchange() {
             paper_name: "Protocol smoke".into(),
             enabled: true,
             operations: vec![PressOperation::FreshFull],
+            reading_editions: true,
             updated_at: now,
         };
         std::fs::write(
@@ -1361,6 +1369,7 @@ fn controller_exchange_bridge() {
             paper_name: "Controller bridge".into(),
             enabled: true,
             operations: vec![PressOperation::FreshFull],
+            reading_editions: true,
             updated_at: Utc::now(),
         },
     )
@@ -1502,4 +1511,145 @@ fn regression_inaccessible_and_corrupt_intent_recovery_releases_global_lock() {
             Some(press::PressErrorCode::TimedOut)
         );
     }
+}
+
+fn save_reading_request(f: &mut Fixture, urls: &[&str]) {
+    f.request.operation = PressOperation::ReadingEdition;
+    f.request.articles = Some(urls.iter().map(|u| (*u).to_owned()).collect());
+    let path = f.binding.root.join(format!(
+        ".deckle-press/requests/{}/{}.json",
+        f.request.reader_id, f.request.request_id
+    ));
+    std::fs::write(path, serde_json::to_vec(&f.request).unwrap()).unwrap();
+}
+#[test]
+fn press_worker_reading_child_publishes_selection_and_reports_partial_source_failure() {
+    for fail in [false, true] {
+        let mut f = fixture("Selected process paper");
+        save_reading_request(
+            &mut f,
+            &[
+                "https://example.invalid/selected-b",
+                if fail {
+                    "https://example.invalid/missing"
+                } else {
+                    "https://example.invalid/selected-a"
+                },
+            ],
+        );
+        let mut w = PressSupervisor::with_options(f.options.clone());
+        until(
+            &f,
+            &mut w,
+            if fail {
+                PressState::Failed
+            } else {
+                PressState::Published
+            },
+        );
+        drop(w);
+        let s = status(&f).unwrap();
+        if fail {
+            assert_eq!(s.error_code, Some(press::PressErrorCode::SourceFailure));
+            assert!(s.result.is_none());
+        } else {
+            let manifest: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(
+                    f.binding
+                        .root
+                        .join(s.result.unwrap().bundle)
+                        .join("edition.json"),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(manifest["sections"].as_array().unwrap().len(), 1);
+            let stories = manifest["sections"][0]["stories"].as_array().unwrap();
+            assert_eq!(stories.len(), 2);
+            assert!(stories[0]["title"].as_str().unwrap().contains("selected-b"));
+            assert!(stories[1]["title"].as_str().unwrap().contains("selected-a"));
+        }
+        assert!(!f.cfg.reading.queue_path.as_ref().unwrap().exists());
+    }
+}
+
+#[test]
+fn press_worker_concurrent_reading_selections_publish_distinct_outputs() {
+    use std::sync::atomic::{AtomicI64, Ordering};
+    let mut f = fixture("TEST DELAY");
+    save_reading_request(&mut f, &["https://example.invalid/selected-a"]);
+    let instant = Utc::now();
+    let offset = Arc::new(AtomicI64::new(0));
+    let clock_offset = offset.clone();
+    f.options.clock = Arc::new(move || {
+        instant + deckle_digest::chrono::Duration::seconds(clock_offset.load(Ordering::SeqCst))
+    });
+    let first_request = f.request.clone();
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut w, PressState::Building);
+    f.request.request_id = Uuid::new_v4();
+    save_reading_request(&mut f, &["https://example.invalid/selected-b"]);
+    let second_request_id = f.request.request_id;
+    until(&f, &mut w, PressState::Queued);
+    let second_job = status(&f).unwrap().job_id;
+    f.request = first_request;
+    until(&f, &mut w, PressState::Published);
+    let first_status = status(&f).unwrap();
+    assert_ne!(first_status.job_id, second_job);
+    f.request.request_id = second_request_id;
+    offset.store(301, Ordering::SeqCst);
+    until(&f, &mut w, PressState::Published);
+    let second_status = status(&f).unwrap();
+    drop(w);
+    let first = first_status.result.unwrap();
+    let second = second_status.result.unwrap();
+    assert_ne!(first.edition_id, second.edition_id);
+    for (result, expected, excluded) in [
+        (first, "selected-a", "selected-b"),
+        (second, "selected-b", "selected-a"),
+    ] {
+        let body = std::fs::read_to_string(f.binding.root.join(result.bundle).join("edition.json"))
+            .unwrap();
+        assert!(body.contains(expected));
+        assert!(!body.contains(excluded));
+    }
+}
+
+#[test]
+fn press_worker_production_reading_denies_private_destination_before_connecting() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let mut f = fixture("TEST PUBLIC WEB");
+    let url = format!("http://{}/private", listener.local_addr().unwrap());
+    save_reading_request(&mut f, &[&url]);
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut w, PressState::Failed);
+    drop(w);
+    assert_eq!(
+        status(&f).unwrap().error_code,
+        Some(press::PressErrorCode::SourceFailure)
+    );
+    assert!(listener.accept().is_err());
+}
+
+#[test]
+fn press_worker_accepts_legacy_descriptor_without_source_input() {
+    let mut f = fixture("Legacy descriptor");
+    f.options.launch = Arc::new(|path| {
+        let mut value: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?).unwrap();
+        value.as_object_mut().unwrap().remove("input");
+        std::fs::write(path, serde_json::to_vec(&value).unwrap())?;
+        launch(path)
+    });
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut w, PressState::Published);
+    drop(w);
+    let body = std::fs::read_to_string(
+        f.binding
+            .root
+            .join(status(&f).unwrap().result.unwrap().bundle)
+            .join("edition.json"),
+    )
+    .unwrap();
+    assert!(body.contains("Library reopened"));
 }

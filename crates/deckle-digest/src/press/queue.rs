@@ -34,6 +34,21 @@ pub(crate) struct Entry {
     first_seen: DateTime<Utc>,
     status: PressStatus,
 }
+/// Frozen source selection stored with a job, including across worker recovery.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JobInput {
+    pub operation: PressOperation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub articles: Option<Vec<String>>,
+}
+impl From<&PressRequest> for JobInput {
+    fn from(request: &PressRequest) -> Self {
+        Self {
+            operation: request.operation,
+            articles: request.articles.clone(),
+        }
+    }
+}
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Job {
     id: Uuid,
@@ -44,6 +59,8 @@ pub(crate) struct Job {
     first_seen: DateTime<Utc>,
     lease: Option<JobLease>,
     terminal: bool,
+    #[serde(default)]
+    input: JobInput,
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub(crate) struct JournalData {
@@ -69,7 +86,8 @@ pub(crate) fn validate_data(data: &JournalData) -> bool {
     let mut pending_jobs = HashSet::new();
     let mut active = 0;
     for j in &data.jobs {
-        if jobs.insert(j.id, j).is_some()
+        if validate_input(j.input.operation, j.input.articles.as_deref()).is_err()
+            || jobs.insert(j.id, j).is_some()
             || !data
                 .bindings
                 .iter()
@@ -168,7 +186,8 @@ pub(crate) fn validate_data(data: &JournalData) -> bool {
         let Some(j) = jobs.get(&job_id) else {
             return false;
         };
-        if j.producer != binding.producer_id
+        if j.input != JobInput::from(&e.request)
+            || j.producer != binding.producer_id
             || j.paper != binding.paper_id
             || j.root != binding.root
         {
@@ -391,7 +410,11 @@ impl PressJournal {
             return Err(PressError::new(PressErrorCode::Busy));
         }
         let idx = if let Some(idx) = data.jobs.iter().position(|j| {
-            j.paper == b.paper_id && j.producer == b.producer_id && j.root == b.root && !j.terminal
+            j.paper == b.paper_id
+                && j.producer == b.producer_id
+                && j.root == b.root
+                && !j.terminal
+                && j.input == JobInput::from(&request)
         }) {
             idx
         } else {
@@ -411,6 +434,7 @@ impl PressJournal {
                 first_seen: now,
                 lease: None,
                 terminal: false,
+                input: JobInput::from(&request),
             });
             data.jobs.len() - 1
         };
@@ -507,6 +531,15 @@ impl PressJournal {
             .iter()
             .find(|e| e.request.request_id == request_id)
             .map(|e| e.status.clone())
+    }
+    pub fn job_input(&self, lease: &JobLease) -> Result<JobInput, PressError> {
+        self.check_generation(lease)?;
+        self.data
+            .jobs
+            .iter()
+            .find(|j| j.id == lease.job_id)
+            .map(|j| j.input.clone())
+            .ok_or_else(conflict)
     }
     pub fn active(&self) -> Option<JobLease> {
         self.data

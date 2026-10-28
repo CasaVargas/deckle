@@ -285,3 +285,113 @@ fn press_protocol_rejects_noncanonical_uuid_spellings() {
         );
     }
 }
+
+#[test]
+fn reading_requests_validate_selection_and_operation_payload() {
+    let mut v = request();
+    v["operation"] = json!("reading_edition");
+    v["articles"] = json!(["https://example.org/a?sig=a%20b", "https://example.org/b"]);
+    assert!(decode_request(&bytes(&v), &path(), &binding(), now()).is_ok());
+    for articles in [
+        json!(null),
+        json!([]),
+        json!(["file:///tmp/a"]),
+        json!(["https://u:p@example.org/a"]),
+        json!([
+            "https://example.org/a#fragment",
+            "https://example.org/a?utm_source=x"
+        ]),
+        json!(["https://example.org/a", "https://example.org/a"]),
+        json!(["https://example.org/\na"]),
+        json!(vec!["https://example.org/a"; 21]),
+    ] {
+        v["articles"] = articles;
+        assert!(
+            decode_request(&bytes(&v), &path(), &binding(), now()).is_err(),
+            "{v}"
+        );
+    }
+    v["operation"] = json!("fresh_full");
+    for articles in [json!(null), json!([]), json!(["https://example.org/a"])] {
+        v["articles"] = articles;
+        assert!(decode_request(&bytes(&v), &path(), &binding(), now()).is_err());
+    }
+}
+
+#[test]
+fn reading_url_bounds_normalized_identity_and_signed_query_bytes() {
+    use deckle_digest::press::normalize_article_url;
+    let signed = "https://example.org/a?sig=A%2fb+Z&x=&utm_source=mail&order=2%201#title";
+    assert_eq!(
+        normalize_article_url(signed).unwrap(),
+        "https://example.org/a?sig=A%2fb+Z&x=&order=2%201"
+    );
+    let mut v = request();
+    v["operation"] = json!("reading_edition");
+    v["articles"] = json!([signed, "https://example.org/b?email=a@b"]);
+    assert!(decode_request(&bytes(&v), &path(), &binding(), now()).is_ok());
+    for urls in [
+        vec![format!("https://example.org/{}", "a".repeat(2048))],
+        vec![
+            "https://example.org/a".into(),
+            "https://example.org/a?utm_source=mail#fragment".into(),
+        ],
+    ] {
+        v["articles"] = json!(urls);
+        assert!(decode_request(&bytes(&v), &path(), &binding(), now()).is_err());
+    }
+    let mut m: Value =
+        serde_json::from_str(include_str!("../../../../fixtures/press/manifest.json")).unwrap();
+    assert!(
+        !decode_manifest(&bytes(&m), &binding())
+            .unwrap()
+            .reading_editions
+    );
+    for capability in [false, true] {
+        m["reading_editions"] = json!(capability);
+        assert_eq!(
+            decode_manifest(&bytes(&m), &binding())
+                .unwrap()
+                .reading_editions,
+            capability
+        );
+    }
+}
+
+#[test]
+fn reading_selection_exact_count_and_utf8_byte_limits() {
+    use deckle_digest::press::{PressOperation, validate_input};
+    let prefix = "https://example.org/";
+    let exact = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
+    assert!(
+        validate_input(
+            PressOperation::ReadingEdition,
+            Some(std::slice::from_ref(&exact))
+        )
+        .is_ok()
+    );
+    assert!(validate_input(PressOperation::ReadingEdition, Some(&[format!("{exact}a")])).is_err());
+    let unicode = format!("{prefix}{}", "é".repeat(1024));
+    assert!(unicode.chars().count() < 2048);
+    assert!(validate_input(PressOperation::ReadingEdition, Some(&[unicode])).is_err());
+    let mut v = request();
+    v["operation"] = json!("reading_edition");
+    v["articles"] = json!(
+        (0..20)
+            .map(|i| format!("https://example.org/{i}"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        decode_request(&bytes(&v), &path(), &binding(), now())
+            .unwrap()
+            .articles
+            .unwrap()
+            .len(),
+        20
+    );
+    v["articles"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!("https://example.org/20"));
+    assert!(decode_request(&bytes(&v), &path(), &binding(), now()).is_err());
+}

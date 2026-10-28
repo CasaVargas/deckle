@@ -411,6 +411,7 @@ mod tests {
                 paper_name: "Test".into(),
                 enabled: true,
                 operations: vec![PressOperation::FreshFull],
+                reading_editions: true,
                 updated_at: now(),
             },
         )
@@ -430,6 +431,7 @@ mod tests {
                     producer_id: b.producer_id,
                     paper_id: b.paper_id,
                     operation: PressOperation::FreshFull,
+                    articles: None,
                     created_at: at,
                     expires_at: at + Duration::hours(24),
                 },
@@ -499,6 +501,7 @@ mod tests {
             producer_id: other.producer_id,
             paper_id: other.paper_id,
             operation: PressOperation::FreshFull,
+            articles: None,
             created_at: now(),
             expires_at: now() + Duration::hours(24),
         };

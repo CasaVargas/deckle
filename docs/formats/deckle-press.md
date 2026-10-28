@@ -2,7 +2,7 @@
 # Synced-folder press protocol v1
 
 This public contract lets compatible file-based clients request a full fresh
-edition from one designated producer and paper in an explicitly enabled folder.
+edition or a selected-article reading edition from one designated producer and paper in an explicitly enabled folder.
 The desktop must be awake with its watcher running. Sync has no delivery deadline.
 The manifest advertises configuration, not liveness or authentication. Folder
 writers can invoke the bounded operation using the producer's configured sources
@@ -29,14 +29,13 @@ spelling, conflict copies, symlinks escaping the folder and non-regular files.
 The byte decoders do no I/O; the filesystem reader must enforce file safety and
 bounded reads before calling them.
 
-Requests are immutable and permit only `fresh_full`. Clients durably save exact
+Requests are immutable and permit `fresh_full` or capability-gated `reading_edition`. Clients durably save exact
 bytes and binding before atomically publishing. Retries reuse those bytes and ID.
 `expires_at` must be exactly 24 hours after `created_at`. Creation up to five
 minutes ahead of the producer clock is accepted. Greater skew or a different TTL
 is `clock_mismatch`. An unstarted request expires when `now >= expires_at`.
 Running builds may finish after expiry. Different bytes for an accepted request
-ID are `protocol_conflict`. No URLs, destinations, credentials or shell parameters
-are accepted as operations.
+ID are `protocol_conflict`. No destinations, credentials or shell parameters are accepted as operations.
 
 Statuses have positive monotonic revisions and states `queued`, `building`,
 `published`, `failed`, `expired` or `result_removed`. Ignore older revisions and
@@ -79,3 +78,40 @@ requirements. The Rust integration tests cover runtime clock and routing checks.
 ### Shared storage and bounded recovery
 
 Producer shared writes and deletions pin the selected directory hierarchy and reject ancestor replacement. An unstarted job rechecks persisted local opt-in and exact export binding after acquiring the build lock. Recovery checks for a verifiable committed output before enforcing the persisted deadline; unavailable or corrupt output cannot extend that deadline or hold the global slot after workers have been reaped. Retention completes safe work in available bindings before reporting errors from unavailable historical bindings. Unknown expired requests with `now >= expires_at + 30 days` are ignored without deleting client-owned controls; known request IDs retain normal reconciliation.
+
+### Selected-article reading editions
+
+Manifest version 1 retains exactly `operations: ["fresh_full"]` for older clients.
+Optional `reading_editions: true` advertises support for `reading_edition`; missing
+or false means unsupported. Enable or repair folder requests through explicit
+producer setup after updating to advertise the capability. Watcher reconciliation
+never writes an enabled advertisement or restores an opt-out.
+
+A `reading_edition` request requires `articles`, an ordered array of 1–20 HTTP(S)
+URL strings, each at most 2,048 UTF-8 bytes. `fresh_full` requires the field to be
+absent; null and empty supplied arrays are invalid. URLs require a host and cannot
+contain userinfo or control characters. Uniqueness uses normalized identity:
+remove fragments and query keys beginning with `utm_`, preserving all retained
+query components byte-for-byte, including signed values. Clients should submit
+normalized URLs; producers independently validate safe URL syntax and normalized
+uniqueness. The complete control remains limited to 16,384 bytes.
+
+The producer freezes the exact ordered payload in its durable job input. Only the
+same operation and exact ordered articles within one binding coalesce; a different
+selection gets separate work or `busy`, never another selection's result. Legacy
+jobs without source input recover as `fresh_full`. Retry the original immutable
+request rather than silently requesting a full edition.
+
+Reading editions contain only selected articles, complete text inline, without
+configured feeds, weather, puzzles, saved queues or scheduled deliveries. Any
+unavailable selected article fails the whole request with `source_failure`.
+Persistent queues/configuration stay untouched. Result/status formats and fresh
+bundle identity are unchanged.
+
+Production reading fetches use a public-web-only transport for article pages,
+authentication, redirects and photo assets. Every connection uses the checked DNS
+address list directly; mixed public/private answers are denied. Proxies are
+disabled and local, reserved, multicast, link-local and non-global destinations
+are denied. This also excludes publisher endpoints requiring private networking,
+proxy-only access or non-global IPv6 translation/tunnel ranges. Existing publisher
+session scoping still applies; refreshed cookies stay in memory.
