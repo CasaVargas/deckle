@@ -74,7 +74,9 @@ pub enum PressOperation {
 pub struct ProducerManifest {
     pub format: String,
     pub version: u32,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub producer_id: Uuid,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub paper_id: Uuid,
     pub paper_name: String,
     pub enabled: bool,
@@ -85,9 +87,13 @@ pub struct ProducerManifest {
 pub struct PressRequest {
     pub format: String,
     pub version: u32,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub request_id: Uuid,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub reader_id: Uuid,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub producer_id: Uuid,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub paper_id: Uuid,
     pub operation: PressOperation,
     pub created_at: DateTime<Utc>,
@@ -105,6 +111,7 @@ pub enum PressState {
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PressResult {
+    #[serde(deserialize_with = "canonical_uuid")]
     pub edition_id: Uuid,
     pub bundle: String,
     pub manifest_sha256: String,
@@ -113,15 +120,18 @@ pub struct PressResult {
 pub struct PressStatus {
     pub format: String,
     pub version: u32,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub request_id: Uuid,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub producer_id: Uuid,
+    #[serde(deserialize_with = "canonical_uuid")]
     pub paper_id: Uuid,
     pub revision: u64,
     pub state: PressState,
     pub updated_at: DateTime<Utc>,
     #[serde(
         default,
-        deserialize_with = "present_optional",
+        deserialize_with = "present_canonical_uuid",
         skip_serializing_if = "Option::is_none"
     )]
     pub job_id: Option<Uuid>,
@@ -155,6 +165,20 @@ pub struct PressStatus {
         skip_serializing_if = "Option::is_none"
     )]
     pub message: Option<String>,
+}
+// Public controls use the exact lowercase, hyphenated spelling from the schema.
+fn canonical_uuid<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Uuid, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    let id = Uuid::parse_str(&value).map_err(serde::de::Error::custom)?;
+    if value != id.to_string() {
+        return Err(serde::de::Error::custom("noncanonical UUID"));
+    }
+    Ok(id)
+}
+fn present_canonical_uuid<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Uuid>, D::Error> {
+    canonical_uuid(deserializer).map(Some)
 }
 // Missing optional fields are accepted; a present JSON null is not the declared type.
 fn present_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>

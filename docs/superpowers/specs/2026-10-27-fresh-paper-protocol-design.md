@@ -1,6 +1,6 @@
 # Fresh paper on demand through a synced folder
 
-Date: 2026-10-27. Status: approved by Jonathan on 2026-10-27; implementation not started.
+Date: 2026-10-27. Status: approved by Jonathan on 2026-10-27; implementation present; automated checks are recorded in `docs/testing/on-demand-paper.md`, with physical delivery verification still open.
 Components: desktop producer and compatible file-based clients.
 
 ## Intent and scope

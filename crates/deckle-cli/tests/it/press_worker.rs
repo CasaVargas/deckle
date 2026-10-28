@@ -806,3 +806,196 @@ fn press_worker_preserves_fraction_only_shelf_progress() {
     );
     assert_eq!(std::fs::read(f.cfg.shelf_store()).unwrap(), bytes);
 }
+
+// Exercises the public controls and the real child builder with injected source I/O.
+// Removing coalescing, publication inventory, or scheduled isolation breaks this test.
+#[test]
+fn press_worker_protocol_smoke_exchange() {
+    let mut f = fixture("TEST DELAY");
+    let now = deckle_digest::chrono::TimeZone::with_ymd_and_hms(
+        &deckle_digest::tz::local_tz(),
+        2026,
+        10,
+        27,
+        23,
+        59,
+        59,
+    )
+    .single()
+    .unwrap()
+    .with_timezone(&Utc);
+    let clock = Arc::new(std::sync::Mutex::new(now));
+    let shared_clock = clock.clone();
+    f.options.clock = Arc::new(move || *shared_clock.lock().unwrap());
+    f.request.created_at = now;
+    f.request.expires_at = now + deckle_digest::chrono::Duration::hours(24);
+    let write_request = |request: &PressRequest| {
+        let path = f.binding.root.join(format!(
+            ".deckle-press/requests/{}/{}.json",
+            request.reader_id, request.request_id
+        ));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec(request).unwrap()).unwrap();
+    };
+    write_request(&f.request);
+    let mut second = f.request.clone();
+    second.reader_id = Uuid::new_v4();
+    second.request_id = Uuid::new_v4();
+    write_request(&second);
+    let legacy = f.binding.root.join("scheduled.deckle/edition.json");
+    let marks = f.binding.root.join(format!(
+        ".deckle-returns/{}/2026-10-27.json",
+        f.request.reader_id
+    ));
+    for (path, bytes) in [
+        (
+            &legacy,
+            include_bytes!("../../../../fixtures/press/bundle-1.3.json").as_slice(),
+        ),
+        (
+            &marks,
+            include_bytes!("../../../../fixtures/press/returns-legacy.json").as_slice(),
+        ),
+    ] {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    let legacy_before = std::fs::read(&legacy).unwrap();
+    let marks_before = std::fs::read(&marks).unwrap();
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&f.options.run_lock)
+        .unwrap();
+    lock.lock().unwrap();
+    let mut worker = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut worker, PressState::Queued);
+    let queued = status(&f).unwrap();
+    drop(lock);
+    // Cross midnight while queued; identity is UUID-scoped, not a scheduled date key.
+    *clock.lock().unwrap() += deckle_digest::chrono::Duration::seconds(2);
+    until(&f, &mut worker, PressState::Building);
+    let building = status(&f).unwrap();
+    until(&f, &mut worker, PressState::Published);
+    let published = status(&f).unwrap();
+    let other: press::PressStatus = serde_json::from_slice(
+        &std::fs::read(
+            f.binding
+                .root
+                .join(format!(".deckle-press/status/{}.json", second.request_id)),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(other.state, PressState::Published);
+    assert_eq!(published.job_id, other.job_id);
+    assert_eq!(published.result, other.result);
+    assert!(queued.revision < building.revision && building.revision < published.revision);
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 1);
+    assert_eq!(std::fs::read(&legacy).unwrap(), legacy_before);
+    assert_eq!(std::fs::read(&marks).unwrap(), marks_before);
+    let result = published.result.as_ref().unwrap();
+    let bundle = f.binding.root.join(&result.bundle);
+    let bytes = std::fs::read(bundle.join("edition.json")).unwrap();
+    use sha2::{Digest, Sha256};
+    assert_eq!(
+        Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+        result.manifest_sha256
+    );
+    let edition: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(edition["edition"]["id"], result.edition_id.to_string());
+    assert_eq!(
+        edition["edition"]["paper_id"],
+        f.binding.paper_id.to_string()
+    );
+    assert_eq!(edition["edition"]["kind"], "fresh");
+    assert_eq!(edition["edition"]["date"], "2026-10-28");
+    assert!(!edition["files"].as_array().unwrap().is_empty());
+    for file in edition["files"].as_array().unwrap() {
+        let data = std::fs::read(bundle.join(file["path"].as_str().unwrap())).unwrap();
+        assert_eq!(data.len() as u64, file["size"].as_u64().unwrap());
+        assert_eq!(
+            Sha256::digest(&data)
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>(),
+            file["sha256"].as_str().unwrap()
+        );
+    }
+    drop(worker);
+    let mut worker = PressSupervisor::with_options(f.options.clone());
+    worker.tick(std::slice::from_ref(&f.cfg), now).unwrap();
+    assert_eq!(status(&f).unwrap(), published);
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 1);
+    if let Some(output) = std::env::var_os("DECKLE_PRESS_SMOKE_OUTPUT") {
+        let output = Path::new(&output);
+        std::fs::create_dir(output).expect("smoke output must not already exist");
+        for (name, value) in [
+            ("request.json", serde_json::to_value(&f.request).unwrap()),
+            (
+                "request-second.json",
+                serde_json::to_value(&second).unwrap(),
+            ),
+            ("status-queued.json", serde_json::to_value(&queued).unwrap()),
+            (
+                "status-building.json",
+                serde_json::to_value(&building).unwrap(),
+            ),
+            (
+                "status-published.json",
+                serde_json::to_value(&published).unwrap(),
+            ),
+            ("status-second.json", serde_json::to_value(&other).unwrap()),
+        ] {
+            std::fs::write(
+                output.join(name),
+                serde_json::to_vec_pretty(&value).unwrap(),
+            )
+            .unwrap();
+        }
+        let manifest = ProducerManifest {
+            format: "deckle-press".into(),
+            version: 1,
+            producer_id: f.binding.producer_id,
+            paper_id: f.binding.paper_id,
+            paper_name: "Protocol smoke".into(),
+            enabled: true,
+            operations: vec![PressOperation::FreshFull],
+            updated_at: now,
+        };
+        std::fs::write(
+            output.join("manifest.json"),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        fn copy_tree(source: &Path, destination: &Path) {
+            std::fs::create_dir_all(destination).unwrap();
+            for entry in std::fs::read_dir(source).unwrap() {
+                let entry = entry.unwrap();
+                let dest = destination.join(entry.file_name());
+                if entry.file_type().unwrap().is_dir() {
+                    copy_tree(&entry.path(), &dest);
+                } else {
+                    std::fs::copy(entry.path(), &dest).unwrap();
+                }
+            }
+        }
+        copy_tree(&bundle, &output.join(&result.bundle));
+        std::fs::write(output.join("scheduled-before.json"), legacy_before).unwrap();
+        std::fs::write(
+            output.join("scheduled-after.json"),
+            std::fs::read(legacy).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(output.join("marks-before.json"), marks_before).unwrap();
+        std::fs::write(
+            output.join("marks-after.json"),
+            std::fs::read(marks).unwrap(),
+        )
+        .unwrap();
+    }
+}

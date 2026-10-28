@@ -183,5 +183,17 @@
     "schema": "docs/formats/deckle-press.schema.json",
     "definition": "manifest",
     "valid": false
+  },
+  {
+    "file": "invalid-request-uuid-uppercase.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
+  },
+  {
+    "file": "invalid-request-uuid-compact.json",
+    "schema": "docs/formats/deckle-press.schema.json",
+    "definition": "request",
+    "valid": false
   }
 ]

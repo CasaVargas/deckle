@@ -68,6 +68,11 @@ jobs:
       # nextest runs every test in its own process and the test binaries in parallel (cargo
       # test runs the binaries one after another). The workspace has no doctests to miss.
       - run: cargo nextest run --workspace --profile ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r tools/requirements-press.txt
+      - run: python tools/press-smoke.py --target-dir target --output "${{ runner.temp }}/press-smoke"
   press-contract:
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'

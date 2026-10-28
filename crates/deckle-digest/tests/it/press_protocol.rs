@@ -227,3 +227,61 @@ fn press_protocol_optional_fields_must_have_their_declared_types() {
         "present optional fields must have the declared type"
     );
 }
+
+#[test]
+fn press_protocol_rejects_noncanonical_uuid_spellings() {
+    fn spellings(id: &str) -> [String; 4] {
+        [
+            id.to_uppercase(),
+            id.replace('-', ""),
+            format!("{{{id}}}"),
+            format!("urn:uuid:{id}"),
+        ]
+    }
+    let status_path = PathBuf::from(format!(".deckle-press/status/{REQUEST}.json"));
+    for key in ["request_id", "reader_id", "producer_id", "paper_id"] {
+        for spelling in spellings(request()[key].as_str().unwrap()) {
+            let mut candidate = request();
+            candidate[key] = json!(spelling);
+            assert!(
+                decode_request(&bytes(&candidate), &path(), &binding(), now()).is_err(),
+                "request {key}: {spelling}"
+            );
+        }
+    }
+    for key in ["producer_id", "paper_id"] {
+        let manifest: Value =
+            serde_json::from_str(include_str!("../../../../fixtures/press/manifest.json")).unwrap();
+        for spelling in spellings(manifest[key].as_str().unwrap()) {
+            let mut candidate = manifest.clone();
+            candidate[key] = json!(spelling);
+            assert!(
+                decode_manifest(&bytes(&candidate), &binding()).is_err(),
+                "manifest {key}: {spelling}"
+            );
+        }
+    }
+    for (key, id) in [
+        ("request_id", REQUEST),
+        ("producer_id", PRODUCER),
+        ("paper_id", PAPER),
+        ("job_id", PRODUCER),
+    ] {
+        for spelling in spellings(id) {
+            let mut candidate = status();
+            candidate[key] = json!(spelling);
+            assert!(
+                decode_status(&bytes(&candidate), &status_path, &binding()).is_err(),
+                "status {key}: {spelling}"
+            );
+        }
+    }
+    for spelling in spellings(EDITION) {
+        let mut candidate = status();
+        candidate["result"]["edition_id"] = json!(spelling);
+        assert!(
+            decode_status(&bytes(&candidate), &status_path, &binding()).is_err(),
+            "result: {spelling}"
+        );
+    }
+}
