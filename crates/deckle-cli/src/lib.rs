@@ -2069,6 +2069,24 @@ fn schedule_at() -> Option<(u8, u8)> {
         .and_then(|a| deckle_digest::schedule::parse_at(&a).ok())
 }
 
+/// The next press in a daemon install, from `[schedule]` (`at`, and `days` when set).
+fn daemon_next_press(
+    sched: &deckle_digest::config::ScheduleConfig,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
+) -> Option<deckle_digest::chrono::NaiveDate> {
+    use deckle_digest::chrono::{Datelike, Days};
+    let at = deckle_digest::schedule::parse_at(sched.at.as_deref()?).ok()?;
+    let mut date = deckle_digest::press::next_press(at, now).date_naive();
+    for _ in 0..7 {
+        let day = deckle_digest::config::Day::ALL[date.weekday().num_days_from_monday() as usize];
+        if sched.days.is_empty() || sched.days.contains(&day) {
+            return Some(date);
+        }
+        date = date + Days::new(1);
+    }
+    None
+}
+
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
     match arg {
         None => Ok(deckle_digest::chrono::Local::now().date_naive()),
@@ -2992,10 +3010,15 @@ fn digest(
                     None => {
                         let now = deckle_digest::chrono::Utc::now()
                             .with_timezone(&deckle_digest::tz::local_tz());
-                        deckle_digest::press::press(schedule_at(), None, now)
-                            .next
-                            .map(|n| n.date_naive())
-                            .ok_or("nothing is scheduled; there's no press to stop")?
+                        // No OS job to ask in a container: the main paper's own `[schedule]`.
+                        let next = if daemon_install() {
+                            daemon_next_press(&cfg.schedule, now)
+                        } else {
+                            deckle_digest::press::press(schedule_at(), None, now)
+                                .next
+                                .map(|n| n.date_naive())
+                        };
+                        next.ok_or("nothing is scheduled; there's no press to stop")?
                     }
                 };
                 Some(date)

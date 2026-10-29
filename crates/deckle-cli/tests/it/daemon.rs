@@ -315,3 +315,65 @@ fn daemon_install_takes_site_passwords_from_env_only() {
         "{without}"
     );
 }
+
+fn stopped_date(o: &std::process::Output) -> String {
+    let v: serde_json::Value = serde_json::from_str(&text(&o.stdout)).unwrap();
+    v["stopped"].as_str().unwrap().to_owned()
+}
+
+#[test]
+fn stop_in_daemon_install_uses_config_at() {
+    let (_tmp, home) = setup(AT_0530);
+    let o = in_daemon_install(&home, &["--json", "stop"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let day = stopped_date(&o);
+    let today = deckle_digest::chrono::Utc::now().date_naive();
+    let tomorrow = today + deckle_digest::chrono::Days::new(1);
+    assert!(
+        day == today.to_string() || day == tomorrow.to_string(),
+        "{day}"
+    );
+    let state: Vec<_> = walk(&home)
+        .into_iter()
+        .filter(|p| p.ends_with("press.json"))
+        .collect();
+    assert_eq!(state.len(), 1, "{state:?}");
+    assert!(std::fs::read_to_string(&state[0]).unwrap().contains(&day));
+}
+
+#[test]
+fn stop_in_daemon_install_honours_days() {
+    use deckle_digest::chrono::{Datelike, Days, Utc};
+    let target = Utc::now().date_naive() + Days::new(3);
+    let key =
+        deckle_digest::config::Day::ALL[target.weekday().num_days_from_monday() as usize].key();
+    let (_tmp, home) = setup(&format!("[schedule]\nat = \"05:30\"\ndays = [\"{key}\"]\n"));
+    let o = in_daemon_install(&home, &["--json", "stop"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert_eq!(stopped_date(&o), target.to_string());
+}
+
+#[test]
+fn stop_in_daemon_install_without_at_still_errors() {
+    let (_tmp, home) = setup("");
+    let o = in_daemon_install(&home, &["stop"]);
+    assert!(!o.status.success());
+    assert!(
+        text(&o.stderr).contains("nothing is scheduled; there's no press to stop"),
+        "{}",
+        text(&o.stderr)
+    );
+}
+
+fn walk(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let p = e.path();
+        if p.is_dir() {
+            out.extend(walk(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
