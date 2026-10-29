@@ -183,14 +183,14 @@ fn in_daemon_install(home: &Path, args: &[&str]) -> std::process::Output {
 fn start_lists_bad_paths_and_still_prints() {
     let (_tmp, home) = setup(AT_0530);
     let mut toml = digest_toml(&home, AT_0530);
-    toml.push_str("\n[[export]]\nname = \"Mac\"\ndir = \"/Users/someone/iCloud/Deckle\"\n");
+    toml.push_str("\n[[export]]\nname = \"Mac\"\ndir = \"/no-such-root/someone/iCloud/Deckle\"\n");
     std::fs::write(config_dir(&home).join("digest.toml"), toml).unwrap();
     let o = daemon(&home, "06:00");
     assert!(o.status.success(), "{}", text(&o.stderr));
     let err = text(&o.stderr);
     assert!(
         err.contains("export.dir")
-            && err.contains("/Users/someone/iCloud/Deckle")
+            && err.contains("/no-such-root/someone/iCloud/Deckle")
             && err.contains("main paper"),
         "{err}"
     );

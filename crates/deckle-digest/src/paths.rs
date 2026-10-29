@@ -52,11 +52,20 @@ pub fn check(papers: &[Config]) -> Vec<PathProblem> {
     out
 }
 
+/// Fine unless the nearest existing ancestor is the filesystem root (or a bare drive root) or
+/// isn't a folder: a fresh `$HOME` lacks `~/Deckle`, which is created on use, but `/Users/…`
+/// or `C:\Users\…` copied from a Mac or PC has nothing to grow from.
 fn usable(path: &Path) -> bool {
-    path.exists()
-        || path
-            .parent()
-            .is_none_or(|p| p.as_os_str().is_empty() || p.exists())
+    if !path.is_absolute() {
+        // A Windows drive path on Linux, or a rooted one without a drive on Windows, is a name
+        // that can never be made.
+        let b = path.to_string_lossy();
+        return !(b.starts_with(['/', '\\']) || b.as_bytes().get(1) == Some(&b':'));
+    }
+    match path.ancestors().find(|a| a.exists()) {
+        Some(a) => a.is_dir() && a.parent().is_some(),
+        None => false,
+    }
 }
 
 #[cfg(test)]
@@ -79,14 +88,50 @@ mod tests {
 
     #[test]
     fn check_names_missing_mac_export_dir() {
-        let p = check(&[with_export("/Users/someone/iCloud/Deckle")]);
+        let p = check(&[with_export("/no-such-root/someone/iCloud/Deckle")]);
         assert_eq!(
             p,
             vec![PathProblem {
                 paper: "main".into(),
                 key: "export.dir",
-                path: "/Users/someone/iCloud/Deckle".into(),
+                path: "/no-such-root/someone/iCloud/Deckle".into(),
             }]
+        );
+    }
+
+    #[test]
+    fn default_paths_under_fresh_home_are_fine() {
+        // What `~/Deckle/Inbox` and `~/Deckle/Morgue` expand to under a new `$HOME`.
+        let home = tempfile::tempdir().unwrap();
+        let mut cfg = Config::default();
+        cfg.reading.inbox = home
+            .path()
+            .join("Deckle/Inbox")
+            .to_string_lossy()
+            .into_owned();
+        cfg.morgue.folder = home
+            .path()
+            .join("Deckle/Morgue")
+            .to_string_lossy()
+            .into_owned();
+        assert!(check(&[cfg]).is_empty());
+    }
+
+    #[test]
+    fn windows_and_volume_paths_are_flagged() {
+        for p in ["/no-such-volumes/Backup/Deckle", "Q:\\no-such\\Deckle"] {
+            assert_eq!(check(&[with_export(p)]).len(), 1, "{p}");
+        }
+    }
+
+    #[test]
+    fn under_a_file_is_flagged() {
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("file");
+        std::fs::write(&f, "").unwrap();
+        assert_eq!(
+            check(&[with_export(&f.join("x/y").to_string_lossy())]).len(),
+            1
         );
     }
 
