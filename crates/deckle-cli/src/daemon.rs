@@ -101,8 +101,18 @@ pub fn run(
     Ok(())
 }
 
-/// The start-up check of the config, Morgue and export folders: Task 5 fills it in.
-fn check_paths(_papers: &[Config]) {}
+/// The start-up check of the export, Inbox and Morgue folders: a config carried over from a
+/// Mac names folders the container doesn't have. Said, never fatal: the rest still prints.
+fn check_paths(papers: &[Config]) {
+    for p in deckle_digest::paths::check(papers) {
+        eprintln!(
+            "config: {} = {} doesn't exist here ({} paper). Point it at a folder under /data.",
+            p.key,
+            p.path.display(),
+            p.paper
+        );
+    }
+}
 
 /// The zone the clock reads. `TZ` first: `digest run` (chrono's local time) follows it, while
 /// the machine zone on Linux is `/etc/localtime`, which a container's `TZ` doesn't change.

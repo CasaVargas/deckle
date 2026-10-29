@@ -28,6 +28,7 @@ pub mod masthead;
 pub mod moon;
 pub mod next;
 pub mod papers;
+pub mod paths;
 pub mod pdf;
 pub mod press;
 pub mod print;

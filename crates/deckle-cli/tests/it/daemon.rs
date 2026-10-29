@@ -158,3 +158,97 @@ fn unscheduled_paper_never_runs() {
     assert!(!text(&o.stdout).contains("[kids]"), "{}", text(&o.stdout));
     assert_eq!(state(&home)["printed"].get("kids"), None);
 }
+
+/// `deckle digest <args>` in a daemon install (`DECKLE_DAEMON=1`), `PATH` empty so nothing
+/// could reach launchd, schtasks or cron.
+fn in_daemon_install(home: &Path, args: &[&str]) -> std::process::Output {
+    Command::cargo_bin("deckle")
+        .unwrap()
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("XDG_CONFIG_HOME", home)
+        .env("APPDATA", home)
+        .env("LOCALAPPDATA", home)
+        .env("PATH", "/nonexistent")
+        .env("TZ", "UTC")
+        .env("DECKLE_DAEMON", "1")
+        .env_remove("DECKLE_SMTP_PASSWORD")
+        .arg("digest")
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn start_lists_bad_paths_and_still_prints() {
+    let (_tmp, home) = setup(AT_0530);
+    let mut toml = digest_toml(&home, AT_0530);
+    toml.push_str("\n[[export]]\nname = \"Mac\"\ndir = \"/Users/someone/iCloud/Deckle\"\n");
+    std::fs::write(config_dir(&home).join("digest.toml"), toml).unwrap();
+    let o = daemon(&home, "06:00");
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let err = text(&o.stderr);
+    assert!(
+        err.contains("export.dir")
+            && err.contains("/Users/someone/iCloud/Deckle")
+            && err.contains("main paper"),
+        "{err}"
+    );
+    assert!(edition(&home).is_file(), "{err}");
+}
+
+#[test]
+fn schedule_off_in_daemon_install_clears_main_at() {
+    let (_tmp, home) = setup(AT_0530);
+    let o = in_daemon_install(&home, &["schedule", "--off"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let toml = std::fs::read_to_string(config_dir(&home).join("digest.toml")).unwrap();
+    assert!(!toml.contains("05:30"), "{toml}");
+}
+
+#[test]
+fn schedule_at_in_daemon_install_saves_for_the_daemon() {
+    let (_tmp, home) = setup("");
+    let o = in_daemon_install(&home, &["schedule", "--at", "06:15"]);
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(
+        text(&o.stdout).contains("saved; the daemon picks it up within a minute"),
+        "{}",
+        text(&o.stdout)
+    );
+    let toml = std::fs::read_to_string(config_dir(&home).join("digest.toml")).unwrap();
+    assert!(toml.contains("06:15"), "{toml}");
+}
+
+#[test]
+fn email_password_in_daemon_install_names_env() {
+    let (_tmp, home) = setup("");
+    let o = in_daemon_install(&home, &["email", "password", "--stdin"]);
+    assert!(!o.status.success());
+    assert!(
+        text(&o.stderr).contains("no keychain in the container: set DECKLE_SMTP_PASSWORD"),
+        "{}",
+        text(&o.stderr)
+    );
+}
+
+#[test]
+fn subscribe_password_in_daemon_install_names_site_env() {
+    let (_tmp, home) = setup("");
+    let o = in_daemon_install(
+        &home,
+        &[
+            "subscribe",
+            "gazette.example",
+            "--username",
+            "me",
+            "--stdin",
+        ],
+    );
+    assert!(!o.status.success());
+    assert!(
+        text(&o.stderr).contains("set DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE"),
+        "{}",
+        text(&o.stderr)
+    );
+}
