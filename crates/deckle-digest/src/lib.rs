@@ -11,6 +11,7 @@ pub mod bundle;
 pub mod config;
 pub mod cookbook;
 pub mod cover;
+pub mod daemon;
 pub mod day;
 pub mod editor;
 pub mod epub;
