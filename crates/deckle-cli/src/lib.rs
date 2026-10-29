@@ -5,6 +5,7 @@ mod cli;
 mod cookbook;
 pub mod cookbook_api;
 mod cookbook_delivery;
+mod daemon;
 mod highlights;
 mod inbox;
 pub mod press_worker;
@@ -3053,6 +3054,11 @@ fn digest(
             let mut outcome = push_queued(&path, &queue, &papers, target)?;
             outcome.remarkable = remarkable;
             emit(json, &outcome, || outcome.describe(&queue))?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::DigestCommand::Daemon { tick } => {
+            let papers = all_papers(&path)?;
+            daemon::run(&path, explicit_config.as_deref(), papers, tick)?;
             Ok(ExitCode::SUCCESS)
         }
         cli::DigestCommand::Watch { interval } => {

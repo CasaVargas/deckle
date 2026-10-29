@@ -153,7 +153,7 @@ pub fn unstable_exe(exe: &Path) -> Option<String> {
 
 impl Schedule {
     /// The arguments after the binary for one job (`run` or `watch`).
-    fn args(&self, job: &str) -> Vec<String> {
+    pub fn args(&self, job: &str) -> Vec<String> {
         let mut a = vec!["digest".to_owned()];
         if let Some(c) = &self.config {
             a.push("--config".into());
