@@ -71,7 +71,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.os }}-${{ matrix.target }}
       # keyring's Secret Service backend links libdbus; the CLI needs nothing else.
       - run: |
           sudo apt-get update
