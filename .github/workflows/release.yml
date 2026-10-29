@@ -206,6 +206,36 @@ jobs:
           fi
           # A release build must find the bundled copy, not this one.
           rm -rf target/pdfium
+      # macOS 26 draws the Liquid Glass icon from Resources/Assets.car, which Xcode 26's actool
+      # compiles from src-tauri/icons/Deckle.icon; CFBundleIconName (src-tauri/icon.macos.Info.plist)
+      # names it. icons/icon.icns stays as CFBundleIconFile for anything that doesn't read Assets.car.
+      - name: Liquid Glass icon
+        if: runner.os == 'macOS'
+        shell: bash
+        working-directory: apps/desktop/src-tauri
+        run: |
+          set -euo pipefail
+          # actool learned .icon in Xcode 26; use the runner's default Xcode if it's new enough,
+          # else the newest Xcode 26 or later installed beside it.
+          major=$(xcodebuild -version | awk 'NR==1 { split($2, v, "."); print v[1] }')
+          if [ "$major" -lt 26 ]; then
+            xcode=$(ls -d /Applications/Xcode_2[6-9]*.app 2>/dev/null | sort -V | tail -1 || true)
+            [ -n "$xcode" ] || { echo "::error::No Xcode 26 or later on this runner to compile icons/Deckle.icon"; exit 1; }
+            export DEVELOPER_DIR="$xcode/Contents/Developer"
+          fi
+          xcrun actool --version
+          mkdir -p liquid-glass
+          xcrun actool icons/Deckle.icon --compile liquid-glass \
+            --output-format human-readable-text --notices --warnings --errors \
+            --output-partial-info-plist "$RUNNER_TEMP/icon-partial.plist" \
+            --app-icon Deckle --include-all-app-icons --enable-on-demand-resources NO \
+            --development-region en --target-device mac \
+            --minimum-deployment-target 14.0 --platform macosx
+          test -f liquid-glass/Assets.car || { echo "::error::actool made no Assets.car from icons/Deckle.icon"; exit 1; }
+          echo "actool's partial Info.plist:"
+          cat "$RUNNER_TEMP/icon-partial.plist"
+          xcrun --sdk macosx assetutil --info liquid-glass/Assets.car
+          echo "ICON_ARGS= --config src-tauri/icon.macos.conf.json" >> "$GITHUB_ENV"
       - uses: tauri-apps/tauri-action@v0
         if: github.event.inputs.dry_run != 'true'
         env:
@@ -219,7 +249,7 @@ jobs:
         with:
           projectPath: apps/desktop
           tauriScript: pnpm tauri
-          args: --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}${{ env.PDFIUM_ARGS }}
+          args: --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}${{ env.PDFIUM_ARGS }}${{ env.ICON_ARGS }}
           tagName: ${{ env.TAG }}
           releaseName: ${{ env.TAG && format('Deckle {0}', env.TAG) || '' }}
           releaseBody: |
@@ -240,7 +270,7 @@ jobs:
           AZURE_TENANT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_TENANT_ID || '' }}
           AZURE_CLIENT_ID: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_ID || '' }}
           AZURE_CLIENT_SECRET: ${{ runner.os == 'Windows' && secrets.AZURE_CLIENT_SECRET || '' }}
-        run: pnpm tauri build --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}${{ env.PDFIUM_ARGS }}
+        run: pnpm tauri build --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}${{ env.PDFIUM_ARGS }}${{ env.ICON_ARGS }}
       # The built app reads a PDF through its own PDFium: no DECKLE_PDFIUM, no copy elsewhere.
       - name: Check PDFium in the macOS app
         if: runner.os == 'macOS'
@@ -264,6 +294,19 @@ jobs:
           out=$("$bin" --json inspect fixtures/pdf/book.pdf)
           echo "$out"
           echo "$out" | grep -q '"title": *"A Small Book"' || { echo "::error::the app couldn't read a PDF through its bundled PDFium"; exit 1; }
+      - name: Check the Liquid Glass icon in the macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          app=$(ls -d target/$TARGET/release/bundle/macos/*.app | head -1)
+          test -f "$app/Contents/Resources/Assets.car" || { echo "::error::Assets.car is not in $app/Contents/Resources"; exit 1; }
+          name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$app/Contents/Info.plist")
+          [ "$name" = "Deckle" ] || { echo "::error::CFBundleIconName is '$name', not Deckle"; exit 1; }
+          echo "CFBundleIconFile: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$app/Contents/Info.plist")"
+          ls -l "$app/Contents/Resources"
       - name: Check PDFium in the Windows installer
         if: runner.os == 'Windows'
         shell: powershell
