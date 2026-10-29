@@ -1,0 +1,19 @@
+# The image builds only the CLI (docker/Dockerfile), but Cargo still loads every workspace
+# member's manifest and sources, so crates/, data/ and apps/desktop/src-tauri/ stay.
+.git/
+.claude/
+.superpowers/
+target/
+**/node_modules/
+apps/desktop/node_modules/
+apps/desktop/dist/
+apps/desktop/src/
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/pdfium/
+docs/
+fixtures/
+# The builder image's toolchain is stable already; the file would make rustup fetch another.
+rust-toolchain.toml
+**/.DS_Store
+**/*.log

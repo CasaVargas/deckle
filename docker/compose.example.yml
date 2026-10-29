@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Deckle, headless: copy to compose.yml, set the paths and TZ, then `docker compose up -d`.
+# The first start writes /config/deckle/digest.toml; edit it and restart.
+services:
+  deckle:
+    image: ghcr.io/casavargas/deckle:latest
+    container_name: deckle
+    restart: unless-stopped
+    # A running edition gets up to 60 s to finish on stop, plus the watcher's shutdown.
+    # With `docker run`, pass --stop-timeout 90.
+    stop_grace_period: 90s
+    environment:
+      TZ: America/New_York      # papers print on this zone's clock
+      PUID: "99"                # files are written as this user and group
+      PGID: "100"               # (Unraid: nobody:users)
+      DECKLE_SMTP_PASSWORD: ""  # for [email]: send the paper to your Kindle
+    volumes:
+      - ./config:/config        # digest.toml, papers, state
+      - ./data:/data            # Morgue, library, Inbox, export folders
+    # The bookmarklet listener. Uncomment to save pages from a browser; set
+    # DECKLE_BOOKMARKLET_URL to the address the browser reaches (behind a TLS proxy for
+    # https pages).
+    # ports:
+    #   - "47219:47219"

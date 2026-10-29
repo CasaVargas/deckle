@@ -18,6 +18,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -44,6 +45,18 @@ jobs:
               - 'apps/desktop/*.json'
               - 'apps/desktop/*.ts'
               - 'apps/desktop/*.yaml'
+              - '.github/workflows/ci.yml'
+            docker:
+              - 'docker/**'
+              - '.dockerignore'
+              - 'crates/**'
+              - 'data/**'
+              - 'apps/desktop/src-tauri/**'
+              - 'tools/docker-smoke.sh'
+              - 'tools/fetch-pdfium.sh'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'LICENSE'
               - '.github/workflows/ci.yml'
   rust:
     needs: changes
@@ -78,6 +91,19 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r tools/requirements-press.txt
       - run: python tools/press-smoke.py --target-dir target --output "${{ runner.temp }}/press-smoke"
+  # The headless image (docker/Dockerfile): build it for amd64 and run one daemon tick in it.
+  docker:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f docker/Dockerfile -t deckle:ci .
+      - name: Image size and linked libraries
+        run: |
+          docker image ls deckle:ci
+          docker run --rm --entrypoint ldd deckle:ci /opt/deckle/deckle
+      - run: tools/docker-smoke.sh deckle:ci
   press-contract:
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'
