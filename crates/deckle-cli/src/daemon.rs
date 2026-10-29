@@ -122,13 +122,23 @@ fn now(zone: Tz) -> DateTime<Tz> {
         .unwrap_or_else(|| Utc::now().with_timezone(&zone))
 }
 
-/// The saved state; a file that's there but unreadable is said, then started over.
+/// The saved state; a file that's there but can't be read or parsed (permissions, a root-owned
+/// copy) is said, then started over. Only a missing file is a quiet fresh start.
 fn load_state(path: &Path) -> DaemonState {
-    let bytes = std::fs::read(path).unwrap_or_default();
-    if !bytes.is_empty() && serde_json::from_slice::<DaemonState>(&bytes).is_err() {
-        eprintln!("{}: daemon.json unreadable; starting fresh", path.display());
+    match std::fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+            eprintln!("{}: daemon.json unreadable; starting fresh", path.display());
+            DaemonState::default()
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => DaemonState::default(),
+        Err(e) => {
+            eprintln!(
+                "{}: can't read daemon.json ({e}); starting fresh",
+                path.display()
+            );
+            DaemonState::default()
+        }
     }
-    DaemonState::load(path)
 }
 
 struct Daemon {

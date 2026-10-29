@@ -111,6 +111,60 @@ fn due_paper_prints_once() {
     assert_eq!(mtime, again);
 }
 
+fn mtime(p: &Path) -> std::time::SystemTime {
+    std::fs::metadata(p).unwrap().modified().unwrap()
+}
+
+/// The Morgue sidecar alone keeps today's edition from printing twice: with daemon.json
+/// gone, a second tick runs nothing.
+#[test]
+fn sidecar_guards_a_reprint_without_daemon_json() {
+    let (_tmp, home) = setup(AT_0530);
+    let o = daemon(&home, "06:00");
+    assert!(edition(&home).is_file(), "{}", text(&o.stderr));
+    let before = mtime(&edition(&home));
+
+    std::fs::remove_file(config_dir(&home).join("daemon.json")).unwrap();
+    let o = daemon(&home, "06:00");
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(!text(&o.stdout).contains("[main]"), "{}", text(&o.stdout));
+    assert_eq!(before, mtime(&edition(&home)));
+}
+
+/// The same with daemon.json garbage, which is said.
+#[test]
+fn sidecar_guards_a_reprint_with_garbage_daemon_json() {
+    let (_tmp, home) = setup(AT_0530);
+    let o = daemon(&home, "06:00");
+    assert!(edition(&home).is_file(), "{}", text(&o.stderr));
+    let before = mtime(&edition(&home));
+
+    std::fs::write(config_dir(&home).join("daemon.json"), "not json {").unwrap();
+    let o = daemon(&home, "06:00");
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    assert!(!text(&o.stdout).contains("[main]"), "{}", text(&o.stdout));
+    assert!(
+        text(&o.stderr).contains("daemon.json unreadable"),
+        "{}",
+        text(&o.stderr)
+    );
+    assert_eq!(before, mtime(&edition(&home)));
+}
+
+/// A daemon.json that's there but can't be read (here a folder) is said, not silently
+/// started over.
+#[test]
+fn unreadable_daemon_json_is_said() {
+    let (_tmp, home) = setup("");
+    std::fs::create_dir_all(config_dir(&home).join("daemon.json")).unwrap();
+    let o = daemon(&home, "06:00");
+    let err = text(&o.stderr);
+    assert!(
+        err.contains("daemon.json") && err.contains("can't read"),
+        "{err}"
+    );
+}
+
 #[test]
 fn after_noon_logs_skip() {
     let (_tmp, home) = setup(AT_0530);
