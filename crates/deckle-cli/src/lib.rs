@@ -3093,13 +3093,15 @@ fn digest(
                     std::thread::spawn(move || {
                         if let Err(e) = deckle_digest::bookmarklet::serve(reading, token, recipes) {
                             eprintln!(
-                                "bookmarklet: can't listen on 127.0.0.1:{}: {e}",
+                                "bookmarklet: can't listen on {}:{}: {e}",
+                                deckle_digest::bookmarklet::bind_address(),
                                 deckle_digest::bookmarklet::PORT
                             );
                         }
                     });
                     eprintln!(
-                        "bookmarklet: listening on 127.0.0.1:{}",
+                        "bookmarklet: listening on {}:{}",
+                        deckle_digest::bookmarklet::bind_address(),
                         deckle_digest::bookmarklet::PORT
                     );
                 }
