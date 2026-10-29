@@ -349,9 +349,11 @@ jobs:
           if ($bad) { exit 1 }
 
   # The headless Linux CLI tarballs and the container image (release-linux.yml). After the
-  # bundle jobs so the draft release exists for the tarballs to attach to.
+  # bundle jobs (the draft release exists for the tarballs) and the latest.json check.
   linux:
-    needs: bundle
+    needs: [bundle, check-updater-json]
+    # check-updater-json is skipped on a dry run, which would skip this job too
+    if: ${{ !cancelled() && needs.bundle.result == 'success' && needs.check-updater-json.result != 'failure' }}
     permissions:
       contents: write
       packages: write
@@ -359,7 +361,6 @@ jobs:
     with:
       tag: ${{ github.event.inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
       dry_run: ${{ github.event.inputs.dry_run == 'true' }}
-    secrets: inherit
 
   # Every platform's updater entry must be in the draft's latest.json before it's published:
   # an install whose key is missing finds no update.

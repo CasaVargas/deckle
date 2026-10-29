@@ -5,6 +5,10 @@ name: release-linux
 # works out itself; it can also be run alone with workflow_dispatch (dry run, or a tag whose
 # draft release already exists).
 #
+# `:latest` is not moved at tag time: release.yml makes a draft, and the owner reviews it first.
+# Publishing the release (the `release: published` trigger) points `:latest` at that version's
+# existing image, with no rebuild.
+#
 # A dry run builds everything, smokes the image and keeps the tarballs as workflow artifacts;
 # it creates no release asset and pushes no image.
 on:
@@ -18,6 +22,8 @@ on:
         description: "Build and check without attaching assets or pushing the image"
         type: boolean
         default: false
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -39,14 +45,16 @@ env:
 
 jobs:
   linux-cli:
+    if: github.event_name != 'release'
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # 22.04 runners set the glibc floor (2.35: Ubuntu 22.04, Debian 12 or newer)
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             pdfium: linux-x64
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             pdfium: linux-arm64
     runs-on: ${{ matrix.os }}
@@ -86,7 +94,10 @@ jobs:
           mkdir "$name"
           cp target/release/deckle target/pdfium/lib/libpdfium.so LICENSE "$name/"
           # deckle-pdf looks for PDFium beside the executable, so no setup is needed.
-          echo "PDFium (libpdfium.so) sits beside deckle and is found there; set DECKLE_PDFIUM to a library file or folder to use another copy." > "$name/README.txt"
+          printf '%s\n' \
+            "Needs glibc 2.35+ (Ubuntu 22.04, Debian 12 or newer) and libdbus-1-3." \
+            "PDFium (libpdfium.so) sits beside deckle and is found there; set DECKLE_PDFIUM to a library file or folder to use another copy." \
+            > "$name/README.txt"
           tar czf "$name.tar.gz" "$name"
           echo "tarball=$name.tar.gz" >> "$GITHUB_OUTPUT"
       # The tarball as shipped must run on its own: the binary starts and reads a PDF through
@@ -122,6 +133,7 @@ jobs:
   # before anything is pushed, and pushed by digest; `image` then joins the digests into one
   # multi-arch tag. A real release never publishes an image that failed its smoke test.
   image-build:
+    if: github.event_name != 'release'
     strategy:
       fail-fast: false
       matrix:
@@ -191,7 +203,7 @@ jobs:
 
   image:
     needs: image-build
-    if: inputs.dry_run != true
+    if: github.event_name != 'release' && inputs.dry_run != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -205,7 +217,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # The version is the tag without its leading v (0.9.0 style), plus latest.
+      # The version is the tag without its leading v (0.9.0 style); `:latest` waits for publish.
       - name: Join the architectures into one tag
         working-directory: ${{ runner.temp }}/digests
         run: |
@@ -214,6 +226,27 @@ jobs:
           refs=()
           for d in *; do refs+=("ghcr.io/casavargas/deckle@sha256:$d"); done
           docker buildx imagetools create \
-            -t "ghcr.io/casavargas/deckle:$version" -t ghcr.io/casavargas/deckle:latest \
+            -t "ghcr.io/casavargas/deckle:$version" \
             "${refs[@]}"
           docker buildx imagetools inspect "ghcr.io/casavargas/deckle:$version"
+
+  # The owner published the draft: `:latest` now follows that version (no rebuild). Prereleases
+  # never take it. Runs only for the `release` event, never for workflow_call or dispatch.
+  latest:
+    if: github.event_name == 'release' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Point latest at the published version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          docker buildx imagetools create -t ghcr.io/casavargas/deckle:latest "ghcr.io/casavargas/deckle:$version"
+          docker buildx imagetools inspect ghcr.io/casavargas/deckle:latest
