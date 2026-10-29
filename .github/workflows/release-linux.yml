@@ -231,9 +231,9 @@ jobs:
           docker buildx imagetools inspect "ghcr.io/casavargas/deckle:$version"
 
   # The owner published the draft: `:latest` now follows that version (no rebuild). Prereleases
-  # never take it. Runs only for the `release` event, never for workflow_call or dispatch.
+  # never take it, nor do data releases (wordwise-vN). Runs only for the `release` event, never for workflow_call or dispatch.
   latest:
-    if: github.event_name == 'release' && !github.event.release.prerelease
+    if: github.event_name == 'release' && !github.event.release.prerelease && startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: docker/setup-buildx-action@v3
@@ -247,6 +247,11 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
+          # App releases are v<number>; data releases (wordwise-vN) have no image.
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9] ]]; then
+            echo "Release $RELEASE_TAG is not an app version tag: no image, :latest untouched."
+            exit 0
+          fi
           version="${RELEASE_TAG#v}"
           docker buildx imagetools create -t ghcr.io/casavargas/deckle:latest "ghcr.io/casavargas/deckle:$version"
           docker buildx imagetools inspect ghcr.io/casavargas/deckle:latest
