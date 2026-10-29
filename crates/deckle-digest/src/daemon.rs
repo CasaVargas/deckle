@@ -97,10 +97,11 @@ pub fn decide(job: &Schedule, now: DateTime<Tz>, state: &DaemonState, exists: bo
     if !on_time && now.hour() >= u32::from(CATCH_UP_UNTIL) {
         return Decision::Skip(SkipWhy::PastNoon);
     }
-    let recent_failure = state
-        .last_attempt
-        .get(&job.slug)
-        .is_some_and(|t| now.with_timezone(&Utc) - *t < chrono::Duration::minutes(RETRY_EVERY_MIN));
+    // A future-dated attempt (clock stepped back) is stale, or it would block retries for hours.
+    let recent_failure = state.last_attempt.get(&job.slug).is_some_and(|t| {
+        let age = now.with_timezone(&Utc) - *t;
+        age >= chrono::Duration::zero() && age < chrono::Duration::minutes(RETRY_EVERY_MIN)
+    });
     if recent_failure {
         Decision::Skip(SkipWhy::RetryLater)
     } else {
@@ -223,6 +224,18 @@ mod tests {
         assert_eq!(
             decide(&j, at(12, 5), &s, false),
             Decision::Skip(SkipWhy::PastNoon)
+        );
+    }
+
+    #[test]
+    fn future_dated_attempt_does_not_block_retries() {
+        // The clock stepped back (or the RTC was ahead at boot) after the failed attempt.
+        let mut s = DaemonState::default();
+        s.last_attempt
+            .insert("main".into(), at(6, 40).with_timezone(&Utc));
+        assert_eq!(
+            decide(&job(5, 30, &[]), at(5, 40), &s, false),
+            Decision::Run
         );
     }
 
