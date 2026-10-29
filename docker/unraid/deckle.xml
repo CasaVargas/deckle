@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/CasaVargas/deckle/issues</Support>
   <Project>https://github.com/CasaVargas/deckle</Project>
-  <Overview>Deckle builds a morning newspaper from your town's news and weather, your RSS feeds and the articles you saved, and has it waiting on your e-ink reader. This is the headless container: it runs the Daily on a schedule, keeps every edition in a Morgue folder, and emails the paper to a Kindle through your own mail account. A Kobo, PocketBook or reMarkable on this server's USB, or any export folder, works too.&#xD;
+  <Overview>Deckle builds a morning newspaper from your town's news and weather, your RSS feeds and the articles you saved, and has it waiting on your e-ink reader. This is the headless container: it runs the Daily on a schedule, keeps every edition in a Morgue folder, and emails the paper to a Kindle through your own mail account. Any export folder works too.&#xD;
 &#xD;
 What doesn't work here: Kindle book conversion (Enhanced Typesetting, X-Ray, Word Wise) needs Kindle Previewer, which only runs on Mac and Windows. The first start writes a starter digest.toml in the config folder; edit it, then restart the container. Set the Kindle email password in DECKLE_SMTP_PASSWORD. Setup: https://github.com/CasaVargas/deckle/blob/main/docs/docker.md</Overview>
   <Category>Productivity: Tools:</Category>

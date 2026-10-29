@@ -136,8 +136,8 @@ sites fails that way, put the listener behind a reverse proxy with TLS and set
 2. Start the container and read the log. It lists each configured path that can't exist there.
    Re-point each one at `/data/…`.
 3. Move passwords into environment variables.
-4. So two installs never print or claim the same paper, turn off **Allow fresh-paper requests**
-   on the desktop and stop its schedule: `deckle digest schedule --off`.
+4. So two installs never print or claim the same paper, turn off **Fresh-paper requests**
+   (Delivery → Bundle export) on the desktop and stop its schedule: `deckle digest schedule --off`.
 
 Mount your old Morgue under `/data/Deckle` if you want the history.
 
@@ -148,3 +148,5 @@ The release has `deckle-<version>-x86_64-unknown-linux-gnu.tar.gz` and
 They need glibc 2.35 or newer (Ubuntu 22.04, Debian 12) and `libdbus-1-3`. Run
 `deckle digest daemon` under your own supervisor, with `DECKLE_DAEMON=1` set so it behaves as
 the container does. Kindle book conversion is still unavailable.
+Set `DECKLE_BOOKMARKLET_BIND=0.0.0.0` to reach the bookmarklet over your network. `TZ` sets the
+daemon's clock.
