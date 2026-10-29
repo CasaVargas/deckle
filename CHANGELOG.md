@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Deckle in a container.** A Linux image, `ghcr.io/casavargas/deckle`, runs the Daily
+  headless: it prints each paper on schedule, catches up a morning it missed, and emails the
+  paper to your Kindle. Passwords come from environment variables, since a container has no
+  keychain. There's a Compose file, an Unraid template, and Linux command-line tarballs (x86_64
+  and aarch64) with each release. Kindle book conversion still needs Mac or Windows. See
+  [docs/docker.md](docs/docker.md).
+
 ## 0.9.0 — no more black windows on Windows
 
 - **No more console windows on Windows.** Opening the Daily tab popped a burst of black

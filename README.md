@@ -199,6 +199,8 @@ on a Kindle it could now build better.
    - **macOS 14+**, Apple silicon or Intel: the `.dmg`, signed and notarized.
    - **Windows 11**: the `-setup.exe` (per-user, no admin), code-signed. A new certificate can still
      trigger SmartScreen: **More info → Run anyway**.
+   - **Linux**: the command line only, as `deckle-<version>-<target>.tar.gz` for x86_64 or aarch64
+     (needs glibc 2.35+ and `libdbus-1-3`), or the [container](docs/docker.md).
 2. **For Kindle books, install [Kindle Previewer 4](https://kdp.amazon.com/en_US/help/topic/G202131170)**
    (free, from Amazon). It's the only thing that produces Enhanced Typesetting. Deckle drives it and
    doesn't bundle it. The paper on a Kobo, PocketBook or reMarkable doesn't need it.
@@ -405,12 +407,13 @@ fixtures and simulated devices. On real hardware it's verified on a **Kindle Scr
 against simulated devices so far. Results per device are in [docs/devices.md](docs/devices.md), and
 bug reports with your model and firmware are very welcome.
 
-Linux isn't supported: Kindle Previewer only runs on Mac and Windows. What's next is on the
+On Linux, the Daily runs headless in a [container](docs/docker.md) (Docker, Unraid); Kindle books
+can't be converted there, because Kindle Previewer only runs on Mac and Windows. What's next is on the
 [roadmap](https://github.com/CasaVargas/deckle/issues?q=is%3Aopen+label%3Aroadmap).
 
 ## Build from source
 
-Rust (stable, 1.85+), Node 22, pnpm. Conversion needs macOS or Windows.
+Rust (stable, 1.85+), Node 22, pnpm. Kindle book conversion needs macOS or Windows.
 
 ```sh
 git config core.hooksPath .githooks                # once: fmt + clippy before every push
