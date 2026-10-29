@@ -3468,7 +3468,7 @@ fn session_text(state: &deckle_digest::session::SessionState) -> String {
 /// `digest subscribe [site]`: list the subscriptions, or add, test or forget one.
 /// `DECKLE_DAEMON` is set (by the image): a container, with no keychain and no job scheduler.
 fn daemon_install() -> bool {
-    std::env::var_os("DECKLE_DAEMON").is_some_and(|v| !v.is_empty())
+    deckle_digest::secret::daemon_install()
 }
 
 fn no_keychain(env: &str) -> String {

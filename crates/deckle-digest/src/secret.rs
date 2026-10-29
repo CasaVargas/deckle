@@ -276,8 +276,21 @@ pub struct SystemKeyring;
 
 impl SystemKeyring {
     fn entry(service: &str, account: &str) -> Result<keyring::Entry, KeyringError> {
+        // A container has no keychain to trust, whatever libdbus finds: the environment
+        // decides, every time (Linux Docker design, "The image").
+        if daemon_install() {
+            return Err(KeyringError::Unavailable(
+                "daemon install: passwords come from the environment".into(),
+            ));
+        }
         keyring::Entry::new(service, account).map_err(keyring_error)
     }
+}
+
+/// `DECKLE_DAEMON` is set (by the image): a headless install whose passwords are only ever
+/// `DECKLE_SMTP_PASSWORD` and `DECKLE_SITE_PASSWORD_<SITE>`.
+pub fn daemon_install() -> bool {
+    std::env::var_os("DECKLE_DAEMON").is_some_and(|v| !v.is_empty())
 }
 
 /// keyring's errors, without their payloads: `BadEncoding` holds the stored bytes.

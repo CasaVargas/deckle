@@ -162,6 +162,16 @@ fn unscheduled_paper_never_runs() {
 /// `deckle digest <args>` in a daemon install (`DECKLE_DAEMON=1`), `PATH` empty so nothing
 /// could reach launchd, schtasks or cron.
 fn in_daemon_install(home: &Path, args: &[&str]) -> std::process::Output {
+    in_daemon_install_with(home, &[], args)
+}
+
+/// [`in_daemon_install`] with `envs` set; `--json` in `args` goes before `digest`.
+fn in_daemon_install_with(
+    home: &Path,
+    envs: &[(&str, &str)],
+    args: &[&str],
+) -> std::process::Output {
+    let (json, args): (Vec<&str>, Vec<&str>) = args.iter().partition(|a| **a == "--json");
     Command::cargo_bin("deckle")
         .unwrap()
         .env("HOME", home)
@@ -173,6 +183,9 @@ fn in_daemon_install(home: &Path, args: &[&str]) -> std::process::Output {
         .env("TZ", "UTC")
         .env("DECKLE_DAEMON", "1")
         .env_remove("DECKLE_SMTP_PASSWORD")
+        .env_remove("DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE")
+        .envs(envs.iter().copied())
+        .args(json)
         .arg("digest")
         .args(args)
         .output()
@@ -250,5 +263,55 @@ fn subscribe_password_in_daemon_install_names_site_env() {
         text(&o.stderr).contains("set DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE"),
         "{}",
         text(&o.stderr)
+    );
+}
+
+/// `[email]` sending to a port nothing listens on: a send gets as far as connecting.
+const EMAIL: &str = "[email]\nenabled = true\nto = \"x@kindle.com\"\nfrom = \"me@example.com\"\n\
+                     smtp_host = \"127.0.0.1\"\nsmtp_port = 587\nusername = \"me\"\n";
+
+const GAZETTE: &str = "[[subscriptions]]\nsite = \"gazette.example\"\nusername = \"me\"\n";
+
+/// A daemon install never asks the system keychain (Ruling 8): the password is the
+/// environment's, whatever keychain the machine has.
+#[test]
+fn daemon_install_takes_the_smtp_password_from_env_only() {
+    let (_tmp, home) = setup(EMAIL);
+    let o = in_daemon_install(&home, &["email", "test"]);
+    let err = text(&o.stderr);
+    assert!(!o.status.success());
+    assert!(
+        err.contains("daemon install: passwords come from the environment")
+            && err.contains("DECKLE_SMTP_PASSWORD isn't set"),
+        "{err}"
+    );
+    // With the variable the send gets past the password and fails on the connection.
+    let o = in_daemon_install_with(&home, &[("DECKLE_SMTP_PASSWORD", "x")], &["email", "test"]);
+    let err = text(&o.stderr);
+    assert!(!o.status.success());
+    assert!(
+        !err.contains("keychain") && !err.contains("DECKLE_SMTP_PASSWORD"),
+        "{err}"
+    );
+}
+
+#[test]
+fn daemon_install_takes_site_passwords_from_env_only() {
+    let (_tmp, home) = setup(GAZETTE);
+    let status = |envs: &[(&str, &str)]| {
+        let o = in_daemon_install_with(&home, envs, &["--json", "subscribe"]);
+        assert!(o.status.success(), "{}", text(&o.stderr));
+        let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+        v[0].clone()
+    };
+    let with = status(&[("DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE", "x")]);
+    assert_eq!(with["has_password"], true, "{with}");
+    let without = status(&[]);
+    assert_eq!(without["has_password"], false, "{without}");
+    let why = without["state"]["NoPassword"].as_str().unwrap_or_default();
+    assert!(
+        why.contains("daemon install: passwords come from the environment")
+            && why.contains("DECKLE_SITE_PASSWORD_GAZETTE_EXAMPLE"),
+        "{without}"
     );
 }
