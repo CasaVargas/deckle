@@ -8,3 +8,4 @@ dist
 /apps/desktop/src-tauri/gen/schemas
 /.superpowers
 /apps/desktop/src-tauri/pdfium
+/apps/desktop/src-tauri/liquid-glass

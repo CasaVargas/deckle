@@ -1,0 +1,11 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "macOS": {
+      "files": {
+        "Resources/Assets.car": "liquid-glass/Assets.car"
+      },
+      "infoPlist": "icon.macos.Info.plist"
+    }
+  }
+}
