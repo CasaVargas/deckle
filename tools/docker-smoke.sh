@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Smoke test for the Deckle image (Linux Docker design, "The image"): an empty /config gets a
-# starter config owned by PUID:PGID, a horoscope-only paper due at 05:30 prints today's EPUB to
-# /data/out on one daemon tick, and passwords come from the environment, never a keychain.
+# starter config owned by PUID:PGID, a root `docker exec deckle` runs as PUID:PGID, a
+# horoscope-only paper due at 05:30 prints today's EPUB to /data/out on one daemon tick, owned
+# by PUID:PGID, and passwords come from the environment, never a keychain.
 # Offline apart from the image itself.
 #
 #   tools/docker-smoke.sh deckle:ci
@@ -14,7 +15,7 @@ name="deckle-smoke-$$"
 mkdir "$tmp/config" "$tmp/data"
 
 cleanup() {
-    docker rm -f "$name" >/dev/null 2>&1 || true
+    docker rm -f "$name" "$name-live" >/dev/null 2>&1 || true
     # The container's user owns what it wrote; remove it from inside, as root.
     docker run --rm --entrypoint rm -v "$tmp:/t" "$image" -rf /t/config /t/data >/dev/null 2>&1 || true
     rm -rf "$tmp"
@@ -25,6 +26,7 @@ fail() {
     echo "docker-smoke: FAIL: $*" >&2
     echo "--- container log ---" >&2
     docker logs "$name" >&2 2>&1 || true
+    docker logs "$name-live" >&2 2>&1 || true
     exit 1
 }
 
@@ -60,10 +62,48 @@ at = "05:30"
 name = "out"
 dir = "/data/out"
 TOML
+
+# 2a. A root shell's `deckle` (docker exec, Unraid's console) runs as PUID:PGID: another paper
+# printed that way leaves nothing root-owned, so the daemon can still take run.lock below.
+docker run --rm -i --entrypoint sh -v "$tmp/config:/config" "$image" -c \
+    'mkdir -p /config/deckle/papers && cat > /config/deckle/papers/extra.toml \
+     && chown -R 99:100 /config/deckle/papers' <<'TOML'
+title = "The Extra"
+sections = ["horoscope"]
+
+[[export]]
+name = "extra"
+dir = "/data/extra"
+TOML
+docker run -d --name "$name-live" -e TZ=UTC \
+    -e "DECKLE_DAEMON_FAKE_NOW=${today}T04:00:00+00:00" \
+    -v "$tmp/config:/config" -v "$tmp/data:/data" "$image" >/dev/null \
+    || fail "the long-running container didn't start"
+for _ in $(seq 30); do
+    docker logs "$name-live" 2>&1 | grep -q "daemon: config" && break
+    sleep 1
+done
+out="$(docker exec "$name-live" deckle digest --paper extra run 2>&1)" \
+    || fail "root docker exec digest run failed: $out"
+docker rm -f "$name-live" >/dev/null
+# Whatever the paper's file is called: the one EPUB in its export folder.
+extra="$(find "$tmp/data/extra" -name '*.epub' 2>/dev/null | head -1)"
+[ -s "$extra" ] || fail "no EPUB in /data/extra from the root docker exec: $out"
+# Searched as root, inside, so no folder the host user can't enter hides a root-owned file.
+rooted="$(docker run --rm --entrypoint find -v "$tmp/config:/config" -v "$tmp/data:/data" \
+    "$image" /config /data -uid 0)"
+[ -z "$rooted" ] || fail "root docker exec left root-owned files: $rooted"
+owner="$(stat -c %u:%g "$extra")"
+[ "$owner" = "99:100" ] || fail "root docker exec's EPUB owned by $owner, want 99:100"
+echo "docker-smoke: root docker exec ran as 99:100"
+
+# 2b. The daemon's tick still prints, its EPUB owned by PUID:PGID.
 tick -e "DECKLE_DAEMON_FAKE_NOW=${today}T06:00:00+00:00"
 epub="$tmp/data/out/deckle-daily-$today.epub"
 [ -s "$epub" ] || fail "no $epub"
-echo "docker-smoke: printed $(basename "$epub")"
+owner="$(stat -c %u:%g "$epub")"
+[ "$owner" = "99:100" ] || fail "$(basename "$epub") owned by $owner, want 99:100"
+echo "docker-smoke: printed $(basename "$epub"), owned by $owner"
 
 # 3. Passwords come only from the environment, whatever keychain libdbus might find.
 docker run --rm -i --entrypoint sh -v "$tmp/config:/config" "$image" \

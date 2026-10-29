@@ -37,7 +37,8 @@ RUN apt-get update \
 COPY --from=build /out/deckle /out/libpdfium.so /opt/deckle/
 COPY LICENSE /usr/share/doc/deckle/LICENSE
 COPY --chmod=0755 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN ln -s /opt/deckle/deckle /usr/local/bin/deckle
+# On PATH, a wrapper: a root `docker exec deckle deckle …` runs as PUID:PGID.
+COPY --chmod=0755 docker/deckle.sh /usr/local/bin/deckle
 
 LABEL org.opencontainers.image.title="Deckle" \
       org.opencontainers.image.source="https://github.com/CasaVargas/deckle" \

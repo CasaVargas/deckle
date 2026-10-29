@@ -48,7 +48,8 @@ With plain `docker run`, add `--stop-timeout 90`. A running edition gets up to 6
 finish when the container stops; the compose file's `stop_grace_period: 90s` covers that and
 the watcher's shutdown.
 
-The entrypoint sets the time zone, creates the `PUID`/`PGID` user, and runs Deckle as that user.
+The entrypoint sets the time zone, creates the `PUID`/`PGID` user, and runs Deckle as that user;
+`docker exec deckle deckle …` and Unraid's console run it as that user too.
 It changes the owner of the top of `/config` and `/data`, and only when it differs. If you change
 `PUID` or `PGID` on an existing install, `chown -R` the folders yourself.
 
@@ -133,6 +134,8 @@ sites fails that way, put the listener behind a reverse proxy with TLS and set
 
 1. Copy the desktop's config folder (the one holding `digest.toml`; `deckle digest init` prints
    its path, and on a Mac it's `~/Library/Application Support/deckle`) to `/config/deckle`.
+   Copy over SMB, or after copying from a root shell run `chown -R 99:100` (your `PUID:PGID`)
+   on what you copied, so the container's user can write it.
 2. Start the container and read the log. It lists each configured path that can't exist there.
    Re-point each one at `/data/…`.
 3. Move passwords into environment variables.
