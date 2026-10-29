@@ -956,6 +956,8 @@ fn email_only_paper_builds_without_previewer() {
     let home = tmp.path().join("home");
     let dir = if cfg!(target_os = "macos") {
         home.join("Library/Application Support/deckle")
+    } else if cfg!(windows) {
+        home.join("AppData/deckle")
     } else {
         home.join(".config/deckle")
     };
