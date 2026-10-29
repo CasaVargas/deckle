@@ -947,3 +947,51 @@ fn preset_defaults_and_explicit_flags_reach_the_pipeline() {
         assert!(r["word_wise"].is_null());
     }
 }
+
+/// Email sends the EPUB, so an email-only paper needs no Kindle Previewer (the Linux container
+/// has none). The send itself fails here (nothing listens on 127.0.0.1:587); that is the usual "queued, reported" path.
+#[test]
+fn email_only_paper_builds_without_previewer() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let dir = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/deckle")
+    } else {
+        home.join(".config/deckle")
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    let morgue = tmp.path().join("morgue");
+    std::fs::write(
+        dir.join("digest.toml"),
+        format!(
+            "sections = [\"horoscope\"]\n\
+             [morgue]\nfolder = {morgue:?}\n\
+             [email]\nenabled = true\nto = \"x@kindle.com\"\nfrom = \"me@example.com\"\n\
+             smtp_host = \"127.0.0.1\"\nsmtp_port = 587\nusername = \"me\"\n"
+        ),
+    )
+    .unwrap();
+    let o = deckle_at(&home)
+        .env("DECKLE_SMTP_PASSWORD", "x")
+        // Never a real Previewer.
+        .env("DECKLE_PREVIEWER", home.join("no-previewer"))
+        .env("PATH", "/nonexistent")
+        // Today: the Morgue keeps only a build for the day it is made.
+        .args(["--json", "digest", "run"])
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    assert!(!err.contains("Kindle Previewer is not installed"), "{err}");
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap_or_else(|e| {
+        panic!("{e}: {}\n{err}", String::from_utf8_lossy(&o.stdout));
+    });
+    let notes = v["build"]["notes"].to_string();
+    assert!(notes.contains("no Kindle copy"), "{notes}");
+    let kept: Vec<_> = std::fs::read_dir(&morgue)
+        .unwrap()
+        .flat_map(|year| std::fs::read_dir(year.unwrap().path()).unwrap())
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".epub"))
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+}

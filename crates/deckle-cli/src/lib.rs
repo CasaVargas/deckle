@@ -2555,18 +2555,23 @@ fn digest(
             // Two papers due at the same minute convert one after the other (many papers §5).
             let _lock = run_lock()?;
             let mut no_kindle = None;
-            // Export folders need no Previewer (other readers design §6): without one, the
-            // paper still goes to them, and nothing is converted or queued for a Kindle.
+            // Export folders need no Previewer (other readers design §6), nor does email, which
+            // sends the EPUB: without one, the paper still goes to them, and nothing is
+            // converted or queued for a Kindle.
             let located = match previewer::locate(pv.as_deref()) {
                 Ok(l) => Some(l),
                 Err(e)
                     if to == "device"
-                        && (!cfg.export.is_empty() || reader_seen() || cfg.remarkable.enabled) =>
+                        && (!cfg.export.is_empty()
+                            || reader_seen()
+                            || cfg.remarkable.enabled
+                            || cfg.email.enabled) =>
                 {
                     let to: Vec<&str> = [
                         (!cfg.export.is_empty()).then_some("the export folders"),
                         reader_seen().then_some("the e-reader outbox"),
                         cfg.remarkable.enabled.then_some("the reMarkable"),
+                        cfg.email.enabled.then_some("email"),
                     ]
                     .into_iter()
                     .flatten()
