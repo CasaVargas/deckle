@@ -1,0 +1,173 @@
+name: release-linux
+# Linux half of a release: the headless CLI as tarballs (x86_64, aarch64) attached to the
+# release's draft, and the multi-arch container image pushed to GHCR (docs/superpowers/specs/
+# 2026-10-29-linux-docker-design.md). release.yml calls this with the tag and dry-run flag it
+# works out itself; it can also be run alone with workflow_dispatch (dry run, or a tag whose
+# draft release already exists).
+#
+# A dry run builds everything, smokes the image and keeps the tarballs as workflow artifacts;
+# it creates no release asset and pushes no image.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.9.0); empty for a dry run"
+        type: string
+        default: ""
+      dry_run:
+        description: "Build and check without attaching assets or pushing the image"
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v0.9.0); leave empty for a dry run"
+        type: string
+        default: ""
+      dry_run:
+        description: "Build and check without attaching assets or pushing the image"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  TAG: ${{ inputs.tag }}
+  DRY_RUN: ${{ inputs.dry_run }}
+
+jobs:
+  linux-cli:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            pdfium: linux-x64
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            pdfium: linux-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || '' }}
+      - name: Dry run or tag
+        run: |
+          if [ -z "$TAG" ] && [ "$DRY_RUN" != "true" ]; then
+            echo "::error::Run by hand with no tag: set dry_run to build without a release."
+            exit 1
+          fi
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      # keyring's Secret Service backend links libdbus; the CLI needs nothing else.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev pkg-config
+      - run: cargo build --release -p deckle-cli --locked
+      - name: Package
+        id: pkg
+        env:
+          TARGET: ${{ matrix.target }}
+          PDFIUM: ${{ matrix.pdfium }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TAG" ]; then
+            version="${TAG#v}"
+          else
+            version=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml)
+          fi
+          tools/fetch-pdfium.sh "$PDFIUM"
+          name="deckle-$version-$TARGET"
+          mkdir "$name"
+          cp target/release/deckle target/pdfium/lib/libpdfium.so LICENSE "$name/"
+          # deckle-pdf looks for PDFium beside the executable, so no setup is needed.
+          echo "PDFium (libpdfium.so) sits beside deckle and is found there; set DECKLE_PDFIUM to a library file or folder to use another copy." > "$name/README.txt"
+          tar czf "$name.tar.gz" "$name"
+          echo "tarball=$name.tar.gz" >> "$GITHUB_OUTPUT"
+      # The tarball as shipped must run on its own: the binary starts and reads a PDF through
+      # the libpdfium.so beside it (the runner is the target architecture, so this executes).
+      - name: Check the tarball
+        env:
+          TARBALL: ${{ steps.pkg.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          dir=$(mktemp -d)
+          tar xzf "$TARBALL" -C "$dir"
+          bin=$(ls -d "$dir"/*/)deckle
+          "$bin" --version
+          out=$("$bin" --json inspect fixtures/pdf/book.pdf)
+          echo "$out"
+          echo "$out" | grep -q '"title": *"A Small Book"' || { echo "::error::the tarball's deckle couldn't read a PDF through its libpdfium.so"; exit 1; }
+      # The draft release is made by release.yml's bundle jobs, which this runs after.
+      - name: Attach to the release
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARBALL: ${{ steps.pkg.outputs.tarball }}
+        run: gh release upload "$TAG" "$TARBALL" --clobber -R "$GITHUB_REPOSITORY"
+      - name: Keep the dry run's tarball
+        if: inputs.dry_run == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: deckle-${{ matrix.target }}
+          path: ${{ steps.pkg.outputs.tarball }}
+          retention-days: 7
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || '' }}
+      - name: Dry run or tag
+        run: |
+          if [ -z "$TAG" ] && [ "$DRY_RUN" != "true" ]; then
+            echo "::error::Run by hand with no tag: set dry_run to build without a release."
+            exit 1
+          fi
+      - name: Image version
+        id: ver
+        run: |
+          if [ -n "$TAG" ]; then
+            version="${TAG#v}"
+          else
+            version=$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p}' Cargo.toml)
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      # amd64 first, loaded locally, so the smoke test runs before anything is pushed.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: deckle:smoke
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,scope=image,mode=max
+      - run: tools/docker-smoke.sh deckle:smoke
+      - name: Log in to GHCR
+        if: inputs.dry_run != true
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Both architectures; on a dry run nothing is pushed (the arm64 build still proves it builds).
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ inputs.dry_run != true }}
+          tags: |
+            ghcr.io/casavargas/deckle:${{ steps.ver.outputs.version }}
+            ghcr.io/casavargas/deckle:latest
+          cache-from: type=gha,scope=image
+          cache-to: type=gha,scope=image,mode=max
