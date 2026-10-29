@@ -1,8 +1,8 @@
 # Deckle on Linux: a Docker container with a web UI
 
-Date: 2026-10-29. Status: draft, awaiting approval. Jonathan decided Docker for Linux and Unraid,
+Date: 2026-10-29. Status: approved by Jonathan on 2026-10-29. Jonathan decided Docker for Linux and Unraid,
 both phases, catch-up of missed editions before noon, and modest migration support; choices
-marked "author's call" are proposals in this draft.
+marked "author's call" were approved with the full design.
 Components: CI, `deckle-cli`, a new server binary, the desktop frontend, packaging.
 
 ## Intent
