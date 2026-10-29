@@ -324,7 +324,7 @@ fn stopped_date(o: &std::process::Output) -> String {
 #[test]
 fn stop_in_daemon_install_uses_config_at() {
     let (_tmp, home) = setup(AT_0530);
-    let o = in_daemon_install(&home, &["--json", "stop"]);
+    let o = in_daemon_install_with(&home, &[("TZ", "UTC")], &["--json", "stop"]);
     assert!(o.status.success(), "{}", text(&o.stderr));
     let day = stopped_date(&o);
     let today = deckle_digest::chrono::Utc::now().date_naive();
@@ -348,7 +348,7 @@ fn stop_in_daemon_install_honours_days() {
     let key =
         deckle_digest::config::Day::ALL[target.weekday().num_days_from_monday() as usize].key();
     let (_tmp, home) = setup(&format!("[schedule]\nat = \"05:30\"\ndays = [\"{key}\"]\n"));
-    let o = in_daemon_install(&home, &["--json", "stop"]);
+    let o = in_daemon_install_with(&home, &[("TZ", "UTC")], &["--json", "stop"]);
     assert!(o.status.success(), "{}", text(&o.stderr));
     assert_eq!(stopped_date(&o), target.to_string());
 }

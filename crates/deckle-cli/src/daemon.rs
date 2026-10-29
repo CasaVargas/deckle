@@ -48,7 +48,7 @@ pub fn run(
     let exe = std::env::current_exe().map_err(|e| format!("can't find the deckle binary: {e}"))?;
     let config = config.map(|c| c.canonicalize().unwrap_or_else(|_| c.to_path_buf()));
     let once = std::env::var_os(ONCE).is_some_and(|v| !v.is_empty());
-    let zone = zone();
+    let zone = deckle_digest::tz::process_tz();
     let state_path = path
         .parent()
         .unwrap_or_else(|| Path::new("."))
@@ -112,15 +112,6 @@ fn check_paths(papers: &[Config]) {
             p.paper
         );
     }
-}
-
-/// The zone the clock reads. `TZ` first: `digest run` (chrono's local time) follows it, while
-/// the machine zone on Linux is `/etc/localtime`, which a container's `TZ` doesn't change.
-fn zone() -> Tz {
-    std::env::var("TZ")
-        .ok()
-        .and_then(|z| z.trim_start_matches(':').parse().ok())
-        .unwrap_or_else(deckle_digest::tz::local_tz)
 }
 
 fn now(zone: Tz) -> DateTime<Tz> {

@@ -3008,8 +3008,14 @@ fn digest(
                 let date = match date {
                     Some(d) => parse_date(Some(&d))?,
                     None => {
-                        let now = deckle_digest::chrono::Utc::now()
-                            .with_timezone(&deckle_digest::tz::local_tz());
+                        // The daemon's zone (TZ first) in a container, so stop and the
+                        // clock agree on which morning is next.
+                        let tz = if daemon_install() {
+                            deckle_digest::tz::process_tz()
+                        } else {
+                            deckle_digest::tz::local_tz()
+                        };
+                        let now = deckle_digest::chrono::Utc::now().with_timezone(&tz);
                         // No OS job to ask in a container: the main paper's own `[schedule]`.
                         let next = if daemon_install() {
                             daemon_next_press(&cfg.schedule, now)
