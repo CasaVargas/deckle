@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The daemon's start-up check of configured folders (Linux Docker design): a config carried
-//! over from a Mac names folders that aren't in the container. A folder is fine when it exists
-//! or its parent does (it's created on use); otherwise nothing could ever write there.
+//! over from a Mac names folders that aren't in the container. A missing folder is created on
+//! use, so it's fine while its nearest existing ancestor is a folder other than the filesystem
+//! root. `/Users/…` from a Mac, where only `/` exists, is reported.
 //!
 //! The library root lives in `deckle-library`'s own config, not a digest `Config`, so it isn't
 //! checked here.
@@ -11,7 +12,8 @@ use std::path::{Path, PathBuf};
 use crate::Config;
 use crate::inbox::expand_home;
 
-/// A configured folder that doesn't exist and can't be created.
+/// A configured folder with nothing to grow from: its nearest existing ancestor is the
+/// filesystem root, or isn't a folder.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathProblem {
     /// The paper's slug, `main` for `digest.toml`.
@@ -22,7 +24,8 @@ pub struct PathProblem {
     pub path: PathBuf,
 }
 
-/// Configured folders that don't exist and can't be created (parent missing too).
+/// Configured folders with nothing to grow from: the nearest existing ancestor is the root (or a
+/// bare drive root) or not a folder.
 pub fn check(papers: &[Config]) -> Vec<PathProblem> {
     let mut out = Vec::new();
     for cfg in papers {

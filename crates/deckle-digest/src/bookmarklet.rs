@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The bookmarklet (save-to-paper design §4): `deckle digest watch` listens on
-//! `127.0.0.1:47219`; the bookmarklet opens `/save?token=…&url=…&title=…` in a small popup,
-//! which avoids the browser's mixed-content and CORS rules. The token keeps other local pages
-//! from adding to the queue blindly.
+//! `127.0.0.1:47219` by default; the bookmarklet opens `/save?token=…&url=…&title=…` in a small
+//! popup, which avoids the browser's mixed-content and CORS rules. The token keeps other local
+//! pages from adding to the queue blindly.
 //!
 //! A second bookmarklet, **Save recipe**, carries the recipe from the page you're looking at
 //! (cookbook design §8.3, amended): the page's recipe data travels in the fragment of a popup

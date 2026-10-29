@@ -3494,7 +3494,6 @@ fn session_text(state: &deckle_digest::session::SessionState) -> String {
     }
 }
 
-/// `digest subscribe [site]`: list the subscriptions, or add, test or forget one.
 /// `DECKLE_DAEMON` is set (by the image): a container, with no keychain and no job scheduler.
 fn daemon_install() -> bool {
     deckle_digest::secret::daemon_install()
@@ -3563,6 +3562,7 @@ fn daemon_schedule(
     Ok(ExitCode::SUCCESS)
 }
 
+/// `digest subscribe [site]`: list the subscriptions, or add, test or forget one.
 fn digest_subscribe(
     json: bool,
     path: &Path,
