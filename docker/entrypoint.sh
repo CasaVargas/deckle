@@ -49,7 +49,8 @@ fi
 for dir in /config /data; do
     mkdir -p "$dir"
     if [ "$(stat -c %u:%g "$dir")" != "$PUID:$PGID" ]; then
-        chown "$PUID:$PGID" "$dir"
+        # NFS root_squash, CIFS or rootless Docker can refuse; say so, don't crash-loop.
+        chown "$PUID:$PGID" "$dir" || log "warning: can't chown $dir; make it writable by $PUID:$PGID"
     fi
 done
 
@@ -57,9 +58,13 @@ done
 home="$HOME"
 as_user() { gosu "$PUID:$PGID" env HOME="$home" "$@"; }
 
+# A failure here still starts the daemon, which says the config is missing.
 if [ ! -e "$config" ]; then
-    as_user deckle digest init >/dev/null
-    log "wrote a starter $config — edit it, then restart"
+    if as_user deckle digest init >/dev/null; then
+        log "wrote a starter $config — edit it, then restart"
+    else
+        log "can't write $config as $PUID:$PGID; make /config writable by them"
+    fi
 fi
 
 exec gosu "$PUID:$PGID" env HOME="$home" "$@"

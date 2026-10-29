@@ -30,9 +30,10 @@ RUN case "$TARGETARCH" in \
 
 FROM debian:bookworm-slim
 # No Tauri/WebKit: the CLI only. Fonts are bundled in the binary; DejaVu covers anything
-# rendered outside it. tzdata so TZ names resolve; gosu to drop root after setup.
+# rendered outside it. tzdata so TZ names resolve; gosu to drop root after setup; tini as PID 1
+# so signals reach the daemon and its exited children are reaped.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata gosu fonts-dejavu-core libdbus-1-3 \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata gosu tini fonts-dejavu-core libdbus-1-3 \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/deckle /out/libpdfium.so /opt/deckle/
 COPY LICENSE /usr/share/doc/deckle/LICENSE
@@ -55,5 +56,5 @@ ENV PUID=99 \
 VOLUME /config /data
 # The bookmarklet listener.
 EXPOSE 47219
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["deckle", "digest", "daemon"]
