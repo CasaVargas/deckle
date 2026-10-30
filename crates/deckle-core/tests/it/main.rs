@@ -8,6 +8,7 @@ mod cover_rule;
 mod deliver;
 mod devices;
 mod inspect;
+mod koreader;
 mod matcher;
 mod metadata_fill;
 mod normalize;

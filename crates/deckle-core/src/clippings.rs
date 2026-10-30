@@ -8,12 +8,17 @@ use crate::deliver::{Conn, DeliverError, Target};
 
 pub const CLIPPINGS: &str = "My Clippings.txt";
 
-/// `documents/My Clippings.txt` from the connection's target; `Ok(None)` when there isn't one.
+/// `documents/My Clippings.txt` from the connection's target, with KOReader's highlights after
+/// it on a folder or a Kindle on USB storage (KOReader reads design §6); `Ok(None)` when there
+/// are none.
 pub fn read_on(conn: &mut Conn<'_>) -> Result<Option<Vec<u8>>, DeliverError> {
     match conn.target {
         // A folder export stands in for `documents/`, as in the inventory.
-        Target::Folder(dir) => read_file(&dir.join(CLIPPINGS)),
-        Target::MassStorage(dev) => read_file(&dev.root.join("documents").join(CLIPPINGS)),
+        Target::Folder(dir) => with_koreader(read_file(&dir.join(CLIPPINGS))?, dir),
+        Target::MassStorage(dev) => with_koreader(
+            read_file(&dev.root.join("documents").join(CLIPPINGS))?,
+            &dev.root,
+        ),
         Target::Mtp(_) => {
             let mtp_err = |e: deckle_transport::session::MtpError| DeliverError::Mtp(e.to_string());
             let dev = match conn.mtp() {
@@ -33,6 +38,25 @@ pub fn read_on(conn: &mut Conn<'_>) -> Result<Option<Vec<u8>>, DeliverError> {
             }
         }
     }
+}
+
+/// `clippings`, then the KOReader highlights under `root`. A sidecar that can't be read is a
+/// warning on stderr.
+fn with_koreader(clippings: Option<Vec<u8>>, root: &Path) -> Result<Option<Vec<u8>>, DeliverError> {
+    let ko = crate::koreader::read(root);
+    for w in &ko.warnings {
+        eprintln!("KOReader: {w}");
+    }
+    Ok(match (clippings, ko.clippings) {
+        (Some(mut a), Some(b)) => {
+            if !a.ends_with(b"\n") {
+                a.push(b'\n');
+            }
+            a.extend(b);
+            Some(a)
+        }
+        (a, b) => a.or(b),
+    })
 }
 
 fn read_file(path: &Path) -> Result<Option<Vec<u8>>, DeliverError> {
