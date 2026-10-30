@@ -125,7 +125,10 @@ pub(crate) fn with_readers(
         let Some(k) = &kobo else {
             return kindle(book, outbox, owner);
         };
-        let bytes = deckle_core::reader::book_epub(book).map_err(Skip::Unreadable)?;
+        // The Kindle copy's X-Ray options: the heuristic, no LLM or Wikipedia.
+        let whos_who = deckle_core::xray::XRayOptions::default();
+        let bytes =
+            deckle_core::reader::book_epub(book, Some(&whos_who)).map_err(Skip::Unreadable)?;
         let stem = book.file_stem().unwrap_or_default().to_string_lossy();
         let name = format!("{}.epub", deckle_core::deliver::sanitize(&stem));
         let write = || -> std::io::Result<()> {

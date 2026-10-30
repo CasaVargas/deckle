@@ -34,6 +34,7 @@ pub mod thumbnail;
 pub mod typography;
 pub mod usb_serial;
 pub mod vocab;
+pub mod whoswho;
 pub mod wordwise;
 pub mod xray;
 pub mod yjf;

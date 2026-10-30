@@ -73,7 +73,7 @@ fn xhtml_files(files: &[(String, Vec<u8>)]) -> Result<Vec<String>, String> {
 }
 
 /// The zip again: `mimetype` first and stored, the rest deflated, in their old order.
-fn write(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
+pub(crate) fn write(files: &[(String, Vec<u8>)]) -> Result<Vec<u8>, String> {
     use zip::write::SimpleFileOptions;
     let mut out = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
     let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
