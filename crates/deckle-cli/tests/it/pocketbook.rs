@@ -64,7 +64,10 @@ fn the_morning_paper_goes_to_a_pocketbook_as_an_epub() {
     assert!(text.contains("PocketBook:"), "{text}");
     assert_eq!(
         names(&root.join("Deckle")),
-        ["deckle-daily-2026-10-23.epub"]
+        [
+            "deckle-daily-2026-10-23.epub",
+            "deckle-daily-2026-10-23.sdr"
+        ]
     );
     let sent = std::fs::read(root.join("Deckle/deckle-daily-2026-10-23.epub")).unwrap();
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(sent)).unwrap();
