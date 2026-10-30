@@ -3,16 +3,17 @@
 //! `X-Deckle: 1` header every state-changing request carries (a cross-site form can't set it).
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{Request, State};
+use axum::extract::{ConnectInfo, Request, State};
 use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use axum::{Extension, Json};
 use serde::Deserialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -25,6 +26,8 @@ const COOKIE_NAME: &str = "deckle_session";
 const SESSION_LIFE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
 /// Every wrong password costs this long, so guessing online is slow.
 const FAILURE_DELAY: Duration = Duration::from_secs(1);
+/// Password checks in flight at once; more get `429`.
+pub(crate) const LOGIN_SLOTS: usize = 4;
 
 /// Session tokens and when each expires. Restarting the server logs everyone out.
 #[derive(Default)]
@@ -129,6 +132,8 @@ struct Login {
 /// `POST /api/login {"password"}`.
 pub(crate) async fn login(
     State(server): State<Shared>,
+    // Absent when served without connect info (tests).
+    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
@@ -141,11 +146,26 @@ pub(crate) async fn login(
     if server.cfg.auth_none {
         return Json(json!({ "ok": true })).into_response();
     }
+    // A few checks at a time, each failure held for the delay: guessing in parallel gets
+    // LOGIN_SLOTS tries a second, not one per connection.
+    let Ok(permit) = server.login_slots.try_acquire() else {
+        return error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many login attempts; try again in a moment".into(),
+        );
+    };
     let expected = server.cfg.password.as_deref().unwrap_or_default();
     if expected.is_empty() || !password_matches(expected, &password) {
+        // The socket's address, never X-Forwarded-For, which the client writes.
+        match peer {
+            Some(Extension(ConnectInfo(addr))) => eprintln!("web UI: failed login from {addr}"),
+            None => eprintln!("web UI: failed login"),
+        }
         tokio::time::sleep(FAILURE_DELAY).await;
+        drop(permit);
         return error(StatusCode::UNAUTHORIZED, "wrong password".into());
     }
+    drop(permit);
     match server.sessions.create() {
         Ok(token) => {
             let set = cookie(&headers, &token, SESSION_LIFE.as_secs());

@@ -82,42 +82,86 @@ async fn login_sets_a_strict_http_only_cookie() {
 }
 
 #[tokio::test]
-async fn login_wrong_password_is_slow_and_constant_time_safe() {
+async fn login_wrong_password_is_slow() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(tmp.path(), false);
-    let wrong = json!({ "password": "correct hors" }).to_string();
-    let start = Instant::now();
-    let r = send(&app, post("/api/login", &wrong, None)).await;
-    assert_eq!(r.status, StatusCode::UNAUTHORIZED);
-    assert!(
-        start.elapsed() >= Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
-    assert!(r.headers.get("set-cookie").is_none());
-
-    // Ten more wrong tries (a longer one, an empty one), side by side, lock nobody out.
-    let mut tries = tokio::task::JoinSet::new();
-    for i in 0..10 {
-        let app = app.clone();
-        let pw = if i % 2 == 0 {
-            format!("{PASSWORD}{i}")
-        } else {
-            String::new()
-        };
-        tries.spawn(async move {
-            send(
-                &app,
-                post("/api/login", &json!({ "password": pw }).to_string(), None),
-            )
-            .await
-            .status
-        });
-    }
-    while let Some(status) = tries.join_next().await {
-        assert_eq!(status.unwrap(), StatusCode::UNAUTHORIZED);
+    for pw in ["correct hors", "", "correct horse!"] {
+        let start = Instant::now();
+        let r = send(
+            &app,
+            post("/api/login", &json!({ "password": pw }).to_string(), None),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+        assert!(
+            start.elapsed() >= Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
+        assert!(r.headers.get("set-cookie").is_none());
     }
     let cookie = login(&app).await;
+    let r = send(&app, post("/api/invoke/app_version", "{}", Some(&cookie))).await;
+    assert_eq!(r.status, StatusCode::OK);
+}
+
+/// Over a real socket, where the handler gets the peer's address to log (`--no-capture`
+/// shows `web UI: failed login from 127.0.0.1:…`).
+#[tokio::test]
+async fn failed_login_is_logged_with_peer() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let (mut conn, stop, server) = crate::serving(tmp.path(), false).await;
+    let body = json!({ "password": "nope" }).to_string();
+    let req = format!(
+        "POST /api/login HTTP/1.1\r\nHost: x\r\nX-Deckle: 1\r\nConnection: close\r\n\
+         Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    conn.write_all(req.as_bytes()).await.unwrap();
+    let mut reply = String::new();
+    conn.read_to_string(&mut reply).await.unwrap();
+    assert!(reply.starts_with("HTTP/1.1 401"), "{reply}");
+    stop.send(()).unwrap();
+    server.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn parallel_logins_are_capped_with_429() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path(), false);
+    let cookie = login(&app).await;
+    let start = Instant::now();
+    let mut tries = tokio::task::JoinSet::new();
+    for i in 0..20 {
+        let app = app.clone();
+        tries.spawn(async move {
+            let body = json!({ "password": format!("guess {i}") }).to_string();
+            let r = send(&app, post("/api/login", &body, None)).await;
+            (r.status, r.body, r.headers, start.elapsed())
+        });
+    }
+    let (mut wrong, mut busy) = (0, 0);
+    while let Some(got) = tries.join_next().await {
+        let (status, body, headers, _) = got.unwrap();
+        match status {
+            StatusCode::UNAUTHORIZED => wrong += 1,
+            StatusCode::TOO_MANY_REQUESTS => {
+                busy += 1;
+                assert_eq!(
+                    serde_json::from_str::<Value>(&body).unwrap(),
+                    json!({"error": "too many login attempts; try again in a moment"})
+                );
+                assert_eq!(headers["x-content-type-options"], "nosniff");
+            }
+            other => panic!("{other}: {body}"),
+        }
+    }
+    assert!(wrong <= 4, "{wrong} checked at once");
+    assert_eq!(wrong + busy, 20);
+    // The slots free up, and a session from before was never affected.
+    login(&app).await;
     let r = send(&app, post("/api/invoke/app_version", "{}", Some(&cookie))).await;
     assert_eq!(r.status, StatusCode::OK);
 }

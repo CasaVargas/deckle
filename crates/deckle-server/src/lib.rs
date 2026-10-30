@@ -10,7 +10,7 @@ mod static_files;
 use std::fmt;
 use std::future::Future;
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -118,6 +118,7 @@ pub(crate) struct Server {
     pub(crate) cfg: ServerConfig,
     pub(crate) ctx: Arc<Ctx>,
     pub(crate) sessions: auth::Sessions,
+    pub(crate) login_slots: tokio::sync::Semaphore,
     /// Set on shutdown: ends the event streams, which would otherwise never finish.
     pub(crate) stop: watch::Sender<bool>,
 }
@@ -130,6 +131,7 @@ pub fn router(cfg: ServerConfig, ctx: Arc<Ctx>) -> Router {
         cfg,
         ctx,
         sessions: Default::default(),
+        login_slots: tokio::sync::Semaphore::new(auth::LOGIN_SLOTS),
         stop: watch::channel(false).0,
     }))
 }
@@ -163,6 +165,12 @@ pub async fn serve(
     ctx: Arc<Ctx>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
+    if !cfg.auth_none
+        && let Some(password) = &cfg.password
+        && password.chars().count() < 12
+    {
+        eprintln!("web UI password is short; use 12+ characters");
+    }
     let listener = tokio::net::TcpListener::bind((cfg.bind, cfg.port)).await?;
     // The address bound, not the one asked for: port 0 picks a free one.
     eprintln!("web UI on http://{}", listener.local_addr()?);
@@ -171,9 +179,12 @@ pub async fn serve(
         cfg,
         ctx,
         sessions: Default::default(),
+        login_slots: tokio::sync::Semaphore::new(auth::LOGIN_SLOTS),
         stop: stop.clone(),
     });
     let app = build(server);
+    // The peer's address, for logging failed logins.
+    let app = app.into_make_service_with_connect_info::<SocketAddr>();
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
             shutdown.await;

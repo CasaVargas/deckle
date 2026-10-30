@@ -63,28 +63,7 @@ async fn shutdown_ends_open_event_streams() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let tmp = tempfile::tempdir().unwrap();
-    let mut cfg = crate::config(tmp.path(), true);
-    // A free port: serve logs the one it gets, but a test can't read the log.
-    cfg.port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let port = cfg.port;
-    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let server = tokio::spawn(deckle_server::serve(cfg, crate::ctx(tmp.path()), async {
-        stopped.await.ok();
-    }));
-
-    let mut conn = None;
-    for _ in 0..250 {
-        if let Ok(c) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
-            conn = Some(c);
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    let mut conn = conn.expect("serve listens within 5 s");
+    let (mut conn, stop, server) = crate::serving(tmp.path(), true).await;
     conn.write_all(b"GET /api/events HTTP/1.1\r\nHost: x\r\n\r\n")
         .await
         .unwrap();

@@ -92,3 +92,33 @@ pub async fn login(app: &Router) -> String {
     let set = r.headers["set-cookie"].to_str().unwrap();
     set.split(';').next().unwrap().to_owned()
 }
+
+/// `serve` on a free port, connected to: the connection, its stop switch and the server task.
+pub async fn serving(
+    dir: &Path,
+    auth_none: bool,
+) -> (
+    tokio::net::TcpStream,
+    tokio::sync::oneshot::Sender<()>,
+    tokio::task::JoinHandle<std::io::Result<()>>,
+) {
+    let mut cfg = config(dir, auth_none);
+    // A free port: serve logs the one it gets, but a test can't read the log.
+    cfg.port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let port = cfg.port;
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(deckle_server::serve(cfg, ctx(dir), async {
+        stopped.await.ok();
+    }));
+    for _ in 0..250 {
+        if let Ok(c) = tokio::net::TcpStream::connect(("127.0.0.1", port)).await {
+            return (c, stop, server);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    panic!("serve listens within 5 s");
+}
