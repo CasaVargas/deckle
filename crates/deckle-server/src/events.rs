@@ -6,8 +6,10 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::HeaderName;
+use axum::http::header::CACHE_CONTROL;
+use axum::response::IntoResponse;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use futures_util::Stream;
 use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::Shared;
@@ -34,9 +36,7 @@ impl deckle_app::events::Events for SseEvents {
 
 /// `GET /api/events`: `event: <name>` / `data: <json>`, with a keep-alive comment every 15 s.
 /// Ends when the server shuts down, so graceful shutdown doesn't wait on it.
-pub(crate) async fn stream(
-    State(server): State<Shared>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+pub(crate) async fn stream(State(server): State<Shared>) -> impl IntoResponse {
     // Subscribed here, not in the stream, so nothing emitted after the response is lost.
     let rx = channel().subscribe();
     let stop = server.stop.subscribe();
@@ -52,7 +52,7 @@ pub(crate) async fn stream(
                     got = rx.recv() => match got {
                         Ok((name, data)) => {
                             let event = Event::default().event(name).data(data);
-                            return Some((Ok(event), (rx, stop, server, warned)));
+                            return Some((Ok::<_, Infallible>(event), (rx, stop, server, warned)));
                         }
                         Err(RecvError::Lagged(n)) => {
                             if !warned {
@@ -69,5 +69,9 @@ pub(crate) async fn stream(
             }
         },
     );
-    Sse::new(events).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
+    let sse = Sse::new(events).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)));
+    // nginx-based proxies (Nginx Proxy Manager, SWAG) hold a stream back unless told not to.
+    ([(CACHE_CONTROL, "no-cache"), (NGINX_BUFFERING, "no")], sse)
 }
+
+const NGINX_BUFFERING: HeaderName = HeaderName::from_static("x-accel-buffering");

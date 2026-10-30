@@ -40,6 +40,9 @@ async fn events_stream_delivers_emitted_event() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()["content-type"], "text/event-stream");
+    // nginx-based proxies (Nginx Proxy Manager, SWAG) buffer a stream that doesn't say not to.
+    assert_eq!(res.headers()["x-accel-buffering"], "no");
+    assert_eq!(res.headers()["cache-control"], "no-cache");
 
     SseEvents.emit(
         "daily-finished",
