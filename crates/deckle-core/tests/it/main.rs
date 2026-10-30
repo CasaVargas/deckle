@@ -9,6 +9,7 @@ mod deliver;
 mod devices;
 mod inspect;
 mod koreader;
+mod koreader_backup;
 mod matcher;
 mod metadata_fill;
 mod normalize;
