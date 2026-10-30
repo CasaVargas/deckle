@@ -2749,12 +2749,12 @@ fn digest(
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             let mut outcome = DigestOutcome::default();
             let reading_outcomes = built.reading_outcomes.clone();
-            if let Some(k) = kfx {
-                record_layout(k, date, &built, &cfg);
-                if is_today(date) {
-                    let note = keep_kfx_in_morgue(&cfg, date, k);
-                    built.notes.extend(note);
-                }
+            record_layout(kfx, date, &built, &cfg);
+            if let Some(k) = kfx
+                && is_today(date)
+            {
+                let note = keep_kfx_in_morgue(&cfg, date, k);
+                built.notes.extend(note);
             }
             // The reMarkable's PDF, from its own outbox.
             let rm_queue = remarkable_queue();
@@ -2817,7 +2817,8 @@ fn digest(
             let remarkable = rm_queued.then(|| push_remarkable(&cfg)).flatten();
             // A Kobo or a PocketBook plugged in now takes its copy at once.
             let device = detect_reader().filter(|_| folder.is_none() && epub_queued);
-            let reader = match push_reader(&kobo_queue, &cfg, device.as_ref()) {
+            let reader = match push_reader(&kobo_queue, std::slice::from_ref(&cfg), device.as_ref())
+            {
                 Ok(o) => o,
                 Err(e) => {
                     built.notes.push(format!("e-reader: {e}"));
@@ -3104,7 +3105,8 @@ fn digest(
             if target.is_none()
                 && let Some(reader) = &reader
             {
-                let mut outcome = push_reader(&kobo_queue, &cfg, Some(reader))?.unwrap_or_default();
+                let mut outcome =
+                    push_reader(&kobo_queue, &papers, Some(reader))?.unwrap_or_default();
                 outcome.remarkable = remarkable;
                 emit(json, &outcome, || match &outcome.flush {
                     Some(_) => outcome.describe(&kobo_queue),
@@ -3261,12 +3263,10 @@ fn digest(
                 }
                 let reader = detect_reader();
                 let reader_id = reader.as_ref().map(deckle_core::reader::Reader::id);
+                // readership comes from KOReader's sidecars (KOReader hub design §C)
                 let reader_actions = reader_id
                     .as_deref()
-                    .map(|id| deckle_core::sync::Actions {
-                        readership: false,
-                        ..sync_actions(&cfg, id)
-                    })
+                    .map(|id| sync_actions(&cfg, id))
                     .unwrap_or_default();
                 let plan = reader_watcher.tick(
                     reader_id.as_deref(),
@@ -3274,7 +3274,7 @@ fn digest(
                     reader_actions,
                 );
                 if let (Some(k), false) = (&reader, plan.is_empty()) {
-                    match reader_sync(&kobo_queue, &cfg, k, plan) {
+                    match reader_sync(&kobo_queue, &papers, k, plan) {
                         Ok(o) => emit(json, &o, || o.describe(&kobo_queue))?,
                         Err(e) => eprintln!("error: {e}"),
                     }
@@ -4173,32 +4173,33 @@ fn queue_epubs(
 }
 
 /// Flushes the EPUB outbox to `reader` (a Kobo or a PocketBook), when one is connected, with its
-/// `[sync]` actions.
+/// `[sync]` actions (the first of `papers`).
 fn push_reader(
     queue: &deckle_core::queue::Queue,
-    cfg: &deckle_digest::Config,
+    papers: &[deckle_digest::Config],
     reader: Option<&deckle_core::reader::Reader>,
 ) -> Result<Option<DigestOutcome>, String> {
     let Some(reader) = reader else {
         return Ok(None);
     };
-    let actions = sync_actions(cfg, &reader.id());
+    let actions = sync_actions(&papers[0], &reader.id());
     let Some(plan) = push_plan(actions, queue.pending().is_empty()) else {
         return Ok(None);
     };
-    reader_sync(queue, cfg, reader, plan).map(Some)
+    reader_sync(queue, papers, reader, plan).map(Some)
 }
 
 /// [`sync_to`] for a Kobo or a PocketBook: push the EPUB outbox, prune, and on a Kobo read its
-/// database for the highlights and the shelf. Neither has a `.yjf`, so no readership; and the
-/// Morgue's notes on
-/// what's on the Kindle stay the Kindle's.
+/// database for the highlights and the shelf. Neither has a `.yjf`: readership comes from
+/// KOReader's sidecars, recorded in each of `papers` (the first is the household's settings).
+/// The Morgue's notes on what's on the Kindle stay the Kindle's.
 fn reader_sync(
     queue: &deckle_core::queue::Queue,
-    cfg: &deckle_digest::Config,
+    papers: &[deckle_digest::Config],
     reader: &deckle_core::reader::Reader,
     plan: deckle_core::sync::Plan,
 ) -> Result<DigestOutcome, String> {
+    let cfg = &papers[0];
     let id = reader.id();
     let now = deckle_digest::chrono::Utc::now();
     let stamp = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -4262,12 +4263,48 @@ fn reader_sync(
             .inspect_err(|e| eprintln!("shelf: {e}"))
             .ok()
     });
+    let readership = (plan.readership && !flush.koreader.is_empty()).then(|| {
+        let device = format!("koreader/{id}");
+        let opened = papers
+            .iter()
+            .map(|p| record_koreader(&readership_path(p), &device, &flush.koreader))
+            .sum();
+        deckle_readership::Recorded {
+            opened,
+            ..Default::default()
+        }
+    });
     Ok(DigestOutcome {
         flush: Some(flush),
         highlights,
+        readership,
         shelf,
         ..Default::default()
     })
+}
+
+/// KOReader's position in each edition the readership file at `path` has a layout for, as
+/// `device`'s reads (KOReader hub design §C). Returns the editions recorded.
+fn record_koreader(path: &Path, device: &str, found: &[deckle_core::koreader::Position]) -> usize {
+    let mut state = deckle_readership::State::load(path);
+    let mut n = 0;
+    for p in found {
+        let Some(date) = deckle_readership::koreader::edition_of(&state, &p.book) else {
+            continue;
+        };
+        let xpointer = p.xpointer.as_deref().unwrap_or_default();
+        if deckle_readership::record_koreader_position(
+            &mut state, date, device, xpointer, p.percent, &p.when,
+        ) {
+            n += 1;
+        }
+    }
+    if n > 0
+        && let Err(e) = state.save(path)
+    {
+        eprintln!("readership: {e}");
+    }
+    n
 }
 
 /// `deckle run … --to device` with no Kindle but a Kobo or a PocketBook: each book cleaned
@@ -4741,14 +4778,16 @@ fn on_device(on: &deckle_core::yjf::OnDevice) -> deckle_readership::OnDevice {
     }
 }
 
-/// Where each section of the edition just built starts, for the readership report. Never fails
-/// the run.
+/// Where each section of the edition just built starts, for the readership report: from the
+/// KFX when one was made, and the EPUB's spine always, for KOReader (KOReader hub design §C).
+/// With no KFX the layout is in the EPUB's own positions. Never fails the run.
 fn record_layout(
-    kfx: &Path,
+    kfx: Option<&Path>,
     date: deckle_digest::chrono::NaiveDate,
     built: &deckle_digest::BuildReport,
     cfg: &deckle_digest::Config,
 ) {
+    use deckle_readership::layout;
     let sections: Vec<(String, String)> = built
         .sections
         .iter()
@@ -4761,29 +4800,40 @@ fn record_layout(
         .iter()
         .map(|s| (s.key.clone(), s.titles.clone()))
         .collect();
-    let layout = std::fs::read(kfx)
-        .map_err(|e| format!("{}: {e}", kfx.display()))
-        .and_then(|bytes| {
-            let mut l = deckle_readership::layout::layout_from_kfx(
-                &bytes,
-                date,
-                &built.title,
-                stem,
-                &sections,
-            )?;
-            // stories are a nicety for learning: a layout without them is still a layout
-            if let Err(e) = deckle_readership::layout::add_stories(&mut l, &bytes, &titles) {
-                eprintln!("readership: stories: {e}");
-            }
-            Ok(l)
-        })
-        .map(|l| with_items(l, built));
+    let epub = std::fs::read(&built.epub)
+        .map_err(|e| format!("{}: {e}", built.epub.display()))
+        .and_then(|bytes| layout::epub_layout(&bytes, &sections));
     let path = readership_path(cfg);
-    let saved = layout.and_then(|l| {
-        let mut state = deckle_readership::State::load(&path);
-        state.record_layout(l);
-        state.save(&path)
-    });
+    let saved = match kfx {
+        Some(kfx) => std::fs::read(kfx)
+            .map_err(|e| format!("{}: {e}", kfx.display()))
+            .and_then(|bytes| {
+                let mut l = layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)?;
+                // stories are a nicety for learning: a layout without them is still a layout
+                if let Err(e) = layout::add_stories(&mut l, &bytes, &titles) {
+                    eprintln!("readership: stories: {e}");
+                }
+                // so is the spine: only KOReader's positions need it
+                match epub {
+                    Ok(e) => l.epub = Some(e),
+                    Err(e) => eprintln!("readership: EPUB spine: {e}"),
+                }
+                Ok(l)
+            })
+            .and_then(|l| {
+                let mut state = deckle_readership::State::load(&path);
+                state.record_layout(with_items(l, built));
+                state.save(&path)
+            }),
+        None => epub.and_then(|e| {
+            let l = layout::layout_from_epub(e, date, &built.title, stem);
+            let mut state = deckle_readership::State::load(&path);
+            match state.record_epub_layout(with_items(l, built)) {
+                true => state.save(&path),
+                false => Ok(()),
+            }
+        }),
+    };
     if let Err(e) = saved {
         eprintln!("readership: {e}");
     }
@@ -5908,6 +5958,7 @@ mod layout_tests {
             title: "T".into(),
             file: "f".into(),
             end: 10,
+            epub: None,
             sections: vec![sec("front"), sec("local"), sec("feeds:Science")],
         };
         let summary = |key: &str, items| deckle_digest::SectionSummary {

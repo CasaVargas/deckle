@@ -62,6 +62,7 @@ fn setup(learning: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
         title: "The Deckle Daily".into(),
         file: STEM.into(),
         end: 200_000,
+        epub: None,
         sections: vec![
             sec("front", "Front page", 0, vec![]),
             sec(

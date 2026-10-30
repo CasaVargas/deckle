@@ -16,6 +16,158 @@ pub struct Layout {
     pub end: i64,
     /// In paper order, the front page first.
     pub sections: Vec<SectionStart>,
+    /// The EPUB's spine, for KOReader's positions (KOReader hub design §C); `None` for layouts
+    /// recorded before it was kept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epub: Option<EpubLayout>,
+}
+
+impl Layout {
+    /// The positions are KFX positions, not [`EpubLayout`] ones.
+    pub fn is_kfx(&self) -> bool {
+        !self.epub.as_ref().is_some_and(|e| e.positions)
+    }
+}
+
+/// Positions per spine file in an edition with no KFX: a section starts at its file's spine
+/// index times this.
+pub const SPINE_SPAN: i64 = 1_000_000;
+
+/// One edition's EPUB spine and the file each section starts in.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct EpubLayout {
+    /// The spine's files in order, as the OPF names them: KOReader's `DocFragment[N]` is
+    /// `files[N - 1]`.
+    pub files: Vec<String>,
+    /// In paper order, the front page first.
+    pub sections: Vec<EpubSection>,
+    /// No KFX was built: the layout's positions are this EPUB's ([`SPINE_SPAN`] per file).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub positions: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EpubSection {
+    /// As [`SectionStart::key`].
+    pub key: String,
+    pub name: String,
+    /// Its file's index in [`EpubLayout::files`].
+    pub spine: usize,
+}
+
+impl EpubLayout {
+    /// The section a spine file belongs to: the last one starting at or before it.
+    pub fn section_at(&self, spine: usize) -> Option<&EpubSection> {
+        self.sections.iter().rev().find(|s| s.spine <= spine)
+    }
+}
+
+/// The spine of the paper's EPUB: `front.xhtml`, then `s<N>.xhtml` for the `N`th of `sections`
+/// (`(key, printed title)` in paper order, without the front page; render.rs).
+pub fn epub_layout(epub: &[u8], sections: &[(String, String)]) -> Result<EpubLayout, String> {
+    let files = spine(epub)?;
+    let mut out = EpubLayout {
+        files,
+        ..EpubLayout::default()
+    };
+    for (i, f) in out.files.iter().enumerate() {
+        let name = f.rsplit('/').next().unwrap_or(f);
+        let (key, title) = if name == "front.xhtml" {
+            ("front".to_owned(), "Front page".to_owned())
+        } else {
+            let Some(n) = name
+                .strip_prefix('s')
+                .and_then(|n| n.strip_suffix(".xhtml"))
+                .and_then(|n| n.parse::<usize>().ok())
+            else {
+                continue;
+            };
+            n.checked_sub(1)
+                .and_then(|n| sections.get(n))
+                .ok_or_else(|| format!("{name} has no section in the build"))?
+                .clone()
+        };
+        out.sections.push(EpubSection {
+            key,
+            name: title,
+            spine: i,
+        });
+    }
+    if out.sections.first().is_none_or(|s| s.key != "front") {
+        return Err("the edition has no front page".into());
+    }
+    if out.sections.len() != sections.len() + 1 {
+        return Err(format!(
+            "the edition has {} sections, the build {}",
+            out.sections.len() - 1,
+            sections.len()
+        ));
+    }
+    Ok(out)
+}
+
+/// Every spine file's href, as the OPF writes it, linear or not: KOReader counts them all.
+fn spine(epub: &[u8]) -> Result<Vec<String>, String> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(epub)).map_err(|e| e.to_string())?;
+    let mut text = |name: &str| -> Result<String, String> {
+        let mut s = String::new();
+        zip.by_name(name)
+            .map_err(|e| format!("{name}: {e}"))?
+            .read_to_string(&mut s)
+            .map_err(|e| format!("{name}: {e}"))?;
+        Ok(s)
+    };
+    let container = text("META-INF/container.xml")?;
+    let doc = roxmltree::Document::parse(&container).map_err(|e| e.to_string())?;
+    let opf_path = doc
+        .descendants()
+        .find(|n| n.has_tag_name("rootfile"))
+        .and_then(|n| n.attribute("full-path"))
+        .ok_or("container.xml names no OPF")?
+        .to_owned();
+    let opf = text(&opf_path)?;
+    let doc = roxmltree::Document::parse(&opf).map_err(|e| format!("{opf_path}: {e}"))?;
+    let href = |id: &str| {
+        doc.descendants()
+            .find(|n| n.has_tag_name("item") && n.attribute("id") == Some(id))
+            .and_then(|n| n.attribute("href"))
+    };
+    let files: Vec<String> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("itemref"))
+        .filter_map(|n| href(n.attribute("idref")?).map(str::to_owned))
+        .collect();
+    if files.is_empty() {
+        return Err(format!("{opf_path}: the spine is empty"));
+    }
+    Ok(files)
+}
+
+/// The layout of an edition with no KFX, in the EPUB's own positions: each section starts at
+/// its file's spine index times [`SPINE_SPAN`], and the edition ends after its last section.
+pub fn layout_from_epub(mut epub: EpubLayout, date: NaiveDate, title: &str, file: &str) -> Layout {
+    epub.positions = true;
+    let at = |spine: usize| spine as i64 * SPINE_SPAN;
+    let sections = epub
+        .sections
+        .iter()
+        .map(|s| SectionStart {
+            key: s.key.clone(),
+            name: s.name.clone(),
+            start: at(s.spine),
+            items: None,
+            stories: Vec::new(),
+        })
+        .collect();
+    Layout {
+        date,
+        title: title.to_owned(),
+        file: file.to_owned(),
+        end: epub.sections.last().map_or(0, |s| at(s.spine + 1)),
+        sections,
+        epub: Some(epub),
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -81,6 +233,7 @@ pub fn layout_from_kfx(
         file: file.to_owned(),
         end,
         sections: out,
+        epub: None,
     })
 }
 

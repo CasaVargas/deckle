@@ -28,6 +28,7 @@ fn edition(s: &mut State, i: u64, secs: &[(&str, &str, i64)], reads: &[(&str, Op
         title: "The Deckle Daily".into(),
         file: format!("deckle-daily-{}", date(i)),
         end: 10_000,
+        epub: None,
         sections: secs
             .iter()
             .map(|(k, n, start)| SectionStart {

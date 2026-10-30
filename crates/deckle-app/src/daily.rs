@@ -913,6 +913,7 @@ mod tests {
             title: "T".into(),
             file: "deckle-daily-2026-10-21".into(),
             end: 100,
+            epub: None,
             sections: vec![
                 SectionStart {
                     key: "front".into(),
@@ -989,6 +990,7 @@ mod tests {
             title: "T".into(),
             file: "deckle-daily-2026-10-21".into(),
             end: 100,
+            epub: None,
             sections: vec![
                 sec("front"),
                 sec("interests:A"),
