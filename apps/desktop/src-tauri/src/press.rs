@@ -6,18 +6,10 @@ use deckle_digest::{
     press::{PressErrorCode, Uuid, setup},
 };
 use serde::{Deserialize, Serialize};
-use std::{
-    path::Path,
-    sync::{Mutex, MutexGuard},
-};
+use std::path::Path;
 
-static CONFIG_WRITE: Mutex<()> = Mutex::new(());
-
-pub(crate) fn config_write() -> Result<MutexGuard<'static, ()>, String> {
-    CONFIG_WRITE
-        .lock()
-        .map_err(|_| "Configuration is busy; reopen settings.".into())
-}
+// One lock with deckle-app's commands, which write the same files.
+pub(crate) use deckle_app::config_write;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PressSetupStatus {
@@ -259,7 +251,7 @@ mod tests {
         entered_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .unwrap();
-        assert!(CONFIG_WRITE.try_lock().is_err());
+        assert!(deckle_app::CONFIG_WRITE.try_lock().is_err());
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let second = std::thread::spawn(move || {
             let status = setup_at(&main, &root, None, 0, false, None, || {

@@ -308,7 +308,7 @@ pub fn shelf_on(
         &config.with_file_name("puzzles.json"),
     );
     // Reading positions ride in the same session (readership design §3).
-    crate::readership::record_on(
+    deckle_app::readership::record_on(
         conn,
         &config.with_file_name("readership.json"),
         &config.with_file_name("digest.toml"),

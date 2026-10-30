@@ -97,7 +97,6 @@ fn now() -> DateTime<Tz> {
     Utc::now().with_timezone(&deckle_digest::tz::local_tz())
 }
 
-#[tauri::command]
 pub fn daily_next(paper: Option<String>) -> Result<NextPaper, String> {
     next_at(
         &digest_path(),
@@ -123,34 +122,22 @@ fn single_flight(flag: &AtomicBool, f: impl FnOnce()) -> bool {
 static REFRESHING: AtomicBool = AtomicBool::new(false);
 
 /// Checks the feeds for headlines (each URL at most twice an hour), then the view.
-#[tauri::command]
-pub async fn daily_next_refresh(paper: Option<String>) -> Result<NextPaper, String> {
-    let p = paper.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut out = Ok(());
-        single_flight(&REFRESHING, || {
-            out = config_at(&digest_path(), p.as_deref()).and_then(|cfg| {
-                let path = cache_dir().join("next.json");
-                let mut cache = deckle_digest::next::live::LiveCache::load(&path);
-                deckle_digest::next::live::refresh(
-                    &cfg,
-                    &mut cache,
-                    Utc::now(),
-                    &deckle_digest::Http,
-                );
-                cache.save(&path)
-            });
+pub fn daily_next_refresh(paper: Option<String>) -> Result<NextPaper, String> {
+    let mut out = Ok(());
+    single_flight(&REFRESHING, || {
+        out = config_at(&digest_path(), paper.as_deref()).and_then(|cfg| {
+            let path = cache_dir().join("next.json");
+            let mut cache = deckle_digest::next::live::LiveCache::load(&path);
+            deckle_digest::next::live::refresh(&cfg, &mut cache, Utc::now(), &deckle_digest::Http);
+            cache.save(&path)
         });
-        out
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    });
+    out?;
     daily_next(paper)
 }
 
 /// Stop the presses is the household's (one `press.json`, as in the CLI): it stops the
 /// selected paper's next edition date for every paper.
-#[tauri::command]
 pub fn press_stop(on: bool, paper: Option<String>) -> Result<NextPaper, String> {
     stop_at(&digest_path(), on, schedule_at(paper.as_deref()), now())?;
     daily_next(paper)

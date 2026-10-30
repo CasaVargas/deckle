@@ -3,7 +3,6 @@
 //! without a running app.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use base64::Engine;
 use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, decide, manual_asin};
@@ -326,16 +325,7 @@ pub fn plan_rows(
         .collect()
 }
 
-/// App state: the settings file location and what the command line asked for.
-pub struct AppState {
-    pub settings_file: PathBuf,
-    pub devices_file: PathBuf,
-    pub preload: Mutex<Vec<String>>,
-    /// `--export-to <dir>`: run the preloaded books into this folder as soon as they load.
-    pub preload_target: Mutex<Option<String>>,
-    /// `--daily` / `--kindle`: open on that tab (else `books`).
-    pub start_tab: &'static str,
-}
+pub use deckle_app::state::AppState;
 
 /// `deckle-desktop [--export-to DIR] [BOOK...]`: books to open and an optional auto-export dir.
 pub fn parse_cli_args(args: &[String]) -> (Vec<String>, Option<String>) {

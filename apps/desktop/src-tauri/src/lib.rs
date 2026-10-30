@@ -6,12 +6,9 @@ mod commands;
 mod cookbook;
 mod daily;
 mod kindle;
-mod morgue;
-mod next;
 mod press;
-mod readership;
-mod shelf;
 mod upgrades;
+mod wrap;
 
 use std::sync::Mutex;
 
@@ -130,23 +127,23 @@ pub fn run() {
             kindle::highlights_set,
             kindle::highlights_write,
             kindle::words_anki,
-            readership::readership_report,
-            readership::readership_apply,
-            readership::readership_dismiss,
-            readership::readership_set,
-            readership::interests_accept,
-            readership::interests_dismiss,
-            morgue::morgue_month,
-            morgue::morgue_search,
-            morgue::morgue_show,
-            morgue::morgue_send,
-            morgue::morgue_open,
-            shelf::shelf_status,
-            shelf::shelf_forget,
-            shelf::shelf_set,
-            next::daily_next,
-            next::daily_next_refresh,
-            next::press_stop,
+            wrap::readership_report,
+            wrap::readership_apply,
+            wrap::readership_dismiss,
+            wrap::readership_set,
+            wrap::interests_accept,
+            wrap::interests_dismiss,
+            wrap::morgue_month,
+            wrap::morgue_search,
+            wrap::morgue_show,
+            wrap::morgue_send,
+            wrap::morgue_open,
+            wrap::shelf_status,
+            wrap::shelf_forget,
+            wrap::shelf_set,
+            wrap::daily_next,
+            wrap::daily_next_refresh,
+            wrap::press_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Deckle");
