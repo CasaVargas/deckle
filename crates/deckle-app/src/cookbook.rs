@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use base64::Engine;
 use deckle_cli::cookbook_api::{self, KindleStatus};
@@ -19,9 +19,9 @@ use deckle_digest::cookbook::store::{
 };
 use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE, book};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
 
-use deckle_app::commands::{AppState, Settings, load_settings_from};
+use crate::commands::{AppState, Settings, load_settings_from};
+use crate::events::Events;
 
 /// The folder the commands work on: `DECKLE_COOKBOOK_DIR`, else beside `digest.toml`.
 fn store() -> Store {
@@ -639,7 +639,7 @@ fn delivery_at(store: &Store, digest: &Path, watcher_installed: bool) -> Deliver
 /// Writes `[sync.devices."<id>"] cookbook = on` into `digest.toml` (a missing file is started),
 /// keeping its comments.
 fn set_kindle_at(digest: &Path, id: &str, on: bool) -> Result<(), String> {
-    let _lock = deckle_app::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = match deckle_digest::Config::load(digest) {
         Ok(c) => c,
         Err(_) if !digest.exists() => deckle_digest::Config::default(),
@@ -737,91 +737,68 @@ fn illustrate_run(
 // The commands
 // ---------------------------------------------------------------------------------------------
 
-fn blocking<T: Send + 'static>(
-    f: impl FnOnce() -> Result<T, String> + Send + 'static,
-) -> impl std::future::Future<Output = Result<T, String>> {
-    let work = tauri::async_runtime::spawn_blocking(f);
-    async move { work.await.map_err(|e| e.to_string())? }
-}
-
 /// Fetches and reads a recipe from a web address, a link file's path or a saved page's path,
 /// writing nothing.
-#[tauri::command]
-pub async fn cookbook_preview(target: String) -> Result<PreviewDto, String> {
-    blocking(move || preview_dto(&store(), &deckle_digest::Http, target.trim())).await
+pub fn cookbook_preview(target: String) -> Result<PreviewDto, String> {
+    preview_dto(&store(), &deckle_digest::Http, target.trim())
 }
 
 /// Adds (or updates) the recipe at `target`. `chapter` is a chapter id, else it is filed by its
 /// categories and title. `picture` is the Add card's chip (`site` | `illustration` | `none`);
 /// choosing `illustration` only records the choice: call `cookbook_illustrate` to draw it.
-#[tauri::command]
-pub async fn cookbook_add(
+pub fn cookbook_add(
     target: String,
     chapter: Option<String>,
     note: Option<String>,
     picture: Option<Picture>,
 ) -> Result<SavedDto, String> {
-    blocking(move || {
-        add_dto(
-            &store(),
-            &deckle_digest::Http,
-            target.trim(),
-            chapter.as_deref(),
-            note.as_deref(),
-            picture,
-            Utc::now(),
-        )
-    })
-    .await
+    add_dto(
+        &store(),
+        &deckle_digest::Http,
+        target.trim(),
+        chapter.as_deref(),
+        note.as_deref(),
+        picture,
+        Utc::now(),
+    )
 }
 
 /// The whole book: settings, chapters with their recipes, counts, the cover.
-#[tauri::command]
-pub async fn cookbook_book() -> Result<BookDto, String> {
-    blocking(|| book_dto(&store())).await
+pub fn cookbook_book() -> Result<BookDto, String> {
+    book_dto(&store())
 }
 
 /// Changes a saved recipe. Choosing `illustration` only records the choice (see `cookbook_add`).
-#[tauri::command]
 pub fn cookbook_update(id: String, patch: PatchDto) -> Result<SavedDto, String> {
     update_dto(&store(), &id, patch)
 }
 
-#[tauri::command]
 pub fn cookbook_remove(id: String) -> Result<(), String> {
     remove_recipe(&store(), &id)
 }
 
 /// Saves the book's settings (`cookbook.toml`), keeping comments and keys it doesn't know.
-#[tauri::command]
 pub fn cookbook_save_config(cfg: ConfigDto) -> Result<(), String> {
     save_config_dto(&store(), cfg)
 }
 
 /// `deckle cookbook send`: builds the book if it changed and sends it to the connected Kindle,
 /// or queues it for each Kindle's next plug-in.
-#[tauri::command]
-pub async fn cookbook_send_now() -> Result<SendDto, String> {
-    blocking(|| send_dto(&store())).await
+pub fn cookbook_send_now() -> Result<SendDto, String> {
+    send_dto(&store())
 }
 
 /// Builds the book into the app's cache and returns the EPUB's path, to open with the opener.
-#[tauri::command]
-pub async fn cookbook_preview_book() -> Result<String, String> {
-    blocking(|| {
-        let out = deckle_core::wordwise::default_cache_dir().join("cookbook");
-        preview_book_at(&store(), &out)
-    })
-    .await
+pub fn cookbook_preview_book() -> Result<String, String> {
+    let out = deckle_core::wordwise::default_cache_dir().join("cookbook");
+    preview_book_at(&store(), &out)
 }
 
-#[tauri::command]
 pub fn cookbook_delivery() -> DeliveryDto {
     delivery_at(&store(), &digest_path(), cookbook_api::watcher_installed())
 }
 
 /// Puts the book on a Kindle (`on`) or leaves it out: `[sync.devices."<id>"] cookbook`.
-#[tauri::command]
 pub fn cookbook_set_kindle(id: String, on: bool) -> Result<(), String> {
     set_kindle_at(&digest_path(), &id, on)
 }
@@ -842,10 +819,9 @@ impl Drop for Drawing {
 /// one at a time, emitting `cookbook-illustrate` ([`IllustrateEvent`]) as each finishes.
 /// `cookbook_illustrate_stop` ends it after the one being drawn. The key is Settings'
 /// `illustrations_api_key`, else `OPENAI_API_KEY` (never X-Ray's `llm_api_key`).
-#[tauri::command]
-pub async fn cookbook_illustrate(
-    app: AppHandle,
-    state: State<'_, AppState>,
+pub fn cookbook_illustrate(
+    events: Arc<dyn Events>,
+    state: &AppState,
     id: Option<String>,
     all: bool,
     redraw: bool,
@@ -857,29 +833,28 @@ pub async fn cookbook_illustrate(
     if ILLUSTRATING.swap(true, Ordering::SeqCst) {
         return Err("Already drawing; stop that first".into());
     }
-    let guard = Drawing;
+    let _guard = Drawing;
     STOP_ILLUSTRATING.store(false, Ordering::SeqCst);
-    blocking(move || {
-        let _guard = guard;
-        let post: Post = &deckle_xray::llm::http_post;
-        illustrate_run(
-            &store(),
-            id.as_deref(),
-            all,
-            redraw,
-            key.as_deref(),
-            post,
-            &STOP_ILLUSTRATING,
-            &mut |e| {
-                let _ = app.emit("cookbook-illustrate", e);
-            },
-        )
-    })
-    .await
+    let post: Post = &deckle_xray::llm::http_post;
+    illustrate_run(
+        &store(),
+        id.as_deref(),
+        all,
+        redraw,
+        key.as_deref(),
+        post,
+        &STOP_ILLUSTRATING,
+        &mut |e| {
+            // A plain struct of strings and numbers: serialising it can't fail.
+            events.emit(
+                "cookbook-illustrate",
+                serde_json::to_value(e).unwrap_or(serde_json::Value::Null),
+            );
+        },
+    )
 }
 
 /// Ends a `cookbook_illustrate` run after the recipe being drawn.
-#[tauri::command]
 pub fn cookbook_illustrate_stop() {
     STOP_ILLUSTRATING.store(true, Ordering::SeqCst);
 }

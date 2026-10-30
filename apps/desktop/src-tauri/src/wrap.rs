@@ -10,13 +10,22 @@ use deckle_app::books::{CatalogView, CoverOffer, PreflightView, SentKindle, Sugg
 use deckle_app::commands::{
     AppState, BookRow, DeviceRow, PlanRow, PreviewerStatus, RunRequest, RunTarget, Settings,
 };
+use deckle_app::cookbook::{
+    BookDto, ConfigDto, DeliveryDto, IllustrateDto, PatchDto, PreviewDto, SavedDto, SendDto,
+};
+use deckle_app::daily::{DailyState, DayPreview, EmailStatus, PapersView, PlaceRow, Preview};
 use deckle_app::kindle::{DeviceShelf, HighlightsStatus, LibraryStatus};
 use deckle_app::morgue::MonthView;
 use deckle_app::press::{ExpectedExport, PressSetupStatus};
 use deckle_app::readership::ReadershipView;
 use deckle_app::shelf::ShelfStatus;
 use deckle_app::upgrades::{Rebuild, SourcesStatus, UpgradesView};
+use deckle_digest::Config;
+use deckle_digest::cookbook::store::Picture;
 use deckle_digest::next::plan::NextPaper;
+use deckle_digest::reading::Entry;
+use deckle_digest::schedule::Status;
+use deckle_digest::session::{SessionState, SiteStatus};
 use deckle_highlights::Outcome;
 use deckle_library::care::{BackupReport, RestoreReport};
 use deckle_library::details::Details;
@@ -34,6 +43,11 @@ impl deckle_app::events::Events for TauriEvents {
         // As before: a closed window just misses the event.
         let _ = self.0.emit(event, payload);
     }
+}
+
+/// The app's own binary, which the commands that run the CLI start.
+fn current_exe() -> Result<PathBuf, String> {
+    std::env::current_exe().map_err(|e| e.to_string())
 }
 
 /// Runs the blocking `f` off the main thread, as the async commands always have.
@@ -64,7 +78,7 @@ pub async fn morgue_show(date: String) -> Result<Option<Detail>, String> {
 
 #[tauri::command]
 pub async fn morgue_send(date: String) -> Result<String, String> {
-    blocking(move || deckle_app::morgue::morgue_send(date)).await
+    blocking(move || deckle_app::morgue::morgue_send(date, &current_exe()?)).await
 }
 
 #[tauri::command]
@@ -268,7 +282,8 @@ pub fn press_setup(
     enabled: bool,
     expected: Option<ExpectedExport>,
 ) -> Result<PressSetupStatus, String> {
-    deckle_app::press::press_setup(paper, export_index, enabled, expected)
+    let exe = std::env::current_exe().map_err(|_| "App executable is unavailable.".to_owned())?;
+    deckle_app::press::press_setup(paper, export_index, enabled, expected, &exe)
 }
 
 // ---- books --------------------------------------------------------------------------
@@ -446,4 +461,209 @@ pub fn library_sources_set(
     folders: Vec<String>,
 ) -> Result<SourcesStatus, String> {
     deckle_app::upgrades::library_sources_set(find_in_calibre, calibre, folders)
+}
+
+// ---- daily --------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn daily_state(paper: Option<String>) -> DailyState {
+    deckle_app::daily::daily_state(paper)
+}
+
+#[tauri::command]
+pub fn masthead_missing(title: String) -> Vec<String> {
+    deckle_app::daily::masthead_missing(title)
+}
+
+#[tauri::command]
+pub fn papers_list() -> Result<PapersView, String> {
+    deckle_app::daily::papers_list()
+}
+
+#[tauri::command]
+pub fn paper_create(title: String, reader: String) -> Result<String, String> {
+    deckle_app::daily::paper_create(title, reader)
+}
+
+#[tauri::command]
+pub fn daily_setup() -> Result<DailyState, String> {
+    deckle_app::daily::daily_setup()
+}
+
+#[tauri::command]
+pub fn daily_save(config: Config, paper: Option<String>) -> Result<DailyState, String> {
+    deckle_app::daily::daily_save(config, paper)
+}
+
+#[tauri::command]
+pub async fn daily_day_preview(
+    day: deckle_digest::config::DayConfig,
+) -> Result<DayPreview, String> {
+    blocking(move || Ok(deckle_app::daily::daily_day_preview(day))).await
+}
+
+#[tauri::command]
+pub async fn geocode(query: String) -> Result<Vec<PlaceRow>, String> {
+    blocking(move || deckle_app::daily::geocode(query)).await
+}
+
+#[tauri::command]
+pub fn reading_list() -> Vec<Entry> {
+    deckle_app::daily::reading_list()
+}
+
+#[tauri::command]
+pub fn reading_save(url: String) -> Result<String, String> {
+    deckle_app::daily::reading_save(url)
+}
+
+#[tauri::command]
+pub fn reading_remove(id: String) -> Result<bool, String> {
+    deckle_app::daily::reading_remove(id)
+}
+
+#[tauri::command]
+pub fn bookmarklet() -> Result<String, String> {
+    deckle_app::daily::bookmarklet()
+}
+
+#[tauri::command]
+pub fn recipe_bookmarklet() -> Result<String, String> {
+    deckle_app::daily::recipe_bookmarklet()
+}
+
+#[tauri::command]
+pub fn edition_preview(paper: Option<String>) -> Option<Preview> {
+    deckle_app::daily::edition_preview(paper)
+}
+
+#[tauri::command]
+pub fn daily_run(app: AppHandle, send: bool, paper: Option<String>) -> Result<(), String> {
+    let exe = current_exe()?;
+    deckle_app::daily::daily_run(Arc::new(TauriEvents(app)), exe, send, paper)
+}
+
+#[tauri::command]
+pub fn schedule_get() -> Status {
+    deckle_app::daily::schedule_get()
+}
+
+#[tauri::command]
+pub fn schedule_set(at: Option<String>, paper: Option<String>) -> Result<Status, String> {
+    deckle_app::daily::schedule_set(at, paper)
+}
+
+#[tauri::command]
+pub fn email_status(paper: Option<String>) -> EmailStatus {
+    deckle_app::daily::email_status(paper)
+}
+
+#[tauri::command]
+pub fn email_set_password(password: String) -> Result<EmailStatus, String> {
+    deckle_app::daily::email_set_password(password)
+}
+
+#[tauri::command]
+pub async fn email_test(paper: Option<String>) -> Result<String, String> {
+    blocking(move || deckle_app::daily::email_test(paper)).await
+}
+
+#[tauri::command]
+pub fn subscriptions_status() -> Result<Vec<SiteStatus>, String> {
+    deckle_app::daily::subscriptions_status()
+}
+
+#[tauri::command]
+pub fn subscription_set_password(
+    site: String,
+    password: String,
+) -> Result<Vec<SiteStatus>, String> {
+    deckle_app::daily::subscription_set_password(site, password)
+}
+
+#[tauri::command]
+pub async fn subscription_test(site: String) -> Result<SessionState, String> {
+    blocking(move || deckle_app::daily::subscription_test(site)).await
+}
+
+#[tauri::command]
+pub fn subscription_forget(site: String) -> Result<Vec<SiteStatus>, String> {
+    deckle_app::daily::subscription_forget(site)
+}
+
+// ---- cookbook -----------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn cookbook_preview(target: String) -> Result<PreviewDto, String> {
+    blocking(move || deckle_app::cookbook::cookbook_preview(target)).await
+}
+
+#[tauri::command]
+pub async fn cookbook_add(
+    target: String,
+    chapter: Option<String>,
+    note: Option<String>,
+    picture: Option<Picture>,
+) -> Result<SavedDto, String> {
+    blocking(move || deckle_app::cookbook::cookbook_add(target, chapter, note, picture)).await
+}
+
+#[tauri::command]
+pub async fn cookbook_book() -> Result<BookDto, String> {
+    blocking(deckle_app::cookbook::cookbook_book).await
+}
+
+#[tauri::command]
+pub fn cookbook_update(id: String, patch: PatchDto) -> Result<SavedDto, String> {
+    deckle_app::cookbook::cookbook_update(id, patch)
+}
+
+#[tauri::command]
+pub fn cookbook_remove(id: String) -> Result<(), String> {
+    deckle_app::cookbook::cookbook_remove(id)
+}
+
+#[tauri::command]
+pub fn cookbook_save_config(cfg: ConfigDto) -> Result<(), String> {
+    deckle_app::cookbook::cookbook_save_config(cfg)
+}
+
+#[tauri::command]
+pub async fn cookbook_send_now() -> Result<SendDto, String> {
+    blocking(deckle_app::cookbook::cookbook_send_now).await
+}
+
+#[tauri::command]
+pub async fn cookbook_preview_book() -> Result<String, String> {
+    blocking(deckle_app::cookbook::cookbook_preview_book).await
+}
+
+#[tauri::command]
+pub fn cookbook_delivery() -> DeliveryDto {
+    deckle_app::cookbook::cookbook_delivery()
+}
+
+#[tauri::command]
+pub fn cookbook_set_kindle(id: String, on: bool) -> Result<(), String> {
+    deckle_app::cookbook::cookbook_set_kindle(id, on)
+}
+
+/// Reaches the state through the handle, as `book_preflight` does, on the blocking thread.
+#[tauri::command]
+pub async fn cookbook_illustrate(
+    app: AppHandle,
+    id: Option<String>,
+    all: bool,
+    redraw: bool,
+) -> Result<IllustrateDto, String> {
+    blocking(move || {
+        let events = Arc::new(TauriEvents(app.clone()));
+        deckle_app::cookbook::cookbook_illustrate(events, &app.state::<AppState>(), id, all, redraw)
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn cookbook_illustrate_stop() {
+    deckle_app::cookbook::cookbook_illustrate_stop()
 }

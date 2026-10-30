@@ -1051,6 +1051,7 @@ dependencies = [
  "deckle-transport",
  "deckle-txt",
  "deckle-xray",
+ "image",
  "rusqlite",
  "serde",
  "serde_json",

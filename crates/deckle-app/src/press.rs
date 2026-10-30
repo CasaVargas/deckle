@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::config_write;
+use crate::daily::paper_config_at;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PressSetupStatus {
@@ -24,11 +25,6 @@ pub struct PressSetupStatus {
 pub struct ExpectedExport {
     pub dir: String,
     pub format: ExportFormat,
-}
-
-/// Paper `paper`'s config (the main paper when `None`), as the Daily tab reads it.
-fn paper_config_at(main: &Path, paper: Option<&str>) -> Result<Config, String> {
-    deckle_digest::papers::load_one(main, paper.unwrap_or(deckle_digest::papers::MAIN))
 }
 
 fn identity(root: &Path) -> Result<Uuid, String> {
@@ -47,11 +43,13 @@ fn identity(root: &Path) -> Result<Uuid, String> {
     })
 }
 
+/// `exe` is the app's own binary, which the watcher job runs.
 pub fn press_setup(
     paper: Option<String>,
     export_index: usize,
     enabled: bool,
     expected: Option<ExpectedExport>,
+    exe: &Path,
 ) -> Result<PressSetupStatus, String> {
     let main = deckle_digest::config::default_path();
     setup_at(
@@ -61,11 +59,7 @@ pub fn press_setup(
         export_index,
         enabled,
         expected.as_ref(),
-        || {
-            let exe =
-                std::env::current_exe().map_err(|_| "App executable is unavailable.".to_owned())?;
-            deckle_digest::schedule::ensure_watcher(&exe, &main)
-        },
+        || deckle_digest::schedule::ensure_watcher(exe, &main),
     )
 }
 

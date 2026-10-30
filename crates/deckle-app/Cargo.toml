@@ -27,6 +27,7 @@ deckle-shelf.workspace = true
 deckle-transport.workspace = true
 deckle-txt.workspace = true
 deckle-xray.workspace = true
+image.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true

@@ -5,6 +5,8 @@
 
 pub mod books;
 pub mod commands;
+pub mod cookbook;
+pub mod daily;
 pub mod events;
 pub mod kindle;
 pub mod morgue;

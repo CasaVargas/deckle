@@ -2,6 +2,8 @@
 //! Every edition on the Daily tab (Morgue design §6): a month of front pages, search, one day's
 //! detail, and sending an edition again. Pure logic is in plain functions for the tests.
 
+use std::path::Path;
+
 use deckle_digest::chrono::{Days, Local, NaiveDate, NaiveTime};
 use deckle_morgue::detail::{Detail, detail};
 use deckle_morgue::search::{DaySummary, Hit, month, search};
@@ -110,10 +112,10 @@ pub fn morgue_show(date: String) -> Result<Option<Detail>, String> {
 
 /// Queues the edition for the Kindle again, through the bundled CLI (as `daily_run` does), so
 /// the Previewer fallback lives in one place.
-pub fn morgue_send(date: String) -> Result<String, String> {
+/// `exe` is the app's own binary.
+pub fn morgue_send(date: String, exe: &Path) -> Result<String, String> {
     date_of(&date)?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let out = deckle_core::quiet::command(&exe)
+    let out = deckle_core::quiet::command(exe)
         .args(["digest", "--json", "morgue", "send", &date])
         .output()
         .map_err(|e| format!("couldn't start {}: {e}", exe.display()))?;
