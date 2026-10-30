@@ -144,7 +144,7 @@ pub async fn today(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response 
     if !auth::basic_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
-    let c = (ctx.source)();
+    let c = (ctx.hooks.source)();
     let mut s = head("today", "Today's paper", "/opds/today", ACQ);
     s.push_str(&paper_entries(&c, 1));
     s.push_str("</feed>\n");
@@ -155,7 +155,7 @@ pub async fn papers(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response
     if !auth::basic_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
-    let c = (ctx.source)();
+    let c = (ctx.hooks.source)();
     let mut s = head("papers", "Recent papers", "/opds/papers", ACQ);
     s.push_str(&paper_entries(&c, RECENT));
     s.push_str("</feed>\n");
@@ -166,7 +166,7 @@ pub async fn books(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response 
     if !auth::basic_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
-    let c = (ctx.source)();
+    let c = (ctx.hooks.source)();
     let mut s = head("books", "Books", "/opds/books", ACQ);
     for b in c.books.iter().take(BOOKS) {
         let title = b
@@ -219,7 +219,7 @@ pub async fn file(
     if !auth::basic_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
-    let Some((path, stem)) = lookup(&(ctx.source)(), &id) else {
+    let Some((path, stem)) = lookup(&(ctx.hooks.source)(), &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let bytes = match tokio::fs::read(&path).await {
@@ -235,6 +235,9 @@ pub async fn file(
     } else {
         (bytes, format!("{stem}.epub"), "application/epub+zip")
     };
+    let served = ctx.hooks.served.clone();
+    let (record_name, record_bytes) = (name.clone(), bytes.clone());
+    tokio::task::spawn_blocking(move || served(&record_name, &record_bytes));
     // A file name the header can carry: no quotes or control characters.
     let safe: String = name
         .chars()
@@ -263,7 +266,7 @@ pub async fn cover(
     if !auth::basic_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
-    let Some((path, _)) = lookup(&(ctx.source)(), &id) else {
+    let Some((path, _)) = lookup(&(ctx.hooks.source)(), &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     match tokio::task::spawn_blocking(move || cover_bytes(&path)).await {

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The reader server (docs/superpowers/specs/2026-10-30-koreader-hub-design.md §A): an OPDS
-//! catalog of the papers, on the home network, for KOReader or any reader that browses OPDS.
-//! The watcher starts it when `[reader_server]` is on and a password is set.
+//! The reader server (docs/superpowers/specs/2026-10-30-koreader-hub-design.md §A, §B): an
+//! OPDS catalog of the papers, and KOReader's progress sync, on the home network. The watcher
+//! starts it when `[reader_server]` is on and a password is set.
 
 pub mod auth;
 pub mod opds;
+pub mod sync;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -38,6 +39,25 @@ pub struct Catalog {
 /// Where the catalog comes from: the CLI lists the Morgue and the outbox.
 pub type Source = Arc<dyn Fn() -> Catalog + Send + Sync>;
 
+/// A file handed to a reader: its file name and bytes.
+pub type Served = Arc<dyn Fn(&str, &[u8]) + Send + Sync>;
+/// A position KOReader synced.
+pub type OnProgress = Arc<dyn Fn(&sync::Progress) + Send + Sync>;
+
+/// What the server tells the rest of Deckle, and where it keeps sync records. The CLI fills
+/// these in; tests give their own.
+#[derive(Clone)]
+pub struct Hooks {
+    pub source: Source,
+    /// A file was handed to a reader, as this file name with these bytes: so a later sync
+    /// naming it by its MD5 can be matched.
+    pub served: Served,
+    /// KOReader reported where it is in a book.
+    pub progress: OnProgress,
+    /// `koreader-sync.json`.
+    pub sync_store: PathBuf,
+}
+
 /// How the server runs.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
@@ -51,7 +71,19 @@ pub struct Settings {
 
 pub struct Ctx {
     pub settings: Settings,
-    pub source: Source,
+    pub hooks: Hooks,
+    /// One writer at a time for `koreader-sync.json`.
+    pub sync_lock: tokio::sync::Mutex<()>,
+}
+
+impl Ctx {
+    pub fn new(settings: Settings, hooks: Hooks) -> Ctx {
+        Ctx {
+            settings,
+            hooks,
+            sync_lock: tokio::sync::Mutex::new(()),
+        }
+    }
 }
 
 /// The address the server binds: `DECKLE_READER_SERVER_BIND`, else `0.0.0.0`.
@@ -71,6 +103,10 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
         .route("/opds/books", get(opds::books))
         .route("/opds/file/{id}", get(opds::file))
         .route("/opds/cover/{id}", get(opds::cover))
+        .route("/users/create", axum::routing::post(sync::register))
+        .route("/users/auth", get(sync::authorize))
+        .route("/syncs/progress", axum::routing::put(sync::update))
+        .route("/syncs/progress/{document}", get(sync::get_progress))
         .with_state(ctx)
 }
 
@@ -78,7 +114,7 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
 /// synchronous).
 pub fn serve_blocking(
     settings: Settings,
-    source: Source,
+    hooks: Hooks,
     stop: std::sync::mpsc::Receiver<()>,
 ) -> std::io::Result<()> {
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -89,7 +125,7 @@ pub fn serve_blocking(
             .parse()
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
         let listener = tokio::net::TcpListener::bind(addr).await?;
-        let ctx = Arc::new(Ctx { settings, source });
+        let ctx = Arc::new(Ctx::new(settings, hooks));
         let stopped = async move {
             // The watcher's thread is synchronous: wait for its word off the runtime.
             let _ = tokio::task::spawn_blocking(move || stop.recv()).await;

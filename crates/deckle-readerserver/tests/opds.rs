@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use base64::Engine;
 use chrono::NaiveDate;
-use deckle_readerserver::{Catalog, Ctx, Paper, Settings, auth, opds, router};
+use deckle_readerserver::{Catalog, Ctx, Hooks, Paper, Settings, auth, opds, router};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
@@ -80,15 +80,21 @@ fn fixture() -> Fixture {
         ],
         books: vec![book.clone()],
     };
-    let ctx = Arc::new(Ctx {
-        settings: Settings {
+    let sync_store = tmp.path().join("koreader-sync.json");
+    let ctx = Arc::new(Ctx::new(
+        Settings {
             bind: "127.0.0.1".into(),
             port: 0,
             username: "deckle".into(),
             key: auth::md5_hex(b"hunter2"),
         },
-        source: Arc::new(move || catalog.clone()),
-    });
+        Hooks {
+            source: Arc::new(move || catalog.clone()),
+            served: Arc::new(|_, _| {}),
+            progress: Arc::new(|_| {}),
+            sync_store,
+        },
+    ));
     Fixture {
         _tmp: tmp,
         paper,
