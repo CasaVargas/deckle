@@ -206,3 +206,27 @@ Calls the builder made where the design was silent:
 - **Sidecars are read first** in the reader session, once, for readership, clippings and shelf.
 - **KOReader on a Kindle** is left out: the Kindle gets the paper as KFX, which KOReader doesn't
   open, so there's no KOReader position in the paper to read.
+## Build notes
+### D (backup and restore)
+- **`--to` on backup** names the folder that holds backups (default `~/Deckle/KOReader backups`);
+  each lands in `<device>/<YYYY-MM-DD HHMMSS>/` under it, local time. `<device>` is `Kobo`,
+  `PocketBook` or `Kindle`, or a folder's own name. A backup never lands on a folder that exists.
+- **`device`** is found as `deckle highlights` finds it: a Kindle on USB storage, else a Kobo,
+  else a PocketBook. A Kindle over MTP is refused for backup and restore alike.
+- **What's copied:** each `.sdr` folder whole (with `metadata.<ext>.lua.old` and anything else in
+  it), the four settings files, and `docsettings/` and `hashdocsettings/`. Nothing else of
+  KOReader's folder (`cache/`, fonts, plugins).
+- **The MD5 in the manifest** is the sidecar's `partial_md5_checksum`; a sidecar without one gets
+  its book's partial MD5 worked out at backup time, or, in `hashdocsettings/`, the folder's name.
+- **Every sidecar goes back beside its book**, including those backed up from `docsettings/` or
+  `hashdocsettings/`. A book found by MD5 under another name gets `<its stem>.sdr/metadata.<its
+  ext>.lua`. When two sidecars in a backup find the same book, the newer goes back and the other
+  is reported as kept.
+- **Times:** restored files keep the backup's modification time, so a second restore of the same
+  backup is the same, and From Your Shelf's last-read time stays true. "Newer" means more than
+  2 seconds past the backup's (FAT keeps times to 2 seconds).
+- **`--settings`** obeys the same newer rule and `--force`. A target with no KOReader folder
+  reports each settings file as failed and writes none. `docsettings/` and `hashdocsettings/` go
+  back only as sidecars beside books, never as folders.
+- **Exit status:** non-zero when any file failed to copy; "kept" and "no book found" are not
+  failures.

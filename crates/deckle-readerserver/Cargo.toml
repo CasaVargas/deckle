@@ -16,7 +16,7 @@ serde_json.workspace = true
 sha1.workspace = true
 subtle.workspace = true
 tokio.workspace = true
-md-5 = "0.10"
+md-5.workspace = true
 
 
 [dev-dependencies]

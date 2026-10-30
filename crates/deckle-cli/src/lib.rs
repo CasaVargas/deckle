@@ -428,6 +428,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
         cli::Command::ReaderServer { action } => reader_server::run(json, action),
         cli::Command::Words { from, action } => words_cmd(json, &from, action),
+        cli::Command::Koreader { action } => koreader_cmd(json, action),
         cli::Command::Bind {
             inputs,
             title,
@@ -957,6 +958,133 @@ fn bind_cmd(
         },
     )?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// The drive or folder KOReader is on, and what to call it: a Kindle on USB storage, else a
+/// Kobo or a PocketBook, else `arg` as a folder. A Kindle over MTP is refused: Deckle neither
+/// walks nor writes KOReader's files over MTP (KOReader hub design §D).
+fn koreader_root(arg: &str) -> Result<(PathBuf, String), String> {
+    if arg != "device" {
+        let dir = PathBuf::from(arg);
+        if !dir.is_dir() {
+            return Err(format!("{} is not a folder", dir.display()));
+        }
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Folder".into());
+        return Ok((dir, name));
+    }
+    match detect_kindle() {
+        Some(Target::MassStorage(d)) => Ok((d.root, "Kindle".into())),
+        Some(Target::Mtp(_)) => Err(
+            "this Kindle is connected over MTP, and Deckle doesn't read or write KOReader's \
+             files that way; copy its koreader/ folder and books to the computer and pass the \
+             folder"
+                .into(),
+        ),
+        _ => match detect_reader() {
+            Some(r) => Ok((r.root().to_path_buf(), r.name())),
+            None => Err("no e-reader connected; pass a folder instead".into()),
+        },
+    }
+}
+
+/// `deckle koreader backup|restore` (KOReader hub design §D).
+fn koreader_cmd(json: bool, action: cli::KoreaderCommand) -> Result<ExitCode, String> {
+    use deckle_core::koreader_backup::{self as kb, Outcome};
+    match action {
+        cli::KoreaderCommand::Backup { from, to } => {
+            let (root, device) = koreader_root(&from)?;
+            let base = match to {
+                Some(t) => t,
+                None => deckle_library::sources::home()
+                    .ok_or("no home folder; pass --to")?
+                    .join("Deckle")
+                    .join("KOReader backups"),
+            };
+            let now = deckle_digest::chrono::Local::now();
+            let dir = base
+                .join(&device)
+                .join(now.format("%Y-%m-%d %H%M%S").to_string());
+            let when = now
+                .with_timezone(&deckle_digest::chrono::Utc)
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string();
+            let done = kb::backup(&root, &dir, &device, &when)?;
+            let m = &done.manifest;
+            emit(
+                json,
+                &serde_json::json!({
+                    "dir": done.dir, "device": m.device, "sidecars": m.sidecars.len(),
+                    "files": m.files.len(), "koreader_dir": m.koreader_dir, "failed": done.failed,
+                }),
+                || {
+                    let mut lines: Vec<String> = done
+                        .failed
+                        .iter()
+                        .map(|(f, e)| format!("failed {f}: {e}"))
+                        .collect();
+                    if m.koreader_dir.is_none() {
+                        lines.push("no KOReader folder here: only the sidecars".into());
+                    }
+                    lines.push(format!(
+                        "{} sidecars and {} files from {} backed up to {}",
+                        m.sidecars.len(),
+                        m.files.len(),
+                        m.device,
+                        done.dir.display()
+                    ));
+                    lines.join("\n")
+                },
+            )?;
+            Ok(if done.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        cli::KoreaderCommand::Restore {
+            backup,
+            to,
+            settings,
+            force,
+        } => {
+            let (root, device) = koreader_root(&to)?;
+            let done = kb::restore(&backup, &root, kb::Options { settings, force })?;
+            emit(json, &done, || {
+                let mut lines: Vec<String> = Vec::new();
+                for i in done.sidecars.iter().chain(&done.settings) {
+                    let to = i.to.as_deref().unwrap_or(&i.book);
+                    lines.push(match i.outcome {
+                        Outcome::Restored if i.by == Some("md5") => {
+                            format!("restored       {to} (found by MD5; was {})", i.book)
+                        }
+                        Outcome::Restored => format!("restored       {to}"),
+                        Outcome::Kept => format!("kept (newer)   {to}"),
+                        Outcome::NoBook => format!("no book found  {}", i.book),
+                        Outcome::Failed => format!(
+                            "failed         {to}: {}",
+                            i.error.as_deref().unwrap_or("unknown")
+                        ),
+                    });
+                }
+                lines.push(format!(
+                    "{} restored, {} kept (newer), {} with no book found, {} failed, on {device}",
+                    done.count(Outcome::Restored),
+                    done.count(Outcome::Kept),
+                    done.count(Outcome::NoBook),
+                    done.count(Outcome::Failed),
+                ));
+                lines.join("\n")
+            })?;
+            Ok(if done.count(Outcome::Failed) == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+    }
 }
 
 /// `deckle words`: reads `vocab.db` over one connection (one MTP session), never writing to the

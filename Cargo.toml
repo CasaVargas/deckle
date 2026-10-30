@@ -51,6 +51,7 @@ regex = "1"
 ureq = { version = "3", features = ["platform-verifier", "cookies", "json"] }
 base64 = "0.22"
 sha2 = "0.11"
+md-5 = "0.11"
 encoding_rs = "0.8"
 tauri = { version = "2.12", features = [] }
 tauri-build = { version = "2.7", features = [] }

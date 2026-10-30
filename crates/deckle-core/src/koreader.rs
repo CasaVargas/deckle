@@ -149,6 +149,35 @@ fn book_path(root: &Path, parent: &Path, stem: &str, ext: &str) -> String {
     }
 }
 
+/// KOReader's name for a book: the MD5 of 1 KiB samples at offsets `1024 << 2i` for i = -1 to
+/// 10, as `util.partialMD5` (`frontend/util.lua`) takes them. LuaJIT masks the shift count to 5
+/// bits, so i = -1 is offset 0. A sample past the end stops it; a short last one still counts.
+/// Lowercase hex; `None` when the file can't be read.
+pub fn partial_md5(path: &Path) -> Option<String> {
+    use md5::{Digest, Md5};
+    use std::io::{Read as _, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let mut md5 = Md5::new();
+    let mut buf = [0u8; 1024];
+    for i in -1i32..=10 {
+        let offset: u64 = if i < 0 { 0 } else { 1024 << (2 * i) };
+        if offset >= len {
+            break;
+        }
+        f.seek(SeekFrom::Start(offset)).ok()?;
+        let mut n = 0;
+        while n < buf.len() {
+            match f.read(&mut buf[n..]).ok()? {
+                0 => break,
+                k => n += k,
+            }
+        }
+        md5.update(&buf[..n]);
+    }
+    Some(md5.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// Reads every sidecar under `root`.
 pub fn read(root: &Path) -> Read {
     let mut out = Read::default();
@@ -752,5 +781,25 @@ mod tests {
             "koreader:abcdef"
         );
         assert_eq!(book_path(root, root, "Walden", "pdf"), "Walden.pdf");
+    }
+
+    #[test]
+    fn partial_md5_samples_as_koreader_does() {
+        // Bytes `i % 251`. Expected values from a one-off Python run of util.partialMD5's
+        // offsets: 17,000 bytes take samples at 0, 1024, 4096 and a short one at 16384.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("book.epub");
+        let bytes: Vec<u8> = (0..17_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&file, &bytes).unwrap();
+        assert_eq!(
+            partial_md5(&file).as_deref(),
+            Some("5f5620a36f2710bff4bfae9324f07628")
+        );
+        std::fs::write(&file, &bytes[..100]).unwrap();
+        assert_eq!(
+            partial_md5(&file).as_deref(),
+            Some("7acedd1a84a4cfcb6e7a16003242945e")
+        );
+        assert_eq!(partial_md5(&dir.path().join("missing")), None);
     }
 }
