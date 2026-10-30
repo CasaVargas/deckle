@@ -203,26 +203,42 @@ fn clippings(conn: &rusqlite::Connection) -> rusqlite::Result<Option<Vec<u8>>> {
     let mut out = String::new();
     for row in rows {
         let (title, author, text, note, created) = row?;
-        let title = title.trim();
-        if title.is_empty() {
-            continue;
-        }
-        let head = match author.trim() {
-            "" => title.to_owned(),
-            a => format!("{title} ({a})"),
-        };
-        let added = english_date(&created)
-            .map(|d| format!(" | Added on {d}"))
-            .unwrap_or_default();
-        for (kind, body) in [("Highlight", text.trim()), ("Note", note.trim())] {
-            if !body.is_empty() {
-                out.push_str(&format!(
-                    "{head}\n- Your {kind}{added}\n\n{body}\n==========\n"
-                ));
-            }
-        }
+        out.push_str(&clipping(
+            &title,
+            &author,
+            "Highlight",
+            None,
+            &text,
+            &created,
+        ));
+        out.push_str(&clipping(&title, &author, "Note", None, &note, &created));
     }
     Ok((!out.is_empty()).then(|| out.into_bytes()))
+}
+
+/// One `My Clippings.txt` entry as a Kindle writes it, or nothing when `title` or `body` is
+/// blank. `kind` is `Highlight` or `Note`; `created` is `YYYY-MM-DD[T ]HH:MM:SS`.
+pub(crate) fn clipping(
+    title: &str,
+    author: &str,
+    kind: &str,
+    page: Option<&str>,
+    body: &str,
+    created: &str,
+) -> String {
+    let (title, body) = (title.trim(), body.trim());
+    if title.is_empty() || body.is_empty() {
+        return String::new();
+    }
+    let head = match author.trim() {
+        "" => title.to_owned(),
+        a => format!("{title} ({a})"),
+    };
+    let page = page.map(|p| format!(" on page {p}")).unwrap_or_default();
+    let added = english_date(created)
+        .map(|d| format!(" | Added on {d}"))
+        .unwrap_or_default();
+    format!("{head}\n- Your {kind}{page}{added}\n\n{body}\n==========\n")
 }
 
 const MONTHS: [&str; 12] = [
