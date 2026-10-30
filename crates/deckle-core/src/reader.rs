@@ -203,7 +203,12 @@ pub fn stem(name: &str) -> &str {
 
 /// A book made ready for the EPUB outbox: a Word document, PDF or text file imported first,
 /// then cleaned as for a Kindle (no Previewer). Each reader takes it through [`Reader::prepare`].
-pub fn book_epub(source: &Path) -> Result<Vec<u8>, String> {
+/// With `whos_who`, X-Ray's people and terms go in as a Who's who page (Who's who design §3); a
+/// page that can't be made is a warning on stderr, never a lost book.
+pub fn book_epub(
+    source: &Path,
+    whos_who: Option<&crate::xray::XRayOptions>,
+) -> Result<Vec<u8>, String> {
     let work = tempfile::tempdir().map_err(|e| e.to_string())?;
     let epub = if crate::import::needs_import(source) {
         crate::import::import(source, work.path(), "imported.epub")
@@ -219,12 +224,31 @@ pub fn book_epub(source: &Path) -> Result<Vec<u8>, String> {
         &crate::normalize::NormalizeOptions::default(),
     )
     .map_err(|e| e.to_string())?;
-    std::fs::read(&normalized).map_err(|e| e.to_string())
+    let bytes = std::fs::read(&normalized).map_err(|e| e.to_string())?;
+    let Some(opts) = whos_who else {
+        return Ok(bytes);
+    };
+    match crate::whoswho::add(&bytes, opts) {
+        Ok((with, summary)) => {
+            for w in summary.iter().flat_map(|s| &s.warnings) {
+                eprintln!("{}: {w}", source.display());
+            }
+            Ok(with)
+        }
+        Err(e) => {
+            eprintln!("{}: Who's who skipped: {e}", source.display());
+            Ok(bytes)
+        }
+    }
 }
 
 /// [`book_epub`], prepared for `reader`.
-pub fn book(reader: &Reader, source: &Path) -> Result<Vec<u8>, String> {
-    reader.prepare(&book_epub(source)?)
+pub fn book(
+    reader: &Reader,
+    source: &Path,
+    whos_who: Option<&crate::xray::XRayOptions>,
+) -> Result<Vec<u8>, String> {
+    reader.prepare(&book_epub(source, whos_who)?)
 }
 
 #[cfg(test)]
