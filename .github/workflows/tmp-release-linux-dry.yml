@@ -1,0 +1,14 @@
+name: tmp-release-linux-dry
+on:
+  push:
+    branches: [feat/web-ui]
+    paths: [.github/workflows/tmp-release-linux-dry.yml]
+permissions:
+  contents: write
+  packages: write
+jobs:
+  linux:
+    uses: ./.github/workflows/release-linux.yml
+    with:
+      tag: ""
+      dry_run: true
