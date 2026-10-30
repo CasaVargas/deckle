@@ -126,7 +126,11 @@ commands! { ctx;
     email_status { paper: Option<String> } => Ok(daily::email_status(paper)),
     email_test { paper: Option<String> } => daily::email_test(paper),
     geocode { query: String } => daily::geocode(query),
-    get_settings {} => Ok(commands::get_settings(&ctx.state)),
+    get_settings {} => Ok(if ctx.web {
+        commands::get_settings_masked(&ctx.state)
+    } else {
+        commands::get_settings(&ctx.state)
+    }),
     highlights_set { folder: Option<String>, clippings: bool } => kindle::highlights_set(folder, clippings),
     highlights_status {} => Ok(kindle::highlights_status()),
     highlights_write { target: RunTarget } => kindle::highlights_write(target),
@@ -198,8 +202,16 @@ commands! { ctx;
     },
     set_device_options { key: String, cde_override: Option<String>, verified_real_asin: bool } =>
         commands::set_device_options(&ctx.state, key, cde_override, verified_real_asin),
-    set_illustrations_key { key: String } => commands::set_illustrations_key(&ctx.state, key),
-    set_settings { settings: Settings } => commands::set_settings(&ctx.state, settings),
+    set_illustrations_key { key: String } => if ctx.web && key == commands::MASKED_KEY {
+        Ok(())
+    } else {
+        commands::set_illustrations_key(&ctx.state, key)
+    },
+    set_settings { settings: Settings } => if ctx.web {
+        commands::set_settings_masked(&ctx.state, settings)
+    } else {
+        commands::set_settings(&ctx.state, settings)
+    },
     shelf_forget {} => shelf::shelf_forget(),
     shelf_set { on: bool } => shelf::shelf_set(on),
     shelf_status {} => Ok(shelf::shelf_status()),

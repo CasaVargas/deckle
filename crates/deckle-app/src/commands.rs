@@ -1086,12 +1086,44 @@ pub fn previewer_status(state: &AppState) -> PreviewerStatus {
     }
 }
 
+/// What the web app gets in place of a saved API key: the key never goes to the browser.
+pub const MASKED_KEY: &str = "••••••••";
+
 pub fn get_settings(state: &AppState) -> Settings {
     load_settings_from(&state.settings_file)
 }
 
 pub fn set_settings(state: &AppState, settings: Settings) -> Result<(), String> {
     save_settings_to(&state.settings_file, &settings)
+}
+
+/// [`get_settings`] for the web app: a saved key reads as [`MASKED_KEY`].
+pub fn get_settings_masked(state: &AppState) -> Settings {
+    let mask = |k: &mut String| {
+        if !k.is_empty() {
+            *k = MASKED_KEY.to_owned();
+        }
+    };
+    let mut s = get_settings(state);
+    mask(&mut s.llm_api_key);
+    mask(&mut s.illustrations_api_key);
+    s
+}
+
+/// [`set_settings`] for the web app: a key that comes back as [`MASKED_KEY`] keeps the saved one.
+pub fn set_settings_masked(state: &AppState, mut settings: Settings) -> Result<(), String> {
+    let saved = get_settings(state);
+    let keep = |k: &mut String, saved: &str| {
+        if k == MASKED_KEY {
+            *k = saved.to_owned();
+        }
+    };
+    keep(&mut settings.llm_api_key, &saved.llm_api_key);
+    keep(
+        &mut settings.illustrations_api_key,
+        &saved.illustrations_api_key,
+    );
+    set_settings(state, settings)
 }
 
 /// Sets only the cookbook's image key (Book settings), so the other settings can't be lost to a

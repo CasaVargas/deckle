@@ -242,6 +242,58 @@ fn web_mode_schedule_shows_as_on_everywhere() {
 }
 
 #[test]
+fn web_mode_settings_mask_the_api_keys() {
+    let tmp = tempfile::tempdir().unwrap();
+    let web = ctx_in(tmp.path(), true);
+    let stored = deckle_app::commands::Settings {
+        llm_api_key: "sk-ant-secret".into(),
+        illustrations_api_key: "sk-image-secret".into(),
+        ..Default::default()
+    };
+    deckle_app::commands::save_settings_to(&web.state.settings_file, &stored).unwrap();
+    let load = || deckle_app::commands::load_settings_from(&web.state.settings_file);
+
+    let v = dispatch(&web, "get_settings", Value::Null).unwrap();
+    assert_eq!(v["llm_api_key"], json!(deckle_app::commands::MASKED_KEY));
+    assert_eq!(
+        v["illustrations_api_key"],
+        json!(deckle_app::commands::MASKED_KEY)
+    );
+    assert!(!v.to_string().contains("secret"), "{v}");
+
+    // The page sends the mask back with another change: the stored keys stay.
+    let mut back = v.clone();
+    back["xray"] = json!(false);
+    dispatch(&web, "set_settings", json!({ "settings": back })).unwrap();
+    let s = load();
+    assert!(!s.xray);
+    assert_eq!(s.llm_api_key, "sk-ant-secret");
+    assert_eq!(s.illustrations_api_key, "sk-image-secret");
+    dispatch(
+        &web,
+        "set_illustrations_key",
+        json!({ "key": deckle_app::commands::MASKED_KEY }),
+    )
+    .unwrap();
+    assert_eq!(load().illustrations_api_key, "sk-image-secret");
+
+    // A new value replaces the key; an empty one clears it.
+    back["llm_api_key"] = json!("sk-ant-new");
+    back["illustrations_api_key"] = json!("");
+    dispatch(&web, "set_settings", json!({ "settings": back })).unwrap();
+    let s = load();
+    assert_eq!(s.llm_api_key, "sk-ant-new");
+    assert_eq!(s.illustrations_api_key, "");
+    let v = dispatch(&web, "get_settings", Value::Null).unwrap();
+    assert_eq!(v["illustrations_api_key"], json!(""), "no key isn't masked");
+
+    // The desktop reads its own keys in clear.
+    let desktop = ctx_in(tmp.path(), false);
+    let v = dispatch(&desktop, "get_settings", Value::Null).unwrap();
+    assert_eq!(v["llm_api_key"], json!("sk-ant-new"));
+}
+
+#[test]
 fn capabilities_web_has_no_updater_or_keychain() {
     let tmp = tempfile::tempdir().unwrap();
     let state = ctx_in(tmp.path(), false).state;
