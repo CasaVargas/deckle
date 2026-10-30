@@ -4,7 +4,7 @@
 //! and downloads stay inside the roots, after symlinks are resolved.
 
 use std::cmp::Ordering;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use axum::Json;
 use axum::body::Body;
@@ -254,19 +254,23 @@ fn uploads_dir(roots: &[PathBuf]) -> PathBuf {
         .join("Uploads")
 }
 
-/// An uploaded file's name, reduced to its last part with no leading dots, so it can't climb
-/// out of its folder or hide.
+/// An uploaded file's name, reduced to one plain component: its last part, without control or
+/// Windows-reserved characters, without leading dots (so it can't climb or hide) and without
+/// the leading or trailing spaces and dots Windows would drop. Control characters go first so
+/// they can't shield a dot; anything still not a single normal component becomes `upload`.
 fn upload_name(sent: &str) -> String {
     let last = sent.rsplit(['/', '\\']).next().unwrap_or("");
-    let name: String = last
-        .trim_start_matches('.')
+    let kept: String = last
         .chars()
-        .filter(|c| !c.is_control())
+        .filter(|c| !c.is_control() && !"<>:\"|?*".contains(*c))
         .collect();
-    if name.is_empty() {
-        "upload".into()
-    } else {
-        name
+    let name = kept
+        .trim_start_matches(['.', ' '])
+        .trim_end_matches(['.', ' ']);
+    let mut parts = Path::new(name).components();
+    match (parts.next(), parts.next()) {
+        (Some(Component::Normal(_)), None) => name.to_owned(),
+        _ => "upload".into(),
     }
 }
 
@@ -333,6 +337,23 @@ pub(crate) async fn upload(State(server): State<Shared>, mut form: Multipart) ->
             return internal(&format_args!("{}: {e}", dir.display()));
         }
         made.dirs.push(dir.clone());
+        // Resolved and confined like a browsed path: a symlinked `Deckle` or `Uploads` mustn't
+        // send the file outside the roots. Written through the resolved path from here on.
+        let roots = server.cfg.roots.clone();
+        let check = dir.clone();
+        let dir = match tokio::task::spawn_blocking(move || confine(&roots, &check)).await {
+            Ok(Ok(real)) => real,
+            Ok(Err(_)) => {
+                return error(
+                    StatusCode::FORBIDDEN,
+                    format!(
+                        "{}: the uploads folder is outside the folders the web UI may use",
+                        base.display()
+                    ),
+                );
+            }
+            Err(e) => return internal(&e),
+        };
         // A temp name until it's whole, so nothing half-written looks finished.
         let part = dir.join(format!("{name}.part"));
         let mut out = match tokio::fs::File::create(&part).await {

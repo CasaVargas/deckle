@@ -288,6 +288,14 @@ async fn upload_name_cannot_traverse() {
         ("/etc/z.epub", "z.epub"),
         ("..", "upload"),
         (".bashrc", "bashrc"),
+        // Control characters go before the dots are trimmed, so they can't shield them.
+        ("\t..", "upload"),
+        ("\t.bashrc", "bashrc"),
+        ("\u{85}..", "upload"),
+        // A drive prefix would make Windows' `join` replace the whole path.
+        ("C:evil.epub", "Cevil.epub"),
+        ("..\\..\\x2.epub", "x2.epub"),
+        (" . name. ", "name"),
     ] {
         let r = send(&app, upload(&[(sent, b"x")], &cookie)).await;
         assert_eq!(r.status, StatusCode::OK, "{sent}: {}", r.body);
@@ -303,6 +311,25 @@ async fn upload_name_cannot_traverse() {
             assert!(p.starts_with(&uploads), "{p:?}");
         }
     }
+}
+
+/// A symlinked uploads folder can't send uploads outside the roots. Unix only: Windows needs a
+/// privilege to make a symlink, which CI doesn't have.
+#[cfg(unix)]
+#[tokio::test]
+async fn upload_refuses_symlinked_uploads_dir() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (_, data) = roots(tmp.path());
+    let outside = tmp.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::create_dir(data.join("Deckle")).unwrap();
+    std::os::unix::fs::symlink(&outside, data.join("Deckle").join("Uploads")).unwrap();
+    let app = files_app(tmp.path(), None);
+    let cookie = login(&app).await;
+    let r = send(&app, upload(&[("x.epub", b"x")], &cookie)).await;
+    assert_eq!(r.status, StatusCode::FORBIDDEN, "{}", r.body);
+    assert!(r.body.contains("error"), "{}", r.body);
+    assert_eq!(tree(&outside), Vec::<PathBuf>::new());
 }
 
 #[tokio::test]
