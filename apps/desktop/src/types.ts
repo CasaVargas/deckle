@@ -373,7 +373,6 @@ export interface RemarkableConfig {
   books: boolean;
 }
 
-/** One `[[export]]` folder: an iCloud Drive folder for an iPad, a Dropbox one for a Boox. */
 export interface PressSetupStatus {
   enabled: boolean;
   watcher_ready: boolean;
@@ -382,12 +381,14 @@ export interface PressSetupStatus {
   paper_id: string | null;
 }
 
+/** One `[[export]]` folder: an iCloud Drive folder for an iPad, a Dropbox one for a Boox or a
+ * Kobo. */
 export interface ExportConfig {
   /** Activated only by explicit request setup. */
   press_enabled?: boolean;
   name: string;
   dir: string;
-  format: "epub" | "pdf" | "bundle";
+  format: "epub" | "kepub" | "pdf" | "bundle";
   photos: "color" | "gray";
   /** With a PDF: the screen it's laid out for. */
   screen: Screen;

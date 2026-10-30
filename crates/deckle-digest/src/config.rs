@@ -1210,13 +1210,15 @@ impl Default for ExportConfig {
     }
 }
 
-/// What an export folder takes: the EPUB, the PDF edition laid out for its `screen`, or the
-/// edition bundle for a native reader (edition bundle design §4).
+/// What an export folder takes: the EPUB, a Kobo's KEPUB (for Dropbox's `Apps/Rakuten Kobo`,
+/// which a Kobo fetches on Sync), the PDF edition laid out for its `screen`, or the edition
+/// bundle for a native reader (edition bundle design §4).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     #[default]
     Epub,
+    Kepub,
     Pdf,
     Bundle,
 }
@@ -1441,12 +1443,14 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # days = ["sat", "sun"]           # mon … sun; leave out for every day
 
 # Also put each edition in a folder, plugged in or not: an iCloud Drive folder reaches an
-# iPad's Files app (open it in Books), Dropbox reaches a Boox. Add one block per folder.
+# iPad's Files app (open it in Books), Dropbox reaches a Boox, and Dropbox's Apps/Rakuten Kobo
+# a Kobo (tap Sync on the Kobo). Add one block per folder.
 # [[export]]
 # name = "iPad"
 # dir = "~/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily"
-# format = "epub"                 # or "pdf": the paper laid out for one screen; or "bundle":
-#                                 # the paper as data, for a native reader app
+# format = "epub"                 # or "kepub" for a Kobo; "pdf": the paper laid out for one
+#                                 # screen; or "bundle": the paper as data, for a native
+#                                 # reader app
 # screen = "remarkable-2"         # for a PDF: remarkable-2, remarkable-paper-pro,
 #                                 # remarkable-paper-pro-move, ipad, a5
 # photos = "color"                # or "gray" for an e-ink reader
