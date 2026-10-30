@@ -371,3 +371,17 @@ Built without a reMarkable: the USB web interface is tested against a stand-in H
 - **Without Previewer**, a reMarkable counts as somewhere the paper can go, like an export folder or a Kobo. Long reads print inside the paper unless `books = true`.
 - **App:** a **reMarkable** card on the Daily tab (on/off, model, long reads), and **As** and **Screen** on each export folder.
 - **Kept for later:** reMarkable's cloud (§13), Inbox books to a reMarkable, and subsetting the embedded fonts (about 400 KB a PDF).
+
+## 19. Reader sync: a Kobo over Dropbox (2026-10-30)
+
+The owner asked for paper delivery without a cable on readers other than Kindle. What each reader can do without Deckle signing in to anything:
+
+- **Kobo:** a Kobo signed in to Dropbox downloads what's in `Apps/Rakuten Kobo` when the owner taps Sync ([Kobo help](https://help.kobo.com/hc/articles/360033830114)). It isn't automatic; one tap a morning is accepted. Files already downloaded stay on the Kobo when they leave Dropbox.
+- **PocketBook:** its Dropbox sync is reported as manual and unreliable. Its dependable route is Send-to-PocketBook email. That is a change to the send-to-Kindle email design (the `@kindle.com` check, size limit, sender approval), so it's a separate issue, not this section.
+- **Boox:** any Android sync app into a folder, which `[[export]]` already covers.
+
+Rulings:
+
+- **`format = "kepub"` on `[[export]]`**, reversing the phase 1 ruling that a Kobo takes KEPUB only from the outbox. The edition is `<prefix>YYYY-MM-DD.kepub.epub`; with `books`, each long read is `<stem>.kepub.epub`. Both are made by `deckle_core::kepub::convert` from the gray or color EPUB the export's `photos` picks, through a hidden temporary file like every export. The prune counts `.kepub.epub` only, so EPUB and KEPUB editions in one folder don't prune each other.
+- **The app infers the preset from the folder.** Picking a folder whose path ends in `Apps/Rakuten Kobo` (either separator, any case) names it "Kobo" and sets KEPUB and gray photos. A Colour model's owner switches photos to color. There's no separate preset picker.
+- **Spike owed:** that a `.kepub.epub` fetched over Dropbox opens with the KEPUB renderer (page and chapter counts), not as a plain EPUB. Kobo's help names only EPUB and PDF. If it opens as a plain EPUB, the paper still reads; switch the default to `epub`.
