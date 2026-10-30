@@ -3,6 +3,7 @@
 // preview card (nothing is written until Add to the book), beside the book card with its cover,
 // its delivery line, and Send now and Preview.
 import { useCapabilities } from "./capabilities";
+import { platform } from "./platform";
 import { useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { api } from "./api";
@@ -386,6 +387,14 @@ function BookCard({ book, delivery, onChanged, onNotice, onDelivery }: { book: C
               {" "}
               <button className="link" onClick={() => api.reveal(result.file ?? "")}>
                 Show file
+              </button>
+            </>
+          )}
+          {result.file && caps.web && (
+            <>
+              {" "}
+              <button className="link" onClick={() => platform.afterSave(result.file ?? "")}>
+                Download
               </button>
             </>
           )}

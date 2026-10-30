@@ -623,6 +623,14 @@ export default function DailyView({
                       </button>
                     </>
                   )}
+                  {preview && caps.web && (
+                    <>
+                      {" · "}
+                      <button className="link" onClick={() => platform.afterSave(preview.file)}>
+                        Download
+                      </button>
+                    </>
+                  )}
                 </p>
               </PressCard>
 

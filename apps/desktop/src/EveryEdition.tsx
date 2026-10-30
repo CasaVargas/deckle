@@ -216,6 +216,11 @@ export default function EveryEdition({ onFolder, disabled, building }: { onFolde
                 </button>
               </>
             )}
+            {caps.web && (
+              <button className="ghost" onClick={() => platform.afterSave(detail.epub)}>
+                Download
+              </button>
+            )}
           </div>
           {!caps.reveal && <Unavailable reason={REVEAL_REASON} />}
           {note && <p className="muted small">{note}</p>}
