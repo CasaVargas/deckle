@@ -6,9 +6,17 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# The container's binary: `serve`, else the `deckle` command line.
+[[bin]]
+name = "deckle-web"
+path = "src/main.rs"
+
 [dependencies]
 axum.workspace = true
+clap.workspace = true
 deckle-app.workspace = true
+deckle-cli.workspace = true
+deckle-core.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 serde.workspace = true
@@ -19,6 +27,8 @@ tokio.workspace = true
 tower-http.workspace = true
 
 [dev-dependencies]
+assert_cmd.workspace = true
+deckle-digest.workspace = true
 http-body-util.workspace = true
 tempfile.workspace = true
 tower.workspace = true

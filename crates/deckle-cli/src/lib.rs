@@ -48,6 +48,17 @@ where
     }
 }
 
+/// Seconds between the daemon's checks, unless `--tick` says otherwise.
+pub const DAEMON_TICK: u64 = 30;
+
+/// `digest daemon --tick <tick>` on the default config, until SIGTERM or SIGINT: `deckle-web
+/// serve` runs it beside the web UI.
+pub fn run_daemon(tick: u64) -> Result<(), String> {
+    let path = deckle_digest::config::default_path();
+    let papers = all_papers(&path)?;
+    daemon::run(&path, None, papers, tick)
+}
+
 /// `Notes: 84 pop-ups (12 already marked, 72 detected), 3 one-way links left` (#31 design §4).
 fn notes_line(n: &deckle_core::notes::NotesReport) -> String {
     let left = match n.skipped_one_way {

@@ -5,6 +5,7 @@ mod auth;
 mod events;
 mod files;
 mod invoke;
+mod serve;
 mod static_files;
 
 use std::path::{Path, PathBuf};
