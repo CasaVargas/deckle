@@ -612,6 +612,13 @@ pub enum DigestCommand {
         #[arg(long, default_value_t = 20)]
         interval: u64,
     },
+    /// Stay running and print every paper on its schedule (containers and servers: no launchd,
+    /// Task Scheduler or cron).
+    Daemon {
+        /// Seconds between checks.
+        #[arg(long, default_value_t = 30)]
+        tick: u64,
+    },
     /// Email the paper to your Kindle (`[email]` in digest.toml): the SMTP password and a test.
     Email {
         #[command(subcommand)]

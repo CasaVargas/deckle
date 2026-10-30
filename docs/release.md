@@ -26,6 +26,21 @@ its own copy), checks the Mac app carries the Liquid Glass icon (`Assets.car` an
 or `latest.json` is created, so nothing reaches installed copies. Use it before tagging whenever
 the bundle changes.
 
+## Linux and the container
+
+`release-linux.yml` runs when `release` makes the draft (and alone through `workflow_dispatch`).
+
+- **Tarballs.** `deckle-<version>-x86_64-unknown-linux-gnu.tar.gz` and the `aarch64` one attach
+  to the draft. They are built on Ubuntu 22.04 runners, which sets the glibc 2.35 floor.
+- **Image.** `ghcr.io/casavargas/deckle:<version>` (the tag without its `v`) is pushed at tag
+  time. `:latest` moves only when you publish the release, to that version, with no rebuild. A
+  prerelease or a data release (`wordwise-vN`) leaves it alone.
+- **First release only.** Organization packages start private: make the GHCR package `deckle`
+  public (package settings → Change visibility) or nobody can pull it. Also confirm the
+  `gh release upload` step found the draft and the tarballs are on it.
+- **Dry run.** *Actions → release-linux → Run workflow* with **dry_run** builds and smoke-tests
+  both architectures and pushes nothing.
+
 ## Updater key (owner, one time)
 
 In-app updates (`docs/superpowers/specs/2026-10-22-auto-update-design.md`) are verified against

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The bookmarklet (save-to-paper design §4): `deckle digest watch` listens on
-//! `127.0.0.1:47219`; the bookmarklet opens `/save?token=…&url=…&title=…` in a small popup,
-//! which avoids the browser's mixed-content and CORS rules. The token keeps other local pages
-//! from adding to the queue blindly.
+//! `127.0.0.1:47219` by default; the bookmarklet opens `/save?token=…&url=…&title=…` in a small
+//! popup, which avoids the browser's mixed-content and CORS rules. The token keeps other local
+//! pages from adding to the queue blindly.
 //!
 //! A second bookmarklet, **Save recipe**, carries the recipe from the page you're looking at
 //! (cookbook design §8.3, amended): the page's recipe data travels in the fragment of a popup
@@ -26,6 +26,47 @@ use crate::sources::reading::slug;
 
 pub const PORT: u16 = 47219;
 
+/// What the bookmarklets and the origin check use when `DECKLE_BOOKMARKLET_URL` is unset.
+fn loopback_origin() -> String {
+    format!("http://127.0.0.1:{PORT}")
+}
+
+/// The address the listener binds: `DECKLE_BOOKMARKLET_BIND`, else loopback only. A container
+/// sets `0.0.0.0`; nothing else ever exposes the listener beyond this machine.
+pub fn bind_address() -> String {
+    bind_from(std::env::var("DECKLE_BOOKMARKLET_BIND").ok().as_deref())
+}
+
+fn bind_from(var: Option<&str>) -> String {
+    match var.map(str::trim) {
+        Some(b) if !b.is_empty() => b.to_owned(),
+        _ => "127.0.0.1".to_owned(),
+    }
+}
+
+/// The public origin the bookmarklets talk to: `DECKLE_BOOKMARKLET_URL` (e.g.
+/// `https://deckle.home.lan`) without a trailing `/`, else `http://127.0.0.1:47219`.
+pub fn origin() -> String {
+    origin_from(std::env::var("DECKLE_BOOKMARKLET_URL").ok().as_deref())
+}
+
+fn origin_from(var: Option<&str>) -> String {
+    match var.map(|u| u.trim().trim_end_matches('/')) {
+        Some(u) if !u.is_empty() => u.to_owned(),
+        _ => loopback_origin(),
+    }
+}
+
+/// The origins the `/recipe` POST accepts: the public one, and loopback so setting the URL
+/// doesn't lock out local use. The token check is separate and always applies.
+fn accepted_origins(public: &str) -> Vec<String> {
+    let mut v = vec![public.to_owned()];
+    if public != loopback_origin() {
+        v.push(loopback_origin());
+    }
+    v
+}
+
 /// The token in `bookmarklet.token` in `dir`, created on first use: 32 hex characters.
 pub fn token(dir: &Path) -> std::io::Result<String> {
     let path = dir.join("bookmarklet.token");
@@ -42,9 +83,9 @@ pub fn token(dir: &Path) -> std::io::Result<String> {
 }
 
 /// The popup script; `kind` is an extra query parameter (with its leading `&`), or empty.
-fn script(token: &str, kind: &str) -> String {
+fn script(origin: &str, token: &str, kind: &str) -> String {
     format!(
-        "javascript:(()=>{{window.open('http://127.0.0.1:{PORT}/save?token={token}{kind}&url='+\
+        "javascript:(()=>{{window.open('{origin}/save?token={token}{kind}&url='+\
          encodeURIComponent(location.href)+'&title='+encodeURIComponent(document.title),\
          'deckle','width=420,height=200')}})()"
     )
@@ -52,16 +93,20 @@ fn script(token: &str, kind: &str) -> String {
 
 /// The bookmarklet to drag to the bookmarks bar.
 pub fn javascript(token: &str) -> String {
-    script(token, "")
+    script(&origin(), token, "")
 }
 
 /// **Save recipe**: the page's `ld+json` blocks that mention `Recipe`, with its address, title,
 /// canonical, `og:image` and `og:site_name`, as JSON in the fragment of a `/recipe` popup.
 /// Nothing else leaves the page. With no such block, the address alone (`kind=recipe`).
 pub fn recipe_javascript(token: &str) -> String {
+    recipe_script(&origin(), token)
+}
+
+fn recipe_script(origin: &str, token: &str) -> String {
     format!(
         "javascript:(()=>{{const q=s=>document.querySelector(s),u=encodeURIComponent,\
-         o='http://127.0.0.1:{PORT}',b=[...document.querySelectorAll('script[type=\"application/ld+json\"]')]\
+         o='{origin}',b=[...document.querySelectorAll('script[type=\"application/ld+json\"]')]\
          .map(s=>s.textContent).filter(t=>t.includes('Recipe'));\
          window.open(b.length?o+'/recipe?token={token}\\x23'+u(JSON.stringify({{url:location.href,\
          title:document.title,canonical:(q('link[rel=canonical]')||{{}}).href||'',\
@@ -185,6 +230,27 @@ pub fn handle_recipe(
     token: &str,
     recipes_inbox: &Path,
 ) -> (u16, &'static str, String) {
+    handle_recipe_for(
+        method,
+        query,
+        origin,
+        body,
+        token,
+        recipes_inbox,
+        &accepted_origins(&loopback_origin()),
+    )
+}
+
+/// [`handle_recipe`] with the origins a `POST` may come from.
+pub fn handle_recipe_for(
+    method: &str,
+    query: &str,
+    origin: Option<&str>,
+    body: &[u8],
+    token: &str,
+    recipes_inbox: &Path,
+    accepted: &[String],
+) -> (u16, &'static str, String) {
     const HTML: &str = "text/html; charset=utf-8";
     const JSON: &str = "application/json";
     let ok_token = query
@@ -201,7 +267,7 @@ pub fn handle_recipe(
             if !ok_token {
                 return (403, JSON, answer("Not saved", stale));
             }
-            if origin != Some(&format!("http://127.0.0.1:{PORT}")) {
+            if !origin.is_some_and(|o| accepted.iter().any(|a| a == o)) {
                 return (
                     403,
                     JSON,
@@ -434,10 +500,11 @@ fn read_request(stream: &std::net::TcpStream) -> Option<Request> {
     })
 }
 
-/// Serves the bookmarklets on `127.0.0.1:PORT`, one request per connection, until the
+/// Serves the bookmarklets on `bind_address():PORT`, one request per connection, until the
 /// process ends. Errors only when the port can't be bound.
 pub fn serve(queue: ReadingQueue, token: String, recipes_inbox: PathBuf) -> std::io::Result<()> {
-    let listener = TcpListener::bind(("127.0.0.1", PORT))?;
+    let listener = TcpListener::bind((bind_address(), PORT))?;
+    let accepted = accepted_origins(&origin());
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
         let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
@@ -448,13 +515,14 @@ pub fn serve(queue: ReadingQueue, token: String, recipes_inbox: PathBuf) -> std:
         let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let (status, kind, body) = if path == "/recipe" {
-            handle_recipe(
+            handle_recipe_for(
                 method,
                 query,
                 req.origin.as_deref(),
                 &req.body,
                 &token,
                 &recipes_inbox,
+                &accepted,
             )
         } else {
             let (status, body) = handle(&req.line, &token, &queue, &recipes_inbox, Utc::now());
@@ -705,6 +773,51 @@ mod tests {
     }
 
     const ORIGIN: Option<&str> = Some("http://127.0.0.1:47219");
+
+    #[test]
+    fn javascript_uses_public_url() {
+        let o = origin_from(Some("https://deckle.home.lan/"));
+        assert_eq!(o, "https://deckle.home.lan", "trailing slash stripped");
+        assert!(script(&o, "abc", "").contains("https://deckle.home.lan/save?token=abc&url="));
+        assert!(recipe_script(&o, "abc").contains("o='https://deckle.home.lan',"));
+    }
+
+    #[test]
+    fn unset_or_blank_env_keeps_loopback() {
+        assert_eq!(origin_from(None), "http://127.0.0.1:47219");
+        assert_eq!(origin_from(Some("  ")), "http://127.0.0.1:47219");
+        assert_eq!(bind_from(None), "127.0.0.1");
+        assert_eq!(bind_from(Some("")), "127.0.0.1");
+        assert_eq!(bind_from(Some("0.0.0.0")), "0.0.0.0");
+    }
+
+    #[test]
+    fn origin_check_accepts_public_url_and_loopback_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let accepted = accepted_origins(&origin_from(Some("https://deckle.home.lan/")));
+        let body = carried("https://ex.test/pie", &["{\"@type\":\"Recipe\"}"]);
+        let post = |o: Option<&str>, token: &str| {
+            handle_recipe_for(
+                "POST",
+                &format!("token={token}"),
+                o,
+                &body,
+                "abc",
+                dir.path(),
+                &accepted,
+            )
+            .0
+        };
+        assert_eq!(post(Some("https://deckle.home.lan"), "abc"), 200);
+        assert_eq!(post(ORIGIN, "abc"), 200, "loopback still works");
+        assert_eq!(post(Some("https://evil.test"), "abc"), 403);
+        assert_eq!(post(None, "abc"), 403);
+        assert_eq!(
+            post(Some("https://deckle.home.lan"), "nope"),
+            403,
+            "token still required"
+        );
+    }
 
     fn carried(url: &str, blocks: &[&str]) -> Vec<u8> {
         serde_json::json!({"url": url, "title": "Pie & <b>Co</b>", "canonical": "javascript:alert(1)",

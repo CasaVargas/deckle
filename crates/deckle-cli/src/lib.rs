@@ -5,6 +5,7 @@ mod cli;
 mod cookbook;
 pub mod cookbook_api;
 mod cookbook_delivery;
+mod daemon;
 mod highlights;
 mod inbox;
 pub mod press_worker;
@@ -2068,6 +2069,24 @@ fn schedule_at() -> Option<(u8, u8)> {
         .and_then(|a| deckle_digest::schedule::parse_at(&a).ok())
 }
 
+/// The next press in a daemon install, from `[schedule]` (`at`, and `days` when set).
+fn daemon_next_press(
+    sched: &deckle_digest::config::ScheduleConfig,
+    now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
+) -> Option<deckle_digest::chrono::NaiveDate> {
+    use deckle_digest::chrono::{Datelike, Days};
+    let at = deckle_digest::schedule::parse_at(sched.at.as_deref()?).ok()?;
+    let mut date = deckle_digest::press::next_press(at, now).date_naive();
+    for _ in 0..7 {
+        let day = deckle_digest::config::Day::ALL[date.weekday().num_days_from_monday() as usize];
+        if sched.days.is_empty() || sched.days.contains(&day) {
+            return Some(date);
+        }
+        date = date + Days::new(1);
+    }
+    None
+}
+
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
     match arg {
         None => Ok(deckle_digest::chrono::Local::now().date_naive()),
@@ -2555,18 +2574,23 @@ fn digest(
             // Two papers due at the same minute convert one after the other (many papers §5).
             let _lock = run_lock()?;
             let mut no_kindle = None;
-            // Export folders need no Previewer (other readers design §6): without one, the
-            // paper still goes to them, and nothing is converted or queued for a Kindle.
+            // Export folders need no Previewer (other readers design §6), nor does email, which
+            // sends the EPUB: without one, the paper still goes to them, and nothing is
+            // converted or queued for a Kindle.
             let located = match previewer::locate(pv.as_deref()) {
                 Ok(l) => Some(l),
                 Err(e)
                     if to == "device"
-                        && (!cfg.export.is_empty() || reader_seen() || cfg.remarkable.enabled) =>
+                        && (!cfg.export.is_empty()
+                            || reader_seen()
+                            || cfg.remarkable.enabled
+                            || cfg.email.enabled) =>
                 {
                     let to: Vec<&str> = [
                         (!cfg.export.is_empty()).then_some("the export folders"),
                         reader_seen().then_some("the e-reader outbox"),
                         cfg.remarkable.enabled.then_some("the reMarkable"),
+                        cfg.email.enabled.then_some("email"),
                     ]
                     .into_iter()
                     .flatten()
@@ -2849,6 +2873,9 @@ fn digest(
         cli::DigestCommand::Schedule { at, days, off } => {
             use deckle_digest::schedule;
             let extra = paper.filter(|p| *p != deckle_digest::papers::MAIN);
+            if daemon_install() {
+                return daemon_schedule(json, &path, paper, at, days, off);
+            }
             if off {
                 let done = match extra {
                     // One paper: its job goes, and `at` leaves its file.
@@ -2981,12 +3008,23 @@ fn digest(
                 let date = match date {
                     Some(d) => parse_date(Some(&d))?,
                     None => {
-                        let now = deckle_digest::chrono::Utc::now()
-                            .with_timezone(&deckle_digest::tz::local_tz());
-                        deckle_digest::press::press(schedule_at(), None, now)
-                            .next
-                            .map(|n| n.date_naive())
-                            .ok_or("nothing is scheduled; there's no press to stop")?
+                        // The daemon's zone (TZ first) in a container, so stop and the
+                        // clock agree on which morning is next.
+                        let tz = if daemon_install() {
+                            deckle_digest::tz::process_tz()
+                        } else {
+                            deckle_digest::tz::local_tz()
+                        };
+                        let now = deckle_digest::chrono::Utc::now().with_timezone(&tz);
+                        // No OS job to ask in a container: the main paper's own `[schedule]`.
+                        let next = if daemon_install() {
+                            daemon_next_press(&cfg.schedule, now)
+                        } else {
+                            deckle_digest::press::press(schedule_at(), None, now)
+                                .next
+                                .map(|n| n.date_naive())
+                        };
+                        next.ok_or("nothing is scheduled; there's no press to stop")?
                     }
                 };
                 Some(date)
@@ -3050,6 +3088,11 @@ fn digest(
             emit(json, &outcome, || outcome.describe(&queue))?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::DigestCommand::Daemon { tick } => {
+            let papers = all_papers(&path)?;
+            daemon::run(&path, explicit_config.as_deref(), papers, tick)?;
+            Ok(ExitCode::SUCCESS)
+        }
         cli::DigestCommand::Watch { interval } => {
             let mut papers = all_papers(&path)?;
             let mut cfg = papers[0].clone();
@@ -3079,13 +3122,15 @@ fn digest(
                     std::thread::spawn(move || {
                         if let Err(e) = deckle_digest::bookmarklet::serve(reading, token, recipes) {
                             eprintln!(
-                                "bookmarklet: can't listen on 127.0.0.1:{}: {e}",
+                                "bookmarklet: can't listen on {}:{}: {e}",
+                                deckle_digest::bookmarklet::bind_address(),
                                 deckle_digest::bookmarklet::PORT
                             );
                         }
                     });
                     eprintln!(
-                        "bookmarklet: listening on 127.0.0.1:{}",
+                        "bookmarklet: listening on {}:{}",
+                        deckle_digest::bookmarklet::bind_address(),
                         deckle_digest::bookmarklet::PORT
                     );
                 }
@@ -3449,6 +3494,74 @@ fn session_text(state: &deckle_digest::session::SessionState) -> String {
     }
 }
 
+/// `DECKLE_DAEMON` is set (by the image): a container, with no keychain and no job scheduler.
+fn daemon_install() -> bool {
+    deckle_digest::secret::daemon_install()
+}
+
+fn no_keychain(env: &str) -> String {
+    format!("no keychain in the container: set {env}")
+}
+
+/// `digest schedule` in a daemon install: the config is the schedule (the daemon re-reads it
+/// every tick), so nothing is installed with launchd, Task Scheduler or cron.
+fn daemon_schedule(
+    json: bool,
+    path: &Path,
+    paper: Option<&str>,
+    at: Option<String>,
+    days: Option<String>,
+    off: bool,
+) -> Result<ExitCode, String> {
+    use deckle_digest::schedule;
+    if off {
+        let mut cfg = paper_config(path, paper)?;
+        cfg.schedule = Default::default();
+        deckle_digest::papers::save(path, &cfg)?;
+        emit(json, &"off", || format!("{}: schedule cleared", cfg.title))?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    let Some(at) = at else {
+        let rows: Vec<(String, Option<String>)> = all_papers(path)?
+            .iter()
+            .map(|c| {
+                let slug = c.paper.as_ref().map_or("main", |p| p.slug.as_str());
+                (slug.to_owned(), c.schedule.at.clone())
+            })
+            .collect();
+        emit(json, &rows, || {
+            rows.iter()
+                .map(|(slug, at)| match at {
+                    Some(at) => format!("edition {slug}: at {at}"),
+                    None => format!("edition {slug}: not scheduled"),
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        })?;
+        return Ok(ExitCode::SUCCESS);
+    };
+    schedule::parse_at(&at)?;
+    let days: Vec<deckle_digest::config::Day> = match &days {
+        None => Vec::new(),
+        Some(list) => list
+            .split(',')
+            .filter(|d| !d.trim().is_empty())
+            .map(|d| {
+                deckle_digest::config::Day::parse(d)
+                    .ok_or_else(|| format!("--days: {d:?} isn't a day (mon … sun)"))
+            })
+            .collect::<Result<_, _>>()?,
+    };
+    let mut cfg = paper_config(path, paper)?;
+    cfg.schedule.at = Some(at);
+    cfg.schedule.days = days;
+    deckle_digest::papers::save(path, &cfg)?;
+    emit(json, &"saved", || {
+        "saved; the daemon picks it up within a minute".to_owned()
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
 /// `digest subscribe [site]`: list the subscriptions, or add, test or forget one.
 fn digest_subscribe(
     json: bool,
@@ -3547,6 +3660,9 @@ fn digest_subscribe(
         }
         (Some(i), None) => cfg.subscriptions[i].clone(),
     };
+    if daemon_install() {
+        return Err(no_keychain(&secret::site_env(&site)));
+    }
     let password = Zeroizing::new(if stdin {
         let mut line = String::new();
         std::io::stdin()
@@ -3607,6 +3723,9 @@ fn digest_email(
     let account = secret::account(cfg);
     match action {
         cli::EmailCommand::Password { stdin } => {
+            if daemon_install() {
+                return Err(no_keychain(secret::ENV));
+            }
             // Nothing to file it under: say so before asking for it.
             if cfg.username.trim().is_empty() || cfg.smtp_host.trim().is_empty() {
                 return Err(secret::SecretError::NoAccount.to_string());

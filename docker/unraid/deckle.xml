@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>Deckle</Name>
+  <Repository>ghcr.io/casavargas/deckle:latest</Repository>
+  <Registry>https://github.com/CasaVargas/deckle/pkgs/container/deckle</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/CasaVargas/deckle/issues</Support>
+  <Project>https://github.com/CasaVargas/deckle</Project>
+  <Overview>Deckle builds a morning newspaper from your town's news and weather, your RSS feeds and the articles you saved, and has it waiting on your e-ink reader. This is the headless container: it runs the Daily on a schedule, keeps every edition in a Morgue folder, and emails the paper to a Kindle through your own mail account. Any export folder works too.&#xD;
+&#xD;
+What doesn't work here: Kindle book conversion (Enhanced Typesetting, X-Ray, Word Wise) needs Kindle Previewer, which only runs on Mac and Windows. The first start writes a starter digest.toml in the config folder; edit it, then restart the container. Set the Kindle email password in DECKLE_SMTP_PASSWORD. Setup: https://github.com/CasaVargas/deckle/blob/main/docs/docker.md</Overview>
+  <Category>Productivity: Tools:</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/CasaVargas/deckle/main/docker/unraid/deckle.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/CasaVargas/deckle/main/apps/desktop/src-tauri/icons/128x128@2x.png</Icon>
+  <ExtraParams>--stop-timeout 90</ExtraParams>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/deckle" Mode="rw" Description="digest.toml, papers and state." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/deckle</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/deckle" Mode="rw" Description="The Morgue, library, Inbox and export folders (Deckle/ inside)." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/deckle</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User id the files are written as (99 is nobody)." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group id the files are written as (100 is users)." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="TZ" Target="TZ" Default="America/New_York" Mode="" Description="Time zone. Papers print on this zone's clock." Type="Variable" Display="always" Required="true" Mask="false">America/New_York</Config>
+  <Config Name="Kindle email password" Target="DECKLE_SMTP_PASSWORD" Default="" Mode="" Description="Password for the [email] account that sends the paper to your Kindle. Leave blank if you don't email it." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Bookmarklet port" Target="47219" Default="47219" Mode="tcp" Description="Optional. Lets a browser bookmarklet save pages to tomorrow's paper." Type="Port" Display="advanced" Required="false" Mask="false">47219</Config>
+  <Config Name="Bookmarklet address" Target="DECKLE_BOOKMARKLET_URL" Default="" Mode="" Description="Optional. The address your browser reaches the port at, as scheme://host[:port] with no path, e.g. http://tower.local:47219." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>

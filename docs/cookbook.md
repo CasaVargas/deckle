@@ -102,10 +102,10 @@ It takes the recipe **from the page you're looking at**, so it works on sites th
 apps, like Food Network. It reads only the page's recipe data (its `ld+json` blocks that
 mention a recipe), the address, the title, and the page's canonical link, share image and site
 name. It never reads cookies, the page's text or anything else. The data rides in the fragment
-of a popup at `127.0.0.1:47219`, so the page itself never contacts Deckle. The popup hands it
-to Deckle, which saves it as an `.html` page in `Inbox/Recipes`. The recipe is kept under the
-page's address, so saving it again updates it. The photo is still downloaded from its image
-link.
+of a popup at the bookmarklet's address (`127.0.0.1:47219` by default), so the page itself
+never contacts Deckle. The popup hands it to Deckle, which saves it as an `.html` page in
+`Inbox/Recipes`. The recipe is kept under the page's address, so saving it again updates it. The
+photo is still downloaded from its image link.
 
 A page with no recipe data sends just its address, and the scan fetches it. For a recipe
 behind a login, save the page as `.html` and drop it into `Inbox/Recipes`. If the popup says
