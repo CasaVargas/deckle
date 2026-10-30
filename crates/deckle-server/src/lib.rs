@@ -4,6 +4,7 @@
 
 mod auth;
 mod events;
+mod files;
 mod invoke;
 mod static_files;
 
@@ -15,6 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::routing::{get, post};
@@ -121,26 +123,43 @@ pub(crate) struct Server {
     pub(crate) login_slots: Arc<tokio::sync::Semaphore>,
     /// Set on shutdown: ends the event streams, which would otherwise never finish.
     pub(crate) stop: watch::Sender<bool>,
+    /// The most one uploaded file may hold, in bytes.
+    pub(crate) upload_limit: u64,
 }
 
 pub(crate) type Shared = Arc<Server>;
 
 /// The whole site: `/api/…` and the frontend.
 pub fn router(cfg: ServerConfig, ctx: Arc<Ctx>) -> Router {
+    router_with_upload_limit(cfg, ctx, files::UPLOAD_LIMIT)
+}
+
+/// [`router`] with a smaller upload limit, so a test needn't send 512 MiB.
+#[doc(hidden)]
+pub fn router_with_upload_limit(cfg: ServerConfig, ctx: Arc<Ctx>, upload_limit: u64) -> Router {
     build(Arc::new(Server {
         cfg,
         ctx,
         sessions: Default::default(),
         login_slots: Arc::new(tokio::sync::Semaphore::new(auth::LOGIN_SLOTS)),
         stop: watch::channel(false).0,
+        upload_limit,
     }))
 }
 
 fn build(server: Shared) -> Router {
-    // Everything here needs a session; Task 6's files routes nest in here too.
+    // Everything here needs a session.
     let private = Router::new()
         .route("/invoke/{command}", post(invoke::invoke))
         .route("/events", get(events::stream))
+        .route("/fs/roots", get(files::roots))
+        .route("/fs/list", get(files::list))
+        .route("/fs/download", get(files::download))
+        // Uploads stream to disk under their own per-file limit, not the 2 MiB body limit.
+        .route(
+            "/fs/upload",
+            post(files::upload).layer(DefaultBodyLimit::disable()),
+        )
         .route_layer(middleware::from_fn_with_state(
             server.clone(),
             auth::require_session,
@@ -181,6 +200,7 @@ pub async fn serve(
         sessions: Default::default(),
         login_slots: Arc::new(tokio::sync::Semaphore::new(auth::LOGIN_SLOTS)),
         stop: stop.clone(),
+        upload_limit: files::UPLOAD_LIMIT,
     });
     let app = build(server);
     // The peer's address, for logging failed logins.

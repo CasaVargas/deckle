@@ -3,6 +3,7 @@
 
 mod auth;
 mod events;
+mod files;
 mod invoke;
 mod static_files;
 
