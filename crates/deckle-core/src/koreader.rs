@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! KOReader's sidecars (docs/superpowers/specs/2026-10-30-koreader-reads-design.md): each
-//! book's `<book>.sdr/metadata.<ext>.lua`, read (never written) for its highlights, notes and
-//! progress, in the shapes a Kobo read gives: `My Clippings.txt` entries and [`kobo::Book`]s.
+//! book's `<book>.sdr/metadata.<ext>.lua`, read for its highlights, notes and progress, in the
+//! shapes a Kobo read gives: `My Clippings.txt` entries and [`kobo::Book`]s. The one sidecar
+//! Deckle writes is a paper's first, beside an edition it wrote itself, and only where there is
+//! none (2026-10-30-koreader-hub-design.md §E).
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -49,6 +51,22 @@ pub struct Read {
     pub clippings: Option<Vec<u8>>,
     /// `<file>: <why>` for sidecars that couldn't be read.
     pub warnings: Vec<String>,
+    /// Where KOReader is in each book beside its sidecar, for readership (KOReader hub design
+    /// §C). A sidecar kept by hash doesn't say which book it is: left out.
+    pub positions: Vec<Position>,
+}
+
+/// Where KOReader is in one book.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Position {
+    /// The book's path relative to the root, as [`Sidecar::book`].
+    pub book: String,
+    /// `last_xpointer`: `/body/DocFragment[N]/…` in an EPUB.
+    pub xpointer: Option<String>,
+    /// `percent_finished`, 0–1.
+    pub percent: Option<f64>,
+    /// When the sidecar was last written, ISO 8601 UTC: when KOReader was last there.
+    pub when: String,
 }
 
 /// Every KOReader sidecar under `root` (spec §3).
@@ -133,6 +151,197 @@ fn book_path(root: &Path, parent: &Path, stem: &str, ext: &str) -> String {
     }
 }
 
+/// KOReader's name for a book: the MD5 of 1 KiB samples at offsets `1024 << 2i` for i = -1 to
+/// 10, as `util.partialMD5` (`frontend/util.lua`) takes them. LuaJIT masks the shift count to 5
+/// bits, so i = -1 is offset 0. A sample past the end stops it; a short last one still counts.
+/// Lowercase hex; `None` when the file can't be read.
+pub fn partial_md5(path: &Path) -> Option<String> {
+    use md5::{Digest, Md5};
+    use std::io::{Read as _, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    let len = f.metadata().ok()?.len();
+    let mut md5 = Md5::new();
+    let mut buf = [0u8; 1024];
+    for i in -1i32..=10 {
+        let offset: u64 = if i < 0 { 0 } else { 1024 << (2 * i) };
+        if offset >= len {
+            break;
+        }
+        f.seek(SeekFrom::Start(offset)).ok()?;
+        let mut n = 0;
+        while n < buf.len() {
+            match f.read(&mut buf[n..]).ok()? {
+                0 => break,
+                k => n += k,
+            }
+        }
+        md5.update(&buf[..n]);
+    }
+    Some(md5.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// [`partial_md5`] of a file's bytes held in memory: the KEPUB the catalog makes on request.
+pub fn partial_md5_bytes(bytes: &[u8]) -> String {
+    use md5::{Digest, Md5};
+    let mut md5 = Md5::new();
+    for i in -1i32..=10 {
+        let offset = if i < 0 { 0 } else { 1024usize << (2 * i) };
+        if offset >= bytes.len() {
+            break;
+        }
+        md5.update(&bytes[offset..(offset + 1024).min(bytes.len())]);
+    }
+    md5.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// KOReader's other name for a book (sync's "file name" matching): the MD5 of its file name.
+pub fn filename_md5(name: &str) -> String {
+    use md5::{Digest, Md5};
+    Md5::digest(name.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The books Deckle handed to a KOReader, by the names KOReader's sync gives them (KOReader hub
+/// design §B): `koreader-documents.json`, digest → what it is.
+pub mod documents {
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    use serde::{Deserialize, Serialize};
+
+    /// Entries kept; the oldest go first.
+    pub const KEEP: usize = 2000;
+
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Document {
+        /// The file name it was handed over as, e.g. `deckle-daily-2026-10-30.kepub.epub`.
+        pub file: String,
+        /// When it was recorded, ISO 8601 UTC.
+        pub seen: String,
+    }
+
+    /// The registry at `path`; a missing or unreadable one is empty.
+    pub fn load(path: &Path) -> BTreeMap<String, Document> {
+        std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    /// The file a digest names, when Deckle handed it over.
+    pub fn lookup(path: &Path, digest: &str) -> Option<Document> {
+        load(path).remove(&digest.to_ascii_lowercase())
+    }
+
+    /// Records `bytes`, handed over as `file`, under both names KOReader may give it.
+    pub fn record(path: &Path, file: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let mut all = load(path);
+        let doc = Document {
+            file: file.to_owned(),
+            seen: crate::devices::now_iso(),
+        };
+        all.insert(super::partial_md5_bytes(bytes), doc.clone());
+        all.insert(super::filename_md5(file), doc);
+        if all.len() > KEEP {
+            let mut by_age: Vec<(String, String)> = all
+                .iter()
+                .map(|(k, d)| (d.seen.clone(), k.clone()))
+                .collect();
+            by_age.sort();
+            for (_, k) in by_age.into_iter().take(all.len() - KEEP) {
+                all.remove(&k);
+            }
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&all)?)?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
+/// The settings a paper opens with (hub design §E): the paper's own fonts and styles, and
+/// hyphenation. Every key is one KOReader reads from a book's sidecar, not its global settings.
+/// Font size and margins are left to the owner's defaults; footnote popups too, as KOReader
+/// keeps them only globally (`footnote_link_in_popup`, readerlink.lua). With no `text_lang`
+/// here, KOReader takes the language from the book (`onPreRenderDocument`, readertypography.lua).
+const PAPER_SETTINGS: &[(&str, &str)] = &[
+    // ReaderConfig loads `copt_<option>` from the sidecar over each option of creoptions.lua
+    // (readerconfig.lua `onReadSettings`, configurable.lua `loadSettings`); ReaderTypeset then
+    // sets it (readertypeset.lua `onReadSettings`). 1 is on.
+    ("copt_embedded_css", "1"),
+    ("copt_embedded_fonts", "1"),
+    // readertypography.lua `onReadSettings`: `config:has("hyphenation")` wins over the global.
+    ("hyphenation", "true"),
+    // readertypography.lua `onReadSettings`: the book's `lang` attributes pick the rules.
+    ("text_lang_embedded_langs", "true"),
+];
+
+/// The sidecar folder KOReader keeps beside `book`: its path less the last extension, so
+/// `x.kepub.epub` has `x.kepub.sdr` (docsettings.lua `getSidecarDir`).
+pub fn sidecar_dir(book: &Path) -> PathBuf {
+    book.with_extension("sdr")
+}
+
+/// `metadata.<last extension>.lua` (docsettings.lua `getSidecarFilename`).
+fn sidecar_name(book: &Path) -> String {
+    let ext = book.extension().unwrap_or_default().to_string_lossy();
+    format!("metadata.{}.lua", if ext.is_empty() { "_" } else { &ext })
+}
+
+/// Writes a paper's sidecar beside `book`, as KOReader writes one, unless its `.sdr` folder is
+/// already there. Returns whether it was written.
+pub fn tune_paper(book: &Path) -> std::io::Result<bool> {
+    use std::io::Write;
+    let dir = sidecar_dir(book);
+    match std::fs::create_dir(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(e) => return Err(e),
+    }
+    let mut text =
+        String::from("-- Deckle's settings for its paper; KOReader keeps its own\nreturn {\n");
+    for (k, v) in PAPER_SETTINGS {
+        text.push_str(&format!("    [\"{k}\"] = {v},\n"));
+    }
+    text.push_str("}\n");
+    let name = sidecar_name(book);
+    let tmp = dir.join(format!(".{name}.tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, dir.join(name)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    Ok(true)
+}
+
+/// Removes `book`'s sidecar with the book: its `metadata.<ext>.lua` and KOReader's `.old` copy,
+/// then the folder, unless another book of that stem (`x.pdf` beside `x.epub`) has a sidecar in
+/// it too.
+pub fn remove_sidecar(book: &Path) -> std::io::Result<()> {
+    let dir = sidecar_dir(book);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    let name = sidecar_name(book);
+    for f in [name.clone(), format!("{name}.old")] {
+        match std::fs::remove_file(dir.join(f)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    if metadata_file(&dir).is_none() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    Ok(())
+}
+
 /// Reads every sidecar under `root`.
 pub fn read(root: &Path) -> Read {
     let mut out = Read::default();
@@ -180,10 +389,20 @@ pub fn read(root: &Path) -> Read {
                 notes.push((h.datetime.clone(), entry));
             }
         }
+        let modified = std::fs::metadata(&s.file)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        if !s.book.starts_with("koreader:")
+            && (parsed.xpointer.is_some() || parsed.percent.is_some())
+        {
+            out.positions.push(Position {
+                book: s.book.clone(),
+                xpointer: parsed.xpointer.clone(),
+                percent: parsed.percent,
+                when: crate::devices::iso(modified),
+            });
+        }
         if parsed.in_progress() {
-            let modified = std::fs::metadata(&s.file)
-                .and_then(|m| m.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
             books.push((
                 modified,
                 Book {
@@ -243,6 +462,8 @@ pub struct Parsed {
     pub percent: Option<f64>,
     /// `summary.status`: `reading`, `complete`, `abandoned`.
     pub status: Option<String>,
+    /// `last_xpointer`: where the reader is, `/body/DocFragment[N]/…` in an EPUB.
+    pub xpointer: Option<String>,
     pub highlights: Vec<Highlight>,
 }
 
@@ -283,6 +504,7 @@ pub fn parse(text: &str) -> Result<Parsed, String> {
             .unwrap_or_default(),
         percent: root.get("percent_finished").and_then(Value::as_f64),
         status: s(root.get("summary").and_then(|v| v.get("status"))),
+        xpointer: s(root.get("last_xpointer")).filter(|x| !x.is_empty()),
         highlights: Vec::new(),
     };
     let page_of = |v: Option<&Value>| -> Option<String> {
@@ -698,6 +920,68 @@ mod tests {
     }
 
     #[test]
+    fn a_papers_sidecar_is_written_once_and_reads_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let book = tmp.path().join("deckle-daily-2026-10-30.kepub.epub");
+        std::fs::write(&book, b"KEPUB").unwrap();
+        assert!(tune_paper(&book).unwrap());
+        // KOReader drops only the last extension.
+        let file = tmp
+            .path()
+            .join("deckle-daily-2026-10-30.kepub.sdr/metadata.epub.lua");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.starts_with("-- ")
+                && text.contains("\nreturn {\n    [\"")
+                && text.ends_with(",\n}\n"),
+            "{text}"
+        );
+        let v = lua::parse(&text).unwrap();
+        assert_eq!(v.get("copt_embedded_css"), Some(&Value::Num(1.0)));
+        assert_eq!(v.get("copt_embedded_fonts"), Some(&Value::Num(1.0)));
+        assert_eq!(v.get("hyphenation"), Some(&Value::Bool(true)));
+        assert_eq!(v.get("text_lang_embedded_langs"), Some(&Value::Bool(true)));
+        let Value::Table(t) = &v else { panic!() };
+        assert_eq!(t.len(), 4);
+        // Nothing a read takes for progress or highlights.
+        let parsed = parse(&text).unwrap();
+        assert!(!parsed.in_progress() && parsed.highlights.is_empty());
+
+        // KOReader's own, once there, is never written over.
+        let ko = "return { [\"percent_finished\"] = 0.5 }";
+        std::fs::write(&file, ko).unwrap();
+        assert!(!tune_paper(&book).unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), ko);
+        // Nor is an `.sdr` folder with nothing in it yet.
+        let pb = tmp.path().join("deckle-daily-2026-10-29.epub");
+        let sdr = tmp.path().join("deckle-daily-2026-10-29.sdr");
+        std::fs::create_dir(&sdr).unwrap();
+        assert!(!tune_paper(&pb).unwrap());
+        assert_eq!(std::fs::read_dir(&sdr).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_sidecar_goes_with_its_book_but_not_another_books() {
+        let tmp = tempfile::tempdir().unwrap();
+        let epub = tmp.path().join("deckle-daily-2026-10-30.epub");
+        tune_paper(&epub).unwrap();
+        let sdr = tmp.path().join("deckle-daily-2026-10-30.sdr");
+        std::fs::write(sdr.join("metadata.epub.lua.old"), "return {}").unwrap();
+        std::fs::write(sdr.join("metadata.pdf.lua"), "return {}").unwrap();
+        remove_sidecar(&epub).unwrap();
+        // That day's PDF keeps its own.
+        let left: Vec<_> = std::fs::read_dir(&sdr)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["metadata.pdf.lua"]);
+        remove_sidecar(&tmp.path().join("deckle-daily-2026-10-30.pdf")).unwrap();
+        assert!(!sdr.exists());
+        // No sidecar, nothing to do.
+        remove_sidecar(&epub).unwrap();
+    }
+
+    #[test]
     fn docsettings_and_hash_paths_map_to_the_book() {
         let root = Path::new("/V");
         assert_eq!(
@@ -723,5 +1007,52 @@ mod tests {
             "koreader:abcdef"
         );
         assert_eq!(book_path(root, root, "Walden", "pdf"), "Walden.pdf");
+    }
+
+    #[test]
+    fn partial_md5_samples_as_koreader_does() {
+        // Bytes `i % 251`. Expected values from a one-off Python run of util.partialMD5's
+        // offsets: 17,000 bytes take samples at 0, 1024, 4096 and a short one at 16384.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("book.epub");
+        let bytes: Vec<u8> = (0..17_000u32).map(|i| (i % 251) as u8).collect();
+        std::fs::write(&file, &bytes).unwrap();
+        assert_eq!(
+            partial_md5(&file).as_deref(),
+            Some("5f5620a36f2710bff4bfae9324f07628")
+        );
+        std::fs::write(&file, &bytes[..100]).unwrap();
+        assert_eq!(
+            partial_md5(&file).as_deref(),
+            Some("7acedd1a84a4cfcb6e7a16003242945e")
+        );
+        assert_eq!(partial_md5(&dir.path().join("missing")), None);
+    }
+
+    #[test]
+    fn partial_md5_of_bytes_matches_the_file_at_every_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        for len in [0usize, 100, 1024, 1025, 17_000, 300_000, 5_000_000] {
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 7 % 251) as u8).collect();
+            let p = tmp.path().join(format!("{len}.bin"));
+            std::fs::write(&p, &bytes).unwrap();
+            assert_eq!(partial_md5(&p).unwrap(), partial_md5_bytes(&bytes), "{len}");
+        }
+    }
+
+    #[test]
+    fn the_registry_answers_to_both_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path().join("koreader-documents.json");
+        documents::record(&reg, "deckle-daily-2026-10-30.epub", b"paper bytes").unwrap();
+        let by_md5 = documents::lookup(&reg, &partial_md5_bytes(b"paper bytes")).unwrap();
+        assert_eq!(by_md5.file, "deckle-daily-2026-10-30.epub");
+        let by_name = documents::lookup(&reg, &filename_md5("deckle-daily-2026-10-30.epub"));
+        assert_eq!(by_name.unwrap().file, "deckle-daily-2026-10-30.epub");
+        assert_eq!(
+            filename_md5("deckle-daily-2026-10-30.epub"),
+            "fadc39eba5a19b8f4d9e049d9b919bc7"
+        );
+        assert!(documents::lookup(&reg, "0000").is_none());
     }
 }

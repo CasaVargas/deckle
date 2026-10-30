@@ -258,6 +258,11 @@ pub enum Command {
         #[command(subcommand)]
         action: KindleCommand,
     },
+    /// The OPDS catalog and KOReader sync on the home network, served by the watcher.
+    ReaderServer {
+        #[command(subcommand)]
+        action: ReaderServerCommand,
+    },
     /// Highlights and notes on a Kindle, as Markdown files (one per book).
     Highlights {
         /// `device` for the first connected Kindle, or a folder standing in for documents/.
@@ -273,6 +278,12 @@ pub enum Command {
         from: String,
         #[command(subcommand)]
         action: WordsCommand,
+    },
+    /// KOReader on a Kobo, a PocketBook, a Kindle on USB storage or in a folder: back up its
+    /// reading state and put it back.
+    Koreader {
+        #[command(subcommand)]
+        action: KoreaderCommand,
     },
     /// Your library: one folder per book, with a deckle.json beside it. Every book `run` sends
     /// is added once the library is set up.
@@ -446,6 +457,36 @@ pub enum HighlightsCommand {
     Export {
         #[arg(long)]
         to: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KoreaderCommand {
+    /// Copy every book's sidecar (progress, highlights, notes) and KOReader's settings,
+    /// history, statistics and vocabulary into a new folder, with a manifest.json.
+    Backup {
+        /// `device` for the connected reader, or a folder (a copy of a reader's drive).
+        #[arg(long, default_value = "device")]
+        from: String,
+        /// Where backups go (default: ~/Deckle/KOReader backups). Each lands in
+        /// <device>/<YYYY-MM-DD HHMMSS>/ under it.
+        #[arg(long)]
+        to: Option<PathBuf>,
+    },
+    /// Put a backup's sidecars back beside their books, found by path or else by KOReader's
+    /// partial MD5. A newer sidecar on the reader is kept.
+    Restore {
+        /// The backup's folder (the one holding manifest.json).
+        backup: PathBuf,
+        /// `device` for the connected reader, or a folder.
+        #[arg(long, default_value = "device")]
+        to: String,
+        /// Also put back KOReader's settings, history, statistics and vocabulary.
+        #[arg(long)]
+        settings: bool,
+        /// Overwrite files on the reader even when they're newer than the backup's.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -746,6 +787,18 @@ pub enum ReadershipCommand {
     Apply { n: usize },
     /// Hide suggestion N for the next 14 editions.
     Dismiss { n: usize },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReaderServerCommand {
+    /// Set the password KOReader signs in with (asked for without echo; its MD5 is kept).
+    Password {
+        /// Read one line from stdin instead, for scripts.
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Whether it's on, and the catalog and sync URLs to type into KOReader.
+    Status,
 }
 
 #[derive(Subcommand, Debug)]

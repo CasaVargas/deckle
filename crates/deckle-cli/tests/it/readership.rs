@@ -56,6 +56,7 @@ fn seeded() -> State {
             title: "The Deckle Daily".into(),
             file: format!("deckle-daily-{date}"),
             end: 10_000,
+            epub: None,
             sections: vec![
                 sec("front", "Front page", 0),
                 sec("weather", "Weather", 1000),

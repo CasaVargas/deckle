@@ -150,6 +150,10 @@ pub struct Config {
     /// `[remarkable]`: the paper as a PDF to a reMarkable (other readers design §9).
     #[serde(skip_serializing_if = "RemarkableConfig::is_default")]
     pub remarkable: RemarkableConfig,
+    /// `[reader_server]`: the OPDS catalog and KOReader sync on the home network (KOReader hub
+    /// design §A). A household setting. Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "ReaderServerConfig::is_default")]
+    pub reader_server: ReaderServerConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
@@ -290,6 +294,7 @@ impl Default for Config {
             morgue: MorgueConfig::default(),
             export: Vec::new(),
             remarkable: RemarkableConfig::default(),
+            reader_server: ReaderServerConfig::default(),
             almanac_path: None,
             press_path: None,
             puzzle_path: None,
@@ -1248,6 +1253,36 @@ impl RemarkableConfig {
     }
 }
 
+/// `[reader_server]` (KOReader hub design §A.2). The password isn't here: its MD5 is kept in
+/// `reader-server.json` beside `digest.toml`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReaderServerConfig {
+    pub enabled: bool,
+    pub port: u16,
+    /// The account KOReader signs in with, for the catalog and for sync.
+    pub username: String,
+}
+
+/// The reader server's port when `[reader_server] port` is unset: the bookmarklet's, plus one.
+pub const READER_SERVER_PORT: u16 = 47220;
+
+impl Default for ReaderServerConfig {
+    fn default() -> Self {
+        ReaderServerConfig {
+            enabled: false,
+            port: READER_SERVER_PORT,
+            username: "deckle".into(),
+        }
+    }
+}
+
+impl ReaderServerConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// The paper's photos: grayscale for e-ink, or as published for a color screen.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1463,6 +1498,13 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # enabled = true
 # screen = "remarkable-2"         # or remarkable-paper-pro, remarkable-paper-pro-move
 # books = false                   # also the long reads, as EPUBs
+
+# KOReader on any reader can browse your papers (an OPDS catalog) and sync its reading
+# progress here, over the home network. Set the password with `deckle reader-server password`.
+# [reader_server]
+# enabled = true
+# port = 47220
+# username = "deckle"
 "#;
 
 /// A new extra paper (`deckle digest papers new`, the app's New paper): `{title}`, `{reader}`
@@ -1658,6 +1700,7 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
         t.remove("sync");
         t.remove("reading");
         t.remove("subscriptions");
+        t.remove("reader_server");
         if let Some(email) = t.get_mut("email").and_then(|e| e.as_table_like_mut()) {
             for key in ["from", "smtp_host", "smtp_port", "username"] {
                 email.remove(key);

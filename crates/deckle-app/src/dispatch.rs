@@ -174,6 +174,9 @@ commands! { ctx;
         press::press_setup(paper, export_index, enabled, expected, &ctx.exe),
     press_stop { on: bool, paper: Option<String> } => next::press_stop(on, paper),
     previewer_status {} => Ok(commands::previewer_status(&ctx.state)),
+    reader_server_set_password { password: String } =>
+        crate::reader_server::reader_server_set_password(password),
+    reader_server_status {} => Ok(crate::reader_server::reader_server_status()),
     readership_apply { id: String, paper: Option<String> } => readership::readership_apply(id, paper),
     readership_dismiss { id: String, paper: Option<String> } => readership::readership_dismiss(id, paper),
     readership_report { paper: Option<String> } => readership::readership_report(paper),

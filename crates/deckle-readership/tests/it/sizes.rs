@@ -14,6 +14,7 @@ fn local_layout(date: &str, len: i64, items: Option<u32>) -> Layout {
         title: "The Deckle Daily".into(),
         file: format!("deckle-daily-{date}"),
         end: 1000 + len,
+        epub: None,
         sections: vec![
             SectionStart {
                 key: "front".into(),

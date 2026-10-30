@@ -30,6 +30,7 @@ deckle-cover = { path = "crates/deckle-cover" }
 deckle-highlights = { path = "crates/deckle-highlights" }
 deckle-shelf = { path = "crates/deckle-shelf" }
 deckle-morgue = { path = "crates/deckle-morgue" }
+deckle-readerserver = { path = "crates/deckle-readerserver" }
 deckle-mobi = { path = "crates/deckle-mobi" }
 deckle-app = { path = "crates/deckle-app" }
 anyhow = "1"
@@ -50,6 +51,7 @@ regex = "1"
 ureq = { version = "3", features = ["platform-verifier", "cookies", "json"] }
 base64 = "0.22"
 sha2 = "0.11"
+md-5 = "0.11"
 encoding_rs = "0.8"
 tauri = { version = "2.12", features = [] }
 tauri-build = { version = "2.7", features = [] }

@@ -164,7 +164,8 @@ pub fn deliver(reader: &Reader, bytes: &[u8], name: &str) -> std::io::Result<Pat
 }
 
 /// Removes all but the newest `keep` books in `Deckle/` whose name starts with `prefix` (the
-/// editions, named by date so the name sorts them), sparing `exempt`. Returns the names removed.
+/// editions, named by date so the name sorts them), sparing `exempt`, each with its KOReader
+/// sidecar. Returns the names removed.
 pub fn prune(
     reader: &Reader,
     prefix: &str,
@@ -186,7 +187,9 @@ pub fn prune(
     names.sort_unstable_by(|a, b| b.cmp(a));
     let mut gone = Vec::new();
     for n in names.into_iter().skip(keep) {
-        std::fs::remove_file(reader.folder().join(&n))?;
+        let book = reader.folder().join(&n);
+        std::fs::remove_file(&book)?;
+        crate::koreader::remove_sidecar(&book)?;
         gone.push(n);
     }
     Ok(gone)
@@ -358,6 +361,26 @@ mod tests {
                 .join("Deckle/deckle-daily-2026-10-03.kepub.epub")
                 .is_file()
         );
+    }
+
+    #[test]
+    fn a_pruned_edition_takes_its_sidecar_and_only_its_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let k = Reader::Kobo(fake_kobo(tmp.path(), ""));
+        for n in [
+            "deckle-daily-2026-10-01.kepub.epub",
+            "deckle-daily-2026-10-02.kepub.epub",
+            "walden.kepub.epub",
+        ] {
+            let book = deliver(&k, b"KEPUB", n).unwrap();
+            crate::koreader::tune_paper(&book).unwrap();
+        }
+        let gone = prune(&k, "deckle-daily-", 1, &[]).unwrap();
+        assert_eq!(gone, ["deckle-daily-2026-10-01.kepub.epub"]);
+        let dir = tmp.path().join(FOLDER);
+        assert!(!dir.join("deckle-daily-2026-10-01.kepub.sdr").exists());
+        assert!(dir.join("deckle-daily-2026-10-02.kepub.sdr").is_dir());
+        assert!(dir.join("walden.kepub.sdr").is_dir());
     }
 
     #[test]

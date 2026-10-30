@@ -180,9 +180,39 @@ fn merging_keeps_a_book_once_from_the_later_read() {
         ],
         clippings: Some(b"b".to_vec()),
         warnings: Vec::new(),
+        positions: Vec::new(),
     };
     let m = merge(kobo, ko);
     assert_eq!(m.clippings.as_deref(), Some(&b"ab"[..]));
     assert_eq!(m.books.len(), 2);
     assert_eq!(m.books[0].percent, 40.0);
+}
+
+#[test]
+fn a_read_gives_each_books_position_but_not_one_kept_by_hash() {
+    let tmp = tempfile::tempdir().unwrap();
+    let paper = NEW.replace(
+        "[\"percent_finished\"]",
+        "[\"last_xpointer\"] = \"/body/DocFragment[3]/body/div[2]/p[4]/text().17\",\n    [\"percent_finished\"]",
+    );
+    put(
+        &tmp.path()
+            .join("Deckle/deckle-daily-2026-10-30.kepub.sdr/metadata.epub.lua"),
+        &paper,
+    );
+    put(
+        &tmp.path()
+            .join(".adds/koreader/hashdocsettings/1a/1a2b3c.sdr/metadata.epub.lua"),
+        &paper,
+    );
+    let r = read(tmp.path());
+    assert_eq!(r.positions.len(), 1, "{:?}", r.positions);
+    let p = &r.positions[0];
+    assert_eq!(p.book, "Deckle/deckle-daily-2026-10-30.kepub.epub");
+    assert_eq!(
+        p.xpointer.as_deref(),
+        Some("/body/DocFragment[3]/body/div[2]/p[4]/text().17")
+    );
+    assert_eq!(p.percent, Some(0.4215));
+    assert!(p.when.ends_with('Z'));
 }

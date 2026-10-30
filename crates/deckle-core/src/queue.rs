@@ -58,6 +58,10 @@ pub struct FlushReport {
     pub positions: Vec<(String, crate::yjf::OnDevice)>,
     /// Why the `.yjf` read failed; the delivery stands.
     pub positions_error: Option<String>,
+    /// On a Kobo or a PocketBook, where KOReader is in each book, read first in the session
+    /// (`[sync] readership`; KOReader hub design §C).
+    #[serde(skip)]
+    pub koreader: Vec<crate::koreader::Position>,
     /// The books' positions and the vocabulary, read in the same session (`[sync] shelf`).
     #[serde(skip)]
     pub shelf: Option<crate::sync::ShelfRead>,

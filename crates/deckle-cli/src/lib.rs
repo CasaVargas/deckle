@@ -9,6 +9,7 @@ mod daemon;
 mod highlights;
 mod inbox;
 pub mod press_worker;
+mod reader_server;
 mod series;
 
 use std::path::{Path, PathBuf};
@@ -425,7 +426,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
+        cli::Command::ReaderServer { action } => reader_server::run(json, action),
         cli::Command::Words { from, action } => words_cmd(json, &from, action),
+        cli::Command::Koreader { action } => koreader_cmd(json, action),
         cli::Command::Bind {
             inputs,
             title,
@@ -955,6 +958,133 @@ fn bind_cmd(
         },
     )?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// The drive or folder KOReader is on, and what to call it: a Kindle on USB storage, else a
+/// Kobo or a PocketBook, else `arg` as a folder. A Kindle over MTP is refused: Deckle neither
+/// walks nor writes KOReader's files over MTP (KOReader hub design §D).
+fn koreader_root(arg: &str) -> Result<(PathBuf, String), String> {
+    if arg != "device" {
+        let dir = PathBuf::from(arg);
+        if !dir.is_dir() {
+            return Err(format!("{} is not a folder", dir.display()));
+        }
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Folder".into());
+        return Ok((dir, name));
+    }
+    match detect_kindle() {
+        Some(Target::MassStorage(d)) => Ok((d.root, "Kindle".into())),
+        Some(Target::Mtp(_)) => Err(
+            "this Kindle is connected over MTP, and Deckle doesn't read or write KOReader's \
+             files that way; copy its koreader/ folder and books to the computer and pass the \
+             folder"
+                .into(),
+        ),
+        _ => match detect_reader() {
+            Some(r) => Ok((r.root().to_path_buf(), r.name())),
+            None => Err("no e-reader connected; pass a folder instead".into()),
+        },
+    }
+}
+
+/// `deckle koreader backup|restore` (KOReader hub design §D).
+fn koreader_cmd(json: bool, action: cli::KoreaderCommand) -> Result<ExitCode, String> {
+    use deckle_core::koreader_backup::{self as kb, Outcome};
+    match action {
+        cli::KoreaderCommand::Backup { from, to } => {
+            let (root, device) = koreader_root(&from)?;
+            let base = match to {
+                Some(t) => t,
+                None => deckle_library::sources::home()
+                    .ok_or("no home folder; pass --to")?
+                    .join("Deckle")
+                    .join("KOReader backups"),
+            };
+            let now = deckle_digest::chrono::Local::now();
+            let dir = base
+                .join(&device)
+                .join(now.format("%Y-%m-%d %H%M%S").to_string());
+            let when = now
+                .with_timezone(&deckle_digest::chrono::Utc)
+                .format("%Y-%m-%dT%H:%M:%SZ")
+                .to_string();
+            let done = kb::backup(&root, &dir, &device, &when)?;
+            let m = &done.manifest;
+            emit(
+                json,
+                &serde_json::json!({
+                    "dir": done.dir, "device": m.device, "sidecars": m.sidecars.len(),
+                    "files": m.files.len(), "koreader_dir": m.koreader_dir, "failed": done.failed,
+                }),
+                || {
+                    let mut lines: Vec<String> = done
+                        .failed
+                        .iter()
+                        .map(|(f, e)| format!("failed {f}: {e}"))
+                        .collect();
+                    if m.koreader_dir.is_none() {
+                        lines.push("no KOReader folder here: only the sidecars".into());
+                    }
+                    lines.push(format!(
+                        "{} sidecars and {} files from {} backed up to {}",
+                        m.sidecars.len(),
+                        m.files.len(),
+                        m.device,
+                        done.dir.display()
+                    ));
+                    lines.join("\n")
+                },
+            )?;
+            Ok(if done.failed.is_empty() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+        cli::KoreaderCommand::Restore {
+            backup,
+            to,
+            settings,
+            force,
+        } => {
+            let (root, device) = koreader_root(&to)?;
+            let done = kb::restore(&backup, &root, kb::Options { settings, force })?;
+            emit(json, &done, || {
+                let mut lines: Vec<String> = Vec::new();
+                for i in done.sidecars.iter().chain(&done.settings) {
+                    let to = i.to.as_deref().unwrap_or(&i.book);
+                    lines.push(match i.outcome {
+                        Outcome::Restored if i.by == Some("md5") => {
+                            format!("restored       {to} (found by MD5; was {})", i.book)
+                        }
+                        Outcome::Restored => format!("restored       {to}"),
+                        Outcome::Kept => format!("kept (newer)   {to}"),
+                        Outcome::NoBook => format!("no book found  {}", i.book),
+                        Outcome::Failed => format!(
+                            "failed         {to}: {}",
+                            i.error.as_deref().unwrap_or("unknown")
+                        ),
+                    });
+                }
+                lines.push(format!(
+                    "{} restored, {} kept (newer), {} with no book found, {} failed, on {device}",
+                    done.count(Outcome::Restored),
+                    done.count(Outcome::Kept),
+                    done.count(Outcome::NoBook),
+                    done.count(Outcome::Failed),
+                ));
+                lines.join("\n")
+            })?;
+            Ok(if done.count(Outcome::Failed) == 0 {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            })
+        }
+    }
 }
 
 /// `deckle words`: reads `vocab.db` over one connection (one MTP session), never writing to the
@@ -2195,7 +2325,7 @@ fn paper_owner(cfg: &deckle_digest::Config) -> Result<Option<String>, String> {
 }
 
 /// A paper's `readership.json`: today's file for the main paper, `papers/<slug>/` for another.
-fn readership_path(cfg: &deckle_digest::Config) -> PathBuf {
+pub(crate) fn readership_path(cfg: &deckle_digest::Config) -> PathBuf {
     cfg.state_file("readership.json")
         .unwrap_or_else(deckle_readership::state_path)
 }
@@ -2707,6 +2837,7 @@ fn digest(
                 _ => Vec::new(),
             };
             let exported = exports.iter().any(|x| x.error.is_none());
+            reader_server::remember(exports.iter().flat_map(|x| x.written.iter()));
             // The EPUB outbox, for a Kobo or a PocketBook: when one has been seen, or there is
             // no Previewer.
             let kobo_queue = epub_queue();
@@ -2749,12 +2880,12 @@ fn digest(
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             let mut outcome = DigestOutcome::default();
             let reading_outcomes = built.reading_outcomes.clone();
-            if let Some(k) = kfx {
-                record_layout(k, date, &built, &cfg);
-                if is_today(date) {
-                    let note = keep_kfx_in_morgue(&cfg, date, k);
-                    built.notes.extend(note);
-                }
+            record_layout(kfx, date, &built, &cfg);
+            if let Some(k) = kfx
+                && is_today(date)
+            {
+                let note = keep_kfx_in_morgue(&cfg, date, k);
+                built.notes.extend(note);
             }
             // The reMarkable's PDF, from its own outbox.
             let rm_queue = remarkable_queue();
@@ -2817,7 +2948,8 @@ fn digest(
             let remarkable = rm_queued.then(|| push_remarkable(&cfg)).flatten();
             // A Kobo or a PocketBook plugged in now takes its copy at once.
             let device = detect_reader().filter(|_| folder.is_none() && epub_queued);
-            let reader = match push_reader(&kobo_queue, &cfg, device.as_ref()) {
+            let reader = match push_reader(&kobo_queue, std::slice::from_ref(&cfg), device.as_ref())
+            {
                 Ok(o) => o,
                 Err(e) => {
                     built.notes.push(format!("e-reader: {e}"));
@@ -3104,7 +3236,8 @@ fn digest(
             if target.is_none()
                 && let Some(reader) = &reader
             {
-                let mut outcome = push_reader(&kobo_queue, &cfg, Some(reader))?.unwrap_or_default();
+                let mut outcome =
+                    push_reader(&kobo_queue, &papers, Some(reader))?.unwrap_or_default();
                 outcome.remarkable = remarkable;
                 emit(json, &outcome, || match &outcome.flush {
                     Some(_) => outcome.describe(&kobo_queue),
@@ -3172,6 +3305,9 @@ fn digest(
                 Ok(None) => {}
                 Err(e) => eprintln!("bookmarklet: no token: {e}"),
             }
+            // The OPDS catalog and KOReader sync, when they're on (KOReader hub design §A.1);
+            // checked each tick, so turning it on in the app needs no restart.
+            let mut reader_server = reader_server::Supervisor::default();
             // Each device's [sync] actions run once per connection: a failed delivery waits
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
@@ -3207,6 +3343,7 @@ fn digest(
                     &mut press_error,
                     press_supervisor.tick(&papers, deckle_digest::chrono::Utc::now()),
                 );
+                reader_server.tick(&cfg, &path);
                 scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,
@@ -3261,12 +3398,10 @@ fn digest(
                 }
                 let reader = detect_reader();
                 let reader_id = reader.as_ref().map(deckle_core::reader::Reader::id);
+                // readership comes from KOReader's sidecars (KOReader hub design §C)
                 let reader_actions = reader_id
                     .as_deref()
-                    .map(|id| deckle_core::sync::Actions {
-                        readership: false,
-                        ..sync_actions(&cfg, id)
-                    })
+                    .map(|id| sync_actions(&cfg, id))
                     .unwrap_or_default();
                 let plan = reader_watcher.tick(
                     reader_id.as_deref(),
@@ -3274,7 +3409,7 @@ fn digest(
                     reader_actions,
                 );
                 if let (Some(k), false) = (&reader, plan.is_empty()) {
-                    match reader_sync(&kobo_queue, &cfg, k, plan) {
+                    match reader_sync(&kobo_queue, &papers, k, plan) {
                         Ok(o) => emit(json, &o, || o.describe(&kobo_queue))?,
                         Err(e) => eprintln!("error: {e}"),
                     }
@@ -4173,32 +4308,33 @@ fn queue_epubs(
 }
 
 /// Flushes the EPUB outbox to `reader` (a Kobo or a PocketBook), when one is connected, with its
-/// `[sync]` actions.
+/// `[sync]` actions (the first of `papers`).
 fn push_reader(
     queue: &deckle_core::queue::Queue,
-    cfg: &deckle_digest::Config,
+    papers: &[deckle_digest::Config],
     reader: Option<&deckle_core::reader::Reader>,
 ) -> Result<Option<DigestOutcome>, String> {
     let Some(reader) = reader else {
         return Ok(None);
     };
-    let actions = sync_actions(cfg, &reader.id());
+    let actions = sync_actions(&papers[0], &reader.id());
     let Some(plan) = push_plan(actions, queue.pending().is_empty()) else {
         return Ok(None);
     };
-    reader_sync(queue, cfg, reader, plan).map(Some)
+    reader_sync(queue, papers, reader, plan).map(Some)
 }
 
 /// [`sync_to`] for a Kobo or a PocketBook: push the EPUB outbox, prune, and on a Kobo read its
-/// database for the highlights and the shelf. Neither has a `.yjf`, so no readership; and the
-/// Morgue's notes on
-/// what's on the Kindle stay the Kindle's.
+/// database for the highlights and the shelf. Neither has a `.yjf`: readership comes from
+/// KOReader's sidecars, recorded in each of `papers` (the first is the household's settings).
+/// The Morgue's notes on what's on the Kindle stay the Kindle's.
 fn reader_sync(
     queue: &deckle_core::queue::Queue,
-    cfg: &deckle_digest::Config,
+    papers: &[deckle_digest::Config],
     reader: &deckle_core::reader::Reader,
     plan: deckle_core::sync::Plan,
 ) -> Result<DigestOutcome, String> {
+    let cfg = &papers[0];
     let id = reader.id();
     let now = deckle_digest::chrono::Utc::now();
     let stamp = now.format("%Y-%m-%dT%H:%M:%SZ").to_string();
@@ -4214,6 +4350,8 @@ fn reader_sync(
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
     )
     .map_err(|e| e.to_string())?;
+    // So KOReader's sync can name these by MD5 later (KOReader hub design §B).
+    reader_server::remember(flush.delivered.iter());
     if plan.clippings && puzzle_on(cfg) && flush.clippings_error.is_none() {
         let path = cfg.puzzle_store();
         let mut store = deckle_digest::puzzle::store::Store::load(&path);
@@ -4262,12 +4400,52 @@ fn reader_sync(
             .inspect_err(|e| eprintln!("shelf: {e}"))
             .ok()
     });
+    let readership = (plan.readership && !flush.koreader.is_empty()).then(|| {
+        let device = format!("koreader/{id}");
+        let opened = papers
+            .iter()
+            .map(|p| record_koreader(&readership_path(p), &device, &flush.koreader))
+            .sum();
+        deckle_readership::Recorded {
+            opened,
+            ..Default::default()
+        }
+    });
     Ok(DigestOutcome {
         flush: Some(flush),
         highlights,
+        readership,
         shelf,
         ..Default::default()
     })
+}
+
+/// KOReader's position in each edition the readership file at `path` has a layout for, as
+/// `device`'s reads (KOReader hub design §C). Returns the editions recorded.
+pub(crate) fn record_koreader(
+    path: &Path,
+    device: &str,
+    found: &[deckle_core::koreader::Position],
+) -> usize {
+    let mut state = deckle_readership::State::load(path);
+    let mut n = 0;
+    for p in found {
+        let Some(date) = deckle_readership::koreader::edition_of(&state, &p.book) else {
+            continue;
+        };
+        let xpointer = p.xpointer.as_deref().unwrap_or_default();
+        if deckle_readership::record_koreader_position(
+            &mut state, date, device, xpointer, p.percent, &p.when,
+        ) {
+            n += 1;
+        }
+    }
+    if n > 0
+        && let Err(e) = state.save(path)
+    {
+        eprintln!("readership: {e}");
+    }
+    n
 }
 
 /// `deckle run … --to device` with no Kindle but a Kobo or a PocketBook: each book cleaned
@@ -4741,14 +4919,16 @@ fn on_device(on: &deckle_core::yjf::OnDevice) -> deckle_readership::OnDevice {
     }
 }
 
-/// Where each section of the edition just built starts, for the readership report. Never fails
-/// the run.
+/// Where each section of the edition just built starts, for the readership report: from the
+/// KFX when one was made, and the EPUB's spine always, for KOReader (KOReader hub design §C).
+/// With no KFX the layout is in the EPUB's own positions. Never fails the run.
 fn record_layout(
-    kfx: &Path,
+    kfx: Option<&Path>,
     date: deckle_digest::chrono::NaiveDate,
     built: &deckle_digest::BuildReport,
     cfg: &deckle_digest::Config,
 ) {
+    use deckle_readership::layout;
     let sections: Vec<(String, String)> = built
         .sections
         .iter()
@@ -4761,29 +4941,52 @@ fn record_layout(
         .iter()
         .map(|s| (s.key.clone(), s.titles.clone()))
         .collect();
-    let layout = std::fs::read(kfx)
-        .map_err(|e| format!("{}: {e}", kfx.display()))
-        .and_then(|bytes| {
-            let mut l = deckle_readership::layout::layout_from_kfx(
-                &bytes,
-                date,
-                &built.title,
-                stem,
-                &sections,
-            )?;
-            // stories are a nicety for learning: a layout without them is still a layout
-            if let Err(e) = deckle_readership::layout::add_stories(&mut l, &bytes, &titles) {
-                eprintln!("readership: stories: {e}");
-            }
-            Ok(l)
-        })
-        .map(|l| with_items(l, built));
+    let epub = std::fs::read(&built.epub)
+        .map_err(|e| format!("{}: {e}", built.epub.display()))
+        .and_then(|bytes| layout::epub_layout(&bytes, &sections));
     let path = readership_path(cfg);
-    let saved = layout.and_then(|l| {
-        let mut state = deckle_readership::State::load(&path);
-        state.record_layout(l);
-        state.save(&path)
+    let from_kfx = kfx.map(|kfx| {
+        std::fs::read(kfx)
+            .map_err(|e| format!("{}: {e}", kfx.display()))
+            .and_then(|bytes| {
+                let mut l = layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)?;
+                // stories are a nicety for learning: a layout without them is still a layout
+                if let Err(e) = layout::add_stories(&mut l, &bytes, &titles) {
+                    eprintln!("readership: stories: {e}");
+                }
+                Ok(l)
+            })
     });
+    // A KFX layout that can't be made still leaves KOReader's: the EPUB's (KOReader hub
+    // design §C).
+    let kfx_layout = match from_kfx {
+        Some(Ok(l)) => Some(l),
+        Some(Err(e)) => {
+            eprintln!("readership: {e}; keeping the EPUB's layout");
+            None
+        }
+        None => None,
+    };
+    let saved = match kfx_layout {
+        Some(mut l) => {
+            // so is the spine: only KOReader's positions need it
+            match epub {
+                Ok(e) => l.epub = Some(e),
+                Err(e) => eprintln!("readership: EPUB spine: {e}"),
+            }
+            let mut state = deckle_readership::State::load(&path);
+            state.record_layout(with_items(l, built));
+            state.save(&path)
+        }
+        None => epub.and_then(|e| {
+            let l = layout::layout_from_epub(e, date, &built.title, stem);
+            let mut state = deckle_readership::State::load(&path);
+            match state.record_epub_layout(with_items(l, built)) {
+                true => state.save(&path),
+                false => Ok(()),
+            }
+        }),
+    };
     if let Err(e) = saved {
         eprintln!("readership: {e}");
     }
@@ -5908,6 +6111,7 @@ mod layout_tests {
             title: "T".into(),
             file: "f".into(),
             end: 10,
+            epub: None,
             sections: vec![sec("front"), sec("local"), sec("feeds:Science")],
         };
         let summary = |key: &str, items| deckle_digest::SectionSummary {

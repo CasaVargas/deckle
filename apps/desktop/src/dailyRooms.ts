@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { DEFAULT_REMARKABLE } from "./exportsView";
-import { SCREEN_LABEL } from "./types";
+import { DEFAULT_READER_SERVER, SCREEN_LABEL } from "./types";
 import { DAYS } from "./papersView";
 import type { DailyConfig, Day, ReadershipView } from "./types";
 
@@ -69,6 +69,7 @@ const FORMAT_LABEL = { epub: "EPUB", kepub: "KEPUB", pdf: "PDF", bundle: "Bundle
 export function deliveryGroups(cfg: DailyConfig): { kindle: DeliveryRow[]; others: DeliveryRow[] } {
   const email = cfg.email;
   const rm = cfg.remarkable ?? DEFAULT_REMARKABLE;
+  const rs = cfg.reader_server ?? DEFAULT_READER_SERVER;
   return {
     kindle: [
       { key: "usb", name: "Over USB", how: "When it's plugged in. Older papers are removed.", status: `Keeps ${plural(cfg.keep, "paper")}`, on: null, opens: true },
@@ -92,6 +93,7 @@ export function deliveryGroups(cfg: DailyConfig): { kindle: DeliveryRow[]; other
         opens: true,
       })),
       { key: "readers", name: "Kobo and PocketBook", how: "Found when one is plugged in, nothing to set up", status: "Automatic", on: null, opens: false },
+      { key: "reader_server", name: "KOReader over Wi-Fi", how: "A catalog to download from, and reading progress back", status: rs.enabled ? `Port ${rs.port}` : "Off", on: rs.enabled, opens: true },
     ],
   };
 }

@@ -74,7 +74,7 @@ ENV PUID=99 \
     DECKLE_WEB_DIR=/opt/deckle/web
 VOLUME /config /data
 # The web UI (off until DECKLE_WEB_PASSWORD is set), and the bookmarklet listener.
-EXPOSE 8080 47219
+EXPOSE 8080 47219 47220
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 # The web UI and the daemon; without a password, the daemon alone.
 CMD ["deckle", "serve"]

@@ -11,6 +11,7 @@ base64 = "0.23"
 deckle-cli.workspace = true
 deckle-core.workspace = true
 deckle-digest.workspace = true
+deckle-readerserver.workspace = true
 deckle-docx.workspace = true
 deckle-fb2.workspace = true
 deckle-highlights.workspace = true

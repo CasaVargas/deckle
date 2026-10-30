@@ -88,6 +88,8 @@ pub fn run() {
             wrap::schedule_set,
             wrap::email_status,
             wrap::email_set_password,
+            wrap::reader_server_status,
+            wrap::reader_server_set_password,
             wrap::email_test,
             wrap::subscriptions_status,
             wrap::subscription_set_password,

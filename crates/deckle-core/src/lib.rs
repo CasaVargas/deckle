@@ -18,6 +18,7 @@ pub mod inventory;
 pub mod kepub;
 pub mod kobo;
 pub mod koreader;
+pub mod koreader_backup;
 pub mod matcher;
 pub mod metadata_fill;
 pub mod normalize;

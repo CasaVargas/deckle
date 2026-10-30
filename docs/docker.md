@@ -46,6 +46,7 @@ The image is `ghcr.io/casavargas/deckle`. `:latest` is the newest published rele
 | `DECKLE_SMTP_PASSWORD` | unset | The password for `[email]`. |
 | `DECKLE_SITE_PASSWORD_<SITE>` | unset | A paper you subscribe to ([below](#email-to-kindle-and-passwords)). |
 | `DECKLE_BOOKMARKLET_URL` | unset | The address your browser reaches the bookmarklet at ([below](#the-bookmarklet-over-your-network)). |
+| `DECKLE_READER_SERVER_URL` | unset | The address your e-readers reach the reader server at, shown in the app ([below](#koreader-over-wi-fi)). |
 
 | Folder | Holds |
 |---|---|
@@ -53,7 +54,7 @@ The image is `ghcr.io/casavargas/deckle`. `:latest` is the newest published rele
 | `/data` | `Deckle/`: the Morgue, the Inbox, export folders |
 
 Port `8080` is the web UI. Port `47219` is the bookmarklet's listener; publish it only if you
-use the bookmarklet.
+use the bookmarklet. Port `47220` is the reader server; publish it only if you turn it on.
 
 With plain `docker run`, add `--stop-timeout 90`. A running edition gets up to 60 seconds to
 finish when the container stops; the compose file's `stop_grace_period: 90s` covers that and
@@ -199,6 +200,18 @@ A browser may block a call to an `http://` address from an `https://` page. If s
 sites fails that way, put the listener behind a reverse proxy with TLS and set
 `DECKLE_BOOKMARKLET_URL` to its `https://` address. Or skip the bookmarklet and drop links
 (`.webloc`, `.url`, `.txt`) and saved pages into `/data/Deckle/Inbox`.
+
+## KOReader over Wi-Fi
+
+Turn on **KOReader over Wi-Fi** in the Daily tab's Delivery (or `[reader_server] enabled = true`)
+and set its password there or with `docker exec deckle deckle reader-server password`. Then:
+
+1. Publish the port (`"47220:47220"` in compose).
+2. Set `DECKLE_READER_SERVER_URL` to the address your e-readers use, e.g.
+   `http://tower.local:47220`, so the app shows URLs that work. Inside the container Deckle only
+   sees its own address.
+
+It's plain HTTP, meant for your home network or Tailscale. Don't expose the port to the internet.
 
 ## Moving from the desktop app
 
