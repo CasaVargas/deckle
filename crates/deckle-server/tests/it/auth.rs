@@ -329,3 +329,27 @@ fn from_env_reads_every_setting() {
         assert!(err.contains(k), "{err}");
     }
 }
+
+#[test]
+fn start_warnings_name_an_ignored_or_short_password() {
+    let cfg =
+        |pairs: &[(&str, &str)]| ServerConfig::from_lookup("/web".into(), env(pairs)).unwrap();
+    assert_eq!(
+        cfg(&[
+            ("DECKLE_WEB_PASSWORD", "a-long-password"),
+            ("DECKLE_WEB_AUTH", "none")
+        ])
+        .warnings(),
+        ["DECKLE_WEB_AUTH=none: the password is ignored"]
+    );
+    assert_eq!(
+        cfg(&[("DECKLE_WEB_PASSWORD", "short")]).warnings(),
+        ["web UI password is short; use 12+ characters"]
+    );
+    assert!(
+        cfg(&[("DECKLE_WEB_PASSWORD", "a-long-password")])
+            .warnings()
+            .is_empty()
+    );
+    assert!(cfg(&[("DECKLE_WEB_AUTH", "none")]).warnings().is_empty());
+}

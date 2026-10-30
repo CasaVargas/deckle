@@ -113,6 +113,17 @@ impl ServerConfig {
             roots,
         })
     }
+
+    /// What the log should say at start about a setting that works but isn't what was meant.
+    pub fn warnings(&self) -> Vec<&'static str> {
+        match &self.password {
+            Some(_) if self.auth_none => vec!["DECKLE_WEB_AUTH=none: the password is ignored"],
+            Some(p) if p.chars().count() < 12 => {
+                vec!["web UI password is short; use 12+ characters"]
+            }
+            _ => Vec::new(),
+        }
+    }
 }
 
 /// What every handler shares.
@@ -184,11 +195,8 @@ pub async fn serve(
     ctx: Arc<Ctx>,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> io::Result<()> {
-    if !cfg.auth_none
-        && let Some(password) = &cfg.password
-        && password.chars().count() < 12
-    {
-        eprintln!("web UI password is short; use 12+ characters");
+    for w in cfg.warnings() {
+        eprintln!("{w}");
     }
     let listener = tokio::net::TcpListener::bind((cfg.bind, cfg.port)).await?;
     // The address bound, not the one asked for: port 0 picks a free one.
