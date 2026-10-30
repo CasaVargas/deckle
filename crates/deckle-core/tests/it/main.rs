@@ -16,5 +16,6 @@ mod pipeline;
 mod preflight;
 mod previewer;
 mod thumbnail;
+mod whoswho;
 mod wordwise;
 mod xray;
