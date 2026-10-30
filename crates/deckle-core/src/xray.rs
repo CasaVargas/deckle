@@ -116,6 +116,66 @@ pub fn build_with(
     post: &mut Post<'_>,
     fetch: &mut Fetch<'_>,
 ) -> Result<Option<XRayOutput>, XRayError> {
+    let Some(found) = entities_with(title, author, lang, runs, opts, post, fetch) else {
+        return Ok(None);
+    };
+    let Entities {
+        entities,
+        source,
+        warnings,
+        lang,
+    } = found;
+    let people = entities
+        .iter()
+        .filter(|e| e.kind == EntityKind::Person)
+        .count();
+    let terms = entities.len() - people;
+    let book = XRayBook {
+        asin: asin.to_owned(),
+        lang,
+        erl,
+        entities,
+    };
+    let tmp = tempfile::tempdir()?;
+    let path = tmp.path().join(sidecar_name(asin));
+    write_asc(&path, &book)?;
+    let bytes = std::fs::read(&path)?;
+    Ok(Some(XRayOutput {
+        file_name: sidecar_name(asin),
+        bytes,
+        summary: XRaySummary {
+            people,
+            terms,
+            source: source.to_owned(),
+            engine: deckle_xray::ENGINE,
+        },
+        warnings,
+    }))
+}
+
+/// The book's people and terms with their descriptions, as X-Ray and Who's who both use them;
+/// `None` when the text has no recurring names.
+pub struct Entities {
+    pub entities: Vec<Entity>,
+    /// `llm` | `wikipedia` | `basic`
+    pub source: &'static str,
+    /// Non-fatal problems (LLM or Wikipedia failures that fell back).
+    pub warnings: Vec<String>,
+    /// The book's primary language subtag (`en`).
+    pub lang: String,
+}
+
+/// Heuristic entities from `runs`, then the LLM's descriptions when configured and Wikipedia's
+/// for terms when opted in.
+pub fn entities_with(
+    title: &str,
+    author: &str,
+    lang: &str,
+    runs: &[Run],
+    opts: &XRayOptions,
+    post: &mut Post<'_>,
+    fetch: &mut Fetch<'_>,
+) -> Option<Entities> {
     // "en-US" → "en": Wikipedia hosts and the strings table use the primary subtag.
     let lang = lang
         .split(['-', '_'])
@@ -125,7 +185,7 @@ pub fn build_with(
     let lang = if lang.is_empty() { "en" } else { lang.as_str() };
     let cands = heuristic(runs, lang);
     if cands.is_empty() {
-        return Ok(None);
+        return None;
     }
     let mut warnings = Vec::new();
     let mut entities: Vec<Entity> = cands
@@ -193,32 +253,12 @@ pub fn build_with(
             source = "wikipedia";
         }
     }
-    let people = entities
-        .iter()
-        .filter(|e| e.kind == EntityKind::Person)
-        .count();
-    let terms = entities.len() - people;
-    let book = XRayBook {
-        asin: asin.to_owned(),
-        lang: lang.to_owned(),
-        erl,
+    Some(Entities {
         entities,
-    };
-    let tmp = tempfile::tempdir()?;
-    let path = tmp.path().join(sidecar_name(asin));
-    write_asc(&path, &book)?;
-    let bytes = std::fs::read(&path)?;
-    Ok(Some(XRayOutput {
-        file_name: sidecar_name(asin),
-        bytes,
-        summary: XRaySummary {
-            people,
-            terms,
-            source: source.to_owned(),
-            engine: deckle_xray::ENGINE,
-        },
+        source,
         warnings,
-    }))
+        lang: lang.to_owned(),
+    })
 }
 
 /// Merges the LLM answer: descriptions and kinds by name, empty description = drop, aliases
