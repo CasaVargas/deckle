@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { relaunch } from "@tauri-apps/plugin-process";
+import { platform } from "../platform";
 import { install, type UpdateState } from "../updates";
 import CasaVargas from "./CasaVargas";
 import { Link, REPO } from "./Row";
@@ -59,7 +59,7 @@ function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version">) {
       return (
         <span className="update">
           Deckle {update.update.version} is installed.
-          <button className="primary" disabled={busy} onClick={() => relaunch()}>
+          <button className="primary" disabled={busy} onClick={() => platform.relaunch()}>
             Restart to finish
           </button>
           {busy && <span>Finish the current job first.</span>}

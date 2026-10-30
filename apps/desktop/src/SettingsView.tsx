@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import Icon from "./Icon";
@@ -57,7 +57,7 @@ export default function SettingsView(props: Props) {
     if (c.key === "previewer") props.onPickPreviewer();
     else if (c.key === "library") props.onPickLibrary();
     else if (c.key === "highlights") {
-      const dir = await openDialog({ directory: true, multiple: false });
+      const dir = await platform.pickFolder({});
       if (typeof dir === "string") setHighlights(await api.highlightsSet(dir, highlights?.clippings ?? false));
     } else onPage(c.page);
   };

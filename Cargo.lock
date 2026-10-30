@@ -1187,30 +1187,12 @@ dependencies = [
 name = "deckle-desktop"
 version = "0.9.0"
 dependencies = [
- "base64 0.23.1",
  "deckle-app",
  "deckle-cli",
- "deckle-core",
  "deckle-digest",
- "deckle-docx",
- "deckle-fb2",
  "deckle-highlights",
- "deckle-kfx",
  "deckle-library",
- "deckle-markdown",
- "deckle-mobi",
  "deckle-morgue",
- "deckle-odt",
- "deckle-pdf",
- "deckle-readership",
- "deckle-rtf",
- "deckle-shelf",
- "deckle-transport",
- "deckle-txt",
- "deckle-xray",
- "image",
- "rusqlite",
- "serde",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -1218,7 +1200,6 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-process",
  "tauri-plugin-updater",
- "tempfile",
 ]
 
 [[package]]

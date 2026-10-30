@@ -3,7 +3,7 @@
 // switcher. Name, who it's for, its Kindle and units, the masthead as cards in each face, how it
 // reads, the AI editor and learning. Everything saves as it changes.
 import { useEffect, useRef, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api } from "./api";
 import DailyEditor from "./DailyEditor";
 import Icon from "./Icon";
@@ -138,8 +138,8 @@ export default function PaperSheet({
           <button
             className="link"
             onClick={async () => {
-              const picked = await openDialog({ multiple: false, filters: [{ name: "TrueType font", extensions: ["ttf"] }] });
-              if (typeof picked === "string") edit((c) => (c.masthead = picked), "now");
+              const picked = (await platform.pickFiles({ filterName: "TrueType font", extensions: ["ttf"] }))?.[0];
+              if (picked !== undefined) edit((c) => (c.masthead = picked), "now");
             }}
           >
             Use a font file…

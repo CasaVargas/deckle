@@ -7,7 +7,7 @@ import { setupSavedExport, setupWithRefresh } from "./pressView";
 import { debounce, saveQueue } from "./saveQueue";
 import SectionsTab from "./SectionsTab";
 import type { Change } from "./SectionsTab";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api } from "./api";
 import { ROOMS, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import PaperSheet from "./PaperSheet";
@@ -698,7 +698,7 @@ export default function DailyView({
                 <button
                   className="ghost"
                   onClick={async () => {
-                    const dir = await openDialog({ directory: true, multiple: false });
+                    const dir = await platform.pickFolder({});
                     if (typeof dir === "string") change((c) => ({ ...c, reading: { ...c.reading, inbox: dir } }));
                   }}
                 >

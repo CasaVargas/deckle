@@ -3,7 +3,7 @@
 // list. A row opens beneath itself to its sources; every change saves as it's made.
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api } from "./api";
 import AddSection from "./AddSection";
 import Icon from "./Icon";
@@ -572,7 +572,7 @@ function ReadingBody({
         <button
           className="ghost"
           onClick={async () => {
-            const dir = await openDialog({ directory: true, multiple: false });
+            const dir = await platform.pickFolder({});
             if (typeof dir === "string") change((c) => ({ ...c, reading: { ...c.reading, inbox: dir } }));
           }}
         >

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useState } from "react";
 import { pressView } from "./pressView";
-import { homeDir } from "@tauri-apps/api/path";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { hasFolder, iCloudDrive, newExport } from "./exportsView";
 import { Switch } from "./settings/Row";
 import { SCREEN_LABEL } from "./types";
@@ -19,12 +18,12 @@ import type { ExportConfig, PressSetupStatus, Screen } from "./types";
 export async function addFolder(current: ExportConfig[]): Promise<ExportConfig[] | string | null> {
   let defaultPath: string | undefined;
   if (navigator.userAgent.includes("Mac")) {
-    defaultPath = await homeDir()
+    defaultPath = await platform.homeDir()
       .then(iCloudDrive)
       .catch(() => undefined);
   }
-  const picked = await openDialog({ directory: true, multiple: false, defaultPath });
-  if (typeof picked !== "string") return null;
+  const picked = await platform.pickFolder({ defaultPath });
+  if (picked === null) return null;
   if (hasFolder(current, picked)) return "That folder is already on the list.";
   return [...current, newExport(picked, current)];
 }

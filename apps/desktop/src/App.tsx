@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api, coverRequest } from "./api";
 import { deviceLabel } from "./deviceLabel";
 import { size } from "./kindleRooms";
@@ -221,23 +220,21 @@ export default function App() {
       })
       .catch(() => {});
     const timer = setInterval(refreshDevices, 4000);
-    const unlistenDrop = getCurrentWebview().onDragDropEvent((ev) => {
-      if (ev.payload.type === "enter" || ev.payload.type === "over") setDragging(true);
-      else if (ev.payload.type === "leave") setDragging(false);
-      else if (ev.payload.type === "drop") {
-        setDragging(false);
+    const unlistenDrop = platform.onFileDrop({
+      over: setDragging,
+      drop: (paths) => {
         // On the Cookbook tab, link files and saved pages are recipes for Add; nothing else belongs
         // there, and never the Books library (not even while Settings covers the tab).
         if (tabRef.current === "cookbook") {
           if (cookbookPasteReady.current) {
-            const files = ev.payload.paths.filter((p) => ARTICLE_FILE.test(p));
+            const files = paths.filter((p) => ARTICLE_FILE.test(p));
             if (files.length > 0) setIncoming((c) => ({ seq: (c?.seq ?? 0) + 1, targets: files }));
             else setNotice("Drop .webloc, .url or .html files to add recipes.");
           }
           return;
         }
-        addPaths(ev.payload.paths);
-      }
+        addPaths(paths);
+      },
     });
     const unlistenProgress = api.onProgress((e) => {
       setBooks((prev) =>
@@ -330,13 +327,13 @@ export default function App() {
   };
 
   const pickBooks = async () => {
-    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "odt", "ott", "fodt", "rtf", "mobi", "azw", "azw3", "prc", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] }] });
-    if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
+    const picked = await platform.pickFiles({ multiple: true, filterName: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "odt", "ott", "fodt", "rtf", "mobi", "azw", "azw3", "prc", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] });
+    if (picked) addPaths(picked);
   };
 
   const pickNotes = async () => {
-    const picked = await openDialog({ directory: true, multiple: false, title: "Choose a folder of Markdown notes" });
-    if (typeof picked === "string") addPaths([picked]);
+    const picked = await platform.pickFolder({ title: "Choose a folder of Markdown notes" });
+    if (picked !== null) addPaths([picked]);
   };
 
   const setLibraryOptions = async (root: string | null, autoAdd: boolean) => {
@@ -348,8 +345,8 @@ export default function App() {
   };
 
   const pickLibrary = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
-    if (typeof dir === "string") setLibraryOptions(dir, library?.auto_add ?? true);
+    const dir = await platform.pickFolder({});
+    if (dir !== null) setLibraryOptions(dir, library?.auto_add ?? true);
   };
 
   // Re-send, Upgrade and Update from the Kindle tab: the library copies go on the Books tab
@@ -372,8 +369,8 @@ export default function App() {
   };
 
   const pickPreviewer = async () => {
-    const picked = await openDialog({ multiple: false, directory: false });
-    if (typeof picked === "string") saveSettings({ ...settings, previewer_path: picked });
+    const picked = (await platform.pickFiles({}))?.[0];
+    if (picked !== undefined) saveSettings({ ...settings, previewer_path: picked });
   };
 
   const runnable = books.filter((b) => b.mode !== "error");
@@ -434,8 +431,8 @@ export default function App() {
   };
 
   const exportToFolder = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
-    if (typeof dir === "string") start({ kind: "folder", path: dir });
+    const dir = await platform.pickFolder({});
+    if (dir !== null) start({ kind: "folder", path: dir });
   };
 
   // `--export-to DIR` on the command line: run as soon as the books and Previewer status are in.

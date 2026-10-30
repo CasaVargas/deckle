@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { monthGrid, sizeLine } from "./morgueView";
@@ -105,7 +105,7 @@ export default function EveryEdition({ onFolder, disabled, building }: { onFolde
     }
   };
   const changeFolder = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
+    const dir = await platform.pickFolder({});
     if (typeof dir === "string") {
       const before = view;
       await onFolder(dir);

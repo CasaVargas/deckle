@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invoke, listen } from "./transport";
+import { platform } from "./platform";
 import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
@@ -107,10 +106,10 @@ export const api = {
   shelfForget: () => invoke<ShelfStatus>("shelf_forget"),
   shelfSet: (on: boolean) => invoke<ShelfStatus>("shelf_set", { on }),
   /** Opens an https link in the default browser (webview links do not). */
-  openLink: (url: string) => openUrl(url),
-  onProgress: (cb: (e: ProgressEvent) => void): Promise<UnlistenFn> =>
-    listen<ProgressEvent>("book-progress", (ev) => cb(ev.payload)),
-  onRunFinished: (cb: () => void): Promise<UnlistenFn> => listen("run-finished", () => cb()),
+  openLink: (url: string) => platform.openUrl(url),
+  onProgress: (cb: (e: ProgressEvent) => void): Promise<() => void> =>
+    listen<ProgressEvent>("book-progress", cb),
+  onRunFinished: (cb: () => void): Promise<() => void> => listen("run-finished", () => cb()),
 
   // The Daily tab
   dailyState: (paper: string | null = null) => invoke<DailyState>("daily_state", { paper }),
@@ -133,8 +132,8 @@ export const api = {
   recipeBookmarklet: () => invoke<string>("recipe_bookmarklet"),
   editionPreview: (paper: string | null = null) => invoke<EditionPreview | null>("edition_preview", { paper }),
   dailyRun: (send: boolean, paper: string | null = null) => invoke<void>("daily_run", { send, paper }),
-  onDailyFinished: (cb: (r: RunResult) => void): Promise<UnlistenFn> =>
-    listen<RunResult>("daily-finished", (ev) => cb(ev.payload)),
+  onDailyFinished: (cb: (r: RunResult) => void): Promise<() => void> =>
+    listen<RunResult>("daily-finished", cb),
   scheduleGet: () => invoke<ScheduleStatus>("schedule_get"),
   scheduleSet: (at: string | null, paper: string | null = null) => invoke<ScheduleStatus>("schedule_set", { at, paper }),
   dailyNext: (paper: string | null = null) => invoke<NextPaper>("daily_next", { paper }),
@@ -166,6 +165,6 @@ export const api = {
   /** Draws one recipe's picture (`id`) or every recipe's (`all`); progress comes as `cookbook-illustrate` events. */
   cookbookIllustrate: (id: string | null, all: boolean, redraw: boolean) => invoke<CookbookIllustrated>("cookbook_illustrate", { id, all, redraw }),
   cookbookIllustrateStop: () => invoke<void>("cookbook_illustrate_stop"),
-  onCookbookIllustrate: (cb: (e: CookbookIllustrateEvent) => void): Promise<UnlistenFn> =>
-    listen<CookbookIllustrateEvent>("cookbook-illustrate", (ev) => cb(ev.payload)),
+  onCookbookIllustrate: (cb: (e: CookbookIllustrateEvent) => void): Promise<() => void> =>
+    listen<CookbookIllustrateEvent>("cookbook-illustrate", cb),
 };
