@@ -180,6 +180,89 @@ pub fn partial_md5(path: &Path) -> Option<String> {
     Some(md5.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// [`partial_md5`] of a file's bytes held in memory: the KEPUB the catalog makes on request.
+pub fn partial_md5_bytes(bytes: &[u8]) -> String {
+    use md5::{Digest, Md5};
+    let mut md5 = Md5::new();
+    for i in -1i32..=10 {
+        let offset = if i < 0 { 0 } else { 1024usize << (2 * i) };
+        if offset >= bytes.len() {
+            break;
+        }
+        md5.update(&bytes[offset..(offset + 1024).min(bytes.len())]);
+    }
+    md5.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// KOReader's other name for a book (sync's "file name" matching): the MD5 of its file name.
+pub fn filename_md5(name: &str) -> String {
+    use md5::{Digest, Md5};
+    Md5::digest(name.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// The books Deckle handed to a KOReader, by the names KOReader's sync gives them (KOReader hub
+/// design §B): `koreader-documents.json`, digest → what it is.
+pub mod documents {
+    use std::collections::BTreeMap;
+    use std::path::Path;
+
+    use serde::{Deserialize, Serialize};
+
+    /// Entries kept; the oldest go first.
+    pub const KEEP: usize = 2000;
+
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct Document {
+        /// The file name it was handed over as, e.g. `deckle-daily-2026-10-30.kepub.epub`.
+        pub file: String,
+        /// When it was recorded, ISO 8601 UTC.
+        pub seen: String,
+    }
+
+    /// The registry at `path`; a missing or unreadable one is empty.
+    pub fn load(path: &Path) -> BTreeMap<String, Document> {
+        std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    /// The file a digest names, when Deckle handed it over.
+    pub fn lookup(path: &Path, digest: &str) -> Option<Document> {
+        load(path).remove(&digest.to_ascii_lowercase())
+    }
+
+    /// Records `bytes`, handed over as `file`, under both names KOReader may give it.
+    pub fn record(path: &Path, file: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let mut all = load(path);
+        let doc = Document {
+            file: file.to_owned(),
+            seen: crate::devices::now_iso(),
+        };
+        all.insert(super::partial_md5_bytes(bytes), doc.clone());
+        all.insert(super::filename_md5(file), doc);
+        if all.len() > KEEP {
+            let mut by_age: Vec<(String, String)> = all
+                .iter()
+                .map(|(k, d)| (d.seen.clone(), k.clone()))
+                .collect();
+            by_age.sort();
+            for (_, k) in by_age.into_iter().take(all.len() - KEEP) {
+                all.remove(&k);
+            }
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(&all)?)?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
 /// The settings a paper opens with (hub design §E): the paper's own fonts and styles, and
 /// hyphenation. Every key is one KOReader reads from a book's sidecar, not its global settings.
 /// Font size and margins are left to the owner's defaults; footnote popups too, as KOReader
@@ -944,5 +1027,32 @@ mod tests {
             Some("7acedd1a84a4cfcb6e7a16003242945e")
         );
         assert_eq!(partial_md5(&dir.path().join("missing")), None);
+    }
+
+    #[test]
+    fn partial_md5_of_bytes_matches_the_file_at_every_size() {
+        let tmp = tempfile::tempdir().unwrap();
+        for len in [0usize, 100, 1024, 1025, 17_000, 300_000, 5_000_000] {
+            let bytes: Vec<u8> = (0..len).map(|i| (i * 7 % 251) as u8).collect();
+            let p = tmp.path().join(format!("{len}.bin"));
+            std::fs::write(&p, &bytes).unwrap();
+            assert_eq!(partial_md5(&p).unwrap(), partial_md5_bytes(&bytes), "{len}");
+        }
+    }
+
+    #[test]
+    fn the_registry_answers_to_both_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path().join("koreader-documents.json");
+        documents::record(&reg, "deckle-daily-2026-10-30.epub", b"paper bytes").unwrap();
+        let by_md5 = documents::lookup(&reg, &partial_md5_bytes(b"paper bytes")).unwrap();
+        assert_eq!(by_md5.file, "deckle-daily-2026-10-30.epub");
+        let by_name = documents::lookup(&reg, &filename_md5("deckle-daily-2026-10-30.epub"));
+        assert_eq!(by_name.unwrap().file, "deckle-daily-2026-10-30.epub");
+        assert_eq!(
+            filename_md5("deckle-daily-2026-10-30.epub"),
+            "fadc39eba5a19b8f4d9e049d9b919bc7"
+        );
+        assert!(documents::lookup(&reg, "0000").is_none());
     }
 }
