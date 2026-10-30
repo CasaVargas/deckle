@@ -118,7 +118,7 @@ pub(crate) struct Server {
     pub(crate) cfg: ServerConfig,
     pub(crate) ctx: Arc<Ctx>,
     pub(crate) sessions: auth::Sessions,
-    pub(crate) login_slots: tokio::sync::Semaphore,
+    pub(crate) login_slots: Arc<tokio::sync::Semaphore>,
     /// Set on shutdown: ends the event streams, which would otherwise never finish.
     pub(crate) stop: watch::Sender<bool>,
 }
@@ -131,7 +131,7 @@ pub fn router(cfg: ServerConfig, ctx: Arc<Ctx>) -> Router {
         cfg,
         ctx,
         sessions: Default::default(),
-        login_slots: tokio::sync::Semaphore::new(auth::LOGIN_SLOTS),
+        login_slots: Arc::new(tokio::sync::Semaphore::new(auth::LOGIN_SLOTS)),
         stop: watch::channel(false).0,
     }))
 }
@@ -179,7 +179,7 @@ pub async fn serve(
         cfg,
         ctx,
         sessions: Default::default(),
-        login_slots: tokio::sync::Semaphore::new(auth::LOGIN_SLOTS),
+        login_slots: Arc::new(tokio::sync::Semaphore::new(auth::LOGIN_SLOTS)),
         stop: stop.clone(),
     });
     let app = build(server);

@@ -146,9 +146,9 @@ pub(crate) async fn login(
     if server.cfg.auth_none {
         return Json(json!({ "ok": true })).into_response();
     }
-    // A few checks at a time, each failure held for the delay: guessing in parallel gets
-    // LOGIN_SLOTS tries a second, not one per connection.
-    let Ok(permit) = server.login_slots.try_acquire() else {
+    // A few checks at a time, each failure holding its slot for the delay: guessing in
+    // parallel gets LOGIN_SLOTS tries a second, not one per connection.
+    let Ok(permit) = server.login_slots.clone().try_acquire_owned() else {
         return error(
             StatusCode::TOO_MANY_REQUESTS,
             "too many login attempts; try again in a moment".into(),
@@ -161,8 +161,13 @@ pub(crate) async fn login(
             Some(Extension(ConnectInfo(addr))) => eprintln!("web UI: failed login from {addr}"),
             None => eprintln!("web UI: failed login"),
         }
+        // A success answers at once, so a client could hang up when none comes and free the
+        // slot early; a task of its own keeps it taken for the whole delay.
+        tokio::spawn(async move {
+            tokio::time::sleep(FAILURE_DELAY).await;
+            drop(permit);
+        });
         tokio::time::sleep(FAILURE_DELAY).await;
-        drop(permit);
         return error(StatusCode::UNAUTHORIZED, "wrong password".into());
     }
     drop(permit);

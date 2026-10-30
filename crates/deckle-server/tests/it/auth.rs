@@ -166,6 +166,32 @@ async fn parallel_logins_are_capped_with_429() {
     assert_eq!(r.status, StatusCode::OK);
 }
 
+/// A wrong guess answers only after the delay, so a client could hang up as soon as no quick
+/// success comes back; its slot must stay taken for the full delay anyway.
+#[tokio::test]
+async fn abandoned_failed_logins_still_hold_their_slot() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path(), false);
+    let mut tries = Vec::new();
+    for i in 0..4 {
+        let app = app.clone();
+        tries.push(tokio::spawn(async move {
+            let body = json!({ "password": format!("guess {i}") }).to_string();
+            send(&app, post("/api/login", &body, None)).await
+        }));
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    for t in tries {
+        t.abort();
+        assert!(t.await.is_err_and(|e| e.is_cancelled()));
+    }
+    let body = json!({ "password": PASSWORD }).to_string();
+    let r = send(&app, post("/api/login", &body, None)).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    login(&app).await;
+}
+
 #[tokio::test]
 async fn login_with_a_bad_body_is_400() {
     let tmp = tempfile::tempdir().unwrap();
