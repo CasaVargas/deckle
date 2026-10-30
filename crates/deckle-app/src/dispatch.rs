@@ -124,6 +124,9 @@ commands! { ctx;
         daily::email_set_password(password)
     },
     email_status { paper: Option<String> } => Ok(daily::email_status(paper)),
+    reader_server_status {} => Ok(crate::reader_server::reader_server_status()),
+    reader_server_set_password { password: String } =>
+        crate::reader_server::reader_server_set_password(password),
     email_test { paper: Option<String> } => daily::email_test(paper),
     geocode { query: String } => daily::geocode(query),
     get_settings {} => Ok(if ctx.web {

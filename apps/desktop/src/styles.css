@@ -149,6 +149,13 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .dl-add { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 14px; border-top: 1px solid var(--line); list-style: none; }
 .delivery-tab .sec-body .email-card p { margin: 0; }
 .delivery-tab .sec-body .remarkable { display: flex; flex-direction: column; gap: 8px; }
+.delivery-tab .sec-body .reader-server { display: flex; flex-direction: column; gap: 8px; }
+.reader-server .export-row input[type="number"] { width: 90px; }
+.reader-server .export-row .save-row { margin: 0; }
+.reader-server-urls { margin: 4px 0 0; }
+.reader-server-urls dt { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.reader-server-urls dd { margin: 2px 0 0; }
+.reader-server-urls code { user-select: all; }
 
 /* The paper's own settings (Daily tab redesign §6): a sheet from the right */
 .sheet-backdrop { position: fixed; inset: 0; z-index: 20; background: rgb(0 0 0 / 0.28); display: flex; justify-content: flex-end; }

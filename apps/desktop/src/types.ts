@@ -351,6 +351,24 @@ export interface DailyConfig {
   export?: ExportConfig[];
   /** `[remarkable]`: the paper as a PDF to a reMarkable (other readers design §9). Absent while untouched. */
   remarkable?: RemarkableConfig;
+  /** `[reader_server]`: the OPDS catalog and KOReader sync (KOReader hub design §A). Absent while untouched. */
+  reader_server?: ReaderServerConfig;
+}
+
+/** `[reader_server]`: served by the watcher on the home network. The password isn't here. */
+export interface ReaderServerConfig {
+  enabled: boolean;
+  port: number;
+  username: string;
+}
+
+export const DEFAULT_READER_SERVER: ReaderServerConfig = { enabled: false, port: 47220, username: "deckle" };
+
+/** The reader server card's state: whether a password is set (never the password) and the URLs. */
+export interface ReaderServerStatus {
+  password_set: boolean;
+  opds: string;
+  sync: string;
 }
 
 /** A screen the PDF edition is laid out for (PDF edition design §5). */

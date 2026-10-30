@@ -14,6 +14,7 @@ pub mod kindle;
 pub mod morgue;
 pub mod next;
 pub mod press;
+pub mod reader_server;
 pub mod readership;
 pub mod shelf;
 pub mod state;

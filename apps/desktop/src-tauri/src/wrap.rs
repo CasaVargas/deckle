@@ -569,6 +569,18 @@ pub fn email_set_password(password: String) -> Result<EmailStatus, String> {
 }
 
 #[tauri::command]
+pub fn reader_server_status() -> deckle_app::reader_server::ReaderServerStatus {
+    deckle_app::reader_server::reader_server_status()
+}
+
+#[tauri::command]
+pub fn reader_server_set_password(
+    password: String,
+) -> Result<deckle_app::reader_server::ReaderServerStatus, String> {
+    deckle_app::reader_server::reader_server_set_password(password)
+}
+
+#[tauri::command]
 pub async fn email_test(paper: Option<String>) -> Result<String, String> {
     blocking(move || deckle_app::daily::email_test(paper)).await
 }

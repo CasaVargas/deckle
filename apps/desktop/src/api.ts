@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke, listen } from "./transport";
 import { platform } from "./platform";
-import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -143,6 +143,9 @@ export const api = {
   /** Write-only: the keychain keeps it, nothing reads it back. */
   emailSetPassword: (password: string) => invoke<EmailStatus>("email_set_password", { password }),
   emailTest: (paper: string | null = null) => invoke<string>("email_test", { paper }),
+  readerServerStatus: () => invoke<ReaderServerStatus>("reader_server_status"),
+  /** Write-only: its MD5 is kept, nothing reads it back. */
+  readerServerSetPassword: (password: string) => invoke<ReaderServerStatus>("reader_server_set_password", { password }),
   subscriptionsStatus: () => invoke<SiteStatus[]>("subscriptions_status"),
   /** Write-only: the keychain keeps it, nothing reads it back. */
   subscriptionSetPassword: (site: string, password: string) => invoke<SiteStatus[]>("subscription_set_password", { site, password }),
