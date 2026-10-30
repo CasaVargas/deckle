@@ -190,7 +190,9 @@ on a Kindle it could now build better.
   export leaves out, and later exports only add what's new. The 2024 Scribe doesn't keep that file
   ([#99](https://github.com/CasaVargas/deckle/issues/99)). If you read in KOReader, on any reader
   Deckle can see over USB or in a folder your reader syncs back, its highlights and notes come
-  too, and on a Kobo or PocketBook its books in progress reach From Your Shelf.
+  too, and on a Kobo or PocketBook its books in progress reach From Your Shelf. The paper opens
+  in KOReader as designed: Deckle sends it with settings for its own fonts, styles and
+  hyphenation, once, and never over KOReader's own.
 - **Words to Anki.** The words you looked up, as flashcards with a short definition, the sentence
   you met it in and the book.
 - **Several Kindles in one home.** Name each Kindle, then send a book to *Mom's Kindle* even when
