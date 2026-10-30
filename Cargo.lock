@@ -1080,7 +1080,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-app"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64 0.23.1",
  "deckle-cli",
@@ -1111,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-cli"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-core"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "csv",
@@ -1177,7 +1177,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-cover"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "ab_glyph",
  "image",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-desktop"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "deckle-app",
  "deckle-cli",
@@ -1204,7 +1204,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-digest"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "ab_glyph",
  "base64 0.22.1",
@@ -1248,7 +1248,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-docx"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "roxmltree",
  "sha2 0.11.1",
@@ -1259,7 +1259,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-fb2"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "encoding_rs",
@@ -1272,7 +1272,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-highlights"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1282,7 +1282,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-kfx"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "rand 0.9.5",
  "roxmltree",
@@ -1298,7 +1298,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-library"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "deckle-core",
  "deckle-docx",
@@ -1324,7 +1324,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-markdown"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "pulldown-cmark",
  "roxmltree",
@@ -1338,7 +1338,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-mobi"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "dom_query",
  "encoding_rs",
@@ -1352,7 +1352,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-morgue"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "deckle-digest",
@@ -1369,7 +1369,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-odt"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "roxmltree",
@@ -1381,7 +1381,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-pdf"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "image",
  "pdfium-render",
@@ -1394,7 +1394,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-readership"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "deckle-digest",
@@ -1409,7 +1409,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-rtf"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "encoding_rs",
  "roxmltree",
@@ -1421,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-server"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "assert_cmd",
  "axum",
@@ -1445,7 +1445,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-shelf"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "chrono",
  "deckle-core",
@@ -1460,7 +1460,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-transport"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "rusb",
  "serde",
@@ -1469,7 +1469,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-txt"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "encoding_rs",
  "roxmltree",
@@ -1481,7 +1481,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-wordwise"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "base64 0.22.1",
  "deckle-kfx",
@@ -1493,7 +1493,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-wordwise-build"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "deckle-wordwise",
@@ -1507,7 +1507,7 @@ dependencies = [
 
 [[package]]
 name = "deckle-xray"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "deckle-kfx",
  "regex",

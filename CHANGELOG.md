@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 — Deckle on Linux
 
 - **Deckle in a container.** A Linux image, `ghcr.io/casavargas/deckle`, runs the Daily
   headless: it prints each paper on schedule, catches up a morning it missed, and emails the
@@ -16,6 +16,11 @@
   stay visible and say why they're off. A container set up without the web UI keeps working
   with no changes: with no password, the web UI stays off and the papers still print. See
   [The web app](docs/docker.md#the-web-app).
+- **Email-only papers without Kindle Previewer.** A paper whose only way to a Kindle is
+  email now builds and sends on a Mac or PC with no Kindle Previewer, instead of stopping with
+  a Previewer error.
+- **A new icon.** The morning paper on a warm board: a deckle-edged sheet, a Fraktur "D"
+  masthead, columns of type and the mini crossword. On macOS 26 it's a Liquid Glass icon.
 
 ## 0.9.0 — no more black windows on Windows
 
