@@ -267,11 +267,32 @@ fn upload_name(sent: &str) -> String {
     let name = kept
         .trim_start_matches(['.', ' '])
         .trim_end_matches(['.', ' ']);
-    let mut parts = Path::new(name).components();
+    let name = shortened(name);
+    let mut parts = Path::new(&name).components();
     match (parts.next(), parts.next()) {
-        (Some(Component::Normal(_)), None) => name.to_owned(),
+        (Some(Component::Normal(_)), None) => name,
         _ => "upload".into(),
     }
+}
+
+/// The most bytes an uploaded file's name keeps: under the usual 255-byte limit, with room for
+/// the `.part` it's written as first.
+const NAME_BYTES: usize = 200;
+
+/// `name` cut to [`NAME_BYTES`] on a character boundary, its extension kept.
+fn shortened(name: &str) -> String {
+    if name.len() <= NAME_BYTES {
+        return name.to_owned();
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && ext.len() <= 16 => (stem, &name[stem.len()..]),
+        _ => (name, ""),
+    };
+    let mut end = NAME_BYTES - ext.len();
+    while !stem.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{ext}", stem[..end].trim_end_matches(['.', ' ']))
 }
 
 fn random_id() -> Result<String, getrandom::Error> {

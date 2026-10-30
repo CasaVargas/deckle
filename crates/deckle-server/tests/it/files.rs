@@ -276,6 +276,29 @@ async fn upload_saves_under_uploads_and_returns_path() {
 }
 
 #[tokio::test]
+async fn upload_long_name_is_cut_keeping_the_extension() {
+    let tmp = tempfile::tempdir().unwrap();
+    roots(tmp.path());
+    let app = files_app(tmp.path(), None);
+    let cookie = login(&app).await;
+    // 85 three-byte characters: 255 bytes before the extension, past most filesystems' limit.
+    let title: String = "東京の夜明けと新しい物語"
+        .chars()
+        .cycle()
+        .take(85)
+        .collect();
+    let r = send(&app, upload(&[(&format!("{title}.epub"), b"x")], &cookie)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    let v: Vec<String> = serde_json::from_str(&r.body).unwrap();
+    let p = Path::new(&v[0]);
+    let name = p.file_name().unwrap().to_str().unwrap();
+    assert!(name.len() <= 200, "{} bytes: {name}", name.len());
+    assert!(name.ends_with(".epub"), "{name}");
+    assert!(title.starts_with(name.trim_end_matches(".epub")), "{name}");
+    assert!(p.is_file());
+}
+
+#[tokio::test]
 async fn upload_name_cannot_traverse() {
     let tmp = tempfile::tempdir().unwrap();
     let (_, data) = roots(tmp.path());
