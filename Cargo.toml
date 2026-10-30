@@ -30,6 +30,7 @@ deckle-cover = { path = "crates/deckle-cover" }
 deckle-highlights = { path = "crates/deckle-highlights" }
 deckle-shelf = { path = "crates/deckle-shelf" }
 deckle-morgue = { path = "crates/deckle-morgue" }
+deckle-readerserver = { path = "crates/deckle-readerserver" }
 deckle-mobi = { path = "crates/deckle-mobi" }
 deckle-app = { path = "crates/deckle-app" }
 anyhow = "1"

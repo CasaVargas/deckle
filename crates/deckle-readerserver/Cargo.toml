@@ -1,0 +1,27 @@
+[package]
+name = "deckle-readerserver"
+description = "Deckle's reader server: an OPDS catalog and KOReader progress sync on the home network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum.workspace = true
+base64.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+deckle-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha1.workspace = true
+subtle.workspace = true
+tokio.workspace = true
+md-5 = "0.10"
+
+
+[dev-dependencies]
+http-body-util.workspace = true
+tempfile.workspace = true
+tower.workspace = true
+zip.workspace = true
+roxmltree.workspace = true
