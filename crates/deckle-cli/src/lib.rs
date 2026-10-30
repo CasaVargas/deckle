@@ -2325,7 +2325,7 @@ fn paper_owner(cfg: &deckle_digest::Config) -> Result<Option<String>, String> {
 }
 
 /// A paper's `readership.json`: today's file for the main paper, `papers/<slug>/` for another.
-fn readership_path(cfg: &deckle_digest::Config) -> PathBuf {
+pub(crate) fn readership_path(cfg: &deckle_digest::Config) -> PathBuf {
     cfg.state_file("readership.json")
         .unwrap_or_else(deckle_readership::state_path)
 }
@@ -2837,6 +2837,7 @@ fn digest(
                 _ => Vec::new(),
             };
             let exported = exports.iter().any(|x| x.error.is_none());
+            reader_server::remember(exports.iter().flat_map(|x| x.written.iter()));
             // The EPUB outbox, for a Kobo or a PocketBook: when one has been seen, or there is
             // no Previewer.
             let kobo_queue = epub_queue();
@@ -4349,6 +4350,8 @@ fn reader_sync(
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
     )
     .map_err(|e| e.to_string())?;
+    // So KOReader's sync can name these by MD5 later (KOReader hub design §B).
+    reader_server::remember(flush.delivered.iter());
     if plan.clippings && puzzle_on(cfg) && flush.clippings_error.is_none() {
         let path = cfg.puzzle_store();
         let mut store = deckle_digest::puzzle::store::Store::load(&path);
@@ -4419,7 +4422,11 @@ fn reader_sync(
 
 /// KOReader's position in each edition the readership file at `path` has a layout for, as
 /// `device`'s reads (KOReader hub design §C). Returns the editions recorded.
-fn record_koreader(path: &Path, device: &str, found: &[deckle_core::koreader::Position]) -> usize {
+pub(crate) fn record_koreader(
+    path: &Path,
+    device: &str,
+    found: &[deckle_core::koreader::Position],
+) -> usize {
     let mut state = deckle_readership::State::load(path);
     let mut n = 0;
     for p in found {
@@ -4938,8 +4945,8 @@ fn record_layout(
         .map_err(|e| format!("{}: {e}", built.epub.display()))
         .and_then(|bytes| layout::epub_layout(&bytes, &sections));
     let path = readership_path(cfg);
-    let saved = match kfx {
-        Some(kfx) => std::fs::read(kfx)
+    let from_kfx = kfx.map(|kfx| {
+        std::fs::read(kfx)
             .map_err(|e| format!("{}: {e}", kfx.display()))
             .and_then(|bytes| {
                 let mut l = layout::layout_from_kfx(&bytes, date, &built.title, stem, &sections)?;
@@ -4947,18 +4954,30 @@ fn record_layout(
                 if let Err(e) = layout::add_stories(&mut l, &bytes, &titles) {
                     eprintln!("readership: stories: {e}");
                 }
-                // so is the spine: only KOReader's positions need it
-                match epub {
-                    Ok(e) => l.epub = Some(e),
-                    Err(e) => eprintln!("readership: EPUB spine: {e}"),
-                }
                 Ok(l)
             })
-            .and_then(|l| {
-                let mut state = deckle_readership::State::load(&path);
-                state.record_layout(with_items(l, built));
-                state.save(&path)
-            }),
+    });
+    // A KFX layout that can't be made still leaves KOReader's: the EPUB's (KOReader hub
+    // design §C).
+    let kfx_layout = match from_kfx {
+        Some(Ok(l)) => Some(l),
+        Some(Err(e)) => {
+            eprintln!("readership: {e}; keeping the EPUB's layout");
+            None
+        }
+        None => None,
+    };
+    let saved = match kfx_layout {
+        Some(mut l) => {
+            // so is the spine: only KOReader's positions need it
+            match epub {
+                Ok(e) => l.epub = Some(e),
+                Err(e) => eprintln!("readership: EPUB spine: {e}"),
+            }
+            let mut state = deckle_readership::State::load(&path);
+            state.record_layout(with_items(l, built));
+            state.save(&path)
+        }
         None => epub.and_then(|e| {
             let l = layout::layout_from_epub(e, date, &built.title, stem);
             let mut state = deckle_readership::State::load(&path);
