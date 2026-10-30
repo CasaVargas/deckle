@@ -103,6 +103,17 @@ impl State {
         }
     }
 
+    /// [`State::record_layout`] for an edition built with no KFX, in its EPUB's positions
+    /// (KOReader hub design §C). A date that already has a KFX layout keeps it: a Kindle's
+    /// reads are in its positions. Returns whether it was recorded.
+    pub fn record_epub_layout(&mut self, layout: Layout) -> bool {
+        if self.editions.get(&layout.date).is_some_and(Layout::is_kfx) {
+            return false;
+        }
+        self.record_layout(layout);
+        true
+    }
+
     /// Moves a section's history to a new key (a renamed interest, interests design §5.4):
     /// every layout's section with key `old`, and the dismissed suggestion ids that end in it.
     /// Returns how many entries moved.

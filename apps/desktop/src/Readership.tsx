@@ -31,7 +31,7 @@ export default function Readership({ paper = null, onApplied }: { paper?: string
       <div className="readership-head">
         <div>
           <h3>How far you read</h3>
-          <p className="muted small">Each time the Kindle connects, Deckle notes how far you got in each edition, from the Kindle's own reading position. It stays on this Mac.</p>
+          <p className="muted small">Each time the Kindle connects, Deckle notes how far you got in each edition, from the Kindle's own reading position. A Kobo or PocketBook running KOReader counts too. It stays on this Mac.</p>
         </div>
         {view.enabled && r.opened >= 3 && (
           <div className="readership-numbers">
@@ -55,7 +55,7 @@ export default function Readership({ paper = null, onApplied }: { paper?: string
           </button>
         </p>
       ) : r.opened < 3 ? (
-        <p className="muted small">Plug your Kindle in after reading and this fills in.</p>
+        <p className="muted small">Plug in your Kindle, or a Kobo or PocketBook running KOReader, after reading and this fills in.</p>
       ) : (
         <>
           <div className="readership-legend muted small">

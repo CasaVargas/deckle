@@ -294,7 +294,8 @@ pub fn run_with(
 /// [`run`] for a reader on a drive (other readers design §8): each queued `.epub` goes over
 /// into `Deckle/`, a KEPUB for a Kobo and as it is for a PocketBook (a book that won't convert
 /// stays queued, with a warning), then the prune, then, on a Kobo, one read of its database for
-/// the highlights and the shelf. Neither has a `.yjf`: `plan.readership` is ignored.
+/// the highlights and the shelf. Neither has a `.yjf`: `plan.readership` takes KOReader's
+/// positions from its sidecars instead (KOReader hub design §C).
 pub fn run_reader(
     queue: &Queue,
     reader: &crate::reader::Reader,
@@ -304,6 +305,16 @@ pub fn run_reader(
 ) -> Result<FlushReport, DeliverError> {
     use crate::reader::{self, Reader};
     let mut report = FlushReport::default();
+    let mut ko = (plan.readership || plan.clippings || plan.shelf)
+        .then(|| crate::koreader::read(reader.root()));
+    if let Some(ko) = &mut ko {
+        report
+            .warnings
+            .extend(ko.warnings.iter().map(|w| format!("KOReader: {w}")));
+        if plan.readership {
+            report.koreader = std::mem::take(&mut ko.positions);
+        }
+    }
     if plan.push {
         let pending: Vec<PathBuf> = queue
             .pending()
@@ -343,11 +354,9 @@ pub fn run_reader(
     // One read serves both; a failed read doesn't undo a delivery. A Kobo's database and
     // KOReader's sidecars are read together; a PocketBook has only KOReader's (KOReader reads
     // design §6).
-    if plan.clippings || plan.shelf {
-        let ko = crate::koreader::read(reader.root());
-        report
-            .warnings
-            .extend(ko.warnings.iter().map(|w| format!("KOReader: {w}")));
+    if (plan.clippings || plan.shelf)
+        && let Some(ko) = ko
+    {
         let read = match reader {
             Reader::Kobo(kobo) => crate::kobo::read(kobo).map(|k| crate::koreader::merge(k, ko)),
             Reader::PocketBook(_) => Ok(crate::koreader::merge(Default::default(), ko)),
@@ -1313,6 +1322,37 @@ mod pocketbook_tests {
         assert_eq!(books.len(), 1);
         assert_eq!(books[0].content_id, "Books/Walden.epub");
         assert_eq!(books[0].percent, 50.0);
+        // readership off: no positions
+        assert!(r.koreader.is_empty());
+    }
+
+    #[test]
+    fn readership_takes_koreaders_position_in_each_paper() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("PB");
+        std::fs::create_dir_all(root.join("Deckle/deckle-daily-2026-10-30.sdr")).unwrap();
+        std::fs::write(
+            root.join("Deckle/deckle-daily-2026-10-30.sdr/metadata.epub.lua"),
+            "return { [\"last_xpointer\"] = \"/body/DocFragment[4]/body/p[2]/text().0\", \
+             [\"percent_finished\"] = 0.6 }",
+        )
+        .unwrap();
+        let pb = Reader::PocketBook(PocketBook { root });
+        let q = Queue::new(tmp.path().join("outbox-epub"));
+        let plan = Plan {
+            readership: true,
+            ..Plan::default()
+        };
+        let r = run_reader(&q, &pb, plan, &Prune::default(), &mut |_, _, _| {}).unwrap();
+        assert_eq!(r.koreader.len(), 1);
+        assert_eq!(r.koreader[0].book, "Deckle/deckle-daily-2026-10-30.epub");
+        assert_eq!(
+            r.koreader[0].xpointer.as_deref(),
+            Some("/body/DocFragment[4]/body/p[2]/text().0")
+        );
+        assert_eq!(r.koreader[0].percent, Some(0.6));
+        // only readership asked: no shelf, no clippings
+        assert!(r.kobo_books.is_none() && r.clippings.is_none());
     }
 }
 

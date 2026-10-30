@@ -182,3 +182,27 @@ the test.
 KOReader on a real device against the server: the OPDS catalog opens with a username and
 password, the paper downloads, sync logs in and pushes progress, and the paper's reached sections
 match what was read.
+### Build notes (C)
+Calls the builder made where the design was silent:
+- **Storage.** `Layout` gains `epub: Option<EpubLayout>`. `EpubLayout` holds `files` (every
+  spine file, linear or not, as the OPF names it), `sections` (`{key, name, spine}`) and
+  `positions: bool`, true when the layout itself is in EPUB positions because no KFX was built.
+  Older files load (`epub` absent means KFX positions).
+- **An EPUB-only layout** has each section at `spine × 1_000_000` and ends after its last
+  section's file. Its percentages count files, not text, so tomorrow's paper doesn't size
+  sections from it (`sizes::history` skips it). A build with no KFX never replaces a date's KFX
+  layout: a Kindle's reads are in its positions.
+- **Which section a file is.** `front.xhtml` is the front page; `s<N>.xhtml` is the build's `N`th
+  section. A spine that doesn't match the build is refused (logged), never recorded wrong. A file
+  outside any section (the nav, last) counts as the section before it.
+- **Furthest, last.** KOReader gives one position. `furthest` only moves forward; `last` and
+  `last_read` follow the newest `when`, so an older record arriving late can only raise `furthest`.
+- **Percentage** places the read only when the xpointer can't (an edition recorded before its
+  spine was kept, or a position that isn't `DocFragment[N]`).
+- **Drive id** is the reader's id (`kobo/<volume>`, `pocketbook/<volume>`), so a drive's device
+  is `koreader/kobo/KOBOeReader`. A drive's reads go into every paper's `readership.json` whose
+  stems match, from `digest push` and the watcher; a paper's own `digest run` records only its
+  own. The watcher no longer turns `readership` off for a Kobo or PocketBook.
+- **Sidecars are read first** in the reader session, once, for readership, clippings and shelf.
+- **KOReader on a Kindle** is left out: the Kindle gets the paper as KFX, which KOReader doesn't
+  open, so there's no KOReader position in the paper to read.

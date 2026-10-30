@@ -418,6 +418,7 @@ fn connection_records_highlights_and_presence() {
         title: "The Deckle Daily".into(),
         file: "deckle-daily-2026-10-21".into(),
         end: 10_000,
+        epub: None,
         sections: vec![SectionStart {
             key: "front".into(),
             name: "Front page".into(),
@@ -495,6 +496,7 @@ fn pruned_editions_are_no_longer_on_the_kindle() {
             title: "The Deckle Daily".into(),
             file: format!("deckle-daily-{day}"),
             end: 10_000,
+            epub: None,
             sections: vec![SectionStart {
                 key: "front".into(),
                 name: "Front page".into(),

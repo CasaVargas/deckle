@@ -83,6 +83,7 @@ pub fn layout(date: &str, starts: &[i64]) -> deckle_readership::layout::Layout {
         title: "The Deckle Daily".into(),
         file: format!("deckle-daily-{date}"),
         end: 10_000,
+        epub: None,
         sections: starts
             .iter()
             .enumerate()

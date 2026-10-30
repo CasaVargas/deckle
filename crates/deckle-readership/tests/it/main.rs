@@ -2,6 +2,7 @@
 //! All integration tests in one binary: one link instead of one per file.
 
 mod common;
+mod koreader;
 mod krds;
 mod layout;
 mod learn;

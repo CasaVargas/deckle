@@ -23,11 +23,12 @@ fn lengths(l: &Layout) -> impl Iterator<Item = (&str, i64, Option<u32>)> {
 }
 
 /// Median lengths over the newest [`SIZE_WINDOW`] layouts: per section, and per item where the
-/// layout knows its item count.
+/// layout knows its item count. A layout in EPUB positions says nothing about length: left out.
 pub fn history(state: &State) -> History {
     let mut whole: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let mut per_item: BTreeMap<String, Vec<f64>> = BTreeMap::new();
-    for l in state.editions.values().rev().take(SIZE_WINDOW) {
+    let kfx = state.editions.values().rev().filter(|l| l.is_kfx());
+    for l in kfx.take(SIZE_WINDOW) {
         for (key, len, items) in lengths(l) {
             whole.entry(key.to_owned()).or_default().push(len as f64);
             if let Some(n) = items.filter(|n| *n > 0) {

@@ -49,6 +49,22 @@ pub struct Read {
     pub clippings: Option<Vec<u8>>,
     /// `<file>: <why>` for sidecars that couldn't be read.
     pub warnings: Vec<String>,
+    /// Where KOReader is in each book beside its sidecar, for readership (KOReader hub design
+    /// §C). A sidecar kept by hash doesn't say which book it is: left out.
+    pub positions: Vec<Position>,
+}
+
+/// Where KOReader is in one book.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Position {
+    /// The book's path relative to the root, as [`Sidecar::book`].
+    pub book: String,
+    /// `last_xpointer`: `/body/DocFragment[N]/…` in an EPUB.
+    pub xpointer: Option<String>,
+    /// `percent_finished`, 0–1.
+    pub percent: Option<f64>,
+    /// When the sidecar was last written, ISO 8601 UTC: when KOReader was last there.
+    pub when: String,
 }
 
 /// Every KOReader sidecar under `root` (spec §3).
@@ -180,10 +196,20 @@ pub fn read(root: &Path) -> Read {
                 notes.push((h.datetime.clone(), entry));
             }
         }
+        let modified = std::fs::metadata(&s.file)
+            .and_then(|m| m.modified())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        if !s.book.starts_with("koreader:")
+            && (parsed.xpointer.is_some() || parsed.percent.is_some())
+        {
+            out.positions.push(Position {
+                book: s.book.clone(),
+                xpointer: parsed.xpointer.clone(),
+                percent: parsed.percent,
+                when: crate::devices::iso(modified),
+            });
+        }
         if parsed.in_progress() {
-            let modified = std::fs::metadata(&s.file)
-                .and_then(|m| m.modified())
-                .unwrap_or(SystemTime::UNIX_EPOCH);
             books.push((
                 modified,
                 Book {
@@ -243,6 +269,8 @@ pub struct Parsed {
     pub percent: Option<f64>,
     /// `summary.status`: `reading`, `complete`, `abandoned`.
     pub status: Option<String>,
+    /// `last_xpointer`: where the reader is, `/body/DocFragment[N]/…` in an EPUB.
+    pub xpointer: Option<String>,
     pub highlights: Vec<Highlight>,
 }
 
@@ -283,6 +311,7 @@ pub fn parse(text: &str) -> Result<Parsed, String> {
             .unwrap_or_default(),
         percent: root.get("percent_finished").and_then(Value::as_f64),
         status: s(root.get("summary").and_then(|v| v.get("status"))),
+        xpointer: s(root.get("last_xpointer")).filter(|x| !x.is_empty()),
         highlights: Vec::new(),
     };
     let page_of = |v: Option<&Value>| -> Option<String> {

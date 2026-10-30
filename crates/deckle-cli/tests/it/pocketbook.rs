@@ -79,6 +79,53 @@ fn the_morning_paper_goes_to_a_pocketbook_as_an_epub() {
 }
 
 #[test]
+fn koreaders_place_in_the_paper_on_a_pocketbook_is_its_readership() {
+    let (_tmp, home, root) = setup();
+    let o = deckle(&home, &root)
+        .args(["digest", "run", "--date", "2026-10-23"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    // no Kindle, no KFX: the layout is the EPUB's (KOReader hub design §C)
+    let dir = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/deckle")
+    } else {
+        home.join("deckle")
+    };
+    let file = dir.join("readership.json");
+    let state = deckle_readership::State::load(&file);
+    let layout = &state.editions[&"2026-10-23".parse().unwrap()];
+    assert!(!layout.is_kfx(), "{layout:?}");
+    let epub = layout.epub.as_ref().unwrap();
+    assert_eq!(epub.files[..2], ["front.xhtml", "s1.xhtml"]);
+    // KOReader opens it and reads into the horoscope (s1.xhtml, the second file)
+    std::fs::create_dir_all(root.join("Deckle/deckle-daily-2026-10-23.sdr")).unwrap();
+    std::fs::write(
+        root.join("Deckle/deckle-daily-2026-10-23.sdr/metadata.epub.lua"),
+        "return {\n    [\"last_xpointer\"] = \"/body/DocFragment[2]/body/div/p[3]/text().4\",\n    \
+         [\"percent_finished\"] = 0.8,\n}\n",
+    )
+    .unwrap();
+    let o = deckle(&home, &root)
+        .args(["digest", "push"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let text = String::from_utf8_lossy(&o.stdout);
+    assert!(text.contains("readership: 1 edition read"), "{text}");
+    let state = deckle_readership::State::load(&file);
+    let reads = &state.reads[&"2026-10-23".parse().unwrap()];
+    let read = &reads["koreader/pocketbook/PB632"];
+    assert!(read.opened);
+    let horoscope = layout
+        .sections
+        .iter()
+        .find(|s| s.key == "horoscope")
+        .unwrap();
+    assert_eq!(read.furthest, Some(horoscope.start + 1));
+}
+
+#[test]
 fn a_book_goes_to_a_pocketbook_when_no_kindle_is_plugged_in() {
     let (_tmp, home, root) = setup();
     let book = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mini/deckle-mini.epub");
