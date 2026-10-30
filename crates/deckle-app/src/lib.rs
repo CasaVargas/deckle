@@ -4,9 +4,11 @@
 //! async runtime.
 
 pub mod books;
+pub mod capabilities;
 pub mod commands;
 pub mod cookbook;
 pub mod daily;
+pub mod dispatch;
 pub mod events;
 pub mod kindle;
 pub mod morgue;

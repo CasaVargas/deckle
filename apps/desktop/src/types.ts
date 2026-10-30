@@ -224,6 +224,18 @@ export interface PreviewerStatus {
   download_url: string;
 }
 
+/** What this install can do: the web app has no keychain, updater, file manager or system jobs. */
+export interface Capabilities {
+  web: boolean;
+  previewer: boolean;
+  usb: boolean;
+  keychain: boolean;
+  updater: boolean;
+  reveal: boolean;
+  /** "install": a system job runs the edition; "config": the daemon reads `[schedule]`. */
+  schedule: "install" | "config";
+}
+
 export interface ProgressEvent {
   id: string;
   status: "running" | "done" | "failed";

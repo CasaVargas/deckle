@@ -176,6 +176,11 @@ pub fn app_version() -> String {
 }
 
 #[tauri::command]
+pub fn capabilities() -> deckle_app::capabilities::Capabilities {
+    deckle_app::capabilities::capabilities(false)
+}
+
+#[tauri::command]
 pub fn take_preloaded_books(state: State<'_, AppState>) -> Vec<String> {
     deckle_app::commands::take_preloaded_books(&state)
 }

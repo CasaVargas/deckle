@@ -39,6 +39,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             wrap::app_version,
+            wrap::capabilities,
             wrap::take_preloaded_books,
             wrap::take_preloaded_target,
             wrap::inspect_books,
