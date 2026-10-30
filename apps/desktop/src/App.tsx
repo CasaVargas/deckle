@@ -58,7 +58,8 @@ function toState(row: BookRow): BookState {
 
 /** The web app asks for its password first, and again when the session ends (a 401). */
 export default function App() {
-  if (platform.kind !== "web") return <Deckle />;
+  // The build-time constant, not platform.kind, so the desktop bundle drops WebApp and Login.
+  if (import.meta.env.VITE_DECKLE_TARGET !== "web") return <Deckle />;
   return <WebApp />;
 }
 

@@ -9,6 +9,7 @@ class FakeEventSource {
   static made: FakeEventSource[] = [];
   handlers = new Map<string, ((ev: MessageEvent) => void)[]>();
   closed = false;
+  readyState = 0;
   constructor(public url: string) {
     FakeEventSource.made.push(this);
   }
@@ -17,6 +18,9 @@ class FakeEventSource {
   }
   close() {
     this.closed = true;
+  }
+  fire(name: string) {
+    for (const h of this.handlers.get(name) ?? []) h({} as MessageEvent);
   }
   send(name: string, data: unknown) {
     for (const h of this.handlers.get(name) ?? []) h({ data: JSON.stringify(data) } as MessageEvent);
@@ -76,4 +80,46 @@ test("web_listen_fans_out_one_eventsource", async () => {
   es.send("book-progress", { id: "2" });
   expect(a).toHaveBeenCalledTimes(1);
   expect(b).toHaveBeenCalledTimes(2);
+});
+
+test("web_events_reconnect_after_close", async () => {
+  vi.useFakeTimers();
+  try {
+    const got = vi.fn();
+    await webListen("run-finished", got);
+    const first = FakeEventSource.made[0];
+    // A proxy 502 while the container restarts: the browser gives up on the stream for good.
+    first.readyState = 2;
+    first.fire("error");
+    expect(FakeEventSource.made).toHaveLength(1);
+    vi.advanceTimersByTime(999);
+    expect(FakeEventSource.made).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(FakeEventSource.made).toHaveLength(2);
+    expect(first.closed).toBe(true);
+    const second = FakeEventSource.made[1];
+    second.send("run-finished", { ok: true });
+    expect(got).toHaveBeenCalledWith({ ok: true });
+    // Failing again waits twice as long; opening resets the wait.
+    second.readyState = 2;
+    second.fire("error");
+    vi.advanceTimersByTime(1999);
+    expect(FakeEventSource.made).toHaveLength(2);
+    vi.advanceTimersByTime(1);
+    expect(FakeEventSource.made).toHaveLength(3);
+    const third = FakeEventSource.made[2];
+    third.fire("open");
+    third.readyState = 2;
+    third.fire("error");
+    vi.advanceTimersByTime(1000);
+    expect(FakeEventSource.made).toHaveLength(4);
+    // An error the browser retries by itself (still CONNECTING) opens nothing new.
+    const fourth = FakeEventSource.made[3];
+    fourth.readyState = 0;
+    fourth.fire("error");
+    vi.advanceTimersByTime(60_000);
+    expect(FakeEventSource.made).toHaveLength(4);
+  } finally {
+    vi.useRealTimers();
+  }
 });

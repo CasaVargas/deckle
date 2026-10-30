@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { PREVIEWER_REASON } from "./web/gates";
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 
 /** The Settings pages (Settings redesign §2). */
@@ -83,10 +84,13 @@ const base = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const list = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`);
 
-export function setupChecks(a: { previewer: PreviewerStatus | null; library: LibraryStatus | null; sources: SourcesStatus | null; highlights: string | null | undefined; devices: DeviceRow[] }): Check[] {
+export function setupChecks(a: { previewer: PreviewerStatus | null; library: LibraryStatus | null; sources: SourcesStatus | null; highlights: string | null | undefined; devices: DeviceRow[]; web?: boolean }): Check[] {
   const out: Check[] = [];
   out.push(
-    !a.previewer
+    // The web app's server can't run it: the reason, with nothing to choose.
+    a.web && a.previewer && !a.previewer.found
+      ? { key: "previewer", title: "Kindle Previewer", state: PREVIEWER_REASON, mark: "optional", page: "sending" }
+      : !a.previewer
       ? { key: "previewer", title: "Kindle Previewer", state: "looking for it…", mark: "ok", page: "sending" }
       : a.previewer.found
         ? { key: "previewer", title: "Kindle Previewer", state: "found, so books can be converted", mark: "ok", page: "sending" }

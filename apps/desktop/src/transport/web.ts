@@ -55,16 +55,43 @@ function subscribe(es: EventSource, event: string) {
   });
 }
 
+// A stream the browser gave up on (closed after an error: a proxy's 502 while the container
+// restarts) is reopened after a wait that doubles from 1 s to 30 s and resets once one opens.
+// Without it, progress events would stop until a reload, and with DECKLE_WEB_AUTH=none no 401
+// would ever bring the login screen (and its restart) instead.
+const FIRST_RETRY = 1000;
+const LAST_RETRY = 30_000;
+/** EventSource.CLOSED, spelled out so it needn't exist outside a browser. */
+const CLOSED = 2;
+let retryDelay = FIRST_RETRY;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
 function open(): EventSource {
   if (!source) {
-    source = new EventSource("/api/events");
-    for (const event of listeners.keys()) subscribe(source, event);
+    const es = new EventSource("/api/events");
+    source = es;
+    for (const event of listeners.keys()) subscribe(es, event);
+    es.addEventListener("open", () => {
+      retryDelay = FIRST_RETRY;
+    });
+    es.addEventListener("error", () => {
+      // Still CONNECTING: the browser retries by itself.
+      if (es.readyState !== CLOSED || source !== es || retryTimer) return;
+      const wait = retryDelay;
+      retryDelay = Math.min(retryDelay * 2, LAST_RETRY);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        if (source === es) restartEvents();
+      }, wait);
+    });
   }
   return source;
 }
 
 /** Opens the stream again, as after logging in: one opened before it was refused and closed. */
 export function restartEvents() {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
   source?.close();
   source = null;
   if (listeners.size > 0) open();
@@ -87,6 +114,9 @@ export function webListen<T>(event: string, cb: (payload: T) => void): Promise<(
 
 /** For tests: forget the stream and its listeners. */
 export function resetEventsForTest() {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  retryDelay = FIRST_RETRY;
   source?.close();
   source = null;
   listeners.clear();
