@@ -35,7 +35,8 @@ async fn security_headers_present() {
         let r = send(&app, get(uri)).await;
         assert_eq!(
             r.headers["content-security-policy"],
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:",
+            "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
+             frame-ancestors 'none'",
             "{uri}"
         );
         assert_eq!(r.headers["x-content-type-options"], "nosniff", "{uri}");

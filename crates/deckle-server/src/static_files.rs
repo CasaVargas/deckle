@@ -9,8 +9,10 @@ use axum::http::header::{CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYP
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
-/// The desktop app's CSP (tauri.conf.json), so the page runs under the same rules.
-const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:";
+/// The desktop app's CSP (tauri.conf.json), so the page runs under the same rules, and no other
+/// site may frame it (clickjacking).
+const CSP: &str = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; \
+                   frame-ancestors 'none'";
 
 /// Files under `web_dir`; any other path gets `index.html`, for the frontend's own routes.
 pub(crate) fn service(web_dir: &Path) -> ServeDir<ServeFile> {
