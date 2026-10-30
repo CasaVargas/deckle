@@ -162,12 +162,13 @@ pub(crate) async fn login(
             None => eprintln!("web UI: failed login"),
         }
         // A success answers at once, so a client could hang up when none comes and free the
-        // slot early; a task of its own keeps it taken for the whole delay.
-        tokio::spawn(async move {
+        // slot early; a task of its own keeps it taken for the whole delay. Waiting for that
+        // task, not a sleep of our own, frees the slot before the answer goes out.
+        let hold = tokio::spawn(async move {
             tokio::time::sleep(FAILURE_DELAY).await;
             drop(permit);
         });
-        tokio::time::sleep(FAILURE_DELAY).await;
+        let _ = hold.await;
         return error(StatusCode::UNAUTHORIZED, "wrong password".into());
     }
     drop(permit);

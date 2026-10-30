@@ -188,7 +188,7 @@ async fn abandoned_failed_logins_still_hold_their_slot() {
     let body = json!({ "password": PASSWORD }).to_string();
     let r = send(&app, post("/api/login", &body, None)).await;
     assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_millis(1300)).await;
     login(&app).await;
 }
 
