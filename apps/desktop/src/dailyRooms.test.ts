@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { daysLine, deliveryGroups, destinations, goesLine, stopLine, toggleDay } from "./dailyRooms";
+import { daysLine, deliveryGroups, destinations, exportFolderHint, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import { newExport } from "./exportsView";
 import type { DailyConfig, ReadershipView } from "./types";
 
@@ -103,4 +103,11 @@ test("Delivery: the Kindle by USB and email, then other readers with a row per f
     ["folder:1", "Boox", "PDF · gray", null],
     ["readers", "Kobo and PocketBook", "Automatic", null],
   ]);
+});
+
+test("on the web, the export-folder hint speaks of the server's folders", () => {
+  expect(exportFolderHint(false)).toBe("iCloud Drive for an iPad, Dropbox for a Boox");
+  expect(exportFolderHint(true)).toBe("A folder under /data your reader syncs from");
+  expect(destinations(cfg(), true).find((r) => r.key === "exports")?.how).toBe(exportFolderHint(true));
+  expect(destinations(cfg()).find((r) => r.key === "exports")?.how).toBe(exportFolderHint(false));
 });

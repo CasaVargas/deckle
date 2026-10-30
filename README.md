@@ -200,7 +200,8 @@ on a Kindle it could now build better.
    - **Windows 11**: the `-setup.exe` (per-user, no admin), code-signed. A new certificate can still
      trigger SmartScreen: **More info → Run anyway**.
    - **Linux**: the command line only, as `deckle-<version>-<target>.tar.gz` for x86_64 or aarch64
-     (needs glibc 2.35+ and `libdbus-1-3`), or the [container](docs/docker.md).
+     (needs glibc 2.35+ and `libdbus-1-3`), or the [container](docs/docker.md), which serves the
+     app to your browser on port 8080.
 2. **For Kindle books, install [Kindle Previewer 4](https://kdp.amazon.com/en_US/help/topic/G202131170)**
    (free, from Amazon). It's the only thing that produces Enhanced Typesetting. Deckle drives it and
    doesn't bundle it. The paper on a Kobo, PocketBook or reMarkable doesn't need it.

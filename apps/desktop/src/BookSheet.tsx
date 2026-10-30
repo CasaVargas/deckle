@@ -2,6 +2,7 @@
 // Book settings (cookbook design §8.2): a sheet from the right, like the Daily's paper settings
 // (Esc or × closes it). The book's title, subtitle and default picture, its chapters, illustrations,
 // and the cookbook.toml it is saved to. Everything saves as it changes, one save at a time.
+import { useCapabilities } from "./capabilities";
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { OTHER_CHAPTER, addChapter, canRemoveChapter, illustrateProgress, illustrationSends, moveChapter, removeChapterWarning, reorderChapters } from "./cookbookRooms";
@@ -46,6 +47,7 @@ export default function BookSheet({
   onChanged: () => void;
   onClose: () => void;
 }) {
+  const caps = useCapabilities();
   const [draft, setDraft] = useState<CookbookConfig>(() => structuredClone(book.config));
   const draftRef = useRef(draft);
   const [saving, setSaving] = useState(false);
@@ -410,9 +412,11 @@ export default function BookSheet({
         <p className="muted small">
           {saving ? "Saving… " : "Saved as you go to "}
           <span className="mono">{book.config_path}</span>; your own comments in it are kept.{" "}
-          <button className="link" onClick={() => api.reveal(book.config_path)}>
-            Show the file
-          </button>
+          {caps.reveal && (
+            <button className="link" onClick={() => api.reveal(book.config_path)}>
+              Show the file
+            </button>
+          )}
         </p>
       </section>
     </div>

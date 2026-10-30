@@ -74,7 +74,7 @@ pub fn accept_with_today(
     key: &str,
     today: deckle_digest::chrono::NaiveDate,
 ) -> Result<ReadershipView, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = load_config(digest, paper)?;
     let path = learning_file(state);
     let mut learning = deckle_readership::Learning::load(&path);
@@ -121,7 +121,7 @@ pub fn apply_at(
     id: &str,
 ) -> Result<ReadershipView, String> {
     let s = suggestion(state, digest, paper, id)?;
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = load_config(digest, paper)?;
     deckle_readership::apply(&s, &mut cfg)?;
     deckle_digest::papers::save(digest, &cfg)?;
@@ -146,7 +146,7 @@ pub fn dismiss_at(
 
 /// `[sync] readership` is a household setting, in `digest.toml`.
 pub fn set_at(state: &Path, digest: &Path, on: bool) -> Result<ReadershipView, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = load_config(digest, None)?;
     if cfg.sync.readership != on {
         cfg.sync.readership = on;
@@ -189,7 +189,7 @@ pub fn record_on(conn: &mut Conn<'_>, state: &Path, digest: &Path) {
     }
 }
 
-// ---- Tauri commands -----------------------------------------------------------------
+// ---- Commands -----------------------------------------------------------------------
 
 /// Paper `paper`'s readership file (the main paper's, or its own in `papers/<slug>/`), and
 /// `digest.toml`.
@@ -207,38 +207,32 @@ fn paths(paper: Option<&str>) -> Result<(PathBuf, PathBuf), String> {
     paths_for(&deckle_digest::config::default_path(), paper)
 }
 
-#[tauri::command]
 pub fn readership_report(paper: Option<String>) -> Result<ReadershipView, String> {
     let (s, d) = paths(paper.as_deref())?;
     view_at(&s, &d, paper.as_deref())
 }
 
-#[tauri::command]
 pub fn readership_apply(id: String, paper: Option<String>) -> Result<ReadershipView, String> {
     let (s, d) = paths(paper.as_deref())?;
     apply_at(&s, &d, paper.as_deref(), &id)
 }
 
-#[tauri::command]
 pub fn readership_dismiss(id: String, paper: Option<String>) -> Result<ReadershipView, String> {
     let (s, d) = paths(paper.as_deref())?;
     dismiss_at(&s, &d, paper.as_deref(), &id)
 }
 
-#[tauri::command]
 pub fn interests_accept(key: String, paper: Option<String>) -> Result<ReadershipView, String> {
     let (s, d) = paths(paper.as_deref())?;
     accept_at(&s, &d, paper.as_deref(), &key)
 }
 
-#[tauri::command]
 pub fn interests_dismiss(key: String, paper: Option<String>) -> Result<ReadershipView, String> {
     let (s, d) = paths(paper.as_deref())?;
     dismiss_noticed_at(&s, &d, paper.as_deref(), &key)
 }
 
 /// Turning it on or off is the household's, so the view after is the main paper's.
-#[tauri::command]
 pub fn readership_set(on: bool) -> Result<ReadershipView, String> {
     let (s, d) = paths(None)?;
     set_at(&s, &d, on)
@@ -456,8 +450,7 @@ mod tests {
         std::fs::create_dir_all(&sdr).unwrap();
         std::fs::write(docs.join("deckle-daily-2026-10-21.kfx"), b"KFX").unwrap();
         let yjf = std::fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../../fixtures/yjf/daily-2026-10-21.yjf"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/yjf/daily-2026-10-21.yjf"),
         )
         .unwrap();
         std::fs::write(sdr.join("deckle-daily-2026-10-219d6e5f44.yjf"), yjf).unwrap();

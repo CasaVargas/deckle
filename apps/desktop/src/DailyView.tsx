@@ -2,12 +2,15 @@
 // The Daily tab (Daily design §5c, Daily tab redesign §2–3), in tabs: Today (tomorrow's paper so
 // far, when it goes to press, a link box and the week), Sections, Reading, Editions and Delivery,
 // all backed by digest.toml and the CLI. The paper switcher picks which paper they work on.
+import { useCapabilities } from "./capabilities";
+import Unavailable from "./web/Unavailable";
+import { SMTP_ENV, passwordReason } from "./web/gates";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { setupSavedExport, setupWithRefresh } from "./pressView";
 import { debounce, saveQueue } from "./saveQueue";
 import SectionsTab from "./SectionsTab";
 import type { Change } from "./SectionsTab";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api } from "./api";
 import { ROOMS, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import PaperSheet from "./PaperSheet";
@@ -77,6 +80,7 @@ export default function DailyView({
   initialRoom?: Room | null;
   onRoomTaken?: () => void;
 }) {
+  const caps = useCapabilities();
   const [state, setState] = useState<DailyState | null>(null);
   const [draft, setDraft] = useState<DailyConfig | null>(null);
   // Saving as you go (Daily tab redesign §4): the newest edit is in draftRef; `seq` counts edits,
@@ -436,9 +440,11 @@ export default function DailyView({
         <section className="card">
           <h2>{isMain ? "digest.toml" : `papers/${paper}.toml`} has a problem</h2>
           <p className="fail">{state.error}</p>
-          <button className="ghost" onClick={() => api.reveal(state.config_path)}>
-            Show the file
-          </button>
+          {caps.reveal && (
+            <button className="ghost" onClick={() => api.reveal(state.config_path)}>
+              Show the file
+            </button>
+          )}
         </section>
       </div>
     );
@@ -490,6 +496,9 @@ export default function DailyView({
         </label>
         <div>
           <span className="label">Password</span>
+          {!caps.keychain ? (
+            <Unavailable reason={passwordReason(SMTP_ENV)} />
+          ) : (
           <form
             className="save-row"
             onSubmit={(e) => {
@@ -508,6 +517,7 @@ export default function DailyView({
               {emailStatus?.has_password ? "Replace" : "Save"}
             </button>
           </form>
+          )}
         </div>
         </>)}
       </div>
@@ -526,8 +536,8 @@ export default function DailyView({
       {emailMsg && <p className={`small ${emailMsg.ok ? "" : "fail"}`}>{emailMsg.text}</p>}
       <p className="muted small">
         Add the From address to Amazon's Approved Personal Document E-mail List (Manage Your Content and Devices → Preferences →
-        Personal Document Settings), or Amazon drops the email. Gmail and iCloud need an app password. The password is kept in the
-        system keychain, never in digest.toml.
+        Personal Document Settings), or Amazon drops the email. Gmail and iCloud need an app password.
+        {caps.keychain && " The password is kept in the system keychain, never in digest.toml."}
       </p>
       <p className="muted small">
         Emailed papers collect in your Kindle's Docs: Deckle can't remove them, so the "keep" setting only applies over USB. Clear
@@ -605,11 +615,19 @@ export default function DailyView({
                 <p className="muted small">
                   {preview ? `Last built ${preview.title.replace(/^.*— /, "")}` : "No edition built yet."}
                   {preview && preview.outbox > 0 && ` · ${preview.outbox} waiting for your Kindle`}
-                  {preview && (
+                  {preview && caps.reveal && (
                     <>
                       {" · "}
                       <button className="link" onClick={() => api.reveal(preview.file)}>
                         Show file
+                      </button>
+                    </>
+                  )}
+                  {preview && caps.web && (
+                    <>
+                      {" · "}
+                      <button className="link" onClick={() => platform.afterSave(preview.file)}>
+                        Download
                       </button>
                     </>
                   )}
@@ -698,7 +716,7 @@ export default function DailyView({
                 <button
                   className="ghost"
                   onClick={async () => {
-                    const dir = await openDialog({ directory: true, multiple: false });
+                    const dir = await platform.pickFolder({});
                     if (typeof dir === "string") change((c) => ({ ...c, reading: { ...c.reading, inbox: dir } }));
                   }}
                 >

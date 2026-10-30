@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { useState } from "react";
 import { api } from "./api";
 import type { RunTarget } from "./types";
@@ -11,11 +11,12 @@ export default function WordsAnki({ target, busy }: { target: RunTarget; busy: b
 
   const exportWords = async () => {
     setMessage(null);
-    const to = await saveDialog({ defaultPath: "Kindle words.csv", filters: [{ name: "CSV for Anki", extensions: ["csv"] }] });
-    if (typeof to !== "string") return;
+    const to = await platform.saveFile({ defaultName: "Kindle words.csv", filterName: "CSV for Anki", extensions: ["csv"] });
+    if (to === null) return;
     setExporting(true);
     try {
       const n = await api.wordsAnki(target, to);
+      await platform.afterSave(to);
       setMessage(`${n} word${n === 1 ? "" : "s"} written. In Anki: File → Import, then pick the file.`);
     } catch (e) {
       setMessage(String(e));

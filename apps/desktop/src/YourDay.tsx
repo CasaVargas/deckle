@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api } from "./api";
 import { DEFAULT_DAY, addressError, previewLine, withoutCalendar } from "./dayView";
 import Icon from "./Icon";
@@ -46,8 +46,8 @@ export default function YourDay({
   };
 
   const addFile = async () => {
-    const picked = await openDialog({ multiple: false, filters: [{ name: "Calendar", extensions: ["ics"] }] });
-    if (typeof picked === "string" && !current.calendars.includes(picked)) {
+    const picked = (await platform.pickFiles({ filterName: "Calendar", extensions: ["ics"] }))?.[0];
+    if (picked !== undefined && !current.calendars.includes(picked)) {
       await change({ ...current, calendars: [...current.calendars, picked] });
     }
   };

@@ -318,7 +318,7 @@ pub fn shelf_on(
     }
     // What the connection teaches the main paper (interests design §5), after the reads and
     // the shelf it draws on are stored.
-    let _config_write = crate::press::config_write()?;
+    let _config_write = crate::config_write()?;
     if let Ok(cfg) = deckle_digest::Config::load(&digest) {
         let state = deckle_readership::State::load(&config.with_file_name("readership.json"));
         let shelf = deckle_digest::shelf::store::Shelf::load(&config.with_file_name("shelf.json"));
@@ -496,7 +496,7 @@ pub fn highlights_set_at(
     }
     st.save(state)
         .map_err(|e| format!("{}: {e}", state.display()))?;
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = match digest.exists() {
         true => deckle_digest::Config::load(digest)?,
         false => deckle_digest::Config::parse(deckle_digest::config::STARTER)?,
@@ -565,30 +565,22 @@ pub fn with_target<T: Send + 'static>(
     f(&mut conn, &deckle_library::config::default_path())
 }
 
-#[tauri::command]
 pub fn library_status() -> LibraryStatus {
     library_status_at(&deckle_library::config::default_path())
 }
 
-#[tauri::command]
 pub fn library_set(root: Option<String>, auto_add: bool) -> Result<LibraryStatus, String> {
     library_set_at(&deckle_library::config::default_path(), root, auto_add)
 }
 
-/// Lists over USB/MTP off the main thread (an MTP listing takes a few seconds).
-#[tauri::command]
-pub async fn device_books(target: RunTarget) -> Result<DeviceShelf, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        with_target(target, |conn, config| {
-            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
-            shelf_on(conn, config, Some(&cache))
-        })
+/// Lists over USB/MTP; an MTP listing takes a few seconds.
+pub fn device_books(target: RunTarget) -> Result<DeviceShelf, String> {
+    with_target(target, |conn, config| {
+        let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+        shelf_on(conn, config, Some(&cache))
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
 pub fn highlights_status() -> HighlightsStatus {
     let config = deckle_library::config::default_path();
     highlights_status_at(
@@ -597,7 +589,6 @@ pub fn highlights_status() -> HighlightsStatus {
     )
 }
 
-#[tauri::command]
 pub fn highlights_set(folder: Option<String>, clippings: bool) -> Result<HighlightsStatus, String> {
     let config = deckle_library::config::default_path();
     highlights_set_at(
@@ -609,34 +600,19 @@ pub fn highlights_set(folder: Option<String>, clippings: bool) -> Result<Highlig
 }
 
 /// Its own session, like Remove.
-#[tauri::command]
-pub async fn highlights_write(target: RunTarget) -> Result<Outcome, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        with_target(target, |conn, config| {
-            write_highlights_on(conn, &highlights_state(config))
-        })
+pub fn highlights_write(target: RunTarget) -> Result<Outcome, String> {
+    with_target(target, |conn, config| {
+        write_highlights_on(conn, &highlights_state(config))
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// Its own session, like Remove.
-#[tauri::command]
-pub async fn words_anki(target: RunTarget, to: String) -> Result<usize, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        with_target(target, move |conn, _| anki_on(conn, Path::new(&to)))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn words_anki(target: RunTarget, to: String) -> Result<usize, String> {
+    with_target(target, move |conn, _| anki_on(conn, Path::new(&to)))
 }
 
-#[tauri::command]
-pub async fn device_remove(target: RunTarget, file: String) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        with_target(target, move |conn, config| remove_from(conn, config, &file))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn device_remove(target: RunTarget, file: String) -> Result<Vec<String>, String> {
+    with_target(target, move |conn, config| remove_from(conn, config, &file))
 }
 
 /// Removes each of `files`, over one session (This Kindle's Make room). `(file, error)` for
@@ -689,42 +665,24 @@ pub fn restore_from(conn: &mut Conn<'_>, dir: &Path) -> Result<RestoreReport, St
     care::restore_on(conn, dir, &present)
 }
 
-#[tauri::command]
-pub async fn device_remove_many(
+pub fn device_remove_many(
     target: RunTarget,
     files: Vec<String>,
 ) -> Result<Vec<(String, String)>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        with_target(target, move |conn, config| {
-            Ok(remove_many(conn, config, &files))
-        })
+    with_target(target, move |conn, config| {
+        Ok(remove_many(conn, config, &files))
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn device_backup(
-    target: RunTarget,
-    into: Option<String>,
-) -> Result<BackupReport, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        with_target(target, move |conn, config| {
-            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
-            backup_to(conn, config, Some(&cache), into.as_deref().map(Path::new))
-        })
+pub fn device_backup(target: RunTarget, into: Option<String>) -> Result<BackupReport, String> {
+    with_target(target, move |conn, config| {
+        let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+        backup_to(conn, config, Some(&cache), into.as_deref().map(Path::new))
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn device_restore(target: RunTarget, dir: String) -> Result<RestoreReport, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        with_target(target, move |conn, _| restore_from(conn, Path::new(&dir)))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn device_restore(target: RunTarget, dir: String) -> Result<RestoreReport, String> {
+    with_target(target, move |conn, _| restore_from(conn, Path::new(&dir)))
 }
 
 #[cfg(test)]
@@ -747,7 +705,7 @@ mod rooms_tests {
         .unwrap();
         // 15% in, by the Kindle's own count.
         std::fs::copy(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/yjf/book.yjf"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/yjf/book.yjf"),
             kindle.join("Side.sdr/Side.azw3f"),
         )
         .unwrap();
@@ -900,7 +858,7 @@ mod tests {
 
     fn clippings_fixture() -> Vec<u8> {
         std::fs::read(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/clippings/variants.txt"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/clippings/variants.txt"),
         )
         .unwrap()
     }
@@ -1017,7 +975,7 @@ mod tests {
         std::fs::write(
             out.join("Walden.sdr/Walden9d6e.yjf"),
             std::fs::read(
-                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/yjf/book.yjf"),
+                Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/yjf/book.yjf"),
             )
             .unwrap(),
         )

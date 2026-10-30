@@ -55,7 +55,7 @@ pub fn forget_at(shelf: &Path, digest: &Path) -> Result<ShelfStatus, String> {
 
 /// Writes `[sync] shelf`, keeping the file's comments. Returns the new value.
 pub fn set_at(digest: &Path, on: bool) -> Result<bool, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = load_config(digest)?;
     if cfg.sync.shelf != on || !digest.exists() {
         cfg.sync.shelf = on;
@@ -64,26 +64,23 @@ pub fn set_at(digest: &Path, on: bool) -> Result<bool, String> {
     Ok(on)
 }
 
-// ---- Tauri commands -----------------------------------------------------------------
+// ---- Commands -----------------------------------------------------------------------
 
 fn paths() -> (std::path::PathBuf, std::path::PathBuf) {
     let digest = deckle_digest::config::default_path();
     (deckle_digest::Config::default().shelf_store(), digest)
 }
 
-#[tauri::command]
 pub fn shelf_status() -> ShelfStatus {
     let (s, d) = paths();
     status_at(&s, &d, Utc::now())
 }
 
-#[tauri::command]
 pub fn shelf_forget() -> Result<ShelfStatus, String> {
     let (s, d) = paths();
     forget_at(&s, &d)
 }
 
-#[tauri::command]
 pub fn shelf_set(on: bool) -> Result<ShelfStatus, String> {
     let (s, d) = paths();
     set_at(&d, on)?;

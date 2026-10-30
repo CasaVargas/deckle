@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // In-app updates (auto-update design): one check per launch, and install only on a click.
-import { check, type Update } from "@tauri-apps/plugin-updater";
+import { platform, type UpdateInfo as Update } from "./platform";
 
 export type UpdateState =
   | { kind: "checking" }
@@ -17,7 +17,7 @@ export const hasUpdate = (s: UpdateState): s is Extract<UpdateState, { update: U
 /** Never rejects: offline, GitHub down or a dev build all end as `failed`, quietly. */
 export async function checkForUpdate(): Promise<UpdateState> {
   try {
-    const update = await check();
+    const update = await platform.checkUpdate();
     return update ? { kind: "available", update } : { kind: "current" };
   } catch (e) {
     console.warn("update check failed", e);

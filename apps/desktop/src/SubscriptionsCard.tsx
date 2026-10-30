@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useCapabilities } from "./capabilities";
+import Unavailable from "./web/Unavailable";
+import { passwordReason, siteEnv } from "./web/gates";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { SUBSCRIBED_SLUGS, forgetTested, groupFor, removeGroup, renameGroup, setMaxItems, shownStatus, statusKey, subscriptionLine, toggleGroup, toggleSlug } from "./subscriptions";
@@ -27,6 +30,7 @@ export default function SubscriptionsCard({
   /** Saves the draft; false when it didn't save (the notice says why). */
   onSave: () => Promise<boolean>;
 }) {
+  const caps = useCapabilities();
   const [statuses, setStatuses] = useState<SiteStatus[]>([]);
   const [passwords, setPasswords] = useState<Record<number, string>>({});
   // A fresh status only knows what this process has tried, so a test's answer is kept here.
@@ -158,17 +162,22 @@ export default function SubscriptionsCard({
                 <input value={s.username} placeholder="you@example.com" spellCheck={false} onChange={(e) => edit(i, { username: e.target.value })} />
               </label>
             </div>
+            {!caps.keychain && <Unavailable reason={passwordReason(siteEnv(s.site))} />}
             <div className="save-row">
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={passwords[i] ?? ""}
-                placeholder={st?.has_password ? "Saved in the keychain" : "Password"}
-                onChange={(e) => setPasswords((p) => ({ ...p, [i]: e.target.value }))}
-              />
-              <button className="ghost" disabled={busy !== null || !passwords[i]} onClick={() => savePassword(i)}>
-                Save password
-              </button>
+              {caps.keychain && (
+                <>
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    value={passwords[i] ?? ""}
+                    placeholder={st?.has_password ? "Saved in the keychain" : "Password"}
+                    onChange={(e) => setPasswords((p) => ({ ...p, [i]: e.target.value }))}
+                  />
+                  <button className="ghost" disabled={busy !== null || !passwords[i]} onClick={() => savePassword(i)}>
+                    Save password
+                  </button>
+                </>
+              )}
               <button className="ghost" disabled={busy !== null || !s.site.trim() || !s.username.trim()} onClick={() => test(i)}>
                 {busy === i ? "Working…" : "Test sign-in"}
               </button>

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { relaunch } from "@tauri-apps/plugin-process";
+import { useCapabilities } from "../capabilities";
+import Unavailable from "../web/Unavailable";
+import { UPDATER_REASON } from "../web/gates";
+import { platform } from "../platform";
 import { install, type UpdateState } from "../updates";
 import CasaVargas from "./CasaVargas";
 import { Link, REPO } from "./Row";
@@ -59,7 +62,7 @@ function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version">) {
       return (
         <span className="update">
           Deckle {update.update.version} is installed.
-          <button className="primary" disabled={busy} onClick={() => relaunch()}>
+          <button className="primary" disabled={busy} onClick={() => platform.relaunch()}>
             Restart to finish
           </button>
           {busy && <span>Finish the current job first.</span>}
@@ -69,13 +72,14 @@ function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version">) {
 }
 
 export default function About({ version, update, onUpdateState, busy }: Props) {
+  const caps = useCapabilities();
   return (
     <>
       <p className="set-lead">
         Deckle {version} · GPL-3.0-or-later · <Link href={REPO}>Source</Link>
       </p>
       <div className="set-block">
-        <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} />
+        {caps.updater ? <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} /> : <Unavailable reason={UPDATER_REASON} />}
       </div>
       <CasaVargas />
       <p className="set-prose">

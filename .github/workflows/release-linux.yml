@@ -76,7 +76,8 @@ jobs:
       - run: |
           sudo apt-get update
           sudo apt-get install -y libdbus-1-dev pkg-config
-      - run: cargo build --release -p deckle-cli --locked
+      # One binary, as in the image: deckle-web is the `deckle` command line plus `serve`.
+      - run: cargo build --release -p deckle-server --bin deckle-web --locked
       - name: Package
         id: pkg
         env:
@@ -92,7 +93,8 @@ jobs:
           tools/fetch-pdfium.sh "$PDFIUM"
           name="deckle-$version-$TARGET"
           mkdir "$name"
-          cp target/release/deckle target/pdfium/lib/libpdfium.so LICENSE "$name/"
+          cp target/release/deckle-web "$name/deckle"
+          cp target/pdfium/lib/libpdfium.so LICENSE "$name/"
           # deckle-pdf looks for PDFium beside the executable, so no setup is needed.
           printf '%s\n' \
             "Needs glibc 2.35+ (Ubuntu 22.04, Debian 12 or newer) and libdbus-1-3." \

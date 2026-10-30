@@ -2,8 +2,9 @@
 // The paper's own settings (Daily tab redesign §6): a sheet from the right, opened from the paper
 // switcher. Name, who it's for, its Kindle and units, the masthead as cards in each face, how it
 // reads, the AI editor and learning. Everything saves as it changes.
+import { useCapabilities } from "./capabilities";
 import { useEffect, useRef, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api } from "./api";
 import DailyEditor from "./DailyEditor";
 import Icon from "./Icon";
@@ -30,6 +31,7 @@ export default function PaperSheet({
   flush: () => void;
   onClose: () => void;
 }) {
+  const caps = useCapabilities();
   const [missing, setMissing] = useState<string[]>([]);
   const sheet = useRef<HTMLElement | null>(null);
   const choice = mastheadChoice(draft.masthead);
@@ -138,8 +140,8 @@ export default function PaperSheet({
           <button
             className="link"
             onClick={async () => {
-              const picked = await openDialog({ multiple: false, filters: [{ name: "TrueType font", extensions: ["ttf"] }] });
-              if (typeof picked === "string") edit((c) => (c.masthead = picked), "now");
+              const picked = (await platform.pickFiles({ filterName: "TrueType font", extensions: ["ttf"] }))?.[0];
+              if (picked !== undefined) edit((c) => (c.masthead = picked), "now");
             }}
           >
             Use a font file…
@@ -190,9 +192,11 @@ export default function PaperSheet({
 
         <p className="muted small">
           Saved as you go to <span className="mono">{configPath}</span>; your own comments in it are kept.{" "}
-          <button className="link" onClick={() => api.reveal(configPath)}>
-            Show the file
-          </button>
+          {caps.reveal && (
+            <button className="link" onClick={() => api.reveal(configPath)}>
+              Show the file
+            </button>
+          )}
         </p>
       </section>
     </div>

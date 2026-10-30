@@ -48,6 +48,48 @@ where
     }
 }
 
+/// Seconds between the daemon's checks, unless `--tick` says otherwise.
+pub const DAEMON_TICK: u64 = 30;
+
+/// `digest daemon --tick <tick>` on the default config, until SIGTERM or SIGINT: `deckle-web
+/// serve` runs it beside the web UI.
+pub fn run_daemon(tick: u64) -> Result<(), String> {
+    let path = deckle_digest::config::default_path();
+    let papers = all_papers(&path)?;
+    daemon::run(&path, None, papers, tick)
+}
+
+/// `digest init`'s starter config at the default path, unless there's a config already:
+/// `deckle-web serve`'s first run. `Some(path)` when it wrote one.
+pub fn ensure_starter_config() -> Result<Option<PathBuf>, String> {
+    let path = deckle_digest::config::default_path();
+    if path.exists() {
+        return Ok(None);
+    }
+    match write_starter(&path, true) {
+        Ok(()) => Ok(Some(path)),
+        // Written by someone else meanwhile: theirs stands.
+        Err(_) if path.exists() => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Writes the starter digest.toml to `path`; `keep` refuses to replace a file already there.
+fn write_starter(path: &Path, keep: bool) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .create_new(keep)
+        .truncate(true)
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    std::io::Write::write_all(&mut file, deckle_digest::config::STARTER.as_bytes())
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// `Notes: 84 pop-ups (12 already marked, 72 detected), 3 one-way links left` (#31 design §4).
 fn notes_line(n: &deckle_core::notes::NotesReport) -> String {
     let left = match n.skipped_one_way {
@@ -2069,24 +2111,6 @@ fn schedule_at() -> Option<(u8, u8)> {
         .and_then(|a| deckle_digest::schedule::parse_at(&a).ok())
 }
 
-/// The next press in a daemon install, from `[schedule]` (`at`, and `days` when set).
-fn daemon_next_press(
-    sched: &deckle_digest::config::ScheduleConfig,
-    now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
-) -> Option<deckle_digest::chrono::NaiveDate> {
-    use deckle_digest::chrono::{Datelike, Days};
-    let at = deckle_digest::schedule::parse_at(sched.at.as_deref()?).ok()?;
-    let mut date = deckle_digest::press::next_press(at, now).date_naive();
-    for _ in 0..7 {
-        let day = deckle_digest::config::Day::ALL[date.weekday().num_days_from_monday() as usize];
-        if sched.days.is_empty() || sched.days.contains(&day) {
-            return Some(date);
-        }
-        date = date + Days::new(1);
-    }
-    None
-}
-
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
     match arg {
         None => Ok(deckle_digest::chrono::Local::now().date_naive()),
@@ -2472,10 +2496,7 @@ fn digest(
                     path.display()
                 ));
             }
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            std::fs::write(&path, deckle_digest::config::STARTER).map_err(|e| e.to_string())?;
+            write_starter(&path, false)?;
             emit(json, &path, || format!("wrote {}", path.display()))?;
             Ok(ExitCode::SUCCESS)
         }
@@ -3018,7 +3039,7 @@ fn digest(
                         let now = deckle_digest::chrono::Utc::now().with_timezone(&tz);
                         // No OS job to ask in a container: the main paper's own `[schedule]`.
                         let next = if daemon_install() {
-                            daemon_next_press(&cfg.schedule, now)
+                            deckle_digest::schedule::config_next_press(&cfg.schedule, now)
                         } else {
                             deckle_digest::press::press(schedule_at(), None, now)
                                 .next
@@ -3500,7 +3521,7 @@ fn daemon_install() -> bool {
 }
 
 fn no_keychain(env: &str) -> String {
-    format!("no keychain in the container: set {env}")
+    deckle_digest::secret::no_keychain(env)
 }
 
 /// `digest schedule` in a daemon install: the config is the schedule (the daemon re-reads it
@@ -3515,9 +3536,8 @@ fn daemon_schedule(
 ) -> Result<ExitCode, String> {
     use deckle_digest::schedule;
     if off {
-        let mut cfg = paper_config(path, paper)?;
-        cfg.schedule = Default::default();
-        deckle_digest::papers::save(path, &cfg)?;
+        load_digest_config(path)?;
+        let cfg = schedule::clear_config_schedule(path, paper)?;
         emit(json, &"off", || format!("{}: schedule cleared", cfg.title))?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -3552,10 +3572,8 @@ fn daemon_schedule(
             })
             .collect::<Result<_, _>>()?,
     };
-    let mut cfg = paper_config(path, paper)?;
-    cfg.schedule.at = Some(at);
-    cfg.schedule.days = days;
-    deckle_digest::papers::save(path, &cfg)?;
+    load_digest_config(path)?;
+    schedule::save_config_schedule(path, paper, Some(&at), Some(days))?;
     emit(json, &"saved", || {
         "saved; the daemon picks it up within a minute".to_owned()
     })?;

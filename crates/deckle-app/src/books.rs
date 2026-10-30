@@ -15,7 +15,6 @@ use deckle_library::upgrade::Upgrades;
 use deckle_library::watch::{Watched, scan, seen_path};
 use deckle_library::{Library, LibraryConfig, SeriesRef};
 use serde::Serialize;
-use tauri::State;
 
 use crate::commands::{AppState, CoverChoice, load_settings_from};
 use crate::kindle::data_url;
@@ -62,17 +61,12 @@ pub fn catalog_at(config: &Path, home: Option<&Path>, device: Option<&str>) -> C
     }
 }
 
-#[tauri::command]
-pub async fn library_catalog(device: Option<String>) -> Result<CatalogView, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        catalog_at(
-            &deckle_library::config::default_path(),
-            home().as_deref(),
-            device.as_deref(),
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())
+pub fn library_catalog(device: Option<String>) -> CatalogView {
+    catalog_at(
+        &deckle_library::config::default_path(),
+        home().as_deref(),
+        device.as_deref(),
+    )
 }
 
 /// Covers this tall make the grid's thumbnails.
@@ -91,11 +85,8 @@ pub fn covers_of(paths: &[String]) -> Vec<(String, Option<String>)> {
         .collect()
 }
 
-#[tauri::command]
-pub async fn library_covers(paths: Vec<String>) -> Result<Vec<(String, Option<String>)>, String> {
-    tauri::async_runtime::spawn_blocking(move || covers_of(&paths))
-        .await
-        .map_err(|e| e.to_string())
+pub fn library_covers(paths: Vec<String>) -> Vec<(String, Option<String>)> {
+    covers_of(&paths)
 }
 
 /// What Deckle will do to one book, for Before you send.
@@ -156,18 +147,13 @@ pub fn preflight_with(
     })
 }
 
-#[tauri::command]
-pub async fn book_preflight(
-    state: State<'_, AppState>,
+pub fn book_preflight(
+    state: &AppState,
     path: String,
     cover: Option<CoverChoice>,
 ) -> Result<PreflightView, String> {
     let settings = load_settings_from(&state.settings_file);
-    tauri::async_runtime::spawn_blocking(move || {
-        preflight_with(Path::new(&path), &settings, cover.as_ref())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    preflight_with(Path::new(&path), &settings, cover.as_ref())
 }
 
 /// An Open Library cover the picker offers.
@@ -178,9 +164,8 @@ pub struct CoverOffer {
 }
 
 /// Open Library's covers, when the owner has Open Library on (the metadata setting).
-#[tauri::command]
-pub async fn cover_candidates(
-    state: State<'_, AppState>,
+pub fn cover_candidates(
+    state: &AppState,
     title: String,
     author: String,
     isbn: Option<String>,
@@ -188,19 +173,15 @@ pub async fn cover_candidates(
     if !load_settings_from(&state.settings_file).metadata_fill {
         return Err("Turn on Open Library in Settings → Books to look for covers there.".into());
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut fetch = deckle_core::wordwise::http_get_bytes;
-        deckle_core::covers::candidates(&title, &author, isbn.as_deref(), &mut fetch).map(|c| {
-            c.into_iter()
-                .map(|c| CoverOffer {
-                    thumb: data_url(&c.thumb),
-                    large: c.large,
-                })
-                .collect()
-        })
+    let mut fetch = deckle_core::wordwise::http_get_bytes;
+    deckle_core::covers::candidates(&title, &author, isbn.as_deref(), &mut fetch).map(|c| {
+        c.into_iter()
+            .map(|c| CoverOffer {
+                thumb: data_url(&c.thumb),
+                large: c.large,
+            })
+            .collect()
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// `covers/` in Deckle's cache, where picked covers are kept for the send.
@@ -209,33 +190,28 @@ fn covers_dir() -> PathBuf {
 }
 
 /// Fetches the large cover at `large` into the cache; its path is what the send uses.
-#[tauri::command]
-pub async fn cover_fetch(large: String) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut fetch = deckle_core::wordwise::http_get_bytes;
-        let bytes = deckle_core::covers::fetch_large(&large, &mut fetch)?;
-        let name: String = large
-            .rsplit('/')
-            .take(2)
-            .collect::<Vec<_>>()
-            .join("-")
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let dir = covers_dir();
-        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-        let path = dir.join(name);
-        std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-        Ok(path.to_string_lossy().into_owned())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn cover_fetch(large: String) -> Result<String, String> {
+    let mut fetch = deckle_core::wordwise::http_get_bytes;
+    let bytes = deckle_core::covers::fetch_large(&large, &mut fetch)?;
+    let name: String = large
+        .rsplit('/')
+        .take(2)
+        .collect::<Vec<_>>()
+        .join("-")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let dir = covers_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join(name);
+    std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Writes `details` into the library book in `dir` (its copy's OPF and sidecar).
@@ -244,7 +220,6 @@ pub fn fix_at(config: &Path, dir: &Path, details: &Details) -> Result<(), String
     fix(&lib, dir, details).map(|_| ())
 }
 
-#[tauri::command]
 pub fn library_fix_details(dir: String, details: Details) -> Result<(), String> {
     fix_at(
         &deckle_library::config::default_path(),
@@ -264,7 +239,6 @@ pub fn details_at(config: &Path, dir: &Path) -> Result<Details, String> {
     read_book(&book.source_path())
 }
 
-#[tauri::command]
 pub fn library_read_details(dir: String) -> Result<Details, String> {
     details_at(&deckle_library::config::default_path(), Path::new(&dir))
 }
@@ -344,28 +318,23 @@ pub fn suggest_at(
 
 /// Open Library's suggestions for a library book. Online, so only with the metadata setting on
 /// or when the person `asked` (the editor's Look up on Open Library).
-#[tauri::command]
-pub async fn library_suggest_details(
-    state: State<'_, AppState>,
+pub fn library_suggest_details(
+    state: &AppState,
     dir: String,
     asked: bool,
 ) -> Result<Option<Suggestions>, String> {
     if !asked && !load_settings_from(&state.settings_file).metadata_fill {
         return Err("Fill missing details is off in Settings → Books.".into());
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut fetch = |url: &str| {
-            deckle_core::wordwise::http_get_bytes(url)
-                .and_then(|b| String::from_utf8(b).map_err(|e| e.to_string()))
-        };
-        suggest_at(
-            &deckle_library::config::default_path(),
-            Path::new(&dir),
-            &mut fetch,
-        )
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let mut fetch = |url: &str| {
+        deckle_core::wordwise::http_get_bytes(url)
+            .and_then(|b| String::from_utf8(b).map_err(|e| e.to_string()))
+    };
+    suggest_at(
+        &deckle_library::config::default_path(),
+        Path::new(&dir),
+        &mut fetch,
+    )
 }
 
 /// A book Deckle sent to a Kindle, for the Kindle tab when that Kindle isn't plugged in
@@ -446,7 +415,6 @@ pub fn sent_kindles(lib: &Library) -> Vec<SentKindle> {
     out
 }
 
-#[tauri::command]
 pub fn library_sent_kindles() -> Vec<SentKindle> {
     Library::configured(&deckle_library::config::default_path())
         .map(|(lib, _)| sent_kindles(&lib))
@@ -468,7 +436,6 @@ pub fn watch_set_at(config: &Path, dir: Option<String>) -> Result<Option<String>
     Ok(dir.map(|d| d.to_string_lossy().into_owned()))
 }
 
-#[tauri::command]
 pub fn library_watch_set(dir: Option<String>) -> Result<Option<String>, String> {
     watch_set_at(&deckle_library::config::default_path(), dir)
 }
@@ -485,27 +452,19 @@ pub fn watch_scan_at(config: &Path) -> Result<Watched, String> {
     }
 }
 
-#[tauri::command]
-pub async fn library_watch_scan() -> Result<Watched, String> {
-    tauri::async_runtime::spawn_blocking(|| watch_scan_at(&deckle_library::config::default_path()))
-        .await
-        .map_err(|e| e.to_string())?
+pub fn library_watch_scan() -> Result<Watched, String> {
+    watch_scan_at(&deckle_library::config::default_path())
 }
 
 /// Explicit searches scan devices once, rather than opening an MTP session on each keystroke.
-#[tauri::command]
-pub async fn library_search(query: String) -> Result<deckle_library::search::Report, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        use deckle_core::deliver::{Target, detect_mass_storage};
-        let mut targets: Vec<_> = detect_mass_storage()
-            .into_iter()
-            .map(Target::MassStorage)
-            .collect();
-        targets.extend(deckle_transport::usb::detect().into_iter().map(Target::Mtp));
-        deckle_library::search::collect(&deckle_library::config::default_path(), &targets, &query)
-    })
-    .await
-    .map_err(|e| e.to_string())
+pub fn library_search(query: String) -> deckle_library::search::Report {
+    use deckle_core::deliver::{Target, detect_mass_storage};
+    let mut targets: Vec<_> = detect_mass_storage()
+        .into_iter()
+        .map(Target::MassStorage)
+        .collect();
+    targets.extend(deckle_transport::usb::detect().into_iter().map(Target::Mtp));
+    deckle_library::search::collect(&deckle_library::config::default_path(), &targets, &query)
 }
 
 #[cfg(test)]
