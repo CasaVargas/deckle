@@ -5,7 +5,8 @@
 import { patchExport } from "./pressView";
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { deliveryGroups } from "./dailyRooms";
+import { deliveryGroups, exportFolderHint } from "./dailyRooms";
+import { useCapabilities } from "./capabilities";
 import type { DeliveryRow } from "./dailyRooms";
 import { DEFAULT_EMAIL } from "./types";
 import { DEFAULT_REMARKABLE } from "./exportsView";
@@ -29,6 +30,7 @@ export default function DeliveryTab({
   /** The email settings, which keep their own password and test state. */
   emailBody: ReactNode;
 }) {
+  const caps = useCapabilities();
   const [open, setOpen] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const groups = deliveryGroups(draft);
@@ -143,7 +145,7 @@ export default function DeliveryTab({
             >
               + Add a folder
             </button>
-            <span className="muted small">iCloud Drive for an iPad, Dropbox for a Boox</span>
+            <span className="muted small">{exportFolderHint(caps.web)}</span>
             {error && <span className="warn small">{error}</span>}
           </li>
         </ul>

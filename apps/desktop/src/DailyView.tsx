@@ -536,8 +536,8 @@ export default function DailyView({
       {emailMsg && <p className={`small ${emailMsg.ok ? "" : "fail"}`}>{emailMsg.text}</p>}
       <p className="muted small">
         Add the From address to Amazon's Approved Personal Document E-mail List (Manage Your Content and Devices → Preferences →
-        Personal Document Settings), or Amazon drops the email. Gmail and iCloud need an app password. The password is kept in the
-        system keychain, never in digest.toml.
+        Personal Document Settings), or Amazon drops the email. Gmail and iCloud need an app password.
+        {caps.keychain && " The password is kept in the system keychain, never in digest.toml."}
       </p>
       <p className="muted small">
         Emailed papers collect in your Kindle's Docs: Deckle can't remove them, so the "keep" setting only applies over USB. Clear

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import type { Settings } from "../types";
 import { Switch } from "./Row";
+import { useCapabilities } from "../capabilities";
 
 interface Props {
   settings: Settings;
@@ -22,6 +23,7 @@ function Example({ level, on }: { level: number; on: boolean }) {
 
 /** Reading aids (Settings redesign §6): Word Wise and X-Ray, help that appears while you read. */
 export default function ReadingAids({ settings, set }: Props) {
+  const caps = useCapabilities();
   const ai = settings.llm_provider !== "off";
   return (
     <div className="set-stack">
@@ -97,7 +99,7 @@ export default function ReadingAids({ settings, set }: Props) {
             <label>
               <span className="tk-label">API key</span>
               <input type="password" value={settings.llm_api_key} onChange={(e) => set("llm_api_key", e.target.value)} placeholder="Optional" autoComplete="off" />
-              <span className="muted small">Stored on this computer. Empty uses ANTHROPIC_API_KEY / OPENAI_API_KEY.</span>
+              <span className="muted small">Stored on {caps.web ? "the server" : "this computer"}. Empty uses ANTHROPIC_API_KEY / OPENAI_API_KEY.</span>
             </label>
           </div>
         )}

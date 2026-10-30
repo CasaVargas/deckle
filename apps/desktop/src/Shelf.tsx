@@ -34,7 +34,11 @@ export default function Shelf({ inPaper }: { inPaper: boolean }) {
       {caps.web && !caps.usb ? (
         <Unavailable reason={NO_DEVICE_REASON} />
       ) : (
-        !status.enabled && <p className="muted small">This Mac isn't reading your Kindle for it. Turn it on in Settings → Kindles.</p>
+        !status.enabled && (
+          <p className="muted small">
+            {caps.web ? "Deckle isn't reading your Kindle for it." : "This Mac isn't reading your Kindle for it."} Turn it on in Settings → Kindles.
+          </p>
+        )
       )}
       {email && <p className="warn small">{email}</p>}
       {status.kindle && (

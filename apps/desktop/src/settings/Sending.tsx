@@ -72,21 +72,24 @@ export default function Sending({ settings, set, previewer, onPickPreviewer, dev
         </div>
         <p className="muted">
           Amazon's free tool that turns a book into the Kindle's own format.{" "}
-          {previewer?.found ? (
+          {caps.web ? null : previewer?.found ? (
             "Deckle finds it by itself; choose it only if it lives somewhere unusual."
-          ) : caps.web ? null : (
+          ) : (
             <>
               {previewer?.download_url ? <Link href={previewer.download_url}>Download it</Link> : "Download it"} and restart Deckle, or choose its command line tool.
             </>
           )}
         </p>
         {caps.web && !previewer?.found && <Unavailable reason={PREVIEWER_REASON} />}
-        <div className="set-wide">
-          <input type="text" value={settings.previewer_path ?? ""} placeholder={previewer?.path ?? "Found automatically"} onChange={(e) => set("previewer_path", e.target.value || null)} aria-label="Kindle Previewer location" />
-          <button className="ghost" onClick={onPickPreviewer}>
-            Choose…
-          </button>
-        </div>
+        {/* The server finds its own Previewer: there's nothing to point it at from a browser. */}
+        {!caps.web && (
+          <div className="set-wide">
+            <input type="text" value={settings.previewer_path ?? ""} placeholder={previewer?.path ?? "Found automatically"} onChange={(e) => set("previewer_path", e.target.value || null)} aria-label="Kindle Previewer location" />
+            <button className="ghost" onClick={onPickPreviewer}>
+              Choose…
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );
