@@ -25,3 +25,5 @@ services:
       # DECKLE_BOOKMARKLET_URL to the address the browser reaches (behind a TLS proxy for
       # https pages).
       # - "47219:47219"
+      # KOReader over Wi-Fi: the catalog and progress sync ([reader_server] in digest.toml).
+      # - "47220:47220"

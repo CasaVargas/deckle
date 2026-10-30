@@ -704,6 +704,40 @@ Mac.
 - **A folder that's missing** is made when its parent exists. When the parent is missing too
   (iCloud Drive turned off), the run's report says so and the paper still ships everywhere else.
 
+## KOReader over Wi-Fi
+
+KOReader runs on Kobos, PocketBooks, Boox tablets, reMarkables and jailbroken Kindles. Deckle
+can serve it two things over your home network (KOReader hub design,
+`docs/superpowers/specs/2026-10-30-koreader-hub-design.md`):
+
+- **A catalog (OPDS):** today's paper, the last two weeks of papers, and the books waiting for
+  your e-readers, each as an EPUB or, for a Kobo, a KEPUB. In KOReader: Search → OPDS catalog → +,
+  with the catalog URL, the username and the password.
+- **Progress sync:** KOReader's own sync, pointed at this computer instead of the internet.
+
+Turn it on in Delivery → **KOReader over Wi-Fi**, choose a password, and copy the two URLs the
+card shows. Or from the command line:
+
+```toml
+[reader_server]
+enabled = true
+port = 47220                     # the default
+username = "deckle"
+```
+
+```sh
+deckle reader-server password    # asked for without echo; only its MD5 is kept
+deckle reader-server status      # on or off, and the URLs to type into KOReader
+```
+
+- The watcher serves it, so the app (or `deckle digest watch`) has to be running. Changes apply
+  within a tick, no restart.
+- The password's MD5 is kept in `reader-server.json` beside `digest.toml`, readable only by you.
+  KOReader's sync protocol sends exactly that MD5, so treat the file like a password.
+- It's plain HTTP on every network interface. Use it at home or over Tailscale, never open to the
+  internet. `DECKLE_READER_SERVER_BIND` limits the address it listens on.
+- Not yet checked with KOReader on a real device (`docs/devices.md`).
+
 ## Kobo
 
 A Kobo gets the paper too, with no Kindle Previewer: plug it in once (or keep it plugged in for
