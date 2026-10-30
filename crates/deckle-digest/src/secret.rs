@@ -293,6 +293,11 @@ pub fn daemon_install() -> bool {
     std::env::var_os("DECKLE_DAEMON").is_some_and(|v| !v.is_empty())
 }
 
+/// Why a password can't be saved in a daemon install: it comes from `env` instead.
+pub fn no_keychain(env: &str) -> String {
+    format!("no keychain in the container: set {env}")
+}
+
 /// keyring's errors, without their payloads: `BadEncoding` holds the stored bytes.
 fn keyring_error(e: keyring::Error) -> KeyringError {
     match e {

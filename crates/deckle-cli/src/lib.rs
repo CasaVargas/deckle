@@ -2069,24 +2069,6 @@ fn schedule_at() -> Option<(u8, u8)> {
         .and_then(|a| deckle_digest::schedule::parse_at(&a).ok())
 }
 
-/// The next press in a daemon install, from `[schedule]` (`at`, and `days` when set).
-fn daemon_next_press(
-    sched: &deckle_digest::config::ScheduleConfig,
-    now: deckle_digest::chrono::DateTime<deckle_digest::chrono_tz::Tz>,
-) -> Option<deckle_digest::chrono::NaiveDate> {
-    use deckle_digest::chrono::{Datelike, Days};
-    let at = deckle_digest::schedule::parse_at(sched.at.as_deref()?).ok()?;
-    let mut date = deckle_digest::press::next_press(at, now).date_naive();
-    for _ in 0..7 {
-        let day = deckle_digest::config::Day::ALL[date.weekday().num_days_from_monday() as usize];
-        if sched.days.is_empty() || sched.days.contains(&day) {
-            return Some(date);
-        }
-        date = date + Days::new(1);
-    }
-    None
-}
-
 fn parse_date(arg: Option<&str>) -> Result<deckle_digest::chrono::NaiveDate, String> {
     match arg {
         None => Ok(deckle_digest::chrono::Local::now().date_naive()),
@@ -3018,7 +3000,7 @@ fn digest(
                         let now = deckle_digest::chrono::Utc::now().with_timezone(&tz);
                         // No OS job to ask in a container: the main paper's own `[schedule]`.
                         let next = if daemon_install() {
-                            daemon_next_press(&cfg.schedule, now)
+                            deckle_digest::schedule::config_next_press(&cfg.schedule, now)
                         } else {
                             deckle_digest::press::press(schedule_at(), None, now)
                                 .next
@@ -3500,7 +3482,7 @@ fn daemon_install() -> bool {
 }
 
 fn no_keychain(env: &str) -> String {
-    format!("no keychain in the container: set {env}")
+    deckle_digest::secret::no_keychain(env)
 }
 
 /// `digest schedule` in a daemon install: the config is the schedule (the daemon re-reads it
@@ -3515,9 +3497,8 @@ fn daemon_schedule(
 ) -> Result<ExitCode, String> {
     use deckle_digest::schedule;
     if off {
-        let mut cfg = paper_config(path, paper)?;
-        cfg.schedule = Default::default();
-        deckle_digest::papers::save(path, &cfg)?;
+        load_digest_config(path)?;
+        let cfg = schedule::clear_config_schedule(path, paper)?;
         emit(json, &"off", || format!("{}: schedule cleared", cfg.title))?;
         return Ok(ExitCode::SUCCESS);
     }
@@ -3552,10 +3533,8 @@ fn daemon_schedule(
             })
             .collect::<Result<_, _>>()?,
     };
-    let mut cfg = paper_config(path, paper)?;
-    cfg.schedule.at = Some(at);
-    cfg.schedule.days = days;
-    deckle_digest::papers::save(path, &cfg)?;
+    load_digest_config(path)?;
+    schedule::save_config_schedule(path, paper, Some(&at), Some(days))?;
     emit(json, &"saved", || {
         "saved; the daemon picks it up within a minute".to_owned()
     })?;
