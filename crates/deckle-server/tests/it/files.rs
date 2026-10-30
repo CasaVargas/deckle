@@ -331,20 +331,33 @@ async fn upload_over_limit_is_413_and_leaves_nothing() {
 async fn download_sets_attachment() {
     let tmp = tempfile::tempdir().unwrap();
     let (_, data) = roots(tmp.path());
-    std::fs::write(data.join("Dune \"1\".epub"), b"spice").unwrap();
+    std::fs::write(data.join("Dune.epub"), b"spice").unwrap();
     std::fs::write(data.join("Émile.epub"), b"rousseau").unwrap();
     let app = files_app(tmp.path(), None);
     let cookie = login(&app).await;
 
-    let p = data.join("Dune \"1\".epub");
+    let p = data.join("Dune.epub");
     let r = get(&app, &format!("/api/fs/download?path={}", q(&p)), &cookie).await;
     assert_eq!(r.status, StatusCode::OK, "{}", r.body);
     assert_eq!(r.body, "spice");
     assert_eq!(
         r.headers["content-disposition"],
-        "attachment; filename=\"Dune _1_.epub\"; filename*=UTF-8''Dune%20%221%22.epub"
+        "attachment; filename=\"Dune.epub\""
     );
     assert_eq!(r.headers["content-type"], "application/epub+zip");
+
+    // A quote can't break out of `filename="…"`. Unix only: Windows forbids `"` in names.
+    #[cfg(unix)]
+    {
+        let p = data.join("Dune \"1\".epub");
+        std::fs::write(&p, b"spice").unwrap();
+        let r = get(&app, &format!("/api/fs/download?path={}", q(&p)), &cookie).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+        assert_eq!(
+            r.headers["content-disposition"],
+            "attachment; filename=\"Dune _1_.epub\"; filename*=UTF-8''Dune%20%221%22.epub"
+        );
+    }
 
     let p = data.join("Émile.epub");
     let r = get(&app, &format!("/api/fs/download?path={}", q(&p)), &cookie).await;
