@@ -88,13 +88,71 @@ fn a_book_goes_to_a_pocketbook_when_no_kindle_is_plugged_in() {
 }
 
 #[test]
-fn highlights_say_a_pocketbook_has_none_to_read() {
+fn a_pocketbook_without_koreader_has_no_highlights_yet() {
     let (tmp, home, root) = setup();
-    // No Kindle and no Kobo: there's nothing to read highlights from.
+    // Only KOReader's sidecars are read on a PocketBook (KOReader reads design §6).
     let o = deckle(&home, &root)
         .args(["highlights", "export", "--to"])
         .arg(tmp.path().join("out"))
         .output()
         .unwrap();
-    assert!(!o.status.success());
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(String::from_utf8_lossy(&o.stdout).contains("no highlights on"));
+    assert!(!tmp.path().join("out").exists());
+}
+
+/// A KOReader sidecar with one highlight and a note (KOReader reads design §4).
+const SIDECAR: &str = r#"return {
+    ["annotations"] = {
+        [1] = {
+            ["datetime"] = "2026-10-21 08:15:03",
+            ["drawer"] = "lighten",
+            ["note"] = "Thoreau at his plainest.",
+            ["pageno"] = 12,
+            ["pos0"] = "a",
+            ["pos1"] = "b",
+            ["text"] = "The mass of men lead lives of quiet desperation.",
+        },
+    },
+    ["doc_props"] = { ["authors"] = "Henry David Thoreau", ["title"] = "Walden" },
+    ["percent_finished"] = 0.42,
+}
+"#;
+
+#[test]
+fn highlights_export_reads_koreader_on_a_pocketbook() {
+    let (tmp, home, root) = setup();
+    std::fs::create_dir_all(root.join("Books/Walden.sdr")).unwrap();
+    std::fs::write(root.join("Books/Walden.sdr/metadata.epub.lua"), SIDECAR).unwrap();
+    let out = tmp.path().join("highlights");
+    let o = deckle(&home, &root)
+        .args(["highlights", "export", "--to"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let written = names(&out);
+    assert_eq!(written.len(), 1, "{written:?}");
+    let md = std::fs::read_to_string(out.join(&written[0])).unwrap();
+    assert!(md.contains("quiet desperation"), "{md}");
+    assert!(md.contains("Thoreau at his plainest."), "{md}");
+}
+
+#[test]
+fn highlights_from_a_folder_read_koreader_sidecars_in_it() {
+    // A Boox's folder, synced back to the computer by a two-way sync app.
+    let (tmp, home, _root) = setup();
+    let folder = tmp.path().join("Boox");
+    std::fs::create_dir_all(folder.join("Walden.sdr")).unwrap();
+    std::fs::write(folder.join("Walden.sdr/metadata.epub.lua"), SIDECAR).unwrap();
+    let o = deckle(&home, Path::new("/nonexistent-mounts"))
+        .args(["--json", "highlights", "--from"])
+        .arg(&folder)
+        .arg("list")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let rows: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(rows[0]["title"], "Walden", "{rows}");
+    assert_eq!(rows[0]["total"], 2, "a highlight and its note: {rows}");
 }

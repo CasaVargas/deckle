@@ -340,13 +340,24 @@ pub fn run_reader(
                 }
             })?;
     }
-    // One read serves both; a failed read doesn't undo a delivery. A PocketBook isn't read.
-    if let (Reader::Kobo(kobo), true) = (reader, plan.clippings || plan.shelf) {
-        match crate::kobo::read(kobo) {
+    // One read serves both; a failed read doesn't undo a delivery. A Kobo's database and
+    // KOReader's sidecars are read together; a PocketBook has only KOReader's (KOReader reads
+    // design §6).
+    if plan.clippings || plan.shelf {
+        let ko = crate::koreader::read(reader.root());
+        report
+            .warnings
+            .extend(ko.warnings.iter().map(|w| format!("KOReader: {w}")));
+        let read = match reader {
+            Reader::Kobo(kobo) => crate::kobo::read(kobo).map(|k| crate::koreader::merge(k, ko)),
+            Reader::PocketBook(_) => Ok(crate::koreader::merge(Default::default(), ko)),
+        };
+        match read {
             Ok(r) => {
                 // The shelf prints a highlight too, so it brings the clippings, as on a Kindle.
                 report.clippings = r.clippings;
-                if plan.shelf {
+                // A PocketBook without KOReader has nothing to show: no shelf for it.
+                if plan.shelf && (matches!(reader, Reader::Kobo(_)) || !r.books.is_empty()) {
                     report.kobo_books = Some(r.books);
                 }
             }
@@ -1264,6 +1275,44 @@ mod pocketbook_tests {
         assert_eq!(r.delivered, std::slice::from_ref(&sent));
         assert_eq!(std::fs::read(sent).unwrap(), epub);
         assert!(r.kobo_books.is_none() && r.clippings.is_none() && r.clippings_error.is_none());
+    }
+
+    #[test]
+    fn a_pocketbook_running_koreader_is_read_for_highlights_and_books() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("PB");
+        std::fs::create_dir_all(root.join("Books/Walden.sdr")).unwrap();
+        std::fs::write(
+            root.join("Books/Walden.sdr/metadata.epub.lua"),
+            "return { [\"annotations\"] = { [1] = { [\"datetime\"] = \"2026-10-21 08:15:03\", \
+             [\"drawer\"] = \"lighten\", [\"text\"] = \"Simplify.\" } }, \
+             [\"doc_props\"] = { [\"title\"] = \"Walden\" }, [\"percent_finished\"] = 0.5 }",
+        )
+        .unwrap();
+        let pb = Reader::PocketBook(PocketBook { root });
+        let q = Queue::new(tmp.path().join("outbox-epub"));
+        let plan = Plan {
+            push: false,
+            prune: false,
+            clippings: true,
+            readership: false,
+            shelf: true,
+        };
+        let prune = Prune {
+            prefix: "deckle-daily-".into(),
+            keep: 3,
+            exempt: Vec::new(),
+        };
+        let r = run_reader(&q, &pb, plan, &prune, &mut |_, _, _| {}).unwrap();
+        let text = String::from_utf8(r.clippings.unwrap()).unwrap();
+        assert!(
+            text.starts_with("Walden\n- Your Highlight | Added on"),
+            "{text}"
+        );
+        let books = r.kobo_books.unwrap();
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].content_id, "Books/Walden.epub");
+        assert_eq!(books[0].percent, 50.0);
     }
 }
 

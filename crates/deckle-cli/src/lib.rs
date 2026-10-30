@@ -996,18 +996,23 @@ fn highlights_cmd(
     from: &str,
     action: cli::HighlightsCommand,
 ) -> Result<ExitCode, String> {
-    // No Kindle but a Kobo: its highlights, written as a Kindle's clippings (other readers §8.2).
-    let kobo = (from == "device" && detect_kindle().is_none())
+    // No Kindle but a Kobo or a PocketBook: a Kobo's database and KOReader's sidecars, written
+    // as a Kindle's clippings (other readers §8.2, KOReader reads design §6).
+    let reader = (from == "device" && detect_kindle().is_none())
         .then(detect_reader)
-        .flatten()
-        .and_then(|r| match r {
-            deckle_core::reader::Reader::Kobo(k) => Some(k),
-            _ => None,
-        });
-    let read = match &kobo {
-        Some(k) => deckle_core::kobo::read(k)
-            .map(|r| r.clippings)
-            .map_err(|e| e.to_string()),
+        .flatten();
+    let read = match &reader {
+        Some(r) => {
+            let ko = deckle_core::koreader::read(r.root());
+            for w in &ko.warnings {
+                eprintln!("warning: KOReader: {w}");
+            }
+            match r {
+                deckle_core::reader::Reader::Kobo(k) => deckle_core::kobo::read(k)
+                    .map(|k| deckle_core::koreader::merge(k, ko).clippings),
+                deckle_core::reader::Reader::PocketBook(_) => Ok(ko.clippings),
+            }
+        }
         None => {
             let target = resolve_target(from)?;
             deckle_core::clippings::read_on(&mut deckle_core::deliver::Conn::new(&target))
@@ -1020,7 +1025,10 @@ fn highlights_cmd(
             emit(
                 json,
                 &serde_json::json!({ "written": [], "failed": [] }),
-                || "no highlights on this Kindle yet".into(),
+                || match &reader {
+                    Some(r) => format!("no highlights on the {} yet", r.name()),
+                    None => "no highlights on this Kindle yet".into(),
+                },
             )?;
             return Ok(ExitCode::SUCCESS);
         }
