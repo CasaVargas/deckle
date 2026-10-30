@@ -29,6 +29,7 @@ mod papers;
 mod pocketbook;
 mod press;
 mod puzzle;
+mod reader_server;
 mod readership;
 mod remarkable;
 mod rtf;

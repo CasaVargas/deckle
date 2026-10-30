@@ -9,6 +9,7 @@ mod daemon;
 mod highlights;
 mod inbox;
 pub mod press_worker;
+mod reader_server;
 mod series;
 
 use std::path::{Path, PathBuf};
@@ -425,6 +426,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
+        cli::Command::ReaderServer { action } => reader_server::run(json, action),
         cli::Command::Words { from, action } => words_cmd(json, &from, action),
         cli::Command::Bind {
             inputs,
@@ -3172,6 +3174,9 @@ fn digest(
                 Ok(None) => {}
                 Err(e) => eprintln!("bookmarklet: no token: {e}"),
             }
+            // The OPDS catalog and KOReader sync, when they're on (KOReader hub design §A.1);
+            // checked each tick, so turning it on in the app needs no restart.
+            let mut reader_server = reader_server::Supervisor::default();
             // Each device's [sync] actions run once per connection: a failed delivery waits
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
@@ -3207,6 +3212,7 @@ fn digest(
                     &mut press_error,
                     press_supervisor.tick(&papers, deckle_digest::chrono::Utc::now()),
                 );
+                reader_server.tick(&cfg, &path);
                 scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,

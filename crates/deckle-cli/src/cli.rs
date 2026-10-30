@@ -258,6 +258,11 @@ pub enum Command {
         #[command(subcommand)]
         action: KindleCommand,
     },
+    /// The OPDS catalog and KOReader sync on the home network, served by the watcher.
+    ReaderServer {
+        #[command(subcommand)]
+        action: ReaderServerCommand,
+    },
     /// Highlights and notes on a Kindle, as Markdown files (one per book).
     Highlights {
         /// `device` for the first connected Kindle, or a folder standing in for documents/.
@@ -746,6 +751,18 @@ pub enum ReadershipCommand {
     Apply { n: usize },
     /// Hide suggestion N for the next 14 editions.
     Dismiss { n: usize },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ReaderServerCommand {
+    /// Set the password KOReader signs in with (asked for without echo; its MD5 is kept).
+    Password {
+        /// Read one line from stdin instead, for scripts.
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Whether it's on, and the catalog and sync URLs to type into KOReader.
+    Status,
 }
 
 #[derive(Subcommand, Debug)]
