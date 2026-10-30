@@ -49,24 +49,36 @@ impl Serve {
             // SAFETY: still single-threaded; no other code reads or writes the environment.
             unsafe { std::env::set_var("DECKLE_DAEMON", "1") };
         }
+        // A first run has no config: the starter one lets the daemon start, and the web UI
+        // edit it.
+        match deckle_cli::ensure_starter_config() {
+            Ok(Some(path)) => eprintln!(
+                "wrote a starter {} — edit it in the web UI or the file",
+                path.display()
+            ),
+            Ok(None) => {}
+            Err(e) => eprintln!("can't write a starter config: {e}"),
+        }
         let web = self.web_config();
 
-        let (done, daemon_done) = tokio::sync::oneshot::channel::<()>();
+        // `true` when the daemon stopped on a signal (or after its one tick), `false` (or a
+        // dropped sender, on a panic) when it failed.
+        let (done, daemon_done) = tokio::sync::oneshot::channel::<bool>();
         let daemon = std::thread::spawn(move || {
             let r = deckle_cli::run_daemon(deckle_cli::DAEMON_TICK);
-            // The daemon returns on SIGTERM/SIGINT (or once, in tests): the server stops too.
-            let _ = done.send(());
+            if let Err(msg) = &r {
+                eprintln!("daemon off: {msg}");
+            }
+            let _ = done.send(r.is_ok());
             r
         });
         if let Some(cfg) = web {
             serve_web(cfg, daemon_done);
         }
+        // With the web UI off too, a failed daemon ends the process at once.
         match daemon.join() {
             Ok(Ok(())) => ExitCode::SUCCESS,
-            Ok(Err(msg)) => {
-                eprintln!("error: {msg}");
-                ExitCode::FAILURE
-            }
+            Ok(Err(_)) => ExitCode::FAILURE,
             Err(_) => ExitCode::FAILURE,
         }
     }
@@ -106,9 +118,9 @@ impl Serve {
     }
 }
 
-/// Serves until `stop` fires (or the daemon thread ends and drops it). A failure to start is
+/// Serves until the daemon stops, or until a signal when it failed. A failure to start is
 /// said and leaves the daemon running.
-fn serve_web(cfg: ServerConfig, stop: tokio::sync::oneshot::Receiver<()>) {
+fn serve_web(cfg: ServerConfig, stop: tokio::sync::oneshot::Receiver<bool>) {
     let rt = match tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -120,13 +132,43 @@ fn serve_web(cfg: ServerConfig, stop: tokio::sync::oneshot::Receiver<()>) {
         }
     };
     let result = rt.block_on(deckle_server::serve(cfg, Arc::new(ctx()), async {
-        let _ = stop.await;
+        // A daemon that stopped stops the server. One that failed holds no signal handlers,
+        // so the web UI stays up (to fix the config) and stops on its own signal.
+        if stop.await != Ok(true) {
+            stop_signal().await;
+        }
     }));
     if let Err(e) = result {
         eprintln!("web UI off: {e}");
     }
     // A command still running on a blocking thread mustn't hold up the exit.
     rt.shutdown_timeout(STOP_GRACE);
+}
+
+/// SIGTERM or SIGINT (Ctrl-C on Windows). Can't listen → never: the process is killed instead.
+async fn stop_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        match (
+            signal(SignalKind::terminate()),
+            signal(SignalKind::interrupt()),
+        ) {
+            (Ok(mut term), Ok(mut int)) => {
+                tokio::select! {
+                    _ = term.recv() => {}
+                    _ = int.recv() => {}
+                }
+            }
+            _ => std::future::pending().await,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        if tokio::signal::ctrl_c().await.is_err() {
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 /// The app's state as the desktop app keeps it: its `settings.json` and `devices.json` (which

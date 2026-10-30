@@ -59,6 +59,37 @@ pub fn run_daemon(tick: u64) -> Result<(), String> {
     daemon::run(&path, None, papers, tick)
 }
 
+/// `digest init`'s starter config at the default path, unless there's a config already:
+/// `deckle-web serve`'s first run. `Some(path)` when it wrote one.
+pub fn ensure_starter_config() -> Result<Option<PathBuf>, String> {
+    let path = deckle_digest::config::default_path();
+    if path.exists() {
+        return Ok(None);
+    }
+    match write_starter(&path, true) {
+        Ok(()) => Ok(Some(path)),
+        // Written by someone else meanwhile: theirs stands.
+        Err(_) if path.exists() => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Writes the starter digest.toml to `path`; `keep` refuses to replace a file already there.
+fn write_starter(path: &Path, keep: bool) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .create_new(keep)
+        .truncate(true)
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    std::io::Write::write_all(&mut file, deckle_digest::config::STARTER.as_bytes())
+        .map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// `Notes: 84 pop-ups (12 already marked, 72 detected), 3 one-way links left` (#31 design §4).
 fn notes_line(n: &deckle_core::notes::NotesReport) -> String {
     let left = match n.skipped_one_way {
@@ -2465,10 +2496,7 @@ fn digest(
                     path.display()
                 ));
             }
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-            }
-            std::fs::write(&path, deckle_digest::config::STARTER).map_err(|e| e.to_string())?;
+            write_starter(&path, false)?;
             emit(json, &path, || format!("wrote {}", path.display()))?;
             Ok(ExitCode::SUCCESS)
         }

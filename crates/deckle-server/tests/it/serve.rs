@@ -90,6 +90,26 @@ fn serve_without_password_runs_daemon_only() {
     );
 }
 
+/// A first run with no digest.toml gets `digest init`'s starter and carries on.
+#[test]
+fn serve_writes_starter_config_when_missing() {
+    let (_tmp, home) = setup();
+    let path = config_dir(&home).join("digest.toml");
+    std::fs::remove_file(&path).unwrap();
+    let o = serve(&home, "06:00")
+        .env("DECKLE_DAEMON_ONCE", "1")
+        .output()
+        .unwrap();
+    let err = text(&o.stderr);
+    assert!(o.status.success(), "{err}");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        deckle_digest::config::STARTER
+    );
+    assert!(err.contains("wrote a starter"), "{err}");
+    assert!(!err.contains("daemon off"), "{err}");
+}
+
 /// The other argv is the `deckle` command line.
 #[test]
 fn other_arguments_are_the_command_line() {
@@ -111,7 +131,8 @@ fn other_arguments_are_the_command_line() {
 mod over_http {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::TcpStream;
-    use std::process::{Command, Stdio};
+    use std::path::Path;
+    use std::process::{Child, Command, ExitStatus, Stdio};
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
 
@@ -136,70 +157,119 @@ mod over_http {
         out
     }
 
-    #[test]
-    fn serve_with_password_answers_http() {
-        let (_tmp, home) = setup();
-        // 04:00: nothing due, so the daemon idles and the server stays up.
-        let mut child = serve(&home, "04:00")
-            .env("DECKLE_WEB_PASSWORD", "a test password")
+    /// A running `serve` with a password on a free port, and its log so far.
+    struct Running {
+        child: Child,
+        lines: mpsc::Receiver<String>,
+        reader: std::thread::JoinHandle<()>,
+        port: u16,
+        log: String,
+    }
+
+    /// Starts `serve` and waits for its port and for a log line containing `ready`.
+    fn start(home: &Path, hhmm: &str, ready: &str) -> Running {
+        let mut child = serve(home, hhmm)
+            .env("DECKLE_WEB_PASSWORD", PASSWORD)
             .env("DECKLE_WEB_PORT", "0")
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        let (tx, rx) = mpsc::channel();
+        let (tx, lines) = mpsc::channel();
         let stderr = child.stderr.take().unwrap();
         let reader = std::thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                 let _ = tx.send(line);
             }
         });
-        // The port, once the daemon (whose signal handlers stop us cleanly) has started too.
-        let (mut port, mut daemon, mut log) = (None, false, String::new());
+        let (mut port, mut seen, mut log) = (None, false, String::new());
         let deadline = Instant::now() + Duration::from_secs(60);
-        while port.is_none() || !daemon {
-            let line = rx
+        while port.is_none() || !seen {
+            let line = lines
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .unwrap_or_else(|_| panic!("serve starts within 60 s:\n{log}"));
             if let Some(addr) = line.strip_prefix("web UI on http://") {
                 port = addr.rsplit(':').next().and_then(|p| p.parse::<u16>().ok());
             }
-            daemon |= line.contains("daemon: config");
+            seen |= line.contains(ready);
             log.push_str(&line);
             log.push('\n');
         }
-        let port = port.unwrap();
+        Running {
+            child,
+            lines,
+            reader,
+            port: port.unwrap(),
+            log,
+        }
+    }
 
-        let r = http(
-            port,
-            "POST",
-            "/api/login",
-            None,
-            r#"{"password":"a test password"}"#,
-        );
-        assert!(r.starts_with("HTTP/1.1 200"), "{r}");
-        let cookie = r
-            .lines()
-            .find_map(|l| {
-                l.strip_prefix("set-cookie: ")
-                    .or_else(|| l.strip_prefix("Set-Cookie: "))
-            })
-            .and_then(|v| v.split(';').next())
-            .unwrap_or_else(|| panic!("a session cookie: {r}"))
-            .to_owned();
-        let r = http(port, "POST", "/api/invoke/app_version", Some(&cookie), "{}");
-        assert!(r.starts_with("HTTP/1.1 200"), "{r}");
-        assert!(r.contains(env!("CARGO_PKG_VERSION")), "{r}");
+    impl Running {
+        /// Logs in and asks for the app's version.
+        fn answers(&self) {
+            let body = format!("{{\"password\":\"{PASSWORD}\"}}");
+            let r = http(self.port, "POST", "/api/login", None, &body);
+            assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+            let cookie = r
+                .lines()
+                .find_map(|l| {
+                    l.strip_prefix("set-cookie: ")
+                        .or_else(|| l.strip_prefix("Set-Cookie: "))
+                })
+                .and_then(|v| v.split(';').next())
+                .unwrap_or_else(|| panic!("a session cookie: {r}"))
+                .to_owned();
+            let r = http(
+                self.port,
+                "POST",
+                "/api/invoke/app_version",
+                Some(&cookie),
+                "{}",
+            );
+            assert!(r.starts_with("HTTP/1.1 200"), "{r}");
+            assert!(r.contains(env!("CARGO_PKG_VERSION")), "{r}");
+        }
 
-        let term = Command::new("kill")
-            .args(["-TERM", &child.id().to_string()])
-            .status()
-            .unwrap();
-        assert!(term.success());
-        let status = child.wait().unwrap();
-        reader.join().unwrap();
-        log.extend(rx.try_iter().map(|l| l + "\n"));
+        /// SIGTERM, then the exit status and the whole log.
+        fn terminate(mut self) -> (ExitStatus, String) {
+            let term = Command::new("kill")
+                .args(["-TERM", &self.child.id().to_string()])
+                .status()
+                .unwrap();
+            assert!(term.success());
+            let status = self.child.wait().unwrap();
+            self.reader.join().unwrap();
+            self.log.extend(self.lines.try_iter().map(|l| l + "\n"));
+            (status, self.log)
+        }
+    }
+
+    const PASSWORD: &str = "a test password";
+
+    #[test]
+    fn serve_with_password_answers_http() {
+        let (_tmp, home) = setup();
+        // 04:00: nothing due, so the daemon idles and the server stays up. Its banner comes
+        // after its signal handlers, which stop us cleanly.
+        let running = start(&home, "04:00", "daemon: config");
+        running.answers();
+        let (status, log) = running.terminate();
         assert!(status.success(), "{status}\n{log}");
         assert!(log.contains("stopped"), "{log}");
+    }
+
+    /// A config that doesn't parse stops the daemon, not the web UI that can fix it.
+    #[test]
+    fn serve_keeps_ui_when_daemon_fails() {
+        let (_tmp, home) = setup();
+        std::fs::write(
+            super::config_dir(&home).join("digest.toml"),
+            "sections = [\"unterminated\n",
+        )
+        .unwrap();
+        let running = start(&home, "04:00", "daemon off:");
+        running.answers();
+        let (status, log) = running.terminate();
+        assert_eq!(status.code(), Some(1), "{log}");
     }
 }
