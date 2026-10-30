@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Deckle, headless: copy to compose.yml, set the paths and TZ, then `docker compose up -d`.
-# The first start writes /config/deckle/digest.toml; edit it and restart.
+# Deckle, headless: copy to compose.yml, set the paths, TZ and the web UI's password, then
+# `docker compose up -d` and open http://<host>:8080. The first start writes
+# /config/deckle/digest.toml; edit it in the web UI (or the file) and restart.
 services:
   deckle:
     image: ghcr.io/casavargas/deckle:latest
@@ -13,12 +14,14 @@ services:
       TZ: America/New_York      # papers print on this zone's clock
       PUID: "99"                # files are written as this user and group
       PGID: "100"               # (Unraid: nobody:users)
+      DECKLE_WEB_PASSWORD: ""   # the web UI's login (12+ characters); blank keeps it off
       DECKLE_SMTP_PASSWORD: ""  # for [email]: send the paper to your Kindle
     volumes:
       - ./config:/config        # digest.toml, papers, state
       - ./data:/data            # Morgue, library, Inbox, export folders
-    # The bookmarklet listener. Uncomment to save pages from a browser; set
-    # DECKLE_BOOKMARKLET_URL to the address the browser reaches (behind a TLS proxy for
-    # https pages).
-    # ports:
-    #   - "47219:47219"
+    ports:
+      - "8080:8080"             # the web UI
+      # The bookmarklet listener. Uncomment to save pages from a browser; set
+      # DECKLE_BOOKMARKLET_URL to the address the browser reaches (behind a TLS proxy for
+      # https pages).
+      # - "47219:47219"
