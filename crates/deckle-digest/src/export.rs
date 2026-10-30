@@ -2,7 +2,8 @@
 //! Export folders (docs/superpowers/specs/2026-10-23-other-readers-design.md §7): after every
 //! build, each `[[export]]` folder gets the edition as an EPUB, in color or gray, and keeps the
 //! newest `keep`. A folder is always reachable, so there is no outbox: an iCloud Drive folder
-//! reaches an iPad's Files app, Dropbox a Boox.
+//! reaches an iPad's Files app, Dropbox a Boox, and Dropbox's `Apps/Rakuten Kobo` a Kobo as
+//! KEPUB (§19).
 //!
 //! A folder that can't be written is a line in the report, never a failed run (as an email
 //! failure, email design §13).
@@ -37,6 +38,7 @@ pub fn export_filename(date: NaiveDate) -> String {
 fn extension(format: ExportFormat) -> &'static str {
     match format {
         ExportFormat::Epub => "epub",
+        ExportFormat::Kepub => "kepub.epub",
         ExportFormat::Pdf => "pdf",
         ExportFormat::Bundle => "deckle",
     }
@@ -78,7 +80,8 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
         (_, Some(c), true) => c.clone(),
         _ => built.epub.clone(),
     };
-    let name = format!("{}{date}.{}", built.prefix, extension(e.format));
+    let ext = extension(e.format);
+    let name = format!("{}{date}.{ext}", built.prefix);
     let mut files = vec![(paper, name)];
     if e.books {
         let reads = match color && built.color_long_reads.len() == built.long_reads.len() {
@@ -86,16 +89,26 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
             false => &built.long_reads,
         };
         for p in reads {
-            let name = p
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
+            let name = match e.format {
+                ExportFormat::Kepub => {
+                    let stem = p.file_stem().unwrap_or_default().to_string_lossy();
+                    format!("{stem}.{ext}")
+                }
+                _ => p
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+            };
             files.push((p.clone(), name));
         }
     }
     for (from, name) in files {
-        match copy_into(&from, &dir, &name) {
+        let written = match e.format {
+            ExportFormat::Kepub => kepub_into(&from, &dir, &name),
+            _ => copy_into(&from, &dir, &name),
+        };
+        match written {
             Ok(p) => report.written.push(p),
             Err(why) => {
                 report.error = Some(why);
@@ -103,7 +116,7 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
             }
         }
     }
-    match prune_ext_for(&dir, e.keep, extension(e.format), &built.prefix) {
+    match prune_ext_for(&dir, e.keep, ext, &built.prefix) {
         Ok(gone) => report.pruned = gone,
         Err(why) => report.error = Some(why),
     }
@@ -208,6 +221,22 @@ fn copy_into(from: &Path, dir: &Path, name: &str) -> Result<PathBuf, String> {
     let to = dir.join(name);
     let tmp = dir.join(format!(".{name}.tmp"));
     std::fs::copy(from, &tmp).map_err(|e| format!("{}: {e}", from.display()))?;
+    std::fs::rename(&tmp, &to).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{}: {e}", to.display())
+    })?;
+    Ok(to)
+}
+
+/// Converts the EPUB `from` to a KEPUB at `dir/name`, through a hidden temporary file as
+/// [`copy_into`] does.
+fn kepub_into(from: &Path, dir: &Path, name: &str) -> Result<PathBuf, String> {
+    let bytes = std::fs::read(from).map_err(|e| format!("{}: {e}", from.display()))?;
+    let kepub = deckle_core::kepub::convert(&bytes)
+        .map_err(|e| format!("{}: not made a KEPUB: {e}", from.display()))?;
+    let to = dir.join(name);
+    let tmp = dir.join(format!(".{name}.tmp"));
+    std::fs::write(&tmp, kepub).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &to).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         format!("{}: {e}", to.display())
@@ -370,6 +399,105 @@ mod tests {
         let r = export(&with, day(), &b);
         assert_eq!(r.written[1], out.join("deckle-read-a.epub"));
         assert_eq!(std::fs::read(&r.written[1]).unwrap(), b"color read");
+    }
+
+    /// A one-page EPUB, enough for `kepub::convert`.
+    fn real_epub(path: &Path) {
+        use std::io::Write;
+        let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        let opts = zip::write::SimpleFileOptions::default();
+        for (name, body) in [
+            ("mimetype", "application/epub+zip"),
+            (
+                "META-INF/container.xml",
+                "<?xml version=\"1.0\"?><container version=\"1.0\" \
+                 xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles>\
+                 <rootfile full-path=\"OEBPS/content.opf\" \
+                 media-type=\"application/oebps-package+xml\"/></rootfiles></container>",
+            ),
+            (
+                "OEBPS/content.opf",
+                "<?xml version=\"1.0\"?><package xmlns=\"http://www.idpf.org/2007/opf\" \
+                 version=\"3.0\"><manifest><item id=\"p\" href=\"p.xhtml\" \
+                 media-type=\"application/xhtml+xml\"/></manifest></package>",
+            ),
+            (
+                "OEBPS/p.xhtml",
+                "<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>Rain today. Sun \
+                 tomorrow.</p></body></html>",
+            ),
+        ] {
+            z.start_file(name, opts).unwrap();
+            z.write_all(body.as_bytes()).unwrap();
+        }
+        z.finish().unwrap();
+    }
+
+    #[test]
+    fn a_kepub_export_converts_the_paper_and_long_reads_and_prunes_its_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = built(tmp.path(), false, &["deckle-read-a"]);
+        real_epub(&b.epub);
+        real_epub(&b.long_reads[0]);
+        let out = tmp.path().join("Rakuten Kobo");
+        std::fs::create_dir(&out).unwrap();
+        for d in ["2026-10-21", "2026-10-22"] {
+            std::fs::write(out.join(format!("deckle-daily-{d}.kepub.epub")), b"old").unwrap();
+        }
+        std::fs::write(
+            out.join("deckle-daily-2026-10-20.epub"),
+            b"an epub export's",
+        )
+        .unwrap();
+        let e = ExportConfig {
+            format: ExportFormat::Kepub,
+            photos: Photos::Gray,
+            keep: 2,
+            books: true,
+            ..cfg(&out)
+        };
+        let r = export(&e, day(), &b);
+        assert_eq!(r.error, None);
+        assert_eq!(
+            r.written,
+            vec![
+                out.join("deckle-daily-2026-10-23.kepub.epub"),
+                out.join("deckle-read-a.kepub.epub")
+            ]
+        );
+        for w in &r.written {
+            use std::io::Read;
+            let mut z = zip::ZipArchive::new(std::fs::File::open(w).unwrap()).unwrap();
+            let mut page = String::new();
+            z.by_name("OEBPS/p.xhtml")
+                .unwrap()
+                .read_to_string(&mut page)
+                .unwrap();
+            assert!(page.contains("koboSpan"), "{}: {page}", w.display());
+        }
+        assert_eq!(
+            r.pruned,
+            vec![out.join("deckle-daily-2026-10-21.kepub.epub")]
+        );
+        assert!(out.join("deckle-daily-2026-10-20.epub").exists());
+        assert!(
+            !out.read_dir()
+                .unwrap()
+                .any(|f| { f.unwrap().file_name().to_string_lossy().ends_with(".tmp") })
+        );
+    }
+
+    #[test]
+    fn a_kepub_export_reports_a_paper_that_isnt_an_epub() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = built(tmp.path(), false, &[]);
+        let e = ExportConfig {
+            format: ExportFormat::Kepub,
+            ..cfg(&tmp.path().join("kobo"))
+        };
+        let r = export(&e, day(), &b);
+        assert!(r.error.unwrap().contains("not made a KEPUB"));
+        assert!(r.written.is_empty());
     }
 
     #[test]

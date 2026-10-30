@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { exportParts, folderName, hasFolder, iCloudDrive, newExport, remarkablePart } from "./exportsView";
+import { exportParts, folderName, hasFolder, iCloudDrive, isKoboDropbox, newExport, remarkablePart } from "./exportsView";
 
 const icloud = "/Users/me/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily";
 
@@ -46,4 +46,19 @@ test("a reMarkable's part of the result", () => {
   expect(remarkablePart({ remarkable_queued: true })).toMatch(/Waiting for your reMarkable/);
   expect(remarkablePart({ remarkable_queued: true, remarkable: { uploaded: ["a.pdf"], errors: [] } })).toBe("Sent to your reMarkable.");
   expect(remarkablePart({ remarkable: { uploaded: [], errors: ["no answer"] } })).toBe("reMarkable: no answer");
+});
+
+test("Dropbox's Kobo folder gets a gray KEPUB named Kobo", () => {
+  const mac = "/Users/me/Dropbox/Apps/Rakuten Kobo";
+  expect(newExport(mac, [])).toMatchObject({ name: "Kobo", dir: mac, format: "kepub", photos: "gray" });
+  expect(newExport("C:\\Users\\me\\Dropbox\\Apps\\Rakuten Kobo\\", []).format).toBe("kepub");
+  expect(newExport(mac, [newExport(mac, [])]).name).toBe("Kobo 2");
+});
+
+test("only the Rakuten Kobo app folder counts as a Kobo's", () => {
+  expect(isKoboDropbox("/Users/me/Dropbox/Apps/Rakuten Kobo/")).toBe(true);
+  expect(isKoboDropbox("/Users/me/Dropbox/Apps/rakuten kobo")).toBe(true);
+  expect(isKoboDropbox("/Users/me/Dropbox/Apps/Rakuten Kobo/Old")).toBe(false);
+  expect(isKoboDropbox("/Users/me/Dropbox/Kobo")).toBe(false);
+  expect(newExport("/Users/me/Dropbox/Boox", []).format).toBe("epub");
 });
