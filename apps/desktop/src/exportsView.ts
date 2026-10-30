@@ -23,13 +23,22 @@ export function folderName(dir: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-/** An export for `dir`, named after the folder and unique among `existing` ("Deckle Daily 2"). */
+/** Whether `dir` is Dropbox's folder for a Kobo (`Apps/Rakuten Kobo`), which the Kobo fetches
+ * when you tap Sync. */
+export function isKoboDropbox(dir: string): boolean {
+  return /(^|[\\/])Apps[\\/]+Rakuten Kobo[\\/]*$/i.test(dir);
+}
+
+/** An export for `dir`, named after the folder and unique among `existing` ("Deckle Daily 2").
+ * Dropbox's Kobo folder is named "Kobo" and gets a gray KEPUB. */
 export function newExport(dir: string, existing: ExportConfig[]): ExportConfig {
-  const base = folderName(dir) || "Folder";
+  const kobo = isKoboDropbox(dir);
+  const base = kobo ? "Kobo" : folderName(dir) || "Folder";
   const taken = new Set(existing.map((e) => e.name.trim()));
   let name = base;
   for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
-  return { ...DEFAULT_EXPORT, name, dir };
+  const how: Partial<ExportConfig> = kobo ? { format: "kepub", photos: "gray" } : {};
+  return { ...DEFAULT_EXPORT, ...how, name, dir };
 }
 
 /** Whether `dir` is already an export folder. */

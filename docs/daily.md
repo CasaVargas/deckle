@@ -662,18 +662,26 @@ password, **Save password**, **Test sign-in** and **Remove**. `deckle digest lin
   delete).
 - **The site** must be a bare host: no user name, port or trailing dot (`yourpaper.com`).
 
-## Export folders: an iPad, a Boox, any folder
+## Export folders: an iPad, a Kobo, a Boox, any folder
 
 The paper doesn't have to go to a Kindle. Each `[[export]]` folder gets every morning's edition
 as an EPUB, plugged in or not, and keeps the newest few. An iCloud Drive folder puts it in an
 iPad's Files app (tap it to open it in Books); a Dropbox or Google Drive folder reaches a Boox.
 (`docs/superpowers/specs/2026-10-23-other-readers-design.md`)
 
+**A Kobo without the cable.** A Kobo linked to Dropbox
+([Kobo's steps](https://help.kobo.com/hc/articles/360033830114)) fetches what's in Dropbox's
+`Apps/Rakuten Kobo` folder when you tap **Sync**. Point an export there with `format = "kepub"`
+and the paper is waiting each morning after one tap. Picking that folder in the app sets the
+KEPUB and gray photos for you. Pruning only cleans the Dropbox folder: an edition the Kobo already
+fetched stays on the Kobo until you remove it there. Not yet checked on a Kobo
+(`docs/devices.md`).
+
 ```toml
 [[export]]
 name = "iPad"
 dir = "~/Library/Mobile Documents/com~apple~CloudDocs/Deckle Daily"
-format = "epub"                  # or "pdf": the paper laid out for one screen (below)
+format = "epub"                  # or "kepub" for a Kobo; "pdf": laid out for one screen (below)
 photos = "color"                 # or "gray" for an e-ink reader
 keep = 7                         # editions kept in the folder; 0 keeps all
 books = false                    # also the long reads, not only the paper
@@ -691,8 +699,8 @@ Mac.
   Previewer installed, the Kindle gets its copy as before.
 - **Only the morning run exports.** `digest run` does, like email; `digest build` and
   `--to <folder>` don't.
-- **Pruning** only removes `deckle-daily-YYYY-MM-DD.epub` files beyond `keep`; long reads and
-  anything else in the folder stay.
+- **Pruning** only removes `deckle-daily-YYYY-MM-DD.epub` files beyond `keep` (`.kepub.epub` in a
+  KEPUB folder, `.pdf` in a PDF one); long reads and anything else in the folder stay.
 - **A folder that's missing** is made when its parent exists. When the parent is missing too
   (iCloud Drive turned off), the run's report says so and the paper still ships everywhere else.
 

@@ -50,6 +50,7 @@ export function FolderSettings({ e, onPatch, onRemove, onSetup }: { e: ExportCon
           <span className="label">As</span>
           <select value={e.format} onChange={(ev) => onPatch({ format: ev.target.value as ExportConfig["format"] })}>
             <option value="epub">EPUB (any reader)</option>
+            <option value="kepub">KEPUB (Kobo)</option>
             <option value="pdf">PDF, laid out for a screen</option>
             <option value="bundle">Bundle, for a reader app</option>
           </select>
@@ -98,7 +99,11 @@ export function FolderSettings({ e, onPatch, onRemove, onSetup }: { e: ExportCon
         </div>
         <Switch label={`Fresh-paper requests for ${e.name}`} checked={view.checked} disabled={busy} onChange={(on) => void setup(on)} />
       </div>}
-      <p className="muted small">An EPUB opens in any reader; Kindle Previewer isn't needed for these.</p>
+      <p className="muted small">
+        {e.format === "kepub"
+          ? "A Kobo linked to Dropbox fetches the paper from Apps/Rakuten Kobo when you tap Sync."
+          : "An EPUB opens in any reader; Kindle Previewer isn't needed for these."}
+      </p>
       <button className="quiet" onClick={onRemove}>
         Stop putting the paper in {e.name}
       </button>

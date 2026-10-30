@@ -1062,7 +1062,7 @@ mod front {
 
 // ---- Export folders (other readers design §7) ----
 
-use deckle_digest::config::{ExportConfig, Photos, STARTER, save, validate_exports};
+use deckle_digest::config::{ExportConfig, ExportFormat, Photos, STARTER, save, validate_exports};
 
 fn exporting(c: &mut Config, photos: Photos) {
     c.export = vec![ExportConfig {
@@ -1148,10 +1148,11 @@ fn exports_need_a_unique_name_and_a_folder() {
     assert!(validate_exports(&[one("iPad", "~/a"), one("iPad", "~/b")]).is_err());
     let err = Config::parse("[[export]]\nname = \"iPad\"\ndir = \"\"\n").unwrap_err();
     assert!(err.contains("dir is empty"), "{err}");
-    // A Kobo's KEPUB isn't an export format: a Kobo takes it from the outbox.
-    assert!(
-        Config::parse("[[export]]\nname = \"x\"\ndir = \"~/x\"\nformat = \"kepub\"\n").is_err()
-    );
+    // A KEPUB export is for Dropbox's Apps/Rakuten Kobo (other readers design §19).
+    let cfg =
+        Config::parse("[[export]]\nname = \"x\"\ndir = \"~/x\"\nformat = \"kepub\"\n").unwrap();
+    assert_eq!(cfg.export[0].format, ExportFormat::Kepub);
+    assert!(Config::parse("[[export]]\nname = \"x\"\ndir = \"~/x\"\nformat = \"mobi\"\n").is_err());
 }
 
 #[test]

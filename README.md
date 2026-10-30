@@ -124,7 +124,8 @@ in, press **Send**.
   back on every send.
 - **X-Ray.** The people and terms in the book. Optionally a model (Anthropic, or any
   OpenAI-compatible endpoint including a local Ollama) writes spoiler-free descriptions, and
-  Wikipedia adds summaries.
+  Wikipedia adds summaries. A Kobo or PocketBook gets the same people and terms as a Who's who
+  page at the back, with each name's first mention in a chapter linked to it.
 - **Word Wise.** Hints from a Wiktionary-derived English lexicon, pointed at the Kindle's own
   dictionary when it has one.
 - **Book styles.** Novel, Academic or Manual, per book: the paragraph style, pop-up notes, pages
