@@ -86,10 +86,10 @@ pub fn save_paper_with_history(
     state: &Path,
     learning: &Path,
 ) -> Result<(), String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = deckle_app::config_write()?;
     let old = paper_config_at(main, paper)?;
     config.paper = old.paper.clone();
-    crate::press::guard_save(
+    deckle_app::press::guard_save(
         main,
         &deckle_digest::press::setup::private_root(),
         &old,
@@ -476,7 +476,7 @@ pub fn papers_list() -> Result<PapersView, String> {
 
 /// Writes `papers/<slug>.toml` for a new paper; returns its slug.
 pub fn create_at(main: &Path, title: &str, reader: &str) -> Result<String, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = deckle_app::config_write()?;
     let title = title.trim();
     if title.is_empty() {
         return Err("Give the paper a name.".into());
@@ -499,7 +499,7 @@ pub fn paper_create(title: String, reader: String) -> Result<String, String> {
 /// First run: write the starter config.
 #[tauri::command]
 pub fn daily_setup() -> Result<DailyState, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = deckle_app::config_write()?;
     let path = config_path();
     if !path.exists() {
         if let Some(dir) = path.parent() {
@@ -671,7 +671,7 @@ pub fn schedule_get() -> deckle_digest::schedule::Status {
 
 /// Writes paper `paper`'s `[schedule] at` (`None` clears it), as `digest schedule` does.
 pub fn set_at_in(main: &Path, paper: Option<&str>, at: Option<&str>) -> Result<Config, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = deckle_app::config_write()?;
     let mut cfg = paper_config_at(main, paper)?;
     if let Some(at) = at {
         deckle_digest::schedule::parse_at(at)?;
@@ -843,6 +843,30 @@ mod tests {
     }
 
     use super::*;
+
+    /// A paper save can't switch on Fresh-paper requests; only setup can (press design).
+    #[test]
+    fn press_setup_raw_autosave_cannot_activate() {
+        use deckle_digest::config::{ExportConfig, ExportFormat};
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("digest.toml");
+        let folder = dir.path().join("shared");
+        std::fs::create_dir(&folder).unwrap();
+        let cfg = Config {
+            export: vec![ExportConfig {
+                name: "Paper".into(),
+                dir: folder.display().to_string(),
+                format: ExportFormat::Bundle,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        deckle_digest::config::save(&main, &cfg).unwrap();
+        let mut next = Config::load(&main).unwrap();
+        next.export[0].press_enabled = true;
+        assert!(save_paper_at(&main, None, next).is_err());
+        assert!(!Config::load(&main).unwrap().export[0].press_enabled);
+    }
 
     #[test]
     fn session_states_serialize_to_the_shapes_the_window_reads() {

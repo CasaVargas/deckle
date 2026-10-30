@@ -199,17 +199,12 @@ pub fn upgrades_on(
     })
 }
 
-/// Lists over USB/MTP off the main thread.
-#[tauri::command]
-pub async fn device_upgrades(target: RunTarget) -> Result<UpgradesView, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::kindle::with_target(target, |conn, config| {
-            let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
-            upgrades_on(conn, config, Some(&cache), home().as_deref())
-        })
+/// Lists over USB/MTP.
+pub fn device_upgrades(target: RunTarget) -> Result<UpgradesView, String> {
+    crate::kindle::with_target(target, |conn, config| {
+        let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+        upgrades_on(conn, config, Some(&cache), home().as_deref())
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
 /// One book [`device_rebuild`] tried: the rebuilt EPUB, or why it couldn't be rebuilt.
@@ -241,32 +236,20 @@ pub fn rebuild_on(conn: &mut Conn<'_>, config: &Path, files: &[String]) -> Vec<R
         .collect()
 }
 
-#[tauri::command]
-pub async fn device_rebuild(target: RunTarget, files: Vec<String>) -> Result<Vec<Rebuild>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::kindle::with_target(target, move |conn, config| {
-            Ok(rebuild_on(conn, config, &files))
-        })
+pub fn device_rebuild(target: RunTarget, files: Vec<String>) -> Result<Vec<Rebuild>, String> {
+    crate::kindle::with_target(target, move |conn, config| {
+        Ok(rebuild_on(conn, config, &files))
     })
-    .await
-    .map_err(|e| e.to_string())?
 }
 
-#[tauri::command]
-pub async fn device_put_back(target: RunTarget, file: String) -> Result<PutBack, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::kindle::with_target(target, move |conn, config| put_back(conn, config, &file))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn device_put_back(target: RunTarget, file: String) -> Result<PutBack, String> {
+    crate::kindle::with_target(target, move |conn, config| put_back(conn, config, &file))
 }
 
-#[tauri::command]
 pub fn library_sources() -> SourcesStatus {
     sources_status_at(&deckle_library::config::default_path())
 }
 
-#[tauri::command]
 pub fn library_sources_set(
     find_in_calibre: bool,
     calibre: Option<String>,

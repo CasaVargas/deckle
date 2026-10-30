@@ -3,12 +3,17 @@
 //! UI serves the same functions over HTTP. Every function here blocks; callers run it off their
 //! async runtime.
 
+pub mod books;
+pub mod commands;
 pub mod events;
+pub mod kindle;
 pub mod morgue;
 pub mod next;
+pub mod press;
 pub mod readership;
 pub mod shelf;
 pub mod state;
+pub mod upgrades;
 
 use std::sync::{Mutex, MutexGuard};
 

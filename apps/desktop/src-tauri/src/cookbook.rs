@@ -21,7 +21,7 @@ use deckle_digest::cookbook::{Chapter, EVERYTHING_ELSE, book};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::commands::{AppState, Settings, load_settings_from};
+use deckle_app::commands::{AppState, Settings, load_settings_from};
 
 /// The folder the commands work on: `DECKLE_COOKBOOK_DIR`, else beside `digest.toml`.
 fn store() -> Store {
@@ -639,7 +639,7 @@ fn delivery_at(store: &Store, digest: &Path, watcher_installed: bool) -> Deliver
 /// Writes `[sync.devices."<id>"] cookbook = on` into `digest.toml` (a missing file is started),
 /// keeping its comments.
 fn set_kindle_at(digest: &Path, id: &str, on: bool) -> Result<(), String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = deckle_app::config_write()?;
     let mut cfg = match deckle_digest::Config::load(digest) {
         Ok(c) => c,
         Err(_) if !digest.exists() => deckle_digest::Config::default(),

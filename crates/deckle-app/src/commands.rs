@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Tauri commands behind the GUI. Pure logic lives in plain functions so it can be unit-tested
-//! without a running app.
+//! The core commands behind the GUI. Pure logic lives in plain functions so it can be
+//! unit-tested without a running app.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use base64::Engine;
 use deckle_core::cover_rule::{Decision, DeviceClass, MatchResult, Override, decide, manual_asin};
@@ -17,7 +18,8 @@ use deckle_core::wordwise::{WordWiseOptions, WordWiseSummary};
 use deckle_core::xray::{LlmConfig, XRaySummary};
 use deckle_kfx::convert::CdeType;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+
+use crate::events::Events;
 
 /// Everything the book list needs to render one row.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -325,7 +327,7 @@ pub fn plan_rows(
         .collect()
 }
 
-pub use deckle_app::state::AppState;
+pub use crate::state::AppState;
 
 /// `deckle-desktop [--export-to DIR] [BOOK...]`: books to open and an optional auto-export dir.
 pub fn parse_cli_args(args: &[String]) -> (Vec<String>, Option<String>) {
@@ -920,39 +922,30 @@ pub fn run_books_with(
     firmware
 }
 
-// ---- Tauri command wrappers -----------------------------------------------------------------
+// ---- Commands ----------------------------------------------------------------------------
 
-#[tauri::command]
 pub fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
 }
 
-#[tauri::command]
-pub fn take_preloaded_books(state: State<'_, AppState>) -> Vec<String> {
+pub fn take_preloaded_books(state: &AppState) -> Vec<String> {
     std::mem::take(&mut *state.preload.lock().unwrap())
 }
 
-#[tauri::command]
-pub fn take_preloaded_target(state: State<'_, AppState>) -> Option<String> {
+pub fn take_preloaded_target(state: &AppState) -> Option<String> {
     state.preload_target.lock().unwrap().take()
 }
 
-#[tauri::command]
-pub fn start_tab(state: State<'_, AppState>) -> &'static str {
+pub fn start_tab(state: &AppState) -> &'static str {
     state.start_tab
 }
 
-/// Off the main thread: a Word document or text file is imported to read its metadata.
-#[tauri::command]
-pub async fn inspect_books(paths: Vec<String>) -> Result<Vec<BookRow>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        expand_book_paths(&paths)
-            .iter()
-            .map(|p| book_row(p))
-            .collect()
-    })
-    .await
-    .map_err(|e| e.to_string())
+/// Blocks: a Word document or text file is imported to read its metadata.
+pub fn inspect_books(paths: Vec<String>) -> Vec<BookRow> {
+    expand_book_paths(&paths)
+        .iter()
+        .map(|p| book_row(p))
+        .collect()
 }
 
 /// The rows' files bound, in order, into one book in `dir` named after `title` (#22): its row,
@@ -979,33 +972,22 @@ pub fn bind_row(
     Ok(row)
 }
 
-/// Binds off the main thread: Word documents, text files and PDFs are imported first.
-#[tauri::command]
-pub async fn bind_books(
+/// Blocks: Word documents, text files and PDFs are imported first.
+pub fn bind_books(
     paths: Vec<String>,
     title: String,
     author: Option<String>,
 ) -> Result<BookRow, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let dir = deckle_core::wordwise::default_cache_dir().join("bound");
-        bind_row(&paths, &title, author, &dir, &deckle_digest::Http)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let dir = deckle_core::wordwise::default_cache_dir().join("bound");
+    bind_row(&paths, &title, author, &dir, &deckle_digest::Http)
 }
 
-/// Fetches and builds web articles off the main thread; see [`article_rows`].
-#[tauri::command]
-pub async fn import_articles(targets: Vec<String>) -> Result<Vec<BookRow>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        article_rows(&targets, &deckle_digest::Http, &deckle_cli::articles_dir())
-    })
-    .await
-    .map_err(|e| e.to_string())
+/// Fetches and builds web articles; see [`article_rows`].
+pub fn import_articles(targets: Vec<String>) -> Vec<BookRow> {
+    article_rows(&targets, &deckle_digest::Http, &deckle_cli::articles_dir())
 }
 
-#[tauri::command]
-pub fn list_devices(state: State<'_, AppState>) -> Vec<DeviceRow> {
+pub fn list_devices(state: &AppState) -> Vec<DeviceRow> {
     device_rows(&state.devices_file)
 }
 
@@ -1021,7 +1003,7 @@ fn name_kindle_with(
     name: &str,
     before_save: impl FnOnce(),
 ) -> Result<(), String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = match deckle_digest::Config::load(path) {
         Ok(c) => c,
         Err(_) if !path.exists() => deckle_digest::Config::default(),
@@ -1032,14 +1014,12 @@ fn name_kindle_with(
     deckle_digest::config::save(path, &cfg)
 }
 
-#[tauri::command]
 pub fn name_kindle(sync_id: String, name: String) -> Result<(), String> {
     name_kindle_at(&deckle_digest::config::default_path(), &sync_id, &name)
 }
 
-#[tauri::command]
 pub fn set_device_options(
-    state: State<'_, AppState>,
+    state: &AppState,
     key: String,
     cde_override: Option<String>,
     verified_real_asin: bool,
@@ -1050,12 +1030,7 @@ pub fn set_device_options(
     reg.save(&state.devices_file)
 }
 
-#[tauri::command]
-pub fn plan_books(
-    state: State<'_, AppState>,
-    books: Vec<RunRequest>,
-    target: RunTarget,
-) -> Vec<PlanRow> {
+pub fn plan_books(state: &AppState, books: Vec<RunRequest>, target: RunTarget) -> Vec<PlanRow> {
     let reg = DeviceRegistry::load(&state.devices_file);
     let (class, profile) = match &target {
         RunTarget::Folder { .. } => (DeviceClass::Folder, None),
@@ -1093,8 +1068,7 @@ pub fn plan_books(
     )
 }
 
-#[tauri::command]
-pub fn previewer_status(state: State<'_, AppState>) -> PreviewerStatus {
+pub fn previewer_status(state: &AppState) -> PreviewerStatus {
     let settings = load_settings_from(&state.settings_file);
     match previewer::locate(settings.previewer_path.as_deref().map(Path::new)) {
         Ok(p) => PreviewerStatus {
@@ -1112,27 +1086,25 @@ pub fn previewer_status(state: State<'_, AppState>) -> PreviewerStatus {
     }
 }
 
-#[tauri::command]
-pub fn get_settings(state: State<'_, AppState>) -> Settings {
+pub fn get_settings(state: &AppState) -> Settings {
     load_settings_from(&state.settings_file)
 }
 
-#[tauri::command]
-pub fn set_settings(state: State<'_, AppState>, settings: Settings) -> Result<(), String> {
+pub fn set_settings(state: &AppState, settings: Settings) -> Result<(), String> {
     save_settings_to(&state.settings_file, &settings)
 }
 
 /// Sets only the cookbook's image key (Book settings), so the other settings can't be lost to a
 /// stale copy in the page.
-#[tauri::command]
-pub fn set_illustrations_key(state: State<'_, AppState>, key: String) -> Result<(), String> {
+pub fn set_illustrations_key(state: &AppState, key: String) -> Result<(), String> {
     set_illustrations_key_at(&state.settings_file, &key)
 }
 
-#[tauri::command]
+/// Starts the run on its own thread and returns at once: each step is a `book-progress` event,
+/// and `run-finished` comes last.
 pub fn run_books(
-    app: AppHandle,
-    state: State<'_, AppState>,
+    events: Arc<dyn Events>,
+    state: &AppState,
     books: Vec<RunRequest>,
     target: RunTarget,
 ) -> Result<(), String> {
@@ -1163,7 +1135,7 @@ pub fn run_books(
             device_override.as_deref(),
             verified,
             &mut |e| {
-                let _ = app.emit("book-progress", e);
+                events.emit("book-progress", progress_json(&e));
             },
         );
         // An MTP Kindle's firmware is only read by a send; keep it for the device card.
@@ -1172,13 +1144,18 @@ pub fn run_books(
             reg.set_firmware(&key, &fw);
             let _ = reg.save(&devices_file);
         }
-        let _ = app.emit("run-finished", ());
+        // Tauri sent `()` as null.
+        events.emit("run-finished", serde_json::Value::Null);
     });
     Ok(())
 }
 
+fn progress_json(e: &ProgressEvent) -> serde_json::Value {
+    // A plain struct of strings and numbers: serialising it can't fail.
+    serde_json::to_value(e).unwrap_or(serde_json::Value::Null)
+}
+
 /// Shows a file in Finder / Explorer / the file manager.
-#[tauri::command]
 pub fn reveal(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let r = std::process::Command::new("open")
@@ -1194,20 +1171,6 @@ pub fn reveal(path: String) -> Result<(), String> {
         .arg(Path::new(&path).parent().unwrap_or(Path::new("/")))
         .spawn();
     r.map(|_| ()).map_err(|e| e.to_string())
-}
-
-pub fn settings_file(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_config_dir()
-        .map(|d| d.join("settings.json"))
-        .unwrap_or_else(|_| PathBuf::from("deckle-settings.json"))
-}
-
-pub fn devices_file(app: &AppHandle) -> PathBuf {
-    app.path()
-        .app_config_dir()
-        .map(|d| d.join("devices.json"))
-        .unwrap_or_else(|_| PathBuf::from("deckle-devices.json"))
 }
 
 #[cfg(test)]
@@ -1318,7 +1281,7 @@ mod tests {
 
     #[test]
     fn kindle_files_are_books_in_a_folder_walk() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/mobi");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mobi");
         let expanded = expand_book_paths(&[root.to_string_lossy().into_owned()]);
         assert!(expanded.contains(&root.join("mini6.mobi")));
         assert!(expanded.contains(&root.join("mini.azw3")));
@@ -1329,7 +1292,7 @@ mod tests {
 
     #[test]
     fn rtf_files_are_books_in_a_folder_walk() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/rtf");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/rtf");
         let expanded = expand_book_paths(&[root.to_string_lossy().into_owned()]);
         assert!(expanded.contains(&root.join("mini.rtf")));
         let row = book_row(&root.join("mini.rtf"));
@@ -1339,7 +1302,7 @@ mod tests {
 
     #[test]
     fn odt_files_are_books_in_a_folder_walk() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/odt");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/odt");
         let expanded = expand_book_paths(&[root.to_string_lossy().into_owned()]);
         assert!(expanded.contains(&root.join("mini.odt")));
         assert!(expanded.contains(&root.join("mini.fodt")));
@@ -1351,7 +1314,7 @@ mod tests {
 
     #[test]
     fn fb2_files_are_books_in_a_folder_walk() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/fb2");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/fb2");
         let expanded = expand_book_paths(&[root.to_string_lossy().into_owned()]);
         assert!(expanded.contains(&root.join("mini.fb2")));
         assert!(expanded.contains(&root.join("mini.fb2.zip")));
@@ -1362,7 +1325,7 @@ mod tests {
 
     #[test]
     fn markdown_paths_are_one_book_and_inspect_as_imports() {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/markdown");
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/markdown");
         let paths = vec![
             root.join("mini.md").to_string_lossy().into_owned(),
             root.join("notes").to_string_lossy().into_owned(),
@@ -1508,7 +1471,7 @@ mod tests {
 
     #[test]
     fn rows_bind_into_one_book_row() {
-        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures");
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
         let dir = tempfile::tempdir().unwrap();
         let paths = [
             fixtures.join("docx/deckle-mini.docx"),
@@ -1535,7 +1498,7 @@ mod tests {
 
     #[test]
     fn word_and_text_rows_show_the_imported_metadata() {
-        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures");
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
         let docx = book_row(&fixtures.join("docx/deckle-mini.docx"));
         assert_eq!(docx.error, None, "{}", docx.reason);
         assert_eq!(docx.title, "Deckle Mini Document");
@@ -1555,7 +1518,7 @@ mod tests {
     #[test]
     fn a_pdf_row_shows_the_reflowed_metadata_and_a_scan_says_why_not() {
         // Needs PDFium: tools/fetch-pdfium.sh, or DECKLE_PDFIUM.
-        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures/pdf");
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf");
         let pdf = book_row(&fixtures.join("book.pdf"));
         assert_eq!(pdf.error, None, "{}", pdf.reason);
         assert_eq!(
@@ -1728,7 +1691,7 @@ mod tests {
 
     fn golden_kfx() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../fixtures/mini/deckle-mini-pdoc.golden.kfx")
+            .join("../../fixtures/mini/deckle-mini-pdoc.golden.kfx")
     }
 
     #[test]
@@ -1789,7 +1752,7 @@ mod tests {
     fn run_books_emits_stage_events_and_a_final_result_per_book() {
         let out = tempfile::tempdir().unwrap();
         let fake = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../crates/deckle-core/tests/fake_previewer/ok.sh");
+            .join("../deckle-core/tests/fake_previewer/ok.sh");
         let settings = Settings {
             previewer_path: Some(fake.to_string_lossy().into_owned()),
             pages_auto: false,
@@ -1836,5 +1799,75 @@ mod tests {
         );
         assert!(last.reason.as_deref().unwrap().contains("PDOC"));
         assert!(last.asin.as_deref().unwrap().ends_with("DECK"));
+    }
+
+    /// What `run_books` emitted, in order; `done` fires on `run-finished`.
+    struct Recorded {
+        events: std::sync::Mutex<Vec<(String, serde_json::Value)>>,
+        done: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    }
+
+    impl Events for Recorded {
+        fn emit(&self, event: &str, payload: serde_json::Value) {
+            self.events
+                .lock()
+                .unwrap()
+                .push((event.to_owned(), payload));
+            if event == "run-finished"
+                && let Some(tx) = self.done.lock().unwrap().take()
+            {
+                tx.send(()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn run_books_emits_progress_then_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let state = AppState {
+            settings_file: dir.path().join("settings.json"),
+            devices_file: dir.path().join("devices.json"),
+            preload: Default::default(),
+            preload_target: Default::default(),
+            start_tab: "books",
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let rec = Arc::new(Recorded {
+            events: Default::default(),
+            done: std::sync::Mutex::new(Some(tx)),
+        });
+        run_books(
+            rec.clone(),
+            &state,
+            vec![RunRequest {
+                id: "gone".into(),
+                path: dir
+                    .path()
+                    .join("missing.epub")
+                    .to_string_lossy()
+                    .into_owned(),
+                cde: None,
+                asin: None,
+                upgrade_of: None,
+                cover: None,
+            }],
+            RunTarget::Folder {
+                path: out.to_string_lossy().into_owned(),
+            },
+        )
+        .unwrap();
+        rx.recv_timeout(std::time::Duration::from_secs(30))
+            .expect("run-finished");
+        let events = rec.events.lock().unwrap();
+        let (last, progress) = events.split_last().unwrap();
+        assert_eq!(*last, ("run-finished".to_owned(), serde_json::Value::Null));
+        assert!(!progress.is_empty());
+        assert!(progress.iter().all(|(name, _)| name == "book-progress"));
+        let (_, result) = progress.last().unwrap();
+        assert_eq!(result["id"], "gone");
+        assert_eq!(result["status"], "failed");
+        assert!(result["error"].is_string(), "{result}");
     }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Explicit setup and the desktop config-save boundary. Shared paths always come from disk.
+//! Explicit setup and the app's config-save boundary. Shared paths always come from disk.
 use deckle_digest::{
     Config,
     config::ExportFormat,
@@ -8,8 +8,7 @@ use deckle_digest::{
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-// One lock with deckle-app's commands, which write the same files.
-pub(crate) use deckle_app::config_write;
+use crate::config_write;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PressSetupStatus {
@@ -25,6 +24,11 @@ pub struct PressSetupStatus {
 pub struct ExpectedExport {
     pub dir: String,
     pub format: ExportFormat,
+}
+
+/// Paper `paper`'s config (the main paper when `None`), as the Daily tab reads it.
+fn paper_config_at(main: &Path, paper: Option<&str>) -> Result<Config, String> {
+    deckle_digest::papers::load_one(main, paper.unwrap_or(deckle_digest::papers::MAIN))
 }
 
 fn identity(root: &Path) -> Result<Uuid, String> {
@@ -43,7 +47,6 @@ fn identity(root: &Path) -> Result<Uuid, String> {
     })
 }
 
-#[tauri::command]
 pub fn press_setup(
     paper: Option<String>,
     export_index: usize,
@@ -66,7 +69,7 @@ pub fn press_setup(
     )
 }
 
-pub(crate) fn setup_at(
+pub fn setup_at(
     main: &Path,
     root: &Path,
     paper: Option<&str>,
@@ -76,7 +79,7 @@ pub(crate) fn setup_at(
     watcher: impl FnOnce() -> Result<(), String>,
 ) -> Result<PressSetupStatus, String> {
     let _lock = config_write()?;
-    let mut config = crate::daily::paper_config_at(main, paper)
+    let mut config = paper_config_at(main, paper)
         .map_err(|_| "Could not read this paper's settings.".to_owned())?;
     let export = config
         .export
@@ -109,7 +112,7 @@ pub(crate) fn setup_at(
         setup::disable(&configs, &mut config, index, producer, &path)
     };
     let error = result.err().map(|e| e.code);
-    let saved_enabled = crate::daily::paper_config_at(main, paper)
+    let saved_enabled = paper_config_at(main, paper)
         .ok()
         .and_then(|c| c.export.get(index).map(|e| e.press_enabled))
         .unwrap_or(false);
@@ -124,12 +127,7 @@ pub(crate) fn setup_at(
 
 /// Called while holding CONFIG_WRITE, before any replacement config is committed.
 /// Saving settings can retain an owned activation, but only setup may create one.
-pub(crate) fn guard_save(
-    main: &Path,
-    root: &Path,
-    old: &Config,
-    next: &mut Config,
-) -> Result<(), String> {
+pub fn guard_save(main: &Path, root: &Path, old: &Config, next: &mut Config) -> Result<(), String> {
     next.paper_id = old.paper_id;
     let same = |a: &deckle_digest::config::ExportConfig,
                 b: &deckle_digest::config::ExportConfig| {
@@ -251,7 +249,7 @@ mod tests {
         entered_rx
             .recv_timeout(std::time::Duration::from_secs(5))
             .unwrap();
-        assert!(deckle_app::CONFIG_WRITE.try_lock().is_err());
+        assert!(crate::CONFIG_WRITE.try_lock().is_err());
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let second = std::thread::spawn(move || {
             let status = setup_at(&main, &root, None, 0, false, None, || {
@@ -341,7 +339,6 @@ mod tests {
         next.export[0].press_enabled = true;
         assert!(guard_save(&main, &root, &old, &mut next).is_err());
         assert!(!root.exists());
-        assert!(crate::daily::save_paper_at(&main, None, next).is_err());
         assert!(!Config::load(&main).unwrap().export[0].press_enabled);
     }
     #[test]

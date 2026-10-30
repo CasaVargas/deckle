@@ -7,13 +7,29 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+base64 = "0.23"
+deckle-cli.workspace = true
 deckle-core.workspace = true
 deckle-digest.workspace = true
+deckle-docx.workspace = true
+deckle-fb2.workspace = true
+deckle-highlights.workspace = true
+deckle-kfx.workspace = true
+deckle-library.workspace = true
+deckle-markdown.workspace = true
+deckle-mobi.workspace = true
 deckle-morgue.workspace = true
+deckle-odt.workspace = true
+deckle-pdf.workspace = true
 deckle-readership.workspace = true
+deckle-rtf.workspace = true
 deckle-shelf.workspace = true
+deckle-transport.workspace = true
+deckle-txt.workspace = true
+deckle-xray.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
+rusqlite.workspace = true
