@@ -230,3 +230,23 @@ Calls the builder made where the design was silent:
   back only as sidecars beside books, never as folders.
 - **Exit status:** non-zero when any file failed to copy; "kept" and "no book found" are not
   failures.
+
+## Build notes (B)
+
+- The server keeps the newest position per document in `koreader-sync.json` and passes each one
+  on: a paper's to its readership through `record_koreader_position` (via the CLI's
+  `record_koreader`), any other book's to From Your Shelf as device `koreader/<device_id>`,
+  named after KOReader's `device`, with every open book that device has synced.
+- **Which file a document is:** KOReader's `metadata.filename` when "Send document metadata" is on,
+  else `koreader-documents.json`. That registry is filled with both digests of every file Deckle
+  hands over: each catalog download (the bytes served, so a KEPUB made on request counts), each
+  file pushed to a Kobo's or PocketBook's drive, and each export-folder file. Kept to 2,000
+  entries, oldest first out. A book Deckle never handed over and that sends no metadata isn't on
+  the shelf: there's no title to show.
+- A paper's file that matches no layout (an old edition) goes nowhere; a paper never lands on the
+  shelf.
+- **A fix found on the way:** when the KFX layout can't be made (today "Weather & Almanac" isn't
+  matched in the KFX, a separate bug), the EPUB layout is still recorded, so KOReader's reads have
+  somewhere to land.
+- Registering answers 402. `GET /syncs/progress/<doc>` answers `{}` for an unknown document, as
+  the reference server does.

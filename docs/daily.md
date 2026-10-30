@@ -736,6 +736,14 @@ deckle reader-server status      # on or off, and the URLs to type into KOReader
   KOReader's sync protocol sends exactly that MD5, so treat the file like a password.
 - It's plain HTTP on every network interface. Use it at home or over Tailscale, never open to the
   internet. `DECKLE_READER_SERVER_BIND` limits the address it listens on.
+- **Progress sync:** in KOReader, Tools → Progress sync → Custom sync server, the sync URL; then
+  Log in with the same username and password (registering is closed: the account is Deckle's).
+  Each position lands in the paper's Readership, as `koreader/<device id>`, to the section, or
+  for any other book on From Your Shelf under the reader's name. KOReader names a book by the
+  MD5 of its file; Deckle remembers that for every file it hands over (the catalog, a Kobo's or
+  PocketBook's drive, an export folder) in `koreader-documents.json`. For a book that came from
+  elsewhere, turn on KOReader's "Send document metadata" so Deckle learns its title. Positions
+  are kept in `koreader-sync.json`.
 - Not yet checked with KOReader on a real device (`docs/devices.md`).
 
 ## Kobo
