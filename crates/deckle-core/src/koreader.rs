@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! KOReader's sidecars (docs/superpowers/specs/2026-10-30-koreader-reads-design.md): each
-//! book's `<book>.sdr/metadata.<ext>.lua`, read (never written) for its highlights, notes and
-//! progress, in the shapes a Kobo read gives: `My Clippings.txt` entries and [`kobo::Book`]s.
+//! book's `<book>.sdr/metadata.<ext>.lua`, read for its highlights, notes and progress, in the
+//! shapes a Kobo read gives: `My Clippings.txt` entries and [`kobo::Book`]s. The one sidecar
+//! Deckle writes is a paper's first, beside an edition it wrote itself, and only where there is
+//! none (2026-10-30-koreader-hub-design.md §E).
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -176,6 +178,85 @@ pub fn partial_md5(path: &Path) -> Option<String> {
         md5.update(&buf[..n]);
     }
     Some(md5.finalize().iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The settings a paper opens with (hub design §E): the paper's own fonts and styles, and
+/// hyphenation. Every key is one KOReader reads from a book's sidecar, not its global settings.
+/// Font size and margins are left to the owner's defaults; footnote popups too, as KOReader
+/// keeps them only globally (`footnote_link_in_popup`, readerlink.lua). With no `text_lang`
+/// here, KOReader takes the language from the book (`onPreRenderDocument`, readertypography.lua).
+const PAPER_SETTINGS: &[(&str, &str)] = &[
+    // ReaderConfig loads `copt_<option>` from the sidecar over each option of creoptions.lua
+    // (readerconfig.lua `onReadSettings`, configurable.lua `loadSettings`); ReaderTypeset then
+    // sets it (readertypeset.lua `onReadSettings`). 1 is on.
+    ("copt_embedded_css", "1"),
+    ("copt_embedded_fonts", "1"),
+    // readertypography.lua `onReadSettings`: `config:has("hyphenation")` wins over the global.
+    ("hyphenation", "true"),
+    // readertypography.lua `onReadSettings`: the book's `lang` attributes pick the rules.
+    ("text_lang_embedded_langs", "true"),
+];
+
+/// The sidecar folder KOReader keeps beside `book`: its path less the last extension, so
+/// `x.kepub.epub` has `x.kepub.sdr` (docsettings.lua `getSidecarDir`).
+pub fn sidecar_dir(book: &Path) -> PathBuf {
+    book.with_extension("sdr")
+}
+
+/// `metadata.<last extension>.lua` (docsettings.lua `getSidecarFilename`).
+fn sidecar_name(book: &Path) -> String {
+    let ext = book.extension().unwrap_or_default().to_string_lossy();
+    format!("metadata.{}.lua", if ext.is_empty() { "_" } else { &ext })
+}
+
+/// Writes a paper's sidecar beside `book`, as KOReader writes one, unless its `.sdr` folder is
+/// already there. Returns whether it was written.
+pub fn tune_paper(book: &Path) -> std::io::Result<bool> {
+    use std::io::Write;
+    let dir = sidecar_dir(book);
+    match std::fs::create_dir(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(e) => return Err(e),
+    }
+    let mut text =
+        String::from("-- Deckle's settings for its paper; KOReader keeps its own\nreturn {\n");
+    for (k, v) in PAPER_SETTINGS {
+        text.push_str(&format!("    [\"{k}\"] = {v},\n"));
+    }
+    text.push_str("}\n");
+    let name = sidecar_name(book);
+    let tmp = dir.join(format!(".{name}.tmp"));
+    {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(text.as_bytes())?;
+        f.sync_all()?;
+    }
+    std::fs::rename(&tmp, dir.join(name)).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    Ok(true)
+}
+
+/// Removes `book`'s sidecar with the book: its `metadata.<ext>.lua` and KOReader's `.old` copy,
+/// then the folder, unless another book of that stem (`x.pdf` beside `x.epub`) has a sidecar in
+/// it too.
+pub fn remove_sidecar(book: &Path) -> std::io::Result<()> {
+    let dir = sidecar_dir(book);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    let name = sidecar_name(book);
+    for f in [name.clone(), format!("{name}.old")] {
+        match std::fs::remove_file(dir.join(f)) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+            _ => {}
+        }
+    }
+    if metadata_file(&dir).is_none() {
+        std::fs::remove_dir_all(&dir)?;
+    }
+    Ok(())
 }
 
 /// Reads every sidecar under `root`.
@@ -753,6 +834,68 @@ mod tests {
     fn lua_rejects_code() {
         assert!(lua::parse("return os.execute('rm -rf /')").is_err());
         assert!(lua::parse("return { [\"a\"] = 1 } extra").is_err());
+    }
+
+    #[test]
+    fn a_papers_sidecar_is_written_once_and_reads_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let book = tmp.path().join("deckle-daily-2026-10-30.kepub.epub");
+        std::fs::write(&book, b"KEPUB").unwrap();
+        assert!(tune_paper(&book).unwrap());
+        // KOReader drops only the last extension.
+        let file = tmp
+            .path()
+            .join("deckle-daily-2026-10-30.kepub.sdr/metadata.epub.lua");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.starts_with("-- ")
+                && text.contains("\nreturn {\n    [\"")
+                && text.ends_with(",\n}\n"),
+            "{text}"
+        );
+        let v = lua::parse(&text).unwrap();
+        assert_eq!(v.get("copt_embedded_css"), Some(&Value::Num(1.0)));
+        assert_eq!(v.get("copt_embedded_fonts"), Some(&Value::Num(1.0)));
+        assert_eq!(v.get("hyphenation"), Some(&Value::Bool(true)));
+        assert_eq!(v.get("text_lang_embedded_langs"), Some(&Value::Bool(true)));
+        let Value::Table(t) = &v else { panic!() };
+        assert_eq!(t.len(), 4);
+        // Nothing a read takes for progress or highlights.
+        let parsed = parse(&text).unwrap();
+        assert!(!parsed.in_progress() && parsed.highlights.is_empty());
+
+        // KOReader's own, once there, is never written over.
+        let ko = "return { [\"percent_finished\"] = 0.5 }";
+        std::fs::write(&file, ko).unwrap();
+        assert!(!tune_paper(&book).unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), ko);
+        // Nor is an `.sdr` folder with nothing in it yet.
+        let pb = tmp.path().join("deckle-daily-2026-10-29.epub");
+        let sdr = tmp.path().join("deckle-daily-2026-10-29.sdr");
+        std::fs::create_dir(&sdr).unwrap();
+        assert!(!tune_paper(&pb).unwrap());
+        assert_eq!(std::fs::read_dir(&sdr).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_sidecar_goes_with_its_book_but_not_another_books() {
+        let tmp = tempfile::tempdir().unwrap();
+        let epub = tmp.path().join("deckle-daily-2026-10-30.epub");
+        tune_paper(&epub).unwrap();
+        let sdr = tmp.path().join("deckle-daily-2026-10-30.sdr");
+        std::fs::write(sdr.join("metadata.epub.lua.old"), "return {}").unwrap();
+        std::fs::write(sdr.join("metadata.pdf.lua"), "return {}").unwrap();
+        remove_sidecar(&epub).unwrap();
+        // That day's PDF keeps its own.
+        let left: Vec<_> = std::fs::read_dir(&sdr)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(left, ["metadata.pdf.lua"]);
+        remove_sidecar(&tmp.path().join("deckle-daily-2026-10-30.pdf")).unwrap();
+        assert!(!sdr.exists());
+        // No sidecar, nothing to do.
+        remove_sidecar(&epub).unwrap();
     }
 
     #[test]

@@ -97,7 +97,8 @@ fn the_morning_paper_goes_to_a_kobo_with_no_previewer() {
         names(&root.join("Deckle")),
         [
             "deckle-daily-2026-10-02.kepub.epub",
-            "deckle-daily-2026-10-23.kepub.epub"
+            "deckle-daily-2026-10-23.kepub.epub",
+            "deckle-daily-2026-10-23.kepub.sdr"
         ]
     );
     let sent = std::fs::read(root.join("Deckle/deckle-daily-2026-10-23.kepub.epub")).unwrap();
@@ -183,7 +184,10 @@ fn a_push_sends_what_waits_in_the_kobo_outbox() {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     assert_eq!(
         names(&root.join("Deckle")),
-        ["deckle-daily-2026-10-23.kepub.epub"],
+        [
+            "deckle-daily-2026-10-23.kepub.epub",
+            "deckle-daily-2026-10-23.kepub.sdr"
+        ],
         "{}",
         String::from_utf8_lossy(&o.stdout)
     );

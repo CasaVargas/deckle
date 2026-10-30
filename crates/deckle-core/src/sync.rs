@@ -293,9 +293,10 @@ pub fn run_with(
 
 /// [`run`] for a reader on a drive (other readers design §8): each queued `.epub` goes over
 /// into `Deckle/`, a KEPUB for a Kobo and as it is for a PocketBook (a book that won't convert
-/// stays queued, with a warning), then the prune, then, on a Kobo, one read of its database for
-/// the highlights and the shelf. Neither has a `.yjf`: `plan.readership` takes KOReader's
-/// positions from its sidecars instead (KOReader hub design §C).
+/// stays queued, with a warning), a paper with its KOReader sidecar (hub design §E); then one
+/// read of the highlights and the shelf, then the prune, so a pruned paper's highlights are read
+/// first. Neither has a `.yjf`: `plan.readership` takes KOReader's positions from its sidecars
+/// instead (KOReader hub design §C).
 pub fn run_reader(
     queue: &Queue,
     reader: &crate::reader::Reader,
@@ -321,6 +322,7 @@ pub fn run_reader(
             .into_iter()
             .filter(|p| p.extension().is_some_and(|x| x == "epub"))
             .collect();
+        let mut kept: Option<Vec<String>> = None;
         for (i, entry) in pending.iter().enumerate() {
             let io = |source| DeliverError::Io {
                 path: entry.clone(),
@@ -333,6 +335,23 @@ pub fn run_reader(
             match reader.prepare(&bytes) {
                 Ok(ready) => {
                     let path = reader::deliver(reader, &ready, &name).map_err(io)?;
+                    if !prune.prefix.is_empty() && name.starts_with(&prune.prefix) {
+                        // KOReader may keep its sidecars away from the book (`docsettings/`):
+                        // one there for this edition means it was read before.
+                        let kept = kept.get_or_insert_with(|| {
+                            crate::koreader::find(reader.root())
+                                .into_iter()
+                                .map(|s| s.book)
+                                .collect::<Vec<_>>()
+                        });
+                        if !kept.contains(&format!("{}/{name}", reader::FOLDER))
+                            && let Err(e) = crate::koreader::tune_paper(&path)
+                        {
+                            report
+                                .warnings
+                                .push(format!("{name}: no KOReader settings written: {e}"));
+                        }
+                    }
                     report.delivered.push(path);
                     std::fs::remove_file(entry).map_err(io)?;
                 }
@@ -341,15 +360,6 @@ pub fn run_reader(
                     .push(format!("{file}: not sent, it doesn't read as an EPUB: {e}")),
             }
         }
-    }
-    if plan.prune {
-        report.pruned =
-            reader::prune(reader, &prune.prefix, prune.keep, &prune.exempt).map_err(|source| {
-                DeliverError::Io {
-                    path: reader.root().join(reader::FOLDER),
-                    source,
-                }
-            })?;
     }
     // One read serves both; a failed read doesn't undo a delivery. A Kobo's database and
     // KOReader's sidecars are read together; a PocketBook has only KOReader's (KOReader reads
@@ -379,6 +389,15 @@ pub fn run_reader(
                 }
             }
         }
+    }
+    if plan.prune {
+        report.pruned =
+            reader::prune(reader, &prune.prefix, prune.keep, &prune.exempt).map_err(|source| {
+                DeliverError::Io {
+                    path: reader.root().join(reader::FOLDER),
+                    source,
+                }
+            })?;
     }
     Ok(report)
 }
@@ -1284,6 +1303,76 @@ mod pocketbook_tests {
         assert_eq!(r.delivered, std::slice::from_ref(&sent));
         assert_eq!(std::fs::read(sent).unwrap(), epub);
         assert!(r.kobo_books.is_none() && r.clippings.is_none() && r.clippings_error.is_none());
+    }
+
+    fn zip_epub() -> Vec<u8> {
+        use std::io::Write;
+        let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        z.start_file("mimetype", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        z.write_all(b"application/epub+zip").unwrap();
+        z.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn a_paper_goes_with_koreader_settings_and_a_book_without() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("PB");
+        let deckle = root.join("Deckle");
+        std::fs::create_dir_all(&deckle).unwrap();
+        // An older edition, read in KOReader, with a highlight not yet taken.
+        std::fs::write(deckle.join("deckle-daily-2026-10-01.epub"), b"old").unwrap();
+        std::fs::create_dir_all(deckle.join("deckle-daily-2026-10-01.sdr")).unwrap();
+        std::fs::write(
+            deckle.join("deckle-daily-2026-10-01.sdr/metadata.epub.lua"),
+            "return { [\"annotations\"] = { [1] = { [\"datetime\"] = \"2026-10-01 08:15:03\", \
+             [\"drawer\"] = \"lighten\", [\"text\"] = \"Rain today.\" } } }",
+        )
+        .unwrap();
+        // A sent-again edition KOReader keeps settings for in its `docsettings/`.
+        let elsewhere = root
+            .join("applications/koreader/docsettings/mnt/ext1/Deckle/deckle-daily-2026-10-02.sdr");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(
+            elsewhere.join("metadata.epub.lua"),
+            "return { [\"percent_finished\"] = 0.3 }",
+        )
+        .unwrap();
+        let pb = Reader::PocketBook(PocketBook { root: root.clone() });
+        let q = Queue::new(tmp.path().join("outbox-epub"));
+        std::fs::create_dir_all(&q.dir).unwrap();
+        for n in [
+            "deckle-daily-2026-10-02.epub",
+            "deckle-daily-2026-10-03.epub",
+            "walden.epub",
+        ] {
+            std::fs::write(q.dir.join(n), zip_epub()).unwrap();
+        }
+        let plan = Plan {
+            push: true,
+            prune: true,
+            clippings: true,
+            readership: false,
+            shelf: false,
+        };
+        let prune = Prune {
+            prefix: "deckle-daily-".into(),
+            keep: 2,
+            exempt: Vec::new(),
+        };
+        let r = run_reader(&q, &pb, plan, &prune, &mut |_, _, _| {}).unwrap();
+        assert_eq!(r.delivered.len(), 3);
+        assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+        let tuned = deckle.join("deckle-daily-2026-10-03.sdr/metadata.epub.lua");
+        let v = crate::koreader::lua::parse(&std::fs::read_to_string(tuned).unwrap()).unwrap();
+        assert!(v.get("copt_embedded_css").is_some());
+        assert!(!deckle.join("deckle-daily-2026-10-02.sdr").exists());
+        assert!(!deckle.join("walden.sdr").exists());
+        // The old edition's highlight was read before it went, with its sidecar.
+        assert_eq!(r.pruned, ["deckle-daily-2026-10-01.epub"]);
+        assert!(!deckle.join("deckle-daily-2026-10-01.sdr").exists());
+        let text = String::from_utf8(r.clippings.unwrap()).unwrap();
+        assert!(text.contains("Rain today."), "{text}");
     }
 
     #[test]

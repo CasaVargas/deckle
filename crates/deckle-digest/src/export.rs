@@ -103,13 +103,20 @@ pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportR
             files.push((p.clone(), name));
         }
     }
-    for (from, name) in files {
+    for (i, (from, name)) in files.into_iter().enumerate() {
         let written = match e.format {
             ExportFormat::Kepub => kepub_into(&from, &dir, &name),
             _ => copy_into(&from, &dir, &name),
         };
         match written {
-            Ok(p) => report.written.push(p),
+            Ok(p) => {
+                // The paper (first), not the long reads, opens in KOReader as designed (hub
+                // design §E). A sidecar not written costs only the settings.
+                if i == 0 && matches!(e.format, ExportFormat::Epub | ExportFormat::Kepub) {
+                    let _ = deckle_core::koreader::tune_paper(&p);
+                }
+                report.written.push(p)
+            }
             Err(why) => {
                 report.error = Some(why);
                 return report;
@@ -256,7 +263,7 @@ pub fn prune_ext(dir: &Path, keep: usize, ext: &str) -> Result<Vec<PathBuf>, Str
 }
 
 /// [`prune_ext`] for one paper's editions, `<prefix>YYYY-MM-DD.<ext>`: another paper's in the
-/// same folder are left alone (many papers §4).
+/// same folder are left alone (many papers §4). Each goes with its KOReader sidecar.
 pub fn prune_ext_for(
     dir: &Path,
     keep: usize,
@@ -283,6 +290,10 @@ pub fn prune_ext_for(
     let mut gone = Vec::new();
     for (_, p) in editions.into_iter().skip(keep) {
         std::fs::remove_file(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+        deckle_core::koreader::remove_sidecar(&p).map_err(|e| {
+            let sdr = deckle_core::koreader::sidecar_dir(&p);
+            format!("{}: {e}", sdr.display())
+        })?;
         gone.push(p);
     }
     Ok(gone)
@@ -442,7 +453,9 @@ mod tests {
         let out = tmp.path().join("Rakuten Kobo");
         std::fs::create_dir(&out).unwrap();
         for d in ["2026-10-21", "2026-10-22"] {
-            std::fs::write(out.join(format!("deckle-daily-{d}.kepub.epub")), b"old").unwrap();
+            let old = out.join(format!("deckle-daily-{d}.kepub.epub"));
+            std::fs::write(&old, b"old").unwrap();
+            deckle_core::koreader::tune_paper(&old).unwrap();
         }
         std::fs::write(
             out.join("deckle-daily-2026-10-20.epub"),
@@ -479,6 +492,13 @@ mod tests {
             r.pruned,
             vec![out.join("deckle-daily-2026-10-21.kepub.epub")]
         );
+        assert!(
+            out.join("deckle-daily-2026-10-23.kepub.sdr/metadata.epub.lua")
+                .is_file()
+        );
+        assert!(!out.join("deckle-read-a.kepub.sdr").exists());
+        assert!(!out.join("deckle-daily-2026-10-21.kepub.sdr").exists());
+        assert!(out.join("deckle-daily-2026-10-22.kepub.sdr").is_dir());
         assert!(out.join("deckle-daily-2026-10-20.epub").exists());
         assert!(
             !out.read_dir()
@@ -508,6 +528,11 @@ mod tests {
         std::fs::create_dir(&out).unwrap();
         for d in ["2026-10-19", "2026-10-20", "2026-10-21", "2026-10-22"] {
             std::fs::write(out.join(format!("deckle-daily-{d}.epub")), b"old").unwrap();
+        }
+        // KOReader's sidecars: the pruned editions' go with them.
+        for sdr in ["deckle-daily-2026-10-19.sdr", "deckle-read-a.sdr"] {
+            std::fs::create_dir(out.join(sdr)).unwrap();
+            std::fs::write(out.join(sdr).join("metadata.epub.lua"), "return {}").unwrap();
         }
         for other in [
             "deckle-read-a.epub",
@@ -541,8 +566,10 @@ mod tests {
             [
                 "deckle-daily-2026-10-22.epub",
                 "deckle-daily-2026-10-23.epub",
+                "deckle-daily-2026-10-23.sdr",
                 "deckle-daily-draft.epub",
                 "deckle-read-a.epub",
+                "deckle-read-a.sdr",
                 "notes.epub"
             ]
         );
@@ -618,10 +645,63 @@ mod tests {
         let b = built(tmp.path(), false, &[]);
         let out = tmp.path().join("ipad");
         export(&cfg(&out), day(), &b);
-        let names: Vec<_> = std::fs::read_dir(&out)
+        let mut names: Vec<_> = std::fs::read_dir(&out)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(names, ["deckle-daily-2026-10-23.epub"]);
+        names.sort();
+        assert_eq!(
+            names,
+            [
+                "deckle-daily-2026-10-23.epub",
+                "deckle-daily-2026-10-23.sdr"
+            ]
+        );
+        let sdr: Vec<_> = std::fs::read_dir(out.join("deckle-daily-2026-10-23.sdr"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(sdr, ["metadata.epub.lua"]);
+    }
+
+    #[test]
+    fn the_paper_gets_koreader_settings_once_and_long_reads_and_pdfs_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let b = built(tmp.path(), false, &["deckle-read-a"]);
+        let out = tmp.path().join("boox");
+        let e = ExportConfig {
+            books: true,
+            ..cfg(&out)
+        };
+        export(&e, day(), &b);
+        let file = out.join("deckle-daily-2026-10-23.sdr/metadata.epub.lua");
+        let v =
+            deckle_core::koreader::lua::parse(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert!(v.get("copt_embedded_fonts").is_some());
+        assert!(!out.join("deckle-read-a.sdr").exists());
+        // Exported again after KOReader wrote its own: left alone.
+        std::fs::write(&file, "return { [\"percent_finished\"] = 0.4 }").unwrap();
+        export(&e, day(), &b);
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "return { [\"percent_finished\"] = 0.4 }"
+        );
+
+        let mut b = b;
+        let pdf = tmp.path().join("p.pdf");
+        std::fs::write(&pdf, b"%PDF-paper").unwrap();
+        b.pdfs.push(crate::PdfBuild {
+            screen: crate::pdf::Screen::Remarkable2,
+            photos: Photos::Gray,
+            path: pdf,
+        });
+        let pdfs = tmp.path().join("pdfs");
+        let e = ExportConfig {
+            format: ExportFormat::Pdf,
+            photos: Photos::Gray,
+            ..cfg(&pdfs)
+        };
+        assert_eq!(export(&e, day(), &b).error, None);
+        assert!(!pdfs.join("deckle-daily-2026-10-23.sdr").exists());
     }
 }
