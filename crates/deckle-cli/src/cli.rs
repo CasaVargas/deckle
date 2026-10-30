@@ -274,6 +274,12 @@ pub enum Command {
         #[command(subcommand)]
         action: WordsCommand,
     },
+    /// KOReader on a Kobo, a PocketBook, a Kindle on USB storage or in a folder: back up its
+    /// reading state and put it back.
+    Koreader {
+        #[command(subcommand)]
+        action: KoreaderCommand,
+    },
     /// Your library: one folder per book, with a deckle.json beside it. Every book `run` sends
     /// is added once the library is set up.
     Library {
@@ -446,6 +452,36 @@ pub enum HighlightsCommand {
     Export {
         #[arg(long)]
         to: Option<PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KoreaderCommand {
+    /// Copy every book's sidecar (progress, highlights, notes) and KOReader's settings,
+    /// history, statistics and vocabulary into a new folder, with a manifest.json.
+    Backup {
+        /// `device` for the connected reader, or a folder (a copy of a reader's drive).
+        #[arg(long, default_value = "device")]
+        from: String,
+        /// Where backups go (default: ~/Deckle/KOReader backups). Each lands in
+        /// <device>/<YYYY-MM-DD HHMMSS>/ under it.
+        #[arg(long)]
+        to: Option<PathBuf>,
+    },
+    /// Put a backup's sidecars back beside their books, found by path or else by KOReader's
+    /// partial MD5. A newer sidecar on the reader is kept.
+    Restore {
+        /// The backup's folder (the one holding manifest.json).
+        backup: PathBuf,
+        /// `device` for the connected reader, or a folder.
+        #[arg(long, default_value = "device")]
+        to: String,
+        /// Also put back KOReader's settings, history, statistics and vocabulary.
+        #[arg(long)]
+        settings: bool,
+        /// Overwrite files on the reader even when they're newer than the backup's.
+        #[arg(long)]
+        force: bool,
     },
 }
 

@@ -413,10 +413,11 @@ fn books(root: &Path, exts: &HashSet<String>) -> HashMap<String, Vec<String>> {
                 if !name.starts_with('.') && !name.ends_with(".sdr") && depth < MAX_DEPTH {
                     stack.push((e.path(), depth + 1));
                 }
-            } else if t.is_file() && exts.contains(&split_name(&name).1.to_ascii_lowercase()) {
-                if let Some(md5) = koreader::partial_md5(&e.path()) {
-                    out.entry(md5).or_default().push(rel(root, &e.path()));
-                }
+            } else if t.is_file()
+                && exts.contains(&split_name(&name).1.to_ascii_lowercase())
+                && let Some(md5) = koreader::partial_md5(&e.path())
+            {
+                out.entry(md5).or_default().push(rel(root, &e.path()));
             }
         }
     }

@@ -17,6 +17,7 @@ mod kfx_anchors;
 #[cfg(unix)]
 mod kindles;
 mod kobo;
+mod koreader;
 #[cfg(unix)]
 mod learn;
 mod lint;
