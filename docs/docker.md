@@ -41,6 +41,7 @@ The image is `ghcr.io/casavargas/deckle`. `:latest` is the newest published rele
 | `DECKLE_WEB_PASSWORD` | unset | The web UI's password. Unset, the web UI stays off ([below](#the-web-app)). |
 | `DECKLE_WEB_AUTH` | unset | `none`: no login, only behind a proxy that logs you in ([below](#no-login-behind-a-proxy)). |
 | `DECKLE_WEB_PORT` | `8080` | The web UI's port inside the container. |
+| `DECKLE_WEB_BIND` | `0.0.0.0` | The address the web UI listens on inside the container. Outside the image the default is `127.0.0.1`. |
 | `DECKLE_WEB_ROOTS` | unset | More folders for the web UI's file picker, `:`-separated ([below](#files-uploads-and-downloads)). |
 | `DECKLE_SMTP_PASSWORD` | unset | The password for `[email]`. |
 | `DECKLE_SITE_PASSWORD_<SITE>` | unset | A paper you subscribe to ([below](#email-to-kindle-and-passwords)). |
@@ -144,7 +145,9 @@ Each failed login is logged with the address it came from.
 
 The web UI speaks plain HTTP. For anything beyond your home network, put it behind a reverse
 proxy with TLS (Traefik, Caddy, nginx, Nginx Proxy Manager, Unraid's SWAG); the login cookie is
-marked `Secure` when the proxy sends `X-Forwarded-Proto: https`.
+marked `Secure` when the proxy sends `X-Forwarded-Proto: https`. Live progress comes over a
+Server-Sent Events stream, `/api/events`, sent with `X-Accel-Buffering: no` so nginx-based proxies
+(Nginx Proxy Manager, SWAG) pass it through as it arrives; any other proxy must not buffer it.
 
 ### No login, behind a proxy
 
@@ -174,8 +177,9 @@ first, e.g. `-v /mnt/user/books:/books` and `DECKLE_WEB_ROOTS=/books`). Nothing 
 shown or served.
 
 A file you upload from your computer lands in `/data/Deckle/Uploads/<id>/<name>`, up to 512 MiB
-each. Anything the app "saves" is written to `/data/Deckle/Exports` and downloaded to your
-browser.
+each. Uploads aren't cleaned up automatically: delete old ones from `/data/Deckle/Uploads` when
+you no longer need them. Anything the app "saves" is written to `/data/Deckle/Exports` and
+downloaded to your browser.
 
 ## The bookmarklet over your network
 
