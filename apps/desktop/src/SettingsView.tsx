@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { useCapabilities } from "./capabilities";
 import Icon from "./Icon";
 import { escStaysInField } from "./settingsKeys";
 import { PAGES, onlineOn, pageNotes, pageSummary, searchSettings, setupChecks } from "./settingsIndex";
@@ -43,6 +44,7 @@ interface Props {
 /** Settings take over the window: pages in a sidebar, one page at a time, and a search over every setting (Settings redesign §3). */
 export default function SettingsView(props: Props) {
   const { page, onPage, onBack, settings, onChange } = props;
+  const caps = useCapabilities();
   const [query, setQuery] = useState("");
   // Overview's checklist reads where originals and highlights go; read again on each visit.
   const [sources, setSources] = useState<SourcesStatus | null>(null);
@@ -51,13 +53,13 @@ export default function SettingsView(props: Props) {
     api.librarySources().then(setSources).catch(() => setSources(null));
     api.highlightsStatus().then(setHighlights).catch(() => setHighlights(undefined));
   }, [page]);
-  const checks = setupChecks({ previewer: props.previewer, library: props.library, sources, highlights: highlights === undefined ? undefined : (highlights?.folder ?? null), devices: props.devices });
+  const checks = setupChecks({ previewer: props.previewer, library: props.library, sources, highlights: highlights === undefined ? undefined : (highlights?.folder ?? null), devices: props.devices, web: caps.web });
   const notes = pageNotes(checks, onlineOn(settings));
   const fix = async (c: Check) => {
     if (c.key === "previewer") props.onPickPreviewer();
     else if (c.key === "library") props.onPickLibrary();
     else if (c.key === "highlights") {
-      const dir = await openDialog({ directory: true, multiple: false });
+      const dir = await platform.pickFolder({});
       if (typeof dir === "string") setHighlights(await api.highlightsSet(dir, highlights?.clippings ?? false));
     } else onPage(c.page);
   };

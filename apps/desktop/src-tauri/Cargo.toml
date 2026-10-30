@@ -15,35 +15,14 @@ tauri-build.workspace = true
 
 [dependencies]
 tauri.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-deckle-core.workspace = true
-deckle-xray.workspace = true
-deckle-kfx.workspace = true
-deckle-transport.workspace = true
 deckle-digest.workspace = true
 deckle-highlights.workspace = true
 deckle-cli.workspace = true
 deckle-library.workspace = true
-deckle-docx.workspace = true
-deckle-txt.workspace = true
-deckle-fb2.workspace = true
-deckle-odt.workspace = true
-deckle-rtf.workspace = true
-deckle-mobi.workspace = true
-deckle-markdown.workspace = true
-deckle-pdf.workspace = true
-deckle-readership.workspace = true
-deckle-shelf.workspace = true
 deckle-morgue.workspace = true
-base64 = "0.23"
-image.workspace = true
+deckle-app.workspace = true
 tauri-plugin-dialog = "2.8"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2.4"
 tauri-plugin-updater = "2.14"
-tempfile.workspace = true
-
-[dev-dependencies]
-rusqlite.workspace = true
-tempfile.workspace = true

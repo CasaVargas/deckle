@@ -27,8 +27,12 @@ export interface Place {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** What an export folder is for, under "Add a folder": on the web the folders are the server's. */
+export const exportFolderHint = (web: boolean) =>
+  web ? "A folder under /data your reader syncs from" : "iCloud Drive for an iPad, Dropbox for a Boox";
+
 /** Where the paper goes, from the config: the Kindle always, the rest when they're set up. */
-export function destinations(cfg: DailyConfig): Place[] {
+export function destinations(cfg: DailyConfig, web = false): Place[] {
   const email = cfg.email;
   const rm = cfg.remarkable ?? DEFAULT_REMARKABLE;
   const exports = cfg.export ?? [];
@@ -39,7 +43,7 @@ export function destinations(cfg: DailyConfig): Place[] {
     {
       key: "exports",
       name: "Export folders",
-      how: "iCloud Drive for an iPad, Dropbox for a Boox",
+      how: exportFolderHint(web),
       status: exports.length === 0 ? "None" : exports.length === 1 ? exports[0].name : plural(exports.length, "folder"),
       on: exports.length > 0,
       open: true,

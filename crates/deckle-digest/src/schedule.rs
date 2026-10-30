@@ -869,8 +869,15 @@ pub fn remove() -> Result<Vec<String>, String> {
     }
 }
 
+/// What's scheduled. In a daemon install that's the config (a broken one reads as nothing
+/// scheduled; [`daemon_status`] says why), on any OS.
 pub fn status() -> Status {
-    if cfg!(target_os = "macos") {
+    if crate::secret::daemon_install() {
+        daemon_status().unwrap_or(Status {
+            watch: true,
+            ..Status::default()
+        })
+    } else if cfg!(target_os = "macos") {
         macos_status()
     } else if cfg!(target_os = "windows") {
         windows_status()
@@ -879,9 +886,193 @@ pub fn status() -> Status {
     }
 }
 
+// ---- a daemon install: the config is the schedule ------------------------------------
+// The container's daemon re-reads `[schedule]` every tick, so `digest schedule` there and the
+// web UI's schedule switch both edit the file and install nothing.
+
+/// Writes paper `paper`'s (`None`: the main paper's) `[schedule] at` (`None` clears it) and,
+/// when given, its `days`; days not given are kept. Returns the saved paper.
+pub fn save_config_schedule(
+    main: &Path,
+    paper: Option<&str>,
+    at: Option<&str>,
+    days: Option<Vec<Day>>,
+) -> Result<Config, String> {
+    if let Some(at) = at {
+        parse_at(at)?;
+    }
+    let mut cfg = crate::papers::load_one(main, paper.unwrap_or(MAIN))?;
+    cfg.schedule.at = at.map(str::to_owned);
+    if let Some(days) = days {
+        cfg.schedule.days = days;
+    }
+    crate::papers::save(main, &cfg)?;
+    Ok(cfg)
+}
+
+/// Clears paper `paper`'s whole `[schedule]`, days too (`digest schedule --off`).
+pub fn clear_config_schedule(main: &Path, paper: Option<&str>) -> Result<Config, String> {
+    save_config_schedule(main, paper, None, Some(Vec::new()))
+}
+
+/// [`status`] read from the config: every paper with `[schedule] at`, main first. There is no
+/// watcher job or binary to report.
+pub fn config_status(main: &Path) -> Result<Status, String> {
+    let papers: Vec<PaperStatus> = crate::papers::load_all(main)?
+        .papers
+        .iter()
+        .filter_map(|c| {
+            Some(PaperStatus {
+                slug: c.slug().to_owned(),
+                at: Some(c.schedule.at.clone()?),
+                days: c.schedule.days.clone(),
+            })
+        })
+        .collect();
+    let at = papers
+        .iter()
+        .find(|p| p.slug == MAIN)
+        .and_then(|p| p.at.clone());
+    Ok(Status {
+        at,
+        papers,
+        ..Status::default()
+    })
+}
+
+/// [`status`] in a daemon install: the config's schedule, and the watcher is on (the daemon
+/// runs it).
+pub fn daemon_status() -> Result<Status, String> {
+    Ok(Status {
+        watch: true,
+        ..config_status(&crate::config::default_path())?
+    })
+}
+
+/// The next press from a paper's `[schedule]` (`at`, and `days` when set), in `now`'s zone.
+pub fn config_next_press(
+    sched: &crate::config::ScheduleConfig,
+    now: chrono::DateTime<chrono_tz::Tz>,
+) -> Option<chrono::NaiveDate> {
+    use chrono::{Datelike, Days};
+    let at = parse_at(sched.at.as_deref()?).ok()?;
+    let mut date = crate::press::next_press(at, now).date_naive();
+    for _ in 0..7 {
+        let day = Day::ALL[date.weekday().num_days_from_monday() as usize];
+        if sched.days.is_empty() || sched.days.contains(&day) {
+            return Some(date);
+        }
+        date = date + Days::new(1);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A main paper at `dir/digest.toml` and one extra, `courier`.
+    fn two_papers(dir: &Path) -> PathBuf {
+        let main = dir.join("digest.toml");
+        std::fs::write(&main, "title = \"The Gazette\"\n").unwrap();
+        crate::papers::create(&main, "courier", "The Courier", "Sam").unwrap();
+        main
+    }
+
+    #[test]
+    fn a_config_schedule_saves_at_and_days_and_reads_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = two_papers(tmp.path());
+        save_config_schedule(&main, None, Some("06:15"), Some(vec![Day::Sat])).unwrap();
+        save_config_schedule(&main, Some("courier"), Some("07:00"), None).unwrap();
+        let s = config_status(&main).unwrap();
+        assert_eq!(s.at.as_deref(), Some("06:15"));
+        assert!(!s.watch && s.exe.is_none());
+        assert_eq!(
+            s.papers,
+            vec![
+                PaperStatus {
+                    slug: MAIN.into(),
+                    at: Some("06:15".into()),
+                    days: vec![Day::Sat]
+                },
+                PaperStatus {
+                    slug: "courier".into(),
+                    at: Some("07:00".into()),
+                    days: Vec::new()
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn status_in_a_daemon_install_is_the_config_with_the_watcher_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        // nextest runs each test in its own process, so the environment is this test's alone.
+        unsafe {
+            std::env::set_var("HOME", tmp.path());
+            std::env::set_var("APPDATA", tmp.path());
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+            std::env::set_var("DECKLE_DAEMON", "1");
+        }
+        let main = crate::config::default_path();
+        std::fs::create_dir_all(main.parent().unwrap()).unwrap();
+        two_papers(main.parent().unwrap());
+        save_config_schedule(&main, None, Some("06:15"), Some(vec![Day::Sat])).unwrap();
+        save_config_schedule(&main, Some("courier"), Some("07:00"), None).unwrap();
+        let s = status();
+        assert_eq!(s.at.as_deref(), Some("06:15"));
+        assert!(s.watch, "the daemon owns the watcher");
+        assert_eq!(
+            s.papers.iter().map(|p| p.slug.as_str()).collect::<Vec<_>>(),
+            [MAIN, "courier"]
+        );
+        assert_eq!(s, daemon_status().unwrap());
+
+        std::fs::write(&main, "title = [").unwrap();
+        assert!(daemon_status().is_err(), "a broken config is an error");
+        assert!(status().watch && status().papers.is_empty());
+    }
+
+    #[test]
+    fn a_config_schedule_keeps_days_unless_given_and_refuses_a_bad_time() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = two_papers(tmp.path());
+        save_config_schedule(&main, None, Some("06:15"), Some(vec![Day::Mon])).unwrap();
+        // Off keeps the days, as the desktop's switch does; on again finds them.
+        let cfg = save_config_schedule(&main, None, None, None).unwrap();
+        assert_eq!(
+            (cfg.schedule.at, cfg.schedule.days.clone()),
+            (None, vec![Day::Mon])
+        );
+        assert_eq!(config_status(&main).unwrap(), Status::default());
+        assert!(save_config_schedule(&main, None, Some("25:00"), None).is_err());
+        clear_config_schedule(&main, None).unwrap();
+        let cfg = crate::papers::load_one(&main, MAIN).unwrap();
+        assert!(cfg.schedule.is_default());
+    }
+
+    #[test]
+    fn the_next_config_press_skips_to_a_scheduled_day() {
+        use chrono::TimeZone;
+        let tz = chrono_tz::Europe::London;
+        // A Thursday, before 06:00.
+        let now = tz.with_ymd_and_hms(2026, 10, 29, 5, 0, 0).unwrap();
+        let sched = |days: Vec<Day>| crate::config::ScheduleConfig {
+            at: Some("06:00".into()),
+            days,
+        };
+        let d = |s: &str| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap();
+        assert_eq!(
+            config_next_press(&sched(Vec::new()), now),
+            Some(d("2026-10-29"))
+        );
+        assert_eq!(
+            config_next_press(&sched(vec![Day::Sat]), now),
+            Some(d("2026-10-31"))
+        );
+        assert_eq!(config_next_press(&Default::default(), now), None);
+    }
 
     fn sched(config: Option<&str>) -> Schedule {
         Schedule {

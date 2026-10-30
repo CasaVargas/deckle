@@ -1011,3 +1011,21 @@ input[type=checkbox] { padding: 0; }
 .chapter-head .handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .chapter-count { white-space: nowrap; }
 .chapter-warning { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 0 10px 10px 42px; }
+
+/* The web app (web UI design): login, the server picker, and features this install can't offer. */
+.unavailable { margin: 4px 0; }
+.login-backdrop { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; background: var(--bg); }
+.login { width: min(360px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 10px; }
+.login input { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+.login .label { margin-top: 6px; }
+.picker-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgb(0 0 0 / 0.28); }
+.picker { width: min(560px, calc(100% - 32px)); max-height: min(560px, calc(100% - 48px)); display: flex; flex-direction: column; gap: 10px; }
+.picker-head { display: flex; align-items: center; justify-content: space-between; }
+.picker-where { display: flex; align-items: center; gap: 10px; }
+.picker-list { list-style: none; margin: 0; padding: 4px; flex: 1; min-height: 180px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.picker-row { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left; background: none; border: 0; border-radius: 6px; padding: 5px 8px; font-size: 13px; }
+.picker-row:hover { background: color-mix(in srgb, var(--line) 50%, transparent); }
+.picker-row.on { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.picker-empty { padding: 8px; }
+.picker-foot { display: flex; align-items: center; gap: 8px; }
+.books-whole > .tray .send-foot .unavailable { flex-basis: 100%; }

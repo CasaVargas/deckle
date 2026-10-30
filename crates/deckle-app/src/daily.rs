@@ -4,6 +4,7 @@
 //! process, so the window never blocks and the result is the CLI's JSON report.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use base64::Engine;
 use deckle_digest::Config;
@@ -13,7 +14,8 @@ use deckle_digest::reading::{Added, Entry, ReadingQueue, State};
 use deckle_digest::secret::{self, Keyring, SystemKeyring};
 use deckle_digest::zeroize::Zeroizing;
 use serde::Serialize;
-use tauri::{AppHandle, Emitter};
+
+use crate::events::Events;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct DailyState {
@@ -57,7 +59,7 @@ fn config_path() -> PathBuf {
 }
 
 /// One paper's config (`None`: the main paper).
-pub fn paper_config_at(main: &Path, paper: Option<&str>) -> Result<Config, String> {
+pub(crate) fn paper_config_at(main: &Path, paper: Option<&str>) -> Result<Config, String> {
     deckle_digest::papers::load_one(main, paper.unwrap_or(deckle_digest::papers::MAIN))
 }
 
@@ -86,7 +88,7 @@ pub fn save_paper_with_history(
     state: &Path,
     learning: &Path,
 ) -> Result<(), String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let old = paper_config_at(main, paper)?;
     config.paper = old.paper.clone();
     crate::press::guard_save(
@@ -413,9 +415,8 @@ fn subscription_for(
         .ok_or_else(|| format!("no subscription for {site}; save the site first"))
 }
 
-// ---- Tauri commands -----------------------------------------------------------------
+// ---- The commands -------------------------------------------------------------------
 
-#[tauri::command]
 pub fn daily_state(paper: Option<String>) -> DailyState {
     paper_state_at(&config_path(), paper.as_deref())
 }
@@ -464,19 +465,17 @@ pub fn masthead_missing_for(title: &str) -> Vec<String> {
         .collect()
 }
 
-#[tauri::command]
 pub fn masthead_missing(title: String) -> Vec<String> {
     masthead_missing_for(&title)
 }
 
-#[tauri::command]
 pub fn papers_list() -> Result<PapersView, String> {
     papers_at(&config_path(), &deckle_digest::schedule::status())
 }
 
 /// Writes `papers/<slug>.toml` for a new paper; returns its slug.
 pub fn create_at(main: &Path, title: &str, reader: &str) -> Result<String, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let title = title.trim();
     if title.is_empty() {
         return Err("Give the paper a name.".into());
@@ -491,15 +490,13 @@ pub fn create_at(main: &Path, title: &str, reader: &str) -> Result<String, Strin
     Ok(slug)
 }
 
-#[tauri::command]
 pub fn paper_create(title: String, reader: String) -> Result<String, String> {
     create_at(&config_path(), &title, &reader)
 }
 
 /// First run: write the starter config.
-#[tauri::command]
 pub fn daily_setup() -> Result<DailyState, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let path = config_path();
     if !path.exists() {
         if let Some(dir) = path.parent() {
@@ -510,7 +507,6 @@ pub fn daily_setup() -> Result<DailyState, String> {
     Ok(state_at(&path))
 }
 
-#[tauri::command]
 pub fn daily_save(mut config: Config, paper: Option<String>) -> Result<DailyState, String> {
     let path = config_path();
     normalize_subscriptions(&mut config)?;
@@ -552,26 +548,14 @@ pub fn day_preview_with(
     }
 }
 
-#[tauri::command]
-pub async fn daily_day_preview(
-    day: deckle_digest::config::DayConfig,
-) -> Result<DayPreview, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let tz = deckle_digest::tz::local_tz();
-        let date = Utc::now().with_timezone(&tz).date_naive();
-        day_preview_with(&day, date, tz, &deckle_digest::Http)
-    })
-    .await
-    .map_err(|e| e.to_string())
+pub fn daily_day_preview(day: deckle_digest::config::DayConfig) -> DayPreview {
+    let tz = deckle_digest::tz::local_tz();
+    let date = Utc::now().with_timezone(&tz).date_naive();
+    day_preview_with(&day, date, tz, &deckle_digest::Http)
 }
 
-#[tauri::command]
-pub async fn geocode(query: String) -> Result<Vec<PlaceRow>, String> {
-    let places = tauri::async_runtime::spawn_blocking(move || {
-        deckle_digest::geocode::search(&query, &deckle_digest::Http)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+pub fn geocode(query: String) -> Result<Vec<PlaceRow>, String> {
+    let places = deckle_digest::geocode::search(&query, &deckle_digest::Http)?;
     Ok(places
         .into_iter()
         .map(|p| PlaceRow {
@@ -582,13 +566,11 @@ pub async fn geocode(query: String) -> Result<Vec<PlaceRow>, String> {
         .collect())
 }
 
-#[tauri::command]
 pub fn reading_list() -> Vec<Entry> {
     let cfg = Config::load(&config_path()).ok();
     reading_rows(&queue_for(cfg.as_ref()), deckle_digest::chrono::Utc::now())
 }
 
-#[tauri::command]
 pub fn reading_save(url: String) -> Result<String, String> {
     let url = url.trim();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
@@ -601,13 +583,11 @@ pub fn reading_save(url: String) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
 pub fn reading_remove(id: String) -> Result<bool, String> {
     let cfg = Config::load(&config_path()).ok();
     queue_for(cfg.as_ref()).remove(&id)
 }
 
-#[tauri::command]
 pub fn bookmarklet() -> Result<String, String> {
     let cfg = Config::load(&config_path()).ok();
     let q = queue_for(cfg.as_ref());
@@ -617,7 +597,6 @@ pub fn bookmarklet() -> Result<String, String> {
 }
 
 /// **Save recipe** (cookbook design §8.3): the same listener and token as [`bookmarklet`].
-#[tauri::command]
 pub fn recipe_bookmarklet() -> Result<String, String> {
     let cfg = Config::load(&config_path()).ok();
     let q = queue_for(cfg.as_ref());
@@ -626,7 +605,6 @@ pub fn recipe_bookmarklet() -> Result<String, String> {
     Ok(deckle_digest::bookmarklet::recipe_javascript(&token))
 }
 
-#[tauri::command]
 pub fn edition_preview(paper: Option<String>) -> Option<Preview> {
     let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir())
         .pending()
@@ -643,10 +621,13 @@ pub fn edition_preview(paper: Option<String>) -> Option<Preview> {
 }
 
 /// Builds (preview) or runs (send) the edition in a child process; emits `daily-finished`
-/// with a [`RunResult`].
-#[tauri::command]
-pub fn daily_run(app: AppHandle, send: bool, paper: Option<String>) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+/// with a [`RunResult`]. `exe` is the app's own binary, which acts as the CLI.
+pub fn daily_run(
+    events: Arc<dyn Events>,
+    exe: PathBuf,
+    send: bool,
+    paper: Option<String>,
+) -> Result<(), String> {
     let preview = digest_cache().join("preview");
     std::fs::create_dir_all(&preview).map_err(|e| e.to_string())?;
     let args = run_args(send, &preview, paper.as_deref());
@@ -659,19 +640,22 @@ pub fn daily_run(app: AppHandle, send: bool, paper: Option<String>) -> Result<()
                 log: format!("couldn't start {}: {e}", exe.display()),
             },
         };
-        let _ = app.emit("daily-finished", result);
+        // Strings, a bool and the CLI's own JSON: serialising it can't fail.
+        events.emit(
+            "daily-finished",
+            serde_json::to_value(result).unwrap_or(serde_json::Value::Null),
+        );
     });
     Ok(())
 }
 
-#[tauri::command]
 pub fn schedule_get() -> deckle_digest::schedule::Status {
     deckle_digest::schedule::status()
 }
 
 /// Writes paper `paper`'s `[schedule] at` (`None` clears it), as `digest schedule` does.
 pub fn set_at_in(main: &Path, paper: Option<&str>, at: Option<&str>) -> Result<Config, String> {
-    let _lock = crate::press::config_write()?;
+    let _lock = crate::config_write()?;
     let mut cfg = paper_config_at(main, paper)?;
     if let Some(at) = at {
         deckle_digest::schedule::parse_at(at)?;
@@ -687,7 +671,6 @@ pub fn set_at_in(main: &Path, paper: Option<&str>, at: Option<&str>) -> Result<C
 /// `Some("05:30")` saves the paper's time and installs (or moves) its job with the app's own
 /// binary, on its days; `None` removes that paper's job. Other papers' jobs, and the watcher
 /// they need, stay.
-#[tauri::command]
 pub fn schedule_set(
     at: Option<String>,
     paper: Option<String>,
@@ -716,14 +699,12 @@ pub fn schedule_set(
     Ok(schedule::status())
 }
 
-#[tauri::command]
 pub fn email_status(paper: Option<String>) -> EmailStatus {
     let cfg = email_config(paper.as_deref()).unwrap_or_default();
     email_status_with(&cfg, &SystemKeyring, &env_var)
 }
 
 /// Writes the keychain for the saved `[email]` account. Nothing reads it back to the window.
-#[tauri::command]
 pub fn email_set_password(password: String) -> Result<EmailStatus, String> {
     // The account is the household's: the main paper's.
     let cfg = email_config(None)?;
@@ -732,30 +713,24 @@ pub fn email_set_password(password: String) -> Result<EmailStatus, String> {
 }
 
 /// `deckle digest email test` from the card: a one-page EPUB to the Kindle address.
-#[tauri::command]
-pub async fn email_test(paper: Option<String>) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let cfg = email_config(paper.as_deref())?;
-        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-        deckle_digest::mail::send_test(
-            &cfg,
-            dir.path(),
-            deckle_digest::chrono::Local::now().date_naive(),
-            &SystemKeyring,
-            &env_var,
-            |pw| deckle_digest::mail::SmtpMailer::new(&cfg, pw),
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(format!(
-            "Test sent to {}. It should reach your Kindle within a few minutes.",
-            cfg.to.trim()
-        ))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn email_test(paper: Option<String>) -> Result<String, String> {
+    let cfg = email_config(paper.as_deref())?;
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    deckle_digest::mail::send_test(
+        &cfg,
+        dir.path(),
+        deckle_digest::chrono::Local::now().date_naive(),
+        &SystemKeyring,
+        &env_var,
+        |pw| deckle_digest::mail::SmtpMailer::new(&cfg, pw),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(format!(
+        "Test sent to {}. It should reach your Kindle within a few minutes.",
+        cfg.to.trim()
+    ))
 }
 
-#[tauri::command]
 pub fn subscriptions_status() -> Result<Vec<deckle_digest::session::SiteStatus>, String> {
     let path = config_path();
     let cfg = Config::load(&path)?;
@@ -768,7 +743,6 @@ pub fn subscriptions_status() -> Result<Vec<deckle_digest::session::SiteStatus>,
 }
 
 /// Writes the keychain for a saved subscription. Nothing reads it back to the window.
-#[tauri::command]
 pub fn subscription_set_password(
     site: String,
     password: String,
@@ -787,32 +761,20 @@ pub fn subscription_set_password(
 }
 
 /// Signs in to the site now and keeps the session.
-#[tauri::command]
-pub async fn subscription_test(
-    site: String,
-) -> Result<deckle_digest::session::SessionState, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let path = config_path();
-        let cfg = Config::load(&path)?;
-        let sub = subscription_for(&cfg, &site)?;
-        let net = deckle_digest::SessionNet::from_config(
-            &path,
-            &cfg.subscriptions,
-            &SystemKeyring,
-            &env_var,
-        );
-        let state = net.sign_in(&sub.site);
-        for note in net.save_jars() {
-            eprintln!("{note}");
-        }
-        Ok(state)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn subscription_test(site: String) -> Result<deckle_digest::session::SessionState, String> {
+    let path = config_path();
+    let cfg = Config::load(&path)?;
+    let sub = subscription_for(&cfg, &site)?;
+    let net =
+        deckle_digest::SessionNet::from_config(&path, &cfg.subscriptions, &SystemKeyring, &env_var);
+    let state = net.sign_in(&sub.site);
+    for note in net.save_jars() {
+        eprintln!("{note}");
+    }
+    Ok(state)
 }
 
 /// Removes the keychain entry, the config entry and the saved session.
-#[tauri::command]
 pub fn subscription_forget(
     site: String,
 ) -> Result<Vec<deckle_digest::session::SiteStatus>, String> {
@@ -843,6 +805,30 @@ mod tests {
     }
 
     use super::*;
+
+    /// A paper save can't switch on Fresh-paper requests; only setup can (press design).
+    #[test]
+    fn press_setup_raw_autosave_cannot_activate() {
+        use deckle_digest::config::{ExportConfig, ExportFormat};
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("digest.toml");
+        let folder = dir.path().join("shared");
+        std::fs::create_dir(&folder).unwrap();
+        let cfg = Config {
+            export: vec![ExportConfig {
+                name: "Paper".into(),
+                dir: folder.display().to_string(),
+                format: ExportFormat::Bundle,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        deckle_digest::config::save(&main, &cfg).unwrap();
+        let mut next = Config::load(&main).unwrap();
+        next.export[0].press_enabled = true;
+        assert!(save_paper_at(&main, None, next).is_err());
+        assert!(!Config::load(&main).unwrap().export[0].press_enabled);
+    }
 
     #[test]
     fn session_states_serialize_to_the_shapes_the_window_reads() {
@@ -1144,6 +1130,60 @@ mod tests {
         assert_eq!(r.report.unwrap()["title"], "T");
         assert_eq!(r.log, "inbox: saved 1\nlast");
         assert!(parse_run(false, b"oops", b"").report.is_none());
+    }
+
+    /// What `daily_run` emitted; `done` fires on `daily-finished`.
+    #[cfg(unix)]
+    struct Recorded {
+        events: std::sync::Mutex<Vec<(String, serde_json::Value)>>,
+        done: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    }
+
+    #[cfg(unix)]
+    impl Events for Recorded {
+        fn emit(&self, event: &str, payload: serde_json::Value) {
+            self.events
+                .lock()
+                .unwrap()
+                .push((event.to_owned(), payload));
+            if event == "daily-finished"
+                && let Some(tx) = self.done.lock().unwrap().take()
+            {
+                tx.send(()).unwrap();
+            }
+        }
+    }
+
+    // Unix only: the stand-in CLI is a shell script. On Windows it would be a `.cmd`, and
+    // Rust refuses to pass some arguments to a batch file, so the test would be about that.
+    #[cfg(unix)]
+    #[test]
+    fn daily_run_emits_daily_finished() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("deckle");
+        // What `digest build --json` prints, as far as `parse_run` reads it.
+        std::fs::write(
+            &exe,
+            "#!/bin/sh\nprintf '%s\\n' '{\"title\":\"The Morning Deckle\"}'\necho 'inbox: saved 1' >&2\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let rec = Arc::new(Recorded {
+            events: Default::default(),
+            done: std::sync::Mutex::new(Some(tx)),
+        });
+        daily_run(rec.clone(), exe, false, None).unwrap();
+        rx.recv_timeout(std::time::Duration::from_secs(30))
+            .expect("daily-finished");
+        let events = rec.events.lock().unwrap();
+        assert_eq!(events.len(), 1, "{events:?}");
+        let (name, result) = &events[0];
+        assert_eq!(name, "daily-finished");
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["report"]["title"], "The Morning Deckle");
+        assert_eq!(result["log"], "inbox: saved 1");
     }
 
     #[test]

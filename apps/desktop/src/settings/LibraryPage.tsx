@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useCapabilities } from "../capabilities";
 import { api } from "../api";
 import type { LibraryStatus } from "../types";
 import Originals from "./Originals";
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function LibraryPage({ library, onLibrary, onPickLibrary }: Props) {
+  const caps = useCapabilities();
   return (
     <div className="set-stack">
       <section className="set-card set-pad" aria-label="Library">
@@ -29,7 +31,7 @@ export default function LibraryPage({ library, onLibrary, onPickLibrary }: Props
         <button className="ghost" onClick={onPickLibrary}>
           {library?.root ? "Change…" : "Choose folder…"}
         </button>
-        {library?.root && (
+        {library?.root && caps.reveal && (
           <button className="ghost" onClick={() => api.reveal(library.root!)}>
             Show
           </button>

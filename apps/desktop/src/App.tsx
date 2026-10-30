@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { api, coverRequest } from "./api";
 import { deviceLabel } from "./deviceLabel";
 import { size } from "./kindleRooms";
@@ -23,6 +22,11 @@ import type { Room } from "./dailyRooms";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
+import { refreshCapabilities, useCapabilities } from "./capabilities";
+import { onSessionLost, restartEvents } from "./transport/web";
+import Login from "./web/Login";
+import Unavailable from "./web/Unavailable";
+import { NO_DEVICE_REASON, PREVIEWER_REASON } from "./web/gates";
 import type { BookRow, BookState, CatalogView, CoverChoice, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
@@ -52,7 +56,44 @@ function toState(row: BookRow): BookState {
   return { ...row, status: "idle", stage: null, delivered: null, pages: null, runWarnings: [], runError: null, shipped: null, xray: null, wordWise: null, cdeOverride: null, asin: null, showReport: false, replaced: [], exported: false, upgradeOf: null, coverPick: null };
 }
 
+/** The web app asks for its password first, and again when the session ends (a 401). */
 export default function App() {
+  // The build-time constant, not platform.kind, so the desktop bundle drops WebApp and Login.
+  if (import.meta.env.VITE_DECKLE_TARGET !== "web") return <Deckle />;
+  return <WebApp />;
+}
+
+function WebApp() {
+  /** null: not asked yet. `in` stays true once in, so the app below keeps its state behind Login. */
+  const [ok, setOk] = useState<boolean | null>(null);
+  const [wasIn, setWasIn] = useState(false);
+  useEffect(() => {
+    fetch("/api/session", { credentials: "same-origin" })
+      .then((r) => r.json())
+      .then((s: { ok: boolean }) => {
+        setOk(s.ok);
+        if (s.ok) setWasIn(true);
+      })
+      .catch(() => setOk(false));
+    return onSessionLost(() => setOk(false));
+  }, []);
+  const loggedIn = () => {
+    setOk(true);
+    setWasIn(true);
+    restartEvents();
+    refreshCapabilities();
+  };
+  if (ok === null) return null;
+  return (
+    <>
+      {wasIn && <Deckle />}
+      {!ok && <Login onIn={loggedIn} />}
+    </>
+  );
+}
+
+function Deckle() {
+  const caps = useCapabilities();
   const [version, setVersion] = useState("");
   const [books, setBooks] = useState<BookState[]>([]);
   const [devices, setDevices] = useState<DeviceRow[]>([]);
@@ -220,24 +261,24 @@ export default function App() {
         if (dir) setAutoExport(dir);
       })
       .catch(() => {});
-    const timer = setInterval(refreshDevices, 4000);
-    const unlistenDrop = getCurrentWebview().onDragDropEvent((ev) => {
-      if (ev.payload.type === "enter" || ev.payload.type === "over") setDragging(true);
-      else if (ev.payload.type === "leave") setDragging(false);
-      else if (ev.payload.type === "drop") {
-        setDragging(false);
+    // A failed look (the web app's session ended) waits for the next one.
+    const timer = setInterval(() => refreshDevices().catch(() => {}), 4000);
+    const unlistenDrop = platform.onFileDrop({
+      over: setDragging,
+      failed: setNotice,
+      drop: (paths) => {
         // On the Cookbook tab, link files and saved pages are recipes for Add; nothing else belongs
         // there, and never the Books library (not even while Settings covers the tab).
         if (tabRef.current === "cookbook") {
           if (cookbookPasteReady.current) {
-            const files = ev.payload.paths.filter((p) => ARTICLE_FILE.test(p));
+            const files = paths.filter((p) => ARTICLE_FILE.test(p));
             if (files.length > 0) setIncoming((c) => ({ seq: (c?.seq ?? 0) + 1, targets: files }));
             else setNotice("Drop .webloc, .url or .html files to add recipes.");
           }
           return;
         }
-        addPaths(ev.payload.paths);
-      }
+        addPaths(paths);
+      },
     });
     const unlistenProgress = api.onProgress((e) => {
       setBooks((prev) =>
@@ -330,13 +371,13 @@ export default function App() {
   };
 
   const pickBooks = async () => {
-    const picked = await openDialog({ multiple: true, directory: false, filters: [{ name: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "odt", "ott", "fodt", "rtf", "mobi", "azw", "azw3", "prc", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] }] });
-    if (picked) addPaths(Array.isArray(picked) ? picked : [picked]);
+    const picked = await platform.pickFiles({ multiple: true, filterName: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "odt", "ott", "fodt", "rtf", "mobi", "azw", "azw3", "prc", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] });
+    if (picked) addPaths(picked);
   };
 
   const pickNotes = async () => {
-    const picked = await openDialog({ directory: true, multiple: false, title: "Choose a folder of Markdown notes" });
-    if (typeof picked === "string") addPaths([picked]);
+    const picked = await platform.pickFolder({ title: "Choose a folder of Markdown notes" });
+    if (picked !== null) addPaths([picked]);
   };
 
   const setLibraryOptions = async (root: string | null, autoAdd: boolean) => {
@@ -348,8 +389,8 @@ export default function App() {
   };
 
   const pickLibrary = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
-    if (typeof dir === "string") setLibraryOptions(dir, library?.auto_add ?? true);
+    const dir = await platform.pickFolder({});
+    if (dir !== null) setLibraryOptions(dir, library?.auto_add ?? true);
   };
 
   // Re-send, Upgrade and Update from the Kindle tab: the library copies go on the Books tab
@@ -372,8 +413,8 @@ export default function App() {
   };
 
   const pickPreviewer = async () => {
-    const picked = await openDialog({ multiple: false, directory: false });
-    if (typeof picked === "string") saveSettings({ ...settings, previewer_path: picked });
+    const picked = (await platform.pickFiles({}))?.[0];
+    if (picked !== undefined) saveSettings({ ...settings, previewer_path: picked });
   };
 
   const runnable = books.filter((b) => b.mode !== "error");
@@ -408,6 +449,11 @@ export default function App() {
     if (runnable.length === 0 || busy) return;
     // A finished KFX is copied as is; only EPUBs need Kindle Previewer.
     if (!previewer?.found && runnable.some((b) => b.mode !== "ready")) {
+      // No Previewer to download on the server: say why, nothing to open.
+      if (caps.web) {
+        setNotice(PREVIEWER_REASON);
+        return;
+      }
       setNotice("Kindle Previewer is not installed. Open Settings to download it or point Deckle at it.");
       openSettings("sending");
       return;
@@ -434,8 +480,8 @@ export default function App() {
   };
 
   const exportToFolder = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
-    if (typeof dir === "string") start({ kind: "folder", path: dir });
+    const dir = await platform.pickFolder({});
+    if (dir !== null) start({ kind: "folder", path: dir });
   };
 
   // `--export-to DIR` on the command line: run as soon as the books and Previewer status are in.
@@ -476,7 +522,7 @@ export default function App() {
     <div className="device">
       <span className={`dot ${device ? "on" : ""}`} aria-hidden="true" />
       {devices.length === 0 ? (
-        "No Kindle connected"
+        caps.web ? NO_DEVICE_REASON : "No Kindle connected"
       ) : devices.length === 1 ? (
         <span title={device?.root ?? undefined}>{device && deviceLabel(device)}</span>
       ) : (
@@ -547,7 +593,7 @@ export default function App() {
               Kindle
             </button>
           </div>
-          {!previewer?.found && previewer && (
+          {!previewer?.found && previewer && !caps.web && (
             <button className="pill warn" onClick={() => openSettings("sending")}>
               Kindle Previewer not found
             </button>
@@ -691,7 +737,7 @@ export default function App() {
                   onOverride={override}
                   onToggleReport={toggleReport}
                   onRemove={remove}
-                  onReveal={(p) => api.reveal(p)}
+                  onReveal={caps.reveal ? (p) => api.reveal(p) : undefined}
                   onOpen={(_, tab) => setDrawer({ path: b.path, tab })}
                 />
               ))}
@@ -699,6 +745,7 @@ export default function App() {
           )}
           </div>
           <div className="send-foot">
+            {caps.web && previewer && !previewer.found && <Unavailable reason={PREVIEWER_REASON} />}
             {deviceControl}
             <button className="primary send" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
               {busy ? "Working…" : runnable.length === 0 ? "Send to Kindle" : `Send ${runnable.length === 1 ? "1 book" : `${runnable.length} books`} to Kindle`}

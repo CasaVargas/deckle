@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "../platform";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import type { HighlightsStatus, ReadershipView, ShelfStatus } from "../types";
@@ -21,7 +21,7 @@ function HighlightsSettings() {
       })
       .catch((e) => setError(String(e)));
   const choose = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
+    const dir = await platform.pickFolder({});
     if (typeof dir === "string") await set(dir, status?.clippings ?? false);
   };
   return (

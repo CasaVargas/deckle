@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useCapabilities } from "../capabilities";
+import Unavailable from "../web/Unavailable";
+import { PREVIEWER_REASON } from "../web/gates";
 import type { DeviceRow, PreviewerStatus, Settings } from "../types";
 import { Link } from "./Row";
 
@@ -21,6 +24,7 @@ const WORD: Record<"pdoc" | "ebok", string> = { pdoc: "Document", ebok: "Kindle 
 
 /** Sending (Settings redesign §5): how books show up, as a choice you can see, and the tool that builds them. */
 export default function Sending({ settings, set, previewer, onPickPreviewer, devices, onKindles }: Props) {
+  const caps = useCapabilities();
   const own = devices.filter((d) => d.cde_override);
   return (
     <div className="set-stack">
@@ -68,7 +72,7 @@ export default function Sending({ settings, set, previewer, onPickPreviewer, dev
         </div>
         <p className="muted">
           Amazon's free tool that turns a book into the Kindle's own format.{" "}
-          {previewer?.found ? (
+          {caps.web ? null : previewer?.found ? (
             "Deckle finds it by itself; choose it only if it lives somewhere unusual."
           ) : (
             <>
@@ -76,12 +80,16 @@ export default function Sending({ settings, set, previewer, onPickPreviewer, dev
             </>
           )}
         </p>
-        <div className="set-wide">
-          <input type="text" value={settings.previewer_path ?? ""} placeholder={previewer?.path ?? "Found automatically"} onChange={(e) => set("previewer_path", e.target.value || null)} aria-label="Kindle Previewer location" />
-          <button className="ghost" onClick={onPickPreviewer}>
-            Choose…
-          </button>
-        </div>
+        {caps.web && !previewer?.found && <Unavailable reason={PREVIEWER_REASON} />}
+        {/* The server finds its own Previewer: there's nothing to point it at from a browser. */}
+        {!caps.web && (
+          <div className="set-wide">
+            <input type="text" value={settings.previewer_path ?? ""} placeholder={previewer?.path ?? "Found automatically"} onChange={(e) => set("previewer_path", e.target.value || null)} aria-label="Kindle Previewer location" />
+            <button className="ghost" onClick={onPickPreviewer}>
+              Choose…
+            </button>
+          </div>
+        )}
       </section>
     </div>
   );

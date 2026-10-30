@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useCapabilities } from "./capabilities";
+import Unavailable from "./web/Unavailable";
+import { REVEAL_REASON } from "./web/gates";
+import { platform } from "./platform";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { monthGrid, sizeLine } from "./morgueView";
@@ -10,6 +13,7 @@ const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "Ju
 
 /** Every edition kept: a month of front pages, search, and sending one to the Kindle again (Morgue design §6). */
 export default function EveryEdition({ onFolder, disabled, building }: { onFolder: (folder: string) => Promise<void> | void; disabled?: boolean; building?: boolean }) {
+  const caps = useCapabilities();
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth() + 1);
@@ -105,7 +109,7 @@ export default function EveryEdition({ onFolder, disabled, building }: { onFolde
     }
   };
   const changeFolder = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
+    const dir = await platform.pickFolder({});
     if (typeof dir === "string") {
       const before = view;
       await onFolder(dir);
@@ -202,13 +206,23 @@ export default function EveryEdition({ onFolder, disabled, building }: { onFolde
             <button className="primary" disabled={busy} onClick={sendAgain}>
               Send again
             </button>
-            <button className="ghost" onClick={() => api.morgueOpen(selected).catch((e) => setError(String(e)))}>
-              Open
-            </button>
-            <button className="ghost" onClick={() => api.reveal(detail.epub).catch((e) => setError(String(e)))}>
-              Show in Finder
-            </button>
+            {caps.reveal && (
+              <>
+                <button className="ghost" onClick={() => api.morgueOpen(selected).catch((e) => setError(String(e)))}>
+                  Open
+                </button>
+                <button className="ghost" onClick={() => api.reveal(detail.epub).catch((e) => setError(String(e)))}>
+                  Show in Finder
+                </button>
+              </>
+            )}
+            {caps.web && (
+              <button className="ghost" onClick={() => platform.afterSave(detail.epub)}>
+                Download
+              </button>
+            )}
           </div>
+          {!caps.reveal && <Unavailable reason={REVEAL_REASON} />}
           {note && <p className="muted small">{note}</p>}
         </div>
       )}

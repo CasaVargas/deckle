@@ -2,6 +2,8 @@
 // The Cookbook tab's Add room (cookbook design §8.2): a link box and Fetch that show a recipe as a
 // preview card (nothing is written until Add to the book), beside the book card with its cover,
 // its delivery line, and Send now and Preview.
+import { useCapabilities } from "./capabilities";
+import { platform } from "./platform";
 import { useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { api } from "./api";
@@ -330,6 +332,7 @@ export default function CookbookAdd({
 
 /** The book as it stands: its cover, its counts, where it goes, and Send now and Preview. */
 function BookCard({ book, delivery, onChanged, onNotice, onDelivery }: { book: CookbookBook | null; delivery: CookbookDelivery | null; onChanged: () => void; onNotice: (m: string) => void; onDelivery: () => void }) {
+  const caps = useCapabilities();
   const [running, setRunning] = useState<null | "send" | "preview">(null);
   const [result, setResult] = useState<{ text: string; file?: string } | null>(null);
 
@@ -379,11 +382,19 @@ function BookCard({ book, delivery, onChanged, onNotice, onDelivery }: { book: C
       {result && (
         <div className="run-result ok" role="status">
           {result.text}
-          {result.file && (
+          {result.file && caps.reveal && (
             <>
               {" "}
               <button className="link" onClick={() => api.reveal(result.file ?? "")}>
                 Show file
+              </button>
+            </>
+          )}
+          {result.file && caps.web && (
+            <>
+              {" "}
+              <button className="link" onClick={() => platform.afterSave(result.file ?? "")}>
+                Download
               </button>
             </>
           )}

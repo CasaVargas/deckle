@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "../platform";
 import { api } from "../api";
 import Icon from "../Icon";
 import type { SourcesStatus } from "../types";
@@ -26,11 +26,11 @@ export default function Originals() {
   };
   if (!status) return error ? <p className="warn small">{error}</p> : null;
   const pickCalibre = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
+    const dir = await platform.pickFolder({});
     if (typeof dir === "string") save(true, dir, status.folders);
   };
   const addFolder = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
+    const dir = await platform.pickFolder({});
     if (typeof dir === "string" && !status.folders.includes(dir)) save(status.find_in_calibre, status.calibre, [...status.folders, dir]);
   };
   const setWatch = async (dir: string | null) => {
@@ -43,7 +43,7 @@ export default function Originals() {
     }
   };
   const watchFolder = async () => {
-    const dir = await openDialog({ directory: true, multiple: false });
+    const dir = await platform.pickFolder({});
     if (typeof dir === "string") setWatch(dir);
   };
   return (

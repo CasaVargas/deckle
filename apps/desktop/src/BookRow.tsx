@@ -19,7 +19,8 @@ interface Props {
   onOverride: (id: string, cde: "pdoc" | "ebok" | null) => void;
   onToggleReport: (id: string) => void;
   onRemove: (id: string) => void;
-  onReveal: (path: string) => void;
+  /** Missing where files can't be shown (the web app). */
+  onReveal?: (path: string) => void;
   /** Opens the book's drawer (Books tab redesign §5) on a tab. */
   onOpen?: (id: string, tab: DrawerTab) => void;
 }
@@ -60,7 +61,7 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
   } else if (book.status === "done") {
     status = (
       <Line chips={doneChips(book)}>
-        {book.delivered && (
+        {book.delivered && onReveal && (
           <button className="link" onClick={() => onReveal(book.delivered!)}>
             Show file
           </button>

@@ -1,0 +1,35 @@
+[package]
+name = "deckle-server"
+description = "Deckle's web UI server: the app's commands over HTTP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The container's binary: `serve`, else the `deckle` command line.
+[[bin]]
+name = "deckle-web"
+path = "src/main.rs"
+
+[dependencies]
+axum.workspace = true
+clap.workspace = true
+deckle-app.workspace = true
+deckle-cli.workspace = true
+deckle-core.workspace = true
+futures-util.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+subtle.workspace = true
+# `serve` with the daemon off stops on its own SIGTERM/Ctrl-C.
+tokio = { workspace = true, features = ["signal"] }
+tower-http.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+deckle-digest.workspace = true
+http-body-util.workspace = true
+tempfile.workspace = true
+tower.workspace = true

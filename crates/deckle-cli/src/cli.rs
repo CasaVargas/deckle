@@ -616,7 +616,7 @@ pub enum DigestCommand {
     /// Task Scheduler or cron).
     Daemon {
         /// Seconds between checks.
-        #[arg(long, default_value_t = 30)]
+        #[arg(long, default_value_t = crate::DAEMON_TICK)]
         tick: u64,
     },
     /// Email the paper to your Kindle (`[email]` in digest.toml): the SMTP password and a test.

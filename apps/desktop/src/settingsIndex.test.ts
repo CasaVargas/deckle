@@ -46,6 +46,13 @@ describe("Overview", () => {
     expect(setupHeading(setupChecks(all))).toBe("Everything Deckle needs is set up.");
   });
 
+  it("on the web, a missing Previewer is the reason, not a to-do", () => {
+    const missing = { found: false, path: null, version: null, download_url: "" };
+    const checks = setupChecks({ previewer: missing, library: null, sources: null, highlights: undefined, devices: [], web: true });
+    expect(checks[0]).toEqual({ key: "previewer", title: "Kindle Previewer", state: "Kindle book conversion needs Kindle Previewer, which doesn't run on Linux.", mark: "optional", page: "sending" });
+    expect(setupHeading(checks)).toBe("Everything Deckle needs is set up.");
+  });
+
   it("says what's missing, and only the Previewer is a must", () => {
     const checks = setupChecks({ previewer: { found: false, path: null, version: null, download_url: "" }, library: { root: null, auto_add: false, books: 0 }, sources: { find_in_calibre: false, calibre: null, folders: [] }, highlights: null, devices: [] });
     expect(checks.map((c) => [c.key, c.mark, c.fix ?? ""])).toEqual([

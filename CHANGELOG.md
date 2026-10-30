@@ -8,6 +8,14 @@
   keychain. There's a Compose file, an Unraid template, and Linux command-line tarballs (x86_64
   and aarch64) with each release. Kindle book conversion still needs Mac or Windows. See
   [docs/docker.md](docs/docker.md).
+- **The app in your browser.** The container now serves the Deckle app on port 8080: the Daily,
+  the Cookbook and your library, from any browser on your network. Set `DECKLE_WEB_PASSWORD` to
+  turn it on; there's one password and no accounts. Files you pick come from the server's
+  folders, and uploads and saved files go under `/data/Deckle`. Features that need a Mac or PC
+  (Kindle book conversion, a plugged-in Kindle, the keychain, Show in folder, in-app updates)
+  stay visible and say why they're off. A container set up without the web UI keeps working
+  with no changes: with no password, the web UI stays off and the papers still print. See
+  [The web app](docs/docker.md#the-web-app).
 
 ## 0.9.0 — no more black windows on Windows
 

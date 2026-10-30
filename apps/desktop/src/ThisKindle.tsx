@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { connectedBy, defaultSpare, freesLine, size, spaceSlices, spareGroups, spareLine } from "./kindleRooms";
@@ -89,7 +89,7 @@ export default function ThisKindle({ target, device, shelf, busy, onChanged, onN
   };
 
   const chooseAndBackUp = async () => {
-    const dir = await openDialog({ directory: true, title: "Back up this Kindle's books into…" });
+    const dir = await platform.pickFolder({ title: "Back up this Kindle's books into…" });
     if (typeof dir === "string") await backUp(dir);
   };
 
@@ -110,7 +110,7 @@ export default function ThisKindle({ target, device, shelf, busy, onChanged, onN
   };
 
   const chooseAndRestore = async () => {
-    const dir = await openDialog({ directory: true, title: "Restore a Deckle backup from…" });
+    const dir = await platform.pickFolder({ title: "Restore a Deckle backup from…" });
     if (typeof dir === "string") await restore(dir);
   };
 

@@ -3,19 +3,22 @@
 # Smoke test for the Deckle image (Linux Docker design, "The image"): an empty /config gets a
 # starter config owned by PUID:PGID, a root `docker exec deckle` runs as PUID:PGID, a
 # horoscope-only paper due at 05:30 prints today's EPUB to /data/out on one daemon tick, owned
-# by PUID:PGID, and passwords come from the environment, never a keychain.
-# Offline apart from the image itself.
+# by PUID:PGID, passwords come from the environment, never a keychain, and the web UI on 8080
+# logs in with DECKLE_WEB_PASSWORD and answers the app's commands (without the password it
+# stays off and the daemon still prints). Offline apart from the image itself; needs curl.
 #
 #   tools/docker-smoke.sh deckle:ci
 set -euo pipefail
 
 image="${1:?usage: tools/docker-smoke.sh IMAGE}"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+version="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^version *= *"\(.*\)"/\1/p;}' "$root/Cargo.toml")"
 tmp="$(mktemp -d)"
 name="deckle-smoke-$$"
 mkdir "$tmp/config" "$tmp/data"
 
 cleanup() {
-    docker rm -f "$name" "$name-live" >/dev/null 2>&1 || true
+    docker rm -f "$name" "$name-live" "$name-web" >/dev/null 2>&1 || true
     # The container's user owns what it wrote; remove it from inside, as root.
     docker run --rm --entrypoint rm -v "$tmp:/t" "$image" -rf /t/config /t/data >/dev/null 2>&1 || true
     rm -rf "$tmp"
@@ -27,6 +30,7 @@ fail() {
     echo "--- container log ---" >&2
     docker logs "$name" >&2 2>&1 || true
     docker logs "$name-live" >&2 2>&1 || true
+    docker logs "$name-web" >&2 2>&1 || true
     exit 1
 }
 
@@ -97,13 +101,59 @@ owner="$(stat -c %u:%g "$extra")"
 [ "$owner" = "99:100" ] || fail "root docker exec's EPUB owned by $owner, want 99:100"
 echo "docker-smoke: root docker exec ran as 99:100"
 
-# 2b. The daemon's tick still prints, its EPUB owned by PUID:PGID.
+# 2b. The daemon's tick still prints, its EPUB owned by PUID:PGID. No DECKLE_WEB_PASSWORD (a
+# Phase 1 install): the web UI stays off and says why, and the daemon runs anyway.
 tick -e "DECKLE_DAEMON_FAKE_NOW=${today}T06:00:00+00:00"
 epub="$tmp/data/out/deckle-daily-$today.epub"
 [ -s "$epub" ] || fail "no $epub"
 owner="$(stat -c %u:%g "$epub")"
 [ "$owner" = "99:100" ] || fail "$(basename "$epub") owned by $owner, want 99:100"
-echo "docker-smoke: printed $(basename "$epub"), owned by $owner"
+grep -q "web UI off" <<<"$(docker logs "$name" 2>&1)" || fail "no 'web UI off' log line"
+echo "docker-smoke: printed $(basename "$epub"), owned by $owner, web UI off"
+
+# 2c. The web UI, on a free host port: the page, the login, and the app's commands.
+docker run -d --name "$name-web" -e TZ=UTC -e DECKLE_WEB_PASSWORD=smoke-password-1 \
+    -p 127.0.0.1::8080 -v "$tmp/config:/config" -v "$tmp/data:/data" "$image" >/dev/null \
+    || fail "the web container didn't start"
+for _ in $(seq 30); do
+    docker logs "$name-web" 2>&1 | grep -q "web UI on" && break
+    sleep 1
+done
+grep -q "web UI on http://0.0.0.0:8080" <<<"$(docker logs "$name-web" 2>&1)" \
+    || fail "no 'web UI on http://0.0.0.0:8080' log line"
+addr="$(docker port "$name-web" 8080/tcp | head -1)"
+base="http://$addr"
+jar="$tmp/cookies"
+# The status code; the body goes to $tmp/body.
+http() { curl -sS -o "$tmp/body" -w '%{http_code}' "$@" || echo 000; }
+body() { cat "$tmp/body"; }
+expect() { # STATUS WHAT CURL-ARGS…
+    local want="$1" what="$2"; shift 2
+    local got; got="$(http "$@")"
+    [ "$got" = "$want" ] || fail "$what: HTTP $got, want $want: $(body)"
+}
+expect 200 "GET /" "$base/"
+grep -q '<div id="root"></div>' "$tmp/body" || fail "GET / isn't the app's page: $(body)"
+json=(-H 'Content-Type: application/json')
+expect 401 "login, wrong password" -c "$jar" -b "$jar" -X POST -H 'X-Deckle: 1' "${json[@]}" \
+    -d '{"password":"wrong"}' "$base/api/login"
+expect 200 "login" -c "$jar" -b "$jar" -X POST -H 'X-Deckle: 1' "${json[@]}" \
+    -d '{"password":"smoke-password-1"}' "$base/api/login"
+expect 200 "GET /api/session" -b "$jar" "$base/api/session"
+grep -Eq '"ok": ?true' "$tmp/body" || fail "session not logged in: $(body)"
+expect 200 "invoke app_version" -b "$jar" -X POST -H 'X-Deckle: 1' "${json[@]}" -d '{}' \
+    "$base/api/invoke/app_version"
+[ "$(body)" = "\"$version\"" ] || fail "app_version is $(body), want \"$version\""
+expect 200 "invoke daily_state" -b "$jar" -X POST -H 'X-Deckle: 1' "${json[@]}" -d '{}' \
+    "$base/api/invoke/daily_state"
+expect 401 "invoke without the cookie" -X POST -H 'X-Deckle: 1' "${json[@]}" -d '{}' \
+    "$base/api/invoke/app_version"
+expect 403 "invoke without X-Deckle" -b "$jar" -X POST "${json[@]}" -d '{}' \
+    "$base/api/invoke/app_version"
+grep -q "failed login from" <<<"$(docker logs "$name-web" 2>&1)" \
+    || fail "the failed login wasn't logged"
+docker rm -f "$name-web" >/dev/null
+echo "docker-smoke: web UI on 8080: page, login, app_version $version, daily_state"
 
 # 3. Passwords come only from the environment, whatever keychain libdbus might find.
 docker run --rm -i --entrypoint sh -v "$tmp/config:/config" "$image" \

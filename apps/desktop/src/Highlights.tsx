@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { platform } from "./platform";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { writtenSummary } from "./highlightSummary";
@@ -30,7 +30,7 @@ export default function Highlights({ target, rows, error, busy, onWritten }: Pro
   const files = pending.length;
 
   const chooseFolder = async (): Promise<boolean> => {
-    const dir = await openDialog({ directory: true, multiple: false });
+    const dir = await platform.pickFolder({});
     if (typeof dir !== "string") return false;
     setStatus(await api.highlightsSet(dir, status?.clippings ?? false));
     return true;

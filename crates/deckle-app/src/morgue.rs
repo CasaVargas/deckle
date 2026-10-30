@@ -2,6 +2,8 @@
 //! Every edition on the Daily tab (Morgue design §6): a month of front pages, search, one day's
 //! detail, and sending an edition again. Pure logic is in plain functions for the tests.
 
+use std::path::Path;
+
 use deckle_digest::chrono::{Days, Local, NaiveDate, NaiveTime};
 use deckle_morgue::detail::{Detail, detail};
 use deckle_morgue::search::{DaySummary, Hit, month, search};
@@ -84,62 +86,43 @@ fn date_of(s: &str) -> Result<NaiveDate, String> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| format!("expected YYYY-MM-DD, got {s:?}"))
 }
 
-// ---- Tauri commands -----------------------------------------------------------------
+// ---- Commands -----------------------------------------------------------------------
 
-// The file reads below run off the main thread: a search folds every kept edition, and the
-// folder may sit on iCloud.
+// Callers run the file reads below off the main thread: a search folds every kept edition, and
+// the folder may sit on iCloud.
 
-#[tauri::command]
-pub async fn morgue_month(year: i32, month: u32) -> Result<MonthView, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let now = Local::now();
-        let next = deckle_digest::schedule::status()
-            .at
-            .and_then(|at| next_build(&at, now.date_naive(), now.time()));
-        Ok::<_, String>(month_view(&morgue()?, year, month, next))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub fn morgue_month(year: i32, month: u32) -> Result<MonthView, String> {
+    let now = Local::now();
+    let next = deckle_digest::schedule::status()
+        .at
+        .and_then(|at| next_build(&at, now.date_naive(), now.time()));
+    Ok(month_view(&morgue()?, year, month, next))
 }
 
-#[tauri::command]
-pub async fn morgue_search(query: String) -> Result<Vec<Hit>, String> {
-    tauri::async_runtime::spawn_blocking(move || Ok::<_, String>(search(&morgue()?, &query)))
-        .await
-        .map_err(|e| e.to_string())?
+pub fn morgue_search(query: String) -> Result<Vec<Hit>, String> {
+    Ok(search(&morgue()?, &query))
 }
 
-#[tauri::command]
-pub async fn morgue_show(date: String) -> Result<Option<Detail>, String> {
+pub fn morgue_show(date: String) -> Result<Option<Detail>, String> {
     let date = date_of(&date)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let reads = deckle_readership::State::load(&deckle_readership::state_path());
-        let state = MorgueState::load(&deckle_morgue::state::state_path());
-        Ok::<_, String>(detail(&morgue()?, date, &reads, &state))
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let reads = deckle_readership::State::load(&deckle_readership::state_path());
+    let state = MorgueState::load(&deckle_morgue::state::state_path());
+    Ok(detail(&morgue()?, date, &reads, &state))
 }
 
 /// Queues the edition for the Kindle again, through the bundled CLI (as `daily_run` does), so
 /// the Previewer fallback lives in one place.
-#[tauri::command]
-pub async fn morgue_send(date: String) -> Result<String, String> {
+/// `exe` is the app's own binary.
+pub fn morgue_send(date: String, exe: &Path) -> Result<String, String> {
     date_of(&date)?;
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let out = deckle_core::quiet::command(&exe)
-            .args(["digest", "--json", "morgue", "send", &date])
-            .output()
-            .map_err(|e| format!("couldn't start {}: {e}", exe.display()))?;
-        parse_send(out.status.success(), &out.stdout, &out.stderr)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let out = deckle_core::quiet::command(exe)
+        .args(["digest", "--json", "morgue", "send", &date])
+        .output()
+        .map_err(|e| format!("couldn't start {}: {e}", exe.display()))?;
+    parse_send(out.status.success(), &out.stdout, &out.stderr)
 }
 
 /// Opens the kept EPUB in whatever the system opens EPUBs with.
-#[tauri::command]
 pub fn morgue_open(date: String) -> Result<(), String> {
     let epub = morgue()?.paths(date_of(&date)?).0;
     if !epub.is_file() {
