@@ -23,6 +23,7 @@ deckle-rtf.workspace = true
 deckle-markdown.workspace = true
 deckle-pdf.workspace = true
 sha2.workspace = true
+md-5.workspace = true
 flate2 = "1"
 thiserror.workspace = true
 serde.workspace = true
