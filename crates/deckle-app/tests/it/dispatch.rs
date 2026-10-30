@@ -211,6 +211,37 @@ fn web_mode_schedule_set_writes_config() {
 }
 
 #[test]
+fn web_mode_schedule_shows_as_on_everywhere() {
+    let tmp = tempfile::tempdir().unwrap();
+    // nextest runs each test in its own process, so the environment is this test's alone.
+    // Dry-run makes any attempt to install a job an error.
+    unsafe {
+        std::env::set_var("HOME", tmp.path());
+        std::env::set_var("APPDATA", tmp.path());
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+        std::env::set_var("DECKLE_DAEMON", "1");
+        std::env::set_var("DECKLE_SCHEDULE_DRY_RUN", "1");
+    }
+    let main = deckle_digest::config::default_path();
+    std::fs::create_dir_all(main.parent().unwrap()).unwrap();
+    std::fs::write(&main, "title = \"The Gazette\"\n").unwrap();
+    let ctx = ctx_in(tmp.path(), true);
+
+    let v = dispatch(&ctx, "schedule_set", json!({"at": "06:15"})).unwrap();
+    assert_eq!(v["watch"], json!(true), "the daemon owns the watcher");
+    assert_eq!(dispatch(&ctx, "schedule_get", Value::Null).unwrap(), v);
+    let next = dispatch(&ctx, "daily_next", Value::Null).unwrap();
+    assert_eq!(next["press"]["at"], json!("06:15"));
+    let papers = dispatch(&ctx, "papers_list", Value::Null).unwrap();
+    assert_eq!(papers["papers"][0]["installed"], json!(true), "{papers}");
+    let stopped = dispatch(&ctx, "press_stop", json!({"on": true})).unwrap();
+    assert!(!stopped["press"]["stopped"].is_null(), "{stopped}");
+
+    std::fs::write(&main, "title = [").unwrap();
+    assert!(dispatch(&ctx, "schedule_get", Value::Null).is_err());
+}
+
+#[test]
 fn capabilities_web_has_no_updater_or_keychain() {
     let tmp = tempfile::tempdir().unwrap();
     let state = ctx_in(tmp.path(), false).state;

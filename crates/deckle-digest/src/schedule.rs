@@ -869,8 +869,15 @@ pub fn remove() -> Result<Vec<String>, String> {
     }
 }
 
+/// What's scheduled. In a daemon install that's the config (a broken one reads as nothing
+/// scheduled; [`daemon_status`] says why), on any OS.
 pub fn status() -> Status {
-    if cfg!(target_os = "macos") {
+    if crate::secret::daemon_install() {
+        daemon_status().unwrap_or(Status {
+            watch: true,
+            ..Status::default()
+        })
+    } else if cfg!(target_os = "macos") {
         macos_status()
     } else if cfg!(target_os = "windows") {
         windows_status()
@@ -933,6 +940,15 @@ pub fn config_status(main: &Path) -> Result<Status, String> {
     })
 }
 
+/// [`status`] in a daemon install: the config's schedule, and the watcher is on (the daemon
+/// runs it).
+pub fn daemon_status() -> Result<Status, String> {
+    Ok(Status {
+        watch: true,
+        ..config_status(&crate::config::default_path())?
+    })
+}
+
 /// The next press from a paper's `[schedule]` (`at`, and `days` when set), in `now`'s zone.
 pub fn config_next_press(
     sched: &crate::config::ScheduleConfig,
@@ -987,6 +1003,35 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn status_in_a_daemon_install_is_the_config_with_the_watcher_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        // nextest runs each test in its own process, so the environment is this test's alone.
+        unsafe {
+            std::env::set_var("HOME", tmp.path());
+            std::env::set_var("APPDATA", tmp.path());
+            std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+            std::env::set_var("DECKLE_DAEMON", "1");
+        }
+        let main = crate::config::default_path();
+        std::fs::create_dir_all(main.parent().unwrap()).unwrap();
+        two_papers(main.parent().unwrap());
+        save_config_schedule(&main, None, Some("06:15"), Some(vec![Day::Sat])).unwrap();
+        save_config_schedule(&main, Some("courier"), Some("07:00"), None).unwrap();
+        let s = status();
+        assert_eq!(s.at.as_deref(), Some("06:15"));
+        assert!(s.watch, "the daemon owns the watcher");
+        assert_eq!(
+            s.papers.iter().map(|p| p.slug.as_str()).collect::<Vec<_>>(),
+            [MAIN, "courier"]
+        );
+        assert_eq!(s, daemon_status().unwrap());
+
+        std::fs::write(&main, "title = [").unwrap();
+        assert!(daemon_status().is_err(), "a broken config is an error");
+        assert!(status().watch && status().papers.is_empty());
     }
 
     #[test]

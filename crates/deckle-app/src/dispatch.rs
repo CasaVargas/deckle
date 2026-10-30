@@ -187,7 +187,7 @@ commands! { ctx;
     run_books { books: Vec<RunRequest>, target: RunTarget } =>
         commands::run_books(ctx.events.clone(), &ctx.state, books, target),
     schedule_get {} => if ctx.web {
-        Ok(web_schedule_get())
+        deckle_digest::schedule::daemon_status()
     } else {
         Ok(daily::schedule_get())
     },
@@ -226,12 +226,6 @@ commands! { ctx;
     words_anki { target: RunTarget, to: String } => kindle::words_anki(target, to),
 }
 
-/// The container's daemon reads `[schedule]` itself: the schedule is what the config says.
-fn web_schedule_get() -> deckle_digest::schedule::Status {
-    deckle_digest::schedule::config_status(&deckle_digest::config::default_path())
-        .unwrap_or_default()
-}
-
 /// Saves the paper's `[schedule] at` (its days kept) for the daemon; nothing is installed.
 fn web_schedule_set(
     at: Option<String>,
@@ -247,5 +241,5 @@ fn web_schedule_set(
             None,
         )?;
     }
-    deckle_digest::schedule::config_status(&main)
+    deckle_digest::schedule::daemon_status()
 }
