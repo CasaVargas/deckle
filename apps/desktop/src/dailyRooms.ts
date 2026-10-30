@@ -29,7 +29,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 
 /** What an export folder is for, under "Add a folder": on the web the folders are the server's. */
 export const exportFolderHint = (web: boolean) =>
-  web ? "A folder under /data your reader syncs from" : "iCloud Drive for an iPad, Dropbox for a Boox";
+  web ? "A folder under /data your reader syncs from" : "iCloud Drive for an iPad, Dropbox for a Kobo or a Boox";
 
 /** Where the paper goes, from the config: the Kindle always, the rest when they're set up. */
 export function destinations(cfg: DailyConfig, web = false): Place[] {
@@ -63,7 +63,7 @@ export interface DeliveryRow {
   opens: boolean;
 }
 
-const FORMAT_LABEL = { epub: "EPUB", pdf: "PDF", bundle: "Bundle" } as const;
+const FORMAT_LABEL = { epub: "EPUB", kepub: "KEPUB", pdf: "PDF", bundle: "Bundle" } as const;
 
 /** Delivery's two groups: the Kindle (over USB, by email), then other readers. */
 export function deliveryGroups(cfg: DailyConfig): { kindle: DeliveryRow[]; others: DeliveryRow[] } {
