@@ -78,7 +78,7 @@ commands! { ctx;
     book_preflight { path: String, cover: Option<CoverChoice> } =>
         books::book_preflight(&ctx.state, path, cover),
     bookmarklet {} => daily::bookmarklet(),
-    capabilities {} => Ok(capabilities::capabilities(ctx.web)),
+    capabilities {} => Ok(capabilities::capabilities(ctx.web, &ctx.state)),
     cookbook_add { target: String, chapter: Option<String>, note: Option<String>, picture: Option<Picture> } =>
         cookbook::cookbook_add(target, chapter, note, picture),
     cookbook_book {} => cookbook::cookbook_book(),

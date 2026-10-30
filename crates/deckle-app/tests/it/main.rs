@@ -2,3 +2,4 @@
 //! All integration tests in one binary: one link instead of one per file.
 
 mod dispatch;
+mod press;

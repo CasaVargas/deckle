@@ -176,8 +176,8 @@ pub fn app_version() -> String {
 }
 
 #[tauri::command]
-pub fn capabilities() -> deckle_app::capabilities::Capabilities {
-    deckle_app::capabilities::capabilities(false)
+pub fn capabilities(state: State<'_, AppState>) -> deckle_app::capabilities::Capabilities {
+    deckle_app::capabilities::capabilities(false, &state)
 }
 
 #[tauri::command]

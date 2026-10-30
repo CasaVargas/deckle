@@ -212,14 +212,33 @@ fn web_mode_schedule_set_writes_config() {
 
 #[test]
 fn capabilities_web_has_no_updater_or_keychain() {
-    let web = capabilities(true);
+    let tmp = tempfile::tempdir().unwrap();
+    let state = ctx_in(tmp.path(), false).state;
+    let web = capabilities(true, &state);
     assert!(web.web && !web.updater && !web.keychain && !web.reveal);
     assert_eq!(web.schedule, "config");
-    let desktop = capabilities(false);
+    let desktop = capabilities(false, &state);
     assert!(!desktop.web && desktop.updater && desktop.keychain && desktop.reveal && desktop.usb);
     assert_eq!(desktop.schedule, "install");
-    let tmp = tempfile::tempdir().unwrap();
     let v = dispatch(&ctx_in(tmp.path(), true), "capabilities", Value::Null).unwrap();
     assert_eq!(v["schedule"], json!("config"));
     assert_eq!(v["keychain"], json!(false));
+}
+
+// The fake Previewer is a shell script.
+#[cfg(unix)]
+#[test]
+fn capabilities_previewer_honours_settings_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let ctx = ctx_in(tmp.path(), true);
+    let fake =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh");
+    let settings = deckle_app::commands::Settings {
+        previewer_path: Some(fake.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    deckle_app::commands::save_settings_to(&ctx.state.settings_file, &settings).unwrap();
+    assert!(capabilities(true, &ctx.state).previewer);
+    let v = dispatch(&ctx, "capabilities", Value::Null).unwrap();
+    assert_eq!(v["previewer"], json!(true));
 }

@@ -43,7 +43,8 @@ fn identity(root: &Path) -> Result<Uuid, String> {
     })
 }
 
-/// `exe` is the app's own binary, which the watcher job runs.
+/// `exe` is the app's own binary, which the watcher job runs. In a daemon install the daemon
+/// is the watcher, so none is installed.
 pub fn press_setup(
     paper: Option<String>,
     export_index: usize,
@@ -59,7 +60,13 @@ pub fn press_setup(
         export_index,
         enabled,
         expected.as_ref(),
-        || deckle_digest::schedule::ensure_watcher(exe, &main),
+        || {
+            // A daemon install's daemon already runs `digest watch`; there is no OS job to add.
+            if deckle_digest::secret::daemon_install() {
+                return Ok(());
+            }
+            deckle_digest::schedule::ensure_watcher(exe, &main)
+        },
     )
 }
 

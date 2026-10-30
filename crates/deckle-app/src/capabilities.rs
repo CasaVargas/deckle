@@ -4,10 +4,12 @@
 
 use serde::Serialize;
 
+use crate::commands::AppState;
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Capabilities {
     pub web: bool,
-    /// Kindle Previewer is installed where Deckle looks for it.
+    /// Kindle Previewer is found, at the settings' path or where Deckle looks for it.
     pub previewer: bool,
     /// Kindles can be reached over USB.
     pub usb: bool,
@@ -22,10 +24,10 @@ pub struct Capabilities {
     pub schedule: &'static str,
 }
 
-pub fn capabilities(web: bool) -> Capabilities {
+pub fn capabilities(web: bool, state: &AppState) -> Capabilities {
     Capabilities {
         web,
-        previewer: deckle_core::previewer::locate(None).is_ok(),
+        previewer: crate::commands::previewer_status(state).found,
         usb: !web || kindle_visible(),
         keychain: !web,
         updater: !web,
