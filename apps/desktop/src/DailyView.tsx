@@ -2,6 +2,9 @@
 // The Daily tab (Daily design §5c, Daily tab redesign §2–3), in tabs: Today (tomorrow's paper so
 // far, when it goes to press, a link box and the week), Sections, Reading, Editions and Delivery,
 // all backed by digest.toml and the CLI. The paper switcher picks which paper they work on.
+import { useCapabilities } from "./capabilities";
+import Unavailable from "./web/Unavailable";
+import { SMTP_ENV, passwordReason } from "./web/gates";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { setupSavedExport, setupWithRefresh } from "./pressView";
 import { debounce, saveQueue } from "./saveQueue";
@@ -77,6 +80,7 @@ export default function DailyView({
   initialRoom?: Room | null;
   onRoomTaken?: () => void;
 }) {
+  const caps = useCapabilities();
   const [state, setState] = useState<DailyState | null>(null);
   const [draft, setDraft] = useState<DailyConfig | null>(null);
   // Saving as you go (Daily tab redesign §4): the newest edit is in draftRef; `seq` counts edits,
@@ -436,9 +440,11 @@ export default function DailyView({
         <section className="card">
           <h2>{isMain ? "digest.toml" : `papers/${paper}.toml`} has a problem</h2>
           <p className="fail">{state.error}</p>
-          <button className="ghost" onClick={() => api.reveal(state.config_path)}>
-            Show the file
-          </button>
+          {caps.reveal && (
+            <button className="ghost" onClick={() => api.reveal(state.config_path)}>
+              Show the file
+            </button>
+          )}
         </section>
       </div>
     );
@@ -490,6 +496,9 @@ export default function DailyView({
         </label>
         <div>
           <span className="label">Password</span>
+          {!caps.keychain ? (
+            <Unavailable reason={passwordReason(SMTP_ENV)} />
+          ) : (
           <form
             className="save-row"
             onSubmit={(e) => {
@@ -508,6 +517,7 @@ export default function DailyView({
               {emailStatus?.has_password ? "Replace" : "Save"}
             </button>
           </form>
+          )}
         </div>
         </>)}
       </div>
@@ -605,7 +615,7 @@ export default function DailyView({
                 <p className="muted small">
                   {preview ? `Last built ${preview.title.replace(/^.*— /, "")}` : "No edition built yet."}
                   {preview && preview.outbox > 0 && ` · ${preview.outbox} waiting for your Kindle`}
-                  {preview && (
+                  {preview && caps.reveal && (
                     <>
                       {" · "}
                       <button className="link" onClick={() => api.reveal(preview.file)}>

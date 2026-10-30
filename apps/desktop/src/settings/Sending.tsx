@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useCapabilities } from "../capabilities";
+import Unavailable from "../web/Unavailable";
+import { PREVIEWER_REASON } from "../web/gates";
 import type { DeviceRow, PreviewerStatus, Settings } from "../types";
 import { Link } from "./Row";
 
@@ -21,6 +24,7 @@ const WORD: Record<"pdoc" | "ebok", string> = { pdoc: "Document", ebok: "Kindle 
 
 /** Sending (Settings redesign §5): how books show up, as a choice you can see, and the tool that builds them. */
 export default function Sending({ settings, set, previewer, onPickPreviewer, devices, onKindles }: Props) {
+  const caps = useCapabilities();
   const own = devices.filter((d) => d.cde_override);
   return (
     <div className="set-stack">
@@ -70,12 +74,13 @@ export default function Sending({ settings, set, previewer, onPickPreviewer, dev
           Amazon's free tool that turns a book into the Kindle's own format.{" "}
           {previewer?.found ? (
             "Deckle finds it by itself; choose it only if it lives somewhere unusual."
-          ) : (
+          ) : caps.web ? null : (
             <>
               {previewer?.download_url ? <Link href={previewer.download_url}>Download it</Link> : "Download it"} and restart Deckle, or choose its command line tool.
             </>
           )}
         </p>
+        {caps.web && !previewer?.found && <Unavailable reason={PREVIEWER_REASON} />}
         <div className="set-wide">
           <input type="text" value={settings.previewer_path ?? ""} placeholder={previewer?.path ?? "Found automatically"} onChange={(e) => set("previewer_path", e.target.value || null)} aria-label="Kindle Previewer location" />
           <button className="ghost" onClick={onPickPreviewer}>

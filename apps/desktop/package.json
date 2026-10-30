@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:web": "tsc --noEmit && vite build --mode web --outDir dist-web",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest run"

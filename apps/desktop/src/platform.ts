@@ -27,8 +27,9 @@ export interface Platform {
   afterSave(path: string): Promise<void>;
   openUrl(url: string): Promise<void>;
   homeDir(): Promise<string>;
-  /** `over(true)` while files hover the window, `over(false)` when they leave or land; then `drop`. */
-  onFileDrop(h: { over(on: boolean): void; drop(paths: string[]): void }): Promise<() => void>;
+  /** `over(true)` while files hover the window, `over(false)` when they leave or land; then `drop`.
+   * `failed` says why dropped files couldn't be taken (web: the upload failed). */
+  onFileDrop(h: { over(on: boolean): void; drop(paths: string[]): void; failed?(message: string): void }): Promise<() => void>;
   checkUpdate(): Promise<UpdateInfo | null>;
   relaunch(): Promise<void>;
 }

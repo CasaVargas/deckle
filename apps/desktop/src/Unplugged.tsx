@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { useCapabilities } from "./capabilities";
+import { NO_DEVICE_REASON } from "./web/gates";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { sentOn } from "./kindleRooms";
@@ -10,6 +12,7 @@ import type { SentKindle } from "./types";
  * send, what the tab will show and how to connect one.
  */
 export default function Unplugged() {
+  const caps = useCapabilities();
   const [kindles, setKindles] = useState<SentKindle[] | null>(null);
   const [key, setKey] = useState<string | null>(null);
   const [covers, setCovers] = useState<Record<string, string | null>>({});
@@ -35,7 +38,9 @@ export default function Unplugged() {
 
   if (kindles === null) return <main className="kindle-main" />;
   const now = new Date();
-  const connect = "Plug it in by USB. Newer Kindles connect the way a phone does: if it doesn't show up, unlock it after plugging it in.";
+  const connect = caps.web
+    ? NO_DEVICE_REASON
+    : "Plug it in by USB. Newer Kindles connect the way a phone does: if it doesn't show up, unlock it after plugging it in.";
 
   if (!kindle) {
     return (

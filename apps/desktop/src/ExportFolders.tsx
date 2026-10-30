@@ -17,7 +17,8 @@ import type { ExportConfig, PressSetupStatus, Screen } from "./types";
  * paper). Resolves to the new list, or a reason it wasn't added, or null when cancelled. */
 export async function addFolder(current: ExportConfig[]): Promise<ExportConfig[] | string | null> {
   let defaultPath: string | undefined;
-  if (navigator.userAgent.includes("Mac")) {
+  // A browser on a Mac still picks among the server's folders, which have no iCloud Drive.
+  if (platform.kind === "desktop" && navigator.userAgent.includes("Mac")) {
     defaultPath = await platform.homeDir()
       .then(iCloudDrive)
       .catch(() => undefined);
