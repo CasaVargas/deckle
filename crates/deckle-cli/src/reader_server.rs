@@ -24,7 +24,7 @@ fn catalog(main_path: &Path) -> Catalog {
     let Ok(loaded) = deckle_digest::papers::load_all(main_path) else {
         return Catalog::default();
     };
-    for cfg in &loaded.papers {
+    for (i, cfg) in loaded.papers.iter().enumerate() {
         let morgue = deckle_morgue::Morgue::from_config(cfg);
         for date in morgue.editions() {
             let (epub, _, _) = morgue.paths(date);
@@ -46,6 +46,7 @@ fn catalog(main_path: &Path) -> Catalog {
                 title,
                 epub,
                 stem,
+                main: i == 0,
             });
         }
     }
