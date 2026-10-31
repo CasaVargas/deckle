@@ -33,6 +33,10 @@ pub struct Puzzle {
     pub rows: Option<[String; 5]>,
     pub clues: Vec<Clue>,
     pub ladder: Option<Ladder>,
+    /// The word search (word search design); `None` on days stored before it, or when none
+    /// could be made.
+    #[serde(default)]
+    pub search: Option<super::search::Search>,
 }
 
 /// What the Kindle's notes said about a day's puzzle.

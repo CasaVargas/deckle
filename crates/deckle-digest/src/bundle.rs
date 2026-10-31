@@ -209,6 +209,49 @@ struct PuzzleJson {
     clues: Vec<ClueJson>,
     ladder: Option<LadderJson>,
     yesterday: Option<YesterdayJson>,
+    /// The word search (word search design §5): optional and additive, in any version.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    search: Option<SearchJson>,
+}
+
+#[derive(Serialize)]
+struct SearchJson {
+    size: usize,
+    grid: Vec<String>,
+    words: Vec<HiddenJson>,
+}
+
+#[derive(Serialize)]
+struct HiddenJson {
+    word: String,
+    row: u8,
+    col: u8,
+    dir: &'static str,
+    theme: bool,
+}
+
+fn search_json(s: &crate::puzzle::search::Search) -> SearchJson {
+    use crate::puzzle::search::Way;
+    SearchJson {
+        size: crate::puzzle::search::SIZE,
+        grid: s.rows.clone(),
+        words: s
+            .words
+            .iter()
+            .map(|h| HiddenJson {
+                word: h.word.to_uppercase(),
+                row: h.row,
+                col: h.col,
+                dir: match h.way {
+                    Way::Across => "across",
+                    Way::Down => "down",
+                    Way::DownRight => "down-right",
+                    Way::UpRight => "up-right",
+                },
+                theme: h.theme,
+            })
+            .collect(),
+    }
 }
 
 #[derive(Serialize)]
@@ -233,6 +276,8 @@ struct LadderJson {
 struct YesterdayJson {
     grid: Option<Vec<String>>,
     ladder: Option<Vec<String>>,
+    /// Yesterday's word search, or `null`.
+    search: Option<SearchJson>,
 }
 
 #[derive(Serialize)]
@@ -664,7 +709,9 @@ fn write_inner(
                         .ladder
                         .as_ref()
                         .map(|l| l.path.iter().map(|w| w.to_uppercase()).collect()),
+                    search: y.search.as_ref().map(search_json),
                 }),
+                search: t.search.as_ref().map(search_json),
             }
         });
         sections.push(SectionJson {

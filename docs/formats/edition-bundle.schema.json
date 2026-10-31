@@ -267,10 +267,35 @@
               "required": ["grid", "ladder"],
               "properties": {
                 "grid": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "type": "string" } }] },
-                "ladder": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "type": "string" } }] }
+                "ladder": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "type": "string" } }] },
+                "search": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/search" }], "description": "Optional, additive: yesterday's word search." }
               }
             }
           ]
+        },
+        "search": { "$ref": "#/$defs/search", "description": "Optional, additive in any 1.x: the word search." }
+      }
+    },
+    "search": {
+      "type": "object",
+      "description": "A word search. Words read forward only from row/col along dir; answers are in the bundle like the mini's.",
+      "required": ["size", "grid", "words"],
+      "properties": {
+        "size": { "type": "integer", "minimum": 1 },
+        "grid": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z]+$" } },
+        "words": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["word", "row", "col", "dir", "theme"],
+            "properties": {
+              "word": { "type": "string", "pattern": "^[A-Z]+$" },
+              "row": { "type": "integer", "minimum": 0 },
+              "col": { "type": "integer", "minimum": 0 },
+              "dir": { "enum": ["across", "down", "down-right", "up-right"] },
+              "theme": { "type": "boolean" }
+            }
+          }
         }
       }
     }

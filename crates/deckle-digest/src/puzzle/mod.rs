@@ -5,6 +5,7 @@
 pub mod check;
 pub mod grid;
 pub mod ladder;
+pub mod search;
 pub mod store;
 pub mod theme;
 pub mod words;
@@ -28,6 +29,12 @@ pub const FILL_CAP: Duration = Duration::from_millis(500);
 /// Theme answers placed in a mini.
 const THEME_WORDS: usize = 2;
 
+/// Theme words in a word search, at most (word search design §2).
+const SEARCH_THEMES: usize = 3;
+/// Mixed into the date's seed for the word search, so its fill never moves the mini's or the
+/// ladder's.
+const SEARCH_SALT: u64 = 0x5EA8_C000;
+
 /// Fills tried with the theme words, then as many without, while the fill matches a grid of the
 /// last [`store::KEEP_DAYS`] days.
 const FRESH_TRIES: u64 = 4;
@@ -39,6 +46,8 @@ const FRESH_TRIES: u64 = 4;
 ///   headline that runs two days gives the same theme word twice. A repeat is filled again with
 ///   the date's next seed, then without the theme words.
 /// - The ladder avoids the pairs of the last 60 days.
+/// - The word search (word search design §4) hides up to three other headline words and none
+///   of the mini's, from its own seed, and is none of the last 60 days' either.
 pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -> Puzzle {
     let seed = date.num_days_from_ce() as u64;
     let mut rng = StdRng::seed_from_u64(seed);
@@ -65,7 +74,7 @@ pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -
         let mut again = StdRng::seed_from_u64(seed ^ (attempt << 32));
         fill = grid::fill(words, &seeds, &mut again, FILL_CAP);
     }
-    let clues = fill
+    let clues: Vec<Clue> = fill
         .as_ref()
         .map(|f| {
             f.answers
@@ -98,6 +107,12 @@ pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -
     } else {
         None
     };
+    let minis: HashSet<String> = clues
+        .iter()
+        .map(|c| c.answer.clone())
+        .chain(themes.iter().map(|t| t.word.clone()))
+        .collect();
+    let search = word_search(date, cfg, words, store, &minis);
     Puzzle {
         number: 1 + store
             .days
@@ -108,7 +123,48 @@ pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -
         rows: fill.map(|f| f.rows),
         clues,
         ladder,
+        search,
     }
+}
+
+/// The day's word search: yesterday's 4–5-letter headline words not in `avoid` (the mini's
+/// answers and themes) first, filled from the date's salted seed, again while it matches a
+/// search of the last 60 days, then without the theme words.
+fn word_search(
+    date: NaiveDate,
+    cfg: &PuzzleConfig,
+    words: &Words,
+    store: &Store,
+    avoid: &HashSet<String>,
+) -> Option<search::Search> {
+    let mut themes: Vec<String> = match (cfg.theme, store.days.get(&(date - Days::new(1)))) {
+        (true, Some(y)) => theme::pick(&y.headlines, THEME_WORDS + SEARCH_THEMES)
+            .into_iter()
+            .map(|t| t.word)
+            .filter(|w| (4..=5).contains(&w.len()) && !avoid.contains(w))
+            .take(SEARCH_THEMES)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let since = date - Days::new(store::KEEP_DAYS);
+    let recent: HashSet<&Vec<String>> = store
+        .days
+        .range(since..date)
+        .filter_map(|(_, d)| d.puzzle.search.as_ref().map(|s| &s.rows))
+        .collect();
+    let seed = date.num_days_from_ce() as u64 ^ SEARCH_SALT;
+    let mut found = None;
+    for attempt in 0..=2 * FRESH_TRIES {
+        if attempt > FRESH_TRIES {
+            themes.clear();
+        }
+        let mut rng = StdRng::seed_from_u64(seed ^ (attempt << 32));
+        found = search::fill(words, &themes, avoid, &mut rng);
+        if found.as_ref().is_none_or(|s| !recent.contains(&s.rows)) {
+            break;
+        }
+    }
+    found
 }
 
 /// The stored puzzle for `date`, or a new one made and kept in `store`.
@@ -143,6 +199,8 @@ pub struct PuzzleData {
 const KICKER: &str = "Answers in tomorrow's paper";
 const HINT: &str = "Highlight a clue and add your answer as a note; tomorrow's paper checks it.";
 const CREDIT: &str = "Words and definitions from Wiktionary and wordfreq (CC BY-SA 4.0)";
+const SEARCH_HOW: &str = "Find these words; they run across, down, or diagonally, never backwards.";
+const FROM_HEADLINES: &str = " (from yesterday's paper)";
 
 /// The Puzzle section for `date`: today's mini and ladder (made and kept in `store` when new),
 /// then yesterday's answers when there was a puzzle yesterday.
@@ -187,6 +245,33 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
             ..Default::default()
         });
     }
+    if let Some(ws) = &p.search {
+        let mut body = search_table(ws, "grid search", false);
+        body.push_str(&format!("<p class=\"small\">{}</p>\n", esc(SEARCH_HOW)));
+        let listed: Vec<String> = ws
+            .words
+            .iter()
+            .map(|h| {
+                let suffix = if h.theme { FROM_HEADLINES } else { "" };
+                format!(
+                    "<p class=\"clue\">{}{}</p>",
+                    h.word.to_uppercase(),
+                    esc(suffix)
+                )
+            })
+            .collect();
+        let (left, right) = listed.split_at(listed.len().div_ceil(2));
+        body.push_str(&format!(
+            "<table class=\"cols\"><tr><td>{}</td><td>{}</td></tr></table>\n",
+            left.concat(),
+            right.concat()
+        ));
+        articles.push(Article {
+            title: format!("Word search · No. {}", p.number),
+            body,
+            ..Default::default()
+        });
+    }
     if articles.is_empty() {
         let mut s = crate::sources::unavailable("Puzzle", "no puzzle could be made");
         s.key = section_key(SectionKind::Puzzle, None);
@@ -210,6 +295,14 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
                 ),
             };
             body.push_str(&format!("<p>{}</p>\n", esc(&line)));
+        }
+        if let Some(ws) = &y.puzzle.search {
+            body.push_str(&search_table(ws, "grid search small", true));
+            let list: Vec<String> = ws.words.iter().map(|h| h.word.to_uppercase()).collect();
+            body.push_str(&format!(
+                "<p>{}</p>\n",
+                esc(&format!("Word search: {}", list.join(", ")))
+            ));
         }
         if let Some(s) = &y.solve {
             body.push_str(&format!(
@@ -245,6 +338,46 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
                 .map(|y| y.puzzle.clone()),
         }),
     }
+}
+
+/// The word search as a table of letters; with `mask`, only the hidden words' letters, the
+/// other squares a middle dot (yesterday's answers).
+fn search_table(ws: &search::Search, class: &str, mask: bool) -> String {
+    // sized from the stored rows, not `SIZE`: a day kept from another size never stops the paper
+    let mut shown: Vec<Vec<bool>> = ws
+        .rows
+        .iter()
+        .map(|r| vec![!mask; r.chars().count()])
+        .collect();
+    if mask {
+        for h in &ws.words {
+            for (r, c) in ws.cells(h) {
+                if let Some(cell) = shown.get_mut(r).and_then(|row| row.get_mut(c)) {
+                    *cell = true;
+                }
+            }
+        }
+    }
+    let mut out = format!("<table class=\"{class}\">\n");
+    for (r, row) in ws.rows.iter().enumerate() {
+        out.push_str("<tr>");
+        for (c, ch) in row.chars().enumerate() {
+            let letter = ch.to_string();
+            out.push_str("<td>");
+            out.push_str(
+                if shown[r][c] {
+                    esc(&letter)
+                } else {
+                    "·".to_owned()
+                }
+                .as_str(),
+            );
+            out.push_str("</td>");
+        }
+        out.push_str("</tr>\n");
+    }
+    out.push_str("</table>\n");
+    out
 }
 
 /// The grid as a table, black squares filled: the clue numbers small in the corner, or the

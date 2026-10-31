@@ -1219,6 +1219,16 @@ fn collect_cell(
                 text: "\n".into(),
             });
         } else if c.is_element() {
+            // a paragraph after text in the same cell starts its own line, as a `<br>` does
+            if matches!(c.tag_name().name(), "p" | "div" | "li")
+                && cell.runs.iter().any(|r| !r.text.trim().is_empty())
+            {
+                cell.runs.push(Run {
+                    face,
+                    size,
+                    text: "\n".into(),
+                });
+            }
             let f = match c.tag_name().name() {
                 "b" | "strong" => Face::Bold,
                 "i" | "em" => Face::Italic,
@@ -3641,6 +3651,38 @@ mod tests {
         assert!(pdf.contains("/PageLabels"), "no page labels");
         assert_eq!(pdf.matches("/Type /PageLabel").count(), 2, "A and B");
         assert!(pdf.contains("/P (A)") && pdf.contains("/P (B)"));
+    }
+
+    /// The word search's list sets several paragraphs in one table cell: each starts a line.
+    #[test]
+    fn paragraphs_in_a_table_cell_start_new_lines() {
+        let mut d = Doc {
+            blocks: Vec::new(),
+            images: Vec::new(),
+            outline: Vec::new(),
+            anchors: 0,
+            t: Type::for_width(Screen::Remarkable2.page().0),
+            photos: Photos::Gray,
+            jump_end: None,
+            front_end: 0,
+            large_print: false,
+        };
+        body(
+            &mut d,
+            "<table class=\"cols\"><tr><td><p class=\"clue\">CURVY</p><p class=\"clue\">GRAFT</p></td></tr></table>",
+            &[],
+            &[],
+        );
+        let Some(Block::Table { rows, .. }) = d.blocks.first() else {
+            panic!("a table");
+        };
+        let text: String = rows[0][0].runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(
+            text.split_whitespace().collect::<Vec<_>>(),
+            ["CURVY", "GRAFT"],
+            "{text:?}"
+        );
+        assert!(text.contains('\n'), "{text:?}");
     }
 
     #[test]

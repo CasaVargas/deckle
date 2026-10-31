@@ -230,7 +230,8 @@ Each story:
     { "number": 1, "dir": "across", "clue": "To prohibit", "answer": "BAN", "theme": false }
   ],
   "ladder": { "from": "MOON", "to": "GLOW", "steps": 4, "answer": ["MOON", "…", "GLOW"] },
-  "yesterday": { "grid": ["…"], "ladder": ["…"] }
+  "yesterday": { "grid": ["…"], "ladder": ["…"], "search": null },
+  "search": { "size": 9, "grid": ["…9 letters…"], "words": [{ "word": "COURT", "row": 0, "col": 2, "dir": "across", "theme": true }] }
 }
 ```
 
@@ -239,6 +240,7 @@ Each story:
 - **`ladder.steps`:** the blank rungs between `from` and `to`, the blanks the paper prints. `answer` is the whole path, so it holds `steps + 2` words: MOON, BOON, BOOT, BLOT, BLOW, GLOW has `steps` 4.
 - **Answers are in the bundle**, so a reader can check a solve on the device. A reader shouldn't show them before the owner asks.
 - **`ladder`** and **`yesterday`** are optional.
+- **`search`** (optional, additive in any 1.x; no version change): a 9×9 word search, and `yesterday.search` is the same shape or `null`. `words[].dir` is `across`, `down`, `down-right` or `up-right`, and words read forward only from `row`, `col`. Answers are in the bundle like the mini's. A reader finds it by the key, not the version.
 
 ### 6.7 The print plan (added in 1.3)
 

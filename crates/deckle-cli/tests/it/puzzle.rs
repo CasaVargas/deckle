@@ -150,3 +150,51 @@ fn digest_puzzle_prints_the_mini() {
     assert_eq!(v["clues"].as_array().unwrap().len(), kept.clues.len());
     assert_eq!(v["yesterday"]["puzzle"]["number"], 1);
 }
+
+#[test]
+fn digest_puzzle_prints_the_word_search() {
+    let (home, _) = setup("sections = [\"puzzle\"]\n");
+    let out = deckle(home.path())
+        .args(["digest", "puzzle"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8(out.stdout).unwrap();
+    let at = text.find("Word search · No. 2").expect(&text);
+    let rows: Vec<&str> = text[at..].lines().skip(1).take(9).collect();
+    assert_eq!(rows.len(), 9, "{text}");
+    for row in rows {
+        let letters: Vec<&str> = row.split_whitespace().collect();
+        assert_eq!(letters.len(), 9, "{row:?}");
+        assert!(
+            letters
+                .iter()
+                .all(|l| l.len() == 1 && l.bytes().all(|b| b.is_ascii_uppercase()))
+        );
+    }
+    let kept = stored(home.path()).days[&Local::now().date_naive()]
+        .puzzle
+        .search
+        .clone()
+        .expect("today's search is kept");
+    let find = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("Find:"))
+        .expect(&text);
+    for h in &kept.words {
+        assert!(find.contains(&h.word.to_uppercase()), "{find}");
+    }
+}
+
+#[test]
+fn digest_puzzle_json_has_search() {
+    let (home, _) = setup("sections = [\"puzzle\"]\n");
+    let out = deckle(home.path())
+        .args(["--json", "digest", "puzzle"])
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["search"]["rows"].as_array().unwrap().len(), 9);
+    let n = v["search"]["words"].as_array().unwrap().len();
+    assert!((8..=10).contains(&n), "{n}");
+}

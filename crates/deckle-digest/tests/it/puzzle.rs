@@ -332,7 +332,10 @@ fn no_yesterday_no_answers() {
     today(date() - Days::new(2), &cfg, &words, &mut store);
     let s = section(date(), &page_cfg(), &mut store, &words);
     let titles: Vec<&str> = s.articles.iter().map(|a| a.title.as_str()).collect();
-    assert_eq!(titles, ["The Mini · No. 2", "Word ladder"]);
+    assert_eq!(
+        titles,
+        ["The Mini · No. 2", "Word ladder", "Word search · No. 2"]
+    );
     assert!(xhtml(s).contains("Wiktionary and wordfreq"));
 }
 
@@ -440,6 +443,7 @@ fn checked_puzzle() -> Puzzle {
                 .map(String::from)
                 .to_vec(),
         }),
+        search: None,
     }
 }
 
@@ -724,4 +728,266 @@ fn a_grid_is_never_yesterdays_again() {
         "No. {} reprinted No. {}",
         today.number, yesterday.number
     );
+}
+
+#[test]
+fn a_day_has_a_word_search() {
+    let mut store = Store::default();
+    let cfg = PuzzleConfig::default();
+    let first = today(date(), &cfg, Words::embedded(), &mut store).clone();
+    let s = first.puzzle.search.as_ref().expect("a word search");
+    assert!((8..=10).contains(&s.words.len()), "{}", s.words.len());
+    assert_eq!(today(date(), &cfg, Words::embedded(), &mut store), &first);
+}
+
+#[test]
+fn old_puzzles_json_loads_without_search() {
+    let json =
+        r#"{"days":{"2026-10-21":{"puzzle":{"number":1,"rows":null,"clues":[],"ladder":null}}}}"#;
+    let store: Store = serde_json::from_str(json).unwrap();
+    assert_eq!(store.days[&yesterday()].puzzle.search, None);
+}
+
+#[test]
+fn search_never_reuses_the_minis_words() {
+    let store = store_with_yesterday(vec![leaf()]);
+    let p = make(date(), &PuzzleConfig::default(), Words::embedded(), &store);
+    let s = p.search.expect("a word search");
+    for h in &s.words {
+        assert!(
+            p.clues.iter().all(|c| c.answer != h.word),
+            "{} is in the mini",
+            h.word
+        );
+    }
+    assert!(s.words.iter().all(|h| h.word != "leaf"));
+}
+
+#[test]
+fn three_letter_themes_are_skipped() {
+    let oak = ThemeWord {
+        word: "oak".into(),
+        headline: "Old oak falls on Main Street".into(),
+        section: "Local".into(),
+    };
+    let store = store_with_yesterday(vec![oak]);
+    let s = make(date(), &PuzzleConfig::default(), Words::embedded(), &store)
+        .search
+        .expect("a word search");
+    assert!(
+        s.words
+            .iter()
+            .all(|h| h.word != "oak" && (4..=5).contains(&h.word.len()))
+    );
+    assert!(s.words.iter().all(|h| !h.theme));
+}
+
+#[test]
+fn a_search_is_never_a_recent_one() {
+    let cfg = PuzzleConfig::default();
+    let plain = make(date(), &cfg, Words::embedded(), &Store::default());
+    let mut store = Store::default();
+    let mut yesterday_puzzle = make(yesterday(), &cfg, Words::embedded(), &store);
+    yesterday_puzzle.search = plain.search.clone();
+    store.days.insert(
+        yesterday(),
+        Day {
+            puzzle: yesterday_puzzle,
+            headlines: Vec::new(),
+            solve: None,
+        },
+    );
+    let again = make(date(), &cfg, Words::embedded(), &store);
+    assert!(again.search.is_some());
+    assert_ne!(again.search.map(|s| s.rows), plain.search.map(|s| s.rows));
+}
+
+#[test]
+fn a_list_too_small_leaves_the_search_out() {
+    let small = Words::from_tsv("cold\tx\ncord\tx\ncard\tx\nward\tx\nwarm\tx\n");
+    let p = make(date(), &PuzzleConfig::default(), &small, &Store::default());
+    assert_eq!(p.search, None);
+}
+
+#[test]
+fn existing_days_keep_their_mini_and_ladder() {
+    let p = make(
+        date(),
+        &PuzzleConfig::default(),
+        Words::embedded(),
+        &Store::default(),
+    );
+    assert_eq!(
+        p.rows,
+        Some(["##GOT", "DRIVE", "RAVEN", "AVERT", "GER##"].map(String::from))
+    );
+    assert_eq!(
+        p.ladder.map(|l| l.path),
+        Some(
+            ["hard", "bard", "bare", "base", "ease", "easy"]
+                .map(String::from)
+                .to_vec()
+        )
+    );
+}
+
+// --- the word search on the page (word search plan, Task 3) ---
+
+fn headline(word: &str, section: &str) -> ThemeWord {
+    ThemeWord {
+        word: word.into(),
+        headline: format!("A {word} story for the {section} page"),
+        section: section.into(),
+    }
+}
+
+/// Yesterday with five headline words in five sections: the mini takes two, the search the rest.
+fn store_for_search() -> Store {
+    store_with_yesterday(vec![
+        headline("court", "Local"),
+        headline("state", "The Nation"),
+        headline("music", "Entertainment"),
+        headline("leaf", "The World"),
+        headline("bird", "Technology"),
+    ])
+}
+
+fn article<'a>(s: &'a Section, title: &str) -> Option<&'a deckle_digest::Article> {
+    s.articles.iter().find(|a| a.title.starts_with(title))
+}
+
+#[test]
+fn the_search_prints_after_the_ladder() {
+    let mut store = store_for_search();
+    let s = section(date(), &page_cfg(), &mut store, Words::embedded());
+    let titles: Vec<&str> = s.articles.iter().map(|a| a.title.as_str()).collect();
+    let n = store.days[&date()].puzzle.number;
+    assert_eq!(
+        &titles[..3],
+        [
+            format!("The Mini · No. {n}").as_str(),
+            "Word ladder",
+            format!("Word search · No. {n}").as_str()
+        ]
+    );
+    let body = &s.articles[2].body;
+    assert!(body.contains("<table class=\"grid search\">"), "{body}");
+    assert_eq!(
+        body.matches("<tr>").count(),
+        9 + 1,
+        "9 grid rows and the word columns' row"
+    );
+    assert!(
+        body.contains("Find these words; they run across, down, or diagonally, never backwards.")
+    );
+    assert!(body.contains("<table class=\"cols\">"));
+    let search = store.days[&date()].puzzle.search.clone().unwrap();
+    for h in &search.words {
+        let shown = if h.theme {
+            format!("{} (from yesterday&#39;s paper)", h.word.to_uppercase())
+        } else {
+            h.word.to_uppercase()
+        };
+        assert!(body.contains(&shown), "{shown} missing: {body}");
+    }
+    assert!(
+        search.words.iter().any(|h| h.theme),
+        "a headline word is hidden"
+    );
+    assert!(!body.contains("class=\"note\""));
+}
+
+#[test]
+fn yesterdays_answers_show_the_search_masked() {
+    let words = Words::embedded();
+    let mut store = store_for_search();
+    let y = store.days[&yesterday()]
+        .puzzle
+        .search
+        .clone()
+        .expect("yesterday's search");
+    let s = section(date(), &page_cfg(), &mut store, words);
+    let body = &article(&s, "Yesterday's answers").unwrap().body;
+    let start = body
+        .find("<table class=\"grid search small\">")
+        .expect("masked grid");
+    let table = &body[start..start + body[start..].find("</table>").unwrap()];
+    let cells: Vec<&str> = table
+        .split("<td>")
+        .skip(1)
+        .map(|c| &c[..c.find("</td>").unwrap()])
+        .collect();
+    assert_eq!(cells.len(), 81);
+    let mut shown = [[false; 9]; 9];
+    for h in &y.words {
+        for (r, c) in y.cells(h) {
+            shown[r][c] = true;
+        }
+    }
+    for (i, cell) in cells.iter().enumerate() {
+        let (r, c) = (i / 9, i % 9);
+        let want = if shown[r][c] {
+            y.rows[r][c..c + 1].to_owned()
+        } else {
+            "·".to_owned()
+        };
+        assert_eq!(*cell, want, "square {r},{c}");
+    }
+    let list: Vec<String> = y.words.iter().map(|h| h.word.to_uppercase()).collect();
+    assert!(
+        body.contains(&format!("Word search: {}", list.join(", "))),
+        "{body}"
+    );
+}
+
+#[test]
+fn a_day_stored_before_the_search_prints_without_it() {
+    let words = Words::embedded();
+    let cfg = PuzzleConfig::default();
+    let mut store = store_for_search();
+    store.days.get_mut(&yesterday()).unwrap().puzzle.search = None;
+    let mut today_puzzle = make(date(), &cfg, words, &store);
+    today_puzzle.search = None;
+    store.days.insert(
+        date(),
+        Day {
+            puzzle: today_puzzle,
+            headlines: Vec::new(),
+            solve: None,
+        },
+    );
+    let s = section(date(), &page_cfg(), &mut store, words);
+    assert!(article(&s, "Word search").is_none());
+    assert!(article(&s, "The Mini").is_some() && article(&s, "Word ladder").is_some());
+    assert!(
+        !article(&s, "Yesterday's answers")
+            .unwrap()
+            .body
+            .contains("Word search:")
+    );
+}
+
+/// A stored search of another size (an 8×8 after a size change, or a hand-edited
+/// `puzzles.json`) prints as it is; it never stops the paper.
+#[test]
+fn a_stored_search_of_another_size_still_prints() {
+    use deckle_digest::puzzle::search::{Hidden, Search, Way};
+    let words = Words::embedded();
+    let mut store = store_for_search();
+    store.days.get_mut(&yesterday()).unwrap().puzzle.search = Some(Search {
+        rows: (0..8).map(|_| "ABCDEFGH".to_owned()).collect(),
+        words: vec![Hidden {
+            word: "efgh".into(),
+            row: 7,
+            col: 6,
+            way: Way::Across,
+            theme: false,
+        }],
+    });
+    let s = section(date(), &page_cfg(), &mut store, words);
+    let body = &article(&s, "Yesterday's answers").unwrap().body;
+    let start = body.find("<table class=\"grid search small\">").unwrap();
+    let table = &body[start..start + body[start..].find("</table>").unwrap()];
+    assert_eq!(table.matches("<tr>").count(), 8);
+    assert!(body.contains("Word search: EFGH"));
 }
