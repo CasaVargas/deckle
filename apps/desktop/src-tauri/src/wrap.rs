@@ -750,3 +750,42 @@ pub fn koreader_set_enabled(
 pub fn koreader_set_patches(folder: Option<String>, on: bool) -> Result<KoreaderView, String> {
     deckle_app::koreader::koreader_set_patches(folder, on)
 }
+
+#[tauri::command]
+pub async fn koreader_store_list() -> deckle_app::koreader::StoreList {
+    tauri::async_runtime::spawn_blocking(deckle_app::koreader::koreader_store_list)
+        .await
+        .expect("the store list never panics")
+}
+
+#[tauri::command]
+pub async fn koreader_store_search(
+    text: String,
+    updated: bool,
+) -> Result<Vec<deckle_app::koreader::Found>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        deckle_app::koreader::koreader_store_search(text, updated)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn koreader_store_readme(
+    repo: String,
+) -> Result<deckle_app::koreader::StoreReadme, String> {
+    tauri::async_runtime::spawn_blocking(move || deckle_app::koreader::koreader_store_readme(repo))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn koreader_store_updates(
+    folder: Option<String>,
+) -> Result<Vec<deckle_app::koreader::Update>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        deckle_app::koreader::koreader_store_updates(folder)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
