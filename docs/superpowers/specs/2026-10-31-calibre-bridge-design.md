@@ -505,3 +505,40 @@ Deckle checks that its shelves are still there and lists any that the firmware o
   then received a queued book, and a removal queued during the session ran within a poll.
 - **Left for phase 2:** sending from Deckle's and calibre's libraries, the paper on connect,
   cover thumbnails, the app, and the Docker guide.
+
+## Build notes (phase 2)
+
+- **Books from the library:** a book queued from the app, or with `deckle wireless queue` by
+  default, is a `build` job. The server makes it ready when it sends it, with
+  `deckle_core::reader::book_epub` (import, then normalize), the same step a Kobo or PocketBook
+  book goes through, so nothing is built for a reader that never connects. The source's calibre
+  id is kept. `--as-is` sends the file unchanged.
+- **EPUB, not KEPUB, for a Kobo running KOReader (a change from §4.3):** KOReader reads EPUB as
+  it is, and KEPUB's spans are for Kobo's own reader.
+- **The paper:** the watcher writes the newest main-paper edition to `wireless/paper.json`
+  once a minute, or removes it when `[wireless] paper` is off. When a reader connects, the
+  server sends that edition to `Deckle/` if the reader lacks it, and takes off Deckle's
+  `Deckle/deckle-daily-*` editions beyond the newest three (`KEEP_PAPERS`, as the Deckle
+  plugin keeps). These jobs aren't in the queue.
+- **Covers aren't sent:** KOReader's `metadata.lua` keeps only `uuid, lpath, last_modified,
+  size, title, authors, author_sort, tags, series, series_index`, so a thumbnail would be
+  dropped.
+- **Where the app shows it:** the on switch, port, password and paper are a Delivery row and card
+  (`WirelessCard`), next to KOReader over Wi-Fi. The readers, their books, the queue and the
+  picker are on Settings → KOReader (`KoreaderWireless`), next to the plugins. The spec's
+  "readers tab" is the KOReader page. The section refreshes every 5 seconds while it's open.
+- **Online & privacy** gains "On your home network, when you turn them on" for both listeners.
+- **The app's commands:** `wireless_status`, `wireless_set_password` (`null` clears it),
+  `wireless_queue`, `wireless_remove`, `wireless_cancel`, for the desktop and the web app.
+- **Docker:** the image exposes 9090 and the compose example has the port line. The guide says
+  broadcasts need `network_mode: host`, and that the address the app shows is the container's.
+- **Tests:**
+  - the paper on connect and pruning (a book that isn't a paper in `Deckle/` is left alone);
+  - a text file built into an EPUB, next to `--as-is`;
+  - KOReader's own client taking the paper into `Deckle/`;
+  - the app's view (ordering, queue, log tail);
+  - the frontend helpers (`wirelessView.ts`).
+- **Live run** (2026-10-31): `deckle-web serve` from a throwaway home, in the web app.
+  - Turning the row on in Delivery started the server on the daemon's next tick.
+  - KOReader's client then connected and showed on Settings → KOReader.
+  - **Send books…** sent a folder book, and Remove took it off.

@@ -27,3 +27,7 @@ services:
       # - "47219:47219"
       # KOReader over Wi-Fi: the catalog and progress sync ([reader_server] in digest.toml).
       # - "47220:47220"
+      # KOReader's calibre connection ([wireless] in digest.toml). Readers can't find it by
+      # broadcast through Docker's network: type the server's address on the reader, or use
+      # network_mode: host instead of ports.
+      # - "9090:9090"

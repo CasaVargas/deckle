@@ -895,12 +895,16 @@ pub enum WirelessCommand {
         #[arg(long, conflicts_with = "stdin")]
         clear: bool,
     },
-    /// Send books to a reader when it next connects.
+    /// Send books to a reader when it next connects: EPUBs cleaned as for a Kobo; Word, PDF,
+    /// text and Markdown files imported first.
     Queue {
         /// The reader: its name, its id, or `any` for the next to connect.
         reader: String,
         #[arg(required = true)]
         books: Vec<std::path::PathBuf>,
+        /// Send the files exactly as they are.
+        #[arg(long)]
+        as_is: bool,
     },
     /// Take books off a reader when it next connects, by their paths on it.
     Remove {

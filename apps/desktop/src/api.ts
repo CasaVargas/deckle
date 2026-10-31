@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke, listen } from "./transport";
 import { platform } from "./platform";
-import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WirelessView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -144,6 +144,12 @@ export const api = {
   emailSetPassword: (password: string) => invoke<EmailStatus>("email_set_password", { password }),
   emailTest: (paper: string | null = null) => invoke<string>("email_test", { paper }),
   readerServerStatus: () => invoke<ReaderServerStatus>("reader_server_status"),
+  wirelessStatus: () => invoke<WirelessView>("wireless_status"),
+  /** Write-only: `null` clears it. */
+  wirelessSetPassword: (password: string | null) => invoke<WirelessView>("wireless_set_password", { password }),
+  wirelessQueue: (reader: string, paths: string[]) => invoke<WirelessView>("wireless_queue", { reader, paths }),
+  wirelessRemove: (reader: string, lpaths: string[]) => invoke<WirelessView>("wireless_remove", { reader, lpaths }),
+  wirelessCancel: (id: string) => invoke<WirelessView>("wireless_cancel", { id }),
   koreaderStatus: (folder: string | null = null) => invoke<KoreaderView>("koreader_status", { folder }),
   koreaderPreview: (folder: string | null, source: string) => invoke<KoreaderPreview>("koreader_preview", { folder, source }),
   koreaderInstall: (folder: string | null, source: string) => invoke<KoreaderView>("koreader_install", { folder, source }),
