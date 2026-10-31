@@ -126,6 +126,24 @@ pub fn backup(root: &Path, into: &Path, device: &str, when: &str) -> Result<Back
                 copy.tree(&dir.join(f), 0);
             }
         }
+        // Added plugins and patches; KOReader's own plugins come with KOReader (plugins
+        // design §4).
+        for e in std::fs::read_dir(dir.join("plugins"))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if let Some(name) = n.strip_suffix(".koplugin")
+                && e.path().is_dir()
+                && !crate::koreader_plugins::is_builtin(name)
+            {
+                copy.tree(&e.path(), 0);
+            }
+        }
+        if dir.join("patches").is_dir() {
+            copy.tree(&dir.join("patches"), 0);
+        }
     }
     let mut files = copy.files;
     files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -371,6 +389,79 @@ fn restore_settings(dir: &Path, manifest: &Manifest, target: &Path, force: bool)
             match write_atomic(&dir.join(&path), &dest, f.modified) {
                 Ok(_) => item.outcome = Outcome::Restored,
                 Err(e) => item.error = Some(e),
+            }
+        }
+        out.push(item);
+    }
+    out.extend(restore_plugins(
+        dir,
+        manifest,
+        from,
+        to.copied(),
+        target,
+        force,
+    ));
+    out
+}
+
+/// The backup's added plugins and patches back into KOReader's folder, one item per plugin
+/// folder or patch file: kept when the target's copy is newer, unless `force`.
+fn restore_plugins(
+    dir: &Path,
+    manifest: &Manifest,
+    from: &str,
+    to: Option<&str>,
+    target: &Path,
+    force: bool,
+) -> Vec<Item> {
+    let mut groups: std::collections::BTreeMap<String, Vec<&File>> = Default::default();
+    for f in &manifest.files {
+        let Some(rest) = f.path.strip_prefix(&format!("{from}/")) else {
+            continue;
+        };
+        let parts: Vec<&str> = rest.splitn(3, '/').collect();
+        let key = match parts.as_slice() {
+            ["plugins", p, _] if p.ends_with(".koplugin") => format!("plugins/{p}"),
+            ["patches", p] => format!("patches/{p}"),
+            ["patches", p, _] => format!("patches/{p}"),
+            _ => continue,
+        };
+        groups.entry(key).or_default().push(f);
+    }
+    let mut out = Vec::new();
+    for (key, files) in groups {
+        let mut item = Item {
+            book: key.clone(),
+            to: None,
+            by: None,
+            outcome: Outcome::Failed,
+            error: None,
+        };
+        let Some(to) = to else {
+            item.error = Some("no KOReader folder on the target".into());
+            out.push(item);
+            continue;
+        };
+        item.to = Some(format!("{to}/{key}"));
+        let newer = files.iter().any(|f| {
+            let rel = f.path.strip_prefix(&format!("{from}/")).unwrap_or(&f.path);
+            modified(&target.join(to).join(rel)).is_some_and(|t| t > f.modified + SLACK)
+        });
+        if !safe(from) || files.iter().any(|f| !safe(&f.path)) {
+            item.error = Some("a path in the manifest leaves the folder".into());
+        } else if newer && !force {
+            item.outcome = Outcome::Kept;
+        } else {
+            item.outcome = Outcome::Restored;
+            for f in files {
+                let rel = f.path.strip_prefix(&format!("{from}/")).unwrap_or(&f.path);
+                if let Err(e) =
+                    write_atomic(&dir.join(&f.path), &target.join(to).join(rel), f.modified)
+                {
+                    item.outcome = Outcome::Failed;
+                    item.error = Some(e);
+                    break;
+                }
             }
         }
         out.push(item);
