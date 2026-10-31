@@ -1036,3 +1036,12 @@ input[type=checkbox] { padding: 0; }
 .picker-empty { padding: 8px; }
 .picker-foot { display: flex; align-items: center; gap: 8px; }
 .books-whole > .tray .send-foot .unavailable { flex-basis: 100%; }
+
+/* Settings → KOReader */
+.koreader-plugins { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.koreader-plugin { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
+.koreader-plugin:first-child { border-top: 0; }
+.koreader-plugin-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.koreader-plugin .paper-actions { margin-top: 2px; }
+.koreader-confirm { border-color: var(--accent); }
+.koreader-plugin .tag { margin-left: 6px; }

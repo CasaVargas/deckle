@@ -138,6 +138,21 @@ commands! { ctx;
     inspect_books { paths: Vec<String> } => Ok(commands::inspect_books(paths)),
     interests_accept { key: String, paper: Option<String> } => readership::interests_accept(key, paper),
     interests_dismiss { key: String, paper: Option<String> } => readership::interests_dismiss(key, paper),
+    koreader_install { folder: Option<String>, source: String } =>
+        crate::koreader::koreader_install(folder, source),
+    koreader_preview { folder: Option<String>, source: String } =>
+        crate::koreader::koreader_preview(folder, source),
+    koreader_remove { folder: Option<String>, name: String } =>
+        crate::koreader::koreader_remove(folder, name),
+    koreader_rollback { folder: Option<String>, name: String } =>
+        crate::koreader::koreader_rollback(folder, name),
+    koreader_set_enabled { folder: Option<String>, name: String, on: bool } =>
+        crate::koreader::koreader_set_enabled(folder, name, on),
+    koreader_set_patches { folder: Option<String>, on: bool } =>
+        crate::koreader::koreader_set_patches(folder, on),
+    koreader_status { folder: Option<String> } => Ok(crate::koreader::koreader_status(folder)),
+    koreader_update { folder: Option<String>, name: String } =>
+        crate::koreader::koreader_update(folder, name),
     library_catalog { device: Option<String> } => Ok(books::library_catalog(device)),
     library_covers { paths: Vec<String> } => Ok(books::library_covers(paths)),
     library_fix_details { dir: String, details: Details } => books::library_fix_details(dir, details),

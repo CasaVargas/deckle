@@ -3,7 +3,7 @@ import { PREVIEWER_REASON } from "./web/gates";
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 
 /** The Settings pages (Settings redesign §2). */
-export type SettingsPage = "overview" | "sending" | "library" | "books" | "reading" | "kindles" | "highlights" | "online" | "about";
+export type SettingsPage = "overview" | "sending" | "library" | "books" | "reading" | "kindles" | "koreader" | "highlights" | "online" | "about";
 
 export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "overview", title: "Overview" },
@@ -12,6 +12,7 @@ export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "books", title: "Books" },
   { id: "reading", title: "Reading aids" },
   { id: "kindles", title: "Kindles" },
+  { id: "koreader", title: "KOReader" },
   { id: "highlights", title: "Highlights & reading" },
   { id: "online", title: "Online & privacy" },
   { id: "about", title: "About" },
@@ -50,6 +51,8 @@ export const INDEX: Entry[] = [
   { label: "From Your Shelf", page: "highlights", words: "shelf reading daily highlight words" },
   { label: "Mode on this Kindle", page: "kindles", words: "kindle device mode ebok pdoc per kindle" },
   { label: "Keeps Deckle's X-Ray for real ASINs", page: "kindles", words: "asin xray real verified" },
+  { label: "KOReader plugins", page: "koreader", words: "koreader plugins install update remove kobo pocketbook boox patches store" },
+  { label: "The Deckle plugin", page: "koreader", words: "koreader deckle plugin fetch paper wifi automatic" },
   { label: "Updates", page: "about", words: "update version restart" },
   { label: "What Deckle sends online", page: "online", words: "online privacy network internet send" },
   { label: "Checking for updates", page: "online", words: "update github online privacy" },

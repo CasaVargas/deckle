@@ -69,6 +69,12 @@ pub const SOURCES: &str = "deckle-plugins.json";
 /// Plugin changes waiting for the Deckle plugin to apply, in KOReader's folder.
 pub const PENDING: &str = "deckle-pending.lua";
 
+/// KOReader's folder is a Kobo's: KOReader lives in `.adds/koreader` only there, so a copy of the
+/// drive is told apart by its layout, not its name.
+pub fn is_kobo(data: &Path) -> bool {
+    data.ends_with(".adds/koreader")
+}
+
 pub fn is_builtin(name: &str) -> bool {
     BUILTIN.contains(&name)
 }
