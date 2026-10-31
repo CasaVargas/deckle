@@ -199,6 +199,8 @@ pub struct PuzzleData {
 const KICKER: &str = "Answers in tomorrow's paper";
 const HINT: &str = "Highlight a clue and add your answer as a note; tomorrow's paper checks it.";
 const CREDIT: &str = "Words and definitions from Wiktionary and wordfreq (CC BY-SA 4.0)";
+const SEARCH_HOW: &str = "Find these words; they run across, down, or diagonally, never backwards.";
+const FROM_HEADLINES: &str = " (from yesterday's paper)";
 
 /// The Puzzle section for `date`: today's mini and ladder (made and kept in `store` when new),
 /// then yesterday's answers when there was a puzzle yesterday.
@@ -243,6 +245,33 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
             ..Default::default()
         });
     }
+    if let Some(ws) = &p.search {
+        let mut body = search_table(ws, "grid search", false);
+        body.push_str(&format!("<p class=\"small\">{}</p>\n", esc(SEARCH_HOW)));
+        let listed: Vec<String> = ws
+            .words
+            .iter()
+            .map(|h| {
+                let suffix = if h.theme { FROM_HEADLINES } else { "" };
+                format!(
+                    "<p class=\"clue\">{}{}</p>",
+                    h.word.to_uppercase(),
+                    esc(suffix)
+                )
+            })
+            .collect();
+        let (left, right) = listed.split_at(listed.len().div_ceil(2));
+        body.push_str(&format!(
+            "<table class=\"cols\"><tr><td>{}</td><td>{}</td></tr></table>\n",
+            left.concat(),
+            right.concat()
+        ));
+        articles.push(Article {
+            title: format!("Word search · No. {}", p.number),
+            body,
+            ..Default::default()
+        });
+    }
     if articles.is_empty() {
         let mut s = crate::sources::unavailable("Puzzle", "no puzzle could be made");
         s.key = section_key(SectionKind::Puzzle, None);
@@ -266,6 +295,14 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
                 ),
             };
             body.push_str(&format!("<p>{}</p>\n", esc(&line)));
+        }
+        if let Some(ws) = &y.puzzle.search {
+            body.push_str(&search_table(ws, "grid search small", true));
+            let list: Vec<String> = ws.words.iter().map(|h| h.word.to_uppercase()).collect();
+            body.push_str(&format!(
+                "<p>{}</p>\n",
+                esc(&format!("Word search: {}", list.join(", ")))
+            ));
         }
         if let Some(s) = &y.solve {
             body.push_str(&format!(
@@ -301,6 +338,31 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
                 .map(|y| y.puzzle.clone()),
         }),
     }
+}
+
+/// The word search as a table of letters; with `mask`, only the hidden words' letters, the
+/// other squares a middle dot (yesterday's answers).
+fn search_table(ws: &search::Search, class: &str, mask: bool) -> String {
+    let mut shown = [[!mask; search::SIZE]; search::SIZE];
+    if mask {
+        for h in &ws.words {
+            for (r, c) in ws.cells(h) {
+                shown[r][c] = true;
+            }
+        }
+    }
+    let mut out = format!("<table class=\"{class}\">\n");
+    for (r, row) in ws.rows.iter().enumerate() {
+        out.push_str("<tr>");
+        for (c, ch) in row.chars().enumerate() {
+            out.push_str("<td>");
+            out.push(if shown[r][c] { ch } else { '·' });
+            out.push_str("</td>");
+        }
+        out.push_str("</tr>\n");
+    }
+    out.push_str("</table>\n");
+    out
 }
 
 /// The grid as a table, black squares filled: the clue numbers small in the corner, or the

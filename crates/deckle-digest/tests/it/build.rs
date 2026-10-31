@@ -1207,6 +1207,7 @@ fn the_pdf_edition_reads_back_with_its_titles_and_outline() {
     // Ligatures and line breaks aside, the words come back.
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(flat.contains("Inside today"), "{flat}");
+    assert!(flat.contains("Word search · No."), "the word search prints");
     for s in &g.edition.sections {
         assert!(flat.contains(&s.title), "{} missing", s.title);
     }

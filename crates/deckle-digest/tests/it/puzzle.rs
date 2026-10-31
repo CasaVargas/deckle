@@ -332,7 +332,10 @@ fn no_yesterday_no_answers() {
     today(date() - Days::new(2), &cfg, &words, &mut store);
     let s = section(date(), &page_cfg(), &mut store, &words);
     let titles: Vec<&str> = s.articles.iter().map(|a| a.title.as_str()).collect();
-    assert_eq!(titles, ["The Mini · No. 2", "Word ladder"]);
+    assert_eq!(
+        titles,
+        ["The Mini · No. 2", "Word ladder", "Word search · No. 2"]
+    );
     assert!(xhtml(s).contains("Wiktionary and wordfreq"));
 }
 
@@ -825,5 +828,141 @@ fn existing_days_keep_their_mini_and_ladder() {
                 .map(String::from)
                 .to_vec()
         )
+    );
+}
+
+// --- the word search on the page (word search plan, Task 3) ---
+
+fn headline(word: &str, section: &str) -> ThemeWord {
+    ThemeWord {
+        word: word.into(),
+        headline: format!("A {word} story for the {section} page"),
+        section: section.into(),
+    }
+}
+
+/// Yesterday with five headline words in five sections: the mini takes two, the search the rest.
+fn store_for_search() -> Store {
+    store_with_yesterday(vec![
+        headline("court", "Local"),
+        headline("state", "The Nation"),
+        headline("music", "Entertainment"),
+        headline("leaf", "The World"),
+        headline("bird", "Technology"),
+    ])
+}
+
+fn article<'a>(s: &'a Section, title: &str) -> Option<&'a deckle_digest::Article> {
+    s.articles.iter().find(|a| a.title.starts_with(title))
+}
+
+#[test]
+fn the_search_prints_after_the_ladder() {
+    let mut store = store_for_search();
+    let s = section(date(), &page_cfg(), &mut store, Words::embedded());
+    let titles: Vec<&str> = s.articles.iter().map(|a| a.title.as_str()).collect();
+    let n = store.days[&date()].puzzle.number;
+    assert_eq!(
+        &titles[..3],
+        [
+            format!("The Mini · No. {n}").as_str(),
+            "Word ladder",
+            format!("Word search · No. {n}").as_str()
+        ]
+    );
+    let body = &s.articles[2].body;
+    assert!(body.contains("<table class=\"grid search\">"), "{body}");
+    assert_eq!(
+        body.matches("<tr>").count(),
+        9 + 1,
+        "9 grid rows and the word columns' row"
+    );
+    assert!(
+        body.contains("Find these words; they run across, down, or diagonally, never backwards.")
+    );
+    assert!(body.contains("<table class=\"cols\">"));
+    let search = store.days[&date()].puzzle.search.clone().unwrap();
+    for h in &search.words {
+        let shown = if h.theme {
+            format!("{} (from yesterday&#39;s paper)", h.word.to_uppercase())
+        } else {
+            h.word.to_uppercase()
+        };
+        assert!(body.contains(&shown), "{shown} missing: {body}");
+    }
+    assert!(
+        search.words.iter().any(|h| h.theme),
+        "a headline word is hidden"
+    );
+    assert!(!body.contains("class=\"note\""));
+}
+
+#[test]
+fn yesterdays_answers_show_the_search_masked() {
+    let words = Words::embedded();
+    let mut store = store_for_search();
+    let y = store.days[&yesterday()]
+        .puzzle
+        .search
+        .clone()
+        .expect("yesterday's search");
+    let s = section(date(), &page_cfg(), &mut store, words);
+    let body = &article(&s, "Yesterday's answers").unwrap().body;
+    let start = body
+        .find("<table class=\"grid search small\">")
+        .expect("masked grid");
+    let table = &body[start..start + body[start..].find("</table>").unwrap()];
+    let cells: Vec<&str> = table
+        .split("<td>")
+        .skip(1)
+        .map(|c| &c[..c.find("</td>").unwrap()])
+        .collect();
+    assert_eq!(cells.len(), 81);
+    let mut shown = [[false; 9]; 9];
+    for h in &y.words {
+        for (r, c) in y.cells(h) {
+            shown[r][c] = true;
+        }
+    }
+    for (i, cell) in cells.iter().enumerate() {
+        let (r, c) = (i / 9, i % 9);
+        let want = if shown[r][c] {
+            y.rows[r][c..c + 1].to_owned()
+        } else {
+            "·".to_owned()
+        };
+        assert_eq!(*cell, want, "square {r},{c}");
+    }
+    let list: Vec<String> = y.words.iter().map(|h| h.word.to_uppercase()).collect();
+    assert!(
+        body.contains(&format!("Word search: {}", list.join(", "))),
+        "{body}"
+    );
+}
+
+#[test]
+fn a_day_stored_before_the_search_prints_without_it() {
+    let words = Words::embedded();
+    let cfg = PuzzleConfig::default();
+    let mut store = store_for_search();
+    store.days.get_mut(&yesterday()).unwrap().puzzle.search = None;
+    let mut today_puzzle = make(date(), &cfg, words, &store);
+    today_puzzle.search = None;
+    store.days.insert(
+        date(),
+        Day {
+            puzzle: today_puzzle,
+            headlines: Vec::new(),
+            solve: None,
+        },
+    );
+    let s = section(date(), &page_cfg(), &mut store, words);
+    assert!(article(&s, "Word search").is_none());
+    assert!(article(&s, "The Mini").is_some() && article(&s, "Word ladder").is_some());
+    assert!(
+        !article(&s, "Yesterday's answers")
+            .unwrap()
+            .body
+            .contains("Word search:")
     );
 }
