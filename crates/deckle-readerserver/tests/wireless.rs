@@ -314,10 +314,10 @@ fn a_queued_book_lands_in_koreaders_inbox_and_the_reader_is_recorded() {
     assert_eq!(sent["title"], "Dune");
     assert_eq!(sent["authors"], json!(["Frank Herbert"]));
     assert_eq!(sent["tags"], json!(["Sci-Fi"]));
-    assert!(srv.store.jobs().is_empty());
     // The reader keeps the id Deckle gave its storage.
     let uuid = ko.store_uuid.clone().unwrap();
     wait_disconnected(&srv.store);
+    assert!(srv.store.jobs().is_empty());
     let r = srv.store.readers();
     let seen = &r.readers[&uuid];
     assert_eq!(seen.name, "KOReader (Kobo_frost)");
