@@ -381,11 +381,17 @@ pub fn http_fetch(url: &str) -> Result<Vec<u8>, String> {
         )
         .build()
         .new_agent();
-    let mut resp = agent
+    let mut req = agent
         .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|e| e.to_string())?;
+        .header("Accept", "application/vnd.github+json");
+    // A token only raises GitHub's rate limit; it's sent to GitHub's API and nowhere else.
+    if url.starts_with("https://api.github.com/")
+        && let Ok(t) = std::env::var("DECKLE_GITHUB_TOKEN")
+        && !t.trim().is_empty()
+    {
+        req = req.header("Authorization", format!("Bearer {}", t.trim()));
+    }
+    let mut resp = req.call().map_err(|e| e.to_string())?;
     resp.body_mut()
         .with_config()
         .limit(MAX_BYTES * 2)
@@ -412,7 +418,32 @@ pub fn prepare(data: &Path, from: &From, fetch: &mut Fetch<'_>) -> Result<Prepar
             (unzip(&bytes)?, hint, release)
         }
     };
-    let (name, files) = pick_plugin(files, hint.as_deref())?;
+    let source = Source {
+        from: from.label(),
+        release,
+        installed: now,
+    };
+    finish(data, files, hint.as_deref(), source)
+}
+
+/// A plugin from a zip already fetched (and checked) by the caller: the store's pinned releases.
+pub fn prepare_zip(
+    data: &Path,
+    bytes: &[u8],
+    hint: Option<&str>,
+    source: Source,
+) -> Result<Prepared, String> {
+    finish(data, unzip(bytes)?, hint, source)
+}
+
+/// The checks every install passes, then what it would replace.
+fn finish(
+    data: &Path,
+    files: Files,
+    hint: Option<&str>,
+    source: Source,
+) -> Result<Prepared, String> {
+    let (name, files) = pick_plugin(files, hint)?;
     if is_builtin(&name) {
         return Err(format!(
             "{name} is one of KOReader's built-in plugins; Deckle won't replace it"
@@ -431,11 +462,7 @@ pub fn prepare(data: &Path, from: &From, fetch: &mut Fetch<'_>) -> Result<Prepar
         fullname: meta.fullname.unwrap_or_else(|| name.clone()),
         version: meta.version,
         replaces,
-        source: Source {
-            from: from.label(),
-            release,
-            installed: now,
-        },
+        source,
         name,
         files,
     })

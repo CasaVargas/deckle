@@ -11,6 +11,7 @@ mod inspect;
 mod koreader;
 mod koreader_backup;
 mod koreader_plugins;
+mod koreader_store;
 mod matcher;
 mod metadata_fill;
 mod normalize;

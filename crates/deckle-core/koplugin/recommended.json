@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "updated": "2026-10-31",
+  "plugins": [
+    {
+      "repo": "omer-faruq/appstore.koplugin",
+      "name": "appstore",
+      "kind": "plugin",
+      "why": "Browse and install community plugins and patches on the reader itself.",
+      "license": "GPL-3.0",
+      "release": {
+        "tag": "v1.14.0",
+        "asset": "appstore.koplugin.zip",
+        "sha256": "52e802f2d18d1efc576aa489ded1781e2592ea82fa614cd4244632ce3140a548"
+      }
+    },
+    {
+      "repo": "AndyHazz/bookends.koplugin",
+      "name": "bookends",
+      "kind": "plugin",
+      "why": "Configurable headers and footers: time, battery, chapter, pages left, with your own layout.",
+      "license": "AGPL-3.0",
+      "release": {
+        "tag": "v5.31.0",
+        "asset": "bookends.koplugin-v5.31.0.zip",
+        "sha256": "dee07339e6b9c4745aed5947a1a08b3904b2fe61a4153cee897214a84a1cf47f"
+      }
+    },
+    {
+      "repo": "peterboda236/readinginsights.koplugin",
+      "name": "readinginsights",
+      "kind": "plugin",
+      "why": "A full-screen overview of your reading history, from KOReader's own statistics.",
+      "license": "GPL-3.0",
+      "release": {
+        "tag": "v8.7.9",
+        "asset": "readinginsights.koplugin.zip",
+        "sha256": "63adc33b15ab36cddf89d74cad38630ddb6364a523e97c9c5b2947371a42064b"
+      }
+    },
+    {
+      "repo": "greywolf1499/opds_plus.koplugin",
+      "name": "opds_plus",
+      "kind": "plugin",
+      "why": "A nicer OPDS browser, with covers in a grid: good with Deckle's own catalog.",
+      "license": "AGPL-3.0",
+      "release": {
+        "tag": "v1.2.0",
+        "asset": "opds_plus.koplugin.zip",
+        "sha256": "1f5a658752bd8cf663041bceb8ed6e1d6773eee811eb4d63627b98fc5a3d271c"
+      }
+    }
+  ]
+}
