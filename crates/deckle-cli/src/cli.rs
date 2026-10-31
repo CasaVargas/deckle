@@ -263,6 +263,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ReaderServerCommand,
     },
+    /// Reading data written back into your calibre library, through calibredb.
+    Calibre {
+        #[command(subcommand)]
+        action: CalibreCommand,
+    },
     /// calibre's wireless connection, served by the watcher: KOReader takes books over Wi-Fi.
     Wireless {
         #[command(subcommand)]
@@ -880,6 +885,42 @@ pub enum ReaderServerCommand {
     },
     /// Whether it's on, and the catalog and sync URLs to type into KOReader.
     Status,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum CalibreCommand {
+    /// The library, calibredb, the columns chosen, and the next batch.
+    Status,
+    /// Write reading data when the watcher runs (once a minute at most).
+    On,
+    /// Stop writing.
+    Off,
+    /// Choose the column for progress, read, last_read or rating (`none` for none).
+    Map { field: String, column: String },
+    /// Write through calibre's content server (`http://host:8080/#library_id`), so calibre
+    /// can stay open; `none` writes to the library folder.
+    Server {
+        url: Option<String>,
+        #[arg(long)]
+        username: Option<String>,
+    },
+    /// The content server's password, kept in the system keychain.
+    Password {
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// What the next batch would write, what's left alone, and what needs confirming.
+    Preview,
+    /// Write the next batch now.
+    Write,
+    /// A book matched only by title and author is the same book (a number from the preview,
+    /// or `all`).
+    Confirm { n: String },
+    /// Add #deckle_progress, #deckle_read, #deckle_last_read and #deckle_rating, and use them.
+    /// calibre must be closed.
+    CreateColumns,
+    /// Where calibredb is, when it isn't found (`none` to look again).
+    Calibredb { path: Option<std::path::PathBuf> },
 }
 
 #[derive(Subcommand, Debug)]

@@ -54,6 +54,9 @@ pub struct Read {
     /// Where KOReader is in each book beside its sidecar, for readership (KOReader hub design
     /// §C). A sidecar kept by hash doesn't say which book it is: left out.
     pub positions: Vec<Position>,
+    /// Every book with a sidecar that says how far, whether finished, or the stars (calibre
+    /// bridge design §5.1), most recently read first.
+    pub records: Vec<crate::reading::Record>,
 }
 
 /// Where KOReader is in one book.
@@ -402,6 +405,23 @@ pub fn read(root: &Path) -> Read {
                 when: crate::devices::iso(modified),
             });
         }
+        let finished = parsed.status.as_deref() == Some("complete");
+        if parsed.percent.is_some() || finished || parsed.rating.is_some() {
+            let path = (!s.book.starts_with("koreader:")).then(|| s.book.clone());
+            out.records.push(crate::reading::Record {
+                title: title.clone(),
+                authors: parsed.authors.clone(),
+                calibre_id: path
+                    .as_deref()
+                    .and_then(|p| crate::reading::calibre_id_of(root, p)),
+                path,
+                percent: parsed.percent.map(|p| (p * 100.0).clamp(0.0, 100.0)),
+                finished,
+                last_read: Some(crate::devices::iso(modified)),
+                rating: parsed.rating,
+                from: "koreader".into(),
+            });
+        }
         if parsed.in_progress() {
             books.push((
                 modified,
@@ -420,6 +440,7 @@ pub fn read(root: &Path) -> Read {
     out.clippings = (!clippings.is_empty()).then(|| clippings.into_bytes());
     books.sort_by_key(|b| std::cmp::Reverse(b.0));
     out.books = books.into_iter().map(|(_, b)| b).collect();
+    out.records.sort_by(|a, b| b.last_read.cmp(&a.last_read));
     out
 }
 
@@ -450,7 +471,13 @@ pub fn merge(kobo: kobo::Read, ko: Read) -> kobo::Read {
         }
     }
     books.sort_by(|a, b| b.last_read.cmp(&a.last_read));
-    kobo::Read { books, clippings }
+    let mut records = kobo.records;
+    records.extend(ko.records);
+    kobo::Read {
+        books,
+        clippings,
+        records,
+    }
 }
 
 /// What one sidecar says.
@@ -464,6 +491,8 @@ pub struct Parsed {
     pub status: Option<String>,
     /// `last_xpointer`: where the reader is, `/body/DocFragment[N]/…` in an EPUB.
     pub xpointer: Option<String>,
+    /// `summary.rating`: 1–5 stars.
+    pub rating: Option<u8>,
     pub highlights: Vec<Highlight>,
 }
 
@@ -505,6 +534,12 @@ pub fn parse(text: &str) -> Result<Parsed, String> {
         percent: root.get("percent_finished").and_then(Value::as_f64),
         status: s(root.get("summary").and_then(|v| v.get("status"))),
         xpointer: s(root.get("last_xpointer")).filter(|x| !x.is_empty()),
+        rating: root
+            .get("summary")
+            .and_then(|v| v.get("rating"))
+            .and_then(Value::as_f64)
+            .filter(|r| (1.0..=5.0).contains(r))
+            .map(|r| r.round() as u8),
         highlights: Vec::new(),
     };
     let page_of = |v: Option<&Value>| -> Option<String> {

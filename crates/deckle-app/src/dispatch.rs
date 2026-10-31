@@ -78,6 +78,13 @@ commands! { ctx;
     book_preflight { path: String, cover: Option<CoverChoice> } =>
         books::book_preflight(&ctx.state, path, cover),
     bookmarklet {} => daily::bookmarklet(),
+    calibre_create_columns {} => crate::calibre::calibre_create_columns(),
+    calibre_set_password { password: String } => crate::calibre::calibre_set_password(password),
+    calibre_writeback_confirm { keys: Vec<String> } => crate::calibre::calibre_writeback_confirm(keys),
+    calibre_writeback_set { patch: crate::calibre::WritebackPatch } =>
+        crate::calibre::calibre_writeback_set(patch),
+    calibre_writeback_status {} => Ok(crate::calibre::calibre_writeback_status()),
+    calibre_writeback_write {} => crate::calibre::calibre_writeback_write(),
     capabilities {} => Ok(capabilities::capabilities(ctx.web, &ctx.state)),
     cookbook_add { target: String, chapter: Option<String>, note: Option<String>, picture: Option<Picture> } =>
         cookbook::cookbook_add(target, chapter, note, picture),

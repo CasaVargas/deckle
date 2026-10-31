@@ -53,7 +53,7 @@ export default function Originals() {
         note={
           status.find_in_calibre
             ? status.calibre
-              ? `${status.calibre} · read only: Deckle never changes it`
+              ? `${status.calibre} · read only: finding originals never changes it`
               : "No calibre library found. Choose its folder."
             : "Books calibre sent to your Kindle can be upgraded from calibre's EPUBs"
         }

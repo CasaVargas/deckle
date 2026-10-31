@@ -2,6 +2,7 @@
 import { useCapabilities } from "../capabilities";
 import { api } from "../api";
 import type { LibraryStatus } from "../types";
+import CalibreWriteback from "./CalibreWriteback";
 import Originals from "./Originals";
 import { Row, Switch } from "./Row";
 
@@ -52,6 +53,14 @@ export default function LibraryPage({ library, onLibrary, onPickLibrary }: Props
         <h3 className="set-card-title">Originals</h3>
         <p className="muted">Where Deckle looks for the originals of your Kindle's books, so Upgrades can rebuild them.</p>
         <Originals />
+      </section>
+      <section className="set-card set-pad" aria-label="Reading data into calibre">
+        <h3 className="set-card-title">Reading data into calibre</h3>
+        <p className="muted">
+          How far you got, whether you finished, when you last read and your stars, from your Kobo and KOReader readers into calibre columns you choose.
+          Deckle writes only through calibre's own calibredb, and never over a value you set in calibre.
+        </p>
+        <CalibreWriteback />
       </section>
     </div>
   );

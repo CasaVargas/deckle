@@ -373,6 +373,7 @@ pub fn run_reader(
         };
         match read {
             Ok(r) => {
+                report.reading = r.records;
                 // The shelf prints a highlight too, so it brings the clippings, as on a Kindle.
                 report.clippings = r.clippings;
                 // A PocketBook without KOReader has nothing to show: no shelf for it.

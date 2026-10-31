@@ -966,6 +966,54 @@ The reMarkable side is built from how its USB web interface is known to work (`G
 checked on a tablet yet (`docs/devices.md`). The page sizes for each screen are checked there
 too.
 
+## Reading data into calibre
+
+Deckle can write what your readers say about each book into your calibre library (calibre bridge
+design, `docs/superpowers/specs/2026-10-31-calibre-bridge-design.md` §5): how far you got,
+whether you finished, when you last read it, and KOReader's stars. It goes into calibre columns
+you choose, only through calibre's own `calibredb`, and never over a value you set in calibre.
+It's off until you turn it on.
+
+In the app: Settings → Library → **Reading data into calibre**.
+
+1. Choose a column for each piece you want: an integer or decimal column for progress, a
+   yes/no column for read, a date column for last read, a rating (or integer) column for the
+   stars. No columns that fit? **Create the usual ones** adds `#deckle_progress`, `#deckle_read`,
+   `#deckle_last_read` and `#deckle_rating`. That changes the library, so close calibre first.
+2. Read **Next batch**: every value it would write, before and after. Books matched only by
+   title and author wait for a **Yes**, once. Values you set in calibre are listed as left alone.
+3. Turn it on. The watcher writes once a minute at most, after a reader has been read.
+
+```sh
+deckle calibre status            # the library, calibredb, the columns, the next batch
+deckle calibre create-columns    # calibre closed
+deckle calibre map progress deckle_progress    # or read, last_read, rating; `none` to stop
+deckle calibre preview           # the next batch; `deckle calibre confirm 1` (or all) for matches
+deckle calibre on                # the watcher writes; `deckle calibre write` writes now
+```
+
+- **Where it comes from:** a Kobo's database and KOReader's sidecars, read as the reader is
+  plugged in, and KOReader's progress sync to Deckle. These are kept in `reading-log.json`
+  beside `library.json`. A book Deckle can find calibre's id in (any book calibre put on the
+  reader) is matched exactly. Any other book is matched by title and author, and asked about
+  once.
+- **Each column holds:**
+  - **progress:** only goes forward, unless you start a book again (it was marked read, and now
+    the reader says it isn't);
+  - **read:** finished or not;
+  - **last read:** when you last opened it;
+  - **stars:** KOReader's own (a Kobo doesn't share its stars).
+- **calibre open:** calibre won't let another program change a library it has open, so a batch
+  waits and says so. Either close calibre, or turn on calibre's content server and give Deckle
+  its address with the library's id (`http://localhost:8080/#Calibre_Library`, or
+  `deckle calibre server <url> --username <name>`). A password goes in the system keychain
+  (`deckle calibre password`) or `DECKLE_CALIBRE_PASSWORD`.
+- **What it remembers:** what it last wrote, in `calibre-writeback.json` beside `library.json`.
+  That's how it tells its own values from yours.
+- **Needs calibre itself:** `calibredb` is found on `PATH` or where calibre installs. The Docker
+  image doesn't include calibre.
+- **Highlights** come next (calibre bridge design phase 4).
+
 ## The edition bundle, for reader apps
 
 `format = "bundle"` in an `[[export]]` block (or **As: Bundle** on the Daily tab) puts each

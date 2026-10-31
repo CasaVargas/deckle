@@ -169,7 +169,7 @@ fn isbn_digits(s: &str) -> String {
 
 /// `metadata.db` as a read-only SQLite URI: `immutable=1` takes no locks, so a running calibre
 /// is never disturbed and nothing is ever written.
-fn calibre_uri(db: &Path) -> String {
+pub(crate) fn calibre_uri(db: &Path) -> String {
     let mut path = db.to_string_lossy().replace('\\', "/");
     if !path.starts_with('/') {
         path.insert(0, '/');

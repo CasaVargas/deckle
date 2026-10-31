@@ -172,6 +172,7 @@ fn merging_keeps_a_book_once_from_the_later_read() {
             "2026-10-01T00:00:00Z",
         )],
         clippings: Some(b"a".to_vec()),
+        records: Vec::new(),
     };
     let ko = deckle_core::koreader::Read {
         books: vec![
@@ -181,6 +182,7 @@ fn merging_keeps_a_book_once_from_the_later_read() {
         clippings: Some(b"b".to_vec()),
         warnings: Vec::new(),
         positions: Vec::new(),
+        records: Vec::new(),
     };
     let m = merge(kobo, ko);
     assert_eq!(m.clippings.as_deref(), Some(&b"ab"[..]));
@@ -215,4 +217,55 @@ fn a_read_gives_each_books_position_but_not_one_kept_by_hash() {
     );
     assert_eq!(p.percent, Some(0.4215));
     assert!(p.when.ends_with('Z'));
+}
+
+/// An EPUB whose OPF carries calibre's id.
+fn calibre_epub(path: &Path, uuid: &str) {
+    use std::io::Write;
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let o = zip::write::SimpleFileOptions::default();
+    z.start_file("mimetype", o).unwrap();
+    z.write_all(b"application/epub+zip").unwrap();
+    z.start_file("META-INF/container.xml", o).unwrap();
+    z.write_all(br#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="c.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#).unwrap();
+    z.start_file("c.opf", o).unwrap();
+    write!(z, r#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" xmlns:opf="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="i"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>T</dc:title><dc:language>en</dc:language><dc:identifier id="i">x</dc:identifier><dc:identifier opf:scheme="calibre">{uuid}</dc:identifier></metadata><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/></spine></package>"#).unwrap();
+    z.start_file("a.xhtml", o).unwrap();
+    z.write_all(b"<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>x</p></body></html>")
+        .unwrap();
+    z.finish().unwrap();
+}
+
+#[test]
+fn a_read_records_each_book_with_its_calibre_id_finished_and_stars() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    calibre_epub(&root.join("Books/Two Cities.epub"), "c-two-cities");
+    let finished = OLD.replace(
+        r#"["summary"] = { ["status"] = "complete" },"#,
+        r#"["summary"] = { ["status"] = "complete", ["rating"] = 4 },"#,
+    );
+    put(
+        &root.join("Books/Two Cities.sdr/metadata.epub.lua"),
+        &finished,
+    );
+    put(&root.join("Books/Walden.sdr/metadata.epub.lua"), NEW);
+    let r = deckle_core::koreader::read(root);
+    assert_eq!(r.records.len(), 2);
+    let two = r
+        .records
+        .iter()
+        .find(|x| x.title == "A Tale of Two Cities")
+        .unwrap();
+    assert_eq!(two.calibre_id.as_deref(), Some("c-two-cities"));
+    assert_eq!(two.path.as_deref(), Some("Books/Two Cities.epub"));
+    assert!(two.finished);
+    assert_eq!((two.percent, two.rating), (Some(100.0), Some(4)));
+    assert_eq!(two.from, "koreader");
+    let walden = r.records.iter().find(|x| x.title == "Walden").unwrap();
+    assert!(!walden.finished && walden.calibre_id.is_none() && walden.rating.is_none());
+    assert!(walden.percent.unwrap() > 0.0);
+    // A finished book still isn't a book in progress.
+    assert!(r.books.iter().all(|b| b.title != "A Tale of Two Cities"));
 }
