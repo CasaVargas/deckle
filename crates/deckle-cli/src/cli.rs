@@ -488,6 +488,39 @@ pub enum KoreaderCommand {
         #[arg(long)]
         force: bool,
     },
+    /// KOReader's plugins on the reader: list, install, update, remove, roll back.
+    Plugins {
+        /// `device` for the connected reader, or a folder (a copy of a reader's drive).
+        #[arg(long, default_value = "device", global = true)]
+        from: String,
+        #[command(subcommand)]
+        action: PluginsCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PluginsCommand {
+    /// Every plugin (built in and added, on or off) and patch.
+    List,
+    /// Install a plugin from a .zip, a folder, or a GitHub repository (owner/repo or its URL):
+    /// its newest release, else its default branch.
+    Install {
+        source: String,
+        /// Don't ask before writing to the reader.
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Install a plugin again from where it came from (or from SOURCE).
+    Update {
+        name: String,
+        source: Option<String>,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Remove an added plugin (kept in deckle-backup/plugins, so `rollback` brings it back).
+    Remove { name: String },
+    /// Put back the copy of a plugin that the last install, update or remove kept.
+    Rollback { name: String },
 }
 
 #[derive(Subcommand, Debug)]
