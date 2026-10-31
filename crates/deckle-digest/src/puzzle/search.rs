@@ -262,6 +262,10 @@ fn attempt(
             }
         }
     }
+    // the filler can spell a hidden word a second time: the reader would circle the wrong copy
+    if hidden.iter().any(|h| reads(&grid, &h.word) > 1) {
+        return None;
+    }
     hidden.sort_by(|a, b| a.word.cmp(&b.word));
     Some(Search {
         rows: grid
@@ -270,6 +274,22 @@ fn attempt(
             .collect(),
         words: hidden,
     })
+}
+
+/// How many times `word` reads forward in the grid, along any of the four ways.
+fn reads(grid: &Grid, word: &str) -> usize {
+    (0..SIZE)
+        .flat_map(|r| (0..SIZE).flat_map(move |c| Way::ALL.map(|w| (r, c, w))))
+        .filter(|&(r, c, way)| {
+            let (dr, dc) = way.step();
+            word.bytes().enumerate().all(|(k, b)| {
+                let (rr, cc) = (r as isize + dr * k as isize, c as isize + dc * k as isize);
+                (0..SIZE as isize).contains(&rr)
+                    && (0..SIZE as isize).contains(&cc)
+                    && grid[rr as usize][cc as usize] == b
+            })
+        })
+        .count()
 }
 
 /// Whether `word` can go from `(r, c)` along `way`: inside the grid, on empty squares or the
@@ -384,6 +404,35 @@ mod tests {
                     got.as_deref(),
                     Some(h.word.to_uppercase().as_str()),
                     "{h:?}"
+                );
+            }
+        }
+    }
+
+    /// Filler letters can spell a hidden word again; the reader would circle the wrong copy.
+    /// The first such grid in the seeded days is past day 680, so this walks 800.
+    #[test]
+    fn each_hidden_word_reads_once() {
+        let words = Words::embedded();
+        for d in 0..800 {
+            let s = fill(words, &[], &HashSet::new(), &mut day_rng(d), SEARCH_CAP).expect("fills");
+            for h in &s.words {
+                let want = h.word.to_uppercase();
+                let mut found = 0;
+                for r in 0..SIZE as isize {
+                    for c in 0..SIZE as isize {
+                        for way in Way::ALL {
+                            if read(&s.rows, r, c, way.step(), want.len()).as_deref() == Some(&want)
+                            {
+                                found += 1;
+                            }
+                        }
+                    }
+                }
+                assert_eq!(
+                    found, 1,
+                    "day {d}: {want} reads {found} times in {:?}",
+                    s.rows
                 );
             }
         }

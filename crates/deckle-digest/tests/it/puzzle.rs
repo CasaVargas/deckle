@@ -966,3 +966,28 @@ fn a_day_stored_before_the_search_prints_without_it() {
             .contains("Word search:")
     );
 }
+
+/// A stored search of another size (an 8×8 after a size change, or a hand-edited
+/// `puzzles.json`) prints as it is; it never stops the paper.
+#[test]
+fn a_stored_search_of_another_size_still_prints() {
+    use deckle_digest::puzzle::search::{Hidden, Search, Way};
+    let words = Words::embedded();
+    let mut store = store_for_search();
+    store.days.get_mut(&yesterday()).unwrap().puzzle.search = Some(Search {
+        rows: (0..8).map(|_| "ABCDEFGH".to_owned()).collect(),
+        words: vec![Hidden {
+            word: "efgh".into(),
+            row: 7,
+            col: 6,
+            way: Way::Across,
+            theme: false,
+        }],
+    });
+    let s = section(date(), &page_cfg(), &mut store, words);
+    let body = &article(&s, "Yesterday's answers").unwrap().body;
+    let start = body.find("<table class=\"grid search small\">").unwrap();
+    let table = &body[start..start + body[start..].find("</table>").unwrap()];
+    assert_eq!(table.matches("<tr>").count(), 8);
+    assert!(body.contains("Word search: EFGH"));
+}

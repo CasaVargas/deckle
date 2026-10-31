@@ -343,11 +343,18 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
 /// The word search as a table of letters; with `mask`, only the hidden words' letters, the
 /// other squares a middle dot (yesterday's answers).
 fn search_table(ws: &search::Search, class: &str, mask: bool) -> String {
-    let mut shown = [[!mask; search::SIZE]; search::SIZE];
+    // sized from the stored rows, not `SIZE`: a day kept from another size never stops the paper
+    let mut shown: Vec<Vec<bool>> = ws
+        .rows
+        .iter()
+        .map(|r| vec![!mask; r.chars().count()])
+        .collect();
     if mask {
         for h in &ws.words {
             for (r, c) in ws.cells(h) {
-                shown[r][c] = true;
+                if let Some(cell) = shown.get_mut(r).and_then(|row| row.get_mut(c)) {
+                    *cell = true;
+                }
             }
         }
     }
@@ -355,8 +362,16 @@ fn search_table(ws: &search::Search, class: &str, mask: bool) -> String {
     for (r, row) in ws.rows.iter().enumerate() {
         out.push_str("<tr>");
         for (c, ch) in row.chars().enumerate() {
+            let letter = ch.to_string();
             out.push_str("<td>");
-            out.push(if shown[r][c] { ch } else { '·' });
+            out.push_str(
+                if shown[r][c] {
+                    esc(&letter)
+                } else {
+                    "·".to_owned()
+                }
+                .as_str(),
+            );
             out.push_str("</td>");
         }
         out.push_str("</tr>\n");
