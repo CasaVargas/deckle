@@ -749,7 +749,7 @@ deckle reader-server status      # on or off, and the URLs to type into KOReader
 ## KOReader plugins
 
 With a Kobo, PocketBook or jailbroken Kindle plugged in (or `--from <folder>`, a copy of its
-drive), Deckle manages KOReader's plugins
+drive), Deckle manages KOReader's plugins, in **Settings → KOReader** or from the command line
 (`docs/superpowers/specs/2026-10-31-koreader-plugins-design.md`):
 
 ```sh

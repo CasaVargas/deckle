@@ -327,3 +327,23 @@ On a jailbroken Kindle, the plugin list and an install.
 - **Checked with the harness:** the real `main.lua` applied a pending file (Zen on, App Store off,
   two changes, restart asked, file gone), and set progress sync on a stand-in kosync, leaving
   auto-sync off.
+
+## Build notes (phase 4)
+
+- **Where the panel lives:** Settings → **KOReader**, not the Kindle tab: the app has no device
+  view for a Kobo or a PocketBook to hang it on. The page finds the plugged-in reader (a Kindle on
+  USB storage, else a Kobo or a PocketBook) or works on a folder chosen with **Use a folder…**.
+- **Cards:** Reader; the Deckle plugin (Install or Update to this Deckle's version, or why it can't
+  be installed yet); Plugins (added first, then built-in, each with its state, a switch, and for
+  added ones Update, Remove and Undo last change); Add a plugin (`owner/repo` or a GitHub link, a
+  .zip, a folder), which shows what it would install and asks first; Patches.
+- **Switches** are off until the Deckle plugin is on the reader, with the reason shown. A waiting
+  change shows as "On/Off after a restart" and the switch shows what it will be.
+- **Commands:** `koreader_status`, `koreader_preview` (fetches and checks, writes nothing),
+  `koreader_install` (fetches again, then writes), `koreader_update`, `koreader_remove`,
+  `koreader_rollback`, `koreader_set_enabled`, `koreader_set_patches`, each answering with the new
+  page. On the desktop, the ones that may download run off the main thread.
+- **A Kobo is told by its layout:** KOReader in `.adds/koreader` means a Kobo, so the Deckle plugin
+  gets KEPUB from a copied drive too (`koreader_plugins::is_kobo`), in the app and the CLI.
+- **The reader-server check** the plugin install needs moved to `deckle_readerserver::plugin_settings`,
+  shared by the CLI and the app.
