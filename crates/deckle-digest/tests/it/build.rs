@@ -1348,7 +1348,39 @@ fn the_bundle_validates_against_its_schema_and_holds_the_whole_edition() {
     assert!(errors.is_empty(), "{errors:#?}");
 
     assert_eq!(v["format"], "deckle-edition");
-    assert_eq!(v["version"], "1.3");
+    assert_eq!(v["version"], "1.3", "search is additive: no version change");
+    let puzzle = v["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["kind"] == "puzzle")
+        .expect("a puzzle section")["puzzle"]
+        .clone();
+    let search = &puzzle["search"];
+    assert_eq!(search["size"], 9);
+    let grid: Vec<&str> = search["grid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap())
+        .collect();
+    assert_eq!(grid.len(), 9);
+    assert!(grid.iter().all(|r| r.len() == 9));
+    for w in search["words"].as_array().unwrap() {
+        let word = w["word"].as_str().unwrap();
+        let (dr, dc) = match w["dir"].as_str().unwrap() {
+            "across" => (0, 1),
+            "down" => (1, 0),
+            "down-right" => (1, 1),
+            "up-right" => (-1, 1),
+            other => panic!("dir {other}"),
+        };
+        let (r, c) = (w["row"].as_i64().unwrap(), w["col"].as_i64().unwrap());
+        let read: String = (0..word.len() as i64)
+            .map(|k| grid[(r + dr * k) as usize].as_bytes()[(c + dc * k) as usize] as char)
+            .collect();
+        assert_eq!(read, word);
+    }
     assert_eq!(v["edition"]["date"], "2026-10-20");
     let sections = v["sections"].as_array().unwrap();
     // 1.2: every story says how it was fetched; nothing here is subscribed or walled.
@@ -2083,5 +2115,50 @@ fn a_group_without_an_account_prints_as_a_stranger_with_a_note() {
         1,
         "{:?}",
         g.notes
+    );
+}
+
+/// The first paper after the word search ships: yesterday's stored puzzle has none.
+#[test]
+fn a_bundle_whose_yesterday_had_no_search_validates() {
+    use deckle_digest::puzzle::store::{Day, Store};
+    use deckle_digest::puzzle::{make, words::Words};
+    let out = tempfile::tempdir().unwrap();
+    let mut c = config();
+    bundle_export(&mut c, out.path(), false);
+    let yesterday = date().pred_opt().unwrap();
+    let mut store = Store::default();
+    let mut puzzle = make(yesterday, &c.puzzle, Words::embedded(), &store);
+    puzzle.search = None;
+    store.days.insert(
+        yesterday,
+        Day {
+            puzzle,
+            headlines: Vec::new(),
+            solve: None,
+        },
+    );
+    store.save(&c.puzzle_store()).unwrap();
+    let r = build(&c, date(), now(), out.path(), &fake).unwrap();
+    let v = edition_json(r.bundle(false).unwrap());
+    let schema: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../docs/formats/edition-bundle.schema.json"
+    ))
+    .unwrap();
+    let validator = jsonschema::validator_for(&schema).unwrap();
+    let errors: Vec<String> = validator.iter_errors(&v).map(|e| e.to_string()).collect();
+    assert!(errors.is_empty(), "{errors:#?}");
+    let puzzle = &v["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["kind"] == "puzzle")
+        .unwrap()["puzzle"];
+    assert!(puzzle["search"].is_object(), "today has one");
+    assert!(puzzle["yesterday"].is_object());
+    assert!(
+        puzzle["yesterday"]["search"].is_null(),
+        "{}",
+        puzzle["yesterday"]
     );
 }

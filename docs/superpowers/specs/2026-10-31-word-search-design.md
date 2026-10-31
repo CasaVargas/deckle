@@ -86,9 +86,10 @@ playable at a glance on e-ink.
   and nothing relies on colour. It must read on a Scribe and a Paperwhite at default font
   size.
 - **Bundle:** `puzzle.search` is optional and additive. The schema and §6.6 are updated, and a
-  reader that doesn't know `search` ignores it. The version is 1.5 for every bundle that
-  carries `search`. Today a bundle is 1.4 only when it comes fresh from the press and 1.3
-  otherwise (`bundle.rs:24, 695`), so the builder picks how the two paths become one rule.
+  reader that doesn't know `search` ignores it. **The version doesn't change** *(builder's
+  ruling, 2026-10-31)*. The schema ties 1.4 and later to the press's edition identity, and the
+  press accepts only exactly 1.4 (`press/publish.rs:118`), so a 1.5 would break both. A reader
+  finds the word search by the key.
 - **Email:** today's mailer sends one EPUB per email (content type fixed in `mail.rs:318`,
   body text about the paper). PR 2 makes the attachment type and body a parameter. The puzzle
   PDF is a second email to the same Kindle address, sent only when it's on.
