@@ -217,7 +217,7 @@ pub fn layout_from_kfx(
     let mut rest = firsts[1..].iter();
     for (key, name) in sections {
         let run = rest
-            .find(|r| words(&r.text) == words(name))
+            .find(|r| opens_section(&r.text, name))
             .ok_or_else(|| format!("section \"{name}\" not found in the edition"))?;
         out.push(SectionStart {
             key: key.clone(),
@@ -235,6 +235,17 @@ pub fn layout_from_kfx(
         sections: out,
         epub: None,
     })
+}
+
+/// Whether a section's first run is the one called `name`: its heading, or, since sections
+/// print a folio above it (print layout design §5.2), `A2 · Name · Paper · Date`.
+fn opens_section(text: &str, name: &str) -> bool {
+    let name = words(name);
+    if words(text) == name {
+        return true;
+    }
+    let parts: Vec<&str> = text.split('·').collect();
+    parts.len() >= 3 && words(parts[1]) == name
 }
 
 /// `s` with runs of whitespace as single spaces: the converter may collapse or keep them.
@@ -308,4 +319,32 @@ pub fn story_at(layout: &Layout, position: i64) -> Option<(&SectionStart, &Story
     let section = section_at(layout, position)?;
     let story = section.stories.iter().rev().find(|s| s.start <= position)?;
     Some((section, story))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opens_section;
+
+    #[test]
+    fn a_section_opens_with_its_heading_or_its_folio() {
+        assert!(opens_section("Weather & Almanac", "Weather & Almanac"));
+        assert!(opens_section("Weather  &\nAlmanac", "Weather & Almanac"));
+        assert!(opens_section(
+            "A2 · Weather & Almanac · The Deckle Daily · Fri, Oct 30",
+            "Weather & Almanac"
+        ));
+        assert!(!opens_section(
+            "A2 · Local · The Deckle Daily · Fri, Oct 30",
+            "Weather & Almanac"
+        ));
+        // the paper's own name in a folio isn't a section
+        assert!(!opens_section(
+            "A2 · Local · The Deckle Daily · Fri, Oct 30",
+            "The Deckle Daily"
+        ));
+        assert!(!opens_section(
+            "Weather & Almanac today",
+            "Weather & Almanac"
+        ));
+    }
 }
