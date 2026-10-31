@@ -990,57 +990,66 @@ fn koreader_root(arg: &str) -> Result<(PathBuf, String), String> {
     }
 }
 
+/// An install or update, fetched and checked already: shown, asked (unless `yes`), then written.
+fn put_plugin(
+    json: bool,
+    data: &Path,
+    device: &str,
+    p: deckle_core::koreader_plugins::Prepared,
+    yes: bool,
+) -> Result<ExitCode, String> {
+    use deckle_core::koreader_plugins as kp;
+    let what = format!(
+        "{} {}{} from {}{}",
+        if p.replaces.is_some() {
+            "Replace"
+        } else {
+            "Install"
+        },
+        p.fullname,
+        p.version
+            .as_deref()
+            .map(|v| format!(" {v}"))
+            .unwrap_or_default(),
+        p.source.from,
+        p.source
+            .release
+            .as_deref()
+            .map(|r| format!(" (release {r})"))
+            .unwrap_or_default(),
+    );
+    if !yes
+        && !confirm(&format!(
+            "{what} on the {device}? Plugins run code on your reader."
+        ))?
+    {
+        eprintln!("nothing written");
+        return Ok(ExitCode::from(1));
+    }
+    let deckle = p.name == kp::DECKLE;
+    let done = kp::install(data, &p)?;
+    if deckle {
+        let s = deckle_plugin_settings(data, device)?;
+        kp::write_deckle_settings(data, &s)?;
+        eprintln!(
+            "the Deckle plugin will fetch from {} as {}, in {}",
+            s.server, s.username, s.format
+        );
+    }
+    emit(json, &done, || match &done.kept {
+        Some(k) => format!("{what}: done. The old one is kept in {}", k.display()),
+        None => format!("{what}: done. Restart KOReader to load it."),
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
 /// `deckle koreader plugins …` (KOReader plugins design part A).
 fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<ExitCode, String> {
     use deckle_core::koreader_plugins as kp;
     let (root, device) = koreader_root(from)?;
     let data = kp::data_dir(&root)
         .ok_or_else(|| format!("no KOReader on the {device} (no koreader folder found)"))?;
-    // Install and update: fetched and checked first, then shown, then asked.
-    let put = |p: kp::Prepared, yes: bool| -> Result<ExitCode, String> {
-        let what = format!(
-            "{} {}{} from {}{}",
-            if p.replaces.is_some() {
-                "Replace"
-            } else {
-                "Install"
-            },
-            p.fullname,
-            p.version
-                .as_deref()
-                .map(|v| format!(" {v}"))
-                .unwrap_or_default(),
-            p.source.from,
-            p.source
-                .release
-                .as_deref()
-                .map(|r| format!(" (release {r})"))
-                .unwrap_or_default(),
-        );
-        if !yes
-            && !confirm(&format!(
-                "{what} on the {device}? Plugins run code on your reader."
-            ))?
-        {
-            eprintln!("nothing written");
-            return Ok(ExitCode::from(1));
-        }
-        let deckle = p.name == kp::DECKLE;
-        let done = kp::install(&data, &p)?;
-        if deckle {
-            let s = deckle_plugin_settings(&data, &device)?;
-            kp::write_deckle_settings(&data, &s)?;
-            eprintln!(
-                "the Deckle plugin will fetch from {} as {}, in {}",
-                s.server, s.username, s.format
-            );
-        }
-        emit(json, &done, || match &done.kept {
-            Some(k) => format!("{what}: done. The old one is kept in {}", k.display()),
-            None => format!("{what}: done. Restart KOReader to load it."),
-        })?;
-        Ok(ExitCode::SUCCESS)
-    };
+    let put = |p: kp::Prepared, yes: bool| put_plugin(json, &data, &device, p, yes);
     match action {
         cli::PluginsCommand::List => {
             let l = kp::list(&data);
@@ -1098,8 +1107,13 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
                 deckle_plugin_settings(&data, &device)?;
                 return put(kp::deckle_plugin(&data), yes);
             }
-            let from = kp::From::parse(&source)?;
-            let p = kp::prepare(&data, &from, &mut kp::http_fetch)?;
+            let mut fetch = deckle_core::koreader_store::cached(
+                deckle_core::koreader_store::cache_dir(),
+                kp::http_fetch,
+            );
+            let (list, _) = deckle_core::koreader_store::recommended(&mut fetch);
+            let (p, _) =
+                deckle_core::koreader_store::prepare_any(&data, &source, &list, &mut fetch)?;
             if p.name != name {
                 return Err(format!("{source} holds {}, not {name}", p.name));
             }
@@ -1135,6 +1149,119 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
             let done = kp::rollback(&data, &name)?;
             emit(json, &done, || {
                 format!("put back the kept {name}. Restart KOReader to load it.")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+/// `deckle koreader store …` (KOReader plugins design part C).
+fn store_cmd(json: bool, from: &str, action: cli::StoreCommand) -> Result<ExitCode, String> {
+    use deckle_core::koreader_plugins as kp;
+    use deckle_core::koreader_store as ks;
+    let mut fetch = ks::cached(ks::cache_dir(), kp::http_fetch);
+    match action {
+        cli::StoreCommand::List => {
+            let (list, live) = ks::recommended(&mut fetch);
+            emit(
+                json,
+                &serde_json::json!({ "live": live, "list": list }),
+                || {
+                    let mut out: Vec<String> = list
+                        .plugins
+                        .iter()
+                        .map(|p| {
+                            format!(
+                                "{:<18} {} {}  {}\n{:<18} {}",
+                                p.name, p.repo, p.release.tag, p.license, "", p.why
+                            )
+                        })
+                        .collect();
+                    if !live {
+                        out.push(
+                            "(the list built into this Deckle: the live one couldn't be had)"
+                                .into(),
+                        );
+                    }
+                    out.join("\n")
+                },
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::StoreCommand::Search { text, updated } => {
+            let sort = if updated {
+                ks::Sort::Updated
+            } else {
+                ks::Sort::Stars
+            };
+            let found = ks::search(&text.join(" "), sort, &mut fetch)?;
+            emit(json, &found, || {
+                let mut out = vec!["Community plugins, not reviewed by Deckle:".to_owned()];
+                out.extend(found.iter().map(|f| {
+                    format!(
+                        "{:>5}★ {:<44} {}  {}{}",
+                        f.stars,
+                        f.repo,
+                        f.pushed,
+                        f.license.as_deref().unwrap_or("no license"),
+                        f.description
+                            .as_deref()
+                            .map(|d| format!("\n        {d}"))
+                            .unwrap_or_default()
+                    )
+                }));
+                out.join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::StoreCommand::Show { repo } => {
+            let readme = ks::readme(&repo, &mut fetch)?;
+            let latest = ks::latest_release(&repo, &mut fetch);
+            emit(
+                json,
+                &serde_json::json!({ "repo": repo, "latest": latest, "readme": readme }),
+                || {
+                    format!(
+                        "{repo} · newest release: {}\n\n{readme}",
+                        latest.as_deref().unwrap_or("none")
+                    )
+                },
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::StoreCommand::Install { plugin, yes } => {
+            let (root, device) = koreader_root(from)?;
+            let data = kp::data_dir(&root)
+                .ok_or_else(|| format!("no KOReader on the {device} (no koreader folder found)"))?;
+            let (list, _) = ks::recommended(&mut fetch);
+            let (p, reviewed) = ks::prepare_any(&data, &plugin, &list, &mut fetch)?;
+            if !reviewed {
+                eprintln!("{plugin} isn't on Deckle's list: not reviewed by Deckle");
+            }
+            put_plugin(json, &data, &device, p, yes)
+        }
+        cli::StoreCommand::Updates => {
+            let (root, device) = koreader_root(from)?;
+            let data = kp::data_dir(&root)
+                .ok_or_else(|| format!("no KOReader on the {device} (no koreader folder found)"))?;
+            let (list, _) = ks::recommended(&mut fetch);
+            let u = ks::updates(&kp::list(&data), &list, &mut fetch);
+            emit(json, &u, || {
+                if u.is_empty() {
+                    return "every plugin Deckle installed is up to date".into();
+                }
+                u.iter()
+                    .map(|x| {
+                        format!(
+                            "{}: {} → {}{}",
+                            x.name,
+                            x.installed.as_deref().unwrap_or("?"),
+                            x.latest,
+                            if x.pinned { " (reviewed)" } else { "" }
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
             })?;
             Ok(ExitCode::SUCCESS)
         }
@@ -1191,6 +1318,7 @@ fn koreader_cmd(json: bool, action: cli::KoreaderCommand) -> Result<ExitCode, St
     use deckle_core::koreader_backup::{self as kb, Outcome};
     match action {
         cli::KoreaderCommand::Plugins { from, action } => plugins_cmd(json, &from, action),
+        cli::KoreaderCommand::Store { from, action } => store_cmd(json, &from, action),
         cli::KoreaderCommand::Backup { from, to } => {
             let (root, device) = koreader_root(&from)?;
             let base = match to {

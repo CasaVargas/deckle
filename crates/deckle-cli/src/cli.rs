@@ -488,6 +488,15 @@ pub enum KoreaderCommand {
         #[arg(long)]
         force: bool,
     },
+    /// The plugin store: plugins Deckle recommends (pinned and checked), and GitHub's
+    /// koreader-plugin topic (not reviewed). Goes online only when run.
+    Store {
+        /// `device` for the connected reader, or a folder (for install and updates).
+        #[arg(long, default_value = "device", global = true)]
+        from: String,
+        #[command(subcommand)]
+        action: StoreCommand,
+    },
     /// KOReader's plugins on the reader: list, install, update, remove, roll back.
     Plugins {
         /// `device` for the connected reader, or a folder (a copy of a reader's drive).
@@ -496,6 +505,31 @@ pub enum KoreaderCommand {
         #[command(subcommand)]
         action: PluginsCommand,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum StoreCommand {
+    /// The plugins Deckle recommends, each pinned to a reviewed release.
+    List,
+    /// GitHub repositories with the koreader-plugin topic (not reviewed by Deckle).
+    Search {
+        /// Words to look for; nothing lists them all.
+        text: Vec<String>,
+        /// Newest first, not most starred.
+        #[arg(long)]
+        updated: bool,
+    },
+    /// A repository's README and newest release.
+    Show { repo: String },
+    /// Install a recommended plugin (by name or repository: the reviewed release), or any
+    /// repository's newest release.
+    Install {
+        plugin: String,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Installed plugins with a newer release (for recommended ones, a newer reviewed one).
+    Updates,
 }
 
 #[derive(Subcommand, Debug)]
