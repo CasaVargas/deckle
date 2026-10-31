@@ -12,6 +12,7 @@ import Books from "./settings/Books";
 import HighlightsReading from "./settings/HighlightsReading";
 import LibraryPage from "./settings/LibraryPage";
 import Kindles from "./settings/Kindles";
+import Koreader from "./settings/Koreader";
 import Online from "./settings/Online";
 import Overview from "./settings/Overview";
 import ReadingAids from "./settings/ReadingAids";
@@ -149,6 +150,7 @@ export default function SettingsView(props: Props) {
           {page === "books" && <Books settings={settings} set={set} />}
           {page === "reading" && <ReadingAids settings={settings} set={set} />}
           {page === "kindles" && <Kindles devices={props.devices} onDeviceOptions={props.onDeviceOptions} />}
+          {page === "koreader" && <Koreader />}
           {page === "highlights" && <HighlightsReading />}
           {page === "online" && <Online settings={settings} set={set} onPage={onPage} />}
           {page === "about" && <About version={props.version} update={props.update} onUpdateState={props.onUpdateState} busy={props.busy} />}

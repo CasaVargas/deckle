@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke, listen } from "./transport";
 import { platform } from "./platform";
-import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
+import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -144,6 +144,14 @@ export const api = {
   emailSetPassword: (password: string) => invoke<EmailStatus>("email_set_password", { password }),
   emailTest: (paper: string | null = null) => invoke<string>("email_test", { paper }),
   readerServerStatus: () => invoke<ReaderServerStatus>("reader_server_status"),
+  koreaderStatus: (folder: string | null = null) => invoke<KoreaderView>("koreader_status", { folder }),
+  koreaderPreview: (folder: string | null, source: string) => invoke<KoreaderPreview>("koreader_preview", { folder, source }),
+  koreaderInstall: (folder: string | null, source: string) => invoke<KoreaderView>("koreader_install", { folder, source }),
+  koreaderUpdate: (folder: string | null, name: string) => invoke<KoreaderView>("koreader_update", { folder, name }),
+  koreaderRemove: (folder: string | null, name: string) => invoke<KoreaderView>("koreader_remove", { folder, name }),
+  koreaderRollback: (folder: string | null, name: string) => invoke<KoreaderView>("koreader_rollback", { folder, name }),
+  koreaderSetEnabled: (folder: string | null, name: string, on: boolean) => invoke<KoreaderView>("koreader_set_enabled", { folder, name, on }),
+  koreaderSetPatches: (folder: string | null, on: boolean) => invoke<KoreaderView>("koreader_set_patches", { folder, on }),
   /** Write-only: its MD5 is kept, nothing reads it back. */
   readerServerSetPassword: (password: string) => invoke<ReaderServerStatus>("reader_server_set_password", { password }),
   subscriptionsStatus: () => invoke<SiteStatus[]>("subscriptions_status"),

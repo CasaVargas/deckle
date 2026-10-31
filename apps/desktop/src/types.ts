@@ -1100,3 +1100,38 @@ export interface CookbookIllustrated {
   already: number;
   stopped: boolean;
 }
+
+/** A KOReader plugin on the reader (`deckle_core::koreader_plugins::Plugin`). */
+export interface KoPlugin {
+  name: string;
+  fullname: string;
+  description?: string | null;
+  version?: string | null;
+  builtin: boolean;
+  enabled: boolean;
+  /** Where Deckle installed it from. */
+  source?: { from: string; release?: string | null; installed: string };
+  /** On (true) or off after KOReader restarts with the Deckle plugin. */
+  pending?: boolean;
+}
+
+/** Settings → KOReader (KOReader plugins design, phase 4). */
+export interface KoreaderView {
+  device: string | null;
+  root: string | null;
+  listing: { data_dir: string; plugins: KoPlugin[]; patches: string[]; patches_disabled: boolean } | null;
+  deckle_version: string;
+  /** Why the Deckle plugin can't be installed now. */
+  deckle_blocked: string | null;
+  note: string | null;
+}
+
+/** What an install would do, before it's done. */
+export interface KoreaderPreview {
+  name: string;
+  fullname: string;
+  version: string | null;
+  replaces: boolean;
+  from: string;
+  release: string | null;
+}
