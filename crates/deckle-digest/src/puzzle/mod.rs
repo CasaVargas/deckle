@@ -159,7 +159,7 @@ fn word_search(
             themes.clear();
         }
         let mut rng = StdRng::seed_from_u64(seed ^ (attempt << 32));
-        found = search::fill(words, &themes, avoid, &mut rng, search::SEARCH_CAP);
+        found = search::fill(words, &themes, avoid, &mut rng);
         if found.as_ref().is_none_or(|s| !recent.contains(&s.rows)) {
             break;
         }

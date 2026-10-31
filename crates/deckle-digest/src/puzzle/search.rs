@@ -2,20 +2,20 @@
 //! The word search (word search design §4): a 9×9 grid hiding 8–10 words that read forward
 //! only, across, down, or diagonally, with filler letters that never spell a blocklisted word.
 
-use std::collections::HashSet;
-use std::time::{Duration, Instant};
-
 use rand::Rng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use super::words::{Words, blocklist};
 
 /// Squares on a side.
 pub const SIZE: usize = 9;
-/// How long one search may take to fill (word search design §3).
-pub const SEARCH_CAP: Duration = Duration::from_millis(200);
+/// Whole placements tried before the day goes without a search. A count, never a clock: a busy
+/// machine makes the same puzzle (word search design §3 asks for about 200 ms; this many
+/// attempts take a few milliseconds).
+pub const ATTEMPTS: usize = 40;
 const MIN_WORDS: usize = 8;
 const MAX_WORDS: usize = 10;
 const MAX_THEMES: usize = 3;
@@ -125,16 +125,14 @@ const WEIGHTS: [(u8, u32); 26] = [
 type Grid = [[u8; SIZE]; SIZE];
 
 /// A word search: up to three `themes` first (4–5 letters, in the list, not in `avoid`), then
-/// list words, 8 to 10 in all; `None` when that many can't be placed and filled before `cap`.
-/// The same inputs and `rng` make the same search.
+/// list words, 8 to 10 in all; `None` when that many can't be placed and filled in
+/// [`ATTEMPTS`] tries. The same inputs and `rng` make the same search, on any machine.
 pub fn fill(
     words: &Words,
     themes: &[String],
     avoid: &HashSet<String>,
     rng: &mut StdRng,
-    cap: Duration,
 ) -> Option<Search> {
-    let deadline = Instant::now() + cap;
     let mut themes: Vec<&String> = themes
         .iter()
         .filter(|t| (4..=5).contains(&t.len()) && words.contains(t) && !avoid.contains(*t))
@@ -147,22 +145,20 @@ pub fn fill(
         .chain(words.of_len(4))
         .filter(|w| !avoid.contains(*w) && !themes.contains(w))
         .collect();
-    while Instant::now() < deadline {
+    if themes.len() + pool.len() < MIN_WORDS {
+        return None;
+    }
+    for _ in 0..ATTEMPTS {
         pool.shuffle(rng);
         pool.sort_by_key(|w| std::cmp::Reverse(w.len())); // stable: longest first, shuffled within
-        if let Some(s) = attempt(&themes, &pool, rng, deadline) {
+        if let Some(s) = attempt(&themes, &pool, rng) {
             return Some(s);
         }
     }
     None
 }
 
-fn attempt(
-    themes: &[&String],
-    pool: &[&String],
-    rng: &mut StdRng,
-    deadline: Instant,
-) -> Option<Search> {
+fn attempt(themes: &[&String], pool: &[&String], rng: &mut StdRng) -> Option<Search> {
     let mut grid: Grid = [[0; SIZE]; SIZE];
     let mut hidden: Vec<Hidden> = Vec::new();
     let place =
@@ -202,7 +198,7 @@ fn attempt(
         place(t, true, &mut grid, &mut hidden, rng);
     }
     for w in pool.iter().take(TRIES) {
-        if hidden.len() == MAX_WORDS || Instant::now() > deadline {
+        if hidden.len() == MAX_WORDS {
             break;
         }
         place(w, false, &mut grid, &mut hidden, rng);
@@ -370,7 +366,7 @@ mod tests {
     fn sixty() -> Vec<Search> {
         let words = Words::embedded();
         (0..60)
-            .map(|d| fill(words, &[], &HashSet::new(), &mut day_rng(d), SEARCH_CAP).expect("fills"))
+            .map(|d| fill(words, &[], &HashSet::new(), &mut day_rng(d)).expect("fills"))
             .collect()
     }
 
@@ -415,7 +411,7 @@ mod tests {
     fn each_hidden_word_reads_once() {
         let words = Words::embedded();
         for d in 0..800 {
-            let s = fill(words, &[], &HashSet::new(), &mut day_rng(d), SEARCH_CAP).expect("fills");
+            let s = fill(words, &[], &HashSet::new(), &mut day_rng(d)).expect("fills");
             for h in &s.words {
                 let want = h.word.to_uppercase();
                 let mut found = 0;
@@ -474,7 +470,6 @@ mod tests {
             &["court".into(), "state".into()],
             &avoid,
             &mut day_rng(3),
-            SEARCH_CAP,
         )
         .expect("fills");
         for theme in ["court", "state"] {
@@ -490,35 +485,40 @@ mod tests {
     #[test]
     fn deterministic() {
         let words = Words::embedded();
-        let a = fill(
-            words,
-            &["court".into()],
-            &HashSet::new(),
-            &mut day_rng(9),
-            SEARCH_CAP,
-        );
-        let b = fill(
-            words,
-            &["court".into()],
-            &HashSet::new(),
-            &mut day_rng(9),
-            SEARCH_CAP,
-        );
+        let a = fill(words, &["court".into()], &HashSet::new(), &mut day_rng(9));
+        let b = fill(words, &["court".into()], &HashSet::new(), &mut day_rng(9));
         assert!(a.is_some());
         assert_eq!(a, b);
     }
 
+    /// A loaded machine (a load average of 130 while other builds ran) made a different
+    /// puzzle, or none, when a wall clock cut the fill short. Sixteen fills of the same day at
+    /// once must all agree.
     #[test]
-    fn fills_within_the_cap() {
+    fn a_busy_machine_makes_the_same_search() {
         let words = Words::embedded();
-        for d in 0..60 {
-            let start = Instant::now();
-            assert!(fill(words, &[], &HashSet::new(), &mut day_rng(d), SEARCH_CAP).is_some());
-            assert!(
-                start.elapsed() < SEARCH_CAP * 2,
-                "day {d}: {:?}",
-                start.elapsed()
-            );
+        for d in 0..20 {
+            let alone = fill(words, &[], &HashSet::new(), &mut day_rng(d));
+            assert!(alone.is_some());
+            let crowd: Vec<Option<Search>> = std::thread::scope(|s| {
+                let hs: Vec<_> = (0..16)
+                    .map(|_| s.spawn(move || fill(words, &[], &HashSet::new(), &mut day_rng(d))))
+                    .collect();
+                hs.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+            assert!(crowd.iter().all(|c| *c == alone), "day {d}");
         }
+    }
+
+    #[test]
+    fn a_list_too_small_gives_up_at_once() {
+        let small = Words::from_tsv("cold\tx\ncord\tx\ncard\tx\nward\tx\nwarm\tx\n");
+        let start = Instant::now();
+        assert_eq!(fill(&small, &[], &HashSet::new(), &mut day_rng(1)), None);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "{:?}",
+            start.elapsed()
+        );
     }
 }
