@@ -615,6 +615,28 @@ pub fn calibre_set_password(password: String) -> Result<deckle_library::writebac
 }
 
 #[tauri::command]
+pub async fn shelves_status() -> Result<deckle_app::shelves::ShelvesView, String> {
+    blocking(|| Ok(deckle_app::shelves::shelves_status())).await
+}
+
+#[tauri::command]
+pub async fn shelves_set(
+    config: deckle_library::shelves::Config,
+) -> Result<deckle_app::shelves::ShelvesView, String> {
+    blocking(move || deckle_app::shelves::shelves_set(config)).await
+}
+
+#[tauri::command]
+pub async fn shelves_kobo_ok(key: String) -> Result<deckle_app::shelves::ShelvesView, String> {
+    blocking(move || deckle_app::shelves::shelves_kobo_ok(key)).await
+}
+
+#[tauri::command]
+pub async fn shelves_apply() -> Result<deckle_app::shelves::ShelvesView, String> {
+    blocking(deckle_app::shelves::shelves_apply).await
+}
+
+#[tauri::command]
 pub async fn email_test(paper: Option<String>) -> Result<String, String> {
     blocking(move || deckle_app::daily::email_test(paper)).await
 }

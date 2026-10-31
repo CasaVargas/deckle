@@ -263,6 +263,12 @@ pub enum Command {
         #[command(subcommand)]
         action: ReaderServerCommand,
     },
+    /// A Kobo's shelves and KOReader's collections from calibre's tags, series, authors,
+    /// columns or saved searches.
+    Shelves {
+        #[command(subcommand)]
+        action: ShelvesCommand,
+    },
     /// Reading data written back into your calibre library, through calibredb.
     Calibre {
         #[command(subcommand)]
@@ -885,6 +891,38 @@ pub enum ReaderServerCommand {
     },
     /// Whether it's on, and the catalog and sync URLs to type into KOReader.
     Status,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ShelvesCommand {
+    /// The rules, numbered.
+    List,
+    /// A rule: shelf NAME from FROM, which is tag:<t>, series:<s> (series:* for one shelf a
+    /// series), author:<a>, column:#<label>=<value> or search:<saved search>.
+    Add {
+        name: String,
+        from: String,
+        /// Only for these readers (kobo/<serial>, koreader/<id>); every reader without it.
+        #[arg(long)]
+        reader: Vec<String>,
+    },
+    /// Remove rule N; Deckle's shelves from it go the next time.
+    Remove { n: usize },
+    /// Apply the rules when a reader is plugged in and over Wi-Fi (`on`/`off`).
+    Auto { on: String },
+    /// Let Deckle write shelves on a Kobo (one signed in to a Kobo account may sync them).
+    KoboOk { key: String },
+    /// What the rules would change on the plugged-in reader.
+    Preview {
+        /// A folder standing in for a reader's drive.
+        #[arg(long)]
+        folder: Option<std::path::PathBuf>,
+    },
+    /// Change it now.
+    Apply {
+        #[arg(long)]
+        folder: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand, Debug)]

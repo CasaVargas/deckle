@@ -49,6 +49,16 @@ pub struct Seen {
     pub last_seen: String,
     pub free: Option<u64>,
     pub books: Vec<OnReader>,
+    /// KOReader's calibre inbox on the reader (`/mnt/onboard/Books/`), learned from its
+    /// collections: where a book's `lpath` starts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inbox: Option<String>,
+    /// The collections Deckle made on it (calibre's shelves).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub collections: std::collections::BTreeSet<String>,
+    /// It never answered a request for its collections (a KOReader too old for them).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub no_collections: bool,
 }
 
 /// `readers.json`.
@@ -125,6 +135,31 @@ impl Store {
     /// Takes a job off the queue (done, or given up on).
     pub fn finish(&self, job: &Job) {
         let _ = std::fs::remove_file(self.queue_dir().join(format!("{}.json", job.id)));
+    }
+
+    fn shelves_path(&self) -> PathBuf {
+        self.dir.join("shelves.json")
+    }
+
+    /// calibre's shelves as the rules make them, written by the watcher for sessions to apply.
+    pub fn set_shelves(&self, sets: &[deckle_core::shelves::RuleSet]) -> std::io::Result<()> {
+        if sets.is_empty() {
+            return match std::fs::remove_file(self.shelves_path()) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            };
+        }
+        std::fs::create_dir_all(&self.dir)?;
+        let tmp = self.shelves_path().with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(sets)?)?;
+        std::fs::rename(tmp, self.shelves_path())
+    }
+
+    pub fn shelves(&self) -> Vec<deckle_core::shelves::RuleSet> {
+        std::fs::read(self.shelves_path())
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
     }
 
     pub fn readers(&self) -> Readers {

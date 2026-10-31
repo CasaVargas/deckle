@@ -47,6 +47,7 @@ function Deckle:init()
     if not pending_checked then
         pending_checked = true
         self:applyPending()
+        self:applyCollections()
     end
     -- The file browser opening is a chance to fetch (after a book was closed, say).
     if not self.ui.document then
@@ -72,6 +73,44 @@ function Deckle:applyPending()
     G_reader_settings:saveSetting("plugins_disabled", disabled)
     G_reader_settings:flush()
     UIManager:askForRestart(T(_("Deckle changed %1 plugin(s). Restart KOReader to finish."), changed))
+end
+
+--- Collections Deckle left in deckle-collections.lua (calibre bridge design §6.2): calibre's
+--- shelves, made through KOReader's own ReadCollection, so KOReader's file is never written
+--- behind its back.
+function Deckle:applyCollections()
+    local path = DataStorage:getDataDir() .. "/deckle-collections.lua"
+    if lfs.attributes(path, "mode") ~= "file" then return end
+    local ok, pending = pcall(dofile, path)
+    os.remove(path)
+    if not ok or type(pending) ~= "table" then
+        logger.warn("Deckle: collection changes unreadable:", pending)
+        return
+    end
+    local ReadCollection = require("readcollection")
+    local updated, changed = {}, 0
+    for _, op in ipairs(self.Logic.collection_ops(pending)) do
+        local coll = ReadCollection.coll[op.name]
+        if op.op == "delete" and coll then
+            ReadCollection:removeCollection(op.name)
+            updated[op.name], changed = true, changed + 1
+        elseif op.op == "create" and not coll then
+            ReadCollection:addCollection(op.name)
+            updated[op.name], changed = true, changed + 1
+        elseif op.op == "remove" and coll then
+            if ReadCollection:removeItem(op.file, op.name, true) then
+                updated[op.name], changed = true, changed + 1
+            end
+        elseif op.op == "add" and coll and lfs.attributes(op.file, "mode") == "file"
+            and not ReadCollection:isFileInCollection(op.file, op.name) then
+            ReadCollection:addItem(op.file, op.name)
+            updated[op.name], changed = true, changed + 1
+        end
+    end
+    if changed > 0 then
+        ReadCollection:write(updated)
+        logger.info("Deckle: collections from calibre:", changed, "changes")
+    end
 end
 
 --- Points KOReader's progress sync at Deckle, after asking (design §5.5). Auto-sync is left as

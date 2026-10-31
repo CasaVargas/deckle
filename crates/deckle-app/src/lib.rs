@@ -19,6 +19,7 @@ pub mod press;
 pub mod reader_server;
 pub mod readership;
 pub mod shelf;
+pub mod shelves;
 pub mod state;
 pub mod upgrades;
 

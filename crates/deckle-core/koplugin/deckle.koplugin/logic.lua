@@ -104,6 +104,39 @@ function Logic.apply_pending(disabled, wanted)
     return out, changed
 end
 
+--- Deckle's collection changes (deckle-collections.lua, calibre bridge design §6.2) as steps,
+--- in the order to make them: collections deleted, made, books taken off, books added. Anything
+--- that isn't a name or a list of absolute paths is left out.
+function Logic.collection_ops(t)
+    local ops = {}
+    if type(t) ~= "table" then return ops end
+    local function names(list, op)
+        for _, name in ipairs(type(list) == "table" and list or {}) do
+            if type(name) == "string" and name ~= "" then table.insert(ops, { op = op, name = name }) end
+        end
+    end
+    local function books(map, op)
+        local sorted = {}
+        for name in pairs(type(map) == "table" and map or {}) do
+            if type(name) == "string" and name ~= "" then table.insert(sorted, name) end
+        end
+        table.sort(sorted)
+        for _, name in ipairs(sorted) do
+            local files = map[name]
+            for _, file in ipairs(type(files) == "table" and files or {}) do
+                if type(file) == "string" and file:sub(1, 1) == "/" then
+                    table.insert(ops, { op = op, name = name, file = file })
+                end
+            end
+        end
+    end
+    names(t.delete, "delete")
+    names(t.create, "create")
+    books(t.remove, "remove")
+    books(t.add, "add")
+    return ops
+end
+
 --- The progress sync plugin's settings pointed at Deckle: its server, username and key (the
 --- password's MD5, as kosync keeps it). Everything else, auto-sync included, stays as it was.
 function Logic.sync_settings(current, server, username, key)

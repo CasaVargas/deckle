@@ -12,6 +12,7 @@ mod inbox;
 pub mod press_worker;
 mod reader_server;
 mod series;
+mod shelves;
 mod wireless;
 
 use std::path::{Path, PathBuf};
@@ -431,6 +432,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::ReaderServer { action } => reader_server::run(json, action),
         cli::Command::Wireless { action } => wireless::run(json, action),
         cli::Command::Calibre { action } => calibre::run(json, action),
+        cli::Command::Shelves { action } => shelves::run(json, action),
         cli::Command::Words { from, action } => words_cmd(json, &from, action),
         cli::Command::Koreader { action } => koreader_cmd(json, action),
         cli::Command::Bind {
@@ -3641,6 +3643,8 @@ fn digest(
             let mut wireless = wireless::Supervisor::default();
             // Reading data into calibre, when that's on (calibre bridge design §5).
             let mut calibre_writer = calibre::Writer::default();
+            // calibre's shelves for wireless sessions (calibre bridge design §6.2).
+            let mut shelves_publisher = shelves::Publisher::default();
             // Each device's [sync] actions run once per connection: a failed delivery waits
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
@@ -3679,6 +3683,7 @@ fn digest(
                 reader_server.tick(&cfg, &path);
                 wireless.tick(&cfg, &path);
                 calibre_writer.tick();
+                shelves_publisher.tick();
                 scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,
@@ -4554,7 +4559,7 @@ fn detect_kindle() -> Option<Target> {
 
 /// The first connected e-reader on a drive that isn't a Kindle: a Kobo, else a PocketBook
 /// (other readers design §8).
-fn detect_reader() -> Option<deckle_core::reader::Reader> {
+pub(crate) fn detect_reader() -> Option<deckle_core::reader::Reader> {
     deckle_core::reader::detect().into_iter().next()
 }
 
@@ -4717,6 +4722,7 @@ fn reader_sync(
         None => None,
     };
     calibre::record(&id, &flush.reading);
+    shelves::on_sync(reader);
     let shelf = flush.kobo_books.clone().and_then(|books| {
         let path = cfg.shelf_store();
         let previous = deckle_digest::shelf::store::Shelf::load(&path)

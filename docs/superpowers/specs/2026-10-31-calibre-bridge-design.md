@@ -608,3 +608,67 @@ Deckle checks that its shelves are still there and lists any that the firmware o
   - Write now put the Markdown in.
   - The annotations switch stayed off with its "needs calibre 9.18" note, since the stand-in
     `calibredb` has no annotations command.
+
+## Build notes (phase 5)
+
+- **Where it lives:**
+  - `deckle-core::shelves`: the books on a drive with calibre ids, `RuleSet`, `wanted` and `diff`.
+    Only Deckle's shelves lose books or go. An owner's shelf with the same name is joined.
+  - `kobo_shelves`: the Kobo's `Shelf`/`ShelfContent`.
+  - `koreader_shelves`: `collection.lua` read, and `deckle-collections.lua` written.
+  - `deckle-library::shelves`: the rules, evaluated against `metadata.db` (read-only), plus
+    `for_drive`.
+- **The rules live in `calibre-shelves.json` beside `library.json`**, not `[[shelves]]` in
+  `digest.toml`. They belong with the library and the write-back, not the paper.
+- **Rule kinds:**
+  - `tag:`, `author:` and `series:` match case-insensitively;
+  - `series:*` makes one shelf per series that has books on the reader;
+  - `column:#label=value` handles text, bool (`yes`/`true`) and normalized columns;
+  - `search:` runs `calibredb search 'search:"name"'`, and is skipped without calibredb.
+  - A shelf with none of the reader's books isn't made.
+- **Kobo:**
+  - the new shelf rows are firmware-shaped: `Type` `UserTag` and a new `Id` when those columns
+    exist, unsynced;
+  - books taken off and shelves removed are marked `_IsDeleted`, as the firmware does;
+  - a deleted shelf of the same name is replaced;
+  - before writing: a backup (the last three kept), a schema check, and `BEGIN IMMEDIATE`;
+  - the yes once per Kobo is `kobo_ok`.
+- **KOReader over USB:** collection changes go in their own file, `deckle-collections.lua`, beside
+  `deckle-pending.lua`, so the plugin-switch writer is untouched. The Deckle plugin's
+  `applyCollections` (with `Logic.collection_ops`, tested on LuaJIT) makes them through
+  `ReadCollection` at its next start. Paths on the reader come from where KOReader is:
+  `/mnt/onboard/`, `/mnt/us/` or `/mnt/ext1/`.
+- **KOReader over Wi-Fi:**
+  - Once a minute, the watcher writes the evaluated rules to `wireless/shelves.json` (empty while
+    automatic is off).
+  - A session asks `GET_COLLECTIONS` (5 s; no answer marks the reader `no_collections`), works
+    out the inbox, and sends `UPDATE_COLLECTIONS`.
+  - The inbox comes from a collection path that ends in a known `lpath`. KOReader's drive info
+    doesn't say where its inbox is, so it has to be learned that way.
+  - `readers.json` keeps the inbox and Deckle's collections, and `refresh` now keeps fields it
+    learned.
+- **Automatic:**
+  - when a Kobo or PocketBook is read (`shelves::on_sync`), and in Wi-Fi sessions, only with
+    `auto` on;
+  - by hand: `deckle shelves apply` and Fix shelves;
+  - a Kindle running KOReader isn't covered (its sync path is the Kindle's).
+- **App:** Settings → Library → Shelves from calibre, with rules (add and remove), the automatic
+  switch, the plugged-in reader's preview with the Kobo's yes, Fix shelves, and each rule's
+  calibre count.
+- **Tests:**
+  - the diff (join, never empty the owner's, delete only Deckle's);
+  - Kobo writes on a fixture database (backup, firmware columns, delete, schema refusal,
+    backups kept to three);
+  - `collection.lua` and the pending file;
+  - the plugin's `collection_ops`;
+  - each rule kind on a fixture library;
+  - `for_drive` (preview, the Kobo's yes, the plugin, applied);
+  - the stand-in KOReader over Wi-Fi (the inbox learned, shelves made, the owner's kept, the
+    rule gone, an old KOReader noted once);
+  - **KOReader's own `wireless.lua`** taking calibre's shelves as collections (LuaJIT, CI).
+- **Live run** (2026-10-31): `deckle shelves` on a fake Kobo folder with KOReader, against a
+  fixture library.
+  - Preview, then apply waited for the Kobo's yes and the plugin.
+  - After `kobo-ok`, the Kobo's database had `UserTag` shelves, unsynced.
+  - A rule for another reader didn't apply.
+  - The web app's section added a rule and showed calibre's counts.
