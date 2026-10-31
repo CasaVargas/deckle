@@ -1134,4 +1134,35 @@ export interface KoreaderPreview {
   replaces: boolean;
   from: string;
   release: string | null;
+  /** The release Deckle reviewed: a Recommended pin, or the Deckle plugin. */
+  reviewed: boolean;
+}
+
+/** A plugin on Deckle's Recommended list, pinned to a reviewed release. */
+export interface StorePick {
+  repo: string;
+  name: string;
+  kind: string;
+  why: string;
+  license: string;
+  release: { tag: string; asset: string; sha256: string };
+}
+
+/** A repository Discover found (not reviewed). */
+export interface StoreFound {
+  repo: string;
+  description: string | null;
+  stars: number;
+  pushed: string;
+  license: string | null;
+  url: string;
+}
+
+/** A newer release of an installed plugin. */
+export interface StoreUpdate {
+  name: string;
+  repo: string;
+  installed: string | null;
+  latest: string;
+  pinned: boolean;
 }

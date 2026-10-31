@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 
 use deckle_core::koreader_plugins::{self as kp, Listing};
+use deckle_core::koreader_store as ks;
+pub use deckle_core::koreader_store::{Found, Update};
 use serde::Serialize;
 
 /// The page's state.
@@ -33,6 +35,8 @@ pub struct KoreaderPreview {
     pub replaces: bool,
     pub from: String,
     pub release: Option<String>,
+    /// The release Deckle reviewed (a Recommended pin, or the Deckle plugin itself).
+    pub reviewed: bool,
 }
 
 /// The reader to work on: `folder` when given, else a Kindle on USB storage, else a Kobo or a
@@ -110,8 +114,9 @@ pub fn koreader_status(folder: Option<String>) -> KoreaderView {
 /// What installing `source` (a .zip, a folder, `owner/repo` or its URL, or `deckle`) would do.
 pub fn koreader_preview(folder: Option<String>, source: String) -> Result<KoreaderPreview, String> {
     let (data, device) = data(folder.as_deref())?;
-    let p = prepare(&data, &device, &source)?;
+    let (p, reviewed) = prepare(&data, &device, &source)?;
     Ok(KoreaderPreview {
+        reviewed,
         replaces: p.replaces.is_some(),
         name: p.name,
         fullname: p.fullname,
@@ -121,19 +126,22 @@ pub fn koreader_preview(folder: Option<String>, source: String) -> Result<Koread
     })
 }
 
-fn prepare(data: &Path, device: &str, source: &str) -> Result<kp::Prepared, String> {
+/// The plugin `source` names, and whether it's a release Deckle reviewed: the Deckle plugin, a
+/// Recommended pin (checked by hash), or anything else as it is.
+fn prepare(data: &Path, device: &str, source: &str) -> Result<(kp::Prepared, bool), String> {
     if source.trim() == kp::DECKLE {
         plugin_settings(data, device)?;
-        return Ok(kp::deckle_plugin(data));
+        return Ok((kp::deckle_plugin(data), true));
     }
-    let from = kp::From::parse(source.trim())?;
-    kp::prepare(data, &from, &mut kp::http_fetch)
+    let mut fetch = ks::cached(ks::cache_dir(), kp::http_fetch);
+    let (list, _) = ks::recommended(&mut fetch);
+    ks::prepare_any(data, source.trim(), &list, &mut fetch)
 }
 
 /// Installs `source` (after the page showed its preview). The Deckle plugin gets its settings.
 pub fn koreader_install(folder: Option<String>, source: String) -> Result<KoreaderView, String> {
     let (data, device) = data(folder.as_deref())?;
-    let p = prepare(&data, &device, &source)?;
+    let (p, _) = prepare(&data, &device, &source)?;
     let deckle = p.name == kp::DECKLE;
     kp::install(&data, &p)?;
     if deckle {
@@ -183,6 +191,55 @@ pub fn koreader_set_patches(folder: Option<String>, on: bool) -> Result<Koreader
     let (data, _) = data(folder.as_deref())?;
     kp::set_patches(&data, on)?;
     Ok(koreader_status(folder))
+}
+
+/// The Recommended list, and whether it's the live one.
+#[derive(Clone, Debug, Serialize)]
+pub struct StoreList {
+    pub live: bool,
+    pub plugins: Vec<ks::Pick>,
+}
+
+/// The store goes online only through these, when the owner opens it or searches.
+pub fn koreader_store_list() -> StoreList {
+    let mut fetch = ks::cached(ks::cache_dir(), kp::http_fetch);
+    let (list, live) = ks::recommended(&mut fetch);
+    StoreList {
+        live,
+        plugins: list.plugins,
+    }
+}
+
+pub fn koreader_store_search(text: String, updated: bool) -> Result<Vec<ks::Found>, String> {
+    let mut fetch = ks::cached(ks::cache_dir(), kp::http_fetch);
+    let sort = if updated {
+        ks::Sort::Updated
+    } else {
+        ks::Sort::Stars
+    };
+    ks::search(&text, sort, &mut fetch)
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct StoreReadme {
+    pub readme: String,
+    pub latest: Option<String>,
+}
+
+pub fn koreader_store_readme(repo: String) -> Result<StoreReadme, String> {
+    let mut fetch = ks::cached(ks::cache_dir(), kp::http_fetch);
+    Ok(StoreReadme {
+        readme: ks::readme(&repo, &mut fetch)?,
+        latest: ks::latest_release(&repo, &mut fetch),
+    })
+}
+
+/// Installed plugins with a newer release (for Recommended ones, a newer pin).
+pub fn koreader_store_updates(folder: Option<String>) -> Result<Vec<ks::Update>, String> {
+    let (data, _) = data(folder.as_deref())?;
+    let mut fetch = ks::cached(ks::cache_dir(), kp::http_fetch);
+    let (list, _) = ks::recommended(&mut fetch);
+    Ok(ks::updates(&kp::list(&data), &list, &mut fetch))
 }
 
 #[cfg(test)]

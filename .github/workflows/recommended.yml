@@ -1,0 +1,27 @@
+# The KOReader plugin store's Recommended list: every pinned release still downloads, matches its
+# SHA-256 and holds one plugin (KOReader plugins design part C). Weekly, so a deleted or replaced
+# release shows up, and on any change to the list.
+name: recommended plugins
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'crates/deckle-core/koplugin/recommended.json'
+      - 'tools/check-recommended.py'
+      - '.github/workflows/recommended.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  pins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -I tools/check-recommended.py

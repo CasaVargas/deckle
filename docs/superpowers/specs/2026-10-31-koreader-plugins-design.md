@@ -347,3 +347,29 @@ On a jailbroken Kindle, the plugin list and an install.
   gets KEPUB from a copied drive too (`koreader_plugins::is_kobo`), in the app and the CLI.
 - **The reader-server check** the plugin install needs moved to `deckle_readerserver::plugin_settings`,
   shared by the CLI and the app.
+
+## Build notes (phase 5)
+
+- **The list:** `crates/deckle-core/koplugin/recommended.json`, embedded as the fallback and
+  fetched live from the main branch's raw URL. Its first entries, each with a release checked on
+  2026-10-31 to hold exactly one `.koplugin` with a `main.lua`: appstore (on-device store),
+  bookends (headers and footers), readinginsights (reading history), opds_plus (an OPDS browser,
+  good with Deckle's catalog). Left out on purpose: plugins tied to piracy sites or to one
+  country's account services, ones with no release to pin, and releases with more than one
+  plugin zip.
+- **One install path:** `koreader_store::prepare_any` gives a plugin on the list its pin (by name,
+  `owner/repo` or URL), checked by SHA-256 before part A's checks, and anything else part A as it
+  is. The CLI's `store install` and `plugins update`, and the app's install and update, all use it,
+  so a Recommended plugin never silently takes an unreviewed release.
+- **Discover** covers the `koreader-plugin` topic only; user patches (`koreader-user-patch`) are
+  later work, since a patch repository holds many files to choose from.
+- **Cache:** GitHub API answers and the live list, an hour, in `<cache>/koreader-store/`, keyed by
+  a hash of the URL. Release downloads aren't cached.
+- **Token:** `DECKLE_GITHUB_TOKEN`, sent only to `api.github.com`. The keychain entry the spec
+  mentions is later work; the environment variable covers the CLI and Docker today.
+- **CI:** `.github/workflows/recommended.yml` runs `tools/check-recommended.py` weekly and on any
+  change to the list: every pin downloads, matches its SHA-256 and holds its one plugin.
+- **App:** the store is a card on Settings → KOReader that fetches nothing until **Open the store**.
+  The install question says whether it's the reviewed release; it scrolls into view from wherever
+  Install was pressed. Plugin rows show "Update available: vX (reviewed)" once the store is open.
+  Settings → Online & privacy has an "Only when you ask" entry for it.

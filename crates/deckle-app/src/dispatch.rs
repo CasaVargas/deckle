@@ -151,6 +151,12 @@ commands! { ctx;
     koreader_set_patches { folder: Option<String>, on: bool } =>
         crate::koreader::koreader_set_patches(folder, on),
     koreader_status { folder: Option<String> } => Ok(crate::koreader::koreader_status(folder)),
+    koreader_store_list {} => Ok(crate::koreader::koreader_store_list()),
+    koreader_store_readme { repo: String } => crate::koreader::koreader_store_readme(repo),
+    koreader_store_search { text: String, updated: bool } =>
+        crate::koreader::koreader_store_search(text, updated),
+    koreader_store_updates { folder: Option<String> } =>
+        crate::koreader::koreader_store_updates(folder),
     koreader_update { folder: Option<String>, name: String } =>
         crate::koreader::koreader_update(folder, name),
     library_catalog { device: Option<String> } => Ok(books::library_catalog(device)),

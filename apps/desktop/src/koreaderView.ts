@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import type { KoPlugin, KoreaderPreview, KoreaderView } from "./types";
+import type { KoPlugin, KoreaderPreview, KoreaderView, StorePick, StoreUpdate } from "./types";
 
 /** The Deckle plugin on the reader, if it's there, and whether this Deckle has a newer one. */
 export function deckleState(view: KoreaderView): { installed: boolean; version: string | null; outdated: boolean } {
@@ -39,4 +39,18 @@ export function confirmLine(p: KoreaderPreview): string {
   const what = `${p.fullname}${p.version ? ` ${p.version}` : ""}`;
   const from = p.from === "deckle" ? "built into Deckle" : `from ${p.from}${p.release ? ` (release ${p.release})` : ""}`;
   return `${p.replaces ? "Replace" : "Install"} ${what}, ${from}?`;
+}
+
+/** What a Recommended plugin's button does: install it, update it to the newer pin, or nothing. */
+export function pickAction(pick: StorePick, view: KoreaderView | null): "install" | "update" | "installed" {
+  const p = view?.listing?.plugins.find((x) => x.name === pick.name);
+  if (!p) return "install";
+  return p.source?.release === pick.release.tag ? "installed" : "update";
+}
+
+/** The update line for an installed plugin, if a newer release exists. */
+export function updateLine(name: string, updates: StoreUpdate[]): string | null {
+  const u = updates.find((x) => x.name === name);
+  if (!u) return null;
+  return `Update available: ${u.latest}${u.pinned ? " (reviewed)" : ""}`;
 }

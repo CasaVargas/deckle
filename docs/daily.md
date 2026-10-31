@@ -779,6 +779,35 @@ deckle koreader plugins rollback appstore         # the copy the last change kep
   `deckle koreader plugins patches on|off` switches every patch at once, directly.
 - KOReader loads new plugins at its next start.
 
+### The plugin store
+
+**Settings → KOReader → Plugin store**, or `deckle koreader store …`:
+
+```sh
+deckle koreader store list                        # Deckle's Recommended list
+deckle koreader store search dictionary           # GitHub's koreader-plugin topic
+deckle koreader store show owner/repo             # its README and newest release
+deckle koreader store install bookends            # by name or repository
+deckle koreader store updates                     # installed plugins with a newer release
+```
+
+- **Recommended** is a short list in Deckle's repository
+  (`crates/deckle-core/koplugin/recommended.json`), each plugin pinned to a release and its
+  SHA-256. Installing one downloads exactly that file and refuses it if a byte differs, so it's
+  what was reviewed; it updates when the list moves its pin. A weekly check makes sure every pin
+  still downloads and matches. The app fetches the newest list, and uses the one built into this
+  Deckle when it can't.
+- **Discover** searches GitHub for repositories with the `koreader-plugin` topic, by stars or by
+  last update, labeled **Not reviewed**: read the details (the README) first. Installing one takes
+  its newest release (or its default branch) through the same checks as any install.
+- **Updates:** for each plugin Deckle installed from GitHub, the store says when there's a newer
+  release (for a Recommended one, a newer pin). Nothing updates by itself.
+- The store goes online only while it's open, or when you run a `store` command, and nothing
+  about your reader or books is sent. GitHub's answers are kept for an hour. Without a token
+  GitHub allows about 60 requests an hour; `DECKLE_GITHUB_TOKEN` (any token, read access to public
+  repositories) raises that, and goes only to GitHub's API.
+- Patches aren't in the store yet; plugins are.
+
 ### The Deckle plugin: the paper by itself
 
 ```sh

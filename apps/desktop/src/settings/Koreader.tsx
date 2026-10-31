@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { canSwitch, confirmLine, deckleState, pluginRows, stateLine, switchOn } from "../koreaderView";
+import { canSwitch, confirmLine, deckleState, pluginRows, stateLine, switchOn, updateLine } from "../koreaderView";
 import { platform } from "../platform";
-import type { KoreaderPreview, KoreaderView } from "../types";
+import type { KoreaderPreview, KoreaderView, StoreUpdate } from "../types";
+import KoreaderStore from "./KoreaderStore";
 import { Row, Switch } from "./Row";
 
 /**
@@ -18,6 +19,12 @@ export default function Koreader() {
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState("");
   const [preview, setPreview] = useState<{ source: string; p: KoreaderPreview } | null>(null);
+  const [updates, setUpdates] = useState<StoreUpdate[]>([]);
+  // The question appears near the top; bring it into view from wherever Install was pressed.
+  const confirmRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (preview) confirmRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [preview]);
 
   const load = (f: string | null = folder) => {
     setBusy(true);
@@ -120,11 +127,14 @@ export default function Koreader() {
       )}
 
       {preview && (
-        <section className="set-card set-pad koreader-confirm" role="alertdialog" aria-label="Install a plugin">
+        <section ref={confirmRef} className="set-card set-pad koreader-confirm" role="alertdialog" aria-label="Install a plugin">
           <p>
             <strong>{confirmLine(preview.p)}</strong>
           </p>
-          <p className="set-note">Plugins run code on your reader. Install what you trust. KOReader loads it at its next start.</p>
+          <p className="set-note">
+            {preview.p.reviewed ? "The release Deckle reviewed, checked byte for byte." : "Not reviewed by Deckle."} Plugins run code on your
+            reader: install what you trust. KOReader loads it at its next start.
+          </p>
           <div className="paper-actions">
             <button
               className="primary"
@@ -164,6 +174,7 @@ export default function Koreader() {
                   <div className="muted small">
                     {stateLine(p)}
                     {p.source ? ` · from ${p.source.from}` : ""}
+                    {updateLine(p.name, updates) ? ` · ${updateLine(p.name, updates)}` : ""}
                   </div>
                   {!p.builtin && (
                     <div className="paper-actions">
@@ -221,6 +232,8 @@ export default function Koreader() {
           <p className="set-note">Deckle checks a plugin before anything is written, and keeps what it replaces so Undo brings it back.</p>
         </section>
       )}
+
+      <KoreaderStore view={view} folder={folder} busy={busy} onInstall={ask} onUpdates={setUpdates} />
 
       {listing && listing.patches.length > 0 && (
         <section className="set-card set-pad" aria-label="Patches">
