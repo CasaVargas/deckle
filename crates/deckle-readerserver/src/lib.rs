@@ -175,6 +175,39 @@ fn urls_from(port: u16, url: Option<&str>) -> (String, String) {
     (format!("{base}/opds"), base)
 }
 
+/// What the Deckle plugin for KOReader is told (KOReader plugins design §5.1): this server's
+/// address and account, KEPUB for a Kobo. The server has to be on (`enabled`), with a password
+/// set beside `main` (digest.toml), and have an address a reader can reach.
+pub fn plugin_settings(
+    enabled: bool,
+    port: u16,
+    username: &str,
+    main: &std::path::Path,
+    kobo: bool,
+) -> Result<deckle_core::koreader_plugins::DeckleSettings, String> {
+    let key = auth::load_key(&auth::key_path(main));
+    let (true, Some(key)) = (enabled, key) else {
+        return Err(
+            "the Deckle plugin fetches from KOReader over Wi-Fi: turn it on and set its \
+                    password first (Daily → Delivery, or [reader_server] and \
+                    `deckle reader-server password`)"
+                .into(),
+        );
+    };
+    let (_, server) = urls(port);
+    if server.contains('<') {
+        return Err("can't tell this computer's address on the network: set \
+                    DECKLE_READER_SERVER_URL to what the reader should use"
+            .into());
+    }
+    Ok(deckle_core::koreader_plugins::DeckleSettings {
+        server,
+        username: username.trim().to_owned(),
+        key,
+        format: if kobo { "kepub" } else { "epub" }.into(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

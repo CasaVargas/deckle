@@ -1028,7 +1028,7 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
         let deckle = p.name == kp::DECKLE;
         let done = kp::install(&data, &p)?;
         if deckle {
-            let s = deckle_plugin_settings(&device)?;
+            let s = deckle_plugin_settings(&data, &device)?;
             kp::write_deckle_settings(&data, &s)?;
             eprintln!(
                 "the Deckle plugin will fetch from {} as {}, in {}",
@@ -1075,7 +1075,7 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
         }
         cli::PluginsCommand::Install { source, yes } => {
             if source == kp::DECKLE {
-                deckle_plugin_settings(&device)?;
+                deckle_plugin_settings(&data, &device)?;
                 return put(kp::deckle_plugin(&data), yes);
             }
             let from = kp::From::parse(&source)?;
@@ -1095,7 +1095,7 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
                     })?,
             };
             if source == kp::DECKLE {
-                deckle_plugin_settings(&device)?;
+                deckle_plugin_settings(&data, &device)?;
                 return put(kp::deckle_plugin(&data), yes);
             }
             let from = kp::From::parse(&source)?;
@@ -1157,32 +1157,14 @@ fn switch(json: bool, data: &Path, name: &str, on: bool) -> Result<ExitCode, Str
 /// What the Deckle plugin is told (KOReader plugins design §5.1): the reader server's address and
 /// account, and KEPUB on a Kobo. The server has to be on, with a password, and reachable.
 fn deckle_plugin_settings(
+    data: &Path,
     device: &str,
 ) -> Result<deckle_core::koreader_plugins::DeckleSettings, String> {
     let main = deckle_digest::config::default_path();
     let cfg = deckle_digest::Config::load(&main).map_err(|e| e.to_string())?;
     let rs = &cfg.reader_server;
-    let key = deckle_readerserver::auth::load_key(&deckle_readerserver::auth::key_path(&main));
-    let (true, Some(key)) = (rs.enabled, key) else {
-        return Err(
-            "the Deckle plugin fetches from KOReader over Wi-Fi: turn it on and set its \
-                    password first (Daily → Delivery, or [reader_server] and \
-                    `deckle reader-server password`)"
-                .into(),
-        );
-    };
-    let (_, server) = deckle_readerserver::urls(rs.port);
-    if server.contains('<') {
-        return Err("can't tell this computer's address on the network: set \
-                    DECKLE_READER_SERVER_URL to what the reader should use"
-            .into());
-    }
-    Ok(deckle_core::koreader_plugins::DeckleSettings {
-        server,
-        username: rs.username.trim().to_owned(),
-        key,
-        format: if device == "Kobo" { "kepub" } else { "epub" }.into(),
-    })
+    let kobo = device == "Kobo" || deckle_core::koreader_plugins::is_kobo(data);
+    deckle_readerserver::plugin_settings(rs.enabled, rs.port, &rs.username, &main, kobo)
 }
 
 /// Asks `question` on the terminal; no terminal means no.
