@@ -581,7 +581,6 @@ pub fn reader_server_set_password(
 }
 
 #[tauri::command]
-<<<<<<< HEAD
 pub fn calibre_writeback_status() -> deckle_library::writeback::Status {
     deckle_app::calibre::calibre_writeback_status()
 }
@@ -616,8 +615,6 @@ pub fn calibre_set_password(password: String) -> Result<deckle_library::writebac
 }
 
 #[tauri::command]
-||||||| 1cc29a9
-=======
 pub fn wireless_status() -> deckle_app::wireless::WirelessView {
     deckle_app::wireless::wireless_status()
 }
@@ -651,7 +648,6 @@ pub fn wireless_cancel(id: String) -> Result<deckle_app::wireless::WirelessView,
 }
 
 #[tauri::command]
->>>>>>> origin/main
 pub async fn email_test(paper: Option<String>) -> Result<String, String> {
     blocking(move || deckle_app::daily::email_test(paper)).await
 }
