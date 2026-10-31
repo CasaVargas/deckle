@@ -363,6 +363,27 @@ impl<S: Read + Write> Session<S> {
         Ok(r["collections"].clone())
     }
 
+    /// Changes KOReader's collections: `create` and `delete` whole ones, `add` and `remove`
+    /// books (absolute paths on the reader) in them.
+    pub fn update_collections(
+        &mut self,
+        create: &[String],
+        delete: &[String],
+        add: &std::collections::BTreeMap<String, Vec<String>>,
+        remove: &std::collections::BTreeMap<String, Vec<String>>,
+    ) -> Result<(), Error> {
+        self.call(
+            Op::UpdateCollections,
+            json!({
+                "add_collections": create,
+                "remove_collections": delete,
+                "add": add,
+                "remove": remove,
+            }),
+        )
+        .map(|_| ())
+    }
+
     /// Keeps the connection alive.
     pub fn noop(&mut self) -> Result<(), Error> {
         self.call(Op::Noop, json!({})).map(|_| ())

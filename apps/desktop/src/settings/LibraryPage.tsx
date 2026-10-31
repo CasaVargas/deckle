@@ -2,6 +2,7 @@
 import { useCapabilities } from "../capabilities";
 import { api } from "../api";
 import type { LibraryStatus } from "../types";
+import CalibreShelves from "./CalibreShelves";
 import CalibreWriteback from "./CalibreWriteback";
 import Originals from "./Originals";
 import { Row, Switch } from "./Row";
@@ -61,6 +62,14 @@ export default function LibraryPage({ library, onLibrary, onPickLibrary }: Props
           Deckle writes only through calibre's own calibredb, and never over a value you set in calibre.
         </p>
         <CalibreWriteback />
+      </section>
+      <section className="set-card set-pad" aria-label="Shelves from calibre">
+        <h3 className="set-card-title">Shelves from calibre</h3>
+        <p className="muted">
+          A Kobo's shelves and KOReader's collections, made from calibre's tags, series, authors, columns or saved searches, holding the books that are on the
+          reader. Shelves you made yourself are never emptied.
+        </p>
+        <CalibreShelves />
       </section>
     </div>
   );

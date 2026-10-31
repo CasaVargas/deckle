@@ -979,7 +979,8 @@ In the app: Settings → Library → **Reading data into calibre**.
 1. Choose a column for each piece you want: an integer or decimal column for progress, a
    yes/no column for read, a date column for last read, a rating (or integer) column for the
    stars. No columns that fit? **Create the usual ones** adds `#deckle_progress`, `#deckle_read`,
-   `#deckle_last_read` and `#deckle_rating`. That changes the library, so close calibre first.
+   `#deckle_last_read`, `#deckle_rating` and `#deckle_highlights` (shown as Markdown). That
+   changes the library, so close calibre first.
 2. Read **Next batch**: every value it would write, before and after. Books matched only by
    title and author wait for a **Yes**, once. Values you set in calibre are listed as left alone.
 3. Turn it on. The watcher writes once a minute at most, after a reader has been read.
@@ -987,7 +988,7 @@ In the app: Settings → Library → **Reading data into calibre**.
 ```sh
 deckle calibre status            # the library, calibredb, the columns, the next batch
 deckle calibre create-columns    # calibre closed
-deckle calibre map progress deckle_progress    # or read, last_read, rating; `none` to stop
+deckle calibre map progress deckle_progress    # or read, last_read, rating, highlights; `none` to stop
 deckle calibre preview           # the next batch; `deckle calibre confirm 1` (or all) for matches
 deckle calibre on                # the watcher writes; `deckle calibre write` writes now
 ```
@@ -1012,7 +1013,59 @@ deckle calibre on                # the watcher writes; `deckle calibre write` wr
   That's how it tells its own values from yours.
 - **Needs calibre itself:** `calibredb` is found on `PATH` or where calibre installs. The Docker
   image doesn't include calibre.
-- **Highlights** come next (calibre bridge design phase 4).
+- **Highlights:**
+  - **The column:** a long-text column gets every highlight and note as Markdown, under its
+    chapter, oldest first, from KOReader and a Kobo. It's written whole each time something
+    changes.
+  - **calibre's own annotations** (off by default, `deckle calibre annotations on`): highlights
+    also go into calibre's annotations, with `calibredb annotations import`, so they're listed and
+    searchable in calibre's Browse annotations. This needs calibre 9.18 or later; Deckle checks
+    the `calibredb` it uses and leaves the switch off otherwise.
+  - **What the annotations can't do:** calibre's viewer can't jump to them, because readers keep
+    their own positions, not calibre's. The same highlight is never imported twice.
+
+## Shelves from calibre
+
+Rules make a Kobo's shelves and KOReader's collections follow calibre (calibre bridge design §6).
+A shelf holds the books that are on the reader. Shelves you made yourself are never emptied: a
+rule with the same name joins one, adding books and taking none off.
+
+In the app: Settings → Library → **Shelves from calibre**. Add rules, then plug in a reader to
+see what they'd change, and **Fix shelves**. Or turn on **Keep them in step by themselves**.
+
+```sh
+deckle shelves add "Science fiction" tag:Sci-Fi
+deckle shelves add x "series:*"                       # one shelf a series
+deckle shelves add Austen "author:Jane Austen" --reader kobo/N418170012345
+deckle shelves add Bedside "column:#shelf=Bedside"    # a calibre column's value
+deckle shelves add "To read" "search:To read"         # a saved search (calibredb runs it)
+deckle shelves list | remove 2 | auto on
+deckle shelves preview              # what it'd change on the plugged-in Kobo or PocketBook
+deckle shelves kobo-ok kobo/N418170012345   # once per Kobo, then:
+deckle shelves apply
+```
+
+- **Which books:** a book on the reader is matched by the calibre id inside it, so books calibre
+  (or Deckle, from calibre) put there.
+- **A Kobo's shelves:** Deckle writes the Kobo's own database, which it does nowhere else, and
+  only after you say yes once for that Kobo.
+  - **Why the yes:** a Kobo signed in to a Kobo account may sync shelves with Kobo's servers.
+  - **Safeguards:** it backs the database up first (`.kobo/KoboReader.sqlite.deckle-…`, the last
+    three are kept), changes only the shelf tables in one go, and writes nothing if the tables
+    aren't what it expects.
+  - **Afterwards:** eject the Kobo so it reads them again.
+- **KOReader over USB:** its collections are made by the Deckle plugin the next time KOReader
+  starts, so install the plugin first (Settings → KOReader). KOReader rewrites its own file, so
+  Deckle never writes it directly.
+- **KOReader over Wi-Fi:** with the calibre connection, collections are made during the session.
+  Deckle has to learn where KOReader keeps calibre's books once: put any book Deckle sent in any
+  collection, and from then on they follow. A KOReader too old for collections over Wi-Fi is
+  noted and not asked again.
+- **What Deckle remembers:** the shelves it made, in `.kobo/deckle-shelves.json` and
+  `<KOReader>/deckle-shelves.json` on the reader. Only those lose books, and they go when their
+  rule does.
+- **The rules** are in `calibre-shelves.json` beside `library.json`.
+- **Not done:** Kindle collections.
 
 ## The edition bundle, for reader apps
 

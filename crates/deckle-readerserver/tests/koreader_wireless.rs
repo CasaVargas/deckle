@@ -42,11 +42,23 @@ fn run_client(
     inbox: &Path,
     password: Option<&str>,
 ) -> String {
+    run_client_with(dir, addr, inbox, password, None)
+}
+
+/// [`run_client`], KOReader starting with the collections in `seed` (a JSON file).
+fn run_client_with(
+    dir: &Path,
+    addr: std::net::SocketAddr,
+    inbox: &Path,
+    password: Option<&str>,
+    seed: Option<&Path>,
+) -> String {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/koreader/client.lua");
     let mut cmd = Command::new("luajit");
     cmd.arg(script).arg(dir).arg(inbox);
-    if let Some(p) = password {
-        cmd.arg(p);
+    cmd.arg(password.unwrap_or(""));
+    if let Some(s) = seed {
+        cmd.arg(s);
     }
     let mut child = cmd
         .stdin(Stdio::piped())
@@ -219,6 +231,47 @@ fn koreaders_client_gives_the_password_deckle_asks_for() {
         !said.contains("invalid password") && said.contains("ejected"),
         "{said}"
     );
+    drop(stop);
+    h.join().unwrap();
+}
+
+#[test]
+fn koreaders_client_takes_calibres_shelves_as_collections() {
+    let Some(dir) = koreader_dir() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let inbox = tmp.path().join("inbox");
+    let book = tmp.path().join("cafe.epub");
+    epub(&book);
+    let state = tmp.path().join("state");
+    let (addr, stop, h) = server(&state, None);
+    let store = Store::new(&state);
+    store.add("any", Some(book), None).unwrap();
+    run_client(&dir, addr, &inbox, None);
+    let landed =
+        std::fs::canonicalize(inbox.join("Celeste Ng/Café Stories - Celeste Ng.epub")).unwrap();
+
+    // The owner has it in favorites, so Deckle can tell where the inbox is.
+    let seed = tmp.path().join("seed.json");
+    std::fs::write(
+        &seed,
+        serde_json::json!({ "favorites": [landed] }).to_string(),
+    )
+    .unwrap();
+    store
+        .set_shelves(&[deckle_core::shelves::RuleSet {
+            name: "Stories".into(),
+            readers: vec!["all".into()],
+            books: ["c0ffee00-0000-4000-8000-000000000001".to_owned()].into(),
+        }])
+        .unwrap();
+    let said = run_client_with(&dir, addr, &inbox, None, Some(&seed));
+    let line = said
+        .lines()
+        .find_map(|l| l.strip_prefix("koreader: collections: "))
+        .unwrap_or_else(|| panic!("{said}"));
+    let c: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert_eq!(c["Stories"], serde_json::json!([landed]), "{said}");
+    assert_eq!(c["favorites"], serde_json::json!([landed]));
     drop(stop);
     h.join().unwrap();
 }

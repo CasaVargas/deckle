@@ -1231,6 +1231,8 @@ export interface WritebackColumns {
   read: string | null;
   last_read: string | null;
   rating: string | null;
+  /** A long-text column, written as Markdown. */
+  highlights: string | null;
 }
 
 export interface WritebackConfig {
@@ -1239,6 +1241,8 @@ export interface WritebackConfig {
   server: string | null;
   username: string | null;
   columns: WritebackColumns;
+  /** Highlights also into calibre's own annotations. */
+  annotations: boolean;
   confirmed: Record<string, string>;
   last_run: string | null;
   last_result: string[];
@@ -1248,7 +1252,7 @@ export interface WritebackChange {
   uuid: string;
   book_id: number;
   title: string;
-  field: "progress" | "read" | "last_read" | "rating";
+  field: "progress" | "read" | "last_read" | "rating" | "highlights";
   column: string;
   old: string | null;
   new: string;
@@ -1271,11 +1275,21 @@ export interface WritebackToConfirm {
   calibre_title: string;
 }
 
+/** One book's highlights for calibre's own annotations. */
+export interface WritebackAnnotations {
+  uuid: string;
+  book_id: number;
+  title: string;
+  format: string;
+  count: number;
+}
+
 export interface WritebackPlan {
   changes: WritebackChange[];
   conflicts: WritebackConflict[];
   to_confirm: WritebackToConfirm[];
   unmatched: string[];
+  annotations: WritebackAnnotations[];
 }
 
 export interface WritebackStatus {
@@ -1286,13 +1300,57 @@ export interface WritebackStatus {
   choices: Partial<Record<keyof WritebackColumns, string[]>>;
   plan: WritebackPlan | null;
   error: string | null;
+  /** This calibredb can import annotations (calibre 9.18 or later). */
+  annotations_supported: boolean;
 }
 
 /** A change to the write-back settings; a field left out stays. */
 export interface WritebackPatch {
   enabled?: boolean;
   columns?: WritebackColumns;
+  annotations?: boolean;
   server?: string;
   username?: string;
   calibredb?: string;
+}
+
+/** A rule that makes a shelf from calibre (calibre bridge design §6.1). */
+export interface ShelfRule {
+  /** The shelf's name; empty for `series:*`, which names one per series. */
+  name: string;
+  /** `tag:…`, `series:…`, `author:…`, `column:#label=value` or `search:…`. */
+  from: string;
+  /** `all`, or reader keys. */
+  readers: string[];
+}
+
+export interface ShelvesConfig {
+  rules: ShelfRule[];
+  kobo_ok: string[];
+  auto: boolean;
+}
+
+export interface ShelfDiff {
+  create: string[];
+  delete: string[];
+  add: Record<string, string[]>;
+  remove: Record<string, string[]>;
+}
+
+export interface ShelfTarget {
+  kind: "kobo" | "koreader";
+  key: string;
+  diff: ShelfDiff;
+  applied: boolean;
+  note: string | null;
+}
+
+export interface ShelvesView {
+  config: ShelvesConfig;
+  /** The plugged-in reader: its key and name. */
+  reader: [string, string] | null;
+  targets: ShelfTarget[];
+  /** Each shelf the rules make, with how many calibre books. */
+  sets: [string, number][];
+  error: string | null;
 }

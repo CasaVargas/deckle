@@ -70,7 +70,7 @@ fn real_calibredb_takes_the_columns_and_the_values() {
     let mut wb = Writeback::default();
     let added =
         writeback::create_usual(&mut wb, &exe, &lib, &mut writeback::system_runner).unwrap();
-    assert_eq!(added.len(), 4);
+    assert_eq!(added.len(), 5);
     let cols = calibre::columns(&lib).unwrap();
     let types: Vec<(&str, &str)> = cols
         .iter()
@@ -79,6 +79,7 @@ fn real_calibredb_takes_the_columns_and_the_values() {
     assert_eq!(
         types,
         [
+            ("deckle_highlights", "comments"),
             ("deckle_last_read", "datetime"),
             ("deckle_progress", "int"),
             ("deckle_rating", "rating"),
@@ -106,6 +107,14 @@ fn real_calibredb_takes_the_columns_and_the_values() {
                 percent: Some(62.4),
                 last_read: Some("2026-10-30T09:15:00Z".into()),
                 rating: Some(4),
+                highlights: vec![deckle_core::reading::Highlight {
+                    text: "The spice must flow.".into(),
+                    note: "Twice now".into(),
+                    chapter: Some("Book One".into()),
+                    datetime: "2026-10-30 09:00:00".into(),
+                    spine: Some(1),
+                    ..Default::default()
+                }],
                 from: "koreader".into(),
                 ..Default::default()
             },
@@ -141,7 +150,7 @@ fn real_calibredb_takes_the_columns_and_the_values() {
             report.failed.clone(),
             report.stopped.clone()
         ),
-        (7, vec![], None),
+        (8, vec![], None),
         "{report:?}"
     );
 
@@ -170,6 +179,13 @@ fn real_calibredb_takes_the_columns_and_the_values() {
             .unwrap()
             .as_deref(),
         Some("true")
+    );
+    let notes = calibre::value(&lib, &col("deckle_highlights"), dune.id)
+        .unwrap()
+        .unwrap();
+    assert!(
+        notes.contains("> The spice must flow.") && notes.contains("Twice now"),
+        "{notes}"
     );
     let listed = calibredb_ok(
         &exe,
@@ -221,4 +237,56 @@ fn real_calibredb_takes_the_columns_and_the_values() {
             .iter()
             .any(|c| c.column == "deckle_progress" && c.calibre == "70")
     );
+
+    // calibre's own annotations, when this calibredb can import them (after calibre 9.17).
+    if writeback::supports_annotations(&exe, &mut writeback::system_runner) {
+        let epub = tmp.path().join("dune.epub");
+        tiny_epub(&epub);
+        calibredb_ok(
+            &exe,
+            &[
+                "add_format",
+                "--with-library",
+                &l,
+                &dune.id.to_string(),
+                &epub.to_string_lossy(),
+            ],
+        );
+        let mut wb = Writeback::load(&p.config);
+        wb.annotations = true;
+        wb.save(&p.config).unwrap();
+        let r = writeback::write_now(&p, None, &mut writeback::system_runner)
+            .unwrap()
+            .unwrap();
+        assert_eq!((r.annotations, r.failed.clone()), (1, vec![]), "{r:?}");
+        let listed = calibredb_ok(&exe, &["annotations", "--with-library", &l, "list"]);
+        assert!(listed.contains("The spice must flow."), "{listed}");
+        // Once: imported again, nothing new.
+        assert!(
+            writeback::status(&Paths::new(&config, None))
+                .plan
+                .unwrap()
+                .annotations
+                .is_empty()
+        );
+    } else {
+        eprintln!("this calibredb has no annotations import: that part waits for calibre 9.18");
+    }
+}
+
+fn tiny_epub(path: &Path) {
+    use std::io::Write;
+    let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    let o = zip::write::SimpleFileOptions::default();
+    z.start_file("mimetype", o).unwrap();
+    z.write_all(b"application/epub+zip").unwrap();
+    z.start_file("META-INF/container.xml", o).unwrap();
+    z.write_all(br#"<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="c.opf" media-type="application/oebps-package+xml"/></rootfiles></container>"#).unwrap();
+    z.start_file("c.opf", o).unwrap();
+    z.write_all(br#"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="i"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Dune</dc:title><dc:language>en</dc:language><dc:identifier id="i">x</dc:identifier></metadata><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/><item id="b" href="b.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/><itemref idref="b"/></spine></package>"#).unwrap();
+    for f in ["a.xhtml", "b.xhtml"] {
+        z.start_file(f, o).unwrap();
+        z.write_all(b"<html xmlns=\"http://www.w3.org/1999/xhtml\"><body><p>The spice must flow.</p></body></html>").unwrap();
+    }
+    z.finish().unwrap();
 }

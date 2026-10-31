@@ -18,6 +18,7 @@ pub mod freshness;
 pub mod search;
 pub mod series;
 pub mod shelf;
+pub mod shelves;
 pub mod sidecar;
 pub mod sources;
 pub mod upgrade;

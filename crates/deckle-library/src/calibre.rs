@@ -32,6 +32,8 @@ pub struct Book {
     pub uuid: String,
     pub title: String,
     pub authors: Vec<String>,
+    /// Its formats, upper case: `EPUB`, `AZW3`…
+    pub formats: Vec<String>,
 }
 
 fn open(root: &Path) -> Result<Connection, String> {
@@ -80,6 +82,17 @@ pub fn books(root: &Path) -> Result<Vec<Book>, String> {
     {
         authors.entry(row.0).or_default().push(row.1);
     }
+    let mut formats: BTreeMap<i64, Vec<String>> = BTreeMap::new();
+    let mut q = db
+        .prepare("SELECT book, format FROM data ORDER BY id")
+        .map_err(err)?;
+    for row in q
+        .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+        .map_err(err)?
+        .flatten()
+    {
+        formats.entry(row.0).or_default().push(row.1.to_uppercase());
+    }
     let mut q = db
         .prepare("SELECT id, uuid, title FROM books ORDER BY id")
         .map_err(err)?;
@@ -100,6 +113,7 @@ pub fn books(root: &Path) -> Result<Vec<Book>, String> {
                 uuid: uuid?,
                 title,
                 authors: authors.remove(&id).unwrap_or_default(),
+                formats: formats.remove(&id).unwrap_or_default(),
             })
         })
         .collect())
@@ -197,6 +211,16 @@ pub mod fixture {
         }
     }
 
+    /// Gives a book a format.
+    pub fn format(root: &Path, book: i64, format: &str) {
+        let db = rusqlite::Connection::open(root.join("metadata.db")).unwrap();
+        db.execute(
+            "INSERT INTO data (book, format, name) VALUES (?1, ?2, 'x')",
+            rusqlite::params![book, format],
+        )
+        .unwrap();
+    }
+
     /// Sets a plain (not normalized) column's value, as calibre would.
     pub fn set(root: &Path, column_id: i64, book: i64, value: rusqlite::types::Value) {
         let db = rusqlite::Connection::open(root.join("metadata.db")).unwrap();
@@ -266,7 +290,8 @@ mod tests {
                 id: 2,
                 uuid: "u-2".into(),
                 title: "Emma".into(),
-                authors: vec!["Jane Austen".into()]
+                authors: vec!["Jane Austen".into()],
+                formats: vec![]
             }
         );
     }

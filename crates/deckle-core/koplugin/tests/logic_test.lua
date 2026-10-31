@@ -143,5 +143,21 @@ test("sync settings point at Deckle and keep the rest", function()
     eq(Logic.sync_settings(nil, "s", "u", "k").userkey, "k")
 end)
 
+test("collection changes come in order, and nothing odd gets through", function()
+    local ops = Logic.collection_ops({
+        create = { "Sci-Fi", 3, "" },
+        delete = { "Old" },
+        add = { ["Sci-Fi"] = { "/mnt/onboard/Dune.epub", "relative.epub", 7 }, [1] = { "/x.epub" } },
+        remove = { Mine = { "/mnt/onboard/Emma.epub" } },
+    })
+    eq(#ops, 4)
+    same({ ops[1].op, ops[1].name }, { "delete", "Old" }, "delete first")
+    same({ ops[2].op, ops[2].name }, { "create", "Sci-Fi" }, "then create")
+    same({ ops[3].op, ops[3].name, ops[3].file }, { "remove", "Mine", "/mnt/onboard/Emma.epub" }, "then remove")
+    same({ ops[4].op, ops[4].name, ops[4].file }, { "add", "Sci-Fi", "/mnt/onboard/Dune.epub" }, "then add")
+    eq(#Logic.collection_ops(nil), 0)
+    eq(#Logic.collection_ops({ add = "nope" }), 0)
+end)
+
 print(("%d tests, %d failed"):format(count, failures))
 os.exit(failures == 0 and 0 or 1)

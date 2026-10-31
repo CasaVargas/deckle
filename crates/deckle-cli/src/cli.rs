@@ -263,6 +263,12 @@ pub enum Command {
         #[command(subcommand)]
         action: ReaderServerCommand,
     },
+    /// A Kobo's shelves and KOReader's collections from calibre's tags, series, authors,
+    /// columns or saved searches.
+    Shelves {
+        #[command(subcommand)]
+        action: ShelvesCommand,
+    },
     /// Reading data written back into your calibre library, through calibredb.
     Calibre {
         #[command(subcommand)]
@@ -888,6 +894,38 @@ pub enum ReaderServerCommand {
 }
 
 #[derive(Subcommand, Debug)]
+pub enum ShelvesCommand {
+    /// The rules, numbered.
+    List,
+    /// A rule: shelf NAME from FROM, which is tag:<t>, series:<s> (series:* for one shelf a
+    /// series), author:<a>, column:#<label>=<value> or search:<saved search>.
+    Add {
+        name: String,
+        from: String,
+        /// Only for these readers (kobo/<serial>, koreader/<id>); every reader without it.
+        #[arg(long)]
+        reader: Vec<String>,
+    },
+    /// Remove rule N; Deckle's shelves from it go the next time.
+    Remove { n: usize },
+    /// Apply the rules when a reader is plugged in and over Wi-Fi (`on`/`off`).
+    Auto { on: String },
+    /// Let Deckle write shelves on a Kobo (one signed in to a Kobo account may sync them).
+    KoboOk { key: String },
+    /// What the rules would change on the plugged-in reader.
+    Preview {
+        /// A folder standing in for a reader's drive.
+        #[arg(long)]
+        folder: Option<std::path::PathBuf>,
+    },
+    /// Change it now.
+    Apply {
+        #[arg(long)]
+        folder: Option<std::path::PathBuf>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 pub enum CalibreCommand {
     /// The library, calibredb, the columns chosen, and the next batch.
     Status,
@@ -895,7 +933,7 @@ pub enum CalibreCommand {
     On,
     /// Stop writing.
     Off,
-    /// Choose the column for progress, read, last_read or rating (`none` for none).
+    /// Choose the column for progress, read, last_read, rating or highlights (`none` for none).
     Map { field: String, column: String },
     /// Write through calibre's content server (`http://host:8080/#library_id`), so calibre
     /// can stay open; `none` writes to the library folder.
@@ -916,9 +954,12 @@ pub enum CalibreCommand {
     /// A book matched only by title and author is the same book (a number from the preview,
     /// or `all`).
     Confirm { n: String },
-    /// Add #deckle_progress, #deckle_read, #deckle_last_read and #deckle_rating, and use them.
+    /// Add #deckle_progress, #deckle_read, #deckle_last_read, #deckle_rating and
+    /// #deckle_highlights, and use them.
     /// calibre must be closed.
     CreateColumns,
+    /// Highlights also into calibre's own annotations (`on`/`off`): calibre 9.18 or later.
+    Annotations { on: String },
     /// Where calibredb is, when it isn't found (`none` to look again).
     Calibredb { path: Option<std::path::PathBuf> },
 }

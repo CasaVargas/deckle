@@ -27,6 +27,10 @@ struct Koreader {
     told_bad_password: bool,
     busy: Option<String>,
     ejected: bool,
+    /// Its collections: name → absolute paths.
+    collections: std::collections::BTreeMap<String, Vec<String>>,
+    /// A KOReader too old for collections: it never answers for them.
+    old: bool,
 }
 
 impl Koreader {
@@ -42,6 +46,8 @@ impl Koreader {
             told_bad_password: false,
             busy: None,
             ejected: false,
+            collections: Default::default(),
+            old: false,
         }
     }
 
@@ -193,6 +199,32 @@ impl Koreader {
                     if arg["messageKind"] == 1 {
                         self.told_bad_password = true;
                     }
+                }
+                Op::GetCollections => {
+                    if !self.old {
+                        Self::ok(&mut s, json!({ "collections": self.collections }));
+                    }
+                }
+                Op::UpdateCollections => {
+                    for n in arg["remove_collections"].as_array().unwrap() {
+                        self.collections.remove(n.as_str().unwrap());
+                    }
+                    for n in arg["add_collections"].as_array().unwrap() {
+                        self.collections
+                            .entry(n.as_str().unwrap().to_owned())
+                            .or_default();
+                    }
+                    for (n, files) in arg["add"].as_object().unwrap() {
+                        let c = self.collections.get_mut(n).unwrap();
+                        for f in files.as_array().unwrap() {
+                            c.push(f.as_str().unwrap().to_owned());
+                        }
+                    }
+                    for (n, files) in arg["remove"].as_object().unwrap() {
+                        let c = self.collections.get_mut(n).unwrap();
+                        c.retain(|x| !files.as_array().unwrap().iter().any(|f| f == x));
+                    }
+                    Self::ok(&mut s, json!({}));
                 }
                 Op::CalibreBusy => {
                     self.busy = arg["otherDevice"].as_str().map(str::to_owned);
@@ -476,6 +508,119 @@ fn a_reader_that_isnt_calibres_kind_is_closed_without_a_word() {
             .iter()
             .any(|l| l.contains("couldn't connect"))
     );
+}
+
+#[test]
+fn calibres_shelves_become_collections_once_the_inbox_is_known() {
+    use deckle_core::shelves::RuleSet;
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = server(&tmp.path().join("state"), None, Duration::from_millis(800));
+    srv.store
+        .set_shelves(&[
+            RuleSet {
+                name: "Sci-Fi".into(),
+                readers: vec!["all".into()],
+                books: ["u-dune".to_owned()].into(),
+            },
+            RuleSet {
+                name: "Austen".into(),
+                readers: vec!["kobo/other".into()],
+                books: ["u-emma".to_owned()].into(),
+            },
+        ])
+        .unwrap();
+    let mut ko = Koreader::new(&tmp.path().join("inbox"));
+    for (u, l) in [
+        ("u-dune", "Frank Herbert/Dune - Frank Herbert.epub"),
+        ("u-emma", "Jane Austen/Emma - Jane Austen.epub"),
+    ] {
+        ko.books.push(json!({"uuid": u, "lpath": l, "title": "T", "authors": ["A"], "last_modified": "2026-01-01T00:00:00+00:00"}));
+    }
+
+    // No collection holds a book Deckle knows: it can't tell where the inbox is, and waits.
+    ko.collections.insert(
+        "favorites".into(),
+        vec!["/mnt/onboard/elsewhere.epub".into()],
+    );
+    ko.run(srv.addr, |_| false);
+    assert!(!ko.collections.contains_key("Sci-Fi"));
+    assert!(
+        srv.store
+            .readers()
+            .log
+            .iter()
+            .any(|l| l.contains("can't tell where"))
+    );
+
+    // The owner put Emma in favorites: now it knows.
+    wait_disconnected(&srv.store);
+    ko.ejected = false;
+    ko.collections
+        .get_mut("favorites")
+        .unwrap()
+        .push("/mnt/onboard/Books/Jane Austen/Emma - Jane Austen.epub".into());
+    ko.run(srv.addr, |_| false);
+    assert_eq!(
+        ko.collections["Sci-Fi"],
+        ["/mnt/onboard/Books/Frank Herbert/Dune - Frank Herbert.epub"]
+    );
+    assert!(
+        !ko.collections.contains_key("Austen"),
+        "that rule is for another reader"
+    );
+    assert_eq!(
+        ko.collections["favorites"].len(),
+        2,
+        "the owner's own is untouched"
+    );
+    wait_disconnected(&srv.store);
+    let seen = srv.store.readers().readers.values().next().unwrap().clone();
+    assert_eq!(seen.inbox.as_deref(), Some("/mnt/onboard/Books/"));
+    assert!(seen.collections.contains("Sci-Fi"));
+
+    // The rule goes: Deckle's collection goes with it, the owner's stays.
+    srv.store
+        .set_shelves(&[RuleSet {
+            name: "Other".into(),
+            readers: vec!["all".into()],
+            books: Default::default(),
+        }])
+        .unwrap();
+    ko.ejected = false;
+    ko.run(srv.addr, |_| false);
+    assert!(!ko.collections.contains_key("Sci-Fi"));
+    assert!(ko.collections.contains_key("favorites"));
+}
+
+#[test]
+fn a_koreader_too_old_for_collections_is_noted_once() {
+    use deckle_core::shelves::RuleSet;
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = server(&tmp.path().join("state"), None, Duration::from_millis(800));
+    srv.store
+        .set_shelves(&[RuleSet {
+            name: "Sci-Fi".into(),
+            readers: vec!["all".into()],
+            books: Default::default(),
+        }])
+        .unwrap();
+    let mut ko = Koreader::new(&tmp.path().join("inbox"));
+    ko.old = true;
+    ko.run(srv.addr, |_| false);
+    wait_disconnected(&srv.store);
+    assert!(
+        srv.store
+            .readers()
+            .readers
+            .values()
+            .next()
+            .unwrap()
+            .no_collections
+    );
+    // Next time it isn't asked.
+    ko.asked.clear();
+    ko.run(srv.addr, |_| false);
+    assert!(!ko.asked.contains(&(Op::GetCollections as u64)));
 }
 
 #[test]

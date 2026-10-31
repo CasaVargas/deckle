@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke, listen } from "./transport";
 import { platform } from "./platform";
-import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, WirelessView } from "./types";
+import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, ShelvesConfig, ShelvesView, WirelessView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -144,6 +144,10 @@ export const api = {
   emailSetPassword: (password: string) => invoke<EmailStatus>("email_set_password", { password }),
   emailTest: (paper: string | null = null) => invoke<string>("email_test", { paper }),
   readerServerStatus: () => invoke<ReaderServerStatus>("reader_server_status"),
+  shelvesStatus: () => invoke<ShelvesView>("shelves_status"),
+  shelvesSet: (config: ShelvesConfig) => invoke<ShelvesView>("shelves_set", { config }),
+  shelvesKoboOk: (key: string) => invoke<ShelvesView>("shelves_kobo_ok", { key }),
+  shelvesApply: () => invoke<ShelvesView>("shelves_apply"),
   calibreWritebackStatus: () => invoke<WritebackStatus>("calibre_writeback_status"),
   calibreWritebackSet: (patch: WritebackPatch) => invoke<WritebackStatus>("calibre_writeback_set", { patch }),
   calibreWritebackConfirm: (keys: string[]) => invoke<WritebackStatus>("calibre_writeback_confirm", { keys }),

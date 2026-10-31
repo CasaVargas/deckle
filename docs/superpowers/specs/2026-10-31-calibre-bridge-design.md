@@ -590,4 +590,122 @@ Deckle checks that its shelves are still there and lists any that the firmware o
   - The preview showed 8 values and Emma's own "read" left alone.
   - Yes confirmed a title match.
   - **Write now** wrote all 8, the database read back the same, and the next batch was empty.
-||||||| 1cc29a9
+
+## Build notes (phase 4)
+
+- **The spike (§5.3), answered:** yes, but not in a released calibre yet.
+  - calibre added `calibredb annotations` (`list|search|export|import|remove`) to its main
+    branch on 2026-10-28 (`src/calibre/db/cli/cmd_annotations.py`).
+  - The latest release, 9.17.0 of 2026-10-23, doesn't have it, so "9.18 or later" in Deckle's
+    words is a guess at the next release.
+  - `import BOOK_ID FORMAT FILE` takes a `calibre_annotation_collection`, one book per file, and
+    merges it as the viewer does: by highlight `uuid`, the newer timestamp wins, nothing is
+    duplicated.
+  - Required: `type`, `uuid`, `timestamp`, `book_id`, `format`. Optional: `highlighted_text`,
+    `notes`, `spine_index`, `toc_family_titles`, `start_cfi`/`end_cfi`, `style`.
+- **Highlights as data:** `reading::Record::highlights`, each with text, note, chapter, page,
+  time and spine file.
+  - KOReader's come from `annotations` (`chapter`, and `pos0`'s `DocFragment[N]` → spine
+    `N - 1`).
+  - A Kobo's come from `Bookmark`, with the chapter from its `content` row when there is one.
+- **The column:**
+  - `Field::Highlights` goes to a `comments` column as Markdown: `### chapter`, each highlight a
+    quote, its note under it, then page and date in italics.
+  - "Create the usual columns" adds `#deckle_highlights` with
+    `--display '{"interpret_as": "markdown"}'`.
+  - The column is replaced whole when the highlights change, and left alone if the owner edited
+    it.
+- **calibre's annotations:**
+  - `Writeback::annotations` turns them on (off by default).
+  - A book's highlights become one collection for its EPUB (else KEPUB, AZW3, else its first
+    format). Each highlight gets a `uuid` from the book, text, note and time, so re-imports
+    merge. Timestamps are made calibre's UTC form; KOReader's carry no zone and are taken as
+    they are.
+  - `spine_index` and the chapter go in. There's no `start_cfi`, since KOReader's xpointers
+    aren't CFIs, so calibre lists them in Browse annotations and its viewer can't place them.
+  - A digest of each book's collection is kept in `written` under `@annotations`, so the same
+    set isn't imported twice.
+  - `supports_annotations` asks `calibredb annotations --help` once per calibredb, and a batch
+    leaves annotations out when it's no.
+- **Tests:**
+  - the Markdown layout;
+  - the column and the collection checked against `annotations_to_import`'s rules (one book,
+    known fields only, `local:viewer`, a stable uuid);
+  - the run's `annotations import` arguments and the file it reads;
+  - once only, and off;
+  - support detection cached per calibredb;
+  - KOReader's chapter and spine;
+  - a Kobo highlight with its chapter.
+- **Real calibre in CI:** the job now uses calibre's official Linux installer (the current
+  release) instead of Ubuntu's old package. The test checks the fifth column is created as
+  comments and the Markdown lands. It imports and lists annotations when that `calibredb` can,
+  and says it waited when it can't (9.17).
+- **Live run** (2026-10-31): the web app with a fixture library.
+  - Mapping a comments column showed "Dune: Highlights empty → 2 highlights".
+  - Write now put the Markdown in.
+  - The annotations switch stayed off with its "needs calibre 9.18" note, since the stand-in
+    `calibredb` has no annotations command.
+
+## Build notes (phase 5)
+
+- **Where it lives:**
+  - `deckle-core::shelves`: the books on a drive with calibre ids, `RuleSet`, `wanted` and `diff`.
+    Only Deckle's shelves lose books or go. An owner's shelf with the same name is joined.
+  - `kobo_shelves`: the Kobo's `Shelf`/`ShelfContent`.
+  - `koreader_shelves`: `collection.lua` read, and `deckle-collections.lua` written.
+  - `deckle-library::shelves`: the rules, evaluated against `metadata.db` (read-only), plus
+    `for_drive`.
+- **The rules live in `calibre-shelves.json` beside `library.json`**, not `[[shelves]]` in
+  `digest.toml`. They belong with the library and the write-back, not the paper.
+- **Rule kinds:**
+  - `tag:`, `author:` and `series:` match case-insensitively;
+  - `series:*` makes one shelf per series that has books on the reader;
+  - `column:#label=value` handles text, bool (`yes`/`true`) and normalized columns;
+  - `search:` runs `calibredb search 'search:"name"'`, and is skipped without calibredb.
+  - A shelf with none of the reader's books isn't made.
+- **Kobo:**
+  - the new shelf rows are firmware-shaped: `Type` `UserTag` and a new `Id` when those columns
+    exist, unsynced;
+  - books taken off and shelves removed are marked `_IsDeleted`, as the firmware does;
+  - a deleted shelf of the same name is replaced;
+  - before writing: a backup (the last three kept), a schema check, and `BEGIN IMMEDIATE`;
+  - the yes once per Kobo is `kobo_ok`.
+- **KOReader over USB:** collection changes go in their own file, `deckle-collections.lua`, beside
+  `deckle-pending.lua`, so the plugin-switch writer is untouched. The Deckle plugin's
+  `applyCollections` (with `Logic.collection_ops`, tested on LuaJIT) makes them through
+  `ReadCollection` at its next start. Paths on the reader come from where KOReader is:
+  `/mnt/onboard/`, `/mnt/us/` or `/mnt/ext1/`.
+- **KOReader over Wi-Fi:**
+  - Once a minute, the watcher writes the evaluated rules to `wireless/shelves.json` (empty while
+    automatic is off).
+  - A session asks `GET_COLLECTIONS` (5 s; no answer marks the reader `no_collections`), works
+    out the inbox, and sends `UPDATE_COLLECTIONS`.
+  - The inbox comes from a collection path that ends in a known `lpath`. KOReader's drive info
+    doesn't say where its inbox is, so it has to be learned that way.
+  - `readers.json` keeps the inbox and Deckle's collections, and `refresh` now keeps fields it
+    learned.
+- **Automatic:**
+  - when a Kobo or PocketBook is read (`shelves::on_sync`), and in Wi-Fi sessions, only with
+    `auto` on;
+  - by hand: `deckle shelves apply` and Fix shelves;
+  - a Kindle running KOReader isn't covered (its sync path is the Kindle's).
+- **App:** Settings → Library → Shelves from calibre, with rules (add and remove), the automatic
+  switch, the plugged-in reader's preview with the Kobo's yes, Fix shelves, and each rule's
+  calibre count.
+- **Tests:**
+  - the diff (join, never empty the owner's, delete only Deckle's);
+  - Kobo writes on a fixture database (backup, firmware columns, delete, schema refusal,
+    backups kept to three);
+  - `collection.lua` and the pending file;
+  - the plugin's `collection_ops`;
+  - each rule kind on a fixture library;
+  - `for_drive` (preview, the Kobo's yes, the plugin, applied);
+  - the stand-in KOReader over Wi-Fi (the inbox learned, shelves made, the owner's kept, the
+    rule gone, an old KOReader noted once);
+  - **KOReader's own `wireless.lua`** taking calibre's shelves as collections (LuaJIT, CI).
+- **Live run** (2026-10-31): `deckle shelves` on a fake Kobo folder with KOReader, against a
+  fixture library.
+  - Preview, then apply waited for the Kobo's yes and the plugin.
+  - After `kobo-ok`, the Kobo's database had `UserTag` shelves, unsynced.
+  - A rule for another reader didn't apply.
+  - The web app's section added a rule and showed calibre's counts.
