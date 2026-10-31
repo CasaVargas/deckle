@@ -353,6 +353,64 @@ export interface DailyConfig {
   remarkable?: RemarkableConfig;
   /** `[reader_server]`: the OPDS catalog and KOReader sync (KOReader hub design §A). Absent while untouched. */
   reader_server?: ReaderServerConfig;
+  /** `[wireless]`: calibre's wireless connection for KOReader (calibre bridge design §4). Absent while untouched. */
+  wireless?: WirelessConfig;
+}
+
+/** `[wireless]`: served by the watcher on the home network. The password isn't here. */
+export interface WirelessConfig {
+  enabled: boolean;
+  port: number;
+  discovery: boolean;
+  library_name: string;
+  /** A reader that connects gets the newest paper and keeps the last three. */
+  paper: boolean;
+}
+
+export const DEFAULT_WIRELESS: WirelessConfig = { enabled: false, port: 9090, discovery: true, library_name: "Deckle", paper: true };
+
+/** A book a reader reported over the wireless connection. */
+export interface OnReader {
+  lpath: string;
+  uuid: string | null;
+  title: string | null;
+  authors: string[];
+  last_modified: string | null;
+  size: number | null;
+}
+
+/** A reader that has connected. */
+export interface WirelessReader {
+  /** Its storage id: what a send names it by. */
+  id: string;
+  name: string;
+  kind: string;
+  connected: boolean;
+  last_seen: string;
+  free: number | null;
+  books: OnReader[];
+}
+
+/** One waiting job: a book to send (`send`), or one to take off (`remove`). */
+export interface WirelessJob {
+  id: string;
+  reader: string;
+  send?: string;
+  remove?: string;
+  build?: boolean;
+  added: string;
+}
+
+export interface WirelessView {
+  /** `[wireless] enabled`. */
+  enabled: boolean;
+  password_set: boolean;
+  /** `address:port`, to type into a reader that doesn't find Deckle itself. */
+  address: string;
+  discovery: boolean;
+  readers: WirelessReader[];
+  queue: WirelessJob[];
+  log: string[];
 }
 
 /** `[reader_server]`: served by the watcher on the home network. The password isn't here. */

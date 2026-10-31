@@ -222,3 +222,25 @@ fn koreaders_client_gives_the_password_deckle_asks_for() {
     drop(stop);
     h.join().unwrap();
 }
+
+#[test]
+fn koreaders_client_takes_the_paper_into_deckles_folder() {
+    let Some(dir) = koreader_dir() else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let inbox = tmp.path().join("inbox");
+    let paper = tmp.path().join("deckle-daily-2026-10-31.epub");
+    epub(&paper);
+    let state = tmp.path().join("state");
+    let (addr, stop, h) = server(&state, None);
+    Store::new(&state).set_paper(Some(&paper)).unwrap();
+    let said = run_client(&dir, addr, &inbox, None);
+    assert!(
+        inbox.join("Deckle/deckle-daily-2026-10-31.epub").is_file(),
+        "{said}"
+    );
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(inbox.join(".metadata.calibre")).unwrap()).unwrap();
+    assert_eq!(meta[0]["lpath"], "Deckle/deckle-daily-2026-10-31.epub");
+    drop(stop);
+    h.join().unwrap();
+}

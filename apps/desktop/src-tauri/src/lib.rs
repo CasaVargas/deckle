@@ -102,12 +102,21 @@ pub fn run() {
             wrap::koreader_store_readme,
             wrap::koreader_store_updates,
             wrap::reader_server_set_password,
+<<<<<<< HEAD
             wrap::calibre_create_columns,
             wrap::calibre_set_password,
             wrap::calibre_writeback_confirm,
             wrap::calibre_writeback_set,
             wrap::calibre_writeback_status,
             wrap::calibre_writeback_write,
+||||||| 1cc29a9
+=======
+            wrap::wireless_cancel,
+            wrap::wireless_queue,
+            wrap::wireless_remove,
+            wrap::wireless_set_password,
+            wrap::wireless_status,
+>>>>>>> origin/main
             wrap::email_test,
             wrap::subscriptions_status,
             wrap::subscription_set_password,

@@ -87,7 +87,7 @@ test("Delivery: the Kindle by USB and email, then other readers with a row per f
     ["usb", "Keeps 3 papers", null],
     ["email", "Off", false],
   ]);
-  expect(plain.others.map((r) => r.key)).toEqual(["remarkable", "readers", "reader_server"]);
+  expect(plain.others.map((r) => r.key)).toEqual(["remarkable", "readers", "reader_server", "wireless"]);
   const full = deliveryGroups(
     cfg({
       keep: 1,
@@ -95,6 +95,7 @@ test("Delivery: the Kindle by USB and email, then other readers with a row per f
       remarkable: { enabled: true, screen: "remarkable-paper-pro", books: false },
       export: [newExport("/Users/me/iCloud/Deckle Daily", []), { ...newExport("/x/Boox", []), format: "pdf", photos: "gray" }],
       reader_server: { enabled: true, port: 47220, username: "deckle" },
+      wireless: { enabled: true, port: 9091, discovery: true, library_name: "Deckle", paper: true },
     }),
   );
   expect(full.kindle.map((r) => r.status)).toEqual(["Keeps 1 paper", "No address yet"]);
@@ -104,6 +105,7 @@ test("Delivery: the Kindle by USB and email, then other readers with a row per f
     ["folder:1", "Boox", "PDF · gray", null],
     ["readers", "Kobo and PocketBook", "Automatic", null],
     ["reader_server", "KOReader over Wi-Fi", "Port 47220", true],
+    ["wireless", "KOReader's calibre connection", "Port 9091", true],
   ]);
 });
 
