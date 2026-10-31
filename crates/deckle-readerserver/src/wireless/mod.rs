@@ -201,9 +201,7 @@ pub fn serve_on(
                 let (s, active, stopping) = (settings.clone(), active.clone(), stopping.clone());
                 sessions.push(std::thread::spawn(move || {
                     run(stream, &s, &active, &stopping);
-                    if let Ok(mut a) = active.lock() {
-                        *a = None;
-                    }
+                    free(&active);
                 }));
                 sessions.retain(|h| !h.is_finished());
             }
@@ -247,6 +245,7 @@ fn run(
     let device = match s.handshake(&settings.library, settings.password.as_deref(), &t, &t) {
         Ok(d) => d.clone(),
         Err(e) => {
+            free(active);
             store.log(format!("a reader at {peer} couldn't connect: {e}"));
             return;
         }
@@ -258,8 +257,22 @@ fn run(
     let ended = match session_loop(&mut s, &device, settings, &store, stopping) {
         Ok(why) => why.to_owned(),
         Err(session::Error::HungUp) => "the reader hung up".to_owned(),
+        // A reader that closes mid-exchange (Wi-Fi off, sleep) is hanging up too.
+        Err(session::Error::Io(e))
+            if matches!(
+                e.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::UnexpectedEof
+            ) =>
+        {
+            "the reader hung up".to_owned()
+        }
         Err(e) => format!("lost: {e}"),
     };
+    // Another reader may connect from here on; the connection itself closes when `s` goes.
+    free(active);
     store.update(|r| {
         if let Some(seen) = r.readers.get_mut(&device.store_uuid) {
             seen.connected = false;
@@ -267,6 +280,12 @@ fn run(
         }
     });
     store.log(format!("{} disconnected ({ended})", device.name));
+}
+
+fn free(active: &Mutex<Option<String>>) {
+    if let Ok(mut a) = active.lock() {
+        *a = None;
+    }
 }
 
 /// Reads what the reader holds and records it.

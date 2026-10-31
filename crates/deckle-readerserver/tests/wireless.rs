@@ -248,6 +248,24 @@ fn server(dir: &Path, password: Option<&str>, idle: Duration) -> Server {
     }
 }
 
+/// Waits for the server to finish with the last session, so the next connection isn't told
+/// it's busy.
+fn wait_disconnected(store: &Store) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let r = store.readers();
+        if !r.readers.is_empty()
+            && r.readers.values().all(|s| !s.connected)
+            && r.log.last().is_some_and(|l| l.contains("disconnected"))
+        {
+            std::thread::sleep(Duration::from_millis(50));
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("the session never ended: {:?}", store.readers().log);
+}
+
 fn epub(path: &Path, title: &str, author: &str, calibre_id: Option<&str>) {
     let mut z = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
     let stored =
@@ -299,7 +317,7 @@ fn a_queued_book_lands_in_koreaders_inbox_and_the_reader_is_recorded() {
     assert!(srv.store.jobs().is_empty());
     // The reader keeps the id Deckle gave its storage.
     let uuid = ko.store_uuid.clone().unwrap();
-    std::thread::sleep(Duration::from_millis(300));
+    wait_disconnected(&srv.store);
     let r = srv.store.readers();
     let seen = &r.readers[&uuid];
     assert_eq!(seen.name, "KOReader (Kobo_frost)");
@@ -322,18 +340,19 @@ fn a_second_connection_while_the_first_is_reconnecting_reads_details_only_for_ne
     ko.books.push(json!({"uuid": "u1", "lpath": "A/One - A.epub", "title": "One", "authors": ["A"], "last_modified": "2026-01-01T00:00:00+00:00"}));
     ko.run(srv.addr, |k| k.asked.contains(&(Op::FreeSpace as u64)));
     assert_eq!(ko.pri_keys, 1, "the first time, its details are asked for");
-    std::thread::sleep(Duration::from_millis(300));
+    wait_disconnected(&srv.store);
     let r = srv.store.readers();
     assert_eq!(
         r.readers.values().next().unwrap().books[0].title.as_deref(),
         Some("One")
     );
 
+    wait_disconnected(&srv.store);
     ko.asked.clear();
     ko.books.push(json!({"uuid": "u2", "lpath": "B/Two - B.epub", "title": "Two", "authors": ["B"], "last_modified": "2026-01-01T00:00:00+00:00"}));
     ko.run(srv.addr, |k| k.asked.contains(&(Op::FreeSpace as u64)));
     assert_eq!(ko.pri_keys, 2, "only the new book's details");
-    std::thread::sleep(Duration::from_millis(300));
+    wait_disconnected(&srv.store);
     let books = srv
         .store
         .readers()
