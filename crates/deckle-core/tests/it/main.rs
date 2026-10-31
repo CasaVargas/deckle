@@ -10,6 +10,7 @@ mod devices;
 mod inspect;
 mod koreader;
 mod koreader_backup;
+mod koreader_plugins;
 mod matcher;
 mod metadata_fill;
 mod normalize;
