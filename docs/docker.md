@@ -213,6 +213,20 @@ and set its password there or with `docker exec deckle deckle reader-server pass
 
 It's plain HTTP, meant for your home network or Tailscale. Don't expose the port to the internet.
 
+## KOReader's calibre connection
+
+Turn on **KOReader's calibre connection** in Delivery (or `[wireless] enabled = true`), and send
+books from Settings → KOReader or `docker exec deckle deckle wireless queue any /books/dune.epub`.
+
+- Publish its port (`"9090:9090"` in compose). On the reader, Tools → calibre → Wireless
+  settings → Server address: the server's own address and `9090`. The app shows the
+  container's address, which the reader can't reach.
+- A reader finds calibre by a UDP broadcast, and broadcasts don't cross Docker's default
+  network. To have readers find Deckle by themselves, run the container with
+  `network_mode: host` (and drop the `ports:` list).
+- Only readers on your home network are answered: through Docker that is the bridge's address,
+  which is private, so publish the port on your LAN only.
+
 ## Moving from the desktop app
 
 1. Copy the desktop's config folder (the one holding `digest.toml`; `deckle digest init` prints

@@ -270,6 +270,14 @@ commands! { ctx;
     } else {
         commands::take_preloaded_target(&ctx.state)
     }),
+    wireless_cancel { id: String } => crate::wireless::wireless_cancel(id),
+    wireless_queue { reader: String, paths: Vec<String> } =>
+        crate::wireless::wireless_queue(reader, paths),
+    wireless_remove { reader: String, lpaths: Vec<String> } =>
+        crate::wireless::wireless_remove(reader, lpaths),
+    wireless_set_password { password: Option<String> } =>
+        crate::wireless::wireless_set_password(password),
+    wireless_status {} => Ok(crate::wireless::wireless_status()),
     words_anki { target: RunTarget, to: String } => kindle::words_anki(target, to),
 }
 

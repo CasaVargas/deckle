@@ -56,6 +56,7 @@ export const INDEX: Entry[] = [
   { label: "KOReader plugins", page: "koreader", words: "koreader plugins install update remove kobo pocketbook boox patches store" },
   { label: "Plugin store", page: "koreader", words: "koreader plugin store recommended discover github install online" },
   { label: "The Deckle plugin", page: "koreader", words: "koreader deckle plugin fetch paper wifi automatic" },
+  { label: "Send books over Wi-Fi (calibre connection)", page: "koreader", words: "koreader calibre wireless connection send books wifi readers remove queue" },
   { label: "Updates", page: "about", words: "update version restart" },
   { label: "What Deckle sends online", page: "online", words: "online privacy network internet send" },
   { label: "Checking for updates", page: "online", words: "update github online privacy" },

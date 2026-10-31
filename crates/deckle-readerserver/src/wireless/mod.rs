@@ -346,6 +346,11 @@ fn session_loop(
     stopping: &AtomicBool,
 ) -> Result<&'static str, session::Error> {
     refresh(s, device, store)?;
+    let papers = paper_jobs(device, store);
+    if !papers.is_empty() {
+        do_jobs(s, device, store, &papers)?;
+        refresh(s, device, store)?;
+    }
     shelve(s, device, store)?;
     let mut last_traffic = Instant::now();
     let mut last_work = Instant::now();
@@ -525,6 +530,53 @@ fn shelve(
     Ok(())
 }
 
+/// Papers Deckle sent that a reader keeps: the newest, and the two before it.
+pub const KEEP_PAPERS: usize = 3;
+
+/// The folder on a reader the paper goes in.
+pub const PAPER_DIR: &str = "Deckle/";
+
+/// Today's paper, when the reader hasn't got it, and the papers Deckle sent beyond the newest
+/// [`KEEP_PAPERS`] to take off (calibre bridge design §4.3). These jobs aren't in the queue.
+fn paper_jobs(device: &Device, store: &Store) -> Vec<Job> {
+    let Some(paper) = store.paper().filter(|p| p.is_file()) else {
+        return Vec::new();
+    };
+    let Some(name) = paper.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+        return Vec::new();
+    };
+    let lpath = format!("{PAPER_DIR}{}", book::clean(&name));
+    let on: Vec<String> = store
+        .readers()
+        .readers
+        .get(&device.store_uuid)
+        .map(|r| r.books.iter().map(|b| b.lpath.clone()).collect())
+        .unwrap_or_default();
+    let job = |send: Option<PathBuf>, remove: Option<String>| Job {
+        id: String::new(),
+        reader: device.store_uuid.clone(),
+        send,
+        remove,
+        build: false,
+        added: now(),
+    };
+    let mut jobs = Vec::new();
+    // Editions sort by date in their names; this one counts as kept.
+    let mut sent: Vec<&String> = on
+        .iter()
+        .filter(|l| l.starts_with(PAPER_DIR) && l.contains("deckle-daily-") && **l != lpath)
+        .collect();
+    sent.sort();
+    sent.reverse();
+    for old in sent.into_iter().skip(KEEP_PAPERS - 1) {
+        jobs.push(job(None, Some(old.clone())));
+    }
+    if !on.contains(&lpath) {
+        jobs.push(job(Some(paper), None));
+    }
+    jobs
+}
+
 fn do_jobs(
     s: &mut Session<TcpStream>,
     device: &Device,
@@ -544,7 +596,12 @@ fn do_jobs(
     let total = sends.len();
     for (i, j) in sends.into_iter().enumerate() {
         let Some(path) = &j.send else { continue };
-        let book = match book::from_file(path, &now()) {
+        let made = if j.build {
+            book::built(path, &now())
+        } else {
+            book::from_file(path, &now())
+        };
+        let book = match made {
             Ok(b) => b,
             Err(e) => {
                 store.finish(j);

@@ -8,12 +8,13 @@ import type { ReactNode } from "react";
 import { deliveryGroups, exportFolderHint } from "./dailyRooms";
 import { useCapabilities } from "./capabilities";
 import type { DeliveryRow } from "./dailyRooms";
-import { DEFAULT_EMAIL, DEFAULT_READER_SERVER } from "./types";
+import { DEFAULT_EMAIL, DEFAULT_READER_SERVER, DEFAULT_WIRELESS } from "./types";
 import { DEFAULT_REMARKABLE } from "./exportsView";
 import { FolderSettings, addFolder } from "./ExportFolders";
 import Icon from "./Icon";
 import ReaderServerCard from "./ReaderServerCard";
 import RemarkableCard from "./RemarkableCard";
+import WirelessCard from "./WirelessCard";
 import type { Change } from "./SectionsTab";
 import type { DailyConfig, ExportConfig, PressSetupStatus } from "./types";
 
@@ -41,6 +42,7 @@ export default function DeliveryTab({
     if (key === "email") change((c) => ({ ...c, email: { ...(c.email ?? DEFAULT_EMAIL), enabled: on } }));
     if (key === "remarkable") change((c) => ({ ...c, remarkable: { ...(c.remarkable ?? DEFAULT_REMARKABLE), enabled: on } }));
     if (key === "reader_server") change((c) => ({ ...c, reader_server: { ...(c.reader_server ?? DEFAULT_READER_SERVER), enabled: on } }));
+    if (key === "wireless") change((c) => ({ ...c, wireless: { ...(c.wireless ?? DEFAULT_WIRELESS), enabled: on } }));
     if (on) setOpen(key);
   };
 
@@ -68,6 +70,8 @@ export default function DeliveryTab({
       );
     if (key === "reader_server")
       return <ReaderServerCard server={draft.reader_server} onSave={(r, how) => change((c) => ({ ...c, reader_server: r }), how)} />;
+    if (key === "wireless")
+      return <WirelessCard wireless={draft.wireless} onSave={(w, how) => change((c) => ({ ...c, wireless: w }), how)} />;
     if (key.startsWith("folder:")) {
       const i = Number(key.slice("folder:".length));
       const e = folders[i];

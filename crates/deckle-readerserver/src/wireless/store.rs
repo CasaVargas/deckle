@@ -25,6 +25,10 @@ pub struct Job {
     /// An `lpath` to take off the reader.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remove: Option<String>,
+    /// `send` is a book to make ready first (imported if need be, then cleaned, as for a Kobo):
+    /// a book from Deckle's library, calibre or a folder. Otherwise it goes as it is.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub build: bool,
     pub added: String,
 }
 
@@ -98,6 +102,21 @@ impl Store {
         send: Option<PathBuf>,
         remove: Option<String>,
     ) -> std::io::Result<Job> {
+        self.put(reader, send, remove, false)
+    }
+
+    /// Adds a book to make ready and send (see [`Job::build`]).
+    pub fn add_book(&self, reader: &str, source: PathBuf) -> std::io::Result<Job> {
+        self.put(reader, Some(source), None, true)
+    }
+
+    fn put(
+        &self,
+        reader: &str,
+        send: Option<PathBuf>,
+        remove: Option<String>,
+        build: bool,
+    ) -> std::io::Result<Job> {
         let now = chrono::Utc::now();
         let job = Job {
             id: format!(
@@ -108,6 +127,7 @@ impl Store {
             reader: reader.trim().to_owned(),
             send,
             remove,
+            build,
             added: now.to_rfc3339(),
         };
         let dir = self.queue_dir();
@@ -116,6 +136,42 @@ impl Store {
         std::fs::write(&tmp, serde_json::to_vec_pretty(&job)?)?;
         std::fs::rename(tmp, dir.join(format!("{}.json", job.id)))?;
         Ok(job)
+    }
+
+    /// Takes a waiting job off the queue before it's done; false when it isn't there.
+    pub fn cancel(&self, id: &str) -> bool {
+        !id.contains(['/', '\\'])
+            && std::fs::remove_file(self.queue_dir().join(format!("{id}.json"))).is_ok()
+    }
+
+    fn paper_path(&self) -> PathBuf {
+        self.dir.join("paper.json")
+    }
+
+    /// The paper a reader gets when it connects: the newest edition of the main paper, or
+    /// none (`[wireless] paper` off). Written by the watcher when it changes.
+    pub fn set_paper(&self, paper: Option<&Path>) -> std::io::Result<()> {
+        match paper {
+            Some(p) => {
+                if self.paper().as_deref() == Some(p) {
+                    return Ok(());
+                }
+                std::fs::create_dir_all(&self.dir)?;
+                let tmp = self.paper_path().with_extension("json.tmp");
+                std::fs::write(&tmp, serde_json::to_vec(&serde_json::json!({ "path": p }))?)?;
+                std::fs::rename(tmp, self.paper_path())
+            }
+            None => match std::fs::remove_file(self.paper_path()) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                _ => Ok(()),
+            },
+        }
+    }
+
+    pub fn paper(&self) -> Option<PathBuf> {
+        let b = std::fs::read(self.paper_path()).ok()?;
+        let v: serde_json::Value = serde_json::from_slice(&b).ok()?;
+        v["path"].as_str().map(PathBuf::from)
     }
 
     /// Every job waiting, oldest first. A file that doesn't parse is skipped.

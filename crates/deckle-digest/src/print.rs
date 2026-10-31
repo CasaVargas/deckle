@@ -192,7 +192,7 @@ fn skybox(g: &Gathered, front: &FrontPlan) -> Vec<Teaser> {
 }
 
 /// `s` cut at a word to at most `max` characters, with an ellipsis when it was cut.
-fn shorten(s: &str, max: usize) -> String {
+pub(crate) fn shorten(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_owned();
     }

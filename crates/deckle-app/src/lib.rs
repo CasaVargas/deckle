@@ -22,6 +22,7 @@ pub mod shelf;
 pub mod shelves;
 pub mod state;
 pub mod upgrades;
+pub mod wireless;
 
 use std::sync::{Mutex, MutexGuard};
 

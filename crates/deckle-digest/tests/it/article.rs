@@ -164,3 +164,66 @@ fn a_lazy_image_uses_its_real_source_over_a_data_placeholder() {
         x.photos
     );
 }
+
+/// Google's front end as it answers a burst of cold connections: the first request of each kind
+/// is dropped mid-handshake.
+#[derive(Default)]
+struct FlakyGoogle {
+    pages: std::sync::atomic::AtomicUsize,
+    posts: std::sync::atomic::AtomicUsize,
+}
+
+const DROPPED: &str = "io: peer closed connection without sending TLS close_notify";
+
+impl Net for FlakyGoogle {
+    fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+        Err(format!("offline: {url}"))
+    }
+    fn get_page(&self, url: &str) -> Result<Vec<u8>, String> {
+        if self.pages.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return Err(DROPPED.into());
+        }
+        GoogleFake.get_page(url)
+    }
+    fn post_form(&self, url: &str, body: &str) -> Result<Vec<u8>, String> {
+        if self.posts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return Err(DROPPED.into());
+        }
+        GoogleFake.post_form(url, body)
+    }
+}
+
+#[test]
+fn google_news_links_decode_through_a_dropped_connection() {
+    let link = "https://news.google.com/rss/articles/CBMid0FVX3lxTE5l?oc=5";
+    let net = FlakyGoogle::default();
+    assert_eq!(resolve_google_news(link, &net).as_deref(), Some(WXII));
+    assert_eq!(net.pages.load(std::sync::atomic::Ordering::SeqCst), 2);
+    assert_eq!(net.posts.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+/// The decoder's reply escapes some characters of the publisher URL (`=` as `=`).
+struct EscapedReply;
+
+impl Net for EscapedReply {
+    fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+        Err(format!("offline: {url}"))
+    }
+    fn get_page(&self, url: &str) -> Result<Vec<u8>, String> {
+        GoogleFake.get_page(url)
+    }
+    fn post_form(&self, _: &str, _: &str) -> Result<Vec<u8>, String> {
+        Ok(br#")]}'
+
+[["wrb.fr","Fbv4je","[\"garturlres\",\"https://www.legacy.com/us/obituaries/name/brenda-sural-obituary?id\\u003d62868594\",1]",null,null,null,"generic"],["di",19]]"#.to_vec())
+    }
+}
+
+#[test]
+fn an_escaped_publisher_url_decodes_whole() {
+    let link = "https://news.google.com/rss/articles/CBMid0FVX3lxTE5l?oc=5";
+    assert_eq!(
+        resolve_google_news(link, &EscapedReply).as_deref(),
+        Some("https://www.legacy.com/us/obituaries/name/brenda-sural-obituary?id=62868594")
+    );
+}

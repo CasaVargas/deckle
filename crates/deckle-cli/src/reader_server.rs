@@ -19,7 +19,7 @@ pub(crate) fn source(main_path: std::path::PathBuf) -> Source {
     Arc::new(move || catalog(&main_path))
 }
 
-fn catalog(main_path: &Path) -> Catalog {
+pub(crate) fn catalog(main_path: &Path) -> Catalog {
     let mut papers = Vec::new();
     let Ok(loaded) = deckle_digest::papers::load_all(main_path) else {
         return Catalog::default();
