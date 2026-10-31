@@ -321,3 +321,59 @@ fn a_backup_carries_added_plugins_and_patches_but_not_built_ins() {
             .is_file()
     );
 }
+
+#[test]
+fn the_deckle_plugin_installs_with_its_settings_and_keeps_the_owners() {
+    use deckle_core::koreader::lua::{self, Value};
+    use deckle_core::koreader_plugins::{DeckleSettings, deckle_plugin, write_deckle_settings};
+    let tmp = tempfile::tempdir().unwrap();
+    let ko = kobo(tmp.path());
+    let p = deckle_plugin(&ko);
+    assert_eq!(p.name, "deckle");
+    install(&ko, &p).unwrap();
+    let meta = std::fs::read_to_string(ko.join("plugins/deckle.koplugin/_meta.lua")).unwrap();
+    assert!(meta.contains(env!("CARGO_PKG_VERSION")), "{meta}");
+    assert!(!meta.contains("DECKLE_VERSION"));
+    for f in ["main.lua", "logic.lua"] {
+        assert!(ko.join("plugins/deckle.koplugin").join(f).is_file(), "{f}");
+    }
+    let listed = list(&ko);
+    let row = listed.plugins.iter().find(|x| x.name == "deckle").unwrap();
+    assert_eq!(row.fullname, "Deckle");
+    assert!(!row.builtin);
+
+    // The owner already chose to keep 7 and the plugin has a fetched list; a new install
+    // changes the server and the key, and keeps those.
+    write(
+        &ko.join("settings/deckle.lua"),
+        "return { [\"keep\"] = 7, [\"fetched\"] = { [1] = \"/mnt/onboard/Deckle/a.epub\" }, [\"key\"] = \"old\" }",
+    );
+    let s = DeckleSettings {
+        server: "http://192.168.1.5:47220".into(),
+        username: "deckle \"home\"".into(),
+        key: "2ab96390c7dbe3439de74d0c9b0b1767".into(),
+        format: "kepub".into(),
+    };
+    let path = write_deckle_settings(&ko, &s).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    let v = lua::parse(&text).unwrap();
+    let get = |k: &str| v.get(k).cloned();
+    assert_eq!(
+        get("server"),
+        Some(Value::Str("http://192.168.1.5:47220".into()))
+    );
+    assert_eq!(get("username"), Some(Value::Str("deckle \"home\"".into())));
+    assert_eq!(
+        get("key"),
+        Some(Value::Str("2ab96390c7dbe3439de74d0c9b0b1767".into()))
+    );
+    assert_eq!(get("format"), Some(Value::Str("kepub".into())));
+    assert_eq!(get("keep"), Some(Value::Num(7.0)), "the owner's keep");
+    assert_eq!(get("auto"), Some(Value::Bool(true)));
+    assert_eq!(get("wifi_on_wake"), Some(Value::Bool(false)));
+    let Some(Value::Table(fetched)) = get("fetched") else {
+        panic!("fetched kept: {text}")
+    };
+    assert_eq!(fetched.len(), 1);
+    assert!(!text.contains("hunter2"));
+}

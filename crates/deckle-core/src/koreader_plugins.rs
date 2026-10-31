@@ -516,10 +516,7 @@ fn unzip(bytes: &[u8]) -> Result<Files, String> {
 /// The one plugin in `files`: the single `<name>.koplugin/` folder, or, for a repository that is
 /// the plugin (its `main.lua` at the top), the top folder named after `hint`. Returns its name and
 /// its files relative to it.
-fn pick_plugin(
-    files: Files,
-    hint: Option<&str>,
-) -> Result<(String, Files), String> {
+fn pick_plugin(files: Files, hint: Option<&str>) -> Result<(String, Files), String> {
     let mut roots: Vec<String> = files
         .iter()
         .filter_map(|(p, _)| {
@@ -581,6 +578,151 @@ fn meta_of(files: &[(String, Vec<u8>)]) -> Meta {
         .find(|(p, _)| p == "_meta.lua")
         .map(|(_, b)| meta_text(&String::from_utf8_lossy(b)))
         .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The Deckle plugin
+
+/// The Deckle plugin's name in KOReader.
+pub const DECKLE: &str = "deckle";
+
+/// The Deckle plugin's files, built into Deckle (KOReader plugins design §5).
+const DECKLE_FILES: &[(&str, &str)] = &[
+    (
+        "_meta.lua",
+        include_str!("../koplugin/deckle.koplugin/_meta.lua"),
+    ),
+    (
+        "logic.lua",
+        include_str!("../koplugin/deckle.koplugin/logic.lua"),
+    ),
+    (
+        "main.lua",
+        include_str!("../koplugin/deckle.koplugin/main.lua"),
+    ),
+];
+
+/// The Deckle plugin, ready to install: this Deckle's version of it.
+pub fn deckle_plugin(data: &Path) -> Prepared {
+    let version = env!("CARGO_PKG_VERSION");
+    let files: Files = DECKLE_FILES
+        .iter()
+        .map(|(n, t)| {
+            (
+                (*n).to_owned(),
+                t.replace("DECKLE_VERSION", version).into_bytes(),
+            )
+        })
+        .collect();
+    Prepared {
+        name: DECKLE.into(),
+        fullname: "Deckle".into(),
+        version: Some(version.to_owned()),
+        replaces: data
+            .join("plugins")
+            .join(format!("{DECKLE}.koplugin"))
+            .is_dir()
+            .then(|| DECKLE.to_owned()),
+        source: Source {
+            from: DECKLE.into(),
+            release: Some(version.to_owned()),
+            installed: crate::devices::now_iso(),
+        },
+        files,
+    }
+}
+
+/// What Deckle tells its plugin: where the reader server is and how to sign in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeckleSettings {
+    pub server: String,
+    pub username: String,
+    /// `md5(password)`: the plugin never holds the password.
+    pub key: String,
+    /// `kepub` for a Kobo, else `epub`.
+    pub format: String,
+}
+
+/// Writes `settings/deckle.lua` in KOReader's folder: the server, sign-in and format from Deckle,
+/// and every other setting kept as the plugin (or its owner) left it, with the defaults for any
+/// not set yet.
+pub fn write_deckle_settings(data: &Path, s: &DeckleSettings) -> Result<PathBuf, String> {
+    let dir = data.join("settings");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join("deckle.lua");
+    let mut entries: Vec<(String, Value)> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| lua::parse(&t).ok())
+        .and_then(|v| match v {
+            Value::Table(t) => Some(t),
+            _ => None,
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(k, v)| match k {
+            lua::Key::Str(k) => Some((k, v)),
+            _ => None,
+        })
+        .collect();
+    let mut set = |k: &str, v: Value, always: bool| match entries.iter_mut().find(|(n, _)| n == k) {
+        Some(e) if always => e.1 = v,
+        Some(_) => {}
+        None => entries.push((k.to_owned(), v)),
+    };
+    set("server", Value::Str(s.server.clone()), true);
+    set("username", Value::Str(s.username.clone()), true);
+    set("key", Value::Str(s.key.clone()), true);
+    set("format", Value::Str(s.format.clone()), true);
+    set("keep", Value::Num(3.0), false);
+    set("auto", Value::Bool(true), false);
+    set("wifi_on_wake", Value::Bool(false), false);
+    let mut text = String::from(
+        "-- Written by Deckle; the Deckle plugin keeps its own settings here too\nreturn {\n",
+    );
+    for (k, v) in &entries {
+        text.push_str(&format!("    [{}] = {},\n", lua_string(k), lua_value(v)));
+    }
+    text.push_str("}\n");
+    let tmp = dir.join(".deckle.lua.tmp");
+    std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
+}
+
+fn lua_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 32 => out.push_str(&format!("\\{:03}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn lua_value(v: &Value) -> String {
+    match v {
+        Value::Nil => "nil".into(),
+        Value::Bool(b) => b.to_string(),
+        Value::Num(n) if n.fract() == 0.0 && n.abs() < 1e15 => format!("{}", *n as i64),
+        Value::Num(n) => n.to_string(),
+        Value::Str(s) => lua_string(s),
+        Value::Table(t) => {
+            let items: Vec<String> = t
+                .iter()
+                .map(|(k, v)| match k {
+                    lua::Key::Num(n) => format!("[{}] = {}", *n as i64, lua_value(v)),
+                    lua::Key::Str(s) => format!("[{}] = {}", lua_string(s), lua_value(v)),
+                })
+                .collect();
+            format!("{{ {} }}", items.join(", "))
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
