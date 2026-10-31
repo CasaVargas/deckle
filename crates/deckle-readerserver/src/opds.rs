@@ -74,7 +74,7 @@ fn head(id: &str, title: &str, self_href: &str, kind: &str) -> String {
 }
 
 pub async fn root(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response {
-    if !auth::basic_ok(&headers, &ctx.settings) {
+    if !auth::either_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
     let mut s = head("root", "Deckle", "/opds", NAV);
@@ -141,7 +141,7 @@ fn paper_entries(c: &Catalog, n: usize) -> String {
 }
 
 pub async fn today(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response {
-    if !auth::basic_ok(&headers, &ctx.settings) {
+    if !auth::either_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
     let c = (ctx.hooks.source)();
@@ -152,7 +152,7 @@ pub async fn today(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response 
 }
 
 pub async fn papers(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response {
-    if !auth::basic_ok(&headers, &ctx.settings) {
+    if !auth::either_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
     let c = (ctx.hooks.source)();
@@ -163,7 +163,7 @@ pub async fn papers(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response
 }
 
 pub async fn books(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response {
-    if !auth::basic_ok(&headers, &ctx.settings) {
+    if !auth::either_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
     let c = (ctx.hooks.source)();
@@ -190,7 +190,7 @@ pub async fn books(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response 
 }
 
 /// The file with id `id` in the catalog of the moment, and the stem it downloads as.
-fn lookup(c: &Catalog, id: &str) -> Option<(PathBuf, String)> {
+pub(crate) fn lookup(c: &Catalog, id: &str) -> Option<(PathBuf, String)> {
     let stem = |p: &Path| {
         p.file_stem()
             .unwrap_or_default()
@@ -216,27 +216,24 @@ pub async fn file(
     UrlPath(id): UrlPath<String>,
     Query(q): Query<FileQuery>,
 ) -> Response {
-    if !auth::basic_ok(&headers, &ctx.settings) {
+    if !auth::either_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
     let Some((path, stem)) = lookup(&(ctx.hooks.source)(), &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let bytes = match tokio::fs::read(&path).await {
-        Ok(b) => b,
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    let kepub = q.format.as_deref() == Some("kepub");
+    let Some(file) = crate::deckle::served(&ctx, &path, kepub).await else {
+        return StatusCode::NOT_FOUND.into_response();
     };
-    let (bytes, name, mime) = if q.format.as_deref() == Some("kepub") {
-        let stem = stem.trim_end_matches(".kepub").to_owned();
-        match deckle_core::kepub::convert(&bytes) {
-            Ok(k) => (k, format!("{stem}.kepub.epub"), "application/kepub+zip"),
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        }
-    } else {
-        (bytes, format!("{stem}.epub"), "application/epub+zip")
+    let stem = stem.trim_end_matches(".kepub").to_owned();
+    let (name, mime) = match kepub {
+        true => (format!("{stem}.kepub.epub"), "application/kepub+zip"),
+        false => (format!("{stem}.epub"), "application/epub+zip"),
     };
+    let bytes = file.bytes.clone();
     let served = ctx.hooks.served.clone();
-    let (record_name, record_bytes) = (name.clone(), bytes.clone());
+    let (record_name, record_bytes) = (name.clone(), bytes.to_vec());
     tokio::task::spawn_blocking(move || served(&record_name, &record_bytes));
     // A file name the header can carry: no quotes or control characters.
     let safe: String = name
@@ -253,7 +250,7 @@ pub async fn file(
             (header::CONTENT_TYPE, mime.to_owned()),
             (header::CONTENT_DISPOSITION, disposition),
         ],
-        bytes,
+        bytes.to_vec(),
     )
         .into_response()
 }
@@ -263,7 +260,7 @@ pub async fn cover(
     headers: HeaderMap,
     UrlPath(id): UrlPath<String>,
 ) -> Response {
-    if !auth::basic_ok(&headers, &ctx.settings) {
+    if !auth::either_ok(&headers, &ctx.settings) {
         return unauthorized();
     }
     let Some((path, _)) = lookup(&(ctx.hooks.source)(), &id) else {

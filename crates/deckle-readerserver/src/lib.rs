@@ -4,6 +4,7 @@
 //! starts it when `[reader_server]` is on and a password is set.
 
 pub mod auth;
+pub mod deckle;
 pub mod opds;
 pub mod sync;
 
@@ -25,6 +26,8 @@ pub struct Paper {
     /// The edition's own name without extension, `deckle-daily-YYYY-MM-DD`: what it downloads
     /// as, and so the name KOReader knows it by.
     pub stem: String,
+    /// The household's main paper (digest.toml's), which the Deckle plugin fetches.
+    pub main: bool,
 }
 
 /// What the catalog lists, newest first. Built for each request, so a paper printed a minute
@@ -74,6 +77,8 @@ pub struct Ctx {
     pub hooks: Hooks,
     /// One writer at a time for `koreader-sync.json`.
     pub sync_lock: tokio::sync::Mutex<()>,
+    /// Files lately served, with their SHA-256, so what `today` describes is what downloads.
+    pub served: std::sync::Mutex<Vec<deckle::Key>>,
 }
 
 impl Ctx {
@@ -82,6 +87,7 @@ impl Ctx {
             settings,
             hooks,
             sync_lock: tokio::sync::Mutex::new(()),
+            served: std::sync::Mutex::new(Vec::new()),
         }
     }
 }
@@ -107,6 +113,7 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
         .route("/users/auth", get(sync::authorize))
         .route("/syncs/progress", axum::routing::put(sync::update))
         .route("/syncs/progress/{document}", get(sync::get_progress))
+        .route("/deckle/v1/today", get(deckle::today))
         .with_state(ctx)
 }
 

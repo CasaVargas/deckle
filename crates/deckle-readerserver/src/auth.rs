@@ -105,6 +105,12 @@ pub fn basic_ok(headers: &HeaderMap, s: &Settings) -> bool {
     user_ok & key_ok
 }
 
+/// HTTP Basic, or KOReader sync's header pair: the Deckle plugin signs in with the latter, so it
+/// never holds the password (KOReader plugins design §6).
+pub fn either_ok(headers: &HeaderMap, s: &Settings) -> bool {
+    basic_ok(headers, s) || kosync_ok(headers, s)
+}
+
 /// KOReader sync's `x-auth-user` and `x-auth-key` (the MD5 of the password).
 pub fn kosync_ok(headers: &HeaderMap, s: &Settings) -> bool {
     let get = |k: &str| headers.get(k).and_then(|v| v.to_str().ok()).unwrap_or("");
