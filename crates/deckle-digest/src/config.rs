@@ -1301,6 +1301,8 @@ pub struct WirelessConfig {
     pub discovery: bool,
     /// The library name the reader shows.
     pub library_name: String,
+    /// A reader that connects gets the newest paper, and keeps the last three Deckle sent.
+    pub paper: bool,
 }
 
 impl Default for WirelessConfig {
@@ -1310,6 +1312,7 @@ impl Default for WirelessConfig {
             port: 9090,
             discovery: true,
             library_name: "Deckle".into(),
+            paper: true,
         }
     }
 }

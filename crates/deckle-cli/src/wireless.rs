@@ -62,10 +62,33 @@ pub(crate) struct Supervisor {
         std::thread::JoinHandle<()>,
     )>,
     said: Option<String>,
+    /// When the paper to send was last looked for.
+    paper_checked: Option<std::time::Instant>,
+}
+
+/// The newest edition of the main paper, for a reader that connects (`[wireless] paper`).
+fn newest_paper(main_path: &Path) -> Option<PathBuf> {
+    crate::reader_server::catalog(main_path)
+        .papers
+        .into_iter()
+        .find(|p| p.main)
+        .map(|p| p.epub)
 }
 
 impl Supervisor {
     pub(crate) fn tick(&mut self, cfg: &Config, main_path: &Path) {
+        if self
+            .paper_checked
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(60))
+        {
+            self.paper_checked = Some(std::time::Instant::now());
+            let paper = (cfg.wireless.enabled && cfg.wireless.paper)
+                .then(|| newest_paper(main_path))
+                .flatten();
+            if let Err(e) = store().set_paper(paper.as_deref()) {
+                eprintln!("wireless: {e}");
+            }
+        }
         let wanted = settings(cfg, main_path);
         if let (Some(w), Some((now, _, handle))) = (&wanted, &self.running)
             && w == now
@@ -224,7 +247,11 @@ pub(crate) fn run(json: bool, action: WirelessCommand) -> Result<ExitCode, Strin
             )?;
             Ok(ExitCode::SUCCESS)
         }
-        WirelessCommand::Queue { reader, books } => {
+        WirelessCommand::Queue {
+            reader,
+            books,
+            as_is,
+        } => {
             let mut added = Vec::new();
             for b in books {
                 let path: PathBuf =
@@ -232,11 +259,12 @@ pub(crate) fn run(json: bool, action: WirelessCommand) -> Result<ExitCode, Strin
                 if !path.is_file() {
                     return Err(format!("{}: not a file", b.display()));
                 }
-                added.push(
-                    store
-                        .add(&reader, Some(path), None)
-                        .map_err(|e| e.to_string())?,
-                );
+                let job = if as_is {
+                    store.add(&reader, Some(path), None)
+                } else {
+                    store.add_book(&reader, path)
+                };
+                added.push(job.map_err(|e| e.to_string())?);
             }
             emit(json, &added, || {
                 format!(

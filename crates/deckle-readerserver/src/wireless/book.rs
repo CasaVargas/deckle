@@ -96,6 +96,31 @@ pub fn from_file(path: &Path, now: &str) -> Result<Outgoing, String> {
     })
 }
 
+/// A book made ready from `source` (imported if need be, then cleaned, as a Kobo gets it:
+/// [`deckle_core::reader::book_epub`]), described from what it became. The calibre id the
+/// source carries is kept.
+pub fn built(source: &Path, now: &str) -> Result<Outgoing, String> {
+    let bytes = deckle_core::reader::book_epub(source, None)?;
+    let work = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let stem = source
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "book".into());
+    let file = work.path().join(format!("{stem}.epub"));
+    std::fs::write(&file, &bytes).map_err(|e| e.to_string())?;
+    let mut out = from_file(&file, now)?;
+    let source_id = source
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
+        .then(|| deckle_core::inspect::inspect(source).ok())
+        .flatten()
+        .and_then(|i| i.calibre_id);
+    if let Some(id) = source_id {
+        out.metadata["uuid"] = json!(id);
+    }
+    Ok(out)
+}
+
 fn mime(ext: &str) -> &'static str {
     match ext {
         "epub" | "kepub" => "application/epub+zip",

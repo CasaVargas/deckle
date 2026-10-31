@@ -82,6 +82,22 @@ export default function Online({ settings, set, onPage }: Props) {
           </div>
         </div>
       </section>
+      <section className="set-card online-rows" aria-label="On your home network">
+        <div className="online-head">On your home network, when you turn them on</div>
+        <div className="online-row">
+          <div>
+            <strong>KOReader over Wi-Fi and its calibre connection</strong>
+            <p className="muted">
+              These don't go online: they listen on your home network for KOReader, to hand it the paper and the books you send, and to take
+              back reading progress. The calibre connection answers only addresses on your home network; keep the catalog to your home
+              network or Tailscale. Both are off until you turn them on in Daily → Delivery.
+            </p>
+            <button className="link-action" onClick={() => onPage("koreader")}>
+              KOReader →
+            </button>
+          </div>
+        </div>
+      </section>
       <p className="muted small">A Kindle itself may ask Amazon about books sent as Kindle books. The Daily's news comes from the sites you choose on the Daily tab.</p>
     </div>
   );

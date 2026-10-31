@@ -752,38 +752,50 @@ KOReader has a built-in way to take books from calibre over Wi-Fi (Tools → cal
 Deckle can answer it instead of calibre, so a book gets to the reader with no cable and no
 plugin (calibre bridge design, `docs/superpowers/specs/2026-10-31-calibre-bridge-design.md`).
 
+In the app, turn on **KOReader's calibre connection** in the Daily tab's Delivery, then send books
+from **Settings → KOReader → Over Wi-Fi**. Every reader that has connected is listed there with
+its books and free space. **Send books…** picks from the Books tab's library (Deckle's, calibre's
+and your folders'), and **Remove** takes a book off.
+
 ```toml
 [wireless]
 enabled = true
 port = 9090                      # calibre's own; pick another if calibre's wireless server is on
 discovery = true                 # answer readers looking for calibre on the network
 library_name = "Deckle"
+paper = true                     # the newest paper when a reader connects; it keeps three
 ```
 
 ```sh
 deckle wireless password         # optional; the reader is asked for it (--clear for none)
 deckle wireless queue any ~/Books/dune.epub      # or the reader's name, e.g. "KOReader (Kobo_frost)"
+deckle wireless queue any notes.docx --as-is     # --as-is: the file exactly as it is
 deckle wireless remove "KOReader (Kobo_frost)" "Frank Herbert/Dune - Frank Herbert.epub"
 deckle wireless status           # listening or not, the address, readers seen, what's queued
 ```
 
-- On the reader, choose an inbox folder the first time (Tools → calibre → Wireless settings),
+- **First time:** on the reader, choose an inbox folder (Tools → calibre → Wireless settings),
   then Connect. It finds Deckle by itself. If it can't (calibre holds the broadcast ports, or
-  Deckle runs in Docker without host networking), type the address `deckle wireless status`
-  shows into Wireless settings → Server address.
-- Queued books go as soon as the reader connects, and while it stays connected, new ones go
-  within a couple of seconds. Books land as `<author>/<title> - <author>.epub` in the inbox
-  folder. KOReader records them for its calibre search with the book's calibre id, title,
-  authors, series and tags.
-- One reader at a time, as with calibre. A second one is told Deckle is busy. A session ends
+  Deckle runs in Docker without host networking), type the address the card shows into Wireless
+  settings → Server address.
+- **What goes:** a book is made ready the way a Kobo gets it. Word, PDF, text and Markdown files
+  are imported, and every EPUB is cleaned, but it stays an EPUB, since KOReader reads EPUB as
+  it is. It lands as `<author>/<title> - <author>.epub` in the inbox folder, and KOReader records
+  it for its calibre search with the book's calibre id, title, authors, series and tags.
+- **When it goes:** books go as soon as the reader connects, or within a couple of seconds if
+  it's already connected.
+- **The paper:** with `paper` on, a reader that connects gets the newest edition of the main
+  paper in `Deckle/`, once. Deckle's papers beyond the newest three are taken off. Other books
+  in that folder are left alone.
+- **One reader at a time,** as with calibre. A second one is told Deckle is busy. A session ends
   after 15 minutes with nothing to do, or when the reader disconnects.
-- The password is kept as is in `wireless.json` beside `digest.toml`, readable only by you,
+- **The password** is kept as is in `wireless.json` beside `digest.toml`, readable only by you,
   because calibre's challenge needs it. Only addresses on your home network are answered.
-- If calibre's own wireless server is on, it already has port 9090 and the broadcast ports:
+- **If calibre's own wireless server is on,** it already has port 9090 and the broadcast ports:
   give Deckle another port and type the address on the reader, or turn calibre's off.
-- The watcher serves it, like the reader server. `deckle wireless serve` runs it in the
+- **Who runs it:** the watcher, like the reader server. `deckle wireless serve` runs it in the
   foreground instead.
-- Checked against KOReader's own calibre client (its `wireless.lua`, run on LuaJIT in CI), not
+- **Checked** against KOReader's own calibre client (its `wireless.lua`, run on LuaJIT in CI), not
   yet on a real reader (`docs/devices.md`).
 
 ## KOReader plugins
