@@ -516,10 +516,7 @@ fn unzip(bytes: &[u8]) -> Result<Files, String> {
 /// The one plugin in `files`: the single `<name>.koplugin/` folder, or, for a repository that is
 /// the plugin (its `main.lua` at the top), the top folder named after `hint`. Returns its name and
 /// its files relative to it.
-fn pick_plugin(
-    files: Files,
-    hint: Option<&str>,
-) -> Result<(String, Files), String> {
+fn pick_plugin(files: Files, hint: Option<&str>) -> Result<(String, Files), String> {
     let mut roots: Vec<String> = files
         .iter()
         .filter_map(|(p, _)| {
