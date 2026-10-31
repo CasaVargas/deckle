@@ -776,6 +776,30 @@ deckle koreader plugins rollback appstore         # the copy the last change kep
   it closes, so Deckle doesn't edit them over USB). Until then, use KOReader's Plugin management.
 - KOReader loads new plugins at its next start.
 
+### The Deckle plugin: the paper by itself
+
+```sh
+deckle koreader plugins install deckle
+```
+
+installs Deckle's own plugin, which fetches today's paper from **KOReader over Wi-Fi** (turn that
+on first) with no taps:
+
+- when the reader wakes with Wi-Fi on, when it joins Wi-Fi, and when the file browser opens, at
+  most every ten minutes and never while a book is open;
+- or from **Tools → Deckle → Get today's paper**.
+
+It asks Deckle what today's paper is, skips it if it's already there, downloads it into
+`Deckle/` in KOReader's home folder, checks its size and SHA-256, says "Today's paper is here",
+and keeps the last three papers it fetched (Tools → Deckle → Papers kept). A Kobo gets KEPUB.
+
+- No reader can wake itself on a timer, so the paper arrives when you pick the reader up. **Turn
+  Wi-Fi on when waking, to fetch** (off by default; it costs battery) makes waking enough.
+- Deckle writes the plugin's settings to `settings/deckle.lua`: the server's address, the
+  username and the password's MD5, never the password. Installing again updates those and keeps
+  the rest. `DECKLE_READER_SERVER_URL` sets the address it's given.
+- With several papers, it fetches the household's main paper (`digest.toml`'s).
+
 ## Kobo
 
 A Kobo gets the paper too, with no Kindle Previewer: plug it in once (or keep it plugged in for

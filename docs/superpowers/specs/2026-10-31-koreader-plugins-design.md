@@ -281,3 +281,29 @@ On a jailbroken Kindle, the plugin list and an install.
    settings.
 5. **Store.** `recommended.json` with its first entries and the CI check, Discover, updates, and
    the Store view.
+
+## Build notes (phase 2)
+
+- **Where the plugin lives:** `crates/deckle-core/koplugin/deckle.koplugin/`, not `koreader/` at
+  the top, so it's inside the crate that embeds it (`include_str!`) and every build, the
+  container's included, has it. `_meta.lua`'s `version` is Deckle's, filled in at install.
+- **Loading its own logic:** `dofile(self.path .. "/logic.lua")`. KOReader puts every plugin's
+  folder on `package.path` (pluginloader.lua), so `require("logic")` could load another plugin's.
+- **What it calls in KOReader:** `socket.http` with `socketutil` timeouts and `file_sink` (as the
+  OPDS and News Downloader plugins do), `json`, `ffi/sha2`, `LuaSettings`,
+  `NetworkMgr:runWhenConnected`, `Notification:notify`, `FileManager.instance:onRefresh`,
+  `ffi/util.purgeDir`.
+- **The fetch is checked:** the server's answer must name a bare `.epub` file, a size and a
+  64-hex SHA-256, and the download must match both before it's renamed into place (through a
+  hidden `.part` file; a FAT drive won't rename over a file, so the old one goes first).
+- **Tests:** `logic.lua` by `koplugin/tests/logic_test.lua` on LuaJIT in CI, where every plugin
+  file is also compiled. `koplugin/tests/harness.lua` runs the real `main.lua` against a live
+  server with KOReader's modules stood in for; it's a manual check, not CI.
+- **Server:** `/deckle/v1/today` and `/opds/file` accept HTTP Basic or the kosync header pair.
+  Served bytes (a KEPUB made on request) are cached by path, modification time and format, so the
+  size and SHA-256 `today` gives are what the download sends.
+- **Install:** `deckle koreader plugins install deckle` (and `update deckle`) requires the reader
+  server on with a password, and an address the reader can reach (`DECKLE_READER_SERVER_URL`, else
+  this computer's LAN address). The format is KEPUB when the device is a Kobo. Settings already in
+  `settings/deckle.lua` (keep, auto, the fetched list) are kept; server, username, key and format
+  are Deckle's.
