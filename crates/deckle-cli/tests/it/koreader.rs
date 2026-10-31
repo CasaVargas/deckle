@@ -309,6 +309,15 @@ fn plugins_switch_through_the_deckle_plugin_and_patches_directly() {
     assert_eq!(zen["enabled"], false);
     assert_eq!(zen["pending"], true);
     assert!(ko.join("deckle-pending.lua").is_file());
+    let text = deckle(&home, &tmp.path().join("no-mounts"))
+        .args(["koreader", "plugins", "--from"])
+        .arg(&kobo)
+        .arg("list")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&text.stdout);
+    let line = text.lines().find(|l| l.contains(" zen ")).unwrap();
+    assert!(line.contains("on after a restart"), "{line}");
     assert!(run(&["patches", "off"]).status.success());
     assert!(ko.join("patches/.patches_disabled").is_file());
     assert!(run(&["patches", "on"]).status.success());

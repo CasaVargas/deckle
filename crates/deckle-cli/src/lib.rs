@@ -1065,7 +1065,7 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
                     .iter()
                     .map(|p| {
                         format!(
-                            "{} {:<22} {}{}{}",
+                            "{} {:<22} {}{}{}{}",
                             if p.enabled { "on " } else { "off" },
                             p.name,
                             p.fullname,
@@ -1073,7 +1073,12 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
                                 .as_deref()
                                 .map(|v| format!(" {v}"))
                                 .unwrap_or_default(),
-                            if p.builtin { "  (built in)" } else { "" }
+                            if p.builtin { "  (built in)" } else { "" },
+                            match p.pending {
+                                Some(true) => "  (on after a restart)",
+                                Some(false) => "  (off after a restart)",
+                                None => "",
+                            }
                         )
                     })
                     .collect();
