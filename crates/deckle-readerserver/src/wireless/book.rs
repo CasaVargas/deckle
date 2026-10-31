@@ -23,15 +23,21 @@ pub struct Outgoing {
 /// isn't an EPUB (or won't open as one) goes by its file name. Papers (`deckle-daily-…`) go in
 /// `Deckle/`; anything else in `<author>/<title> - <author>.<ext>`.
 pub fn from_file(path: &Path, now: &str) -> Result<Outgoing, String> {
+    from_file_as(path, None, now)
+}
+
+/// [`from_file`], with `name` standing in for the file's own name (without extension).
+pub fn from_file_as(path: &Path, name: Option<&str>, now: &str) -> Result<Outgoing, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let ext = path
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    let stem = path
-        .file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "book".into());
+    let stem = name.map(str::to_owned).unwrap_or_else(|| {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "book".into())
+    });
     let info = matches!(ext.as_str(), "epub" | "kepub")
         .then(|| deckle_core::inspect::inspect(path).ok())
         .flatten();
@@ -61,7 +67,7 @@ pub fn from_file(path: &Path, now: &str) -> Result<Outgoing, String> {
         .unwrap_or_else(|| stable_uuid(&title, &authors));
     let paper = stem.starts_with("deckle-daily-");
     let lpath = if paper {
-        format!("Deckle/{}.{ext}", clean(&stem))
+        paper_lpath(&stem, &ext)
     } else {
         lpath(&title, &authors, &ext)
     };
@@ -132,6 +138,11 @@ fn mime(ext: &str) -> &'static str {
 
 /// `<author>/<title> - <author>.<ext>`, as calibre's default template makes it, with each
 /// part made safe for any reader's file system.
+/// Where a paper goes on the reader: `Deckle/<edition name>.<ext>`.
+pub fn paper_lpath(stem: &str, ext: &str) -> String {
+    format!("{}{}.{ext}", super::PAPER_DIR, clean(stem))
+}
+
 pub fn lpath(title: &str, authors: &[String], ext: &str) -> String {
     let author = authors
         .first()

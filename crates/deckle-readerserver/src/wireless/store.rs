@@ -25,6 +25,9 @@ pub struct Job {
     /// An `lpath` to take off the reader.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remove: Option<String>,
+    /// The name `send` goes by on the reader instead of its file name: a paper's edition name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// `send` is a book to make ready first (imported if need be, then cleaned, as for a Kobo):
     /// a book from Deckle's library, calibre or a folder. Otherwise it goes as it is.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -127,6 +130,7 @@ impl Store {
             reader: reader.trim().to_owned(),
             send,
             remove,
+            name: None,
             build,
             added: now.to_rfc3339(),
         };
@@ -148,17 +152,22 @@ impl Store {
         self.dir.join("paper.json")
     }
 
-    /// The paper a reader gets when it connects: the newest edition of the main paper, or
-    /// none (`[wireless] paper` off). Written by the watcher when it changes.
-    pub fn set_paper(&self, paper: Option<&Path>) -> std::io::Result<()> {
+    /// The paper a reader gets when it connects: the newest edition of the main paper with its
+    /// own name (`deckle-daily-YYYY-MM-DD`, which the Morgue's date-named file doesn't carry),
+    /// or none (`[wireless] paper` off). Written by the watcher when it changes.
+    pub fn set_paper(&self, paper: Option<(&Path, &str)>) -> std::io::Result<()> {
         match paper {
-            Some(p) => {
-                if self.paper().as_deref() == Some(p) {
+            Some((p, name)) => {
+                if self.paper().as_deref() == Some(p) && self.paper_name().as_deref() == Some(name)
+                {
                     return Ok(());
                 }
                 std::fs::create_dir_all(&self.dir)?;
                 let tmp = self.paper_path().with_extension("json.tmp");
-                std::fs::write(&tmp, serde_json::to_vec(&serde_json::json!({ "path": p }))?)?;
+                std::fs::write(
+                    &tmp,
+                    serde_json::to_vec(&serde_json::json!({ "path": p, "name": name }))?,
+                )?;
                 std::fs::rename(tmp, self.paper_path())
             }
             None => match std::fs::remove_file(self.paper_path()) {
@@ -172,6 +181,13 @@ impl Store {
         let b = std::fs::read(self.paper_path()).ok()?;
         let v: serde_json::Value = serde_json::from_slice(&b).ok()?;
         v["path"].as_str().map(PathBuf::from)
+    }
+
+    /// The paper's edition name, `deckle-daily-YYYY-MM-DD`, when the watcher gave one.
+    pub fn paper_name(&self) -> Option<String> {
+        let b = std::fs::read(self.paper_path()).ok()?;
+        let v: serde_json::Value = serde_json::from_slice(&b).ok()?;
+        v["name"].as_str().map(str::to_owned)
     }
 
     /// Every job waiting, oldest first. A file that doesn't parse is skipped.

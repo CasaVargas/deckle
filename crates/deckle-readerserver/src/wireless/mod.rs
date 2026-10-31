@@ -542,10 +542,18 @@ fn paper_jobs(device: &Device, store: &Store) -> Vec<Job> {
     let Some(paper) = store.paper().filter(|p| p.is_file()) else {
         return Vec::new();
     };
-    let Some(name) = paper.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+    // The edition's own name: the Morgue's file is named by date only.
+    let Some(name) = store
+        .paper_name()
+        .or_else(|| paper.file_stem().map(|n| n.to_string_lossy().into_owned()))
+    else {
         return Vec::new();
     };
-    let lpath = format!("{PAPER_DIR}{}", book::clean(&name));
+    let ext = paper
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let lpath = book::paper_lpath(&name, &ext);
     let on: Vec<String> = store
         .readers()
         .readers
@@ -555,6 +563,7 @@ fn paper_jobs(device: &Device, store: &Store) -> Vec<Job> {
     let job = |send: Option<PathBuf>, remove: Option<String>| Job {
         id: String::new(),
         reader: device.store_uuid.clone(),
+        name: send.as_ref().map(|_| name.clone()),
         send,
         remove,
         build: false,
@@ -599,7 +608,7 @@ fn do_jobs(
         let made = if j.build {
             book::built(path, &now())
         } else {
-            book::from_file(path, &now())
+            book::from_file_as(path, j.name.as_deref(), &now())
         };
         let book = match made {
             Ok(b) => b,

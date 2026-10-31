@@ -627,10 +627,19 @@ fn a_koreader_too_old_for_collections_is_noted_once() {
 fn a_reader_gets_todays_paper_once_and_keeps_the_last_three() {
     let tmp = tempfile::tempdir().unwrap();
     let inbox = tmp.path().join("inbox");
-    let paper = tmp.path().join("deckle-daily-2026-10-31.epub");
-    epub(&paper, "The Deckle Daily", "Deckle", None);
+    // As the Morgue keeps it: named by date. The edition's own name comes with it.
+    let paper = tmp.path().join("morgue/2026/2026-10-31.epub");
+    std::fs::create_dir_all(paper.parent().unwrap()).unwrap();
+    epub(
+        &paper,
+        "The Deckle Daily — Saturday, October 31, 2026",
+        "Deckle",
+        None,
+    );
     let srv = server(&tmp.path().join("state"), None, Duration::from_millis(800));
-    srv.store.set_paper(Some(&paper)).unwrap();
+    srv.store
+        .set_paper(Some((&paper, "deckle-daily-2026-10-31")))
+        .unwrap();
 
     let mut ko = Koreader::new(&inbox);
     for d in ["27", "28", "29", "30"] {

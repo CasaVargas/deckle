@@ -67,12 +67,12 @@ pub(crate) struct Supervisor {
 }
 
 /// The newest edition of the main paper, for a reader that connects (`[wireless] paper`).
-fn newest_paper(main_path: &Path) -> Option<PathBuf> {
+fn newest_paper(main_path: &Path) -> Option<(PathBuf, String)> {
     crate::reader_server::catalog(main_path)
         .papers
         .into_iter()
         .find(|p| p.main)
-        .map(|p| p.epub)
+        .map(|p| (p.epub, p.stem))
 }
 
 impl Supervisor {
@@ -85,7 +85,9 @@ impl Supervisor {
             let paper = (cfg.wireless.enabled && cfg.wireless.paper)
                 .then(|| newest_paper(main_path))
                 .flatten();
-            if let Err(e) = store().set_paper(paper.as_deref()) {
+            if let Err(e) =
+                store().set_paper(paper.as_ref().map(|(p, n)| (p.as_path(), n.as_str())))
+            {
                 eprintln!("wireless: {e}");
             }
         }

@@ -285,7 +285,9 @@ fn koreaders_client_takes_the_paper_into_deckles_folder() {
     epub(&paper);
     let state = tmp.path().join("state");
     let (addr, stop, h) = server(&state, None);
-    Store::new(&state).set_paper(Some(&paper)).unwrap();
+    Store::new(&state)
+        .set_paper(Some((&paper, "deckle-daily-2026-10-31")))
+        .unwrap();
     let said = run_client(&dir, addr, &inbox, None);
     assert!(
         inbox.join("Deckle/deckle-daily-2026-10-31.epub").is_file(),
