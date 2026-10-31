@@ -110,6 +110,17 @@ jobs:
           docker image ls deckle:ci
           docker run --rm --entrypoint ldd deckle:ci /opt/deckle/deckle
       - run: tools/docker-smoke.sh deckle:ci
+  # The Deckle plugin for KOReader is Lua: its logic is tested, and every file compiled, on the
+  # LuaJIT KOReader runs on (KOReader plugins design §9).
+  koplugin:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y luajit
+      - run: luajit crates/deckle-core/koplugin/tests/logic_test.lua
+      - run: for f in crates/deckle-core/koplugin/deckle.koplugin/*.lua crates/deckle-core/koplugin/tests/*.lua; do luajit -b "$f" /dev/null || exit 1; done
   press-contract:
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'

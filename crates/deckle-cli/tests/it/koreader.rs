@@ -197,3 +197,81 @@ fn plugins_are_listed_installed_updated_removed_and_rolled_back() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("built-in"));
 }
+
+#[test]
+fn the_deckle_plugin_needs_the_reader_server_then_installs_with_its_settings() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    // A folder named like a Kobo's drive: the plugin gets KEPUB.
+    let kobo = tmp.path().join("Kobo");
+    let ko = kobo.join(".adds/koreader");
+    write(&ko.join("settings.reader.lua"), "return {}");
+    std::fs::create_dir_all(ko.join("plugins")).unwrap();
+    let mounts = tmp.path().join("no-mounts");
+    let cmd = |args: &[&str]| {
+        let mut c = deckle(&home, &mounts);
+        c.env("DECKLE_READER_SERVER_URL", "http://tower.local:47220");
+        c.args(args);
+        c
+    };
+    cmd(&["digest", "init"]).assert().success();
+    let install = |c: &mut Command| {
+        c.args(["koreader", "plugins", "--from"])
+            .arg(&kobo)
+            .args(["install", "deckle", "--yes"])
+            .output()
+            .unwrap()
+    };
+    let o = install(&mut cmd(&[]));
+    assert!(!o.status.success());
+    assert!(
+        String::from_utf8_lossy(&o.stderr).contains("KOReader over Wi-Fi"),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(!ko.join("plugins/deckle.koplugin").exists());
+
+    // Turn the server on and set its password, then install.
+    let cfg = walk_for(&home, "digest.toml");
+    let mut text = std::fs::read_to_string(&cfg).unwrap();
+    text.push_str("\n[reader_server]\nenabled = true\n");
+    std::fs::write(&cfg, text).unwrap();
+    cmd(&["reader-server", "password", "--stdin"])
+        .write_stdin("hunter2\n")
+        .assert()
+        .success();
+    let o = install(&mut cmd(&[]));
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert!(ko.join("plugins/deckle.koplugin/main.lua").is_file());
+    let settings = std::fs::read_to_string(ko.join("settings/deckle.lua")).unwrap();
+    assert!(
+        settings.contains("\"http://tower.local:47220\""),
+        "{settings}"
+    );
+    assert!(settings.contains("\"kepub\""), "{settings}");
+    assert!(
+        settings.contains("2ab96390c7dbe3439de74d0c9b0b1767"),
+        "{settings}"
+    );
+    assert!(!settings.contains("hunter2"));
+}
+
+/// The file called `name` somewhere under `dir`.
+fn walk_for(dir: &Path, name: &str) -> std::path::PathBuf {
+    fn find(dir: &Path, name: &str) -> Option<std::path::PathBuf> {
+        for e in std::fs::read_dir(dir).ok()?.flatten() {
+            let p = e.path();
+            if p.file_name().is_some_and(|n| n == name) {
+                return Some(p);
+            }
+            if p.is_dir()
+                && let Some(f) = find(&p, name)
+            {
+                return Some(f);
+            }
+        }
+        None
+    }
+    find(dir, name).unwrap_or_else(|| panic!("{name} not under {}", dir.display()))
+}
