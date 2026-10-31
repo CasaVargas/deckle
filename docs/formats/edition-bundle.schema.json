@@ -253,7 +253,7 @@
               "properties": {
                 "from": { "type": "string" },
                 "to": { "type": "string" },
-                "steps": { "type": "integer", "minimum": 0 },
+                "steps": { "type": "integer", "minimum": 0, "description": "The blank rungs between from and to; answer holds steps + 2 words." },
                 "answer": { "type": "array", "items": { "type": "string" } }
               }
             }
