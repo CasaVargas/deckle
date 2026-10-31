@@ -29,6 +29,12 @@ pub const FILL_CAP: Duration = Duration::from_millis(500);
 /// Theme answers placed in a mini.
 const THEME_WORDS: usize = 2;
 
+/// Theme words in a word search, at most (word search design §2).
+const SEARCH_THEMES: usize = 3;
+/// Mixed into the date's seed for the word search, so its fill never moves the mini's or the
+/// ladder's.
+const SEARCH_SALT: u64 = 0x5EA8_C000;
+
 /// Fills tried with the theme words, then as many without, while the fill matches a grid of the
 /// last [`store::KEEP_DAYS`] days.
 const FRESH_TRIES: u64 = 4;
@@ -40,6 +46,8 @@ const FRESH_TRIES: u64 = 4;
 ///   headline that runs two days gives the same theme word twice. A repeat is filled again with
 ///   the date's next seed, then without the theme words.
 /// - The ladder avoids the pairs of the last 60 days.
+/// - The word search (word search design §4) hides up to three other headline words and none
+///   of the mini's, from its own seed, and is none of the last 60 days' either.
 pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -> Puzzle {
     let seed = date.num_days_from_ce() as u64;
     let mut rng = StdRng::seed_from_u64(seed);
@@ -66,7 +74,7 @@ pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -
         let mut again = StdRng::seed_from_u64(seed ^ (attempt << 32));
         fill = grid::fill(words, &seeds, &mut again, FILL_CAP);
     }
-    let clues = fill
+    let clues: Vec<Clue> = fill
         .as_ref()
         .map(|f| {
             f.answers
@@ -99,6 +107,12 @@ pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -
     } else {
         None
     };
+    let minis: HashSet<String> = clues
+        .iter()
+        .map(|c| c.answer.clone())
+        .chain(themes.iter().map(|t| t.word.clone()))
+        .collect();
+    let search = word_search(date, cfg, words, store, &minis);
     Puzzle {
         number: 1 + store
             .days
@@ -109,7 +123,48 @@ pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -
         rows: fill.map(|f| f.rows),
         clues,
         ladder,
+        search,
     }
+}
+
+/// The day's word search: yesterday's 4–5-letter headline words not in `avoid` (the mini's
+/// answers and themes) first, filled from the date's salted seed, again while it matches a
+/// search of the last 60 days, then without the theme words.
+fn word_search(
+    date: NaiveDate,
+    cfg: &PuzzleConfig,
+    words: &Words,
+    store: &Store,
+    avoid: &HashSet<String>,
+) -> Option<search::Search> {
+    let mut themes: Vec<String> = match (cfg.theme, store.days.get(&(date - Days::new(1)))) {
+        (true, Some(y)) => theme::pick(&y.headlines, THEME_WORDS + SEARCH_THEMES)
+            .into_iter()
+            .map(|t| t.word)
+            .filter(|w| (4..=5).contains(&w.len()) && !avoid.contains(w))
+            .take(SEARCH_THEMES)
+            .collect(),
+        _ => Vec::new(),
+    };
+    let since = date - Days::new(store::KEEP_DAYS);
+    let recent: HashSet<&Vec<String>> = store
+        .days
+        .range(since..date)
+        .filter_map(|(_, d)| d.puzzle.search.as_ref().map(|s| &s.rows))
+        .collect();
+    let seed = date.num_days_from_ce() as u64 ^ SEARCH_SALT;
+    let mut found = None;
+    for attempt in 0..=2 * FRESH_TRIES {
+        if attempt > FRESH_TRIES {
+            themes.clear();
+        }
+        let mut rng = StdRng::seed_from_u64(seed ^ (attempt << 32));
+        found = search::fill(words, &themes, avoid, &mut rng, search::SEARCH_CAP);
+        if found.as_ref().is_none_or(|s| !recent.contains(&s.rows)) {
+            break;
+        }
+    }
+    found
 }
 
 /// The stored puzzle for `date`, or a new one made and kept in `store`.

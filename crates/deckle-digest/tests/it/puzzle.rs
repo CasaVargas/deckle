@@ -440,6 +440,7 @@ fn checked_puzzle() -> Puzzle {
                 .map(String::from)
                 .to_vec(),
         }),
+        search: None,
     }
 }
 
@@ -723,5 +724,106 @@ fn a_grid_is_never_yesterdays_again() {
         today.rows, yesterday.rows,
         "No. {} reprinted No. {}",
         today.number, yesterday.number
+    );
+}
+
+#[test]
+fn a_day_has_a_word_search() {
+    let mut store = Store::default();
+    let cfg = PuzzleConfig::default();
+    let first = today(date(), &cfg, Words::embedded(), &mut store).clone();
+    let s = first.puzzle.search.as_ref().expect("a word search");
+    assert!((8..=10).contains(&s.words.len()), "{}", s.words.len());
+    assert_eq!(today(date(), &cfg, Words::embedded(), &mut store), &first);
+}
+
+#[test]
+fn old_puzzles_json_loads_without_search() {
+    let json =
+        r#"{"days":{"2026-10-21":{"puzzle":{"number":1,"rows":null,"clues":[],"ladder":null}}}}"#;
+    let store: Store = serde_json::from_str(json).unwrap();
+    assert_eq!(store.days[&yesterday()].puzzle.search, None);
+}
+
+#[test]
+fn search_never_reuses_the_minis_words() {
+    let store = store_with_yesterday(vec![leaf()]);
+    let p = make(date(), &PuzzleConfig::default(), Words::embedded(), &store);
+    let s = p.search.expect("a word search");
+    for h in &s.words {
+        assert!(
+            p.clues.iter().all(|c| c.answer != h.word),
+            "{} is in the mini",
+            h.word
+        );
+    }
+    assert!(s.words.iter().all(|h| h.word != "leaf"));
+}
+
+#[test]
+fn three_letter_themes_are_skipped() {
+    let oak = ThemeWord {
+        word: "oak".into(),
+        headline: "Old oak falls on Main Street".into(),
+        section: "Local".into(),
+    };
+    let store = store_with_yesterday(vec![oak]);
+    let s = make(date(), &PuzzleConfig::default(), Words::embedded(), &store)
+        .search
+        .expect("a word search");
+    assert!(
+        s.words
+            .iter()
+            .all(|h| h.word != "oak" && (4..=5).contains(&h.word.len()))
+    );
+    assert!(s.words.iter().all(|h| !h.theme));
+}
+
+#[test]
+fn a_search_is_never_a_recent_one() {
+    let cfg = PuzzleConfig::default();
+    let plain = make(date(), &cfg, Words::embedded(), &Store::default());
+    let mut store = Store::default();
+    let mut yesterday_puzzle = make(yesterday(), &cfg, Words::embedded(), &store);
+    yesterday_puzzle.search = plain.search.clone();
+    store.days.insert(
+        yesterday(),
+        Day {
+            puzzle: yesterday_puzzle,
+            headlines: Vec::new(),
+            solve: None,
+        },
+    );
+    let again = make(date(), &cfg, Words::embedded(), &store);
+    assert!(again.search.is_some());
+    assert_ne!(again.search.map(|s| s.rows), plain.search.map(|s| s.rows));
+}
+
+#[test]
+fn a_list_too_small_leaves_the_search_out() {
+    let small = Words::from_tsv("cold\tx\ncord\tx\ncard\tx\nward\tx\nwarm\tx\n");
+    let p = make(date(), &PuzzleConfig::default(), &small, &Store::default());
+    assert_eq!(p.search, None);
+}
+
+#[test]
+fn existing_days_keep_their_mini_and_ladder() {
+    let p = make(
+        date(),
+        &PuzzleConfig::default(),
+        Words::embedded(),
+        &Store::default(),
+    );
+    assert_eq!(
+        p.rows,
+        Some(["##GOT", "DRIVE", "RAVEN", "AVERT", "GER##"].map(String::from))
+    );
+    assert_eq!(
+        p.ladder.map(|l| l.path),
+        Some(
+            ["hard", "bard", "bare", "base", "ease", "easy"]
+                .map(String::from)
+                .to_vec()
+        )
     );
 }
