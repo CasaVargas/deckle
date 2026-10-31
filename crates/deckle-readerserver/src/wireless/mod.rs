@@ -183,11 +183,7 @@ pub fn serve_on(
     }
     let active: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let mut sessions: Vec<std::thread::JoinHandle<()>> = Vec::new();
-    loop {
-        match stop.try_recv() {
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            _ => break,
-        }
+    while let Err(std::sync::mpsc::TryRecvError::Empty) = stop.try_recv() {
         match listener.accept() {
             Ok((mut stream, peer)) => {
                 if !is_private(peer.ip()) {
@@ -410,7 +406,7 @@ fn do_jobs(
             }
         };
         let ext = book.lpath.rsplit('.').next().unwrap_or("").to_owned();
-        if !device.extensions.iter().any(|e| *e == ext) {
+        if !device.extensions.contains(&ext) {
             store.finish(j);
             store.log(format!(
                 "{} doesn't take .{ext} files: {} not sent",

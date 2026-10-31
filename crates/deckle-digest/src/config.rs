@@ -154,6 +154,11 @@ pub struct Config {
     /// design §A). A household setting. Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "ReaderServerConfig::is_default")]
     pub reader_server: ReaderServerConfig,
+    /// `[wireless]`: calibre's wireless connection, so KOReader takes books from Deckle over
+    /// Wi-Fi (calibre bridge design §4.1). A household setting. Left out of a save while it's
+    /// untouched.
+    #[serde(skip_serializing_if = "WirelessConfig::is_default")]
+    pub wireless: WirelessConfig,
     /// The frost cache (tests); the default is `almanac.json` beside `digest.toml`.
     #[serde(skip)]
     pub almanac_path: Option<PathBuf>,
@@ -295,6 +300,7 @@ impl Default for Config {
             export: Vec::new(),
             remarkable: RemarkableConfig::default(),
             reader_server: ReaderServerConfig::default(),
+            wireless: WirelessConfig::default(),
             almanac_path: None,
             press_path: None,
             puzzle_path: None,
@@ -1283,6 +1289,37 @@ impl ReaderServerConfig {
     }
 }
 
+/// `[wireless]` (calibre bridge design §4.1). The password isn't here: it's in `wireless.json`
+/// beside `digest.toml`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WirelessConfig {
+    pub enabled: bool,
+    /// TCP, calibre's 9090 unless it's taken.
+    pub port: u16,
+    /// Answer readers looking for calibre on the network.
+    pub discovery: bool,
+    /// The library name the reader shows.
+    pub library_name: String,
+}
+
+impl Default for WirelessConfig {
+    fn default() -> Self {
+        WirelessConfig {
+            enabled: false,
+            port: 9090,
+            discovery: true,
+            library_name: "Deckle".into(),
+        }
+    }
+}
+
+impl WirelessConfig {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// The paper's photos: grayscale for e-ink, or as published for a color screen.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1505,6 +1542,13 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # enabled = true
 # port = 47220
 # username = "deckle"
+
+# KOReader's calibre wireless connection (Tools → calibre → Connect) can take books from Deckle
+# instead of calibre, over the home network. Queue books with `deckle wireless queue`; an
+# optional password is set with `deckle wireless password`.
+# [wireless]
+# enabled = true
+# port = 9090
 "#;
 
 /// A new extra paper (`deckle digest papers new`, the app's New paper): `{title}`, `{reader}`
@@ -1701,6 +1745,7 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
         t.remove("reading");
         t.remove("subscriptions");
         t.remove("reader_server");
+        t.remove("wireless");
         if let Some(email) = t.get_mut("email").and_then(|e| e.as_table_like_mut()) {
             for key in ["from", "smtp_host", "smtp_port", "username"] {
                 email.remove(key);
