@@ -521,6 +521,15 @@ pub enum PluginsCommand {
     Remove { name: String },
     /// Put back the copy of a plugin that the last install, update or remove kept.
     Rollback { name: String },
+    /// Switch a plugin on from KOReader's next start (applied by the Deckle plugin).
+    Enable { name: String },
+    /// Switch a plugin off from KOReader's next start (applied by the Deckle plugin).
+    Disable { name: String },
+    /// Switch every patch in patches/ on or off.
+    Patches {
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

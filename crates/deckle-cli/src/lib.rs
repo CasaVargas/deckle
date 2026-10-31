@@ -1118,6 +1118,19 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
             })?;
             Ok(ExitCode::SUCCESS)
         }
+        cli::PluginsCommand::Enable { name } => switch(json, &data, &name, true),
+        cli::PluginsCommand::Disable { name } => switch(json, &data, &name, false),
+        cli::PluginsCommand::Patches { state } => {
+            let on = state == "on";
+            kp::set_patches(&data, on)?;
+            emit(json, &serde_json::json!({ "patches": on }), || {
+                format!(
+                    "patches {}; KOReader reads this at its next start",
+                    if on { "on" } else { "off" }
+                )
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
         cli::PluginsCommand::Rollback { name } => {
             let done = kp::rollback(&data, &name)?;
             emit(json, &done, || {
@@ -1126,6 +1139,19 @@ fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<Ex
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+/// A plugin on or off from KOReader's next start, through the Deckle plugin (design §5.4).
+fn switch(json: bool, data: &Path, name: &str, on: bool) -> Result<ExitCode, String> {
+    deckle_core::koreader_plugins::set_enabled(data, name, on)?;
+    let word = if on { "on" } else { "off" };
+    emit(json, &serde_json::json!({ "name": name, "on": on }), || {
+        format!(
+            "{name} goes {word} when KOReader next starts (the Deckle plugin applies it and asks \
+             for a restart)"
+        )
+    })?;
+    Ok(ExitCode::SUCCESS)
 }
 
 /// What the Deckle plugin is told (KOReader plugins design §5.1): the reader server's address and
