@@ -20,8 +20,10 @@ use crate::koreader::lua::{self, Value};
 use crate::koreader_backup::DATA_DIRS;
 
 /// KOReader's built-in plugins (`BUILTIN_PLUGINS`, frontend/pluginloader.lua, master on
-/// 2026-10-31). Deckle never replaces or removes one of these.
+/// 2026-10-31). Deckle never replaces or removes one of these. Names are folder names, so
+/// case matters: KOReader's own SSH plugin is `SSH.koplugin`.
 pub const BUILTIN: &[&str] = &[
+    "SSH",
     "archiveviewer",
     "autodim",
     "autostandby",
@@ -962,6 +964,13 @@ fn keep(data: &Path, name: &str, folder: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssh_is_built_in() {
+        // KOReader ships SSH.koplugin on Kindle and Kobo; it is in BUILTIN_PLUGINS, capitalized.
+        assert!(is_builtin("SSH"));
+        assert_eq!(BUILTIN.len(), 37);
+    }
 
     #[test]
     fn gettext_calls_unwrap_to_their_strings() {
