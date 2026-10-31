@@ -116,3 +116,84 @@ fn restore_with_no_reader_connected_says_so() {
     assert!(!o.status.success());
     assert!(String::from_utf8_lossy(&o.stderr).contains("no e-reader connected"));
 }
+
+/// A zip of `files` (path, text).
+fn plugin_zip(files: &[(&str, &str)]) -> Vec<u8> {
+    use std::io::Write;
+    let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    for (p, t) in files {
+        z.start_file(*p, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        z.write_all(t.as_bytes()).unwrap();
+    }
+    z.finish().unwrap().into_inner()
+}
+
+#[test]
+fn plugins_are_listed_installed_updated_removed_and_rolled_back() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let kobo = tmp.path().join("KOBOeReader");
+    let ko = kobo.join(".adds/koreader");
+    write(&ko.join("plugins/kosync.koplugin/main.lua"), "-- built in");
+    write(&ko.join("settings.reader.lua"), "return {}");
+    let mounts = tmp.path().join("no-mounts");
+    let run = |args: &[&str]| {
+        deckle(&home, &mounts)
+            .args(["--json", "koreader", "plugins", "--from"])
+            .arg(&kobo)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let json = |o: &std::process::Output| -> serde_json::Value {
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+        serde_json::from_slice(&o.stdout).unwrap()
+    };
+
+    let l = json(&run(&["list"]));
+    assert_eq!(l["plugins"][0]["name"], "kosync");
+    assert_eq!(l["plugins"][0]["builtin"], true);
+
+    let v1 = tmp.path().join("zen-1.zip");
+    std::fs::write(
+        &v1,
+        plugin_zip(&[
+            ("zen.koplugin/main.lua", "-- 1"),
+            (
+                "zen.koplugin/_meta.lua",
+                "return { fullname = \"Zen\", version = \"1\" }",
+            ),
+        ]),
+    )
+    .unwrap();
+    // No terminal to ask on, and no --yes: nothing written.
+    let o = run(&["install", v1.to_str().unwrap()]);
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("--yes"));
+    assert!(!ko.join("plugins/zen.koplugin").exists());
+    json(&run(&["install", v1.to_str().unwrap(), "--yes"]));
+    assert!(ko.join("plugins/zen.koplugin/main.lua").is_file());
+
+    // `update` goes back to where it came from: overwrite the zip with version 2.
+    std::fs::write(&v1, plugin_zip(&[("zen.koplugin/main.lua", "-- 2")])).unwrap();
+    let done = json(&run(&["update", "zen", "--yes"]));
+    assert!(done["kept"].is_string());
+    assert_eq!(
+        std::fs::read_to_string(ko.join("plugins/zen.koplugin/main.lua")).unwrap(),
+        "-- 2"
+    );
+
+    json(&run(&["remove", "zen"]));
+    assert!(!ko.join("plugins/zen.koplugin").exists());
+    json(&run(&["rollback", "zen"]));
+    assert_eq!(
+        std::fs::read_to_string(ko.join("plugins/zen.koplugin/main.lua")).unwrap(),
+        "-- 2"
+    );
+
+    let o = run(&["remove", "kosync"]);
+    assert!(!o.status.success());
+    assert!(String::from_utf8_lossy(&o.stderr).contains("built-in"));
+}

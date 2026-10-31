@@ -990,10 +990,151 @@ fn koreader_root(arg: &str) -> Result<(PathBuf, String), String> {
     }
 }
 
+/// `deckle koreader plugins …` (KOReader plugins design part A).
+fn plugins_cmd(json: bool, from: &str, action: cli::PluginsCommand) -> Result<ExitCode, String> {
+    use deckle_core::koreader_plugins as kp;
+    let (root, device) = koreader_root(from)?;
+    let data = kp::data_dir(&root)
+        .ok_or_else(|| format!("no KOReader on the {device} (no koreader folder found)"))?;
+    // Install and update: fetched and checked first, then shown, then asked.
+    let put = |p: kp::Prepared, yes: bool| -> Result<ExitCode, String> {
+        let what = format!(
+            "{} {}{} from {}{}",
+            if p.replaces.is_some() {
+                "Replace"
+            } else {
+                "Install"
+            },
+            p.fullname,
+            p.version
+                .as_deref()
+                .map(|v| format!(" {v}"))
+                .unwrap_or_default(),
+            p.source.from,
+            p.source
+                .release
+                .as_deref()
+                .map(|r| format!(" (release {r})"))
+                .unwrap_or_default(),
+        );
+        if !yes
+            && !confirm(&format!(
+                "{what} on the {device}? Plugins run code on your reader."
+            ))?
+        {
+            eprintln!("nothing written");
+            return Ok(ExitCode::from(1));
+        }
+        let done = kp::install(&data, &p)?;
+        emit(json, &done, || match &done.kept {
+            Some(k) => format!("{what}: done. The old one is kept in {}", k.display()),
+            None => format!("{what}: done. Restart KOReader to load it."),
+        })?;
+        Ok(ExitCode::SUCCESS)
+    };
+    match action {
+        cli::PluginsCommand::List => {
+            let l = kp::list(&data);
+            emit(json, &l, || {
+                let mut out: Vec<String> = l
+                    .plugins
+                    .iter()
+                    .map(|p| {
+                        format!(
+                            "{} {:<22} {}{}{}",
+                            if p.enabled { "on " } else { "off" },
+                            p.name,
+                            p.fullname,
+                            p.version
+                                .as_deref()
+                                .map(|v| format!(" {v}"))
+                                .unwrap_or_default(),
+                            if p.builtin { "  (built in)" } else { "" }
+                        )
+                    })
+                    .collect();
+                if !l.patches.is_empty() {
+                    out.push(format!(
+                        "patches{}: {}",
+                        if l.patches_disabled { " (all off)" } else { "" },
+                        l.patches.join(", ")
+                    ));
+                }
+                out.join("\n")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::PluginsCommand::Install { source, yes } => {
+            let from = kp::From::parse(&source)?;
+            put(kp::prepare(&data, &from, &mut kp::http_fetch)?, yes)
+        }
+        cli::PluginsCommand::Update { name, source, yes } => {
+            let source = match source {
+                Some(s) => s,
+                None => kp::list(&data)
+                    .plugins
+                    .into_iter()
+                    .find(|p| p.name == name)
+                    .and_then(|p| p.source)
+                    .map(|s| s.from)
+                    .ok_or_else(|| {
+                        format!("{name}: Deckle didn't install it, so pass where to update it from")
+                    })?,
+            };
+            let from = kp::From::parse(&source)?;
+            let p = kp::prepare(&data, &from, &mut kp::http_fetch)?;
+            if p.name != name {
+                return Err(format!("{source} holds {}, not {name}", p.name));
+            }
+            put(p, yes)
+        }
+        cli::PluginsCommand::Remove { name } => {
+            let done = kp::remove(&data, &name)?;
+            emit(json, &done, || {
+                format!(
+                    "removed {name}; kept in {} (`deckle koreader plugins rollback {name}` puts it back)",
+                    done.kept
+                        .as_deref()
+                        .map(|k| k.display().to_string())
+                        .unwrap_or_default()
+                )
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::PluginsCommand::Rollback { name } => {
+            let done = kp::rollback(&data, &name)?;
+            emit(json, &done, || {
+                format!("put back the kept {name}. Restart KOReader to load it.")
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
+}
+
+/// Asks `question` on the terminal; no terminal means no.
+fn confirm(question: &str) -> Result<bool, String> {
+    use std::io::{BufRead, IsTerminal, Write};
+    if !std::io::stdin().is_terminal() {
+        return Err("not a terminal to ask on: pass --yes to go ahead".into());
+    }
+    eprint!("{question} [y/N] ");
+    std::io::stderr().flush().ok();
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
+    Ok(matches!(
+        line.trim().to_ascii_lowercase().as_str(),
+        "y" | "yes"
+    ))
+}
+
 /// `deckle koreader backup|restore` (KOReader hub design §D).
 fn koreader_cmd(json: bool, action: cli::KoreaderCommand) -> Result<ExitCode, String> {
     use deckle_core::koreader_backup::{self as kb, Outcome};
     match action {
+        cli::KoreaderCommand::Plugins { from, action } => plugins_cmd(json, &from, action),
         cli::KoreaderCommand::Backup { from, to } => {
             let (root, device) = koreader_root(&from)?;
             let base = match to {
