@@ -6,8 +6,9 @@
 //! built-in names tells them apart.
 //!
 //! Every replacement keeps the old folder in `deckle-backup/plugins/`, so it can be put back.
-//! Switching a plugin on or off is phase 3: KOReader rewrites `settings.reader.lua` when it
-//! closes, so Deckle doesn't edit it.
+//! Switching a plugin on or off isn't written to `settings.reader.lua`, which KOReader rewrites
+//! when it closes: it goes to `deckle-pending.lua`, which the Deckle plugin applies at KOReader's
+//! next start (design §5.4).
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -65,6 +66,8 @@ pub const MAX_BYTES: u64 = 20 * 1024 * 1024;
 pub const BACKUP_DIR: &str = "deckle-backup/plugins";
 /// Where Deckle remembers each plugin's source, in KOReader's folder.
 pub const SOURCES: &str = "deckle-plugins.json";
+/// Plugin changes waiting for the Deckle plugin to apply, in KOReader's folder.
+pub const PENDING: &str = "deckle-pending.lua";
 
 pub fn is_builtin(name: &str) -> bool {
     BUILTIN.contains(&name)
@@ -93,6 +96,9 @@ pub struct Plugin {
     /// Where Deckle installed it from, when it did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<Source>,
+    /// On (`true`) or off once KOReader restarts with the Deckle plugin, when a change waits.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<bool>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -126,6 +132,7 @@ pub fn list(data: &Path) -> Listing {
         .and_then(|s| s.get("plugins_disable_external"))
         == Some(&Value::Bool(true));
     let sources = load_sources(data);
+    let waiting = pending(data);
     let mut plugins: Vec<Plugin> = std::fs::read_dir(data.join("plugins"))
         .into_iter()
         .flatten()
@@ -143,6 +150,7 @@ pub fn list(data: &Path) -> Listing {
                 builtin,
                 enabled: !disabled.contains(&name) && (builtin || !external_off),
                 source: sources.get(&name).cloned(),
+                pending: waiting.get(&name).copied(),
                 name,
             })
         })
@@ -578,6 +586,88 @@ fn meta_of(files: &[(String, Vec<u8>)]) -> Meta {
         .find(|(p, _)| p == "_meta.lua")
         .map(|(_, b)| meta_text(&String::from_utf8_lossy(b)))
         .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------------------------
+// On and off
+
+/// The plugin changes waiting in `deckle-pending.lua`: name → on.
+pub fn pending(data: &Path) -> BTreeMap<String, bool> {
+    let Some(Value::Table(plugins)) = std::fs::read_to_string(data.join(PENDING))
+        .ok()
+        .and_then(|t| lua::parse(&t).ok())
+        .and_then(|v| v.get("plugins").cloned())
+    else {
+        return BTreeMap::new();
+    };
+    plugins
+        .into_iter()
+        .filter_map(|(k, v)| match (k, v) {
+            (lua::Key::Str(k), Value::Bool(on)) => Some((k, on)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Asks for `name` to be on or off from KOReader's next start: written to `deckle-pending.lua`
+/// for the Deckle plugin to apply. A change back to how it already is clears the wait.
+pub fn set_enabled(data: &Path, name: &str, on: bool) -> Result<(), String> {
+    let listed = list(data);
+    let Some(p) = listed.plugins.iter().find(|p| p.name == name) else {
+        return Err(format!("{name}: no such plugin"));
+    };
+    let deckle_on = listed
+        .plugins
+        .iter()
+        .any(|p| p.name == DECKLE && p.enabled && p.pending != Some(false));
+    if !deckle_on {
+        return Err(format!(
+            "switching {name} on or off needs the Deckle plugin on the reader, to apply it when \
+             KOReader starts (KOReader rewrites its settings when it closes): `deckle koreader \
+             plugins install deckle`, or use KOReader's own Plugin management"
+        ));
+    }
+    if name == DECKLE && !on {
+        return Err("the Deckle plugin can't switch itself off: remove it instead".into());
+    }
+    let mut all = pending(data);
+    if p.enabled == on {
+        all.remove(name);
+    } else {
+        all.insert(name.to_owned(), on);
+    }
+    let path = data.join(PENDING);
+    if all.is_empty() {
+        let _ = std::fs::remove_file(&path);
+        return Ok(());
+    }
+    let mut text = String::from(
+        "-- Plugin changes from Deckle; the Deckle plugin applies them when KOReader starts\nreturn {\n    [\"plugins\"] = {\n",
+    );
+    for (k, on) in &all {
+        text.push_str(&format!("        [{}] = {on},\n", lua_string(k)));
+    }
+    text.push_str("    },\n}\n");
+    let tmp = data.join(format!(".{PENDING}.tmp"));
+    std::fs::write(&tmp, text).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Every patch on or off: `patches/.patches_disabled`, which KOReader only reads, so it's set
+/// directly (userpatch.lua).
+pub fn set_patches(data: &Path, on: bool) -> Result<(), String> {
+    let dir = data.join("patches");
+    let marker = dir.join(".patches_disabled");
+    if on {
+        match std::fs::remove_file(&marker) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(format!("{}: {e}", marker.display())),
+        }
+    } else {
+        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        std::fs::write(&marker, b"").map_err(|e| format!("{}: {e}", marker.display()))
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

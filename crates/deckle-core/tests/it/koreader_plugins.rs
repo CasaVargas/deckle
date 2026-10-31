@@ -377,3 +377,55 @@ fn the_deckle_plugin_installs_with_its_settings_and_keeps_the_owners() {
     assert_eq!(fetched.len(), 1);
     assert!(!text.contains("hunter2"));
 }
+
+#[test]
+fn switching_waits_for_the_deckle_plugin_and_never_edits_koreaders_settings() {
+    use deckle_core::koreader_plugins::{
+        PENDING, deckle_plugin, pending, set_enabled, set_patches,
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let ko = kobo(tmp.path());
+    let before = std::fs::read_to_string(ko.join("settings.reader.lua")).unwrap();
+
+    let err = set_enabled(&ko, "zen", true).unwrap_err();
+    assert!(err.contains("Deckle plugin"), "{err}");
+    assert!(!ko.join(PENDING).exists());
+
+    install(&ko, &deckle_plugin(&ko)).unwrap();
+    set_enabled(&ko, "zen", true).unwrap();
+    set_enabled(&ko, "newsdownloader", false).unwrap();
+    assert_eq!(
+        pending(&ko).into_iter().collect::<Vec<_>>(),
+        [
+            ("newsdownloader".to_owned(), false),
+            ("zen".to_owned(), true)
+        ]
+    );
+    let l = list(&ko);
+    let zen = l.plugins.iter().find(|p| p.name == "zen").unwrap();
+    assert_eq!((zen.enabled, zen.pending), (false, Some(true)));
+    // Switching back to how it is clears the wait; the last one removes the file.
+    set_enabled(&ko, "zen", false).unwrap();
+    set_enabled(&ko, "newsdownloader", true).unwrap();
+    assert!(!ko.join(PENDING).exists());
+    assert!(
+        set_enabled(&ko, "nothing", true)
+            .unwrap_err()
+            .contains("no such plugin")
+    );
+    assert!(
+        set_enabled(&ko, "deckle", false)
+            .unwrap_err()
+            .contains("itself")
+    );
+    assert_eq!(
+        std::fs::read_to_string(ko.join("settings.reader.lua")).unwrap(),
+        before
+    );
+
+    // Patches are a marker KOReader only reads: set directly.
+    set_patches(&ko, true).unwrap();
+    assert!(!list(&ko).patches_disabled);
+    set_patches(&ko, false).unwrap();
+    assert!(list(&ko).patches_disabled);
+}
