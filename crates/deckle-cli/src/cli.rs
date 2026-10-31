@@ -263,6 +263,11 @@ pub enum Command {
         #[command(subcommand)]
         action: ReaderServerCommand,
     },
+    /// calibre's wireless connection, served by the watcher: KOReader takes books over Wi-Fi.
+    Wireless {
+        #[command(subcommand)]
+        action: WirelessCommand,
+    },
     /// Highlights and notes on a Kindle, as Markdown files (one per book).
     Highlights {
         /// `device` for the first connected Kindle, or a folder standing in for documents/.
@@ -875,6 +880,36 @@ pub enum ReaderServerCommand {
     },
     /// Whether it's on, and the catalog and sync URLs to type into KOReader.
     Status,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WirelessCommand {
+    /// Whether it's listening, the address to type into a reader, the readers seen, the queue.
+    Status,
+    /// Set the password a reader must give (asked for without echo), or clear it.
+    Password {
+        /// Read one line from stdin instead, for scripts.
+        #[arg(long)]
+        stdin: bool,
+        /// No password.
+        #[arg(long, conflicts_with = "stdin")]
+        clear: bool,
+    },
+    /// Send books to a reader when it next connects.
+    Queue {
+        /// The reader: its name, its id, or `any` for the next to connect.
+        reader: String,
+        #[arg(required = true)]
+        books: Vec<std::path::PathBuf>,
+    },
+    /// Take books off a reader when it next connects, by their paths on it.
+    Remove {
+        reader: String,
+        #[arg(required = true)]
+        lpaths: Vec<String>,
+    },
+    /// Run the server in the foreground (the watcher runs it when `[wireless]` is on).
+    Serve,
 }
 
 #[derive(Subcommand, Debug)]

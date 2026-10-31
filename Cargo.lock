@@ -1414,6 +1414,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tower",
+ "uuid",
  "zip 9.0.5",
 ]
 

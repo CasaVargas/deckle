@@ -462,3 +462,46 @@ Deckle checks that its shelves are still there and lists any that the firmware o
    annotations if the spike says yes).
 5. **Shelves.** Rules and preview; KOReader over Wi-Fi and through the pending file; Kobo
    shelves; `deckle shelves`; the app.
+
+## Build notes (phase 1)
+
+- **Where it lives:** `deckle-readerserver::wireless`: `frame` (the framing), `session` (one
+  reader, driven from Deckle's side), `book` (the path and calibre record for a file), `store`
+  (the queue and `readers.json`), and the server in `mod.rs`. It uses plain threads and std
+  sockets, not tokio. The CLI's `wireless` module and the watcher's `Supervisor` match the
+  reader server's.
+- **Queue and state:** the queue is a folder, one JSON file per job, under the readership state
+  folder (`wireless/queue/`), so the CLI and the app can add jobs while the server takes them,
+  with no lock. A job names its reader by `store_uuid`, name, kind, or `any`.
+  `wireless/readers.json` keeps each reader's last-known books, free space, whether it's
+  connected, and a 50-line log. The server is its only writer.
+- **The password** is in `wireless.json` beside `digest.toml`, not in `[wireless]`, kept as is
+  (owner-only), together with the library id Deckle makes once. A `password = ""` key in the
+  TOML would have put a secret in a file people share, so it was left out.
+- **ASCII JSON:** calibre's `json.dumps` escapes non-ASCII, so its length prefix counts both
+  characters and bytes. Deckle does the same; KOReader counts bytes.
+- **When a send is refused:** KOReader answers `ERROR` and stays reading JSON, so no bytes may
+  follow (calibre stops there too). Deckle logs the refusal, drops the job and sends the next.
+- **Hanging up:** a `NOOP` where an answer was due means the reader hung up, which is not an
+  error.
+- **Discovery** answers with the reader server's port as the content-server number, else `0`:
+  KOReader's pattern needs digits there.
+- **`calibre_version` is sent as 8.0.0**, so KOReader sends `ERROR` replies (it needs at least
+  4.18).
+- **`BookInfo` gains `calibre_id`,** read from `<dc:identifier opf:scheme="calibre">`.
+- **Tests:**
+  - **The stand-in:** `tests/wireless.rs` runs the server against a Rust stand-in for
+    `wireless.lua`. It covers sending, refusal, removal, busy, a wrong password, junk input,
+    asking for details only for new books, and idle eject.
+  - **KOReader's own client:** `tests/koreader_wireless.rs` runs KOReader's own `wireless.lua`,
+    `metadata.lua` and `extensions.lua` (koreader@7e6c9a4, fetched and checksummed by
+    `tools/fetch-koreader-calibre.sh`) on LuaJIT through `tests/koreader/client.lua`. That
+    harness stands in KOReader's other modules and relays the socket over stdin and stdout. The
+    test checks the received book, `.metadata.calibre`, reconnecting, removal and the password.
+  - **CI:** on Linux it fetches the client and sets `DECKLE_REQUIRE_KOREADER`, so the test can't
+    skip there.
+- **Live run** (2026-10-31): `deckle wireless serve` from a throwaway home was found by a UDP
+  broadcast to 255.255.255.255:54982 from port 8134, as KOReader sends it. KOReader's client
+  then received a queued book, and a removal queued during the session ran within a poll.
+- **Left for phase 2:** sending from Deckle's and calibre's libraries, the paper on connect,
+  cover thumbnails, the app, and the Docker guide.

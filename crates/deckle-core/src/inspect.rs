@@ -59,6 +59,8 @@ pub struct BookInfo {
     pub images_missing_alt: u32,
     pub identifiers: Vec<String>,
     pub isbn: Option<String>,
+    /// calibre's id for the book (its `uuid`), from `<dc:identifier opf:scheme="calibre">`.
+    pub calibre_id: Option<String>,
     pub series: Option<Series>,
     /// `dc:description`, as written (it may hold escaped HTML).
     pub description: Option<String>,
@@ -177,6 +179,11 @@ pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
                     || scheme.as_deref() == Some("15");
                 if looks_isbn && (digits.len() == 10 || digits.len() == 13) && info.isbn.is_none() {
                     info.isbn = Some(digits.to_uppercase());
+                }
+                if (scheme.as_deref() == Some("calibre") || attr(n, "id") == Some("calibre_id"))
+                    && info.calibre_id.is_none()
+                {
+                    info.calibre_id = Some(value.clone());
                 }
                 info.identifiers.push(value);
             }

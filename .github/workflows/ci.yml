@@ -82,7 +82,12 @@ jobs:
       - if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libudev-dev libdbus-1-dev pkg-config
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libudev-dev libdbus-1-dev pkg-config luajit
+      # KOReader's own calibre client, run against the wireless server (calibre bridge §8).
+      - if: runner.os == 'Linux'
+        run: |
+          tools/fetch-koreader-calibre.sh
+          echo "DECKLE_REQUIRE_KOREADER=1" >> "$GITHUB_ENV"
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The PDF importer's tests read real PDFs through PDFium (pinned and checksummed).

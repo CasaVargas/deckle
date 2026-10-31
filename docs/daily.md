@@ -746,6 +746,46 @@ deckle reader-server status      # on or off, and the URLs to type into KOReader
   are kept in `koreader-sync.json`.
 - Not yet checked with KOReader on a real device (`docs/devices.md`).
 
+### calibre's wireless connection: books over Wi-Fi
+
+KOReader has a built-in way to take books from calibre over Wi-Fi (Tools → calibre → Connect).
+Deckle can answer it instead of calibre, so a book gets to the reader with no cable and no
+plugin (calibre bridge design, `docs/superpowers/specs/2026-10-31-calibre-bridge-design.md`).
+
+```toml
+[wireless]
+enabled = true
+port = 9090                      # calibre's own; pick another if calibre's wireless server is on
+discovery = true                 # answer readers looking for calibre on the network
+library_name = "Deckle"
+```
+
+```sh
+deckle wireless password         # optional; the reader is asked for it (--clear for none)
+deckle wireless queue any ~/Books/dune.epub      # or the reader's name, e.g. "KOReader (Kobo_frost)"
+deckle wireless remove "KOReader (Kobo_frost)" "Frank Herbert/Dune - Frank Herbert.epub"
+deckle wireless status           # listening or not, the address, readers seen, what's queued
+```
+
+- On the reader, choose an inbox folder the first time (Tools → calibre → Wireless settings),
+  then Connect. It finds Deckle by itself. If it can't (calibre holds the broadcast ports, or
+  Deckle runs in Docker without host networking), type the address `deckle wireless status`
+  shows into Wireless settings → Server address.
+- Queued books go as soon as the reader connects, and while it stays connected, new ones go
+  within a couple of seconds. Books land as `<author>/<title> - <author>.epub` in the inbox
+  folder. KOReader records them for its calibre search with the book's calibre id, title,
+  authors, series and tags.
+- One reader at a time, as with calibre. A second one is told Deckle is busy. A session ends
+  after 15 minutes with nothing to do, or when the reader disconnects.
+- The password is kept as is in `wireless.json` beside `digest.toml`, readable only by you,
+  because calibre's challenge needs it. Only addresses on your home network are answered.
+- If calibre's own wireless server is on, it already has port 9090 and the broadcast ports:
+  give Deckle another port and type the address on the reader, or turn calibre's off.
+- The watcher serves it, like the reader server. `deckle wireless serve` runs it in the
+  foreground instead.
+- Checked against KOReader's own calibre client (its `wireless.lua`, run on LuaJIT in CI), not
+  yet on a real reader (`docs/devices.md`).
+
 ## KOReader plugins
 
 With a Kobo, PocketBook or jailbroken Kindle plugged in (or `--from <folder>`, a copy of its

@@ -62,7 +62,7 @@ pub struct Loaded {
 /// The household settings a paper file may not set, as `[sync]` or `[email] smtp_host`.
 fn household_key(text: &str) -> Result<Option<String>, String> {
     let table: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
-    for key in ["sync", "reading", "reader_server"] {
+    for key in ["sync", "reading", "reader_server", "wireless"] {
         if table.contains_key(key) {
             return Ok(Some(format!("[{key}]")));
         }
@@ -95,6 +95,7 @@ fn load_extra(main_path: &Path, main: &Config, slug: &str) -> Result<Config, Str
     cfg.reading = main.reading.clone();
     cfg.subscriptions = main.subscriptions.clone();
     cfg.reader_server = main.reader_server.clone();
+    cfg.wireless = main.wireless.clone();
     cfg.email.from = main.email.from.clone();
     cfg.email.smtp_host = main.email.smtp_host.clone();
     cfg.email.smtp_port = main.email.smtp_port;

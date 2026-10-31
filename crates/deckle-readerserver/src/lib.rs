@@ -7,6 +7,7 @@ pub mod auth;
 pub mod deckle;
 pub mod opds;
 pub mod sync;
+pub mod wireless;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

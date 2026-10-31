@@ -11,6 +11,7 @@ mod inbox;
 pub mod press_worker;
 mod reader_server;
 mod series;
+mod wireless;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -427,6 +428,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
         cli::Command::ReaderServer { action } => reader_server::run(json, action),
+        cli::Command::Wireless { action } => wireless::run(json, action),
         cli::Command::Words { from, action } => words_cmd(json, &from, action),
         cli::Command::Koreader { action } => koreader_cmd(json, action),
         cli::Command::Bind {
@@ -3633,6 +3635,8 @@ fn digest(
             // The OPDS catalog and KOReader sync, when they're on (KOReader hub design §A.1);
             // checked each tick, so turning it on in the app needs no restart.
             let mut reader_server = reader_server::Supervisor::default();
+            // calibre's wireless connection, the same way (calibre bridge design §4.1).
+            let mut wireless = wireless::Supervisor::default();
             // Each device's [sync] actions run once per connection: a failed delivery waits
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
@@ -3669,6 +3673,7 @@ fn digest(
                     press_supervisor.tick(&papers, deckle_digest::chrono::Utc::now()),
                 );
                 reader_server.tick(&cfg, &path);
+                wireless.tick(&cfg, &path);
                 scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,
