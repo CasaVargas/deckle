@@ -141,8 +141,10 @@ paper)", and the headline isn't printed, which keeps the list short *(builder's 
     for ink.
   - It's emailed to the same `to` address with subject "Puzzles · <date>" and file name
     `deckle-puzzles-<date>.pdf`.
-  - **To verify on the device before building on it:** Send to Kindle keeps an emailed PDF
-    as a PDF the Scribe can write on, as long as the subject isn't "convert".
+  - **Checked on the owner's Scribe (2026-10-31):** a one-page PDF emailed from the
+    approved Gmail address with subject "Deckle pen test" arrived as a PDF, and the pen could
+    circle words on it. Send to Kindle keeps an emailed PDF as one the Scribe can write on,
+    as long as the subject isn't "convert".
 - **iPad and iPhone (Deckle Reader):** under the ladder.
   - Drag across letters in a straight line along one of the four directions to select them.
   - If the selection is a hidden word, it's struck in the list and outlined in the grid.
@@ -179,7 +181,7 @@ paper)", and the headline isn't printed, which keeps the list short *(builder's 
 
 1. **Deckle:** generator, store, section, CLI and bundle (one PR).
 2. **Deckle:** the `kindle-scribe` screen, section-only PDF rendering, and the puzzle PDF
-   email (one PR). It starts only after the on-device check in §5 passes.
+   email (one PR). The on-device check in §5 has passed.
 3. **Deckle Reader:** iPad and iPhone play (one PR).
 
 ## 8. Left to the builder
