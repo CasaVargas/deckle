@@ -1,14 +1,16 @@
-# KOReader plugins: manage them from Deckle, and a Deckle plugin that fetches the paper — design
+# KOReader plugins: manage them from Deckle, a plugin store, and a Deckle plugin that fetches the paper — design
 
 **Status:** proposed, 2026-10-31 · **Date:** 2026-10-31 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-30-koreader-hub-design.md` (the reader server, OPDS, sync, backup and
 restore, tuned papers), `2026-10-30-koreader-reads-design.md`
 
 Deckle already serves KOReader a catalog and takes its progress sync, but the paper still waits
-until someone opens the catalog and taps it. This adds two things. **Plugin management:** Deckle
-lists, installs, updates, removes and switches KOReader plugins on a reader plugged in over USB.
-**The Deckle plugin:** a small KOReader plugin, installed that way, that downloads the morning
-paper from the reader server by itself when the reader wakes or joins Wi-Fi.
+until someone opens the catalog and taps it. This adds three things. **Plugin management:**
+Deckle lists, installs, updates, removes and switches KOReader plugins on a reader plugged in over
+USB. **The Deckle plugin:** a small KOReader plugin, installed that way, that downloads the
+morning paper from the reader server by itself when the reader wakes or joins Wi-Fi. **A plugin
+store:** community plugins found on GitHub, plus a short list Deckle vouches for, browsed in the
+app on the computer and installed through plugin management.
 
 **A change to an earlier ruling.** The other-readers design (§3) and the KOReader reads design
 (§2) ruled out KOReader plugins. The owner asked for this on 2026-10-31. The rule now: Deckle
@@ -38,6 +40,11 @@ on the owner's command.
 - **Progress sync settings** live in `settings/kosync.lua` (`custom_server`, `username`,
   `userkey` = MD5 of the password, `auto_sync`), loaded by the kosync plugin through `LuaSettings`.
 - **Licensing:** KOReader is AGPL-3.0, and Deckle's plugin is GPL-3.0, which is compatible.
+- **There is no official plugin registry.** Community plugins are GitHub repos, by convention
+  tagged with the topic `koreader-plugin` (about 485 repos on 2026-10-31) or `koreader-user-patch`.
+  The community plugin **appstore.koplugin** (omer-faruq, GPL-3.0) browses those topics on the
+  device and tracks updates by hash. On e-ink it's slow to browse, and it shares GitHub's
+  unauthenticated search limit (about 10 requests a minute), so heavy use needs a token.
 
 ## 2. Goals
 
@@ -47,11 +54,16 @@ on the owner's command.
 - With the Deckle plugin, the morning paper is on the reader when it wakes or joins Wi-Fi, with
   no taps. Old papers it fetched are pruned.
 - Set up progress sync to Deckle from the plugin, with one tap.
+- Find and install community plugins and patches from the computer, with a short reviewed list
+  that installs exactly what was reviewed.
 
 ## 3. Non-goals
 
-- No plugin store, no browsing GitHub for plugins, no automatic updates of third-party plugins.
-  Updates are something the owner runs.
+- No automatic installs or updates of third-party plugins: the store says an update exists and
+  the owner installs it.
+- No Deckle server: the store's community list is a live GitHub search from the owner's computer,
+  and the reviewed list is a file in Deckle's own repository.
+- No reviews, ratings or accounts in the store.
 - Nothing over MTP or Wi-Fi in part A: plugin management is a USB-drive operation on a Kobo,
   PocketBook or jailbroken Kindle, or on a folder.
 - No editing of built-in plugins, only switching them off.
@@ -165,7 +177,43 @@ kosync plugin's `custom_server`, `username` and `userkey` through the kosync plu
 (`self.ui.kosync`) when it's loaded, else in `settings/kosync.lua` before kosync loads it. It
 never turns on `auto_sync`; that stays the owner's choice in KOReader.
 
-## 6. Server side
+## 6. Part C — the plugin store
+
+In the app (the KOReader panel's **Store** view) and the CLI (`deckle koreader store search …`,
+`… store show <repo>`). Installs go through part A; the store only chooses the source.
+
+### 6.1 Two shelves
+
+- **Recommended.** `koreader/recommended.json` in the Deckle repository, fetched from the main
+  branch's raw URL when the store opens (a copy ships in the binary for offline use). Each entry:
+  `repo`, `name`, `kind` (`plugin` or `patch`), one-line `why`, `license`, and a pinned `release`
+  with its asset name and **SHA-256**. An install downloads that asset and refuses it if the hash
+  differs, so it's byte for byte what was reviewed. A newer release appears only when the file is
+  bumped. The owner curates it through ordinary PRs; it starts with appstore.koplugin and a few
+  well-kept plugins chosen during the build, each with a reason.
+- **Discover.** A live GitHub search of the `koreader-plugin` and `koreader-user-patch` topics,
+  sorted by stars or last update, filtered by text, and labeled **Community, not reviewed**. Each
+  result shows stars, last push, license (or "no license"), the README rendered in the app, and
+  the newest release. Installing from Discover takes the newest release's `.koplugin` zip, or the
+  default-branch zip, through part A's checks, and says plainly that Deckle hasn't reviewed it.
+
+### 6.2 Updates
+
+The panel shows, for each installed plugin with a recorded source (part A records the URL and the
+release), whether a newer release exists, with its notes. Recommended entries update only when the
+pin moves. Nothing installs itself; the owner presses Update.
+
+### 6.3 Network and privacy
+
+- The store goes online only while it's open, or when the owner runs a `store` command. A new
+  line in **Settings → Online & privacy**: "Plugin store: GitHub search, READMEs and downloads,
+  only when you open it."
+- Unauthenticated GitHub API by default (60 requests an hour from one address). Results are cached
+  for an hour in Deckle's cache folder. A GitHub token is optional, kept in the keychain (or
+  `DECKLE_GITHUB_TOKEN` without one), and only needs public read access.
+- No telemetry: Deckle doesn't report what was searched or installed.
+
+## 7. Server side
 
 On the reader server (hub design §A):
 - `GET /deckle/v1/today`, and the existing `/opds/file/<id>`, also accept the kosync header pair,
@@ -174,18 +222,20 @@ On the reader server (hub design §A):
   main paper; a per-account choice is later work.
 - `sha256` is computed once per file and cached by path and modification time.
 
-## 7. Safety
+## 8. Safety
 
 - Plugins run code on the owner's reader. Deckle never installs or updates one without the owner
   asking, always names the source, never fetches without being told to, and keeps the previous
   version for an undo.
 - Archives are checked (one `.koplugin`, `main.lua` present, no path escapes, size cap) before
   anything is written to the reader.
+- The store never hides where a plugin comes from. Discover is labeled unreviewed, and
+  Recommended installs only the reviewed bytes.
 - The plugin stores the MD5 key, not the password, and only talks to the `server` it was given.
   It makes no other network calls.
 - Plain HTTP on the home network or Tailscale, as the reader server already is.
 
-## 8. Tests the build must add
+## 9. Tests the build must add
 
 - `list` on fake Kobo, PocketBook and Kindle drives: built-in and user plugins, `_meta.lua` read
   (with `_()` wrappers), on/off from both settings, pending changes shown, patches listed.
@@ -199,8 +249,16 @@ On the reader server (hub design §A):
   tested with plain LuaJIT in CI.
 - Server: `/deckle/v1/today` with kosync headers, 204 when empty, 401 without auth; `opds/file`
   with kosync headers.
+- Store, with GitHub injected:
+  - a Recommended install with the right hash succeeds and a wrong hash is refused;
+  - Discover results parse from recorded API responses, with "no license" and no releases handled;
+  - the update check finds a newer release for a recorded source;
+  - the cache is used within the hour;
+  - nothing goes online while the store is closed.
+- `recommended.json` in CI: every entry's pinned asset downloads and matches its hash (a scheduled
+  job, so a deleted release shows up).
 
-## 9. Device checks owed (`docs/devices.md`)
+## 10. Device checks owed (`docs/devices.md`)
 
 On a Kobo and a PocketBook running KOReader:
 - the plugin installs and shows in Tools;
@@ -211,7 +269,7 @@ On a Kobo and a PocketBook running KOReader:
 
 On a jailbroken Kindle, the plugin list and an install.
 
-## 10. Phases (each its own PR)
+## 11. Phases (each its own PR)
 
 1. **Plugin management, CLI.** `list`, `install`, `update`, `remove`, `rollback`; backup and
    restore of plugins and patches.
@@ -221,3 +279,5 @@ On a jailbroken Kindle, the plugin list and an install.
    Deckle for progress sync".
 4. **App.** The KOReader panel, and the Deckle plugin's row with Install, Fetch now and its
    settings.
+5. **Store.** `recommended.json` with its first entries and the CI check, Discover, updates, and
+   the Store view.
