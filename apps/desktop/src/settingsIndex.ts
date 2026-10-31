@@ -52,6 +52,7 @@ export const INDEX: Entry[] = [
   { label: "Mode on this Kindle", page: "kindles", words: "kindle device mode ebok pdoc per kindle" },
   { label: "Keeps Deckle's X-Ray for real ASINs", page: "kindles", words: "asin xray real verified" },
   { label: "KOReader plugins", page: "koreader", words: "koreader plugins install update remove kobo pocketbook boox patches store" },
+  { label: "Plugin store", page: "koreader", words: "koreader plugin store recommended discover github install online" },
   { label: "The Deckle plugin", page: "koreader", words: "koreader deckle plugin fetch paper wifi automatic" },
   { label: "Updates", page: "about", words: "update version restart" },
   { label: "What Deckle sends online", page: "online", words: "online privacy network internet send" },

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { canSwitch, confirmLine, deckleState, pluginRows, stateLine, switchOn } from "./koreaderView";
+import { canSwitch, confirmLine, deckleState, pickAction, pluginRows, stateLine, switchOn, updateLine } from "./koreaderView";
 import type { KoPlugin, KoreaderView } from "./types";
 
 const plugin = (name: string, o: Partial<KoPlugin> = {}): KoPlugin => ({ name, fullname: name, builtin: false, enabled: true, ...o });
@@ -41,8 +41,22 @@ test("rows: added plugins first, built-in after, the Deckle plugin left to its o
 });
 
 test("the question before an install says what and from where", () => {
-  expect(confirmLine({ name: "appstore", fullname: "App Store", version: "1.14.0", replaces: false, from: "omer-faruq/appstore.koplugin", release: "v1.14.0" })).toBe(
+  expect(confirmLine({ name: "appstore", fullname: "App Store", version: "1.14.0", replaces: false, from: "omer-faruq/appstore.koplugin", release: "v1.14.0", reviewed: true })).toBe(
     "Install App Store 1.14.0, from omer-faruq/appstore.koplugin (release v1.14.0)?",
   );
-  expect(confirmLine({ name: "deckle", fullname: "Deckle", version: "0.11.0", replaces: true, from: "deckle", release: "0.11.0" })).toBe("Replace Deckle 0.11.0, built into Deckle?");
+  expect(confirmLine({ name: "deckle", fullname: "Deckle", version: "0.11.0", replaces: true, from: "deckle", release: "0.11.0", reviewed: true })).toBe("Replace Deckle 0.11.0, built into Deckle?");
+});
+
+test("a Recommended plugin installs, updates to a newer pin, or is installed", () => {
+  const pick = { repo: "a/zen.koplugin", name: "zen", kind: "plugin", why: "", license: "GPL-3.0", release: { tag: "v2", asset: "z.zip", sha256: "x" } };
+  expect(pickAction(pick, view([]))).toBe("install");
+  expect(pickAction(pick, view([plugin("zen", { source: { from: "a/zen.koplugin", release: "v1", installed: "" } })]))).toBe("update");
+  expect(pickAction(pick, view([plugin("zen", { source: { from: "a/zen.koplugin", release: "v2", installed: "" } })]))).toBe("installed");
+  expect(pickAction(pick, null)).toBe("install");
+});
+
+test("the update line says whether the new release was reviewed", () => {
+  const u = [{ name: "zen", repo: "a/zen", installed: "v1", latest: "v2", pinned: true }];
+  expect(updateLine("zen", u)).toBe("Update available: v2 (reviewed)");
+  expect(updateLine("other", u)).toBeNull();
 });

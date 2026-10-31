@@ -66,6 +66,22 @@ export default function Online({ settings, set, onPage }: Props) {
           </div>
         </div>
       </section>
+      <section className="set-card online-rows" aria-label="Only when you ask">
+        <div className="online-head">Only when you ask</div>
+        <div className="online-row">
+          <div>
+            <strong>The KOReader plugin store</strong>
+            <p className="muted">
+              Opening the store asks GitHub for Deckle's recommended list, and searching, details and installs ask GitHub too. Nothing about your
+              reader or books is sent. Answers are kept for an hour. A GitHub token in DECKLE_GITHUB_TOKEN, if you set one, goes only to GitHub's
+              API.
+            </p>
+            <button className="link-action" onClick={() => onPage("koreader")}>
+              KOReader →
+            </button>
+          </div>
+        </div>
+      </section>
       <p className="muted small">A Kindle itself may ask Amazon about books sent as Kindle books. The Daily's news comes from the sites you choose on the Daily tab.</p>
     </div>
   );
