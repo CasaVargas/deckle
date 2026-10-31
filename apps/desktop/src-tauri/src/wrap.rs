@@ -615,6 +615,39 @@ pub fn calibre_set_password(password: String) -> Result<deckle_library::writebac
 }
 
 #[tauri::command]
+pub fn wireless_status() -> deckle_app::wireless::WirelessView {
+    deckle_app::wireless::wireless_status()
+}
+
+#[tauri::command]
+pub fn wireless_set_password(
+    password: Option<String>,
+) -> Result<deckle_app::wireless::WirelessView, String> {
+    deckle_app::wireless::wireless_set_password(password)
+}
+
+#[tauri::command]
+pub fn wireless_queue(
+    reader: String,
+    paths: Vec<String>,
+) -> Result<deckle_app::wireless::WirelessView, String> {
+    deckle_app::wireless::wireless_queue(reader, paths)
+}
+
+#[tauri::command]
+pub fn wireless_remove(
+    reader: String,
+    lpaths: Vec<String>,
+) -> Result<deckle_app::wireless::WirelessView, String> {
+    deckle_app::wireless::wireless_remove(reader, lpaths)
+}
+
+#[tauri::command]
+pub fn wireless_cancel(id: String) -> Result<deckle_app::wireless::WirelessView, String> {
+    deckle_app::wireless::wireless_cancel(id)
+}
+
+#[tauri::command]
 pub async fn email_test(paper: Option<String>) -> Result<String, String> {
     blocking(move || deckle_app::daily::email_test(paper)).await
 }

@@ -1049,6 +1049,9 @@ input[type=checkbox] { padding: 0; }
 .store-tabs button { border: 1px solid var(--line); background: none; padding: 4px 12px; border-radius: 999px; cursor: pointer; color: inherit; }
 .store-tabs button.on { border-color: var(--accent); color: var(--accent); }
 .store-list { list-style: none; margin: 0; padding: 0; }
+.wireless-steps { margin: 8px 0; padding-left: 18px; }
+.wireless-books { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13px; }
+.wireless-books li { padding: 2px 0; }
 .store-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 10px 0; border-top: 1px solid var(--line); }
 .store-item:first-child { border-top: 0; }
 .store-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
