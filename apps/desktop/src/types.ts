@@ -353,6 +353,64 @@ export interface DailyConfig {
   remarkable?: RemarkableConfig;
   /** `[reader_server]`: the OPDS catalog and KOReader sync (KOReader hub design §A). Absent while untouched. */
   reader_server?: ReaderServerConfig;
+  /** `[wireless]`: calibre's wireless connection for KOReader (calibre bridge design §4). Absent while untouched. */
+  wireless?: WirelessConfig;
+}
+
+/** `[wireless]`: served by the watcher on the home network. The password isn't here. */
+export interface WirelessConfig {
+  enabled: boolean;
+  port: number;
+  discovery: boolean;
+  library_name: string;
+  /** A reader that connects gets the newest paper and keeps the last three. */
+  paper: boolean;
+}
+
+export const DEFAULT_WIRELESS: WirelessConfig = { enabled: false, port: 9090, discovery: true, library_name: "Deckle", paper: true };
+
+/** A book a reader reported over the wireless connection. */
+export interface OnReader {
+  lpath: string;
+  uuid: string | null;
+  title: string | null;
+  authors: string[];
+  last_modified: string | null;
+  size: number | null;
+}
+
+/** A reader that has connected. */
+export interface WirelessReader {
+  /** Its storage id: what a send names it by. */
+  id: string;
+  name: string;
+  kind: string;
+  connected: boolean;
+  last_seen: string;
+  free: number | null;
+  books: OnReader[];
+}
+
+/** One waiting job: a book to send (`send`), or one to take off (`remove`). */
+export interface WirelessJob {
+  id: string;
+  reader: string;
+  send?: string;
+  remove?: string;
+  build?: boolean;
+  added: string;
+}
+
+export interface WirelessView {
+  /** `[wireless] enabled`. */
+  enabled: boolean;
+  password_set: boolean;
+  /** `address:port`, to type into a reader that doesn't find Deckle itself. */
+  address: string;
+  discovery: boolean;
+  readers: WirelessReader[];
+  queue: WirelessJob[];
+  log: string[];
 }
 
 /** `[reader_server]`: served by the watcher on the home network. The password isn't here. */
@@ -1165,4 +1223,76 @@ export interface StoreUpdate {
   installed: string | null;
   latest: string;
   pinned: boolean;
+}
+
+/** Which calibre column each piece of reading data goes in, by label without `#` (calibre bridge design §5). */
+export interface WritebackColumns {
+  progress: string | null;
+  read: string | null;
+  last_read: string | null;
+  rating: string | null;
+}
+
+export interface WritebackConfig {
+  enabled: boolean;
+  calibredb: string | null;
+  server: string | null;
+  username: string | null;
+  columns: WritebackColumns;
+  confirmed: Record<string, string>;
+  last_run: string | null;
+  last_result: string[];
+}
+
+export interface WritebackChange {
+  uuid: string;
+  book_id: number;
+  title: string;
+  field: "progress" | "read" | "last_read" | "rating";
+  column: string;
+  old: string | null;
+  new: string;
+}
+
+export interface WritebackConflict {
+  title: string;
+  field: WritebackChange["field"];
+  column: string;
+  calibre: string;
+  reader: string;
+}
+
+export interface WritebackToConfirm {
+  key: string;
+  reader: string;
+  title: string;
+  authors: string[];
+  uuid: string;
+  calibre_title: string;
+}
+
+export interface WritebackPlan {
+  changes: WritebackChange[];
+  conflicts: WritebackConflict[];
+  to_confirm: WritebackToConfirm[];
+  unmatched: string[];
+}
+
+export interface WritebackStatus {
+  library: string | null;
+  calibredb: string | null;
+  writeback: WritebackConfig;
+  /** Each field's possible columns, by label. */
+  choices: Partial<Record<keyof WritebackColumns, string[]>>;
+  plan: WritebackPlan | null;
+  error: string | null;
+}
+
+/** A change to the write-back settings; a field left out stays. */
+export interface WritebackPatch {
+  enabled?: boolean;
+  columns?: WritebackColumns;
+  server?: string;
+  username?: string;
+  calibredb?: string;
 }

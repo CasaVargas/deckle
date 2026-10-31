@@ -28,6 +28,7 @@ export interface Entry {
 export const INDEX: Entry[] = [
   { label: "Kindle Previewer", page: "sending", words: "previewer amazon convert kpf location path" },
   { label: "Library folder", page: "library", words: "library folder keep copy" },
+  { label: "Reading data into calibre", page: "library", words: "calibre write back progress read finished last read rating stars columns calibredb content server" },
   { label: "Add every book I send", page: "library", words: "library auto add" },
   { label: "Find originals in calibre", page: "library", words: "calibre originals upgrades source" },
   { label: "Find originals in folders", page: "library", words: "folders originals upgrades source epub" },
@@ -54,6 +55,7 @@ export const INDEX: Entry[] = [
   { label: "KOReader plugins", page: "koreader", words: "koreader plugins install update remove kobo pocketbook boox patches store" },
   { label: "Plugin store", page: "koreader", words: "koreader plugin store recommended discover github install online" },
   { label: "The Deckle plugin", page: "koreader", words: "koreader deckle plugin fetch paper wifi automatic" },
+  { label: "Send books over Wi-Fi (calibre connection)", page: "koreader", words: "koreader calibre wireless connection send books wifi readers remove queue" },
   { label: "Updates", page: "about", words: "update version restart" },
   { label: "What Deckle sends online", page: "online", words: "online privacy network internet send" },
   { label: "Checking for updates", page: "online", words: "update github online privacy" },

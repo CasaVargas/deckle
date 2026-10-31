@@ -78,6 +78,13 @@ commands! { ctx;
     book_preflight { path: String, cover: Option<CoverChoice> } =>
         books::book_preflight(&ctx.state, path, cover),
     bookmarklet {} => daily::bookmarklet(),
+    calibre_create_columns {} => crate::calibre::calibre_create_columns(),
+    calibre_set_password { password: String } => crate::calibre::calibre_set_password(password),
+    calibre_writeback_confirm { keys: Vec<String> } => crate::calibre::calibre_writeback_confirm(keys),
+    calibre_writeback_set { patch: crate::calibre::WritebackPatch } =>
+        crate::calibre::calibre_writeback_set(patch),
+    calibre_writeback_status {} => Ok(crate::calibre::calibre_writeback_status()),
+    calibre_writeback_write {} => crate::calibre::calibre_writeback_write(),
     capabilities {} => Ok(capabilities::capabilities(ctx.web, &ctx.state)),
     cookbook_add { target: String, chapter: Option<String>, note: Option<String>, picture: Option<Picture> } =>
         cookbook::cookbook_add(target, chapter, note, picture),
@@ -259,6 +266,14 @@ commands! { ctx;
     } else {
         commands::take_preloaded_target(&ctx.state)
     }),
+    wireless_cancel { id: String } => crate::wireless::wireless_cancel(id),
+    wireless_queue { reader: String, paths: Vec<String> } =>
+        crate::wireless::wireless_queue(reader, paths),
+    wireless_remove { reader: String, lpaths: Vec<String> } =>
+        crate::wireless::wireless_remove(reader, lpaths),
+    wireless_set_password { password: Option<String> } =>
+        crate::wireless::wireless_set_password(password),
+    wireless_status {} => Ok(crate::wireless::wireless_status()),
     words_anki { target: RunTarget, to: String } => kindle::words_anki(target, to),
 }
 

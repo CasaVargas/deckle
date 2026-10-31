@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The `deckle` command line, as a library so the desktop app can run it too.
 
+mod calibre;
 mod cli;
 mod cookbook;
 pub mod cookbook_api;
@@ -429,6 +430,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),
         cli::Command::ReaderServer { action } => reader_server::run(json, action),
         cli::Command::Wireless { action } => wireless::run(json, action),
+        cli::Command::Calibre { action } => calibre::run(json, action),
         cli::Command::Words { from, action } => words_cmd(json, &from, action),
         cli::Command::Koreader { action } => koreader_cmd(json, action),
         cli::Command::Bind {
@@ -3637,6 +3639,8 @@ fn digest(
             let mut reader_server = reader_server::Supervisor::default();
             // calibre's wireless connection, the same way (calibre bridge design §4.1).
             let mut wireless = wireless::Supervisor::default();
+            // Reading data into calibre, when that's on (calibre bridge design §5).
+            let mut calibre_writer = calibre::Writer::default();
             // Each device's [sync] actions run once per connection: a failed delivery waits
             // for the Kindle to be reconnected (or for a new edition) instead of retrying
             // every tick.
@@ -3674,6 +3678,7 @@ fn digest(
                 );
                 reader_server.tick(&cfg, &path);
                 wireless.tick(&cfg, &path);
+                calibre_writer.tick();
                 scan_inbox(&cfg, true);
                 say_once(
                     &mut build_error,
@@ -4711,6 +4716,7 @@ fn reader_sync(
         },
         None => None,
     };
+    calibre::record(&id, &flush.reading);
     let shelf = flush.kobo_books.clone().and_then(|books| {
         let path = cfg.shelf_store();
         let previous = deckle_digest::shelf::store::Shelf::load(&path)

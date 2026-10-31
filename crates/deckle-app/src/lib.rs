@@ -4,6 +4,7 @@
 //! async runtime.
 
 pub mod books;
+pub mod calibre;
 pub mod capabilities;
 pub mod commands;
 pub mod cookbook;
@@ -20,6 +21,7 @@ pub mod readership;
 pub mod shelf;
 pub mod state;
 pub mod upgrades;
+pub mod wireless;
 
 use std::sync::{Mutex, MutexGuard};
 

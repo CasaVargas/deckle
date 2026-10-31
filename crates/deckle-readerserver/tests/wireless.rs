@@ -477,3 +477,89 @@ fn a_reader_that_isnt_calibres_kind_is_closed_without_a_word() {
             .any(|l| l.contains("couldn't connect"))
     );
 }
+
+#[test]
+fn a_reader_gets_todays_paper_once_and_keeps_the_last_three() {
+    let tmp = tempfile::tempdir().unwrap();
+    let inbox = tmp.path().join("inbox");
+    let paper = tmp.path().join("deckle-daily-2026-10-31.epub");
+    epub(&paper, "The Deckle Daily", "Deckle", None);
+    let srv = server(&tmp.path().join("state"), None, Duration::from_millis(800));
+    srv.store.set_paper(Some(&paper)).unwrap();
+
+    let mut ko = Koreader::new(&inbox);
+    for d in ["27", "28", "29", "30"] {
+        let lpath = format!("Deckle/deckle-daily-2026-10-{d}.epub");
+        std::fs::create_dir_all(inbox.join("Deckle")).unwrap();
+        std::fs::write(inbox.join(&lpath), b"old").unwrap();
+        ko.books.push(json!({"uuid": format!("p{d}"), "lpath": lpath, "title": "The Deckle Daily", "authors": ["Deckle"], "last_modified": "2026-10-01T00:00:00+00:00"}));
+    }
+    // Someone else's book in Deckle/ isn't a paper Deckle sent.
+    ko.books.push(json!({"uuid": "x", "lpath": "Deckle/notes.epub", "title": "Notes", "authors": [], "last_modified": "2026-10-01T00:00:00+00:00"}));
+    ko.run(srv.addr, |_| false);
+    assert!(ko.ejected);
+    let mut left: Vec<String> = ko
+        .books
+        .iter()
+        .map(|b| b["lpath"].as_str().unwrap().to_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            "Deckle/deckle-daily-2026-10-29.epub",
+            "Deckle/deckle-daily-2026-10-30.epub",
+            "Deckle/deckle-daily-2026-10-31.epub",
+            "Deckle/notes.epub",
+        ]
+    );
+    assert_eq!(
+        std::fs::read(inbox.join("Deckle/deckle-daily-2026-10-31.epub")).unwrap(),
+        std::fs::read(&paper).unwrap()
+    );
+
+    // Connecting again sends nothing.
+    wait_disconnected(&srv.store);
+    ko.asked.clear();
+    ko.ejected = false;
+    ko.run(srv.addr, |_| false);
+    assert!(!ko.asked.contains(&(Op::SendBook as u64)));
+    assert!(!ko.asked.contains(&(Op::DeleteBook as u64)));
+
+    // With the paper off, nothing is sent at all.
+    wait_disconnected(&srv.store);
+    srv.store.set_paper(None).unwrap();
+    assert_eq!(srv.store.paper(), None);
+}
+
+#[test]
+fn a_book_to_make_is_imported_and_cleaned_before_it_goes() {
+    let tmp = tempfile::tempdir().unwrap();
+    let inbox = tmp.path().join("inbox");
+    let notes = tmp.path().join("Field Notes.txt");
+    std::fs::write(
+        &notes,
+        "Field Notes\n\nChapter One\n\nIt was a bright cold day in April.\n",
+    )
+    .unwrap();
+    let srv = server(&tmp.path().join("state"), None, Duration::from_millis(800));
+    srv.store.add_book("any", notes.clone()).unwrap();
+    // A text file sent as it is goes as text.
+    srv.store.add("any", Some(notes.clone()), None).unwrap();
+
+    let mut ko = Koreader::new(&inbox);
+    ko.run(srv.addr, |_| false);
+    let lpaths: Vec<&str> = ko
+        .books
+        .iter()
+        .map(|b| b["lpath"].as_str().unwrap())
+        .collect();
+    assert_eq!(lpaths.len(), 2, "{lpaths:?}");
+    let made = lpaths
+        .iter()
+        .find(|l| l.ends_with(".epub"))
+        .expect("an EPUB was made");
+    let bytes = std::fs::read(inbox.join(made)).unwrap();
+    assert!(zip::ZipArchive::new(std::io::Cursor::new(bytes)).is_ok());
+    assert!(lpaths.iter().any(|l| l.ends_with(".txt")));
+}

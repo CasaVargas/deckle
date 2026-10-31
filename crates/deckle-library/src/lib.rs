@@ -9,6 +9,7 @@
 //! No database, index or lock file: folders can be moved, synced or deleted with anything.
 //! A book's identity is in its sidecar (the generated ASIN's seed), not its path.
 
+pub mod calibre;
 pub mod care;
 pub mod catalog;
 pub mod config;
@@ -21,6 +22,7 @@ pub mod sidecar;
 pub mod sources;
 pub mod upgrade;
 pub mod watch;
+pub mod writeback;
 
 use std::path::{Path, PathBuf};
 

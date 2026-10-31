@@ -5,6 +5,7 @@ import { canSwitch, confirmLine, deckleState, pluginRows, stateLine, switchOn, u
 import { platform } from "../platform";
 import type { KoreaderPreview, KoreaderView, StoreUpdate } from "../types";
 import KoreaderStore from "./KoreaderStore";
+import KoreaderWireless from "./KoreaderWireless";
 import { Row, Switch } from "./Row";
 
 /**
@@ -232,6 +233,8 @@ export default function Koreader() {
           <p className="set-note">Deckle checks a plugin before anything is written, and keeps what it replaces so Undo brings it back.</p>
         </section>
       )}
+
+      <KoreaderWireless />
 
       <KoreaderStore view={view} folder={folder} busy={busy} onInstall={ask} onUpdates={setUpdates} />
 
