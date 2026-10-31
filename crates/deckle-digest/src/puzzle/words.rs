@@ -2,11 +2,25 @@
 //! The puzzle's word list: `word<TAB>clue` lines, built offline by `data/wordwise` and
 //! embedded gzipped (puzzle design §4).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::OnceLock;
 
 static EMBEDDED: &[u8] = include_bytes!("../../assets/puzzle/words.tsv.gz");
+/// The words the list is built without, also kept out of the word search's filler letters.
+static BLOCKLIST: &str = include_str!("../../../../data/wordwise/puzzle-blocklist.txt");
+
+/// The puzzle blocklist (lowercase; `#` lines and blanks skipped), parsed once.
+pub fn blocklist() -> &'static HashSet<String> {
+    static SET: OnceLock<HashSet<String>> = OnceLock::new();
+    SET.get_or_init(|| {
+        BLOCKLIST
+            .lines()
+            .map(|l| l.split('#').next().unwrap_or("").trim().to_lowercase())
+            .filter(|l| !l.is_empty())
+            .collect()
+    })
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct Words {
