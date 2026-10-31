@@ -355,12 +355,12 @@ pub(crate) fn par_map<T: Sync, R: Send>(items: &[T], f: impl Fn(&T) -> R + Sync)
         .collect()
 }
 
-/// The first paragraph that reads like prose (not "Article URL: …" link lists).
+/// The first paragraph that reads like prose (not "Article URL: …" link lists), kept short.
 fn teaser(paragraphs: &[String]) -> Option<String> {
     paragraphs
         .iter()
-        .find(|p| p.len() >= 80 && !p.contains("URL:"))
-        .cloned()
+        .filter(|p| !p.contains("URL:"))
+        .find_map(|p| article::teaser_of(p))
 }
 
 pub(crate) fn section_of(

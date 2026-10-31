@@ -65,6 +65,42 @@ pub struct Extracted {
 static GN_ATTR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"data-n-a-(id|ts|sg)="([^"]+)""#).unwrap());
 
+/// The longest a teaser runs: a dek of a few lines, not the story.
+pub const TEASER_MAX_CHARS: usize = 300;
+
+/// A paragraph's teaser: its first line (a `<br/>` starts one) long enough to read as prose,
+/// kept to the whole sentences that fit, or cut at a word when one sentence runs on.
+pub(crate) fn teaser_of(text: &str) -> Option<String> {
+    let line = text
+        .lines()
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .find(|l| l.len() >= 80)?;
+    if line.chars().count() <= TEASER_MAX_CHARS {
+        return Some(line);
+    }
+    let head: String = line.chars().take(TEASER_MAX_CHARS + 1).collect();
+    // The last sentence end that fits, so long as it leaves a teaser's worth. The next sentence
+    // starts with a capital, so "p. 144" and "No. 3" don't end one.
+    let end = head
+        .char_indices()
+        .filter(|&(i, c)| {
+            c == ' '
+                && i >= 80
+                && head[..i]
+                    .trim_end_matches(['\u{201d}', '\u{2019}', '"', '\'', ')'])
+                    .ends_with(['.', '!', '?'])
+                && line[i + 1..]
+                    .trim_start_matches(['\u{201c}', '\u{2018}', '"', '\'', '('])
+                    .starts_with(char::is_uppercase)
+        })
+        .map(|(i, _)| i)
+        .next_back();
+    Some(match end {
+        Some(i) => head[..i].to_owned(),
+        None => crate::print::shorten(&line, TEASER_MAX_CHARS),
+    })
+}
+
 pub fn is_google_news(url: &str) -> bool {
     url.starts_with("https://news.google.com/rss/articles/")
         || url.starts_with("https://news.google.com/articles/")
@@ -258,6 +294,37 @@ impl Writer {
         text
     }
 
+    /// Writes an inline element like [`Self::wrapped`], but moves a space at its edges outside
+    /// the tags rather than dropping it: `<em>tenacity </em>and` stays two words.
+    fn inline(&mut self, node: &dom_query::NodeRef, open: &str, close: &str) -> String {
+        let saved = std::mem::take(&mut self.out);
+        let text = self.children(node);
+        let inner = std::mem::replace(&mut self.out, saved);
+        if text.trim().is_empty() && !inner.contains("<img") {
+            if !text.is_empty() {
+                self.space();
+            }
+            return text;
+        }
+        if inner.starts_with(char::is_whitespace) {
+            self.space();
+        }
+        self.out.push_str(open);
+        self.out.push_str(inner.trim());
+        self.out.push_str(close);
+        if inner.ends_with(char::is_whitespace) {
+            self.out.push(' ');
+        }
+        text
+    }
+
+    /// A space between words, unless one is already there.
+    fn space(&mut self) {
+        if !self.out.ends_with(char::is_whitespace) {
+            self.out.push(' ');
+        }
+    }
+
     fn node(&mut self, node: &dom_query::NodeRef) -> String {
         if self.max_words.is_some_and(|m| self.words >= m) {
             return String::new();
@@ -278,7 +345,7 @@ impl Writer {
             }
             if collapsed.is_empty() {
                 if !t.is_empty() {
-                    self.out.push(' ');
+                    self.space();
                 }
                 return String::new();
             }
@@ -293,8 +360,10 @@ impl Writer {
                 ""
             };
             self.words += collapsed.split(' ').count();
-            self.out
-                .push_str(&format!("{lead}{}{trail}", esc(&collapsed)));
+            if !lead.is_empty() {
+                self.space();
+            }
+            self.out.push_str(&format!("{}{trail}", esc(&collapsed)));
             return format!("{lead}{collapsed}{trail}");
         }
         if !node.is_element() {
@@ -308,9 +377,8 @@ impl Writer {
             n if SKIP.contains(&n) => String::new(),
             "p" => {
                 let text = self.wrapped(node, "<p>", "</p>\n");
-                let prose = text.trim();
-                if self.teaser.is_none() && prose.len() >= 80 {
-                    self.teaser = Some(prose.to_owned());
+                if self.teaser.is_none() {
+                    self.teaser = teaser_of(&text);
                 }
                 text
             }
@@ -321,8 +389,8 @@ impl Writer {
             "ul" => self.wrapped(node, "<ul>", "</ul>\n"),
             "ol" => self.wrapped(node, "<ol>", "</ol>\n"),
             "li" => self.wrapped(node, "<li>", "</li>"),
-            "em" | "i" => self.wrapped(node, "<em>", "</em>"),
-            "strong" | "b" => self.wrapped(node, "<strong>", "</strong>"),
+            "em" | "i" => self.inline(node, "<em>", "</em>"),
+            "strong" | "b" => self.inline(node, "<strong>", "</strong>"),
             "figcaption" => {
                 let text = self.wrapped(node, "<span class=\"caption\">", "</span>");
                 let caption = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -345,7 +413,8 @@ impl Writer {
             }
             "br" => {
                 self.out.push_str("<br/>");
-                String::new()
+                // A new line for the teaser: some sites set a whole story as one broken paragraph.
+                "\n".to_owned()
             }
             "img" => {
                 let alt = node
@@ -1080,5 +1149,66 @@ mod tests {
             )
             .unwrap();
         assert!(eink_photo(&icon).is_none());
+    }
+
+    #[test]
+    fn a_teaser_is_the_opening_sentences_not_the_whole_story() {
+        // A journal sets its whole article as one paragraph broken by <br/>.
+        let sentence = "Historically, animated films have been used as propaganda in war, and some convey a pacifist view. ";
+        let html = format!(
+            "<html lang=\"en\"><head><title>Porco</title></head><body><article><h1>Porco</h1><p><strong>Introduction</strong><br/> {}</p></article></body></html>",
+            sentence.repeat(60)
+        );
+        let x = extract(&html, "https://journal.example/article/66/").unwrap();
+        let t = x.teaser.unwrap();
+        assert!(
+            t.chars().count() <= TEASER_MAX_CHARS,
+            "{} chars: {t}",
+            t.chars().count()
+        );
+        assert!(t.starts_with("Historically,"), "{t}");
+        assert!(t.ends_with("view."), "{t}");
+    }
+
+    #[test]
+    fn a_teaser_without_a_sentence_end_is_cut_at_a_word() {
+        let run_on = "and the stall holders kept talking about the rail yard ".repeat(12);
+        let t = teaser_of(&run_on).unwrap();
+        assert!(t.chars().count() <= TEASER_MAX_CHARS + 1, "{t}");
+        assert!(t.ends_with("…") && !t.ends_with(" …"), "{t}");
+        let short =
+            "The council met on Tuesday night to talk about the old rail yard and the market.";
+        assert_eq!(teaser_of(short).as_deref(), Some(short));
+        assert_eq!(teaser_of("Too short."), None);
+        // An abbreviation before a number doesn't end a sentence.
+        let cited = "Some animated films, however, have conveyed an anti-war pacifist point of view (Takai 2011). "
+            .to_owned()
+            + &"Then the film can be called anti-war propaganda (Okuda 2003, p. 144), "
+                .repeat(4);
+        let t = teaser_of(&cited).unwrap();
+        assert!(t.ends_with("(Takai 2011)."), "{t}");
+    }
+
+    #[test]
+    fn spaces_at_the_edge_of_emphasis_are_kept() {
+        let html = page(concat!(
+            "<p>John Collison uses <em>tenacity </em>and<em> passion</em> to describe something similar.</p>",
+            "<p><strong>UNN </strong>reports this, citing <strong>MacRumors</strong>, the site.</p>",
+        ));
+        let x = extract(&html, "https://news.example/market").unwrap();
+        assert!(
+            x.xhtml
+                .contains("uses <em>tenacity</em> and <em>passion</em> to describe"),
+            "{}",
+            x.xhtml
+        );
+        assert!(
+            x.xhtml.contains(
+                "<strong>UNN</strong> reports this, citing <strong>MacRumors</strong>, the site."
+            ),
+            "{}",
+            x.xhtml
+        );
+        assert!(!x.xhtml.contains("  "), "no doubled spaces");
     }
 }
