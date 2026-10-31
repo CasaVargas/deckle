@@ -275,3 +275,42 @@ fn walk_for(dir: &Path, name: &str) -> std::path::PathBuf {
     }
     find(dir, name).unwrap_or_else(|| panic!("{name} not under {}", dir.display()))
 }
+
+#[test]
+fn plugins_switch_through_the_deckle_plugin_and_patches_directly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let kobo = tmp.path().join("KOBOeReader");
+    let ko = kobo.join(".adds/koreader");
+    write(&ko.join("plugins/zen.koplugin/main.lua"), "-- zen");
+    write(&ko.join("plugins/deckle.koplugin/main.lua"), "-- deckle");
+    write(
+        &ko.join("settings.reader.lua"),
+        "return { [\"plugins_disabled\"] = { [\"zen\"] = true } }",
+    );
+    let run = |args: &[&str]| {
+        deckle(&home, &tmp.path().join("no-mounts"))
+            .args(["--json", "koreader", "plugins", "--from"])
+            .arg(&kobo)
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let o = run(&["enable", "zen"]);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let l: serde_json::Value = serde_json::from_slice(&run(&["list"]).stdout).unwrap();
+    let zen = l["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "zen")
+        .unwrap();
+    assert_eq!(zen["enabled"], false);
+    assert_eq!(zen["pending"], true);
+    assert!(ko.join("deckle-pending.lua").is_file());
+    assert!(run(&["patches", "off"]).status.success());
+    assert!(ko.join("patches/.patches_disabled").is_file());
+    assert!(run(&["patches", "on"]).status.success());
+    assert!(!ko.join("patches/.patches_disabled").exists());
+}

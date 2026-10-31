@@ -772,8 +772,11 @@ deckle koreader plugins rollback appstore         # the copy the last change kep
   and where each plugin came from in `deckle-plugins.json` beside it.
 - `deckle koreader backup` now includes your added plugins and `patches/`, and
   `restore --settings` puts them back.
-- Switching a plugin on or off comes with the Deckle plugin (KOReader rewrites its settings when
-  it closes, so Deckle doesn't edit them over USB). Until then, use KOReader's Plugin management.
+- **On and off:** `deckle koreader plugins enable|disable <name>`. KOReader rewrites its settings
+  when it closes, so Deckle doesn't edit them over USB: it leaves the change in
+  `deckle-pending.lua`, the Deckle plugin applies it when KOReader starts and asks for a restart,
+  and `list` shows it as waiting until then. This needs the Deckle plugin on the reader.
+  `deckle koreader plugins patches on|off` switches every patch at once, directly.
 - KOReader loads new plugins at its next start.
 
 ### The Deckle plugin: the paper by itself
@@ -799,6 +802,8 @@ and keeps the last three papers it fetched (Tools → Deckle → Papers kept). A
   username and the password's MD5, never the password. Installing again updates those and keeps
   the rest. `DECKLE_READER_SERVER_URL` sets the address it's given.
 - With several papers, it fetches the household's main paper (`digest.toml`'s).
+- **Tools → Deckle → Use Deckle for progress sync** points KOReader's progress sync at Deckle
+  (server, username and key), after asking. Automatic sync stays as you set it.
 
 ## Kobo
 

@@ -89,6 +89,32 @@ function Logic.sidecar_dir(path)
     return (path:gsub("%.[^./]+$", "")) .. ".sdr"
 end
 
+--- KOReader's `plugins_disabled` after Deckle's pending changes (`wanted`: name → on). Returns
+--- the new table and how many plugins changed.
+function Logic.apply_pending(disabled, wanted)
+    local out, changed = {}, 0
+    for name, off in pairs(disabled or {}) do out[name] = off end
+    for name, on in pairs(wanted or {}) do
+        if type(name) == "string" and type(on) == "boolean" then
+            local was_off = out[name] == true
+            if on then out[name] = nil else out[name] = true end
+            if was_off == on then changed = changed + 1 end
+        end
+    end
+    return out, changed
+end
+
+--- The progress sync plugin's settings pointed at Deckle: its server, username and key (the
+--- password's MD5, as kosync keeps it). Everything else, auto-sync included, stays as it was.
+function Logic.sync_settings(current, server, username, key)
+    local out = {}
+    for k, v in pairs(current or {}) do out[k] = v end
+    out.custom_server = (server or ""):gsub("/+$", "")
+    out.username = username
+    out.userkey = key
+    return out
+end
+
 --- A one-line account of a failed fetch, for the menu.
 function Logic.describe(code, why)
     if code == 401 then return "Deckle didn't accept the sign-in: install the plugin again from Deckle" end
