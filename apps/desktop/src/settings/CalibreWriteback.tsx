@@ -69,10 +69,29 @@ export default function CalibreWriteback() {
               <button className="link" disabled={busy || !s.calibredb} onClick={() => act(api.calibreCreateColumns)}>
                 Create the usual ones
               </button>{" "}
-              (#deckle_progress, #deckle_read, #deckle_last_read, #deckle_rating). Close calibre first: adding columns changes the library.
+              (#deckle_progress, #deckle_read, #deckle_last_read, #deckle_rating, #deckle_highlights). Close calibre first: adding columns changes
+              the library.
             </p>
           )}
         </div>
+      )}
+
+      {s.library && wb.columns.highlights !== undefined && (
+        <Row
+          label="Also into calibre's own annotations"
+          note={
+            s.annotations_supported
+              ? "Listed by chapter in calibre's Browse annotations. calibre's viewer can't jump to them: readers keep their own positions."
+              : "Needs calibre 9.18 or later (calibredb annotations import)."
+          }
+        >
+          <Switch
+            label="Also into calibre's own annotations"
+            checked={wb.annotations}
+            disabled={busy || (!wb.annotations && !s.annotations_supported)}
+            onChange={(on) => set({ annotations: on })}
+          />
+        </Row>
       )}
 
       <details className="set-sub">
@@ -115,7 +134,7 @@ export default function CalibreWriteback() {
           <h4>Next batch</h4>
           {noColumns(wb.columns) ? (
             <p className="muted small">Choose a column above to see what would be written.</p>
-          ) : plan.changes.length === 0 ? (
+          ) : plan.changes.length === 0 && plan.annotations.length === 0 ? (
             <p className="muted small">Nothing to write: calibre already says what your readers say.</p>
           ) : (
             <ul className="wireless-books">
@@ -123,6 +142,15 @@ export default function CalibreWriteback() {
                 <li key={`${c.uuid}:${c.column}`}>{changeLine(c)}</li>
               ))}
               {plan.changes.length > 30 && <li className="muted">and {plan.changes.length - 30} more</li>}
+            </ul>
+          )}
+          {plan.annotations.length > 0 && (
+            <ul className="wireless-books">
+              {plan.annotations.map((a) => (
+                <li key={a.uuid}>
+                  {a.title}: {a.count} {a.count === 1 ? "highlight" : "highlights"} into calibre's annotations
+                </li>
+              ))}
             </ul>
           )}
           {plan.to_confirm.length > 0 && (
@@ -153,7 +181,7 @@ export default function CalibreWriteback() {
             </>
           )}
           {plan.unmatched.length > 0 && <p className="muted small">Not in calibre: {plan.unmatched.join(", ")}</p>}
-          <button className="ghost" disabled={busy || !!why || plan.changes.length === 0} onClick={() => act(api.calibreWritebackWrite)}>
+          <button className="ghost" disabled={busy || !!why || (plan.changes.length === 0 && plan.annotations.length === 0)} onClick={() => act(api.calibreWritebackWrite)}>
             {busy ? "Writing…" : "Write now"}
           </button>
         </div>

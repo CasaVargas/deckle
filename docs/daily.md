@@ -979,7 +979,8 @@ In the app: Settings → Library → **Reading data into calibre**.
 1. Choose a column for each piece you want: an integer or decimal column for progress, a
    yes/no column for read, a date column for last read, a rating (or integer) column for the
    stars. No columns that fit? **Create the usual ones** adds `#deckle_progress`, `#deckle_read`,
-   `#deckle_last_read` and `#deckle_rating`. That changes the library, so close calibre first.
+   `#deckle_last_read`, `#deckle_rating` and `#deckle_highlights` (shown as Markdown). That
+   changes the library, so close calibre first.
 2. Read **Next batch**: every value it would write, before and after. Books matched only by
    title and author wait for a **Yes**, once. Values you set in calibre are listed as left alone.
 3. Turn it on. The watcher writes once a minute at most, after a reader has been read.
@@ -987,7 +988,7 @@ In the app: Settings → Library → **Reading data into calibre**.
 ```sh
 deckle calibre status            # the library, calibredb, the columns, the next batch
 deckle calibre create-columns    # calibre closed
-deckle calibre map progress deckle_progress    # or read, last_read, rating; `none` to stop
+deckle calibre map progress deckle_progress    # or read, last_read, rating, highlights; `none` to stop
 deckle calibre preview           # the next batch; `deckle calibre confirm 1` (or all) for matches
 deckle calibre on                # the watcher writes; `deckle calibre write` writes now
 ```
@@ -1012,7 +1013,16 @@ deckle calibre on                # the watcher writes; `deckle calibre write` wr
   That's how it tells its own values from yours.
 - **Needs calibre itself:** `calibredb` is found on `PATH` or where calibre installs. The Docker
   image doesn't include calibre.
-- **Highlights** come next (calibre bridge design phase 4).
+- **Highlights:**
+  - **The column:** a long-text column gets every highlight and note as Markdown, under its
+    chapter, oldest first, from KOReader and a Kobo. It's written whole each time something
+    changes.
+  - **calibre's own annotations** (off by default, `deckle calibre annotations on`): highlights
+    also go into calibre's annotations, with `calibredb annotations import`, so they're listed and
+    searchable in calibre's Browse annotations. This needs calibre 9.18 or later; Deckle checks
+    the `calibredb` it uses and leaves the switch off otherwise.
+  - **What the annotations can't do:** calibre's viewer can't jump to them, because readers keep
+    their own positions, not calibre's. The same highlight is never imported twice.
 
 ## The edition bundle, for reader apps
 

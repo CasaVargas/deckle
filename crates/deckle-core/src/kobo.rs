@@ -175,11 +175,53 @@ fn records(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<crate::reading::
             finished,
             last_read: r.get::<_, Option<String>>(4)?.as_deref().and_then(iso_utc),
             rating: None,
+            highlights: Vec::new(),
             from: "kobo".into(),
         })
     })?;
-    rows.filter(|b| b.as_ref().map_or(true, |b| !b.title.trim().is_empty()))
-        .collect()
+    let mut out: Vec<crate::reading::Record> = rows
+        .filter(|b| b.as_ref().map_or(true, |b| !b.title.trim().is_empty()))
+        .collect::<rusqlite::Result<_>>()?;
+    // Each book's highlights, with the chapter's title when Kobo has a row for it.
+    let mut q = conn.prepare(
+        "SELECT b.VolumeID, b.Text, b.Annotation, b.DateCreated, \
+         (SELECT c.Title FROM content c WHERE c.ContentID = b.ContentID LIMIT 1) \
+         FROM Bookmark b WHERE (b.Text IS NOT NULL AND trim(b.Text) <> '') \
+         OR (b.Annotation IS NOT NULL AND trim(b.Annotation) <> '') ORDER BY b.DateCreated",
+    )?;
+    let marks = q.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            crate::reading::Highlight {
+                text: r
+                    .get::<_, Option<String>>(1)?
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned(),
+                note: r
+                    .get::<_, Option<String>>(2)?
+                    .unwrap_or_default()
+                    .trim()
+                    .to_owned(),
+                chapter: r
+                    .get::<_, Option<String>>(4)?
+                    .filter(|c| !c.trim().is_empty()),
+                page: None,
+                datetime: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                spine: None,
+            },
+        ))
+    })?;
+    for (volume, h) in marks.flatten() {
+        let path = volume.strip_prefix("file:///mnt/onboard/");
+        if let Some(r) = out
+            .iter_mut()
+            .find(|r| r.path.as_deref() == path && path.is_some())
+        {
+            r.highlights.push(h);
+        }
+    }
+    Ok(out)
 }
 
 /// `content` rows of books (`ContentType = 6`) being read (`ReadStatus = 1`).
@@ -372,9 +414,19 @@ pub mod tests {
             "INSERT INTO content VALUES ('file:///mnt/onboard/Books/Dune.epub', '6', 'Dune', 'Frank Herbert', 37, '2026-10-20T21:15:03.000', 1, NULL);
              INSERT INTO content VALUES ('file:///mnt/onboard/Books/Emma.epub', '6', 'Emma', 'Jane Austen', 12, '2026-10-21T08:00:00.000', 2, NULL);
              INSERT INTO content VALUES ('file:///mnt/onboard/Books/New.epub', '6', 'New', 'A', 0, NULL, 0, NULL);
-             INSERT INTO content VALUES ('a-store-book-id', '6', 'Bought', 'B', 50, '2026-10-22T08:00:00.000', 1, NULL);",
+             INSERT INTO content VALUES ('a-store-book-id', '6', 'Bought', 'B', 50, '2026-10-22T08:00:00.000', 1, NULL);
+             INSERT INTO content VALUES ('file:///mnt/onboard/Books/Dune.epub!OEBPS!ch2.xhtml', '9', 'Muad''Dib', NULL, 0, NULL, 0, NULL);
+             INSERT INTO Bookmark VALUES ('b1', 'file:///mnt/onboard/Books/Dune.epub', 'file:///mnt/onboard/Books/Dune.epub!OEBPS!ch2.xhtml', ' The spice must flow. ', 'Again', '2026-10-20T21:00:00.000');",
         );
         let r = read(&k).unwrap();
+        let dune = r.records.iter().find(|x| x.title == "Dune").unwrap();
+        assert_eq!(dune.highlights.len(), 1);
+        let h = &dune.highlights[0];
+        assert_eq!(
+            (h.text.as_str(), h.note.as_str()),
+            ("The spice must flow.", "Again")
+        );
+        assert_eq!(h.chapter.as_deref(), Some("Muad'Dib"));
         let got: Vec<(&str, Option<&str>, Option<f64>, bool)> = r
             .records
             .iter()

@@ -39,6 +39,8 @@ pub fn calibre_writeback_status() -> Status {
 pub struct WritebackPatch {
     pub enabled: Option<bool>,
     pub columns: Option<Columns>,
+    /// Highlights also into calibre's own annotations.
+    pub annotations: Option<bool>,
     /// `""` for none.
     pub server: Option<String>,
     pub username: Option<String>,
@@ -59,6 +61,9 @@ pub fn calibre_writeback_set(patch: WritebackPatch) -> Result<Status, String> {
         if let Some(c) = patch.columns {
             wb.columns = c;
         }
+        if let Some(a) = patch.annotations {
+            wb.annotations = a;
+        }
         if let Some(s) = patch.server {
             wb.server = Some(s.trim().to_owned()).filter(|s| !s.is_empty());
         }
@@ -70,11 +75,7 @@ pub fn calibre_writeback_set(patch: WritebackPatch) -> Result<Status, String> {
         }
         if let Some(on) = patch.enabled {
             let c = &wb.columns;
-            if on
-                && [&c.progress, &c.read, &c.last_read, &c.rating]
-                    .iter()
-                    .all(|x| x.is_none())
-            {
+            if on && c.is_empty() {
                 return Err("choose a column first, or create the usual ones".into());
             }
             wb.enabled = on;

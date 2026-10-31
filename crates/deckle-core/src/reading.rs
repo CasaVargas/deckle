@@ -30,8 +30,38 @@ pub struct Record {
     /// 1–5 stars, when the reader has them.
     #[serde(default)]
     pub rating: Option<u8>,
+    /// The highlights and notes, oldest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub highlights: Vec<Highlight>,
     /// `koreader`, `kobo` or `sync` (KOReader's progress sync).
     pub from: String,
+}
+
+/// One highlight, with its note.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Highlight {
+    pub text: String,
+    /// Empty for none.
+    #[serde(default)]
+    pub note: String,
+    /// The chapter it's in, when the reader says.
+    #[serde(default)]
+    pub chapter: Option<String>,
+    #[serde(default)]
+    pub page: Option<String>,
+    /// When it was made: `YYYY-MM-DD HH:MM:SS` or ISO 8601, as the reader wrote it.
+    #[serde(default)]
+    pub datetime: String,
+    /// Which spine file of the EPUB it's in, from 0 (KOReader's `DocFragment[N]` less one).
+    #[serde(default)]
+    pub spine: Option<u32>,
+}
+
+/// The spine file a KOReader position (`/body/DocFragment[N]/…`) is in, from 0.
+pub fn spine_of(xpointer: &str) -> Option<u32> {
+    let rest = xpointer.split("DocFragment[").nth(1)?;
+    let n: u32 = rest.split(']').next()?.parse().ok()?;
+    n.checked_sub(1)
 }
 
 /// The calibre id inside the EPUB at `root`/`rel`, if it is one and calibre put one there.
@@ -42,4 +72,18 @@ pub fn calibre_id_of(root: &Path, rel: &str) -> Option<String> {
     }
     let path = root.join(rel.trim_start_matches('/'));
     crate::inspect::inspect(&path).ok()?.calibre_id
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_position_names_its_spine_file() {
+        assert_eq!(
+            super::spine_of("/body/DocFragment[3]/body/p[2]/text().5"),
+            Some(2)
+        );
+        assert_eq!(super::spine_of("/body/DocFragment[1]"), Some(0));
+        assert_eq!(super::spine_of("/body/DocFragment[0]"), None);
+        assert_eq!(super::spine_of("12"), None);
+    }
 }

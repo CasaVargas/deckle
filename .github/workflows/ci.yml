@@ -136,7 +136,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@nextest
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends calibre
+      # calibre's own Linux installer (the current release), as calibre's site gives it.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xdg-utils xz-utils libegl1 libopengl0 libxcb-cursor0 libxkbcommon0 libglx0 libnss3
+          wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sudo sh /dev/stdin
+          calibredb --version
       - run: cargo nextest run -p deckle-library -E 'test(real_calibredb)'
         env:
           DECKLE_REQUIRE_CALIBRE: "1"

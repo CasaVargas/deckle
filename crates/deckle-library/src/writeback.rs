@@ -82,16 +82,24 @@ pub struct Columns {
     pub read: Option<String>,
     pub last_read: Option<String>,
     pub rating: Option<String>,
+    /// A long-text column, written as Markdown.
+    pub highlights: Option<String>,
 }
 
 impl Columns {
-    fn pairs(&self) -> [(Field, Option<&String>); 4] {
+    fn pairs(&self) -> [(Field, Option<&String>); 5] {
         [
             (Field::Progress, self.progress.as_ref()),
             (Field::Read, self.read.as_ref()),
             (Field::LastRead, self.last_read.as_ref()),
             (Field::Rating, self.rating.as_ref()),
+            (Field::Highlights, self.highlights.as_ref()),
         ]
+    }
+
+    /// Nothing chosen.
+    pub fn is_empty(&self) -> bool {
+        self.pairs().iter().all(|(_, c)| c.is_none())
     }
 }
 
@@ -107,6 +115,9 @@ pub struct Writeback {
     /// The content server's user; the password is in the system keychain.
     pub username: Option<String>,
     pub columns: Columns,
+    /// Highlights also go into calibre's own annotations (its Browse annotations), with
+    /// `calibredb annotations import`, when this calibredb has it.
+    pub annotations: bool,
     /// Books matched by title and author, confirmed once: log key → calibre uuid.
     pub confirmed: BTreeMap<String, String>,
     /// What Deckle last wrote: calibre uuid → column label → value.
@@ -168,6 +179,7 @@ pub enum Field {
     Read,
     LastRead,
     Rating,
+    Highlights,
 }
 
 impl Field {
@@ -178,6 +190,7 @@ impl Field {
             Field::Read => datatype == "bool",
             Field::LastRead => datatype == "datetime",
             Field::Rating => matches!(datatype, "rating" | "int"),
+            Field::Highlights => datatype == "comments",
         }
     }
 }
@@ -224,6 +237,91 @@ pub struct Plan {
     pub to_confirm: Vec<ToConfirm>,
     /// Books on a reader that aren't in calibre (by title).
     pub unmatched: Vec<String>,
+    /// Highlights for calibre's own annotations, a book at a time (when that's on).
+    pub annotations: Vec<Annotations>,
+}
+
+/// One book's highlights as a calibre annotation collection, for `calibredb annotations import`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Annotations {
+    pub uuid: String,
+    pub book_id: i64,
+    pub title: String,
+    pub format: String,
+    pub count: usize,
+    /// The collection, as calibre's Browse annotations tool exports it.
+    pub collection: serde_json::Value,
+    /// What it says, so the same highlights aren't imported twice.
+    pub digest: String,
+}
+
+/// The key in [`Writeback::written`] the annotations' digest is kept under.
+pub const ANNOTATIONS_KEY: &str = "@annotations";
+
+/// A UTC time as calibre's viewer writes one: `2026-01-01T00:00:00.000Z`. KOReader's
+/// `YYYY-MM-DD HH:MM:SS` has no zone, and is taken as is.
+fn calibre_time(t: &str) -> Option<String> {
+    let t = t.trim();
+    let date = t.get(..10)?;
+    let time = t.get(11..19)?;
+    let ok = date.len() == 10 && date.as_bytes()[4] == b'-' && time.as_bytes()[2] == b':';
+    ok.then(|| format!("{date}T{time}.000Z"))
+}
+
+/// A UUID for a highlight that stays the same for the same book, text and time.
+fn highlight_uuid(book: &str, h: &deckle_core::reading::Highlight) -> String {
+    use sha2::{Digest, Sha256};
+    let d = Sha256::digest(format!(
+        "{book}\u{1f}{}\u{1f}{}\u{1f}{}",
+        h.text, h.note, h.datetime
+    ));
+    let hex: String = d.iter().take(16).map(|b| format!("{b:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
+/// A calibre annotation collection of `highlights` for `book`'s `format`: what
+/// `calibredb annotations import` takes (calibre's `annotations_to_import`). Without the
+/// viewer's own positions (`start_cfi`), calibre lists them in Browse annotations by chapter;
+/// its viewer can't jump to them.
+pub fn collection(
+    book: &calibre::Book,
+    format: &str,
+    highlights: &[deckle_core::reading::Highlight],
+) -> serde_json::Value {
+    let annotations: Vec<serde_json::Value> = highlights
+        .iter()
+        .filter(|h| !h.text.trim().is_empty())
+        .filter_map(|h| {
+            let mut a = serde_json::json!({
+                "type": "highlight",
+                "uuid": highlight_uuid(&book.uuid, h),
+                "timestamp": calibre_time(&h.datetime)?,
+                "highlighted_text": h.text.trim(),
+                "book_id": book.id,
+                "format": format,
+                "user_type": "local",
+                "user": "viewer",
+            });
+            if !h.note.trim().is_empty() {
+                a["notes"] = h.note.trim().into();
+            }
+            if let Some(s) = h.spine {
+                a["spine_index"] = s.into();
+            }
+            if let Some(c) = h.chapter.as_deref().filter(|c| !c.trim().is_empty()) {
+                a["toc_family_titles"] = serde_json::json!([c.trim()]);
+            }
+            Some(a)
+        })
+        .collect();
+    serde_json::json!({ "version": 1, "type": "calibre_annotation_collection", "annotations": annotations })
 }
 
 fn norm(s: &str) -> String {
@@ -262,7 +360,48 @@ fn value_of(field: Field, datatype: &str, r: &Record) -> Option<String> {
                 stars.to_string()
             })
         }
+        Field::Highlights => (!r.highlights.is_empty()).then(|| markdown(&r.highlights)),
     }
+}
+
+/// Highlights as Markdown, under their chapters, oldest first: each a quote, its note after.
+pub fn markdown(highlights: &[deckle_core::reading::Highlight]) -> String {
+    let mut out = String::new();
+    let mut chapter: Option<&str> = None;
+    for h in highlights {
+        let ch = h
+            .chapter
+            .as_deref()
+            .map(str::trim)
+            .filter(|c| !c.is_empty());
+        if ch.is_some() && ch != chapter {
+            out.push_str(&format!("### {}\n\n", ch.unwrap_or_default()));
+            chapter = ch;
+        }
+        let text = h.text.trim();
+        if !text.is_empty() {
+            for line in text.lines() {
+                out.push_str("> ");
+                out.push_str(line.trim_end());
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+        if !h.note.trim().is_empty() {
+            out.push_str(h.note.trim());
+            out.push_str("\n\n");
+        }
+        let when = h.datetime.get(..10).unwrap_or_default();
+        let page = h.page.as_deref().map(|p| format!("page {p}"));
+        let meta: Vec<String> = page
+            .into_iter()
+            .chain((!when.is_empty()).then(|| when.to_owned()))
+            .collect();
+        if !meta.is_empty() {
+            out.push_str(&format!("*{}*\n\n", meta.join(" · ")));
+        }
+    }
+    out.trim_end().to_owned()
 }
 
 /// Whether calibre's `current` and Deckle's `new` say the same.
@@ -276,6 +415,7 @@ fn same_value(datatype: &str, current: &str, new: &str) -> bool {
         "datetime" => {
             current.get(..19).map(|c| c.replace(' ', "T")) == new.get(..19).map(str::to_owned)
         }
+        "comments" => current.trim() == new.trim(),
         _ => current.eq_ignore_ascii_case(new),
     }
 }
@@ -377,6 +517,36 @@ pub fn plan(log: &ReadLog, library: &Path, wb: &Writeback) -> Result<Plan, Strin
                 old: current,
                 new,
             });
+        }
+        let format = ["EPUB", "KEPUB", "AZW3"]
+            .into_iter()
+            .find(|f| book.formats.iter().any(|x| x == f))
+            .or_else(|| book.formats.first().map(String::as_str));
+        if wb.annotations
+            && !r.highlights.is_empty()
+            && let Some(format) = format
+        {
+            let c = collection(book, format, &r.highlights);
+            let count = c["annotations"].as_array().map_or(0, Vec::len);
+            let digest = {
+                use sha2::{Digest, Sha256};
+                Sha256::digest(c.to_string().as_bytes())
+                    .iter()
+                    .take(12)
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            };
+            if count > 0 && written.and_then(|w| w.get(ANNOTATIONS_KEY)) != Some(&digest) {
+                plan.annotations.push(Annotations {
+                    uuid: uuid.clone(),
+                    book_id: book.id,
+                    title: book.title.clone(),
+                    format: format.to_owned(),
+                    count,
+                    collection: c,
+                    digest,
+                });
+            }
         }
     }
     plan.unmatched.sort();
@@ -510,6 +680,8 @@ fn classify(e: String) -> RunError {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Report {
     pub written: usize,
+    /// Highlights imported into calibre's annotations.
+    pub annotations: usize,
     pub failed: Vec<String>,
     /// The batch stopped here (calibre open); what's left goes next time.
     pub stopped: Option<String>,
@@ -547,8 +719,57 @@ pub fn run(
                 .push(format!("{} · #{}: {why}", c.title, c.column)),
         }
     }
+    if report.stopped.is_none() {
+        for a in &plan.annotations {
+            let file = match tempfile::Builder::new().suffix(".json").tempfile() {
+                Ok(f) => f,
+                Err(e) => {
+                    report
+                        .failed
+                        .push(format!("{} · annotations: {e}", a.title));
+                    continue;
+                }
+            };
+            if let Err(e) = std::fs::write(file.path(), a.collection.to_string()) {
+                report
+                    .failed
+                    .push(format!("{} · annotations: {e}", a.title));
+                continue;
+            }
+            let mut args = vec!["annotations".to_owned()];
+            args.extend(base.iter().cloned());
+            args.extend([
+                "import".to_owned(),
+                a.book_id.to_string(),
+                a.format.clone(),
+                file.path().to_string_lossy().into_owned(),
+            ]);
+            match runner(exe, &args).map_err(classify) {
+                Ok(_) => {
+                    wb.written
+                        .entry(a.uuid.clone())
+                        .or_default()
+                        .insert(ANNOTATIONS_KEY.to_owned(), a.digest.clone());
+                    report.annotations += a.count;
+                }
+                Err(RunError::CalibreOpen) => {
+                    report.stopped = Some(RunError::CalibreOpen.to_string());
+                    break;
+                }
+                Err(RunError::Failed(why)) => report
+                    .failed
+                    .push(format!("{} · annotations: {why}", a.title)),
+            }
+        }
+    }
     wb.last_run = Some(deckle_core::devices::now_iso());
     wb.last_result = std::iter::once(format!("{} written", report.written))
+        .chain((report.annotations > 0).then(|| {
+            format!(
+                "{} highlights into calibre's annotations",
+                report.annotations
+            )
+        }))
         .chain(report.stopped.clone())
         .chain(report.failed.iter().cloned())
         .collect();
@@ -556,11 +777,12 @@ pub fn run(
 }
 
 /// The columns "Create the usual columns" adds: `(label, heading, datatype)`.
-pub const USUAL: [(&str, &str, &str); 4] = [
+pub const USUAL: [(&str, &str, &str); 5] = [
     ("deckle_progress", "Progress (Deckle)", "int"),
     ("deckle_read", "Read (Deckle)", "bool"),
     ("deckle_last_read", "Last read (Deckle)", "datetime"),
     ("deckle_rating", "Stars (Deckle)", "rating"),
+    ("deckle_highlights", "Highlights (Deckle)", "comments"),
 ];
 
 /// Adds [`USUAL`]'s columns that aren't there, with `calibredb add_custom_column`, and maps
@@ -579,14 +801,16 @@ pub fn create_usual(
     let mut added = Vec::new();
     for (label, name, datatype) in USUAL {
         if !have.iter().any(|h| h == label) {
-            let args = vec![
+            let mut args = vec![
                 "add_custom_column".to_owned(),
                 "--with-library".into(),
                 library.to_string_lossy().into_owned(),
-                label.into(),
-                name.into(),
-                datatype.into(),
             ];
+            // calibre shows a long-text column written as Markdown as such.
+            if datatype == "comments" {
+                args.extend(["--display".into(), r#"{"interpret_as": "markdown"}"#.into()]);
+            }
+            args.extend([label.into(), name.into(), datatype.into()]);
             runner(exe, &args).map_err(classify)?;
             added.push(label.to_owned());
         }
@@ -596,6 +820,7 @@ pub fn create_usual(
         read: Some(USUAL[1].0.into()),
         last_read: Some(USUAL[2].0.into()),
         rating: Some(USUAL[3].0.into()),
+        highlights: Some(USUAL[4].0.into()),
     };
     Ok(added)
 }
@@ -608,6 +833,7 @@ pub fn choices(columns: &[Column]) -> BTreeMap<&'static str, Vec<String>> {
         ("read", Field::Read),
         ("last_read", Field::LastRead),
         ("rating", Field::Rating),
+        ("highlights", Field::Highlights),
     ] {
         out.insert(
             name,
@@ -632,6 +858,25 @@ pub struct Status {
     /// The next batch; `None` when there's no library to plan against.
     pub plan: Option<Plan>,
     pub error: Option<String>,
+    /// This calibredb can import annotations (calibre newer than 9.17).
+    pub annotations_supported: bool,
+}
+
+/// Whether `exe` has `calibredb annotations import` (added after calibre 9.17.0). Asked once
+/// per calibredb while Deckle runs.
+pub fn supports_annotations(exe: &Path, runner: &mut Runner<'_>) -> bool {
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<BTreeMap<PathBuf, bool>>> = OnceLock::new();
+    let seen = SEEN.get_or_init(Default::default);
+    if let Some(v) = seen.lock().ok().and_then(|m| m.get(exe).copied()) {
+        return v;
+    }
+    let ok = runner(exe, &["annotations".to_owned(), "--help".to_owned()])
+        .is_ok_and(|out| out.contains("annotations import") || out.contains("import BOOK_ID"));
+    if let Ok(mut m) = seen.lock() {
+        m.insert(exe.to_path_buf(), ok);
+    }
+    ok
 }
 
 /// The files and library the write-back works with, from `library.json`'s path.
@@ -662,7 +907,11 @@ pub fn status(p: &Paths) -> Status {
         writeback: wb,
         plan: None,
         error: None,
+        annotations_supported: false,
     };
+    if let Some(exe) = &out.calibredb {
+        out.annotations_supported = supports_annotations(exe, &mut system_runner);
+    }
     let Some(lib) = &p.library else {
         out.error = Some("no calibre library found: name it in Settings → Books".into());
         return out;
@@ -688,8 +937,11 @@ pub fn write_now(
     let lib = p.library.as_deref().ok_or("no calibre library found")?;
     let exe = find_calibredb(wb.calibredb.as_deref())
         .ok_or("calibredb wasn't found: install calibre, or say where calibredb is")?;
-    let pl = plan(&ReadLog::load(&p.log), lib, &wb)?;
-    if pl.changes.is_empty() {
+    let mut pl = plan(&ReadLog::load(&p.log), lib, &wb)?;
+    if !pl.annotations.is_empty() && !supports_annotations(&exe, runner) {
+        pl.annotations.clear();
+    }
+    if pl.changes.is_empty() && pl.annotations.is_empty() {
         return Ok(None);
     }
     let report = run(&pl, &mut wb, &exe, lib, password, runner);
@@ -720,6 +972,7 @@ mod tests {
             finished,
             last_read: Some(when.into()),
             rating: None,
+            highlights: Vec::new(),
             from: "koreader".into(),
         }
     }
@@ -750,6 +1003,7 @@ mod tests {
                 read: Some("read".into()),
                 last_read: Some("last".into()),
                 rating: Some("stars".into()),
+                highlights: None,
             },
             ..Default::default()
         }
@@ -1030,13 +1284,18 @@ mod tests {
         let mut wb = Writeback::default();
         let mut calls = Vec::new();
         let mut ok = |_: &Path, a: &[String]| -> Result<String, String> {
-            calls.push(a[3].clone());
+            calls.push(a[a.len() - 3].clone());
             Ok(String::new())
         };
         let added = create_usual(&mut wb, Path::new("calibredb"), tmp.path(), &mut ok).unwrap();
         assert_eq!(
             added,
-            ["deckle_progress", "deckle_last_read", "deckle_rating"]
+            [
+                "deckle_progress",
+                "deckle_last_read",
+                "deckle_rating",
+                "deckle_highlights"
+            ]
         );
         assert_eq!(calls, added);
         assert_eq!(wb.columns.read.as_deref(), Some("deckle_read"));
@@ -1077,5 +1336,231 @@ mod tests {
         );
         assert_eq!(log.record("b", &[new]), 1, "another reader's is its own");
         assert_eq!(log.books.len(), 2);
+    }
+
+    fn hl(
+        text: &str,
+        note: &str,
+        chapter: Option<&str>,
+        when: &str,
+        spine: Option<u32>,
+    ) -> deckle_core::reading::Highlight {
+        deckle_core::reading::Highlight {
+            text: text.into(),
+            note: note.into(),
+            chapter: chapter.map(str::to_owned),
+            page: None,
+            datetime: when.into(),
+            spine,
+        }
+    }
+
+    #[test]
+    fn highlights_read_as_markdown_under_their_chapters() {
+        let md = markdown(&[
+            hl(
+                "The spice must flow.",
+                "",
+                Some("Book One"),
+                "2026-10-01 08:00:00",
+                Some(2),
+            ),
+            hl(
+                "Fear is the mind-killer.\nFear is the little-death.",
+                "Litany",
+                Some("Book One"),
+                "2026-10-02 09:00:00",
+                Some(2),
+            ),
+            hl(
+                "",
+                "A note alone",
+                Some("Book Two"),
+                "2026-10-03 10:00:00",
+                None,
+            ),
+        ]);
+        assert_eq!(
+            md,
+            "### Book One\n\n> The spice must flow.\n\n*2026-10-01*\n\n> Fear is the mind-killer.\n> Fear is the little-death.\n\nLitany\n\n*2026-10-02*\n\n### Book Two\n\nA note alone\n\n*2026-10-03*"
+        );
+    }
+
+    #[test]
+    fn highlights_go_in_their_column_and_into_calibres_annotations_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        fixture::library(
+            tmp.path(),
+            &[("notes", "Highlights", "comments", false)],
+            &[(1, "u-dune", "Dune", "Frank Herbert")],
+        );
+        fixture::format(tmp.path(), 1, "EPUB");
+        let mut r = rec(
+            "Dune",
+            "Frank Herbert",
+            Some("u-dune"),
+            40.0,
+            false,
+            "2026-10-30T00:00:00Z",
+        );
+        r.highlights = vec![
+            hl(
+                "The spice must flow.",
+                "",
+                Some("Book One"),
+                "2026-10-01 08:00:00",
+                Some(2),
+            ),
+            hl(
+                "Fear is the mind-killer.",
+                "Litany",
+                None,
+                "2026-10-02 09:00:00",
+                None,
+            ),
+        ];
+        let mut log = ReadLog::default();
+        log.record("koreader/a", &[r]);
+        let mut wb = Writeback {
+            columns: Columns {
+                highlights: Some("notes".into()),
+                ..Default::default()
+            },
+            annotations: true,
+            ..Default::default()
+        };
+        let p = plan(&log, tmp.path(), &wb).unwrap();
+        assert_eq!(p.changes.len(), 1);
+        assert!(p.changes[0].new.starts_with("### Book One"));
+        assert_eq!(p.annotations.len(), 1);
+        let a = &p.annotations[0];
+        assert_eq!((a.book_id, a.format.as_str(), a.count), (1, "EPUB", 2));
+
+        // What calibre's annotations_to_import checks.
+        let c = &a.collection;
+        assert_eq!(
+            (c["version"].as_i64(), c["type"].as_str()),
+            (Some(1), Some("calibre_annotation_collection"))
+        );
+        let list = c["annotations"].as_array().unwrap();
+        let allowed = [
+            "type",
+            "uuid",
+            "timestamp",
+            "highlighted_text",
+            "notes",
+            "spine_index",
+            "toc_family_titles",
+            "book_id",
+            "format",
+            "user_type",
+            "user",
+            "style",
+            "start_cfi",
+            "end_cfi",
+            "spine_name",
+        ];
+        for x in list {
+            assert_eq!(x["type"], "highlight");
+            assert!(x["uuid"].as_str().is_some_and(|u| u.len() == 36));
+            assert!(x["timestamp"].as_str().unwrap().ends_with(".000Z"));
+            assert_eq!(
+                (x["book_id"].as_i64(), x["format"].as_str()),
+                (Some(1), Some("EPUB"))
+            );
+            assert_eq!(
+                (x["user_type"].as_str(), x["user"].as_str()),
+                (Some("local"), Some("viewer"))
+            );
+            for k in x.as_object().unwrap().keys() {
+                assert!(allowed.contains(&k.as_str()), "{k}");
+            }
+        }
+        assert_eq!(list[0]["spine_index"], 2);
+        assert_eq!(
+            list[0]["toc_family_titles"],
+            serde_json::json!(["Book One"])
+        );
+        assert_eq!(list[1]["notes"], "Litany");
+        assert!(list[1].get("spine_index").is_none());
+        // The same highlight keeps its uuid, so calibre merges instead of duplicating.
+        assert_eq!(
+            collection(
+                &calibre::books(tmp.path()).unwrap()[0],
+                "EPUB",
+                &log.books.values().next().unwrap().record.highlights
+            )["annotations"][0]["uuid"],
+            list[0]["uuid"]
+        );
+
+        // Run: set_custom, then annotations import with the collection in a file.
+        let mut calls: Vec<Vec<String>> = Vec::new();
+        let mut imported = serde_json::Value::Null;
+        let mut ok = |_: &Path, a: &[String]| -> Result<String, String> {
+            if a[0] == "annotations" {
+                imported =
+                    serde_json::from_slice(&std::fs::read(a.last().unwrap()).unwrap()).unwrap();
+            }
+            calls.push(a.to_vec());
+            Ok(String::new())
+        };
+        let report = run(
+            &p,
+            &mut wb,
+            Path::new("calibredb-a"),
+            tmp.path(),
+            None,
+            &mut ok,
+        );
+        assert_eq!((report.written, report.annotations), (1, 2));
+        assert_eq!(
+            &calls[1][..4],
+            [
+                "annotations",
+                "--with-library",
+                &tmp.path().to_string_lossy(),
+                "import"
+            ]
+        );
+        assert_eq!(&calls[1][4..6], ["1", "EPUB"]);
+        assert_eq!(imported, *c);
+        assert!(
+            wb.last_result
+                .iter()
+                .any(|l| l == "2 highlights into calibre's annotations")
+        );
+
+        // Imported once: the next plan has no annotations for it.
+        fixture::set(
+            tmp.path(),
+            1,
+            1,
+            rusqlite::types::Value::Text(p.changes[0].new.clone()),
+        );
+        let again = plan(&log, tmp.path(), &wb).unwrap();
+        assert!(again.annotations.is_empty() && again.changes.is_empty());
+        // Off: none.
+        wb.annotations = false;
+        wb.written.clear();
+        assert!(plan(&log, tmp.path(), &wb).unwrap().annotations.is_empty());
+    }
+
+    #[test]
+    fn annotations_are_used_only_when_calibredb_has_them() {
+        let mut new = |_: &Path, _: &[String]| -> Result<String, String> {
+            Ok("Usage: calibredb annotations [options] [list|search|export|import|remove] ... calibredb annotations import BOOK_ID FORMAT FILE".into())
+        };
+        assert!(supports_annotations(Path::new("/new/calibredb"), &mut new));
+        let mut old = |_: &Path, _: &[String]| -> Result<String, String> {
+            Err("Unknown command: annotations".into())
+        };
+        assert!(!supports_annotations(Path::new("/old/calibredb"), &mut old));
+        // Asked once per calibredb.
+        let mut never =
+            |_: &Path, _: &[String]| -> Result<String, String> { panic!("asked again") };
+        assert!(supports_annotations(
+            Path::new("/new/calibredb"),
+            &mut never
+        ));
     }
 }

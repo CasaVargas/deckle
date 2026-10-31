@@ -131,6 +131,12 @@ fn plan_lines(s: &writeback::Status) -> Vec<String> {
             i + 1
         ));
     }
+    for a in &plan.annotations {
+        out.push(format!(
+            "  {} · {} highlights into calibre's annotations",
+            a.title, a.count
+        ));
+    }
     if !plan.unmatched.is_empty() {
         out.push(format!("  not in calibre: {}", plan.unmatched.join(", ")));
     }
@@ -174,13 +180,23 @@ pub(crate) fn run(json: bool, action: CalibreCommand) -> Result<ExitCode, String
                             .unwrap_or_else(|| "not found".into())
                     ),
                     format!(
-                        "columns:    progress {}, read {}, last read {}, rating {}",
+                        "columns:    progress {}, read {}, last read {}, rating {}, highlights {}",
                         col(&c.progress),
                         col(&c.read),
                         col(&c.last_read),
-                        col(&c.rating)
+                        col(&c.rating),
+                        col(&c.highlights)
                     ),
                 ];
+                out.push(format!(
+                    "annotations: {}",
+                    match (s.writeback.annotations, s.annotations_supported) {
+                        (true, true) => "on: highlights also go into calibre's own annotations",
+                        (true, false) => "on, but this calibredb can't import annotations (calibre 9.18 or later)",
+                        (false, true) => "off (deckle calibre annotations on)",
+                        (false, false) => "off; needs calibre 9.18 or later",
+                    }
+                ));
                 if let Some(server) = &s.writeback.server {
                     out.push(format!("server:     {server}"));
                 }
@@ -202,16 +218,7 @@ pub(crate) fn run(json: bool, action: CalibreCommand) -> Result<ExitCode, String
         }
         CalibreCommand::On | CalibreCommand::Off => {
             wb.enabled = matches!(action, CalibreCommand::On);
-            if wb.enabled
-                && [
-                    &wb.columns.progress,
-                    &wb.columns.read,
-                    &wb.columns.last_read,
-                    &wb.columns.rating,
-                ]
-                .iter()
-                .all(|c| c.is_none())
-            {
+            if wb.enabled && wb.columns.is_empty() {
                 return Err("no columns chosen yet: deckle calibre map progress <column>, or deckle calibre create-columns".into());
             }
             save(&p, &wb)?;
@@ -244,7 +251,12 @@ pub(crate) fn run(json: bool, action: CalibreCommand) -> Result<ExitCode, String
                 "read" => wb.columns.read = col,
                 "last_read" => wb.columns.last_read = col,
                 "rating" => wb.columns.rating = col,
-                other => return Err(format!("{other}: one of progress, read, last_read, rating")),
+                "highlights" => wb.columns.highlights = col,
+                other => {
+                    return Err(format!(
+                        "{other}: one of progress, read, last_read, rating, highlights"
+                    ));
+                }
             }
             save(&p, &wb)?;
             emit(json, &wb.columns, || "saved".into())?;
@@ -302,6 +314,9 @@ pub(crate) fn run(json: bool, action: CalibreCommand) -> Result<ExitCode, String
             emit(json, &r, || match &r {
                 None => "nothing to write".into(),
                 Some(r) => std::iter::once(format!("{} written", r.written))
+                    .chain((r.annotations > 0).then(|| {
+                        format!("{} highlights into calibre's annotations", r.annotations)
+                    }))
                     .chain(r.stopped.clone())
                     .chain(r.failed.clone())
                     .collect::<Vec<_>>()
@@ -351,6 +366,19 @@ pub(crate) fn run(json: bool, action: CalibreCommand) -> Result<ExitCode, String
                     }
                 )
             })?;
+        }
+        CalibreCommand::Annotations { on } => {
+            wb.annotations = match on.as_str() {
+                "on" => true,
+                "off" => false,
+                _ => return Err("on or off".into()),
+            };
+            save(&p, &wb)?;
+            emit(
+                json,
+                &serde_json::json!({ "annotations": wb.annotations }),
+                || format!("annotations {on}"),
+            )?;
         }
         CalibreCommand::Calibredb { path } => {
             wb.calibredb = path.filter(|p| p != Path::new("none"));
