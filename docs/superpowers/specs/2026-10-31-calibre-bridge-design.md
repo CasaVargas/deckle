@@ -505,3 +505,51 @@ Deckle checks that its shelves are still there and lists any that the firmware o
   then received a queued book, and a removal queued during the session ran within a poll.
 - **Left for phase 2:** sending from Deckle's and calibre's libraries, the paper on connect,
   cover thumbnails, the app, and the Docker guide.
+
+## Build notes (phase 3)
+
+- **Where the data comes from:** `deckle_core::reading::Record`.
+  - KOReader's sidecar read gains `records` (with `summary.rating`, new in `Parsed`) for every
+    sidecar that gives a percent, `complete` or stars.
+  - The Kobo read gains `records` for sideloaded books with `ReadStatus` 1 or 2.
+  - Each record carries the calibre id read from the book file on the reader
+    (`BookInfo::calibre_id`), and `merge` joins them.
+  - `FlushReport::reading` brings them to the CLI, which adds them to `reading-log.json` beside
+    `library.json`. KOReader's progress sync adds records by title (it knows no file).
+  - The wireless connection's readers (part A) add nothing yet: KOReader doesn't report reading
+    state over it.
+- **Matching (§5.2), as built:** first the calibre id in the book, then a confirmed match, then a
+  unique title + first author match, asked about once (`confirmed` in `calibre-writeback.json`).
+  The wireless record and `Source::calibre_id` steps aren't needed: a book calibre or Deckle put
+  on a reader already carries the id.
+- **Reading calibre:** columns, books and current values come from `metadata.db` opened
+  read-only, not from `calibredb list`/`custom_columns`. It's faster, works the same with the
+  content server, and gives each column's type. Writes still go only through `calibredb`.
+- **calibre's value formats** (checked in `src/calibre/db/write.py`):
+  - `set_custom` hands its string to calibre's adapters;
+  - bool is `true`/`false`, datetime is ISO, int and float are plain;
+  - a rating column is half-stars, 0–10, so 4 stars is `8`.
+- **Ratings go to a custom column only,** not calibre's built-in rating: writing the owner's own
+  ratings is a step further than the design needs.
+- **Conflicts:** a value Deckle didn't write (or that changed since it wrote) is left alone and
+  listed, including a value that was there before Deckle ever wrote.
+- **The watcher** writes once a minute at most. A batch stops at the first "Another calibre
+  program is running" and says to use the content server or close calibre.
+- **The app:** Settings → Library → Reading data into calibre, with the column choices (columns
+  another field uses aren't offered), the content server, the next batch with Yes for matches,
+  conflicts, and Write now. The commands are `calibre_writeback_*`, `calibre_create_columns`
+  and `calibre_set_password`.
+- **Tests:**
+  - plan and run in `deckle-library` (newest record wins, conflicts, forward-only progress and
+    restart, confirm-once, `set_custom` arguments, content-server arguments, calibre-open stop,
+    creating columns);
+  - `calibre.rs` reads values from a fixture library;
+  - the frontend helpers;
+  - **real calibre:** `tests/it/real_calibre.rs` runs real `calibredb` (a CI job installs
+    calibre on Ubuntu). It makes a library, adds the usual columns, writes a batch, reads it back
+    from the database and `calibredb list`, and checks an owner's later edit becomes a conflict.
+- **Live run** (2026-10-31): in the web app, from a throwaway home with a fixture library and a
+  stand-in `calibredb`.
+  - The preview showed 8 values and Emma's own "read" left alone.
+  - Yes confirmed a title match.
+  - **Write now** wrote all 8, the database read back the same, and the next batch was empty.

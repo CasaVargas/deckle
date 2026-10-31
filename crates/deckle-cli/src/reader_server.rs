@@ -148,6 +148,31 @@ fn progress(main_path: &Path, p: &Progress) {
         }
     }
     shelf(&loaded.papers[0], &device, p);
+    // For calibre: where the reader is in a book, by its title (sync knows no file or id).
+    let meta = p.metadata.clone().unwrap_or_default();
+    if let Some(title) = meta.title.filter(|t| !t.trim().is_empty()) {
+        crate::calibre::record(
+            &device,
+            &[deckle_core::reading::Record {
+                title,
+                authors: meta
+                    .authors
+                    .map(|a| {
+                        a.split('\n')
+                            .map(str::trim)
+                            .filter(|a| !a.is_empty())
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                percent: Some((p.percentage * 100.0).clamp(0.0, 100.0)),
+                finished: p.percentage >= 1.0,
+                last_read: Some(iso(p.timestamp)),
+                from: "sync".into(),
+                ..Default::default()
+            }],
+        );
+    }
 }
 
 /// Every book `p`'s device has open (not finished), from the sync records, as its shelf.

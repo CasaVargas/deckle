@@ -68,6 +68,10 @@ pub struct FlushReport {
     /// A Kobo's books in progress, read in the same session (`[sync] shelf`).
     #[serde(skip)]
     pub kobo_books: Option<Vec<crate::kobo::Book>>,
+    /// On a Kobo or a PocketBook, what it says of each book (calibre bridge design §5), read
+    /// with the shelf.
+    #[serde(skip)]
+    pub reading: Vec<crate::reading::Record>,
     /// Why the shelf read failed; the delivery stands.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub shelf_error: Option<String>,

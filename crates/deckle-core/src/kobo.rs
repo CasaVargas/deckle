@@ -107,6 +107,8 @@ pub struct Read {
     /// The highlights and notes, written as a Kindle's `My Clippings.txt`, so the highlights
     /// export and From Your Shelf read them as they read a Kindle's.
     pub clippings: Option<Vec<u8>>,
+    /// Every sideloaded book opened or finished (calibre bridge design §5.1).
+    pub records: Vec<crate::reading::Record>,
 }
 
 /// Reads books in progress and highlights from a copy of `.kobo/KoboReader.sqlite`.
@@ -122,7 +124,14 @@ pub fn read(kobo: &Kobo) -> Result<Read, String> {
             let _ = std::fs::copy(&from, tmp.path().join(format!("KoboReader.sqlite{side}")));
         }
     }
-    read_db(&copy)
+    let mut read = read_db(&copy)?;
+    for r in &mut read.records {
+        r.calibre_id = r
+            .path
+            .as_deref()
+            .and_then(|p| crate::reading::calibre_id_of(&kobo.root, p));
+    }
+    Ok(read)
 }
 
 /// [`read`] on a database file already copied out.
@@ -134,7 +143,43 @@ pub fn read_db(path: &Path) -> Result<Read, String> {
     .map_err(|e| format!("KoboReader.sqlite: {e}"))?;
     let books = books(&conn).map_err(|e| format!("books: {e}"))?;
     let clippings = clippings(&conn).map_err(|e| format!("highlights: {e}"))?;
-    Ok(Read { books, clippings })
+    // An older database without a column the record wants still gives books and highlights.
+    let records = records(&conn).unwrap_or_default();
+    Ok(Read {
+        books,
+        clippings,
+        records,
+    })
+}
+
+/// Sideloaded books (`file:///mnt/onboard/…`) opened (`ReadStatus` 1) or finished (2).
+fn records(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<crate::reading::Record>> {
+    let mut q = conn.prepare(
+        "SELECT ContentID, Title, Attribution, ___PercentRead, DateLastRead, ReadStatus \
+         FROM content WHERE ContentType = 6 AND ReadStatus IN (1, 2) \
+         AND ContentID LIKE 'file:///mnt/onboard/%' ORDER BY DateLastRead DESC",
+    )?;
+    let rows = q.query_map([], |r| {
+        let id: String = r.get(0)?;
+        let finished = r.get::<_, Option<i64>>(5)? == Some(2);
+        Ok(crate::reading::Record {
+            title: r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+            authors: authors(&r.get::<_, Option<String>>(2)?.unwrap_or_default()),
+            calibre_id: None,
+            path: id.strip_prefix("file:///mnt/onboard/").map(str::to_owned),
+            percent: Some(if finished {
+                100.0
+            } else {
+                r.get::<_, Option<f64>>(3)?.unwrap_or(0.0).clamp(0.0, 100.0)
+            }),
+            finished,
+            last_read: r.get::<_, Option<String>>(4)?.as_deref().and_then(iso_utc),
+            rating: None,
+            from: "kobo".into(),
+        })
+    })?;
+    rows.filter(|b| b.as_ref().map_or(true, |b| !b.title.trim().is_empty()))
+        .collect()
 }
 
 /// `content` rows of books (`ContentType = 6`) being read (`ReadStatus = 1`).
@@ -318,6 +363,40 @@ pub mod tests {
          ReadStatus INTEGER, BookID TEXT); \
          CREATE TABLE Bookmark (BookmarkID TEXT, VolumeID TEXT, ContentID TEXT, Text TEXT, \
          Annotation TEXT, DateCreated TEXT);";
+
+    #[test]
+    fn sideloaded_books_opened_or_finished_are_records() {
+        let tmp = tempfile::tempdir().unwrap();
+        let k = fake_kobo(
+            tmp.path(),
+            "INSERT INTO content VALUES ('file:///mnt/onboard/Books/Dune.epub', '6', 'Dune', 'Frank Herbert', 37, '2026-10-20T21:15:03.000', 1, NULL);
+             INSERT INTO content VALUES ('file:///mnt/onboard/Books/Emma.epub', '6', 'Emma', 'Jane Austen', 12, '2026-10-21T08:00:00.000', 2, NULL);
+             INSERT INTO content VALUES ('file:///mnt/onboard/Books/New.epub', '6', 'New', 'A', 0, NULL, 0, NULL);
+             INSERT INTO content VALUES ('a-store-book-id', '6', 'Bought', 'B', 50, '2026-10-22T08:00:00.000', 1, NULL);",
+        );
+        let r = read(&k).unwrap();
+        let got: Vec<(&str, Option<&str>, Option<f64>, bool)> = r
+            .records
+            .iter()
+            .map(|x| (x.title.as_str(), x.path.as_deref(), x.percent, x.finished))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("Emma", Some("Books/Emma.epub"), Some(100.0), true),
+                ("Dune", Some("Books/Dune.epub"), Some(37.0), false),
+            ]
+        );
+        assert_eq!(
+            r.records[1].last_read.as_deref(),
+            Some("2026-10-20T21:15:03Z")
+        );
+        assert!(
+            r.records
+                .iter()
+                .all(|x| x.from == "kobo" && x.calibre_id.is_none())
+        );
+    }
 
     #[test]
     fn a_kobo_is_found_by_its_database_and_named_by_its_version_file() {

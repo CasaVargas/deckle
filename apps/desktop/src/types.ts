@@ -1166,3 +1166,75 @@ export interface StoreUpdate {
   latest: string;
   pinned: boolean;
 }
+
+/** Which calibre column each piece of reading data goes in, by label without `#` (calibre bridge design §5). */
+export interface WritebackColumns {
+  progress: string | null;
+  read: string | null;
+  last_read: string | null;
+  rating: string | null;
+}
+
+export interface WritebackConfig {
+  enabled: boolean;
+  calibredb: string | null;
+  server: string | null;
+  username: string | null;
+  columns: WritebackColumns;
+  confirmed: Record<string, string>;
+  last_run: string | null;
+  last_result: string[];
+}
+
+export interface WritebackChange {
+  uuid: string;
+  book_id: number;
+  title: string;
+  field: "progress" | "read" | "last_read" | "rating";
+  column: string;
+  old: string | null;
+  new: string;
+}
+
+export interface WritebackConflict {
+  title: string;
+  field: WritebackChange["field"];
+  column: string;
+  calibre: string;
+  reader: string;
+}
+
+export interface WritebackToConfirm {
+  key: string;
+  reader: string;
+  title: string;
+  authors: string[];
+  uuid: string;
+  calibre_title: string;
+}
+
+export interface WritebackPlan {
+  changes: WritebackChange[];
+  conflicts: WritebackConflict[];
+  to_confirm: WritebackToConfirm[];
+  unmatched: string[];
+}
+
+export interface WritebackStatus {
+  library: string | null;
+  calibredb: string | null;
+  writeback: WritebackConfig;
+  /** Each field's possible columns, by label. */
+  choices: Partial<Record<keyof WritebackColumns, string[]>>;
+  plan: WritebackPlan | null;
+  error: string | null;
+}
+
+/** A change to the write-back settings; a field left out stays. */
+export interface WritebackPatch {
+  enabled?: boolean;
+  columns?: WritebackColumns;
+  server?: string;
+  username?: string;
+  calibredb?: string;
+}

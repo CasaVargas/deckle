@@ -126,6 +126,21 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y luajit
       - run: luajit crates/deckle-core/koplugin/tests/logic_test.lua
       - run: for f in crates/deckle-core/koplugin/deckle.koplugin/*.lua crates/deckle-core/koplugin/tests/*.lua; do luajit -b "$f" /dev/null || exit 1; done
+  # The calibre write-back against calibre's own calibredb (calibre bridge design §8).
+  calibre:
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends calibre
+      - run: cargo nextest run -p deckle-library -E 'test(real_calibredb)'
+        env:
+          DECKLE_REQUIRE_CALIBRE: "1"
+          QT_QPA_PLATFORM: offscreen
   press-contract:
     needs: changes
     if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'

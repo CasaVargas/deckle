@@ -581,6 +581,40 @@ pub fn reader_server_set_password(
 }
 
 #[tauri::command]
+pub fn calibre_writeback_status() -> deckle_library::writeback::Status {
+    deckle_app::calibre::calibre_writeback_status()
+}
+
+#[tauri::command]
+pub fn calibre_writeback_set(
+    patch: deckle_app::calibre::WritebackPatch,
+) -> Result<deckle_library::writeback::Status, String> {
+    deckle_app::calibre::calibre_writeback_set(patch)
+}
+
+#[tauri::command]
+pub fn calibre_writeback_confirm(
+    keys: Vec<String>,
+) -> Result<deckle_library::writeback::Status, String> {
+    deckle_app::calibre::calibre_writeback_confirm(keys)
+}
+
+#[tauri::command]
+pub async fn calibre_writeback_write() -> Result<deckle_library::writeback::Status, String> {
+    blocking(deckle_app::calibre::calibre_writeback_write).await
+}
+
+#[tauri::command]
+pub async fn calibre_create_columns() -> Result<deckle_library::writeback::Status, String> {
+    blocking(deckle_app::calibre::calibre_create_columns).await
+}
+
+#[tauri::command]
+pub fn calibre_set_password(password: String) -> Result<deckle_library::writeback::Status, String> {
+    deckle_app::calibre::calibre_set_password(password)
+}
+
+#[tauri::command]
 pub async fn email_test(paper: Option<String>) -> Result<String, String> {
     blocking(move || deckle_app::daily::email_test(paper)).await
 }
