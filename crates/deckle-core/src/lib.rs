@@ -19,6 +19,7 @@ pub mod kepub;
 pub mod kobo;
 pub mod koreader;
 pub mod koreader_backup;
+pub mod koreader_plugins;
 pub mod matcher;
 pub mod metadata_fill;
 pub mod normalize;

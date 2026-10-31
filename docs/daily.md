@@ -746,6 +746,36 @@ deckle reader-server status      # on or off, and the URLs to type into KOReader
   are kept in `koreader-sync.json`.
 - Not yet checked with KOReader on a real device (`docs/devices.md`).
 
+## KOReader plugins
+
+With a Kobo, PocketBook or jailbroken Kindle plugged in (or `--from <folder>`, a copy of its
+drive), Deckle manages KOReader's plugins
+(`docs/superpowers/specs/2026-10-31-koreader-plugins-design.md`):
+
+```sh
+deckle koreader plugins list                      # built in and added, on or off, and patches
+deckle koreader plugins install owner/repo        # newest release, else the default branch
+deckle koreader plugins install ./thing.koplugin.zip
+deckle koreader plugins update appstore           # again from where it came from
+deckle koreader plugins remove appstore
+deckle koreader plugins rollback appstore         # the copy the last change kept
+```
+
+- Install and update show what they'll write and ask first (`--yes` for scripts). Plugins run
+  code on your reader: install what you trust.
+- An archive must hold exactly one `<name>.koplugin` folder (or be a repository whose top is the
+  plugin) with a `main.lua`, nothing outside it, and under 20 MB unpacked.
+- KOReader's built-in plugins are never replaced or removed. On a reader they share the
+  `plugins/` folder with yours, so Deckle tells them apart by KOReader's own list of built-in
+  names.
+- What a change replaces or removes is kept in `deckle-backup/plugins/` in KOReader's folder,
+  and where each plugin came from in `deckle-plugins.json` beside it.
+- `deckle koreader backup` now includes your added plugins and `patches/`, and
+  `restore --settings` puts them back.
+- Switching a plugin on or off comes with the Deckle plugin (KOReader rewrites its settings when
+  it closes, so Deckle doesn't edit them over USB). Until then, use KOReader's Plugin management.
+- KOReader loads new plugins at its next start.
+
 ## Kobo
 
 A Kobo gets the paper too, with no Kindle Previewer: plug it in once (or keep it plugged in for
