@@ -5,6 +5,7 @@
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use regex::Regex;
 
@@ -63,8 +64,6 @@ pub struct Extracted {
 
 static GN_ATTR: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"data-n-a-(id|ts|sg)="([^"]+)""#).unwrap());
-static GN_URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"garturlres\\",\\"(https?://[^\\"]+)\\""#).unwrap());
 
 pub fn is_google_news(url: &str) -> bool {
     url.starts_with("https://news.google.com/rss/articles/")
@@ -74,7 +73,7 @@ pub fn is_google_news(url: &str) -> bool {
 /// The publisher URL behind a Google News link, via the interstitial page's signature and the
 /// `batchexecute` decoder. Undocumented: `None` on any surprise.
 pub fn resolve_google_news(url: &str, net: &dyn Net) -> Option<String> {
-    let page = String::from_utf8_lossy(&net.get_page(url).ok()?).into_owned();
+    let page = String::from_utf8_lossy(&retrying(|| net.get_page(url)).ok()?).into_owned();
     let (mut id, mut ts, mut sg) = (None, None, None);
     for c in GN_ATTR.captures_iter(&page) {
         let v = c[2].to_owned();
@@ -88,14 +87,53 @@ pub fn resolve_google_news(url: &str, net: &dyn Net) -> Option<String> {
     let req = format!(
         r#"[[["Fbv4je","[\"garturlreq\",[[\"X\",\"X\",[\"X\",\"X\"],null,null,1,1,\"US:en\",null,1,null,null,null,null,null,0,1],\"X\",\"X\",1,[1,1,1],1,1,null,0,0,null,0],\"{id}\",{ts},\"{sg}\"]",null,"generic"]]]"#
     );
-    let reply = net
-        .post_form(
+    let form = format!("f.req={}", encode(&req));
+    let reply = retrying(|| {
+        net.post_form(
             "https://news.google.com/_/DotsSplashUi/data/batchexecute",
-            &format!("f.req={}", encode(&req)),
+            &form,
         )
-        .ok()?;
-    let reply = String::from_utf8_lossy(&reply);
-    GN_URL.captures(&reply).map(|c| c[1].to_owned())
+    })
+    .ok()?;
+    garturl(&String::from_utf8_lossy(&reply))
+}
+
+/// The publisher URL in a `batchexecute` reply: after the `)]}'` guard, a JSON array whose
+/// `Fbv4je` entry holds, as a JSON string, `["garturlres", url, 1]`. Parsed rather than matched,
+/// so an escaped character (`=` comes as `\u003d` in legacy.com links) stays part of the URL.
+fn garturl(reply: &str) -> Option<String> {
+    let json = reply.trim_start().strip_prefix(")]}'")?;
+    let entries: Vec<serde_json::Value> = serde_json::from_str(json.trim()).ok()?;
+    entries.iter().find_map(|e| {
+        let inner: serde_json::Value = serde_json::from_str(e.get(2)?.as_str()?).ok()?;
+        (inner.get(0)?.as_str()? == "garturlres")
+            .then(|| inner.get(1)?.as_str().map(str::to_owned))?
+            .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+    })
+}
+
+/// `fetch`, tried again when the connection dropped. Google's front end drops cold TLS
+/// connections mid-handshake when several open at once (the Local section's parallel fetches
+/// at 05:30 lost every Google News story to it); the next try almost always gets through.
+fn retrying(fetch: impl Fn() -> Result<Vec<u8>, String>) -> Result<Vec<u8>, String> {
+    let mut wait = Duration::from_millis(300);
+    for _ in 0..2 {
+        match fetch() {
+            Err(e) if dropped(&e) => {
+                std::thread::sleep(wait);
+                wait *= 3;
+            }
+            got => return got,
+        }
+    }
+    fetch()
+}
+
+/// A connection closed or reset under the request, as opposed to an answer or a timeout.
+fn dropped(error: &str) -> bool {
+    ["close_notify", "onnection reset", "roken pipe"]
+        .iter()
+        .any(|e| error.contains(e))
 }
 
 /// An absolute photo or page URL. `file:` only for a saved page (a `file:` base), and only
