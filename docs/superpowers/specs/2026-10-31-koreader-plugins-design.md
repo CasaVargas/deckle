@@ -307,3 +307,23 @@ On a jailbroken Kindle, the plugin list and an install.
   this computer's LAN address). The format is KEPUB when the device is a Kobo. Settings already in
   `settings/deckle.lua` (keep, auto, the fetched list) are kept; server, username, key and format
   are Deckle's.
+
+## Build notes (phase 3)
+
+- **Pending changes:** `deckle-pending.lua` is `return { ["plugins"] = { [name] = on } }`.
+  `set_enabled` refuses without the Deckle plugin on (and not itself waiting to go off), refuses
+  to switch the Deckle plugin itself off (remove it instead), and drops a change that matches the
+  plugin's current state, removing the file when nothing waits. `list` shows each waiting change.
+- **Applying:** the plugin applies the file once per KOReader start, from whichever instance
+  initialises first, with `Logic.apply_pending` (counting only real changes), saves
+  `G_reader_settings`, deletes the file, and calls `UIManager:askForRestart`. An unreadable file
+  is deleted and logged.
+- **Patches:** `patches/.patches_disabled` is only read by KOReader (userpatch.lua), so Deckle sets
+  it directly: `deckle koreader plugins patches on|off`.
+- **Progress sync:** through the running kosync instance (`self.ui.kosync`, as the plugin loader
+  registers it) when there is one, marking it `updated` and flushing; else `settings/kosync.lua`
+  through `LuaSettings`. `Logic.sync_settings` sets `custom_server`, `username` and `userkey` and
+  keeps everything else, `auto_sync` included.
+- **Checked with the harness:** the real `main.lua` applied a pending file (Zen on, App Store off,
+  two changes, restart asked, file gone), and set progress sync on a stand-in kosync, leaving
+  auto-sync off.
