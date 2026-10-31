@@ -28,6 +28,7 @@ export interface Entry {
 export const INDEX: Entry[] = [
   { label: "Kindle Previewer", page: "sending", words: "previewer amazon convert kpf location path" },
   { label: "Library folder", page: "library", words: "library folder keep copy" },
+  { label: "Shelves from calibre", page: "library", words: "calibre shelves collections kobo koreader tags series author rules" },
   { label: "Reading data into calibre", page: "library", words: "calibre write back progress read finished last read rating stars columns calibredb content server" },
   { label: "Add every book I send", page: "library", words: "library auto add" },
   { label: "Find originals in calibre", page: "library", words: "calibre originals upgrades source" },

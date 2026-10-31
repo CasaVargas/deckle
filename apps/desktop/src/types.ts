@@ -1313,3 +1313,44 @@ export interface WritebackPatch {
   username?: string;
   calibredb?: string;
 }
+
+/** A rule that makes a shelf from calibre (calibre bridge design §6.1). */
+export interface ShelfRule {
+  /** The shelf's name; empty for `series:*`, which names one per series. */
+  name: string;
+  /** `tag:…`, `series:…`, `author:…`, `column:#label=value` or `search:…`. */
+  from: string;
+  /** `all`, or reader keys. */
+  readers: string[];
+}
+
+export interface ShelvesConfig {
+  rules: ShelfRule[];
+  kobo_ok: string[];
+  auto: boolean;
+}
+
+export interface ShelfDiff {
+  create: string[];
+  delete: string[];
+  add: Record<string, string[]>;
+  remove: Record<string, string[]>;
+}
+
+export interface ShelfTarget {
+  kind: "kobo" | "koreader";
+  key: string;
+  diff: ShelfDiff;
+  applied: boolean;
+  note: string | null;
+}
+
+export interface ShelvesView {
+  config: ShelvesConfig;
+  /** The plugged-in reader: its key and name. */
+  reader: [string, string] | null;
+  targets: ShelfTarget[];
+  /** Each shelf the rules make, with how many calibre books. */
+  sets: [string, number][];
+  error: string | null;
+}

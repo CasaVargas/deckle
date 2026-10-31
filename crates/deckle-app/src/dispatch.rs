@@ -246,6 +246,10 @@ commands! { ctx;
     shelf_forget {} => shelf::shelf_forget(),
     shelf_set { on: bool } => shelf::shelf_set(on),
     shelf_status {} => Ok(shelf::shelf_status()),
+    shelves_apply {} => crate::shelves::shelves_apply(),
+    shelves_kobo_ok { key: String } => crate::shelves::shelves_kobo_ok(key),
+    shelves_set { config: deckle_library::shelves::Config } => crate::shelves::shelves_set(config),
+    shelves_status {} => Ok(crate::shelves::shelves_status()),
     start_tab {} => Ok(if ctx.web { "daily" } else { commands::start_tab(&ctx.state) }),
     subscription_forget { site: String } => daily::subscription_forget(site),
     subscription_set_password { site: String, password: String } => if ctx.web {

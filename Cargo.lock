@@ -1175,6 +1175,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "ureq",
+ "uuid",
  "zip 9.0.5",
 ]
 

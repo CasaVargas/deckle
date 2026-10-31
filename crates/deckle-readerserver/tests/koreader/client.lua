@@ -5,9 +5,13 @@ modules it uses stood in for. The socket is this process's stdin and stdout, fra
 "<length>\n<bytes>" each way; the Rust test (tests/koreader_wireless.rs) carries those to and
 from Deckle's wireless server.
 
-  luajit client.lua <koreader-calibre dir> <inbox> [password]
+  luajit client.lua <koreader-calibre dir> <inbox> [password] [collections.json]
+
+With collections.json (name → absolute paths), KOReader starts with those collections, and the
+ones it ends with are printed to stderr as `collections: <json>`.
 ]]
-local dir, inbox, password = arg[1], arg[2], arg[3]
+local dir, inbox, password, seed_file = arg[1], arg[2], arg[3], arg[4]
+if password == "" then password = nil end
 assert(dir and inbox, "usage: client.lua <koreader-calibre dir> <inbox> [password]")
 
 local function log(...)
@@ -239,7 +243,17 @@ end
 package.preload["ffi/zeromq_h"] = function() return true end
 package.preload["version"] = function() return { getCurrentRevision = function() return "v2026.09" end } end
 package.preload["ui/network/manager"] = function() return { willRerunWhenConnected = function() return false end, isConnected = function() return true end } end
-package.preload["readcollection"] = function() return { coll = {} } end
+-- KOReader's collections, as ReadCollection keeps them: name → { [file] = item }.
+local Collections = { coll = {} }
+function Collections:addCollection(n) self.coll[n] = {} end
+function Collections:removeCollection(n) self.coll[n] = nil end
+function Collections:isFileInCollection(f, n) return self.coll[n] ~= nil and self.coll[n][f] ~= nil end
+function Collections:addItem(f, n) self.coll[n][f] = { file = f } end
+function Collections:removeItem(f, n)
+    if self.coll[n] and self.coll[n][f] then self.coll[n][f] = nil; return true end
+end
+function Collections:write() end
+package.preload["readcollection"] = function() return Collections end
 package.preload["ui/trapper"] = function() return { info = function() end, clear = function() end } end
 package.preload["ui/uimanager"] = function()
     return {
@@ -274,6 +288,13 @@ local CalibreWireless = dofile(dir .. "/wireless.lua")
 local CalibreMetadata = require("metadata")
 
 os.execute("mkdir -p " .. q(inbox))
+if seed_file then
+    local seed = decode(read_file(seed_file))
+    for name, files in pairs(seed) do
+        Collections.coll[name] = {}
+        for _, f in ipairs(files) do Collections.coll[name][f] = { file = f } end
+    end
+end
 CalibreWireless:init()
 CalibreWireless.re = function() end
 CalibreWireless:initCalibreMQ("deckle", 9090)
@@ -291,3 +312,13 @@ while true do
 end
 log("the server closed the connection" .. (CalibreWireless.disconnected_by_server and " (ejected)" or ""))
 if CalibreWireless.invalid_password then log("invalid password") end
+if seed_file then
+    local out = {}
+    for name, items in pairs(Collections.coll) do
+        local files = {}
+        for f in pairs(items) do files[#files + 1] = f end
+        table.sort(files)
+        out[name] = array(files)
+    end
+    log("collections: " .. encode(object(out)))
+end

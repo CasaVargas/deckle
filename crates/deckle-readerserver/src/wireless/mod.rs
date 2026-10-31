@@ -319,6 +319,8 @@ fn refresh(
     books.sort_by(|a, b| a.lpath.cmp(&b.lpath));
     let free = s.free_space().ok();
     store.update(|r| {
+        // What was learned before (its inbox, Deckle's collections) stays.
+        let kept = r.readers.remove(&device.store_uuid).unwrap_or_default();
         r.readers.insert(
             device.store_uuid.clone(),
             Seen {
@@ -329,6 +331,7 @@ fn refresh(
                 last_seen: now(),
                 free,
                 books,
+                ..kept
             },
         );
     });
@@ -348,6 +351,7 @@ fn session_loop(
         do_jobs(s, device, store, &papers)?;
         refresh(s, device, store)?;
     }
+    shelve(s, device, store)?;
     let mut last_traffic = Instant::now();
     let mut last_work = Instant::now();
     loop {
@@ -400,6 +404,130 @@ fn hung_up(stream: &mut TcpStream, wait: Duration) -> io::Result<bool> {
         }
         Err(e) => Err(e),
     }
+}
+
+/// How long a reader has to answer for its collections: a KOReader too old to know the
+/// request never does.
+const COLLECTIONS_WAIT: Duration = Duration::from_secs(5);
+
+/// The inbox a reader's collections show: the start of a path that ends in a known `lpath`.
+fn inbox_from(collections: &serde_json::Value, books: &[OnReader]) -> Option<String> {
+    let lpaths: Vec<&str> = books.iter().map(|b| b.lpath.as_str()).collect();
+    collections
+        .as_object()?
+        .values()
+        .flat_map(|v| v.as_array().into_iter().flatten())
+        .find_map(|p| {
+            let p = p.as_str()?;
+            lpaths.iter().find_map(|l| {
+                p.strip_suffix(l)
+                    .filter(|pre| pre.ends_with('/'))
+                    .map(str::to_owned)
+            })
+        })
+}
+
+/// calibre's shelves as KOReader collections (calibre bridge design §6.2), when the watcher
+/// has rules and the reader can say what it has.
+fn shelve(
+    s: &mut Session<TcpStream>,
+    device: &Device,
+    store: &Store,
+) -> Result<(), session::Error> {
+    use deckle_core::shelves::{OnDrive, Shelves, diff, wanted};
+    let sets = store.shelves();
+    let Some(seen) = store.readers().readers.get(&device.store_uuid).cloned() else {
+        return Ok(());
+    };
+    if sets.is_empty() || seen.no_collections {
+        return Ok(());
+    }
+    s.stream().set_read_timeout(Some(COLLECTIONS_WAIT))?;
+    let asked = s.collections();
+    s.stream().set_read_timeout(Some(Duration::from_secs(60)))?;
+    let collections = match asked {
+        Ok(c) => c,
+        Err(session::Error::Io(e))
+            if matches!(
+                e.kind(),
+                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+            ) =>
+        {
+            store.update(|r| {
+                if let Some(x) = r.readers.get_mut(&device.store_uuid) {
+                    x.no_collections = true;
+                }
+            });
+            store.log(format!(
+                "{} is too old for collections over Wi-Fi",
+                device.name
+            ));
+            // It may still answer late, so this session can't be trusted to stay in step.
+            return Err(session::Error::Protocol("no answer for collections".into()));
+        }
+        Err(e) => return Err(e),
+    };
+    let Some(inbox) = inbox_from(&collections, &seen.books).or(seen.inbox.clone()) else {
+        store.log(format!(
+            "{}: can't tell where KOReader's calibre folder is yet; add any book Deckle sent to a \
+             collection once, and the shelves follow",
+            device.name
+        ));
+        return Ok(());
+    };
+    let key = format!("koreader/{}", device.store_uuid);
+    let books: Vec<OnDrive> = seen
+        .books
+        .iter()
+        .filter_map(|b| {
+            Some(OnDrive {
+                path: b.lpath.clone(),
+                calibre_id: b.uuid.clone()?,
+            })
+        })
+        .collect();
+    let want = wanted(&sets, &key, &books);
+    let mut current = Shelves::new();
+    for (name, files) in collections.as_object().into_iter().flatten() {
+        let list = current.entry(name.clone()).or_default();
+        for f in files
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|f| f.as_str())
+        {
+            if let Some(l) = f.strip_prefix(&inbox) {
+                list.insert(l.to_owned());
+            }
+        }
+    }
+    let d = diff(&want, &current, &seen.collections);
+    if !d.is_empty() {
+        let abs = |m: &Shelves| -> std::collections::BTreeMap<String, Vec<String>> {
+            m.iter()
+                .map(|(n, b)| (n.clone(), b.iter().map(|l| format!("{inbox}{l}")).collect()))
+                .collect()
+        };
+        s.update_collections(&d.create, &d.delete, &abs(&d.add), &abs(&d.remove))?;
+        let (added, removed) = d.counts();
+        store.log(format!(
+            "{}: collections from calibre, {added} added, {removed} taken off",
+            device.name
+        ));
+    }
+    store.update(|r| {
+        if let Some(x) = r.readers.get_mut(&device.store_uuid) {
+            x.inbox = Some(inbox.clone());
+            let mut ours = x.collections.clone();
+            ours.extend(d.create.iter().cloned());
+            for g in &d.delete {
+                ours.remove(g);
+            }
+            ours.retain(|n| want.contains_key(n));
+            x.collections = ours;
+        }
+    });
+    Ok(())
 }
 
 /// Papers Deckle sent that a reader keeps: the newest, and the two before it.
