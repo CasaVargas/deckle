@@ -895,7 +895,7 @@ pub enum CalibreCommand {
     On,
     /// Stop writing.
     Off,
-    /// Choose the column for progress, read, last_read or rating (`none` for none).
+    /// Choose the column for progress, read, last_read, rating or highlights (`none` for none).
     Map { field: String, column: String },
     /// Write through calibre's content server (`http://host:8080/#library_id`), so calibre
     /// can stay open; `none` writes to the library folder.
@@ -916,9 +916,12 @@ pub enum CalibreCommand {
     /// A book matched only by title and author is the same book (a number from the preview,
     /// or `all`).
     Confirm { n: String },
-    /// Add #deckle_progress, #deckle_read, #deckle_last_read and #deckle_rating, and use them.
+    /// Add #deckle_progress, #deckle_read, #deckle_last_read, #deckle_rating and
+    /// #deckle_highlights, and use them.
     /// calibre must be closed.
     CreateColumns,
+    /// Highlights also into calibre's own annotations (`on`/`off`): calibre 9.18 or later.
+    Annotations { on: String },
     /// Where calibredb is, when it isn't found (`none` to look again).
     Calibredb { path: Option<std::path::PathBuf> },
 }

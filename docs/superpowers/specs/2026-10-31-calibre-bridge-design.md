@@ -553,3 +553,58 @@ Deckle checks that its shelves are still there and lists any that the firmware o
   - The preview showed 8 values and Emma's own "read" left alone.
   - Yes confirmed a title match.
   - **Write now** wrote all 8, the database read back the same, and the next batch was empty.
+
+## Build notes (phase 4)
+
+- **The spike (§5.3), answered:** yes, but not in a released calibre yet.
+  - calibre added `calibredb annotations` (`list|search|export|import|remove`) to its main
+    branch on 2026-10-28 (`src/calibre/db/cli/cmd_annotations.py`).
+  - The latest release, 9.17.0 of 2026-10-23, doesn't have it, so "9.18 or later" in Deckle's
+    words is a guess at the next release.
+  - `import BOOK_ID FORMAT FILE` takes a `calibre_annotation_collection`, one book per file, and
+    merges it as the viewer does: by highlight `uuid`, the newer timestamp wins, nothing is
+    duplicated.
+  - Required: `type`, `uuid`, `timestamp`, `book_id`, `format`. Optional: `highlighted_text`,
+    `notes`, `spine_index`, `toc_family_titles`, `start_cfi`/`end_cfi`, `style`.
+- **Highlights as data:** `reading::Record::highlights`, each with text, note, chapter, page,
+  time and spine file.
+  - KOReader's come from `annotations` (`chapter`, and `pos0`'s `DocFragment[N]` → spine
+    `N - 1`).
+  - A Kobo's come from `Bookmark`, with the chapter from its `content` row when there is one.
+- **The column:**
+  - `Field::Highlights` goes to a `comments` column as Markdown: `### chapter`, each highlight a
+    quote, its note under it, then page and date in italics.
+  - "Create the usual columns" adds `#deckle_highlights` with
+    `--display '{"interpret_as": "markdown"}'`.
+  - The column is replaced whole when the highlights change, and left alone if the owner edited
+    it.
+- **calibre's annotations:**
+  - `Writeback::annotations` turns them on (off by default).
+  - A book's highlights become one collection for its EPUB (else KEPUB, AZW3, else its first
+    format). Each highlight gets a `uuid` from the book, text, note and time, so re-imports
+    merge. Timestamps are made calibre's UTC form; KOReader's carry no zone and are taken as
+    they are.
+  - `spine_index` and the chapter go in. There's no `start_cfi`, since KOReader's xpointers
+    aren't CFIs, so calibre lists them in Browse annotations and its viewer can't place them.
+  - A digest of each book's collection is kept in `written` under `@annotations`, so the same
+    set isn't imported twice.
+  - `supports_annotations` asks `calibredb annotations --help` once per calibredb, and a batch
+    leaves annotations out when it's no.
+- **Tests:**
+  - the Markdown layout;
+  - the column and the collection checked against `annotations_to_import`'s rules (one book,
+    known fields only, `local:viewer`, a stable uuid);
+  - the run's `annotations import` arguments and the file it reads;
+  - once only, and off;
+  - support detection cached per calibredb;
+  - KOReader's chapter and spine;
+  - a Kobo highlight with its chapter.
+- **Real calibre in CI:** the job now uses calibre's official Linux installer (the current
+  release) instead of Ubuntu's old package. The test checks the fifth column is created as
+  comments and the Markdown lands. It imports and lists annotations when that `calibredb` can,
+  and says it waited when it can't (9.17).
+- **Live run** (2026-10-31): the web app with a fixture library.
+  - Mapping a comments column showed "Dune: Highlights empty → 2 highlights".
+  - Write now put the Markdown in.
+  - The annotations switch stayed off with its "needs calibre 9.18" note, since the stand-in
+    `calibredb` has no annotations command.

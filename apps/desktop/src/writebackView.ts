@@ -7,12 +7,18 @@ export const FIELDS: { key: keyof WritebackColumns; label: string; hint: string 
   { key: "read", label: "Read", hint: "finished or not (a yes/no column)" },
   { key: "last_read", label: "Last read", hint: "when it was last opened (a date column)" },
   { key: "rating", label: "Stars", hint: "KOReader's stars (a rating or integer column)" },
+  { key: "highlights", label: "Highlights", hint: "highlights and notes as Markdown, by chapter (a long-text column)" },
 ];
 
 /** A value as calibre shows it: 62%, Yes, ★★★★, 30 Oct 2026. */
 export function shown(field: WritebackChange["field"], v: string | null): string {
   if (v === null || v === "") return "empty";
   if (field === "progress") return `${v}%`;
+  if (field === "highlights") {
+    // Each highlight is a quote block; count the blocks, not their lines.
+    const n = v.split(/\n\s*\n/).filter((b) => b.trimStart().startsWith(">")).length;
+    return n ? `${n} ${n === 1 ? "highlight" : "highlights"}` : "notes";
+  }
   if (field === "read") return v === "true" ? "Yes" : "No";
   if (field === "rating") {
     const n = Number(v);
@@ -32,7 +38,7 @@ export function changeLine(c: WritebackChange, ratingIsColumn = true): string {
 
 /** Nothing mapped yet. */
 export function noColumns(c: WritebackColumns): boolean {
-  return !c.progress && !c.read && !c.last_read && !c.rating;
+  return !c.progress && !c.read && !c.last_read && !c.rating && !c.highlights;
 }
 
 /** Why it can't write yet, or null. */

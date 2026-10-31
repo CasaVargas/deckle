@@ -269,3 +269,24 @@ fn a_read_records_each_book_with_its_calibre_id_finished_and_stars() {
     // A finished book still isn't a book in progress.
     assert!(r.books.iter().all(|b| b.title != "A Tale of Two Cities"));
 }
+
+#[test]
+fn a_records_highlights_carry_their_chapter_and_spine_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    put(&tmp.path().join("Walden.sdr/metadata.epub.lua"), NEW);
+    let r = read(tmp.path());
+    let h = &r.records[0].highlights;
+    // The bookmark (no pos0, no drawer) isn't one; oldest first.
+    assert_eq!(h.len(), 2);
+    assert_eq!(h[0].text, "Simplify, simplify.");
+    assert_eq!(h[0].note, "Said \"simplify\" twice\non purpose?");
+    assert_eq!((h[0].spine, h[0].chapter.as_deref()), (None, None));
+    assert_eq!(h[1].chapter.as_deref(), Some("Economy"));
+    assert_eq!(
+        h[1].spine,
+        Some(2),
+        "DocFragment[3] is the third spine file"
+    );
+    assert_eq!(h[1].page.as_deref(), Some("12"));
+    assert_eq!(h[1].datetime, "2026-10-21 08:15:03");
+}

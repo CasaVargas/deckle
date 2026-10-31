@@ -406,7 +406,11 @@ pub fn read(root: &Path) -> Read {
             });
         }
         let finished = parsed.status.as_deref() == Some("complete");
-        if parsed.percent.is_some() || finished || parsed.rating.is_some() {
+        if parsed.percent.is_some()
+            || finished
+            || parsed.rating.is_some()
+            || !parsed.highlights.is_empty()
+        {
             let path = (!s.book.starts_with("koreader:")).then(|| s.book.clone());
             out.records.push(crate::reading::Record {
                 title: title.clone(),
@@ -419,6 +423,19 @@ pub fn read(root: &Path) -> Read {
                 finished,
                 last_read: Some(crate::devices::iso(modified)),
                 rating: parsed.rating,
+                highlights: parsed
+                    .highlights
+                    .iter()
+                    .filter(|h| !h.text.trim().is_empty() || !h.note.trim().is_empty())
+                    .map(|h| crate::reading::Highlight {
+                        text: h.text.clone(),
+                        note: h.note.clone(),
+                        chapter: h.chapter.clone(),
+                        page: h.page.clone(),
+                        datetime: h.datetime.clone(),
+                        spine: h.pos.as_deref().and_then(crate::reading::spine_of),
+                    })
+                    .collect(),
                 from: "koreader".into(),
             });
         }
@@ -512,6 +529,10 @@ pub struct Highlight {
     pub page: Option<String>,
     /// `YYYY-MM-DD HH:MM:SS`.
     pub datetime: String,
+    /// The chapter, as KOReader titles it.
+    pub chapter: Option<String>,
+    /// Where it starts: `pos0` (an xpointer in an EPUB).
+    pub pos: Option<String>,
 }
 
 /// Reads a sidecar's text (spec §4).
@@ -558,6 +579,8 @@ pub fn parse(text: &str) -> Result<Parsed, String> {
                 note: s(a.get("note")).unwrap_or_default(),
                 page: page_of(a.get("pageno")).or_else(|| page_of(a.get("page"))),
                 datetime: s(a.get("datetime")).unwrap_or_default(),
+                chapter: s(a.get("chapter")).filter(|c| !c.trim().is_empty()),
+                pos: s(a.get("pos0")).or_else(|| s(a.get("page"))),
             });
         }
     } else if let Some(Value::Table(pages)) = root.get("highlight") {
@@ -575,6 +598,8 @@ pub fn parse(text: &str) -> Result<Parsed, String> {
                     note: String::new(),
                     page: page.clone(),
                     datetime: s(h.get("datetime")).unwrap_or_default(),
+                    chapter: s(h.get("chapter")).filter(|c| !c.trim().is_empty()),
+                    pos: s(h.get("pos0")),
                 });
             }
         }

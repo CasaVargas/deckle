@@ -20,6 +20,8 @@ test("values read as calibre shows them", () => {
   expect(shown("read", "false")).toBe("No");
   expect(shown("rating", "8")).toBe("★★★★");
   expect(shown("rating", null)).toBe("empty");
+  expect(shown("highlights", "### One\n\n> a\n> b\n\nnote\n\n> c")).toBe("2 highlights");
+  expect(shown("highlights", "just a note")).toBe("notes");
   expect(shown("last_read", "2026-10-30T09:15:00Z")).toMatch(/2026/);
 });
 
@@ -30,14 +32,15 @@ test("a change says the book, the field, and before and after", () => {
 });
 
 test("what stops a write", () => {
-  const cols = { progress: null, read: null, last_read: null, rating: null };
+  const cols = { progress: null, read: null, last_read: null, rating: null, highlights: null };
   const s = (over: Partial<WritebackStatus>): WritebackStatus => ({
     library: "/c",
     calibredb: "/bin/calibredb",
-    writeback: { enabled: false, calibredb: null, server: null, username: null, columns: cols, confirmed: {}, last_run: null, last_result: [] },
+    writeback: { enabled: false, calibredb: null, server: null, username: null, columns: cols, annotations: false, confirmed: {}, last_run: null, last_result: [] },
     choices: {},
     plan: null,
     error: null,
+    annotations_supported: false,
     ...over,
   });
   expect(noColumns(cols)).toBe(true);
