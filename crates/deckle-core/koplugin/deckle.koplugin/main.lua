@@ -10,6 +10,7 @@ sign-in to settings/deckle.lua. It talks to nothing else.
 ]]
 
 local DataStorage = require("datastorage")
+local ConfirmBox = require("ui/widget/confirmbox")
 local Device = require("device")
 local InfoMessage = require("ui/widget/infomessage")
 local LuaSettings = require("luasettings")
@@ -35,15 +36,70 @@ local Deckle = WidgetContainer:extend{
     is_doc_only = false,
 }
 
+-- Pending plugin changes are applied once per KOReader start, by whichever instance comes first.
+local pending_checked = false
+
 function Deckle:init()
     -- By path: every plugin's folder is on package.path, so require("logic") could find another's.
     self.Logic = dofile(self.path .. "/logic.lua")
     self.settings = LuaSettings:open(DataStorage:getSettingsDir() .. "/deckle.lua")
     self.ui.menu:registerToMainMenu(self)
+    if not pending_checked then
+        pending_checked = true
+        self:applyPending()
+    end
     -- The file browser opening is a chance to fetch (after a book was closed, say).
     if not self.ui.document then
         UIManager:nextTick(function() self:maybeFetch("browser") end)
     end
+end
+
+--- Plugin changes Deckle left in deckle-pending.lua (design §5.4): applied to plugins_disabled,
+--- which KOReader reads at start, so a restart finishes them. KOReader saves its settings on
+--- exit, so they stick.
+function Deckle:applyPending()
+    local path = DataStorage:getDataDir() .. "/deckle-pending.lua"
+    if lfs.attributes(path, "mode") ~= "file" then return end
+    local ok, pending = pcall(dofile, path)
+    os.remove(path)
+    if not ok or type(pending) ~= "table" then
+        logger.warn("Deckle: pending changes unreadable:", pending)
+        return
+    end
+    local disabled, changed = self.Logic.apply_pending(
+        G_reader_settings:readSetting("plugins_disabled"), pending.plugins)
+    if changed == 0 then return end
+    G_reader_settings:saveSetting("plugins_disabled", disabled)
+    G_reader_settings:flush()
+    UIManager:askForRestart(T(_("Deckle changed %1 plugin(s). Restart KOReader to finish."), changed))
+end
+
+--- Points KOReader's progress sync at Deckle, after asking (design §5.5). Auto-sync is left as
+--- the owner set it.
+function Deckle:useForSync()
+    local server = self.settings:readSetting("server")
+    local user = self.settings:readSetting("username")
+    UIManager:show(ConfirmBox:new{
+        text = T(_("Send progress sync to Deckle at %1, as %2?\n\nAutomatic sync stays as you set it in Progress sync."), server, user),
+        ok_text = _("Use Deckle"),
+        ok_callback = function()
+            local key = self.settings:readSetting("key")
+            local kosync = self.ui.kosync
+            if kosync and kosync.settings then
+                local new = self.Logic.sync_settings(kosync.settings, server, user, key)
+                for k, v in pairs(new) do kosync.settings[k] = v end
+                kosync.updated = true
+                if kosync.onFlushSettings then kosync:onFlushSettings() end
+            else
+                local s = LuaSettings:open(DataStorage:getSettingsDir() .. "/kosync.lua")
+                s:saveSetting("settings", self.Logic.sync_settings(s:readSetting("settings"), server, user, key))
+                s:flush()
+            end
+            UIManager:show(InfoMessage:new{
+                text = _("Progress sync now goes to Deckle. Turn on automatic sync in Tools → Progress sync if you want it."),
+            })
+        end,
+    })
 end
 
 function Deckle:configured()
@@ -192,6 +248,11 @@ function Deckle:addToMainMenu(menu_items)
                     self.settings:saveSetting("wifi_on_wake", not self.settings:isTrue("wifi_on_wake"))
                     self.settings:flush()
                 end,
+            },
+            {
+                text = _("Use Deckle for progress sync"),
+                enabled_func = function() return self:configured() end,
+                callback = function() self:useForSync() end,
             },
             {
                 text_func = function()

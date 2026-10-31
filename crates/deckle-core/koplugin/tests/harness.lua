@@ -31,9 +31,14 @@ package.preload["device"] = function() return { home_dir = folder } end
 package.preload["ui/widget/infomessage"] = function() return { new = function(_, o) return o end } end
 package.preload["ui/widget/notification"] = function() return { notify = function(_, text) say("notify:", text) end } end
 package.preload["ui/uimanager"] = function() return {
-    show = function(_, w) say("show:", w.text) end,
+    show = function(_, w)
+        say("show:", w.text)
+        if w.ok_callback then say("(answering " .. tostring(w.ok_text) .. ")"); w.ok_callback() end
+    end,
     nextTick = function(_, f) f() end,
+    askForRestart = function(_, text) say("restart asked:", text) end,
 } end
+package.preload["ui/widget/confirmbox"] = function() return { new = function(_, o) return o end } end
 package.preload["ui/network/manager"] = function() return {
     isConnected = function() return true end,
     runWhenConnected = function(_, f) f() end,
@@ -52,7 +57,8 @@ package.preload["util"] = function() return { makePath = function(p) os.execute(
 package.preload["libs/libkoreader-lfs"] = function() return {
     attributes = function(p, what)
         if what == "mode" then
-            return sh(("test -d %q && echo d"):format(p)):match("d") and "directory" or nil
+            local kind = sh(("test -d %q && echo d || (test -f %q && echo f)"):format(p, p))
+            return kind:match("d") and "directory" or kind:match("f") and "file" or nil
         end
         local f = io.open(p, "rb")
         if not f then return nil end
@@ -100,7 +106,16 @@ package.preload["socket.http"] = function() return {
         return 1, code, {}, "HTTP " .. tostring(code)
     end,
 } end
-G_reader_settings = { readSetting = function() return nil end }
+-- KOReader's own settings, with Zen switched off, and Deckle's pending change: Zen on, App Store off.
+local reader = { plugins_disabled = { zen = true } }
+G_reader_settings = {
+    readSetting = function(_, k) return reader[k] end,
+    saveSetting = function(_, k, v) reader[k] = v end,
+    flush = function() say("KOReader settings saved") end,
+}
+local pend = io.open(folder .. "/deckle-pending.lua", "w")
+pend:write('return { ["plugins"] = { ["zen"] = true, ["appstore"] = false } }\n')
+pend:close()
 
 -- Deckle's install writes these settings; here the harness does.
 local f = io.open(settings_dir .. "/deckle.lua", "w")
@@ -125,7 +140,10 @@ package.preload["luasettings"] = function()
 end
 
 local Plugin = dofile(here .. "../deckle.koplugin/main.lua")
-local p = setmetatable({ path = here .. "../deckle.koplugin", ui = { menu = { registerToMainMenu = function() end } } }, Plugin)
+local kosync = { settings = { auto_sync = false, custom_server = "https://sync.koreader.rocks" },
+    onFlushSettings = function() say("kosync settings saved") end }
+local p = setmetatable({ path = here .. "../deckle.koplugin",
+    ui = { menu = { registerToMainMenu = function() end }, kosync = kosync } }, Plugin)
 print("first fetch (as from the menu):")
 p:init()
 p:maybeFetch("menu")
@@ -134,3 +152,10 @@ p:maybeFetch("menu")
 print("an automatic fetch right after (waits ten minutes):")
 p:maybeFetch("network")
 print("fetched: " .. table.concat(p.settings:readSetting("fetched") or {}, ", "))
+print("plugins_disabled after the pending change: zen=" .. tostring(reader.plugins_disabled.zen)
+    .. " appstore=" .. tostring(reader.plugins_disabled.appstore)
+    .. "; pending file left: " .. tostring(io.open(folder .. "/deckle-pending.lua") ~= nil))
+print("use Deckle for progress sync:")
+p:useForSync()
+print(("kosync now: server=%s user=%s key=%s auto_sync=%s"):format(kosync.settings.custom_server,
+    kosync.settings.username, kosync.settings.userkey, tostring(kosync.settings.auto_sync)))
