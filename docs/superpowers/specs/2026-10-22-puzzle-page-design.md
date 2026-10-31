@@ -136,6 +136,11 @@ mini tries to place up to two of them, preferring longer words and different sec
 - The fill uses each word at most once per grid.
 - Theme words go into slots first, then the rest are filled by search, most-constrained slot
   first.
+- A grid never repeats one from the last 60 days. A 5×5 has few fills: one theme word can
+  allow only a handful, and a headline that runs two days running gives the same theme word
+  twice. When the fill matches a recent grid, the search runs again with the next seed for
+  the date (still deterministic). After a few tries it drops the theme words. Otherwise
+  "Yesterday's answers" would solve the puzzle printed above it (2026-10-26, No. 5 was No. 4).
 
 **The ladder.**
 
