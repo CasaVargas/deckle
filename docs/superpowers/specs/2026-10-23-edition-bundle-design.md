@@ -236,6 +236,7 @@ Each story:
 
 - **`grid`:** five rows, `#` for a black square, upper-case letters for the answers.
 - **`numbers`:** `[row, column, number]` for each numbered square.
+- **`ladder.steps`:** the blank rungs between `from` and `to`, the blanks the paper prints. `answer` is the whole path, so it holds `steps + 2` words: MOON, BOON, BOOT, BLOT, BLOW, GLOW has `steps` 4.
 - **Answers are in the bundle**, so a reader can check a solve on the device. A reader shouldn't show them before the owner asks.
 - **`ladder`** and **`yesterday`** are optional.
 

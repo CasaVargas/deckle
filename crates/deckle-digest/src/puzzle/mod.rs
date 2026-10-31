@@ -9,6 +9,7 @@ pub mod store;
 pub mod theme;
 pub mod words;
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 use chrono::{Datelike, Days, NaiveDate};
@@ -27,18 +28,43 @@ pub const FILL_CAP: Duration = Duration::from_millis(500);
 /// Theme answers placed in a mini.
 const THEME_WORDS: usize = 2;
 
+/// Fills tried with the theme words, then as many without, while the fill matches a grid of the
+/// last [`store::KEEP_DAYS`] days.
+const FRESH_TRIES: u64 = 4;
+
 /// The puzzle for `date`, seeded by the date: the same inputs make the same puzzle.
 ///
 /// - The theme words are yesterday's headlines (`store.days[date - 1]`), when there are any.
+/// - The grid is none of the last 60 days' (puzzle design §4): a 5×5 has few fills, and a
+///   headline that runs two days gives the same theme word twice. A repeat is filled again with
+///   the date's next seed, then without the theme words.
 /// - The ladder avoids the pairs of the last 60 days.
 pub fn make(date: NaiveDate, cfg: &PuzzleConfig, words: &Words, store: &Store) -> Puzzle {
-    let mut rng = StdRng::seed_from_u64(date.num_days_from_ce() as u64);
-    let themes = match (cfg.theme, store.days.get(&(date - Days::new(1)))) {
+    let seed = date.num_days_from_ce() as u64;
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut themes = match (cfg.theme, store.days.get(&(date - Days::new(1)))) {
         (true, Some(y)) => theme::pick(&y.headlines, THEME_WORDS),
         _ => Vec::new(),
     };
     let seeds: Vec<String> = themes.iter().map(|t| t.word.clone()).collect();
-    let fill = grid::fill(words, &seeds, &mut rng, FILL_CAP);
+    let since = date - Days::new(store::KEEP_DAYS);
+    let recent: HashSet<&[String; 5]> = store
+        .days
+        .range(since..date)
+        .filter_map(|(_, d)| d.puzzle.rows.as_ref())
+        .collect();
+    let mut fill = grid::fill(words, &seeds, &mut rng, FILL_CAP);
+    for attempt in 1..=2 * FRESH_TRIES {
+        if fill.as_ref().is_none_or(|f| !recent.contains(&f.rows)) {
+            break;
+        }
+        if attempt > FRESH_TRIES {
+            themes.clear();
+        }
+        let seeds: Vec<String> = themes.iter().map(|t| t.word.clone()).collect();
+        let mut again = StdRng::seed_from_u64(seed ^ (attempt << 32));
+        fill = grid::fill(words, &seeds, &mut again, FILL_CAP);
+    }
     let clues = fill
         .as_ref()
         .map(|f| {

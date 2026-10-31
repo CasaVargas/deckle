@@ -672,3 +672,56 @@ fn a_config_without_sections_gets_no_puzzle() {
             .contains(&SectionKind::Puzzle)
     );
 }
+
+/// A headline that runs two days gives the same theme word twice, and a 5×5 has few fills:
+/// on 2026-10-26 No. 5 printed No. 4's grid, so "Yesterday's answers" solved it.
+#[test]
+fn a_grid_is_never_yesterdays_again() {
+    let cfg = PuzzleConfig::default();
+    let theme = |word: &str, headline: &str, section: &str| ThemeWord {
+        word: word.into(),
+        headline: headline.into(),
+        section: section.into(),
+    };
+    let headlines = vec![
+        theme(
+            "court",
+            "Greensboro man charged for inflicting burn injuries to infant, court papers say",
+            "Local",
+        ),
+        theme(
+            "state",
+            "State Elections Board issues letters to potential noncitizens on voter rolls",
+            "Carthage, NC",
+        ),
+    ];
+    let (oct25, oct26) = (
+        NaiveDate::from_ymd_opt(2026, 10, 25).unwrap(),
+        NaiveDate::from_ymd_opt(2026, 10, 26).unwrap(),
+    );
+    let mut store = Store::default();
+    store.days.insert(
+        oct25 - Days::new(1),
+        Day {
+            puzzle: make(oct25 - Days::new(1), &cfg, Words::embedded(), &store),
+            headlines: headlines.clone(),
+            solve: None,
+        },
+    );
+    let yesterday = make(oct25, &cfg, Words::embedded(), &store);
+    store.days.insert(
+        oct25,
+        Day {
+            puzzle: yesterday.clone(),
+            headlines,
+            solve: None,
+        },
+    );
+    let today = make(oct26, &cfg, Words::embedded(), &store);
+    assert!(today.rows.is_some());
+    assert_ne!(
+        today.rows, yesterday.rows,
+        "No. {} reprinted No. {}",
+        today.number, yesterday.number
+    );
+}
