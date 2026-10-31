@@ -258,7 +258,7 @@ impl<S: Read + Write> Session<S> {
     /// The bytes free on the reader.
     pub fn free_space(&mut self) -> Result<u64, Error> {
         let r = self.call(Op::FreeSpace, json!({}))?;
-        Ok(r["free_space_on_device"].as_u64().unwrap_or(0))
+        Ok(bytes(&r["free_space_on_device"]).unwrap_or(0))
     }
 
     /// Every book the reader has. Titles and authors are asked for only for books `known`
@@ -410,8 +410,18 @@ fn on_reader(v: &Value) -> OnReader {
             })
             .unwrap_or_default(),
         last_modified: s("last_modified"),
-        size: v["size"].as_u64(),
+        size: bytes(&v["size"]),
     }
+}
+
+/// A count of bytes, whole or as a float: KOReader's numbers are Lua numbers, and a large one
+/// (its free space) can arrive as `2.55717e10`.
+fn bytes(v: &Value) -> Option<u64> {
+    v.as_u64().or_else(|| {
+        v.as_f64()
+            .filter(|f| f.is_finite() && *f >= 0.0)
+            .map(|f| f.round() as u64)
+    })
 }
 
 /// Tells a reader that connected while another is: calibre's `CALIBRE_BUSY`.
@@ -421,6 +431,19 @@ pub fn busy(w: &mut impl Write, other: &str) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn byte_counts_read_whole_or_as_luas_floats() {
+        use serde_json::json;
+        // KOReader's free space is a Lua number, which can reach us as a float.
+        assert_eq!(
+            super::bytes(&json!(25_571_700_000u64)),
+            Some(25_571_700_000)
+        );
+        assert_eq!(super::bytes(&json!(2.55717e10)), Some(25_571_700_000));
+        assert_eq!(super::bytes(&json!(-1.0)), None);
+        assert_eq!(super::bytes(&json!("12")), None);
+    }
+
     #[test]
     fn the_password_hash_is_sha1_of_password_then_challenge() {
         // `printf 'secret2026-10-31T12:00:00+00:00' | shasum`
