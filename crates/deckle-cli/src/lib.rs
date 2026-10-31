@@ -5417,6 +5417,28 @@ fn puzzle_text(out: &PuzzleOut) -> String {
             l.path.len() - 1
         ));
     }
+    if let Some(s) = &p.search {
+        lines.push(format!("Word search · No. {}", p.number));
+        lines.extend(s.rows.iter().map(|r| {
+            let letters: Vec<String> = r.chars().map(String::from).collect();
+            format!("  {}", letters.join(" "))
+        }));
+        let words: Vec<String> = s
+            .words
+            .iter()
+            .map(|h| {
+                format!(
+                    "{}{}",
+                    h.word.to_uppercase(),
+                    if h.theme { "*" } else { "" }
+                )
+            })
+            .collect();
+        lines.push(format!("  Find: {}", words.join(", ")));
+        if s.words.iter().any(|h| h.theme) {
+            lines.push("  * from yesterday's paper".to_owned());
+        }
+    }
     if let Some(y) = &out.yesterday {
         lines.push(String::new());
         lines.push("Yesterday:".to_owned());
