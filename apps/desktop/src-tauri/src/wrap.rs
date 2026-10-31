@@ -684,3 +684,69 @@ pub async fn cookbook_illustrate(
 pub fn cookbook_illustrate_stop() {
     deckle_app::cookbook::cookbook_illustrate_stop()
 }
+
+use deckle_app::koreader::{KoreaderPreview, KoreaderView};
+
+#[tauri::command]
+pub async fn koreader_status(folder: Option<String>) -> KoreaderView {
+    tauri::async_runtime::spawn_blocking(move || deckle_app::koreader::koreader_status(folder))
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn koreader_preview(
+    folder: Option<String>,
+    source: String,
+) -> Result<KoreaderPreview, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        deckle_app::koreader::koreader_preview(folder, source)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn koreader_install(
+    folder: Option<String>,
+    source: String,
+) -> Result<KoreaderView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        deckle_app::koreader::koreader_install(folder, source)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn koreader_update(folder: Option<String>, name: String) -> Result<KoreaderView, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        deckle_app::koreader::koreader_update(folder, name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub fn koreader_remove(folder: Option<String>, name: String) -> Result<KoreaderView, String> {
+    deckle_app::koreader::koreader_remove(folder, name)
+}
+
+#[tauri::command]
+pub fn koreader_rollback(folder: Option<String>, name: String) -> Result<KoreaderView, String> {
+    deckle_app::koreader::koreader_rollback(folder, name)
+}
+
+#[tauri::command]
+pub fn koreader_set_enabled(
+    folder: Option<String>,
+    name: String,
+    on: bool,
+) -> Result<KoreaderView, String> {
+    deckle_app::koreader::koreader_set_enabled(folder, name, on)
+}
+
+#[tauri::command]
+pub fn koreader_set_patches(folder: Option<String>, on: bool) -> Result<KoreaderView, String> {
+    deckle_app::koreader::koreader_set_patches(folder, on)
+}
