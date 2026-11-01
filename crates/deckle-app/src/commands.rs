@@ -363,10 +363,11 @@ pub fn is_kfx(p: &Path) -> bool {
     has_extension(p, "kfx")
 }
 
-/// A Word, OpenDocument or RTF file, a DRM-free Kindle book, text, FB2, PDF or Markdown file: imported to an EPUB first, as
-/// `deckle run` does.
+/// A Word, OpenDocument or RTF file, a DRM-free Kindle book, text, FB2, PDF, Markdown file or
+/// comic: imported to an EPUB first, as `deckle run` does.
 fn is_imported(p: &Path) -> bool {
-    deckle_docx::is_word(p)
+    deckle_comic::is_comic(p)
+        || deckle_docx::is_word(p)
         || deckle_txt::is_text(p)
         || deckle_fb2::is_fb2(p)
         || deckle_odt::is_odt(p)
@@ -376,8 +377,8 @@ fn is_imported(p: &Path) -> bool {
         || deckle_markdown::is_markdown(p)
 }
 
-/// What a folder walk takes: EPUB, KFX, Word, OpenDocument and RTF files, Kindle books, FB2 and
-/// PDFs. A `.txt` in a folder is far
+/// What a folder walk takes: EPUB, KFX, Word, OpenDocument and RTF files, Kindle books, FB2,
+/// PDFs and comics (CBZ). A `.txt` in a folder is far
 /// more often a note or a README than a book, so text files are taken only when named directly.
 fn is_book(p: &Path) -> bool {
     has_extension(p, "epub")
@@ -388,10 +389,12 @@ fn is_book(p: &Path) -> bool {
         || deckle_rtf::is_rtf(p)
         || deckle_mobi::is_mobi_file(p)
         || deckle_pdf::is_pdf(p)
+        || deckle_comic::is_cbz(p)
 }
 
-/// Files and folders for the send queue. A folder with top-level Markdown is one notes book;
-/// other folders are walked for books. Text and Markdown files are also accepted directly.
+/// Files and folders for the send queue. A folder with top-level Markdown is one notes book, and
+/// a folder of page images one comic (fixed-layout spec §3); other folders are walked for books.
+/// Text and Markdown files are also accepted directly.
 pub fn expand_book_paths(paths: &[String]) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {
@@ -410,7 +413,7 @@ pub fn expand_book_paths(paths: &[String]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for p in paths {
         let p = PathBuf::from(p);
-        if deckle_markdown::is_markdown(&p) {
+        if deckle_markdown::is_markdown(&p) || deckle_comic::is_image_folder(&p) {
             out.push(p);
         } else if p.is_dir() {
             walk(&p, &mut out);
@@ -445,6 +448,8 @@ fn cover_data_url(epub: &Path, href: &str) -> Option<String> {
 
 /// The mode badge for a book today: everything ships as a cover-first PDOC until the M3 features
 /// exist (design §5 keeps covers non-negotiable).
+/// A comic or picture book keeps its pages as they are (fixed-layout spec §5).
+const FIXED_LAYOUT_REASON: &str = "Fixed layout: the pages go as they are, as an AZW3 on a Kindle. No X-Ray, Word Wise or page numbers.";
 const COVER_MODE_REASON: &str = "Enhanced Typesetting, cover and page numbers. X-Ray and Word Wise need the book to ship as EBOK.";
 
 pub fn book_row(path: &Path) -> BookRow {
@@ -489,7 +494,11 @@ pub fn book_row(path: &Path) -> BookRow {
                 series,
                 cover,
                 mode: "cover".into(),
-                reason: COVER_MODE_REASON.into(),
+                reason: if info.fixed_layout {
+                    FIXED_LAYOUT_REASON.into()
+                } else {
+                    COVER_MODE_REASON.into()
+                },
                 warnings: info.warnings,
                 error: None,
             }
@@ -1320,6 +1329,33 @@ mod tests {
         let row = book_row(&root.join("mini6.mobi"));
         assert_eq!(row.error, None, "{}", row.reason);
         assert_eq!(row.title, "The Deckle MOBI Mini");
+    }
+
+    #[test]
+    fn a_page_folder_is_one_comic_and_a_cbz_is_a_book_in_a_folder_walk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let png = std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/markdown/images/square.png"),
+        )
+        .unwrap();
+        let pages = tmp.path().join("Picture Book");
+        std::fs::create_dir(&pages).unwrap();
+        std::fs::write(pages.join("01.png"), &png).unwrap();
+        let shelf = tmp.path().join("shelf");
+        std::fs::create_dir(&shelf).unwrap();
+        std::fs::write(shelf.join("Night Train.cbz"), b"zip").unwrap();
+        std::fs::write(shelf.join("cover.png"), &png).unwrap();
+        // The page folder is one book; the shelf folder is walked, and its stray image isn't one.
+        let expanded = expand_book_paths(&[
+            pages.to_string_lossy().into_owned(),
+            shelf.to_string_lossy().into_owned(),
+        ]);
+        assert_eq!(expanded, [pages.clone(), shelf.join("Night Train.cbz")]);
+        let row = book_row(&pages);
+        assert_eq!(row.error, None, "{}", row.reason);
+        assert_eq!(row.title, "Picture Book");
+        assert!(row.reason.starts_with("Fixed layout"), "{}", row.reason);
     }
 
     #[test]

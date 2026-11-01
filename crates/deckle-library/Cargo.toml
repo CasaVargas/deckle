@@ -16,6 +16,7 @@ deckle-odt.workspace = true
 deckle-rtf.workspace = true
 deckle-markdown.workspace = true
 deckle-pdf.workspace = true
+deckle-comic.workspace = true
 deckle-kfx.workspace = true
 deckle-mobi.workspace = true
 serde.workspace = true

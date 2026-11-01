@@ -49,8 +49,8 @@ pub fn is_cbz(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("cbz"))
 }
 
-/// A folder of page images: no Markdown at its top level (that's a notes book), and images at
-/// its top level or one folder down (chapter folders).
+/// A folder of page images: images at its top level or one folder down (chapter folders), and
+/// no Markdown (that's a notes book) or other books (that's a shelf to walk) at its top level.
 pub fn is_image_folder(path: &Path) -> bool {
     if !path.is_dir() {
         return false;
@@ -69,8 +69,7 @@ pub fn is_image_folder(path: &Path) -> bool {
         if t.is_dir() {
             subdirs.push(e.path());
         } else if t.is_file() {
-            let ext = extension(&name);
-            if ext == "md" || ext == "markdown" {
+            if NOT_A_PAGE_FOLDER.contains(&extension(&name).as_str()) {
                 return false;
             }
             images |= is_image_name(&name);
@@ -209,6 +208,12 @@ fn walk(dir: &Path, prefix: &str, depth: u8, out: &mut Vec<String>) {
         }
     }
 }
+
+/// Files that make a folder something other than a comic: Markdown notes, or books of their own.
+const NOT_A_PAGE_FOLDER: [&str; 17] = [
+    "md", "markdown", "epub", "kfx", "cbz", "cbr", "pdf", "docx", "doc", "odt", "rtf", "mobi",
+    "azw", "azw3", "prc", "fb2", "djvu",
+];
 
 fn extension(name: &str) -> String {
     Path::new(name)

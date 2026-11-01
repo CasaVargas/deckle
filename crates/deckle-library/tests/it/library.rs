@@ -644,3 +644,41 @@ fn kindle_books_are_sources_and_read_their_metadata() {
         assert_eq!(info.title, title);
     }
 }
+
+/// A page image the library tests can use for comics.
+fn page_png() -> Vec<u8> {
+    std::fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/markdown/images/square.png"),
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_cbz_is_kept_as_it_is_and_a_page_folder_as_an_epub_snapshot() {
+    let temp = tempfile::tempdir().unwrap();
+    let cbz = temp.path().join("Night Train.cbz");
+    let mut zw = zip::ZipWriter::new(std::fs::File::create(&cbz).unwrap());
+    for name in ["1.png", "2.png"] {
+        zw.start_file(name, zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(&page_png()).unwrap();
+    }
+    zw.finish().unwrap();
+    assert!(deckle_library::is_source(&cbz));
+    let library = Library::new(temp.path().join("library"));
+    let added = library.add(&cbz).unwrap();
+    assert_eq!(added.book.source_path().extension().unwrap(), "cbz");
+    let info = deckle_library::book_info(&added.book.source_path()).unwrap();
+    assert_eq!(info.title, "Night Train");
+    assert!(info.fixed_layout);
+
+    let pages = temp.path().join("Picture Book");
+    std::fs::create_dir(&pages).unwrap();
+    std::fs::write(pages.join("01.png"), page_png()).unwrap();
+    assert!(deckle_library::is_source(&pages));
+    let added = library.add(&pages).unwrap();
+    assert_eq!(added.book.source_path().extension().unwrap(), "epub");
+    let info = deckle_library::book_info(&added.book.source_path()).unwrap();
+    assert_eq!(info.title, "Picture Book");
+    assert!(info.fixed_layout);
+}

@@ -22,6 +22,7 @@ deckle-mobi.workspace = true
 deckle-morgue.workspace = true
 deckle-odt.workspace = true
 deckle-pdf.workspace = true
+deckle-comic.workspace = true
 deckle-readership.workspace = true
 deckle-rtf.workspace = true
 deckle-shelf.workspace = true
