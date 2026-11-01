@@ -163,7 +163,7 @@ in, press **Send**.
   EPUB or a fixed-layout AZW3) keep their pages as they are: on a Kindle as an AZW3, since Kindle
   Previewer makes no KFX for fixed layout. A CBR needs the system's `bsdtar` (built into macOS
   and Windows as `tar`; `libarchive-tools` on Linux). `ComicInfo.xml` gives the title and series, and manga marked right to left reads
-  right to left. No X-Ray, Word Wise or page numbers. Fitting pages to each screen comes later
+  right to left (`deckle run --direction rtl` sets it for a comic that doesn't say). No X-Ray, Word Wise or page numbers. Fitting pages to each screen comes later
   (#20).
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
 - **Several files, one book.** Bind any of the above in your order, each with its own entry in the

@@ -16,6 +16,24 @@ pub struct Cli {
     pub command: Command,
 }
 
+/// `--direction`: a comic's reading order (fixed-layout spec §3).
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DirectionArg {
+    /// Left to right.
+    Ltr,
+    /// Right to left: manga.
+    Rtl,
+}
+
+impl From<DirectionArg> for deckle_comic::Direction {
+    fn from(d: DirectionArg) -> Self {
+        match d {
+            DirectionArg::Ltr => deckle_comic::Direction::LeftToRight,
+            DirectionArg::Rtl => deckle_comic::Direction::RightToLeft,
+        }
+    }
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CdeArg {
     /// Let the cover rule decide (design §5).
@@ -217,6 +235,10 @@ pub enum Command {
         wordwise_db: Option<PathBuf>,
         #[arg(long)]
         keep_work_dir: bool,
+        /// Reading order for comics (.cbz, .cbr, page folders): `rtl` for manga, `ltr`
+        /// otherwise. Without it, `ComicInfo.xml` decides, else left to right.
+        #[arg(long, value_enum)]
+        direction: Option<DirectionArg>,
     },
     /// Save articles for tomorrow's paper (Your Reading): URLs or saved .html pages.
     Save {
