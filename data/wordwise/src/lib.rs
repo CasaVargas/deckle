@@ -95,6 +95,12 @@ const PUZZLE_MARKED: &[&str] = &[
 /// Longer definitions don't fit beside a 5×5 grid.
 const MAX_CLUE: usize = 90;
 
+/// Which words a puzzle list keeps: their lengths, and the least zipf for each length.
+pub struct ListRules {
+    pub lens: std::ops::RangeInclusive<usize>,
+    pub min_zipf: fn(usize) -> f64,
+}
+
 /// The word list for the puzzle page (puzzle design §4): lowercase a–z words of 3 to 5 letters
 /// at zipf 3.0 or more, each with the short definition of its first everyday sense as the clue,
 /// sorted by word. Proper nouns, abbreviations, marked senses, plain inflections of a kept
@@ -103,6 +109,49 @@ pub fn puzzle_words(
     jsonl: impl BufRead,
     freq: &HashMap<String, f64>,
     blocklist: &HashSet<String>,
+) -> Vec<(String, String)> {
+    let rules = ListRules {
+        lens: 3..=5,
+        min_zipf: |_| 3.0,
+    };
+    word_list(jsonl, freq, blocklist, &rules)
+}
+
+/// The least zipf a crossword entry needs: longer words are rarer, and a big grid needs them.
+fn crossword_zipf(len: usize) -> f64 {
+    match len {
+        ..=5 => 3.0,
+        6..=8 => 2.5,
+        _ => 2.0,
+    }
+}
+
+/// The crossword list (puzzle books §3.3): [`puzzle_words`]' rules for 3 to 15 letters, the
+/// least zipf falling with length, each word with its zipf.
+pub fn crossword_words(
+    jsonl: impl BufRead,
+    freq: &HashMap<String, f64>,
+    blocklist: &HashSet<String>,
+) -> Vec<(String, f64, String)> {
+    let rules = ListRules {
+        lens: 3..=15,
+        min_zipf: crossword_zipf,
+    };
+    word_list(jsonl, freq, blocklist, &rules)
+        .into_iter()
+        .map(|(w, c)| {
+            let z = zipf(freq, &w).unwrap_or(0.0);
+            (w, z, c)
+        })
+        .collect()
+}
+
+/// A puzzle word list by `rules`, as [`puzzle_words`] describes.
+pub fn word_list(
+    jsonl: impl BufRead,
+    freq: &HashMap<String, f64>,
+    blocklist: &HashSet<String>,
+    rules: &ListRules,
 ) -> Vec<(String, String)> {
     // word → its clue, from the first entry and sense that give one; word → the lemmas it
     // inflects; word → whether its lowercase entries are all nouns; names ("Goa", "Beth")
@@ -127,7 +176,7 @@ pub fn puzzle_words(
             continue;
         };
         if entry.get("lang_code").and_then(Value::as_str) != Some("en")
-            || !(3..=5).contains(&word.len())
+            || !rules.lens.contains(&word.len())
             || !word.bytes().all(|b| b.is_ascii_alphabetic())
         {
             continue;
@@ -165,7 +214,7 @@ pub fn puzzle_words(
         if kindle_pos(pos).is_none_or(|p| p == "other")
             || tags(&entry).iter().any(|t| SKIP_SENSE_TAGS.contains(t))
             || blocklist.contains(word)
-            || zipf(freq, word).is_none_or(|z| z < 3.0)
+            || zipf(freq, word).is_none_or(|z| z < (rules.min_zipf)(word.len()))
         {
             continue;
         }

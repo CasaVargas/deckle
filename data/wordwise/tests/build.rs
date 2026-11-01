@@ -6,7 +6,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use deckle_wordwise::lexicon::Lexicon;
-use deckle_wordwise_build::{build, difficulty, load_wordfreq, puzzle_words, short_def, zipf};
+use deckle_wordwise_build::{
+    build, crossword_words, difficulty, load_wordfreq, puzzle_words, short_def, zipf,
+};
 
 fn freq() -> HashMap<String, f64> {
     [
@@ -283,6 +285,24 @@ fn puzzle_clue_never_contains_answer() {
         "The substance making up the trunk of a tree".into()
     )));
     for (w, c) in &list {
+        assert!(!c.to_lowercase().contains(w.as_str()), "{w}: {c}");
+    }
+}
+
+/// Crosswords take longer words than the 5×5 mini, each with its frequency.
+#[test]
+fn crossword_words_keeps_longer_words() {
+    let blocklist = HashSet::new();
+    let list = crossword_words(PUZZLE_SAMPLE.as_bytes(), &puzzle_freq(), &blocklist);
+    let bucket = list.iter().find(|(w, _, _)| w == "bucket").expect("bucket");
+    assert!((bucket.1 - 3.9).abs() < 1e-9);
+    assert_eq!(
+        bucket.2,
+        "A container made of rigid material, often with a handle"
+    );
+    assert!(list.iter().any(|(w, _, _)| w == "card"));
+    assert!(puzzle_list(&[]).iter().all(|(w, _)| w != "bucket"));
+    for (w, _, c) in &list {
         assert!(!c.to_lowercase().contains(w.as_str()), "{w}: {c}");
     }
 }
