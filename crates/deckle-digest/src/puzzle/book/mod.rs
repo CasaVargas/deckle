@@ -328,8 +328,21 @@ fn finish(o: &BookOptions, seed: u64, puzzles: Puzzles, warnings: Vec<String>) -
     }
 }
 
+/// The first fill `fill` makes at `d`'s spread, then at each wider one, with the spread that
+/// made it (puzzle books §3.3).
+fn first_fill(
+    d: Difficulty,
+    mut fill: impl FnMut(f32) -> Option<Crossword>,
+) -> Option<(f32, Crossword)> {
+    [Difficulty::Easy, Difficulty::Medium, Difficulty::Hard]
+        .into_iter()
+        .map(Difficulty::spread)
+        .filter(|s| *s >= d.spread())
+        .find_map(|s| fill(s).map(|x| (s, x)))
+}
+
 /// A crossword book: each puzzle filled from the whole list, preferring common words as the
-/// difficulty asks.
+/// difficulty asks; one that won't fill so takes rarer words, with a warning.
 fn make_crossword(o: &BookOptions, lex: &Lexicon) -> Result<Book, BookError> {
     check(o)?;
     if o.words.is_some() {
@@ -337,13 +350,25 @@ fn make_crossword(o: &BookOptions, lex: &Lexicon) -> Result<Book, BookError> {
     }
     let seed = o.seed.unwrap_or_else(|| default_seed(o));
     let mut puzzles = Vec::with_capacity(o.count);
+    let mut warnings = Vec::new();
     for i in 0..o.count {
-        let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20));
-        let x = cross::fill(lex, o.size, o.difficulty.spread(), &mut rng)
-            .ok_or(BookError::Unfilled(i + 1))?;
+        let mut again = 0u64;
+        let (spread, x) = first_fill(o.difficulty, |spread| {
+            let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20) ^ (again << 40));
+            again += 1;
+            cross::fill(lex, o.size, spread, &mut rng)
+        })
+        .ok_or(BookError::Unfilled(i + 1))?;
+        if spread != o.difficulty.spread() {
+            warnings.push(format!(
+                "puzzle {} has rarer words than {} asks: it wouldn't fill otherwise",
+                i + 1,
+                o.difficulty.name()
+            ));
+        }
         puzzles.push(x);
     }
-    Ok(finish(o, seed, Puzzles::Crossword(puzzles), Vec::new()))
+    Ok(finish(o, seed, Puzzles::Crossword(puzzles), warnings))
 }
 
 fn make_search(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
@@ -659,6 +684,24 @@ mod tests {
         let mut o = crossword(1, 9, Difficulty::Medium);
         o.words = Some(vec!["router".into()]);
         assert_eq!(make(&o, Words::embedded()), Err(BookError::WordsNeedClues));
+    }
+
+    /// A puzzle that won't fill with everyday words tries a wider spread before the book gives
+    /// up.
+    #[test]
+    fn a_crossword_that_wont_fill_tries_a_wider_spread() {
+        let x = Crossword {
+            rows: Vec::new(),
+            clues: Vec::new(),
+        };
+        let mut tried = Vec::new();
+        let got = first_fill(Difficulty::Easy, |s| {
+            tried.push(s);
+            (s > 1.0).then(|| x.clone())
+        });
+        assert_eq!(got, Some((Difficulty::Medium.spread(), x)));
+        assert_eq!(tried, [0.5, 1.5]);
+        assert_eq!(first_fill(Difficulty::Hard, |_| None), None);
     }
 
     #[test]
