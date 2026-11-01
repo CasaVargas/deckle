@@ -238,3 +238,18 @@ fn a_scan_renders_as_page_images_for_a_comic() {
     assert_eq!(page.height(), 2480);
     assert!(page.width() > 1000 && page.width() < page.height());
 }
+
+#[test]
+fn a_scan_with_an_invisible_ocr_layer_is_still_a_scan() {
+    // Internet Archive and most scanners lay the recognised words invisibly over each page
+    // picture; nobody sees that text, so it's no reason to reflow the book.
+    let dir = tempfile::tempdir().unwrap();
+    match convert(&fixture("ocr-scan.pdf"), &dir.path().join("out.epub")) {
+        Err(PdfError::Scanned) => {}
+        Err(e @ PdfError::NoEngine(_)) => panic!("{e}\nrun tools/fetch-pdfium.sh first"),
+        other => panic!("expected Scanned, got {other:?}"),
+    }
+    let scan = deckle_pdf::render_scan(&fixture("ocr-scan.pdf"), dir.path()).unwrap();
+    assert_eq!(scan.pages, 2);
+    assert_eq!(scan.title.as_deref(), Some("A Scanned Picture Book"));
+}
