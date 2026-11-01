@@ -72,6 +72,11 @@ pub struct BookInfo {
     pub spine: Vec<String>,
     pub toc: Vec<TocEntry>,
     pub epub_version: String,
+    /// A fixed-layout book: `rendition:layout` is `pre-paginated` for the whole book or for
+    /// every spine item (fixed-layout spec §3). Comics, manga and picture books.
+    pub fixed_layout: bool,
+    /// The spine reads right to left (`page-progression-direction="rtl"`): manga, mostly.
+    pub right_to_left: bool,
     pub warnings: Vec<String>,
 }
 
@@ -203,6 +208,10 @@ pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
                     }
                     _ => {}
                 }
+                if attr(n, "property") == Some("rendition:layout") && text_of(n) == "pre-paginated"
+                {
+                    info.fixed_layout = true;
+                }
                 if attr(n, "property") == Some("belongs-to-collection")
                     && let Some(id) = attr(n, "id")
                 {
@@ -257,6 +266,18 @@ pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
         .map(|(_, href, _, _)| href.clone());
 
     if let Some(spine_el) = spine_el {
+        info.right_to_left = attr(spine_el, "page-progression-direction") == Some("rtl");
+        let itemrefs: Vec<_> = spine_el
+            .children()
+            .filter(|n| n.has_tag_name("itemref"))
+            .collect();
+        info.fixed_layout |= !itemrefs.is_empty()
+            && itemrefs.iter().all(|r| {
+                attr(*r, "properties").is_some_and(|p| {
+                    p.split_whitespace()
+                        .any(|p| p == "rendition:layout-pre-paginated")
+                })
+            });
         for itemref in spine_el.children().filter(|n| n.has_tag_name("itemref")) {
             let Some(idref) = attr(itemref, "idref") else {
                 continue;
