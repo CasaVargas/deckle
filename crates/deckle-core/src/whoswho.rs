@@ -154,7 +154,7 @@ pub fn add_with(
     ))
 }
 
-fn unzip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+pub(crate) fn unzip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
     use std::io::Read;
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let mut files = Vec::with_capacity(zip.len());
@@ -174,21 +174,25 @@ fn unzip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
 // ---------------------------------------------------------------------------------------------
 // The package
 
-struct Book {
-    opf_path: String,
-    title: String,
-    author: String,
-    lang: String,
+pub(crate) struct Book {
+    pub(crate) opf_path: String,
+    pub(crate) title: String,
+    pub(crate) author: String,
+    pub(crate) lang: String,
     /// Spine XHTML documents, as paths in the zip, in reading order.
-    spine: Vec<String>,
+    pub(crate) spine: Vec<String>,
     /// The nav document's path, when there is one.
-    nav: Option<String>,
+    pub(crate) nav: Option<String>,
     /// The NCX's path, when there is one.
-    ncx: Option<String>,
+    pub(crate) ncx: Option<String>,
+    /// Spine documents marked `linear="no"`.
+    pub(crate) nonlinear: HashSet<String>,
+    /// `rendition:layout` is `pre-paginated`.
+    pub(crate) fixed_layout: bool,
 }
 
 impl Book {
-    fn read(files: &[(String, Vec<u8>)]) -> Result<Book, String> {
+    pub(crate) fn read(files: &[(String, Vec<u8>)]) -> Result<Book, String> {
         let find = |n: &str| files.iter().find(|(f, _)| f == n).map(|(_, d)| d);
         let container = find("META-INF/container.xml").ok_or("no META-INF/container.xml")?;
         let container = String::from_utf8_lossy(container);
@@ -239,6 +243,17 @@ impl Book {
             .values()
             .find(|(_, mt, _)| *mt == "application/x-dtbncx+xml")
             .map(|(p, _, _)| p.clone());
+        let nonlinear = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("itemref") && n.attribute("linear") == Some("no"))
+            .filter_map(|n| items.get(n.attribute("idref")?))
+            .map(|(p, _, _)| p.clone())
+            .collect();
+        let fixed_layout = doc.descendants().any(|n| {
+            n.tag_name().name() == "meta"
+                && n.attribute("property") == Some("rendition:layout")
+                && n.text().map(str::trim) == Some("pre-paginated")
+        });
         Ok(Book {
             title: text("title"),
             author: text("creator"),
@@ -247,6 +262,8 @@ impl Book {
             spine,
             nav,
             ncx,
+            nonlinear,
+            fixed_layout,
         })
     }
 
@@ -255,7 +272,7 @@ impl Book {
     }
 
     /// Spine document path → its label in the nav (else the NCX), for "First mentioned in …".
-    fn nav_labels(&self, files: &[(String, Vec<u8>)]) -> HashMap<String, String> {
+    pub(crate) fn nav_labels(&self, files: &[(String, Vec<u8>)]) -> HashMap<String, String> {
         let mut out = HashMap::new();
         let read = |p: &str| {
             files
@@ -428,21 +445,21 @@ fn relative(from_dir: &str, to: &str) -> String {
 /// One text node: its decoded text, and where each decoded character starts in the document's
 /// raw XHTML.
 #[derive(Clone, Debug)]
-struct Seg {
-    text: String,
+pub(crate) struct Seg {
+    pub(crate) text: String,
     /// Raw byte offset of each decoded char, plus the end.
-    map: Vec<usize>,
-    linkable: bool,
+    pub(crate) map: Vec<usize>,
+    pub(crate) linkable: bool,
     /// Index of the run (block) it belongs to, within its document.
-    block: usize,
+    pub(crate) block: usize,
     /// Chapter within its document: one more at each `h1` or `h2`.
-    section: usize,
+    pub(crate) section: usize,
 }
 
 #[derive(Clone, Debug, Default)]
-struct Doc {
-    segs: Vec<Seg>,
-    blocks: usize,
+pub(crate) struct Doc {
+    pub(crate) segs: Vec<Seg>,
+    pub(crate) blocks: usize,
 }
 
 /// Elements whose text isn't read.
@@ -476,7 +493,7 @@ const BLOCKS: &[&str] = &[
 ];
 
 /// The text nodes of a document's body, in order.
-fn scan(xhtml: &str) -> Doc {
+pub(crate) fn scan(xhtml: &str) -> Doc {
     let mut doc = Doc::default();
     let mut hidden = 0usize;
     let mut no_link = 0usize;
@@ -536,7 +553,7 @@ fn scan(xhtml: &str) -> Doc {
 }
 
 /// The byte after a tag, comment, CDATA section or processing instruction starting at `i`.
-fn tag_end(s: &str, i: usize) -> usize {
+pub(crate) fn tag_end(s: &str, i: usize) -> usize {
     let rest = &s[i..];
     let close = if rest.starts_with("<!--") {
         "-->"
@@ -553,7 +570,7 @@ fn tag_end(s: &str, i: usize) -> usize {
 }
 
 /// `(local name, closing, self-closing)` of an element tag; `None` for comments and the like.
-fn tag_name(tag: &str) -> Option<(&str, bool, bool)> {
+pub(crate) fn tag_name(tag: &str) -> Option<(&str, bool, bool)> {
     let inner = tag.strip_prefix('<')?.strip_suffix('>')?;
     if inner.starts_with('!') || inner.starts_with('?') {
         return None;
@@ -569,7 +586,7 @@ fn tag_name(tag: &str) -> Option<(&str, bool, bool)> {
 }
 
 /// Decodes XML entities in `raw` (which starts at byte `base` of its document).
-fn decode(raw: &str, base: usize) -> (String, Vec<usize>) {
+pub(crate) fn decode(raw: &str, base: usize) -> (String, Vec<usize>) {
     let mut text = String::with_capacity(raw.len());
     let mut map = Vec::with_capacity(raw.len() + 1);
     let mut i = 0;
@@ -731,7 +748,7 @@ fn with_epub_ns(mut s: String) -> String {
     s
 }
 
-fn esc(s: &str) -> String {
+pub(crate) fn esc(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
