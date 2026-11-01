@@ -121,6 +121,11 @@ impl fmt::Display for BookError {
                 "--words has {n} usable words; a word search needs at least {MIN_WORDS} \
                  (3 letters or more, and no longer than the grid)"
             ),
+            BookError::DoesNotFit { size, largest } if *largest == 0 => write!(
+                f,
+                "a {size}×{size} grid is too fine to write in on this screen, and so is every \
+                 word search size"
+            ),
             BookError::DoesNotFit { size, largest } => write!(
                 f,
                 "a {size}×{size} grid is too fine to write in on this screen; \
