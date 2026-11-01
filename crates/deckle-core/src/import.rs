@@ -22,7 +22,7 @@ pub fn needs_import(path: &Path) -> bool {
         || deckle_rtf::is_rtf(path)
         || deckle_mobi::is_mobi_file(path)
         || deckle_markdown::is_markdown_file(path)
-        || deckle_comic::is_cbz(path)
+        || deckle_comic::is_comic_archive(path)
         || path.is_dir()
 }
 

@@ -132,6 +132,15 @@ pub fn book_info(path: &Path) -> Result<BookInfo, String> {
         return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
     }
     if deckle_mobi::is_mobi_file(path) {
+        // A fixed-layout Kindle book is never made an EPUB: its own header says what it is.
+        if let Some(meta) = std::fs::read(path)
+            .ok()
+            .and_then(|b| deckle_mobi::read_meta(&b).ok())
+            .filter(|m| m.fixed_layout && !m.drm)
+        {
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            return Ok(deckle_core::inspect::from_kindle(&meta, &stem));
+        }
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let epub = dir.path().join("imported.epub");
         deckle_mobi::convert(path, &epub).map_err(|e| e.to_string())?;
@@ -369,7 +378,7 @@ impl Library {
         }
         if !is_source(source) {
             return Err(format!(
-                "{}: the library takes EPUBs, Word, OpenDocument and RTF files, DRM-free Kindle books, text, FB2, PDFs, comics (CBZ or a folder of page images) and Markdown",
+                "{}: the library takes EPUBs, Word, OpenDocument and RTF files, DRM-free Kindle books, text, FB2, PDFs, comics (CBZ, CBR or a folder of page images) and Markdown",
                 source.display()
             ));
         }

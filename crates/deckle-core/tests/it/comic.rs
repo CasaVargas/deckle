@@ -341,6 +341,68 @@ mod kindle {
     }
 
     #[test]
+    fn a_fixed_layout_kindle_book_goes_as_it_is_without_previewer() {
+        let dir = tempfile::tempdir().unwrap();
+        let joint = std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/comic/fixed-layout-rtl.mobi"),
+        )
+        .unwrap();
+        let stamp = deckle_mobi::azw3::Stamp {
+            cde: "EBOK",
+            asin: "B0STORE001",
+        };
+        let azw3 = dir.path().join("comic.azw3");
+        std::fs::write(&azw3, deckle_mobi::azw3::kf8_only(&joint, &stamp).unwrap()).unwrap();
+        let joint_path = dir.path().join("comic.mobi");
+        std::fs::write(&joint_path, &joint).unwrap();
+
+        for input in [&azw3, &joint_path] {
+            let out = tempfile::tempdir().unwrap();
+            let mut o = opts(Target::Folder(out.path().into()));
+            // No Previewer anywhere: it isn't needed.
+            o.previewer = Some(PathBuf::from("/no/such/previewer"));
+            o.typography = false;
+            o.xray = XRayMode::Off;
+            o.pages = None;
+            let report = run(input, &o);
+            assert_eq!(report.error, None, "{report:?}");
+            assert!(!report.stage_ms.contains_key("convert"));
+            assert!(
+                report.warnings[0].contains("sent as it is"),
+                "{:?}",
+                report.warnings
+            );
+            let delivered = report.delivered.unwrap();
+            assert_eq!(delivered, out.path().join("Deckle - FXL Probe.azw3"));
+            let meta = deckle_mobi::read_meta(&std::fs::read(&delivered).unwrap()).unwrap();
+            assert!(meta.fixed_layout && meta.kf8);
+            // Stamped by the cover rule, like any book sent to a folder.
+            assert_eq!(meta.cde.as_deref(), Some("PDOC"));
+        }
+
+        // DRM is refused before anything else.
+        let locked = dir.path().join("locked.azw3");
+        std::fs::write(
+            &locked,
+            deckle_mobi::fixture::build(&deckle_mobi::fixture::Book {
+                title: "Locked",
+                kf8: true,
+                fixed_layout: true,
+                drm: true,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        let report = run(&locked, &opts(Target::Folder(dir.path().into())));
+        assert!(report.error.unwrap().contains("DRM"));
+
+        // Other readers can't take it: there's no EPUB to make.
+        let err = deckle_core::reader::book_epub(&azw3, None).unwrap_err();
+        assert!(err.contains("can't make an EPUB"), "{err}");
+    }
+
+    #[test]
     fn a_reflowable_book_refused_enhanced_typesetting_still_fails() {
         // The fixed-layout fake hands back a MOBI; a reflowable book mustn't ship it.
         let out = tempfile::tempdir().unwrap();

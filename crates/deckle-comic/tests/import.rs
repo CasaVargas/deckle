@@ -310,3 +310,85 @@ fn a_spread_after_the_cover_becomes_two_pages_in_reading_order() {
     // Right to left: the spread's right half is read first.
     assert_eq!(page_colours(&rtl), "bgbrg");
 }
+
+/// Whether this machine has bsdtar (macOS and Windows do); CBR tests that need it skip without.
+fn has_bsdtar() -> bool {
+    ["bsdtar", "tar"].iter().any(|t| {
+        std::process::Command::new(t)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("bsdtar"))
+    })
+}
+
+#[test]
+fn a_cbr_that_is_really_a_zip_reads_without_bsdtar() {
+    let dir = tempfile::tempdir().unwrap();
+    let zip = cbz(
+        dir.path(),
+        "x.cbz",
+        &[("1.png", png(4, 6)), ("2.png", png(4, 6))],
+    );
+    let cbr = dir.path().join("Night Train.CBR");
+    std::fs::rename(&zip, &cbr).unwrap();
+    assert!(deckle_comic::is_cbr(&cbr) && is_comic(&cbr));
+    let (_, report) = import(&cbr);
+    assert_eq!((report.title.as_str(), report.pages), ("Night Train", 2));
+}
+
+#[test]
+fn a_real_archive_cbr_is_unpacked_by_bsdtar_and_nothing_escapes_it() {
+    if !has_bsdtar() {
+        eprintln!("skipped: no bsdtar");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let pages = dir.path().join("pages");
+    std::fs::create_dir(&pages).unwrap();
+    std::fs::write(pages.join("1.png"), png(4, 6)).unwrap();
+    std::fs::write(pages.join("2.png"), png(5, 6)).unwrap();
+    // A tar under a .cbr name: bsdtar reads it the way it reads RAR.
+    let cbr = dir.path().join("Picture Book.cbr");
+    let tar = |args: &[&str]| {
+        let ok = std::process::Command::new("tar")
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "{args:?}");
+    };
+    tar(&[
+        "-cf",
+        cbr.to_str().unwrap(),
+        "-C",
+        pages.to_str().unwrap(),
+        "1.png",
+        "2.png",
+    ]);
+    let (files, report) = import(&cbr);
+    assert_eq!((report.title.as_str(), report.pages), ("Picture Book", 2));
+    assert!(text(&files, "OEBPS/pages/p0002.xhtml").contains("width=5, height=6"));
+
+    // An entry named `../escaped.png` is refused, never written outside the temp folder.
+    let evil = dir.path().join("evil.cbr");
+    tar(&[
+        "-cf",
+        evil.to_str().unwrap(),
+        "-s",
+        ",^,../escaped-,",
+        "-C",
+        pages.to_str().unwrap(),
+        "1.png",
+    ]);
+    let _ = convert(&evil, &dir.path().join("evil.epub"));
+    let tmp = std::env::temp_dir();
+    assert!(!tmp.join("escaped-1.png").exists());
+
+    // Not an archive at all: bsdtar's own reason.
+    let junk = dir.path().join("junk.cbr");
+    std::fs::write(&junk, b"definitely not an archive").unwrap();
+    assert!(matches!(
+        convert(&junk, &dir.path().join("junk.epub")),
+        Err(ComicError::NotArchive(_))
+    ));
+}

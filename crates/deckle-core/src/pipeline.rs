@@ -291,6 +291,9 @@ pub fn prepare_with(
     on_stage: &mut dyn FnMut(&'static str),
     fetch: &mut Fetcher,
 ) -> Result<Prepared, Box<RunReport>> {
+    if let Some(prepared) = prepare_kindle_fixed_layout(epub, opts, on_stage) {
+        return prepared;
+    }
     let mut report = RunReport {
         input: epub.to_path_buf(),
         ..Default::default()
@@ -362,21 +365,7 @@ pub fn prepare_with(
     // A fixed-layout page is laid out on purpose: no text changes, no text enrichments
     // (fixed-layout spec §2, §8).
     if info.fixed_layout {
-        let asked: Vec<&str> = [
-            (opts.typography, "typography"),
-            (opts.popup_notes, "pop-up notes"),
-            (opts.xray == XRayMode::Auto, "X-Ray"),
-            (opts.word_wise.is_some(), "Word Wise"),
-            (opts.pages.is_some(), "page numbers"),
-        ]
-        .into_iter()
-        .filter_map(|(on, what)| on.then_some(what))
-        .collect();
-        if !asked.is_empty() {
-            report
-                .warnings
-                .push(format!("fixed-layout book: {} skipped", asked.join(", ")));
-        }
+        report.warnings.extend(fixed_layout_skips(opts));
     }
 
     let (generated_cover, replace_cover) = cover_for(
@@ -430,6 +419,71 @@ pub fn prepare_with(
         name: None,
         _work: work,
     })
+}
+
+/// The one warning naming every text extra `opts` asks for that a fixed-layout book skips.
+fn fixed_layout_skips(opts: &RunOptions) -> Option<String> {
+    let asked: Vec<&str> = [
+        (opts.typography, "typography"),
+        (opts.popup_notes, "pop-up notes"),
+        (opts.xray == XRayMode::Auto, "X-Ray"),
+        (opts.word_wise.is_some(), "Word Wise"),
+        (opts.pages.is_some(), "page numbers"),
+    ]
+    .into_iter()
+    .filter_map(|(on, what)| on.then_some(what))
+    .collect();
+    (!asked.is_empty()).then(|| format!("fixed-layout book: {} skipped", asked.join(", ")))
+}
+
+/// A fixed-layout Kindle book (an AZW3, or a MOBI with a KF8 part) is already what Previewer
+/// would make: it's prepared as it is, with no import, normalize or Previewer, and finished like
+/// any fixed-layout book (fixed-layout spec §3, §9 phase 4). `None` for anything else.
+fn prepare_kindle_fixed_layout(
+    path: &Path,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+) -> Option<Result<Prepared, Box<RunReport>>> {
+    if !deckle_mobi::is_mobi_file(path) {
+        return None;
+    }
+    let meta = std::fs::read(path)
+        .ok()
+        .and_then(|b| deckle_mobi::read_meta(&b).ok())
+        .filter(|m| m.fixed_layout)?;
+    on_stage("inspect");
+    let mut report = RunReport {
+        input: path.to_path_buf(),
+        ..Default::default()
+    };
+    let refused = if meta.drm {
+        Some("this book is DRM-protected, and Deckle never removes DRM; use a DRM-free copy")
+    } else if !meta.kf8 {
+        Some("a fixed-layout MOBI with no KF8 part, which current Kindles don't show as made")
+    } else {
+        None
+    };
+    if let Some(why) = refused {
+        report.error = Some(format!("inspect: {why}"));
+        return Some(Err(Box::new(report)));
+    }
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    report.info = crate::inspect::from_kindle(&meta, &stem);
+    report
+        .warnings
+        .push("a fixed-layout Kindle book: sent as it is, without Kindle Previewer".into());
+    report.warnings.extend(fixed_layout_skips(opts));
+    report.kpf = Some(path.to_path_buf());
+    Some(Ok(Prepared {
+        report,
+        kpf: path.to_path_buf(),
+        wishes: Wishes::of(opts),
+        name: None,
+        _work: None,
+    }))
 }
 
 /// The cover normalize adds, and whether it replaces the book's own: what `pick` asks for,

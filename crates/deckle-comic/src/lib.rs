@@ -8,6 +8,7 @@
 //! §7.1). `ComicInfo.xml` gives the metadata and, for manga, the right-to-left reading order.
 //! Fitting pages to a device's screen happens at finish ([`pages::fit`]), not here.
 
+mod cbr;
 mod comicinfo;
 mod order;
 pub mod pages;
@@ -32,6 +33,13 @@ pub enum ComicError {
     Protected(String),
     #[error("this isn't a CBZ file: {0}")]
     NotZip(String),
+    #[error("this CBR couldn't be opened: {0}")]
+    NotArchive(String),
+    #[error(
+        "opening a CBR needs bsdtar (libarchive): macOS and Windows have it as `tar`; on Linux, \
+         install libarchive-tools, or set DECKLE_BSDTAR to it"
+    )]
+    NoBsdtar,
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -91,12 +99,24 @@ pub fn is_image_folder(path: &Path) -> bool {
         })
 }
 
-/// A CBZ or a folder of page images.
-pub fn is_comic(path: &Path) -> bool {
-    is_cbz(path) || is_image_folder(path)
+/// `.cbr`, any case: a RAR (or, often enough, a zip) of page images.
+pub fn is_cbr(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("cbr"))
 }
 
-/// Converts the comic at `source` (a CBZ or a folder) and writes the EPUB to `epub`.
+/// A comic archive: a CBZ or a CBR.
+pub fn is_comic_archive(path: &Path) -> bool {
+    is_cbz(path) || is_cbr(path)
+}
+
+/// A CBZ, a CBR or a folder of page images.
+pub fn is_comic(path: &Path) -> bool {
+    is_comic_archive(path) || is_image_folder(path)
+}
+
+/// Converts the comic at `source` (a CBZ, a CBR or a folder) and writes the EPUB to `epub`.
 pub fn convert(source: &Path, epub: &Path) -> Result<ImportReport, ComicError> {
     let mut src = Source::open(source)?;
     let stem = source
@@ -158,12 +178,28 @@ pub fn convert(source: &Path, epub: &Path) -> Result<ImportReport, ComicError> {
 enum Source {
     Zip(zip::ZipArchive<std::fs::File>),
     Folder(PathBuf),
+    /// A CBR unpacked into a temp folder, removed with the source.
+    Unpacked(tempfile::TempDir),
+}
+
+fn starts_with(path: &Path, magic: &[u8]) -> std::io::Result<bool> {
+    use std::io::Read;
+    let mut head = vec![0u8; magic.len()];
+    let n = std::fs::File::open(path)?.read(&mut head)?;
+    Ok(n == magic.len() && head == magic)
 }
 
 impl Source {
     fn open(path: &Path) -> Result<Self, ComicError> {
         if path.is_dir() {
             return Ok(Source::Folder(path.to_path_buf()));
+        }
+        // A CBR is often a zip under another name; a real one (RAR, 7z, tar) is unpacked by
+        // the system's bsdtar into a temp folder (fixed-layout spec §10: no bundled unRAR).
+        if is_cbr(path) && !starts_with(path, b"PK\x03\x04")? {
+            let dir = tempfile::Builder::new().prefix("deckle-cbr-").tempdir()?;
+            cbr::extract(&cbr::bsdtar()?, path, dir.path())?;
+            return Ok(Source::Unpacked(dir));
         }
         let file = std::fs::File::open(path)?;
         zip::ZipArchive::new(file)
@@ -180,9 +216,9 @@ impl Source {
                 .filter(|n| !n.ends_with('/'))
                 .map(|n| n.into_owned())
                 .collect(),
-            Source::Folder(root) => {
+            Source::Folder(_) | Source::Unpacked(_) => {
                 let mut out = Vec::new();
-                walk(root, "", 0, &mut out);
+                walk(self.root(), "", 0, &mut out);
                 out
             }
         };
@@ -208,7 +244,16 @@ impl Source {
                 f.read_to_end(&mut bytes)?;
                 Ok(bytes)
             }
-            Source::Folder(root) => Ok(std::fs::read(root.join(name))?),
+            Source::Folder(_) | Source::Unpacked(_) => Ok(std::fs::read(self.root().join(name))?),
+        }
+    }
+
+    /// The folder pages are read from (not a zip's).
+    fn root(&self) -> &Path {
+        match self {
+            Source::Folder(root) => root,
+            Source::Unpacked(dir) => dir.path(),
+            Source::Zip(_) => Path::new(""),
         }
     }
 }
