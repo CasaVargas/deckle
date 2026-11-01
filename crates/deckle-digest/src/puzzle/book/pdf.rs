@@ -99,6 +99,44 @@ impl Faces {
     }
 }
 
+/// The title's size and lines: 28 pt on one line if it fits, else smaller and wrapped at
+/// spaces onto up to three lines, down to 14 pt; a word too long even then is cut.
+fn title_lines(faces: &Faces, title: &str, width: f32) -> (f32, Vec<String>) {
+    let fits = |size: f32, s: &str| faces.width(Face::Bold, size, s) <= width;
+    let wrap = |size: f32| {
+        let mut lines: Vec<String> = Vec::new();
+        for word in title.split_whitespace() {
+            match lines.last_mut() {
+                Some(l) if fits(size, &format!("{l} {word}")) => {
+                    l.push(' ');
+                    l.push_str(word);
+                }
+                _ => lines.push(word.to_owned()),
+            }
+        }
+        lines
+    };
+    let mut size = 28.0;
+    loop {
+        let lines = wrap(size);
+        let last = size <= 14.0;
+        if (lines.len() <= 3 && lines.iter().all(|l| fits(size, l))) || last {
+            let lines = lines
+                .into_iter()
+                .map(|l| {
+                    let mut l = l;
+                    while !fits(size, &l) && l.chars().count() > 1 {
+                        l.pop();
+                    }
+                    l
+                })
+                .collect();
+            return (size, lines);
+        }
+        size -= 1.0;
+    }
+}
+
 /// Where a puzzle page's parts go.
 struct PuzzleLayout {
     grid_x: f32,
@@ -287,12 +325,14 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
             faces: &faces,
             used: &mut used,
         };
-        let mut size: f32 = 28.0;
-        while size > 14.0 && faces.width(Face::Bold, size, &b.title) > pw - 2.0 * MARGIN {
-            size -= 1.0;
+        let (size, lines) = title_lines(&faces, &b.title, pw - 2.0 * MARGIN);
+        let lead = size * 1.2;
+        // the last line sits where a one-line title would
+        let y = ph * 0.38 - lead * (lines.len() - 1) as f32;
+        for (k, line) in lines.iter().enumerate() {
+            p.centred(Face::Bold, size, pw / 2.0, y + lead * k as f32, line);
         }
         let y = ph * 0.38;
-        p.centred(Face::Bold, size, pw / 2.0, y, &b.title);
         p.centred(Face::Regular, 14.0, pw / 2.0, y + 34.0, &b.subtitle);
         let date = b.date.format("%-d %B %Y").to_string();
         p.centred(Face::Regular, 12.0, pw / 2.0, y + 58.0, &date);
@@ -482,4 +522,27 @@ fn write(
         .outlines(outline_root)
         .page_mode(pdf_writer::types::PageMode::UseOutlines);
     pdf.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A long title wraps onto lines that each fit between the margins, never off the page.
+    #[test]
+    fn a_long_title_wraps_inside_the_margins() {
+        let faces = Faces::new();
+        let width = 446.4 - 2.0 * MARGIN;
+        let title =
+            "The Extremely Long and Winding Technology Word Search Collection for Rainy Weekends";
+        let (size, lines) = title_lines(&faces, title, width);
+        assert!(size >= 14.0);
+        assert!(lines.len() > 1 && lines.len() <= 3, "{lines:?}");
+        assert_eq!(lines.join(" "), title);
+        for l in &lines {
+            assert!(faces.width(Face::Bold, size, l) <= width, "{l}");
+        }
+        let (short, one) = title_lines(&faces, "Word Search", width);
+        assert_eq!((short, one), (28.0, vec!["Word Search".to_owned()]));
+    }
 }

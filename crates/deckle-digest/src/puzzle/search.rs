@@ -114,6 +114,11 @@ pub struct Options<'a> {
     pub max: usize,
     /// Words hidden, at least, or the attempt fails.
     pub min: usize,
+    /// A puzzle book's fill (puzzle books §3.2). A blocklisted string inside one hidden word
+    /// (CLASS) isn't the filler's doing and is allowed; a word whose reverse is hidden is
+    /// skipped when words read backwards; and the filler never spells a hidden word again.
+    /// The Daily's fill stays as it was, so its puzzles don't move.
+    pub book: bool,
 }
 
 impl Options<'_> {
@@ -123,6 +128,7 @@ impl Options<'_> {
         ways: &Way::ALL,
         max: 10,
         min: 8,
+        book: false,
     };
 }
 
@@ -251,6 +257,7 @@ fn attempt(
     rng: &mut StdRng,
 ) -> Option<Search> {
     let size = opts.size;
+    let backwards = opts.book && opts.ways.iter().any(|w| !Way::ALL.contains(w));
     let mut grid = Grid::new(size);
     let mut hidden: Vec<Hidden> = Vec::new();
     let place =
@@ -261,6 +268,16 @@ fn attempt(
                 .any(|h| h.word.contains(word) || word.contains(h.word.as_str()))
             {
                 return false;
+            }
+            // read backwards, STAR is RATS: one would be found on the other's squares
+            if backwards {
+                let rev: String = word.chars().rev().collect();
+                if hidden
+                    .iter()
+                    .any(|h| h.word.contains(&rev) || rev.contains(h.word.as_str()))
+                {
+                    return false;
+                }
             }
             let mut spots: Vec<(usize, usize, Way)> = (0..size)
                 .flat_map(|r| {
@@ -311,6 +328,23 @@ fn attempt(
         l.dedup();
         l
     };
+    // a book's own words may hold a blocklisted string (CLASS): that isn't the filler's doing
+    let own: Vec<Vec<usize>> = if opts.book {
+        hidden
+            .iter()
+            .map(|h| {
+                let (dr, dc) = h.way.step();
+                (0..h.word.len() as isize)
+                    .map(|k| {
+                        (h.row as isize + dr * k) as usize * size
+                            + (h.col as isize + dc * k) as usize
+                    })
+                    .collect()
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     for r in 0..size {
         for c in 0..size {
             if grid.cells[r * size + c] != 0 {
@@ -334,7 +368,9 @@ fn attempt(
                     .expect("pick is under the total");
                 let (letter, _) = letters.swap_remove(i);
                 grid.set(r, c, letter);
-                if !spells_blocked(&grid, r, c, &lens, block) {
+                if !spells_blocked(&grid, r, c, &lens, block, &own)
+                    && !(opts.book && spells_hidden(&grid, r, c, &hidden, opts.ways))
+                {
                     ok = true;
                     break;
                 }
@@ -347,7 +383,7 @@ fn attempt(
     // two hidden words crossing can spell one with no filler square: check every square once
     for r in 0..size {
         for c in 0..size {
-            if spells_blocked(&grid, r, c, &lens, block) {
+            if spells_blocked(&grid, r, c, &lens, block, &own) {
                 return None;
             }
         }
@@ -367,9 +403,11 @@ fn attempt(
     })
 }
 
-/// How many times `word` reads in the grid, along any of `ways`.
+/// How many places `word` reads in the grid, along any of `ways`. A palindrome read both ways
+/// on the same squares is one place.
 fn reads(grid: &Grid, word: &str, ways: &[Way]) -> usize {
     let size = grid.size;
+    let last = word.len() as isize - 1;
     (0..size)
         .flat_map(|r| (0..size).flat_map(move |c| ways.iter().map(move |&w| (r, c, w))))
         .filter(|&(r, c, way)| {
@@ -378,7 +416,34 @@ fn reads(grid: &Grid, word: &str, ways: &[Way]) -> usize {
                 grid.at(r as isize + dr * k as isize, c as isize + dc * k as isize) == Some(b)
             })
         })
-        .count()
+        .map(|(r, c, way)| {
+            let (dr, dc) = way.step();
+            let ends = (
+                (r as isize, c as isize),
+                (r as isize + dr * last, c as isize + dc * last),
+            );
+            (ends.0.min(ends.1), ends.0.max(ends.1))
+        })
+        .collect::<HashSet<_>>()
+        .len()
+}
+
+/// Whether a filled line through `(r, c)` along one of `ways` spells a hidden word: a second
+/// copy, which the reader might circle instead.
+fn spells_hidden(grid: &Grid, r: usize, c: usize, hidden: &[Hidden], ways: &[Way]) -> bool {
+    hidden.iter().any(|h| {
+        let len = h.word.len() as isize;
+        ways.iter().any(|w| {
+            let (dr, dc) = w.step();
+            (0..len).any(|k| {
+                let (r0, c0) = (r as isize - dr * k, c as isize - dc * k);
+                h.word
+                    .bytes()
+                    .enumerate()
+                    .all(|(i, b)| grid.at(r0 + dr * i as isize, c0 + dc * i as isize) == Some(b))
+            })
+        })
+    })
 }
 
 /// Whether `word` can go from `(r, c)` along `way`: inside the grid, on empty squares or the
@@ -392,13 +457,14 @@ fn fits(grid: &Grid, word: &str, r: usize, c: usize, way: Way) -> bool {
 }
 
 /// Whether a filled line through `(r, c)`, in any of the 8 directions and any blocklisted
-/// length, spells a blocklisted word.
+/// length, spells a blocklisted word, other than inside one of the `own` words' squares.
 fn spells_blocked(
     grid: &Grid,
     r: usize,
     c: usize,
     lens: &[usize],
     block: &HashSet<String>,
+    own: &[Vec<usize>],
 ) -> bool {
     let mut word = String::with_capacity(grid.size);
     for (dr, dc) in LINES {
@@ -414,7 +480,15 @@ fn spells_blocked(
                     None => false,
                 });
                 if filled && block.contains(&word) {
-                    return true;
+                    let inside = |cells: &Vec<usize>| {
+                        (0..len as isize).all(|i| {
+                            let (rr, cc) = (r0 + dr * i, c0 + dc * i);
+                            cells.contains(&(rr as usize * grid.size + cc as usize))
+                        })
+                    };
+                    if !own.iter().any(inside) {
+                        return true;
+                    }
                 }
             }
         }
@@ -670,6 +744,7 @@ mod tests {
                     ways,
                     max: want,
                     min,
+                    book: true,
                 };
                 for seed in 0..10 {
                     let s = fill_with(&[], &pool, &opts, &mut StdRng::seed_from_u64(seed))
@@ -684,28 +759,50 @@ mod tests {
                     for h in &s.words {
                         assert!(ways.contains(&h.way), "{h:?}");
                         let want = h.word.to_uppercase();
-                        let mut found = 0;
+                        // places, not readings: a palindrome reads both ways on its squares
+                        let mut found = HashSet::new();
                         for r in 0..size as isize {
                             for c in 0..size as isize {
                                 for w in ways {
-                                    if read_in(&s.rows, size, (r, c), w.step(), want.len())
+                                    let (dr, dc) = w.step();
+                                    if read_in(&s.rows, size, (r, c), (dr, dc), want.len())
                                         .as_deref()
                                         == Some(&want)
                                     {
-                                        found += 1;
+                                        let last = want.len() as isize - 1;
+                                        let ends = ((r, c), (r + dr * last, c + dc * last));
+                                        found.insert((ends.0.min(ends.1), ends.0.max(ends.1)));
                                     }
                                 }
                             }
                         }
-                        assert_eq!(found, 1, "size {size} seed {seed}: {want} reads {found}");
+                        assert_eq!(found.len(), 1, "size {size} seed {seed}: {want} {found:?}");
                     }
+                    let squares: Vec<HashSet<(isize, isize)>> = s
+                        .words
+                        .iter()
+                        .map(|h| {
+                            s.cells(h)
+                                .into_iter()
+                                .map(|(r, c)| (r as isize, c as isize))
+                                .collect()
+                        })
+                        .collect();
                     for r in 0..size as isize {
                         for c in 0..size as isize {
                             for w in Way::EVERY {
+                                let (dr, dc) = w.step();
                                 for len in 3..=5 {
-                                    if let Some(x) = read_in(&s.rows, size, (r, c), w.step(), len) {
-                                        assert!(!block.contains(&x.to_lowercase()), "{x}");
-                                    }
+                                    let Some(x) = read_in(&s.rows, size, (r, c), (dr, dc), len)
+                                    else {
+                                        continue;
+                                    };
+                                    // a book allows one inside a hidden word (NIGHT), nowhere else
+                                    let inside = squares.iter().any(|sq| {
+                                        (0..len as isize)
+                                            .all(|k| sq.contains(&(r + dr * k, c + dc * k)))
+                                    });
+                                    assert!(inside || !block.contains(&x.to_lowercase()), "{x}");
                                 }
                             }
                         }
@@ -722,6 +819,7 @@ mod tests {
             ways: &[Way::Across, Way::Down],
             max: 16,
             min: 13,
+            book: true,
         };
         for seed in 0..20 {
             let s = fill_with(&[], &book_pool(), &opts, &mut StdRng::seed_from_u64(seed)).unwrap();
@@ -741,6 +839,7 @@ mod tests {
             ways: &Way::EVERY,
             max: 16,
             min: 13,
+            book: true,
         };
         let s = fill_with(&first, &book_pool(), &opts, &mut StdRng::seed_from_u64(1)).unwrap();
         for w in &first {

@@ -104,10 +104,11 @@ fn to_a_folder_delivers_and_prints_how_to_remake_it() {
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(dir.path().join(BOOK).exists());
     assert!(text.contains("3 pages, 1 puzzle, seed 7"), "{text}");
-    assert!(
-        text.contains("deckle puzzles search --count 1 --size 10 --difficulty medium --seed 7 --date 2026-11-01"),
-        "{text}"
+    let remake = format!(
+        "deckle puzzles search --count 1 --size 10 --difficulty medium --seed 7 --date 2026-11-01 --to {}",
+        dir.path().display()
     );
+    assert!(text.contains(&remake), "{text}");
 }
 
 #[test]

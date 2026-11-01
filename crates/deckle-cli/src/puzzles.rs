@@ -89,6 +89,11 @@ fn search(
         again += &format!(" --screen {}", args.screen);
     }
     again += &format!(" --seed {} --date {}", b.seed, b.date);
+    match (&args.out, &args.to) {
+        (Some(dir), _) => again += &format!(" -o {}", quote(&dir.to_string_lossy())),
+        (None, Some(to)) => again += &format!(" --to {}", quote(to)),
+        (None, None) => {}
+    }
     let report = Report {
         path,
         pages: pdf::pages(&b),

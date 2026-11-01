@@ -234,6 +234,7 @@ fn make_search(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
                     ways: o.difficulty.ways(),
                     max: want,
                     min,
+                    book: true,
                 };
                 let mut rng = StdRng::seed_from_u64(puzzle_seed);
                 if let Some(s) = search::fill_with(&first, &pool, &opts, &mut rng) {
@@ -400,6 +401,70 @@ mod tests {
                 Err(BookError::Count)
             );
         }
+    }
+
+    fn with_words(size: usize, difficulty: Difficulty, words: &[&str]) -> BookOptions {
+        let mut o = opts(3, size);
+        o.difficulty = difficulty;
+        o.words = Some(words.iter().map(|w| w.to_string()).collect());
+        o
+    }
+
+    /// Your words are taken as given (§3.2): CLASS spells a blocklisted string inside itself,
+    /// which isn't the filler's doing.
+    #[test]
+    fn own_words_with_blocked_strings_inside_still_fill() {
+        let words = [
+            "classroom",
+            "title",
+            "night",
+            "shell",
+            "skill",
+            "japan",
+            "muffin",
+            "canal",
+            "soldier",
+            "studies",
+        ];
+        let b = make(
+            &with_words(12, Difficulty::Medium, &words),
+            Words::embedded(),
+        )
+        .unwrap();
+        assert!(
+            b.puzzles
+                .iter()
+                .all(|p| p.words.iter().filter(|h| h.theme).count() >= 8)
+        );
+    }
+
+    /// A palindrome reads backwards on its own squares, and STAR reads RATS backwards: in a
+    /// hard book neither is a second copy to circle.
+    #[test]
+    fn hard_takes_palindromes_and_reversed_pairs() {
+        let words = [
+            "kayak", "level", "noon", "radar", "star", "rats", "live", "evil", "stressed",
+            "desserts",
+        ];
+        let b = make(&with_words(12, Difficulty::Hard, &words), Words::embedded()).unwrap();
+        for p in &b.puzzles {
+            assert!(p.words.iter().any(|h| h.word == "kayak"));
+        }
+    }
+
+    /// The filler mustn't spell a short word again: a big hard grid of three-letter words
+    /// still fills.
+    #[test]
+    fn short_words_fill_big_hard_grids() {
+        let words = [
+            "the", "tea", "sea", "ten", "ant", "art", "ear", "eat", "oat", "rat", "tan", "net",
+        ];
+        let b = make(&with_words(20, Difficulty::Hard, &words), Words::embedded()).unwrap();
+        assert!(
+            b.puzzles
+                .iter()
+                .all(|p| p.words.iter().filter(|h| h.theme).count() >= 6)
+        );
     }
 
     #[test]
