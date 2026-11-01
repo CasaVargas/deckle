@@ -169,6 +169,28 @@ pub fn device_filename(info: &BookInfo) -> String {
     format!("{}.kfx", stem.trim_end())
 }
 
+/// Formats a Kindle opens as they are, so `send` copies them without converting.
+const DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "txt", "azw3", "azw", "mobi", "prc", "kfx"];
+
+/// The device name for a document sent as it is: its own name, made filesystem-safe like
+/// [`device_filename`], with a lowercase extension. `None` for a format a Kindle can't open.
+pub fn document_filename(file_name: &str) -> Option<String> {
+    let (stem, ext) = file_name.rsplit_once('.')?;
+    let ext = ext.to_ascii_lowercase();
+    if !DOCUMENT_EXTENSIONS.contains(&ext.as_str()) {
+        return None;
+    }
+    let stem = sanitize(stem);
+    if stem.is_empty() {
+        return None;
+    }
+    let stem: String = stem
+        .chars()
+        .take(MAX_FILENAME_LEN - ext.len() - 1)
+        .collect();
+    Some(format!("{}.{ext}", stem.trim_end()))
+}
+
 /// Kindle detection over explicit mount roots (the public `detect_mass_storage` wraps it).
 pub fn detect_in(roots: &[PathBuf]) -> Vec<Device> {
     let mut out = Vec::new();
@@ -675,5 +697,42 @@ mod dated_tests {
         assert!(is_dated("deckle-daily-2026-10-24.epub", "deckle-daily-"));
         assert!(!is_dated("deckle-daily-2026-10-24", "deckle-daily-"));
         assert!(!is_dated("deckle-daily-2026-1-024.kfx", "deckle-daily-"));
+    }
+}
+
+#[cfg(test)]
+mod document_tests {
+    use super::document_filename;
+
+    #[test]
+    fn a_document_keeps_its_name_with_a_lowercase_extension() {
+        assert_eq!(
+            document_filename("Write-on Probe C - PDF.pdf").as_deref(),
+            Some("Write-on Probe C - PDF.pdf")
+        );
+        assert_eq!(document_filename("Notes.TXT").as_deref(), Some("Notes.txt"));
+        assert_eq!(
+            document_filename("Café: menu.azw3").as_deref(),
+            Some("Cafe_ menu.azw3")
+        );
+    }
+
+    #[test]
+    fn a_long_name_is_cut_before_the_extension() {
+        let name = document_filename(&format!("{}.pdf", "a".repeat(300))).unwrap();
+        assert_eq!(name.len(), 120);
+        assert!(name.ends_with("a.pdf"), "{name}");
+    }
+
+    #[test]
+    fn only_formats_a_kindle_opens_are_documents() {
+        for ok in [
+            "a.pdf", "a.txt", "a.azw3", "a.azw", "a.mobi", "a.prc", "a.kfx",
+        ] {
+            assert!(document_filename(ok).is_some(), "{ok}");
+        }
+        for no in ["a.docx", "a.epub", "a.cbz", "a", ".pdf"] {
+            assert!(document_filename(no).is_none(), "{no}");
+        }
     }
 }

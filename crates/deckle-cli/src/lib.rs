@@ -353,9 +353,33 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Send { kfx, to } => {
             let bytes =
                 std::fs::read(&kfx).map_err(|e| format!("cannot read {}: {e}", kfx.display()))?;
+            // A KFX goes under its title; anything else a Kindle opens (a PDF, an AZW3) under
+            // its own name, through the same MTP session, which never resets the device.
+            let document = match bytes.starts_with(b"CONT") {
+                true => None,
+                false => Some(
+                    kfx.file_name()
+                        .and_then(|n| deckle_core::deliver::document_filename(&n.to_string_lossy()))
+                        .ok_or_else(|| {
+                            format!(
+                                "{} isn't a KFX or a document a Kindle opens (PDF, TXT, AZW3, \
+                                 MOBI); convert it with `deckle run`",
+                                kfx.display()
+                            )
+                        })?,
+                ),
+            };
             let target = resolve_target(&to)?;
-            let info = info_from_kfx(&bytes);
-            let path = deliver(&bytes, &info, &target).map_err(|e| e.to_string())?;
+            let path = match document {
+                Some(name) => deckle_core::deliver::deliver_named_on(
+                    &bytes,
+                    &name,
+                    &mut deckle_core::deliver::Conn::new(&target),
+                    &Default::default(),
+                ),
+                None => deliver(&bytes, &info_from_kfx(&bytes), &target),
+            }
+            .map_err(|e| e.to_string())?;
             emit(json, &path, || format!("sent to {}", path.display()))?;
             Ok(ExitCode::SUCCESS)
         }

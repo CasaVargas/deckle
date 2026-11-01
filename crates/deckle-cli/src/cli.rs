@@ -119,7 +119,8 @@ pub enum Command {
         #[arg(long)]
         previewer: Option<PathBuf>,
     },
-    /// Copy a KFX to a folder or a connected mass-storage Kindle.
+    /// Copy a KFX, or a document a Kindle opens as it is (PDF, TXT, AZW3, MOBI), to a folder or
+    /// a connected Kindle. A KFX is named after its title; a document keeps its own name.
     Send {
         kfx: PathBuf,
         /// A folder path, or `device` for the first connected Kindle.
