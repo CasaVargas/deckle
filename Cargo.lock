@@ -1142,6 +1142,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "deckle-comic"
+version = "0.10.0"
+dependencies = [
+ "image",
+ "roxmltree",
+ "sha2 0.11.1",
+ "tempfile",
+ "thiserror 2.0.21",
+ "zip 9.0.5",
+]
+
+[[package]]
 name = "deckle-core"
 version = "0.10.0"
 dependencies = [
