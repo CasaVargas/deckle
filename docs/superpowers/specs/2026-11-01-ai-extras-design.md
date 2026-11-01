@@ -78,8 +78,8 @@ pub fn add_with(bytes, opts, post: &mut Post<'_>) -> …;   // injected HTTP for
 Callers:
 
 - **Kindle** (`pipeline::run`): after `normalize`, before `previewer::convert`, the normalized EPUB
-  is rewritten with recaps. `RunOptions` gains `recaps: bool`; it does nothing unless `llm` is also
-  set (then a warning: "Chapter recaps need an LLM; set one in Settings").
+  is rewritten with recaps. `RunOptions` gains `recaps: Option<PathBuf>` (the cache directory;
+  `None` = off); it does nothing unless `llm` is also set (then a warning: "Chapter recaps need an LLM; set one in Settings").
 - **Other readers** (`reader::book_epub`): same, after normalize and before the Who's who page.
   Increment 2 (§10).
 - **CLI**: `deckle run … --recaps` (uses the run's `--llm…` options). Until increment 2, a run to
