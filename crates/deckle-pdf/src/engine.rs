@@ -134,6 +134,26 @@ impl<'a> Document<'a> {
         Ok(out)
     }
 
+    /// How many pages the document has.
+    pub fn page_count(&self) -> usize {
+        self.doc.pages().len() as usize
+    }
+
+    /// Page `index` rendered whole, `height` pixels tall, on white: a scanned page as a picture
+    /// (fixed-layout spec §9, phase 4b).
+    pub fn render(&self, index: usize, height: u32) -> Result<image::DynamicImage, PdfError> {
+        let err = |e: PdfiumError| PdfError::Unreadable(e.to_string());
+        let page = self.doc.pages().get(index as PdfPageIndex).map_err(err)?;
+        let config = PdfRenderConfig::new()
+            .set_target_height(height as Pixels)
+            .set_clear_color(PdfColor::WHITE)
+            .render_form_data(true);
+        page.render_with_config(&config)
+            .map_err(err)?
+            .as_image()
+            .map_err(err)
+    }
+
     /// `rect` on page `index` as a PNG, rendered at [`RENDER_SCALE`].
     pub fn picture(&mut self, index: usize, rect: Rect) -> Result<Vec<u8>, PdfError> {
         let err = |e: PdfiumError| PdfError::Unreadable(e.to_string());

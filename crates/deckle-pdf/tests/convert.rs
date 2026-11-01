@@ -191,3 +191,19 @@ fn not_a_pdf_is_unreadable() {
         Err(PdfError::Unreadable(_))
     ));
 }
+
+#[test]
+fn a_scan_renders_as_page_images_for_a_comic() {
+    let dir = tempfile::tempdir().unwrap();
+    let scan = match deckle_pdf::render_scan(&fixture("scan.pdf"), dir.path()) {
+        Ok(s) => s,
+        Err(e @ PdfError::NoEngine(_)) => panic!("{e}\nrun tools/fetch-pdfium.sh first"),
+        Err(e) => panic!("{e}"),
+    };
+    assert_eq!(scan.pages, 1);
+    let page =
+        image::load_from_memory(&std::fs::read(dir.path().join("p0001.jpg")).unwrap()).unwrap();
+    // Rendered at the tallest panel's height, keeping the page's shape.
+    assert_eq!(page.height(), 2480);
+    assert!(page.width() > 1000 && page.width() < page.height());
+}

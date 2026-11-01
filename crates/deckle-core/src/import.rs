@@ -12,6 +12,42 @@ pub struct Imported {
     pub warnings: Vec<String>,
 }
 
+/// A scanned PDF, which has no text to reflow, as a fixed-layout book of its page pictures
+/// (fixed-layout spec §9, phase 4b): rendered into a page folder named after the PDF, with a
+/// `ComicInfo.xml` carrying its own title and author, then made a comic EPUB at `epub`.
+fn scan_as_comic(pdf: &Path, dir: &Path, epub: &Path) -> Result<Vec<String>, String> {
+    let stem = pdf.file_stem().unwrap_or_default();
+    let pages = dir.join("scan").join(stem);
+    let scan = deckle_pdf::render_scan(pdf, &pages).map_err(|e| e.to_string())?;
+    let escape = |s: &str| {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let field = |tag: &str, v: &Option<String>| {
+        v.as_deref()
+            .map(|v| format!("<{tag}>{}</{tag}>", escape(v)))
+            .unwrap_or_default()
+    };
+    std::fs::write(
+        pages.join("ComicInfo.xml"),
+        format!(
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?><ComicInfo>{}{}</ComicInfo>",
+            field("Title", &scan.title),
+            field("Writer", &scan.author)
+        ),
+    )
+    .map_err(|e| e.to_string())?;
+    let mut warnings = vec![
+        "a scanned PDF: its pages go as pictures, like a comic's (Deckle doesn't read text from \
+         scans)"
+            .to_owned(),
+    ];
+    let report = deckle_comic::convert(&pages, epub).map_err(|e| e.to_string())?;
+    warnings.extend(report.warnings);
+    Ok(warnings)
+}
+
 /// True when `path` needs importing before it's an EPUB.
 pub fn needs_import(path: &Path) -> bool {
     deckle_docx::is_word(path)
@@ -44,9 +80,10 @@ pub fn import(source: &Path, dir: &Path, name: &str) -> Option<Result<Imported, 
             .map(|r| r.warnings)
             .map_err(|e| e.to_string())
     } else if deckle_pdf::is_pdf(source) {
-        deckle_pdf::convert(source, &epub)
-            .map(|r| r.warnings)
-            .map_err(|e| e.to_string())
+        match deckle_pdf::convert(source, &epub) {
+            Err(deckle_pdf::PdfError::Scanned) => scan_as_comic(source, dir, &epub),
+            r => r.map(|r| r.warnings).map_err(|e| e.to_string()),
+        }
     } else if deckle_mobi::is_mobi_file(source) {
         deckle_mobi::convert(source, &epub)
             .map(|r| r.warnings)

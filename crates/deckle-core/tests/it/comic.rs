@@ -517,3 +517,25 @@ fn a_queued_comic_flushes_as_azw3_and_so_does_its_fallback() {
         r.warnings
     );
 }
+
+#[test]
+fn a_scanned_pdf_imports_as_a_fixed_layout_book_of_its_pages() {
+    // Needs PDFium: tools/fetch-pdfium.sh, or DECKLE_PDFIUM.
+    let dir = tempfile::tempdir().unwrap();
+    let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf/scan.pdf");
+    let imported = import(&pdf, dir.path(), "imported.epub").unwrap().unwrap();
+    assert!(
+        imported.warnings[0].contains("scanned PDF"),
+        "{:?}",
+        imported.warnings
+    );
+    let info = inspect(&imported.epub).unwrap();
+    assert!(info.fixed_layout);
+    assert_eq!(info.spine.len(), 1);
+    assert!(
+        info.identifiers
+            .iter()
+            .any(|i| i.starts_with("urn:deckle:comic:")),
+        "a scan is Deckle's own comic, so it's fitted per device"
+    );
+}
