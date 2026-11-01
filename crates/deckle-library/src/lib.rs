@@ -126,9 +126,11 @@ pub fn book_info(path: &Path) -> Result<BookInfo, String> {
         return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
     }
     if deckle_pdf::is_pdf(path) {
+        // Through the import stage, so a scan reads as the comic it's sent as.
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
-        let epub = dir.path().join("imported.epub");
-        deckle_pdf::convert(path, &epub).map_err(|e| e.to_string())?;
+        let epub = deckle_core::import::import(path, dir.path(), "imported.epub")
+            .ok_or("not a PDF Deckle can import")??
+            .epub;
         return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
     }
     if deckle_mobi::is_mobi_file(path) {

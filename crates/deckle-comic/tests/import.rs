@@ -396,6 +396,35 @@ fn a_real_archive_cbr_is_unpacked_by_bsdtar_and_nothing_escapes_it() {
     ));
 }
 
+#[test]
+fn the_owners_direction_wins_over_comicinfo() {
+    let dir = tempfile::tempdir().unwrap();
+    let manga = "<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>";
+    let src = cbz(
+        dir.path(),
+        "m.cbz",
+        &[
+            ("ComicInfo.xml", manga.as_bytes().to_vec()),
+            ("1.png", png(4, 6)),
+        ],
+    );
+    let out = dir.path().join("ltr.epub");
+    let r =
+        deckle_comic::convert_with(&src, &out, Some(deckle_comic::Direction::LeftToRight)).unwrap();
+    assert!(!r.right_to_left);
+    assert!(!text(&read_epub(&out), "OEBPS/content.opf").contains("rtl"));
+
+    let plain = cbz(dir.path(), "p.cbz", &[("1.png", png(4, 6))]);
+    let out = dir.path().join("rtl.epub");
+    let r = deckle_comic::convert_with(&plain, &out, Some(deckle_comic::Direction::RightToLeft))
+        .unwrap();
+    assert!(r.right_to_left);
+    assert!(
+        text(&read_epub(&out), "OEBPS/content.opf")
+            .contains("<spine page-progression-direction=\"rtl\">")
+    );
+}
+
 /// A one-entry ustar archive naming `name`, whatever that name is.
 fn tar_with(name: &str, data: &[u8]) -> Vec<u8> {
     let mut h = [0u8; 512];

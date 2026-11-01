@@ -1600,7 +1600,7 @@ mod tests {
     }
 
     #[test]
-    fn a_pdf_row_shows_the_reflowed_metadata_and_a_scan_says_why_not() {
+    fn a_pdf_row_shows_the_reflowed_metadata_and_a_scan_reads_as_fixed_layout() {
         // Needs PDFium: tools/fetch-pdfium.sh, or DECKLE_PDFIUM.
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf");
         let pdf = book_row(&fixtures.join("book.pdf"));
@@ -1609,9 +1609,10 @@ mod tests {
             (pdf.title.as_str(), pdf.authors.as_str()),
             ("A Small Book", "B. Writer")
         );
+        // A scan has no text to reflow: it goes as its page pictures, like a comic.
         let scan = book_row(&fixtures.join("scan.pdf"));
-        assert_eq!(scan.mode, "error");
-        assert!(scan.reason.contains("no text in it"), "{}", scan.reason);
+        assert_eq!(scan.error, None, "{}", scan.reason);
+        assert!(scan.reason.starts_with("Fixed layout"), "{}", scan.reason);
         let found = expand_book_paths(&[fixtures.to_string_lossy().into_owned()]);
         assert!(
             found.iter().any(|p| p.ends_with("book.pdf")),

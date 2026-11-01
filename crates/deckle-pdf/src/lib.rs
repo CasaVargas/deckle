@@ -58,6 +58,48 @@ pub struct ImportReport {
     pub warnings: Vec<String>,
 }
 
+/// Height a scanned page is rendered at: the tallest e-reader panel (Kindle Scribe). Each device
+/// gets it scaled down to its own screen later (fixed-layout spec §7.1).
+const SCAN_HEIGHT: u32 = 2480;
+
+/// What [`render_scan`] wrote.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scan {
+    /// The PDF's own title and author, when it has real ones.
+    pub title: Option<String>,
+    pub author: Option<String>,
+    pub pages: usize,
+}
+
+/// Renders every page of the PDF at `pdf` into `dir` as `p0001.jpg`, `p0002.jpg`…: a scan
+/// [`convert`] refuses becomes a folder of page images, which `deckle-comic` makes a fixed-layout
+/// book of (fixed-layout spec §9, phase 4b). No OCR: the pages stay pictures.
+pub fn render_scan(pdf: &Path, dir: &Path) -> Result<Scan, PdfError> {
+    let size = std::fs::metadata(pdf)?.len();
+    if size > MAX_BYTES {
+        return Err(PdfError::TooLarge(size));
+    }
+    let pdfium = engine::pdfium()?;
+    let doc = engine::Document::open(pdfium, pdf)?;
+    let info = doc.info();
+    let pages = doc.page_count();
+    std::fs::create_dir_all(dir)?;
+    for i in 0..pages {
+        let img = doc.render(i, SCAN_HEIGHT)?;
+        let mut jpeg = Vec::new();
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg, 85);
+        img.to_rgb8()
+            .write_with_encoder(enc)
+            .map_err(|e| PdfError::Unreadable(e.to_string()))?;
+        std::fs::write(dir.join(format!("p{:04}.jpg", i + 1)), jpeg)?;
+    }
+    Ok(Scan {
+        title: info.title,
+        author: info.author,
+        pages,
+    })
+}
+
 /// Inputs the importer takes: `.pdf`, any case.
 pub fn is_pdf(path: &Path) -> bool {
     path.extension()

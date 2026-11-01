@@ -30,6 +30,71 @@ fn devices_without_a_kindle_succeeds_with_a_message() {
 }
 
 #[test]
+fn send_copies_a_kfx_under_its_title() {
+    let kfx = std::fs::read(deckle_kfx::fixtures::path(
+        "deckle-mini-pdoc-nopages.golden.kfx",
+    ))
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("whatever.kfx");
+    std::fs::write(&src, &kfx).unwrap();
+    let to = dir.path().join("out");
+    std::fs::create_dir(&to).unwrap();
+    Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["send"])
+        .arg(&src)
+        .arg("--to")
+        .arg(&to)
+        .assert()
+        .success();
+    let sent: Vec<_> = std::fs::read_dir(&to).unwrap().flatten().collect();
+    assert_eq!(sent.len(), 1);
+    let name = sent[0].file_name().to_string_lossy().into_owned();
+    assert!(name.ends_with(".kfx") && name != "whatever.kfx", "{name}");
+    assert_eq!(std::fs::read(sent[0].path()).unwrap(), kfx);
+}
+
+#[test]
+fn send_copies_a_pdf_under_its_own_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("Write-on Probe.pdf");
+    std::fs::write(&src, b"%PDF-1.4\n%%EOF\n").unwrap();
+    let to = dir.path().join("out");
+    std::fs::create_dir(&to).unwrap();
+    Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["send"])
+        .arg(&src)
+        .arg("--to")
+        .arg(&to)
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read(to.join("Write-on Probe.pdf")).unwrap(),
+        b"%PDF-1.4\n%%EOF\n"
+    );
+}
+
+#[test]
+fn send_refuses_a_file_a_kindle_cannot_open() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("notes.docx");
+    std::fs::write(&src, b"PK\x03\x04").unwrap();
+    let out = Command::cargo_bin("deckle")
+        .unwrap()
+        .args(["send"])
+        .arg(&src)
+        .arg("--to")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("deckle run"), "{err}");
+}
+
+#[test]
 fn convert_from_kpf_matches_the_golden() {
     let golden = std::fs::read(deckle_kfx::fixtures::path(
         "deckle-mini-pdoc-nopages.golden.kfx",

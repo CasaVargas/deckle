@@ -353,9 +353,33 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Send { kfx, to } => {
             let bytes =
                 std::fs::read(&kfx).map_err(|e| format!("cannot read {}: {e}", kfx.display()))?;
+            // A KFX goes under its title; anything else a Kindle opens (a PDF, an AZW3) under
+            // its own name, through the same MTP session, which never resets the device.
+            let document = match bytes.starts_with(b"CONT") {
+                true => None,
+                false => Some(
+                    kfx.file_name()
+                        .and_then(|n| deckle_core::deliver::document_filename(&n.to_string_lossy()))
+                        .ok_or_else(|| {
+                            format!(
+                                "{} isn't a KFX or a document a Kindle opens (PDF, TXT, AZW3, \
+                                 MOBI); convert it with `deckle run`",
+                                kfx.display()
+                            )
+                        })?,
+                ),
+            };
             let target = resolve_target(&to)?;
-            let info = info_from_kfx(&bytes);
-            let path = deliver(&bytes, &info, &target).map_err(|e| e.to_string())?;
+            let path = match document {
+                Some(name) => deckle_core::deliver::deliver_named_on(
+                    &bytes,
+                    &name,
+                    &mut deckle_core::deliver::Conn::new(&target),
+                    &Default::default(),
+                ),
+                None => deliver(&bytes, &info_from_kfx(&bytes), &target),
+            }
+            .map_err(|e| e.to_string())?;
             emit(json, &path, || format!("sent to {}", path.display()))?;
             Ok(ExitCode::SUCCESS)
         }
@@ -475,10 +499,17 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             word_wise_level,
             wordwise_db,
             keep_work_dir,
+            direction,
         } => {
             if epubs.is_empty() {
                 return Ok(ExitCode::from(EXIT_USAGE));
             }
+            // A comic read in the order asked for: made into its EPUB here, then sent as one.
+            let comics = tempfile::tempdir().map_err(|e| e.to_string())?;
+            let epubs = match direction {
+                Some(d) => with_direction(&epubs, d.into(), comics.path())?,
+                None => epubs,
+            };
             if asin.is_some() && epubs.len() > 1 {
                 return Err("--asin names one book's edition: pass a single EPUB".into());
             }
@@ -4629,6 +4660,33 @@ fn queue_remarkable(
     Ok(())
 }
 
+/// `inputs` with each comic (CBZ, CBR, page folder) made into its EPUB in `dir`, read in
+/// `direction`. Anything else is refused: `--direction` only says how a comic reads.
+fn with_direction(
+    inputs: &[PathBuf],
+    direction: deckle_comic::Direction,
+    dir: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    inputs
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            if !deckle_comic::is_comic(p) {
+                return Err(format!(
+                    "{}: --direction is for comics (.cbz, .cbr or a folder of page images)",
+                    p.display()
+                ));
+            }
+            let stem = p.file_stem().unwrap_or_default().to_string_lossy();
+            // Numbered, so two comics with one name don't overwrite each other.
+            let epub = dir.join(format!("{i}-{stem}.epub"));
+            deckle_comic::convert_with(p, &epub, Some(direction))
+                .map_err(|e| format!("{}: {e}", p.display()))?;
+            Ok(epub)
+        })
+        .collect()
+}
+
 /// Uploads the reMarkable outbox when `[remarkable]` is on and the tablet answers.
 fn push_remarkable(cfg: &deckle_digest::Config) -> Option<deckle_core::sync::RemarkablePush> {
     if !cfg.remarkable.enabled {
@@ -6135,6 +6193,34 @@ mod tests {
     use super::*;
     use deckle_core::pipeline::XRayMode;
     use deckle_digest::reading::Outcome;
+
+    #[test]
+    fn direction_makes_each_comic_an_epub_and_refuses_anything_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let pages = dir.path().join("Night Train");
+        std::fs::create_dir(&pages).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbImage::new(4, 6)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(pages.join("1.png"), png.into_inner()).unwrap();
+        let out = dir.path().join("out");
+        std::fs::create_dir(&out).unwrap();
+        let made = with_direction(
+            std::slice::from_ref(&pages),
+            deckle_comic::Direction::RightToLeft,
+            &out,
+        )
+        .unwrap();
+        assert_eq!(made, [out.join("0-Night Train.epub")]);
+        let info = deckle_core::inspect::inspect(&made[0]).unwrap();
+        assert!(info.fixed_layout && info.right_to_left);
+        assert_eq!(info.title, "Night Train");
+
+        let epub = deckle_kfx::fixtures::path("deckle-mini.epub");
+        let err = with_direction(&[epub], deckle_comic::Direction::RightToLeft, &out).unwrap_err();
+        assert!(err.contains("--direction is for comics"), "{err}");
+    }
 
     pub(crate) fn fake_previewer() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../deckle-core/tests/fake_previewer/ok.sh")
