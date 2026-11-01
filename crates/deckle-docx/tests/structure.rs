@@ -173,9 +173,9 @@ fn emphasis_lists_and_tables_stay_text() {
 
 #[test]
 fn a_document_set_mostly_in_bold_promotes_nothing() {
-    let mut paras = vec![p("Chapter One", None, true)];
+    let mut paras = vec![p("Beginnings", None, true)];
     paras.extend((0..4).map(|_| p(PROSE, None, true)));
-    paras.push(p("Chapter Two", None, true));
+    paras.push(p("Endings", None, true));
     let (files, report) = import(&paras);
     assert!(!chapters(&files).concat().contains("<h1"));
     assert_eq!(report.chapters, 1);
@@ -205,5 +205,35 @@ fn real_heading_styles_switch_recovery_off() {
     assert!(html.contains("<h1 id=\"h1\">Real Chapter</h1>"));
     assert!(html.contains("<p><b>Chapter One</b></p>"), "{html}");
     assert_eq!(report.contents, 1);
+    assert!(!guessed(&report));
+}
+
+#[test]
+fn plain_chapter_titles_become_h1_above_bold_sections() {
+    let mut paras = Vec::new();
+    for ch in ["Chapter One", "Chapter Two: The Return"] {
+        paras.push(body(ch));
+        paras.push(p("Morning", None, true));
+        paras.extend((0..5).map(|_| body(PROSE)));
+    }
+    let (files, report) = import(&paras);
+    let ch = chapters(&files);
+    assert_eq!(ch.len(), 2, "one file per chapter title");
+    assert!(
+        ch[0].contains("<h1 id=\"h1\">Chapter One</h1>"),
+        "{}",
+        ch[0]
+    );
+    assert!(ch[0].contains("<h2 id=\"h2\">Morning</h2>"), "{}", ch[0]);
+    assert!(ch[1].contains(">Chapter Two: The Return</h1>"), "{}", ch[1]);
+    assert!(guessed(&report));
+}
+
+#[test]
+fn a_sentence_about_a_chapter_stays_text() {
+    let mut paras = vec![body("Chapter of accidents"), body("Part of the problem")];
+    paras.extend((0..6).map(|_| body(PROSE)));
+    let (files, report) = import(&paras);
+    assert!(!chapters(&files).concat().contains("<h1"));
     assert!(!guessed(&report));
 }

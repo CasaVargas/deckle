@@ -257,19 +257,29 @@ impl<'d, 'i> Body<'d, 'i> {
             .max_by_key(|(size, n)| (**n, std::cmp::Reverse(**size)))
             .map(|(size, _)| u32::from(*size));
         let bold_cue = self.bold_chars * 2 < total;
-        let promoted = |size: u16, bold: bool| {
-            body.is_some_and(|body| u32::from(size) * 20 >= body * 23) || (bold && bold_cue)
+        // A heading's look, by which levels are ranked. "Chapter 7" set like the text around it
+        // gets a look of its own that outranks every other.
+        let look = |text: &str, size: u16, bold: bool| {
+            if body.is_some_and(|body| u32::from(size) * 20 >= body * 23) || (bold && bold_cue) {
+                Some((size, bold))
+            } else if chapter_title(text) {
+                Some((u16::MAX, true))
+            } else {
+                None
+            }
         };
         let mut looks: Vec<(u16, bool)> = Vec::new();
         let mut count = 0;
         if !styled {
             for b in out.iter() {
-                if let Block::Candidate { size, bold, .. } = b
-                    && promoted(*size, *bold)
+                if let Block::Candidate {
+                    text, size, bold, ..
+                } = b
+                    && let Some(l) = look(text, *size, *bold)
                 {
                     count += 1;
-                    if !looks.contains(&(*size, *bold)) {
-                        looks.push((*size, *bold));
+                    if !looks.contains(&l) {
+                        looks.push(l);
                     }
                 }
             }
@@ -288,7 +298,8 @@ impl<'d, 'i> Body<'d, 'i> {
             else {
                 continue;
             };
-            *b = match looks.iter().position(|l| *l == (*size, *bold)) {
+            let rank = look(text, *size, *bold).and_then(|l| looks.iter().position(|x| *x == l));
+            *b = match rank {
                 Some(rank) if recover => {
                     self.headings += 1;
                     let level = (rank + 1).min(3) as u8;
@@ -306,8 +317,8 @@ impl<'d, 'i> Body<'d, 'i> {
         if recover {
             let s = if count == 1 { "" } else { "s" };
             self.warnings.push(format!(
-                "guessed {count} heading{s} from bold or large text (the document uses no Word \
-                 heading styles)"
+                "guessed {count} heading{s} from bold or large text and chapter titles (the \
+                 document uses no Word heading styles)"
             ));
         }
     }
@@ -715,6 +726,77 @@ impl<'d, 'i> Body<'d, 'i> {
     }
 }
 
+/// Words that open a chapter title on their own ("Prologue") or before a number ("Part II").
+const CHAPTER_WORDS: [&str; 9] = [
+    "chapter",
+    "part",
+    "book",
+    "prologue",
+    "epilogue",
+    "interlude",
+    "afterword",
+    "foreword",
+    "introduction",
+];
+
+const NUMBER_WORDS: [&str; 28] = [
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+];
+
+/// "Chapter 7", "CHAPTER SEVEN", "Part II: The Return", "Prologue": a chapter word, then a
+/// number, a number word or a Roman numeral, then nothing or a separator and a title.
+fn chapter_title(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    let mut words = t.splitn(2, char::is_whitespace);
+    let raw = words.next().unwrap_or("");
+    let word = raw.trim_end_matches([':', '.', '—', '–']);
+    if !CHAPTER_WORDS.contains(&word) {
+        return false;
+    }
+    let rest = words.next().unwrap_or("").trim_start();
+    let separated = |r: &str| r.is_empty() || r.starts_with([':', '.', '—', '–', '-', '|']);
+    if !matches!(word, "chapter" | "part" | "book") {
+        // "Prologue", "Prologue: The Fall", "Prologue — The Fall".
+        return word.len() < raw.len() || separated(rest);
+    }
+    let end = rest
+        .find(|c: char| c.is_whitespace() || matches!(c, ':' | '.' | '—' | '–' | '|'))
+        .unwrap_or(rest.len());
+    let (number, after) = rest.split_at(end);
+    let is_number = !number.is_empty()
+        && (number.chars().all(|c| c.is_ascii_digit())
+            || (number.len() <= 7 && number.chars().all(|c| "ivxlc".contains(c)))
+            || number.split('-').all(|w| NUMBER_WORDS.contains(&w)));
+    is_number && separated(after.trim_start())
+}
+
 /// Whether a paragraph ends like a sentence or a clause, so it reads as text, not a title.
 fn ends_sentence(t: &str) -> bool {
     t.trim_end_matches(['"', '\'', '”', '’', ')', ']'])
@@ -802,7 +884,34 @@ pub fn nest(items: &[(u8, bool, u32, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::nest;
+    use super::{chapter_title, nest};
+
+    #[test]
+    fn chapter_titles_are_recognised() {
+        for t in [
+            "Chapter 7",
+            "CHAPTER SEVEN",
+            "Chapter Twenty-One",
+            "Part II: The Return",
+            "Book iv",
+            "Chapter 3 — Rain",
+            "Prologue",
+            "Epilogue: After",
+            "Introduction",
+        ] {
+            assert!(chapter_title(t), "{t}");
+        }
+        for t in [
+            "Chapter of accidents",
+            "Part of the problem is time",
+            "Book reviews",
+            "Introduction to Rust",
+            "Chapters",
+            "The Prologue",
+        ] {
+            assert!(!chapter_title(t), "{t}");
+        }
+    }
 
     #[test]
     fn list_items_nest_by_level() {

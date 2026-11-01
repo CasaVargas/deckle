@@ -62,8 +62,8 @@ document set in one big size), so nothing is promoted.
 
 **Output:** a promoted paragraph becomes `<hN id="hK">` with its own text and inline markup,
 minus the bold that made it a heading. h1 starts a new chapter file, as Heading 1 does today,
-and h1–h3 go into the contents. The report gets the warning *"guessed N headings from bold or
-large text (the document uses no Word heading styles)"*.
+and h1–h3 go into the contents. The report gets a warning saying how many headings were
+guessed (wording in §6).
 
 **Tests** (`crates/deckle-docx/tests/structure.rs`, documents built in memory with `zip`):
 
@@ -93,7 +93,13 @@ titles are bold at body size, each at the top of a page.
 
 ## 6. Chapter words (increment 4)
 
-In a Word document with no headings, a short centred or standalone paragraph that reads
-"Chapter …", "Part …", "Book …", "Prologue", "Epilogue", "Interlude" or "Afterword"
-(case-insensitive, followed by a number, a number word, a Roman numeral or nothing) is an h1
-candidate even without bold or size, ranked above every look from §3.
+In a Word document with no headings, a candidate paragraph (§3) that reads as a chapter title
+is a heading even without bold or size. A chapter title is "Chapter", "Part" or "Book" followed
+by a number, a number word ("Twenty-One") or a Roman numeral, or "Prologue", "Epilogue",
+"Interlude", "Afterword", "Foreword" or "Introduction" alone. Either can be followed by a
+separator and a title ("Part II: The Return"), and case doesn't matter. A chapter title already
+set apart by size or bold keeps that look's level. One set like the body text gets a look of
+its own that ranks above all the others, so plain "Chapter One" lines become h1 over bold
+section titles. Chapter titles count toward the one-third limit. The warning reads *"guessed N
+headings from bold or large text and chapter titles (the document uses no Word heading
+styles)"*.
