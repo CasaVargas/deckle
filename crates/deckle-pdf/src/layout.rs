@@ -1044,7 +1044,7 @@ mod tests {
             let mut g = Vec::new();
             styled(&mut g, 72.0, 100.0, ch, 10.0, true);
             let mut y = 124.0;
-            let mut para = |g: &mut Vec<Glyph>, y: &mut f32| {
+            let para = |g: &mut Vec<Glyph>, y: &mut f32| {
                 for i in 0..4 {
                     text_at(
                         g,
