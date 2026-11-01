@@ -163,8 +163,7 @@ fn the_identifier_is_stable_across_runs() {
     let b = import(&cbz(dir.path(), "a2.cbz", &files)).0;
     let id = |f: &Files| {
         let opf = text(f, "OEBPS/content.opf");
-        let s = opf.split("urn:deckle:comic:").nth(1).unwrap()[..16].to_owned();
-        s
+        opf.split("urn:deckle:comic:").nth(1).unwrap()[..16].to_owned()
     };
     // Same pages, different file names: different titles, so different ids…
     assert_ne!(id(&a), id(&b));
