@@ -181,6 +181,8 @@ pub(crate) struct Book {
     pub(crate) lang: String,
     /// Spine XHTML documents, as paths in the zip, in reading order.
     pub(crate) spine: Vec<String>,
+    /// Their manifest ids, in the same order.
+    pub(crate) spine_ids: Vec<String>,
     /// The nav document's path, when there is one.
     pub(crate) nav: Option<String>,
     /// The NCX's path, when there is one.
@@ -228,13 +230,16 @@ impl Book {
                 ))
             })
             .collect();
-        let spine = doc
+        let (spine_ids, spine): (Vec<String>, Vec<String>) = doc
             .descendants()
             .filter(|n| n.has_tag_name("itemref"))
-            .filter_map(|n| items.get(n.attribute("idref")?))
-            .filter(|(_, mt, _)| *mt == "application/xhtml+xml")
-            .map(|(p, _, _)| p.clone())
-            .collect();
+            .filter_map(|n| {
+                let id = n.attribute("idref")?;
+                Some((id, items.get(id)?))
+            })
+            .filter(|(_, (_, mt, _))| *mt == "application/xhtml+xml")
+            .map(|(id, (p, _, _))| (id.to_owned(), p.clone()))
+            .unzip();
         let nav = items
             .values()
             .find(|(_, _, props)| props.split_whitespace().any(|p| p == "nav"))
@@ -260,6 +265,7 @@ impl Book {
             lang: text("language"),
             opf_path,
             spine,
+            spine_ids,
             nav,
             ncx,
             nonlinear,
@@ -378,6 +384,131 @@ impl Book {
         }
         Ok(())
     }
+}
+
+impl Book {
+    /// The page `file` (next to the OPF, manifest id `id`) in the manifest, and before the spine
+    /// document `before` in the spine, the nav and the NCX (as `label`, taking that document's
+    /// `playOrder`; later points move up one). Where `before` isn't listed, the page goes first in
+    /// the nav and the NCX's place for it is left alone.
+    pub(crate) fn register_page_before(
+        &self,
+        files: &mut [(String, Vec<u8>)],
+        (id, file, label): (&str, &str, &str),
+        before: &str,
+    ) -> Result<(), String> {
+        let at = self
+            .spine
+            .iter()
+            .position(|p| p == before)
+            .ok_or_else(|| format!("{before} is not in the spine"))?;
+        let opf = slot(files, &self.opf_path)?;
+        let mut s = String::from_utf8_lossy(&opf.1).into_owned();
+        let item =
+            format!("<item id=\"{id}\" href=\"{file}\" media-type=\"application/xhtml+xml\"/>");
+        insert_before_close(&mut s, "manifest", &item)?;
+        let idref = format!("idref=\"{}\"", self.spine_ids[at]);
+        let ref_at = s
+            .find(&idref)
+            .and_then(|i| s[..i].rfind('<'))
+            .ok_or_else(|| format!("no itemref for {before}"))?;
+        s.insert_str(ref_at, &format!("<itemref idref=\"{id}\"/>"));
+        opf.1 = s.into_bytes();
+        let page = self.page_at(file);
+        let label = esc(label);
+
+        if let Some(path) = &self.nav {
+            let nav = slot(files, path)?;
+            let mut s = String::from_utf8_lossy(&nav.1).into_owned();
+            let li = format!(
+                "<li><a href=\"{}\">{label}</a></li>",
+                relative(dir_of(path), &page)
+            );
+            let target = |href: &str| {
+                crate::epub::join(
+                    dir_of(path),
+                    &crate::epub::percent_decode(href.split('#').next().unwrap_or("")),
+                )
+            };
+            let li_at = s
+                .match_indices("href=\"")
+                .find(|(i, m)| {
+                    let rest = &s[i + m.len()..];
+                    rest.find('"').is_some_and(|e| target(&rest[..e]) == before)
+                })
+                .and_then(|(i, _)| s[..i].rfind("<li"));
+            match li_at {
+                Some(i) => s.insert_str(i, &li),
+                None => {
+                    let start = s
+                        .find("epub:type=\"toc\"")
+                        .or_else(|| s.find("<nav"))
+                        .unwrap_or(0);
+                    if let Some(ol) = s[start..].find("<ol") {
+                        let open = tag_end(&s, start + ol);
+                        s.insert_str(open, &li);
+                    }
+                }
+            }
+            nav.1 = s.into_bytes();
+        }
+        if let Some(path) = &self.ncx {
+            let ncx = slot(files, path)?;
+            let mut s = String::from_utf8_lossy(&ncx.1).into_owned();
+            let href = relative(dir_of(path), &page);
+            let point_at = s.match_indices("src=\"").find_map(|(i, m)| {
+                let rest = &s[i + m.len()..];
+                let src = &rest[..rest.find('"')?];
+                let target = crate::epub::join(
+                    dir_of(path),
+                    &crate::epub::percent_decode(src.split('#').next().unwrap_or("")),
+                );
+                (target == before)
+                    .then(|| s[..i].rfind("<navPoint"))
+                    .flatten()
+            });
+            if let Some(i) = point_at {
+                let order = s[i..]
+                    .find("playOrder=\"")
+                    .and_then(|o| {
+                        let rest = &s[i + o + 11..];
+                        rest[..rest.find('"')?].parse::<u32>().ok()
+                    })
+                    .unwrap_or(1);
+                let mut out = renumber(&s, order);
+                out.insert_str(
+                    i,
+                    &format!(
+                        "<navPoint id=\"{id}\" playOrder=\"{order}\"><navLabel><text>{label}\
+                         </text></navLabel><content src=\"{href}\"/></navPoint>"
+                    ),
+                );
+                s = out;
+            }
+            ncx.1 = s.into_bytes();
+        }
+        Ok(())
+    }
+}
+
+/// `xml` with every `playOrder` of `from` or more one higher. Byte offsets before the first
+/// changed number stay put; the inserted navPoint goes before it.
+fn renumber(xml: &str, from: u32) -> String {
+    let mut out = String::with_capacity(xml.len() + 16);
+    let mut rest = xml;
+    while let Some(i) = rest.find("playOrder=\"") {
+        let num_at = i + 11;
+        out.push_str(&rest[..num_at]);
+        rest = &rest[num_at..];
+        let end = rest.find('"').unwrap_or(0);
+        match rest[..end].parse::<u32>() {
+            Ok(n) if n >= from => out.push_str(&(n + 1).to_string()),
+            _ => out.push_str(&rest[..end]),
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 fn slot<'a>(

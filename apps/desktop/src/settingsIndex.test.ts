@@ -92,7 +92,8 @@ describe("page cards", () => {
     expect(pageSummary("reading", { ...s, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("All off");
     expect(pageSummary("reading", { ...s, chapter_recaps: true }, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia · Chapter recaps");
     expect(pageSummary("reading", { ...s, chapter_recaps: true, llm_provider: "off", word_wise: false, xray: false }, null, [], "0.7.0")).toBe("All off");
-    expect(pageSummary("reading", { ...s, book_summary: true, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Book summary");
+    expect(pageSummary("reading", { ...s, book_summary: true, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("A summary");
+    expect(pageSummary("reading", { ...s, chapter_recaps: true, book_summary: true, series_recap: true, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Chapter recaps, a summary and a series recap");
     expect(pageSummary("reading", { ...s, chapter_recaps: true, book_summary: true, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Chapter recaps and a summary");
     expect(pageSummary("kindles", s, null, [kindle], "0.7.0")).toBe("Paperwhite");
     expect(pageSummary("online", { ...s, metadata_fill: false, amazon_match: false }, null, [], "0.7.0")).toBe("2 features on");

@@ -65,6 +65,8 @@ pub struct Settings {
     pub chapter_recaps: bool,
     /// A summary page after the last chapter, made from the recaps (issue #29); needs the LLM.
     pub book_summary: bool,
+    /// A Previously page in a later book of a series, from the earlier books' recaps (issue #29).
+    pub series_recap: bool,
     pub amazon_match: bool,
     /// A typographic cover for a book that has none (issue #27).
     pub generated_cover: bool,
@@ -94,6 +96,7 @@ impl Default for Settings {
             wikipedia: false,
             chapter_recaps: false,
             book_summary: false,
+            series_recap: false,
             amazon_match: false,
             generated_cover: true,
             metadata_fill: false,
@@ -697,12 +700,16 @@ pub fn set_illustrations_key_at(file: &Path, key: &str) -> Result<(), String> {
     save_settings_to(file, &s)
 }
 
-/// Chapter recaps and the book summary as a run asks for them; `None` when both are off.
+/// Chapter recaps, the book summary and the series recap as a run asks for them; `None` when
+/// all are off.
 pub fn extras(settings: &Settings) -> Option<deckle_core::recaps::Extras> {
-    (settings.chapter_recaps || settings.book_summary).then(|| deckle_core::recaps::Extras {
-        cache_dir: deckle_core::wordwise::default_cache_dir(),
-        chapters: settings.chapter_recaps,
-        summary: settings.book_summary,
+    (settings.chapter_recaps || settings.book_summary || settings.series_recap).then(|| {
+        deckle_core::recaps::Extras {
+            cache_dir: deckle_core::wordwise::default_cache_dir(),
+            chapters: settings.chapter_recaps,
+            summary: settings.book_summary,
+            series: settings.series_recap,
+        }
     })
 }
 
@@ -1707,7 +1714,12 @@ mod tests {
             chapter_recaps: true,
             ..s
         };
-        assert!(extras(&both).is_some_and(|e| e.summary && e.chapters));
+        assert!(extras(&both).is_some_and(|e| e.summary && e.chapters && !e.series));
+        let series = Settings {
+            series_recap: true,
+            ..Default::default()
+        };
+        assert!(extras(&series).is_some_and(|e| e.series && !e.chapters && !e.summary));
     }
 
     #[test]
@@ -1733,6 +1745,7 @@ mod tests {
         assert!(!s.popup_notes, "the pop-up notes pass is off by default");
         assert!(!s.chapter_recaps, "chapter recaps are off by default");
         assert!(!s.book_summary, "the book summary is off by default");
+        assert!(!s.series_recap, "the series recap is off by default");
         assert_eq!(extras(&s), None);
         assert!(s.book_presets.is_empty());
         let mut changed = s.clone();
@@ -1747,6 +1760,7 @@ mod tests {
         changed.popup_notes = true;
         changed.chapter_recaps = true;
         changed.book_summary = true;
+        changed.series_recap = true;
         changed.illustrations_api_key = "sk-image".into();
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
@@ -1765,7 +1779,7 @@ mod tests {
             !s.chapter_recaps,
             "a file from before recaps keeps them off"
         );
-        assert!(!s.book_summary);
+        assert!(!s.book_summary && !s.series_recap);
     }
 
     #[test]

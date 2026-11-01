@@ -497,6 +497,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             wikipedia,
             recaps,
             book_summary,
+            series_recap,
             word_wise,
             word_wise_level,
             wordwise_db,
@@ -521,12 +522,15 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 .transpose()?;
             let pages_explicit = pages.is_some();
             let pages = cli::parse_pages(pages.as_deref())?;
-            // Chapter recaps and the book summary (AI extras design §4, §13).
-            let extras = (recaps || book_summary).then(|| deckle_core::recaps::Extras {
-                cache_dir: deckle_core::wordwise::default_cache_dir(),
-                chapters: recaps,
-                summary: book_summary,
-            });
+            // Chapter recaps, the book summary and the series recap (AI extras design §4, §13,
+            // §14).
+            let extras =
+                (recaps || book_summary || series_recap).then(|| deckle_core::recaps::Extras {
+                    cache_dir: deckle_core::wordwise::default_cache_dir(),
+                    chapters: recaps,
+                    summary: book_summary,
+                    series: series_recap,
+                });
             if kindle.is_some() && to != "device" {
                 return Err("--kindle sends to a Kindle; leave out --to".into());
             }
@@ -553,7 +557,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 let recaps = match (&extras, config) {
                     (None, _) => None,
                     (Some(_), None) => {
-                        eprintln!("Chapter recaps and the book summary need an LLM (--llm)");
+                        eprintln!("AI extras need an LLM (--llm)");
                         None
                     }
                     (Some(e), Some(llm)) => Some(e.options(llm)),

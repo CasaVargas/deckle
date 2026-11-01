@@ -50,6 +50,16 @@ export default function Online({ settings, set, onPage }: Props) {
       page: "reading",
       where: "Reading aids",
     },
+    {
+      title: "Series recap",
+      sends: "each chapter's text, and recaps of the earlier books in the series,",
+      to: ai ? provider : "the AI model's provider",
+      why: "A page before chapter 1 of a later book saying what happened so far. Needs the AI model.",
+      on: settings.series_recap,
+      toggle: (on) => set("series_recap", on),
+      page: "reading",
+      where: "Reading aids",
+    },
   ];
   return (
     <div className="set-stack">
