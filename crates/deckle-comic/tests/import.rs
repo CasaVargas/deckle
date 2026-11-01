@@ -117,7 +117,8 @@ fn pages_come_out_in_natural_order_as_a_fixed_layout_epub() {
     roxmltree::Document::parse(&opf).unwrap();
     assert!(opf.contains("<meta property=\"rendition:layout\">pre-paginated</meta>"));
     assert!(opf.contains("<meta name=\"book-type\" content=\"comic\"/>"));
-    assert!(opf.contains("<meta name=\"original-resolution\" content=\"10x20\"/>"));
+    // Three sizes, one page each: the tie goes to the largest.
+    assert!(opf.contains("<meta name=\"original-resolution\" content=\"30x40\"/>"));
     assert!(opf.contains(
         "<item id=\"img-p0001\" href=\"images/p0001.png\" media-type=\"image/png\" properties=\"cover-image\"/>"
     ));
@@ -445,4 +446,26 @@ fn tar_with(name: &str, data: &[u8]) -> Vec<u8> {
     out.extend(data);
     out.resize(out.len().next_multiple_of(512) + 1024, 0);
     out
+}
+
+#[test]
+fn original_resolution_is_the_typical_page_not_a_wide_title_banner() {
+    let dir = tempfile::tempdir().unwrap();
+    // Pepper&Carrot opens on a wide banner; the pages after it are portrait.
+    let src = cbz(
+        dir.path(),
+        "banner.cbz",
+        &[
+            ("00.png", png(60, 16)),
+            ("01.png", png(20, 30)),
+            ("02.png", png(20, 30)),
+            ("03.png", png(22, 30)),
+        ],
+    );
+    let (files, _) = import(&src);
+    let opf = text(&files, "OEBPS/content.opf");
+    assert!(
+        opf.contains("<meta name=\"original-resolution\" content=\"20x30\"/>"),
+        "{opf}"
+    );
 }
