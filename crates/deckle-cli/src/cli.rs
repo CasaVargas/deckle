@@ -349,6 +349,17 @@ pub enum PuzzlesCommand {
         #[command(flatten)]
         book: BookArgs,
     },
+    /// A book of crosswords.
+    Crossword {
+        /// Squares on a side, 5 to 15.
+        #[arg(long, default_value_t = 11)]
+        size: usize,
+        /// easy: everyday words; hard: rarer ones mixed in.
+        #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
+        difficulty: DifficultyArg,
+        #[command(flatten)]
+        book: BookArgs,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]

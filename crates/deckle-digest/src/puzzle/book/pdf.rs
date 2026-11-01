@@ -8,8 +8,10 @@ use std::collections::BTreeMap;
 use ab_glyph::{Font, FontRef, GlyphId};
 use pdf_writer::{Content, Name, Pdf, Rect, Ref, Str, TextStr};
 
-use super::{Book, BookError, SEARCH_SIZES, words_wanted};
+use super::{Book, BookError, CROSS_SIZES, Kind, Puzzles, SEARCH_SIZES, words_wanted};
 use crate::pdf::{BOLD, EmbedFace, REGULAR, Screen, embed_font, glyph_bytes, shape};
+use crate::puzzle::cross::{self, Crossword};
+use crate::puzzle::grid::Dir;
 use crate::puzzle::search::Search;
 
 /// The page a book is laid out for: the Kindle Scribe's screen, or one of the Daily's.
@@ -66,6 +68,14 @@ const CELL_LINE: f32 = 0.75;
 const BORDER: f32 = 2.0;
 /// Answers a page, two by two.
 const ANSWERS_PER_PAGE: usize = 4;
+/// A crossword square, at least: room to write a letter (§4.2).
+const MIN_CROSS_CELL: f32 = 22.0;
+/// A crossword square, at most: a 5×5 needn't fill the page.
+const MAX_CROSS_CELL: f32 = 40.0;
+/// The share of the page a crossword's grid may take; the clues get the rest.
+const CROSS_GRID: f32 = 0.62;
+const CLUE: f32 = 10.0;
+const CLUE_LEAD: f32 = 12.5;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Face {
@@ -231,19 +241,49 @@ impl Painter<'_> {
     /// A grid's letters, centred in their squares; `size_of` gives each square's letter size.
     fn letters(
         &mut self,
-        s: &Search,
+        rows: &[String],
         x: f32,
         y: f32,
         cell: f32,
         size_of: impl Fn(usize, usize) -> f32,
     ) {
-        for (r, row) in s.rows.iter().enumerate() {
+        for (r, row) in rows.iter().enumerate() {
             for (c, ch) in row.chars().enumerate() {
+                if ch == '#' {
+                    continue;
+                }
                 let size = size_of(r, c);
                 let cx = x + (c as f32 + 0.5) * cell;
                 // capitals stand about 0.7 em tall: centre them on the square
                 let base = y + (r as f32 + 0.5) * cell + 0.35 * size;
                 self.centred(Face::Regular, size, cx, base, &ch.to_string());
+            }
+        }
+    }
+
+    /// A crossword's black squares, filled.
+    fn blacks(&mut self, rows: &[String], x: f32, y: f32, cell: f32) {
+        for (r, row) in rows.iter().enumerate() {
+            for (c, ch) in row.chars().enumerate() {
+                if ch == '#' {
+                    let top = y + r as f32 * cell;
+                    self.c
+                        .rect(x + c as f32 * cell, self.ph - top - cell, cell, cell);
+                    self.c.fill_nonzero();
+                }
+            }
+        }
+    }
+
+    /// A crossword's square numbers, small at each entry's first square's top left.
+    fn numbers(&mut self, rows: &[String], x: f32, y: f32, cell: f32) {
+        let size = (0.25 * cell).max(5.0);
+        let mut done = std::collections::BTreeSet::new();
+        for s in cross::slots(rows) {
+            if done.insert(s.number) {
+                let tx = x + s.col as f32 * cell + 1.5;
+                let ty = y + s.row as f32 * cell + size + 0.5;
+                self.text(Face::Regular, size, tx, ty, &s.number.to_string());
             }
         }
     }
@@ -282,9 +322,194 @@ impl Painter<'_> {
     }
 }
 
-/// Pages in the book's PDF: the title, a page a puzzle, and the answers.
-pub fn pages(b: &Book) -> usize {
-    1 + b.puzzles.len() + b.puzzles.len().div_ceil(ANSWERS_PER_PAGE)
+/// A piece of text a crossword's clues print, placed: on its puzzle's first page or a page
+/// after it.
+struct Line {
+    page: usize,
+    x: f32,
+    y: f32,
+    face: Face,
+    size: f32,
+    text: String,
+}
+
+/// Where a crossword page's parts go: its grid, and its clues over as many pages as they take.
+struct CrossLayout {
+    grid_x: f32,
+    grid_y: f32,
+    cell: f32,
+    lines: Vec<Line>,
+    pages: usize,
+}
+
+/// The largest square a `size` crossword's grid can have on `page`.
+fn cross_cell(page: (f32, f32), size: usize) -> f32 {
+    let (w, h) = page;
+    let side = (w - 2.0 * MARGIN).min(CROSS_GRID * (h - 2.0 * MARGIN));
+    (side / size as f32).min(MAX_CROSS_CELL)
+}
+
+/// `text` broken at spaces into lines no wider than `width`.
+fn wrap(faces: &Faces, face: Face, size: f32, text: &str, width: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for word in text.split_whitespace() {
+        match lines.last_mut() {
+            Some(l) if faces.width(face, size, &format!("{l} {word}")) <= width => {
+                l.push(' ');
+                l.push_str(word);
+            }
+            _ => lines.push(word.to_owned()),
+        }
+    }
+    lines
+}
+
+/// One baseline's pieces: (x from the column's left, face, size, text).
+type Row = Vec<(f32, Face, f32, String)>;
+
+/// A crossword's page: "No. N", the grid, then Across and Down in two columns, carried on to
+/// the next page when they run out of room. A clue is never split between columns, nor a
+/// heading from its first clue. `None` when its squares would be under [`MIN_CROSS_CELL`].
+fn lay_out_cross(faces: &Faces, page: (f32, f32), x: &Crossword) -> Option<CrossLayout> {
+    let (w, h) = page;
+    let size = x.rows.len();
+    let cell = cross_cell(page, size);
+    if cell < MIN_CROSS_CELL {
+        return None;
+    }
+    let side = cell * size as f32;
+    let grid_y = MARGIN + HEAD + GAP;
+    let col_w = (w - 2.0 * MARGIN - GAP) / 2.0;
+    let num_w = faces.width(Face::Bold, CLUE, "88") + 4.0;
+    let bottom = h - MARGIN - FOOT - GAP;
+    // the first page's clues start under the grid, a later page's under its heading
+    let top = |pg: usize| match pg {
+        0 => grid_y + side + GAP + LIST,
+        _ => MARGIN + HEAD + GAP + LIST,
+    };
+    let mut blocks: Vec<Vec<Row>> = Vec::new();
+    for (dir, head) in [(Dir::Across, "Across"), (Dir::Down, "Down")] {
+        for (k, c) in x.clues.iter().filter(|c| c.dir == dir).enumerate() {
+            let mut rows: Vec<Row> = Vec::new();
+            if k == 0 {
+                rows.push(vec![(0.0, Face::Bold, LIST, head.to_owned())]);
+            }
+            let num = c.number.to_string();
+            let nx = num_w - 4.0 - faces.width(Face::Bold, CLUE, &num);
+            for (j, line) in wrap(faces, Face::Regular, CLUE, &c.clue, col_w - num_w)
+                .into_iter()
+                .enumerate()
+            {
+                let mut row = vec![(num_w, Face::Regular, CLUE, line)];
+                if j == 0 {
+                    row.insert(0, (nx, Face::Bold, CLUE, num.clone()));
+                }
+                rows.push(row);
+            }
+            blocks.push(rows);
+        }
+    }
+    let mut lines = Vec::new();
+    let (mut pg, mut col) = (0, 0);
+    let mut y = top(0);
+    for (b, rows) in blocks.into_iter().enumerate() {
+        // a little air above "Down", unless it tops a column
+        let heading = rows[0].len() == 1 && rows[0][0].1 == Face::Bold;
+        if heading && b > 0 && y > top(pg) {
+            y += CLUE_LEAD * 0.5;
+        }
+        let height = (rows.len() - 1) as f32 * CLUE_LEAD;
+        while y + height > bottom {
+            (pg, col) = if col == 0 { (pg, 1) } else { (pg + 1, 0) };
+            y = top(pg);
+        }
+        let x0 = MARGIN + col as f32 * (col_w + GAP);
+        for row in rows {
+            for (dx, face, size, text) in row {
+                lines.push(Line {
+                    page: pg,
+                    x: x0 + dx,
+                    y,
+                    face,
+                    size,
+                    text,
+                });
+            }
+            y += CLUE_LEAD;
+        }
+    }
+    Some(CrossLayout {
+        grid_x: (w - side) / 2.0,
+        grid_y,
+        cell,
+        lines,
+        pages: pg + 1,
+    })
+}
+
+/// How the book's puzzles lay out on `page`: a page or more each.
+enum Layouts {
+    Search(Vec<PuzzleLayout>),
+    Crossword(Vec<CrossLayout>),
+}
+
+impl Layouts {
+    /// Each puzzle's page count.
+    fn pages(&self) -> Vec<usize> {
+        match self {
+            Layouts::Search(l) => vec![1; l.len()],
+            Layouts::Crossword(l) => l.iter().map(|x| x.pages).collect(),
+        }
+    }
+}
+
+/// Lays the book's puzzles out, or [`BookError::DoesNotFit`] with the largest size that does.
+fn lay_out_book(faces: &Faces, b: &Book, page: (f32, f32)) -> Result<Layouts, BookError> {
+    let size = b.puzzles.size();
+    let kind = b.puzzles.kind();
+    match &b.puzzles {
+        Puzzles::Search(ps) => {
+            let widest = ps
+                .iter()
+                .flat_map(|p| &p.words)
+                .map(|h| faces.width(Face::Regular, LIST, &h.word.to_uppercase()))
+                .fold(0.0, f32::max);
+            ps.iter()
+                .map(|p| lay_out(page, p.size(), p.words.len(), widest))
+                .collect::<Option<Vec<_>>>()
+                .map(Layouts::Search)
+                .ok_or_else(|| BookError::DoesNotFit {
+                    kind,
+                    size,
+                    largest: SEARCH_SIZES
+                        .rev()
+                        .find(|&s| s < size && lay_out(page, s, words_wanted(s), widest).is_some())
+                        .unwrap_or(0),
+                })
+        }
+        Puzzles::Crossword(xs) => xs
+            .iter()
+            .map(|x| lay_out_cross(faces, page, x))
+            .collect::<Option<Vec<_>>>()
+            .map(Layouts::Crossword)
+            .ok_or_else(|| BookError::DoesNotFit {
+                kind: Kind::Crossword,
+                size,
+                largest: CROSS_SIZES
+                    .rev()
+                    .find(|&s| s < size && cross_cell(page, s) >= MIN_CROSS_CELL)
+                    .unwrap_or(0),
+            }),
+    }
+}
+
+/// Pages in the book's PDF on `page`: the title, each puzzle's pages, and the answers.
+pub fn pages(b: &Book, page: PageSize) -> usize {
+    let faces = Faces::new();
+    let puzzles: usize = lay_out_book(&faces, b, page.page())
+        .map(|l| l.pages().iter().sum())
+        .unwrap_or(b.puzzles.len());
+    1 + puzzles + b.puzzles.len().div_ceil(ANSWERS_PER_PAGE)
 }
 
 /// The book as a PDF for `page`, or [`BookError::DoesNotFit`] when its grids would be too fine
@@ -292,31 +517,21 @@ pub fn pages(b: &Book) -> usize {
 pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
     let faces = Faces::new();
     let (pw, ph) = page.page();
-    let widest = b
-        .puzzles
+    let layouts = lay_out_book(&faces, b, (pw, ph))?;
+    let counts = layouts.pages();
+    // each puzzle's first page, after the title page
+    let starts: Vec<usize> = counts
         .iter()
-        .flat_map(|p| &p.words)
-        .map(|h| faces.width(Face::Regular, LIST, &h.word.to_uppercase()))
-        .fold(0.0, f32::max);
-    let size = b.puzzles.first().map_or(0, Search::size);
-    let layouts: Vec<PuzzleLayout> = b
-        .puzzles
-        .iter()
-        .map(|p| lay_out((pw, ph), p.size(), p.words.len(), widest))
-        .collect::<Option<_>>()
-        .ok_or_else(|| BookError::DoesNotFit {
-            size,
-            largest: SEARCH_SIZES
-                .rev()
-                .find(|&s| s < size && lay_out((pw, ph), s, words_wanted(s), widest).is_some())
-                .unwrap_or(0),
-        })?;
+        .scan(1, |at, n| {
+            let s = *at;
+            *at += n;
+            Some(s)
+        })
+        .collect();
+    let first_answers = 1 + counts.iter().sum::<usize>();
 
     let mut used: [BTreeMap<u16, char>; 2] = Default::default();
     let mut pages: Vec<Content> = Vec::new();
-    let count = b.puzzles.len();
-    let first_answers = 1 + count;
-
     // The title page.
     {
         let mut p = Painter {
@@ -346,47 +561,59 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
         pages.push(p.c);
     }
 
-    // A puzzle a page.
-    for (i, (s, l)) in b.puzzles.iter().zip(&layouts).enumerate() {
-        let mut p = Painter {
-            c: Content::new(),
-            ph,
-            faces: &faces,
-            used: &mut used,
-        };
-        p.text(
-            Face::Bold,
-            HEAD,
-            MARGIN,
-            MARGIN + HEAD,
-            &format!("No. {}", i + 1),
-        );
-        p.grid(l.grid_x, l.grid_y, l.cell, s.size());
-        p.letters(s, l.grid_x, l.grid_y, l.cell, |_, _| 0.55 * l.cell);
-        // alphabetical down each column, then across
-        let rows = s.words.len().div_ceil(l.cols);
-        for (k, h) in s.words.iter().enumerate() {
-            let (col, row) = (k / rows, k % rows);
-            let x = MARGIN + col as f32 * l.col_w;
-            let y = l.list_y + row as f32 * LEAD;
-            p.text(Face::Regular, LIST, x, y, &h.word.to_uppercase());
-        }
+    // The puzzles: a page each, or more for a crossword's clues.
+    for i in 0..b.puzzles.len() {
         let answer_page = first_answers + i / ANSWERS_PER_PAGE + 1;
-        p.text(
-            Face::Regular,
-            FOOT,
-            MARGIN,
-            ph - MARGIN,
-            &format!("Answers on page {answer_page}"),
-        );
-        pages.push(p.c);
+        let foot = format!("Answers on page {answer_page}");
+        for k in 0..counts[i] {
+            let mut p = Painter {
+                c: Content::new(),
+                ph,
+                faces: &faces,
+                used: &mut used,
+            };
+            let head = match k {
+                0 => format!("No. {}", i + 1),
+                _ => format!("No. {} (continued)", i + 1),
+            };
+            p.text(Face::Bold, HEAD, MARGIN, MARGIN + HEAD, &head);
+            match (&b.puzzles, &layouts) {
+                (Puzzles::Search(ps), Layouts::Search(ls)) => {
+                    let (s, l) = (&ps[i], &ls[i]);
+                    p.grid(l.grid_x, l.grid_y, l.cell, s.size());
+                    p.letters(&s.rows, l.grid_x, l.grid_y, l.cell, |_, _| 0.55 * l.cell);
+                    // alphabetical down each column, then across
+                    let rows = s.words.len().div_ceil(l.cols);
+                    for (k, h) in s.words.iter().enumerate() {
+                        let (col, row) = (k / rows, k % rows);
+                        let x = MARGIN + col as f32 * l.col_w;
+                        let y = l.list_y + row as f32 * LEAD;
+                        p.text(Face::Regular, LIST, x, y, &h.word.to_uppercase());
+                    }
+                }
+                (Puzzles::Crossword(xs), Layouts::Crossword(ls)) => {
+                    let (x, l) = (&xs[i], &ls[i]);
+                    if k == 0 {
+                        p.blacks(&x.rows, l.grid_x, l.grid_y, l.cell);
+                        p.grid(l.grid_x, l.grid_y, l.cell, x.rows.len());
+                        p.numbers(&x.rows, l.grid_x, l.grid_y, l.cell);
+                    }
+                    for line in l.lines.iter().filter(|line| line.page == k) {
+                        p.text(line.face, line.size, line.x, line.y, &line.text);
+                    }
+                }
+                _ => unreachable!("a book's layouts are of its own kind"),
+            }
+            p.text(Face::Regular, FOOT, MARGIN, ph - MARGIN, &foot);
+            pages.push(p.c);
+        }
     }
 
     // The answers, two by two.
     let top = MARGIN + HEAD + GAP;
     let slot_w = (pw - 2.0 * MARGIN - GAP) / 2.0;
     let slot_h = (ph - MARGIN - top - GAP) / 2.0;
-    for (n, chunk) in b.puzzles.chunks(ANSWERS_PER_PAGE).enumerate() {
+    for n in 0..b.puzzles.len().div_ceil(ANSWERS_PER_PAGE) {
         let mut p = Painter {
             c: Content::new(),
             ph,
@@ -394,46 +621,68 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
             used: &mut used,
         };
         p.text(Face::Bold, HEAD, MARGIN, MARGIN + HEAD, "Answers");
-        for (k, s) in chunk.iter().enumerate() {
-            let number = n * ANSWERS_PER_PAGE + k + 1;
+        let first = n * ANSWERS_PER_PAGE;
+        for k in 0..ANSWERS_PER_PAGE.min(b.puzzles.len() - first) {
+            let number = first + k + 1;
             let x = MARGIN + (k % 2) as f32 * (slot_w + GAP);
             let y = top + (k / 2) as f32 * (slot_h + GAP);
             p.text(Face::Bold, LIST, x, y + LIST, &format!("No. {number}"));
             let side = slot_w.min(slot_h - LIST - 6.0);
-            let cell = side / s.size() as f32;
             let gy = y + LIST + 6.0;
-            let mut answer = vec![false; s.size() * s.size()];
-            for h in &s.words {
-                for (r, c) in s.cells(h) {
-                    answer[r * s.size() + c] = true;
+            match &b.puzzles {
+                Puzzles::Search(ps) => answer_search(&mut p, &ps[first + k], x, gy, side),
+                Puzzles::Crossword(xs) => {
+                    let rows = &xs[first + k].rows;
+                    let cell = side / rows.len() as f32;
+                    p.blacks(rows, x, gy, cell);
+                    p.grid(x, gy, cell, rows.len());
+                    p.letters(rows, x, gy, cell, |_, _| 0.55 * cell);
                 }
-            }
-            p.grid(x, gy, cell, s.size());
-            let size = s.size();
-            p.letters(s, x, gy, cell, |r, c| {
-                // filler letters smaller, so the answers stand out
-                if answer[r * size + c] {
-                    0.55 * cell
-                } else {
-                    0.33 * cell
-                }
-            });
-            for h in &s.words {
-                let cells = s.cells(h);
-                let centre = |(r, c): (usize, usize)| {
-                    (x + (c as f32 + 0.5) * cell, gy + (r as f32 + 0.5) * cell)
-                };
-                p.capsule(
-                    centre(cells[0]),
-                    centre(*cells.last().expect("words have letters")),
-                    0.42 * cell,
-                );
             }
         }
         pages.push(p.c);
     }
 
-    Ok(write(b, &faces, &used, pages, (pw, ph), first_answers))
+    Ok(write(
+        b,
+        &faces,
+        &used,
+        pages,
+        (pw, ph),
+        &starts,
+        first_answers,
+    ))
+}
+
+/// A word search's answer: the grid, each hidden word outlined, the filler letters smaller so
+/// the answers stand out.
+fn answer_search(p: &mut Painter, s: &Search, x: f32, y: f32, side: f32) {
+    let size = s.size();
+    let cell = side / size as f32;
+    let mut answer = vec![false; size * size];
+    for h in &s.words {
+        for (r, c) in s.cells(h) {
+            answer[r * size + c] = true;
+        }
+    }
+    p.grid(x, y, cell, size);
+    p.letters(&s.rows, x, y, cell, |r, c| {
+        if answer[r * size + c] {
+            0.55 * cell
+        } else {
+            0.33 * cell
+        }
+    });
+    for h in &s.words {
+        let cells = s.cells(h);
+        let centre =
+            |(r, c): (usize, usize)| (x + (c as f32 + 0.5) * cell, y + (r as f32 + 0.5) * cell);
+        p.capsule(
+            centre(cells[0]),
+            centre(*cells.last().expect("words have letters")),
+            0.42 * cell,
+        );
+    }
 }
 
 /// The PDF: pages, both faces embedded, the outline (title, each puzzle, the answers) and the
@@ -444,6 +693,7 @@ fn write(
     used: &[BTreeMap<u16, char>; 2],
     pages: Vec<Content>,
     (pw, ph): (f32, f32),
+    starts: &[usize],
     first_answers: usize,
 ) -> Vec<u8> {
     let mut pdf = Pdf::new();
@@ -496,7 +746,12 @@ fn write(
     }
 
     let mut marks: Vec<(String, usize)> = vec![("Title".to_owned(), 0)];
-    marks.extend((1..first_answers).map(|n| (format!("No. {n}"), n)));
+    marks.extend(
+        starts
+            .iter()
+            .enumerate()
+            .map(|(i, page)| (format!("No. {}", i + 1), *page)),
+    );
     marks.push(("Answers".to_owned(), first_answers));
     let items: Vec<Ref> = marks.iter().map(|_| alloc()).collect();
     for (k, ((title, page), id)) in marks.iter().zip(&items).enumerate() {
