@@ -469,6 +469,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             llm_model,
             llm_endpoint,
             wikipedia,
+            recaps,
             word_wise,
             word_wise_level,
             wordwise_db,
@@ -507,6 +508,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                         llm: llm.config(llm_model.clone(), llm_endpoint.clone()),
                         wikipedia,
                     });
+                if recaps {
+                    eprintln!("Chapter recaps go to Kindle only for now");
+                }
                 return send_to_reader(&epubs, &reader, whos_who.as_ref(), json);
             }
             // Fail before any work (and before touching the target) when Previewer is missing.
@@ -538,6 +542,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 }
             };
             let mut opts = RunOptions {
+                recaps: recaps.then(deckle_core::wordwise::default_cache_dir),
                 preset: None,
                 cover: Default::default(),
                 cde_type: cde.into(),
@@ -2088,6 +2093,7 @@ fn kindle_upgrade(
         let at = deckle_core::devices::now_iso();
         let kept = deckle_library::upgrade::originals_dir(&config, &device.key, file, &at);
         let opts = RunOptions {
+            recaps: None,
             preset: None,
             cover: Default::default(),
             cde_type: deckle_kfx::convert::CdeType::Pdoc,
@@ -2262,6 +2268,7 @@ fn reprocess(
             _ => None,
         };
         let opts = RunOptions {
+            recaps: None,
             preset: None,
             cover: Default::default(),
             cde_type: cde.unwrap_or(deckle_kfx::convert::CdeType::Pdoc),
@@ -4378,6 +4385,7 @@ fn queue_edition(
 /// must always show (design §5).
 fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Path) -> RunOptions {
     RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: deckle_kfx::convert::CdeType::Pdoc,

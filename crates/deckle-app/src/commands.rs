@@ -811,6 +811,7 @@ pub fn run_books_with(
             replaces.push(u.file.clone());
         }
         let mut opts = RunOptions {
+            recaps: None,
             preset: None,
             cover: b.cover.as_ref().map(CoverChoice::pick).unwrap_or_default(),
             cde_type: cde_from(override_str.unwrap_or("pdoc")),

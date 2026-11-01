@@ -204,6 +204,10 @@ pub enum Command {
         /// Wikipedia summaries for X-Ray terms (network).
         #[arg(long)]
         wikipedia: bool,
+        /// An AI-written recap at the end of each chapter (needs --llm). With a hosted provider the
+        /// book's text is sent to it; with a local server nothing leaves this computer.
+        #[arg(long)]
+        recaps: bool,
         /// Word Wise sidecar for EBOK books: `auto` (default) or `off`. The first use downloads
         /// Deckle's Word Wise database (about 12 MB) unless `--wordwise-db` is given.
         #[arg(long = "word-wise", value_enum)]
