@@ -8,7 +8,7 @@ a title page, one puzzle per page, and the answers at the back. Design:
 AZW3 books don't, whichever way they're sent. Ink on a PDF stays after you turn the page and
 after you close and reopen the book.
 
-Word searches are available now. Crosswords, sudoku and LLM-written themes come next.
+Word searches and crosswords are available now. Sudoku and LLM-written themes come next.
 
 ## Commands
 
@@ -18,8 +18,12 @@ Add `--json` for machine-readable output: `{path, pages, puzzles, seed, date, wa
 |---|---|
 | `deckle puzzles search --to device` | Make a book of 10 word searches and copy it to the first connected Kindle, in `documents/`. |
 | `deckle puzzles search -o <folder>` | Write the book into a folder instead. |
+| `deckle puzzles crossword --to device` | Make a book of 10 crosswords and copy it to the Kindle. |
 
 ### Options
+
+These are the word-search options. Crosswords take the same ones, except `--words`, with
+different sizes and difficulties (see [Crosswords](#crosswords)).
 
 | Option | Default | |
 |---|---|---|
@@ -33,6 +37,26 @@ Add `--json` for machine-readable output: `{path, pages, puzzles, seed, date, wa
 | `--replace` | | Overwrite a book with the same name (see below). |
 
 After each run, Deckle prints the command that makes that book again, with its seed and date.
+
+## Crosswords
+
+`deckle puzzles crossword` takes `--size` from 5 to 15 (default 11), plus the same `--count`,
+`--title`, `--seed`, `--date`, `--screen`, `-o`/`--to` and `--replace` as word searches.
+
+- **Grids:** symmetric, with about a fifth of the squares black and no entry longer than 6
+  letters. Every letter is in both an across and a down entry. A 5×5 uses the Daily's mini
+  layouts.
+- **Difficulty:**
+  - `easy` keeps to everyday words;
+  - `medium` mixes in some less common ones;
+  - `hard` draws from the whole list of about 45,000 words.
+- **Clues** come from Wiktionary. Plurals and verb forms say so, for example "To cook in an
+  oven (past tense)". Some clues use an unexpected sense of the word.
+- **Pages:** the numbered grid is at the top and the clues sit below in two columns. Clues
+  that don't fit continue on the next page as "No. N (continued)". A 15×15 takes three pages.
+  The answers are filled grids, four per page.
+- **Not yet:** `--words`, because your own words would need clues. That arrives with LLM
+  themes.
 
 ## Names and ink
 
@@ -60,7 +84,6 @@ Answers.
 
 ## Not yet
 
-- Crossword books, at sizes from 5×5 to 15×15.
 - Sudoku books.
 - `--theme "technology"` written by your LLM, and `--theme current-events` from the Daily's
   headlines.

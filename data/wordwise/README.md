@@ -34,5 +34,24 @@ to `puzzle-blocklist.txt`, and rebuild.
 |---|---|---|---|
 | 2026-10-22 | 2026-10-22 | 3,090 (412 / 1,168 / 1,510) | 61 KB |
 
+## The crossword list
+
+`crates/deckle-digest/assets/puzzle/words-long.tsv.gz`: `word<TAB>zipf<TAB>clue` lines for
+puzzle books' crosswords (puzzle books design §3.3). The rules are the puzzle list's, except:
+- lengths are 3 to 15;
+- the cutoff is zipf 2.0;
+- plurals and verb forms are added, each clued from the sense it inflects, marked "(plural)",
+  "(past tense)", "(-ing form)" or "(3rd person)".
+
+```sh
+cargo run --release -p deckle-wordwise-build -- crossword kaikki-en.jsonl.gz large_en.msgpack.gz \
+    data/wordwise/puzzle-blocklist.txt words-long.tsv
+gzip -9 -n -c words-long.tsv > crates/deckle-digest/assets/puzzle/words-long.tsv.gz
+```
+
+| Built | Sources downloaded | Words | 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10+ letters | Gzipped |
+|---|---|---|---|---|
+| 2026-11-01 | 2026-11-01 | 45,271 | 634 / 2,243 / 3,955 / 5,608 / 6,836 / 7,047 / 6,331 / 12,617 | 826 KB |
+
 Data licenses: Wiktionary content via kaikki.org is CC BY-SA 4.0 (`tests/sample.jsonl` is 22
 trimmed entries of it); wordfreq's word lists are CC BY-SA 4.0.

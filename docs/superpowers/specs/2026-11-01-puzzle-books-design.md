@@ -127,31 +127,50 @@ Defaults: `--count 10`, at least 1 and at most 200 *(builder's call)*.
 
 ### 3.3 Crossword (increment 2)
 
-- **Sizes:** `--size` from 5 to 15, default 11 *(builder's call)*. 5×5 uses the Daily's mini
-  templates. Larger sizes get generated block patterns:
-  - 180° rotational symmetry.
-  - Every across and down entry is at least 3 letters.
-  - All white squares are connected.
-  - At most about 18% black squares at 15×15. Smaller grids may use more.
-- **Fill:** a constraint search over the word list. It picks the most-constrained slot first,
-  uses a letter-at-position index, checks ahead for dead ends, and orders candidates at random
-  from the seed.
-  - Each attempt has a time limit (5 s *(builder's call)*). It counts as a budget of search
-    steps, not wall-clock time, so a busy machine makes the same puzzle.
-  - On failure it tries a new pattern, then a pattern with more black squares.
-  - Theme words are placed first, longest slots first.
-- **Words and clues:** a new embedded list, `words-long.tsv.gz`, of 3–15-letter entries with
-  clues. The data comes from the same offline builder (`data/wordwise`: Wiktionary via kaikki +
-  wordfreq), ranked by frequency.
-  - Target size: 30–60k entries.
+*Updated while building increment 2. The first draft's open grids, with up to 18% black squares
+and long entries, almost never filled from a list of everyday words (measured: 0 of 8 patterns
+at sizes 6–15). The settings below are what the measurements supported.*
+
+- **Sizes:** `--size` from 5 to 15, default 11 *(builder's call)*.
+  - A 5×5 uses the Daily's mini templates.
+  - Larger sizes get generated block patterns:
+    - 180° rotational symmetry.
+    - Every white square is in an across entry and a down entry of 3 letters or more.
+    - All white squares are connected.
+    - **About 20% black squares, and no entry longer than 6 letters** *(builder's call)*.
+      These fill 4 to 7 patterns in 8 at every size. With longer entries or fewer black
+      squares, the fill rate falls toward zero.
+- **Fill:** a constraint search over the word list.
+  - It picks the most-constrained entry first, using a letter-at-position bitset index.
+  - Words are tried in the order of how much room they leave their crossings, using the first
+    48 that fit.
+  - It counts search steps, never time, so a busy machine makes the same puzzle: up to 20k
+    placements per pattern, and up to 24 patterns.
+  - Theme words (increment 4) will be placed first.
+- **Words and clues:** a new embedded list, `words-long.tsv.gz`, built with
+  `deckle-wordwise-build crossword`. It has 45,271 entries of 3–15 letters, 826 KB gzipped, each
+  with its zipf and a clue.
+  - The cutoff is zipf 2.0 at every length. A big grid needs more short words than common
+    ones provide.
+  - **It includes plurals and verb forms** ("cards", "baked", "baking"). Each takes the clue of
+    the sense it inflects, marked: "To cook in an oven (past tense)". A plural also drops the
+    singular's article.
   - The Daily keeps `words.tsv.gz` as it is, so its puzzles don't move.
-  - A clue never contains its answer or a word sharing its stem. This is the existing builder
-    rule.
-- **Page:** grid at the top with squares numbered, then Across and Down clues in two columns. A
-  15×15's clues can run onto a second page, facing the grid. That page is part of the same
-  puzzle and has no outline entry.
-- **Difficulty** comes from word frequency (common words for `easy`, the whole list for
-  `hard`) *(builder's call)*.
+  - A clue never contains its answer.
+  - **Known quirk:** a clue is Wiktionary's first everyday sense, which is sometimes an odd
+    one. For example, PRIEST gets "a blunt tool… for stunning fish". The Daily's list shares
+    this. LLM clues (increment 4) can do better.
+- **Page:** the grid at the top with numbered squares, then Across and Down clues in two
+  columns.
+  - Clues that don't fit carry on over the page, under "No. N (continued)". A 15×15 takes
+    three pages.
+  - A clue is never split between columns, and a heading is never separated from its first
+    clue.
+  - Continuation pages have no outline entry.
+- **Difficulty** sets how strongly the fill prefers everyday words *(builder's call)*:
+  - Words are tried commonest first, each moved down the order by up to a random 0.5 zipf for
+    `easy`, 1.5 for `medium` and 4.0 for `hard`.
+  - Filtering the list instead (zipf ≥ 3.5 for `easy`) left too few words to fill.
 
 ### 3.4 Sudoku (increment 3)
 
@@ -329,7 +348,7 @@ deckle puzzles <search|crossword|sudoku>
      `--seed`, `--date`, `--screen`, `-o`, `--to` and `--replace`.
    - A user doc at `docs/puzzle-books.md`.
    - **Done:** the tests in §7 pass, and a 10-puzzle book reaches the Scribe and takes ink.
-2. **Crossword book:**
+2. **Crossword book** (built 2026-11-01):
    - `words-long.tsv.gz`, built with its builder mode and README row;
    - block patterns;
    - the filler;
