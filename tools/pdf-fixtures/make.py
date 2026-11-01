@@ -198,6 +198,29 @@ def scan():
     c.save()
 
 
+def ocr_scan():
+    """A scan with an OCR text layer, as the Internet Archive and most scanners make them: each
+    page one full-page picture, with the recognised words drawn invisibly (render mode 3) over
+    it. The text is there to search and copy, never to be seen."""
+    c = doc("ocr-scan.pdf", title="A Scanned Picture Book", author="D. Scanner")
+    import struct, zlib
+    raw = b"".join(b"\x00" + bytes([0xD0 + (x // 40) for x in range(200)]) for _ in range(260))
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xFFFFFFFF)
+    data = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 200, 260, 8, 0, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+    from reportlab.lib.utils import ImageReader
+    for page in range(2):
+        c.drawImage(ImageReader(io.BytesIO(data)), 0, 0, width=W, height=H)
+        t = c.beginText(72, H - 100)
+        t.setTextRenderMode(3)
+        t.setFont("Times-Roman", 12)
+        for n in range(12):
+            t.textLine(f"Page {page + 1}, line {n + 1}: the words a reader recognised on this page.")
+        c.drawText(t)
+        c.showPage()
+    c.save()
+
+
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     two_column()
@@ -205,4 +228,5 @@ if __name__ == "__main__":
     book()
     outlined()
     scan()
+    ocr_scan()
     print("wrote", ", ".join(sorted(os.listdir(OUT))), file=sys.stderr)

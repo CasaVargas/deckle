@@ -10,6 +10,7 @@ mod daemon;
 mod highlights;
 mod inbox;
 pub mod press_worker;
+mod puzzles;
 mod reader_server;
 mod series;
 mod shelves;
@@ -450,6 +451,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             action,
         } => digest(json, config, paper, action),
         cli::Command::Cookbook { action } => cookbook::run(json, action),
+        cli::Command::Puzzles { action } => puzzles::run(json, action),
         cli::Command::Library { action } => library(json, action),
         cli::Command::Kindle { to, action } => kindle(json, &to, action),
         cli::Command::Highlights { from, action } => highlights_cmd(json, &from, action),

@@ -247,6 +247,11 @@ fn search_json(s: &crate::puzzle::search::Search) -> SearchJson {
                     Way::Down => "down",
                     Way::DownRight => "down-right",
                     Way::UpRight => "up-right",
+                    // book-only ways: the Daily never hides a word backwards
+                    Way::Left => "left",
+                    Way::Up => "up",
+                    Way::UpLeft => "up-left",
+                    Way::DownLeft => "down-left",
                 },
                 theme: h.theme,
             })

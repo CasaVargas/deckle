@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 /// Deckle: turn EPUBs into store-quality Kindle books and send them to a Kindle.
 #[derive(Parser, Debug)]
@@ -361,6 +361,71 @@ pub enum Command {
         #[command(subcommand)]
         action: CookbookCommand,
     },
+    /// Write-on puzzle books: a puzzle a page and the answers at the back, as a PDF you solve
+    /// in ink on a Kindle Scribe.
+    Puzzles {
+        #[command(subcommand)]
+        action: PuzzlesCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PuzzlesCommand {
+    /// A book of word searches.
+    Search {
+        /// Squares on a side, 8 to 20.
+        #[arg(long, default_value_t = 12)]
+        size: usize,
+        /// easy: across and down; medium: and the diagonals; hard: backwards too.
+        #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
+        difficulty: DifficultyArg,
+        /// Your own words, one a line (`#` lines skipped): the book's theme.
+        #[arg(long)]
+        words: Option<PathBuf>,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DifficultyArg {
+    Easy,
+    Medium,
+    Hard,
+}
+
+/// What every puzzle book takes.
+#[derive(Args, Debug)]
+pub struct BookArgs {
+    /// Puzzles in the book, 1 to 200.
+    #[arg(long, default_value_t = 10)]
+    pub count: usize,
+    /// The book's title (default: the kind, e.g. "Word Search").
+    #[arg(long)]
+    pub title: Option<String>,
+    /// The same seed and date make the same book (default: from the options and the date).
+    #[arg(long)]
+    pub seed: Option<u64>,
+    /// The date on the title page, YYYY-MM-DD (default: today).
+    #[arg(long)]
+    pub date: Option<String>,
+    /// The page: a Kindle Scribe's screen, or another e-ink screen.
+    #[arg(long, default_value = "kindle-scribe", value_parser = deckle_digest::puzzle::book::pdf::PageSize::NAMES)]
+    pub screen: String,
+    /// Write the PDF into this folder.
+    #[arg(
+        short = 'o',
+        long = "out",
+        conflicts_with = "to",
+        required_unless_present = "to"
+    )]
+    pub out: Option<PathBuf>,
+    /// A folder path, or `device` for the first connected Kindle.
+    #[arg(long)]
+    pub to: Option<String>,
+    /// Overwrite a book of the same name. Ink on the old one may stay.
+    #[arg(long)]
+    pub replace: bool,
 }
 
 /// Which picture a recipe prints.
