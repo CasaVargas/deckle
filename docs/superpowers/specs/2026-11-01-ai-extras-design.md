@@ -30,7 +30,7 @@ What each option costs the owner, for a ~100k-word novel (~130k tokens in, ~6k o
 |---|---|---|
 | Anthropic, Sonnet 5.5 ($2 / $10 per M tokens) | ≈ $0.30 | Chapter text goes to Anthropic |
 | Anthropic, Haiku 5.5 ($0.10 / $0.50) | ≈ $0.02 | Same; weaker prose |
-| Local Ollama, ~8B model | $0 | Owner installs Ollama and a ~5 GB model; roughly 10–15 min per novel on an M4 (estimate) |
+| Local Ollama, ~8B model | $0 | Owner installs Ollama and a ~5 GB model; measured 18 min for a 108k-word book with `qwen3:8b` on an M4 Mac mini (16 GB), and it gets some details wrong |
 
 Re-sending a book costs nothing: recaps are cached (§6).
 
@@ -112,6 +112,13 @@ Report: `RunReport` gains `recaps: Option<RecapSummary>`; warnings go into `repo
   chapters). Who's who's `nav_labels` maps a whole file to one label, so it can't name the second
   chapter of a file.
 - Non-linear spine items (`linear="no"`) are skipped.
+- **Front and back matter is skipped**, however long. A chapter counts as matter when its heading
+  (or, before the first heading, the `<body>`) sits inside an element marked by `epub:type` or
+  `role="doc-…"` as front or back matter (`frontmatter`, `backmatter`, `copyright-page`,
+  `colophon`, `acknowledgments`, `toc`, `index`, `bibliography`, `glossary`, `endnotes` and the
+  like), or by Project Gutenberg's `pg-boilerplate` class; or when its heading names it
+  ("Project Gutenberg", "copyright", "acknowledg…", "about the author", "bibliography",
+  "colophon"). Found on a real run: the 2,913-word Gutenberg licence got a "recap".
 - A fixed-layout book (`rendition:layout` = `pre-paginated`) gets no recaps at all (issue #20's
   books are pictures, not prose).
 - A book already carrying recaps (any `deckle-recap` id) comes back unchanged.

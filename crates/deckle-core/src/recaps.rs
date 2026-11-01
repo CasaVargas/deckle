@@ -111,7 +111,7 @@ pub fn add_with(
         let chs = chapters(di, xhtml);
         let with_text = chs.iter().filter(|c| !c.text.trim().is_empty()).count();
         for c in chs {
-            if word_count(&c.text) < MIN_WORDS {
+            if c.matter || word_count(&c.text) < MIN_WORDS {
                 continue;
             }
             let label = c
@@ -451,19 +451,101 @@ pub(crate) struct Chapter {
     pub(crate) heading: Option<String>,
     /// Its text, blocks separated by a blank line.
     pub(crate) text: String,
+    /// Front or back matter (a licence, acknowledgments, an index): no recap.
+    pub(crate) matter: bool,
 }
 
 /// Elements a recap is never put in front of when backing up from a heading.
 const NOT_BEFORE: &[&str] = &["html", "head", "body"];
 /// Inline elements that, empty, are link targets for the heading after them.
 const ANCHORS: &[&str] = &["a", "span"];
+/// `epub:type` (and `role="doc-…"`) values that mark front and back matter.
+const MATTER_TYPES: &[&str] = &[
+    "frontmatter",
+    "backmatter",
+    "titlepage",
+    "halftitlepage",
+    "copyright-page",
+    "colophon",
+    "imprint",
+    "imprimatur",
+    "acknowledgments",
+    "credits",
+    "contributors",
+    "dedication",
+    "toc",
+    "loi",
+    "lot",
+    "index",
+    "bibliography",
+    "glossary",
+    "endnotes",
+    "rearnotes",
+    "errata",
+];
+/// Heading words that name front and back matter.
+const MATTER_NAMES: &[&str] = &[
+    "project gutenberg",
+    "copyright",
+    "acknowledg",
+    "about the author",
+    "bibliography",
+    "colophon",
+];
+/// Elements with no closing tag in HTML (XHTML closes them itself).
+const VOID: &[&str] = &[
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "wbr",
+];
+
+/// Whether an opening tag marks its element as front or back matter: by `epub:type`, by
+/// `role="doc-…"`, or Project Gutenberg's `pg-boilerplate` class.
+fn marks_matter(tag: &str) -> bool {
+    let tokens = |name: &str| {
+        attr(tag, name)
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    tokens("epub:type")
+        .iter()
+        .any(|t| MATTER_TYPES.contains(&t.as_str()))
+        || tokens("role").iter().any(|t| {
+            t.strip_prefix("doc-")
+                .is_some_and(|t| MATTER_TYPES.contains(&t))
+        })
+        || tokens("class").iter().any(|t| t == "pg-boilerplate")
+}
+
+/// The value of attribute `name` in an opening tag.
+fn attr<'t>(tag: &'t str, name: &str) -> Option<&'t str> {
+    let mut from = 0;
+    while let Some(at) = tag[from..].find(name).map(|a| from + a) {
+        from = at + name.len();
+        let before = tag[..at].chars().next_back();
+        let rest = tag[from..].trim_start();
+        if !before.is_some_and(char::is_whitespace) || !rest.starts_with('=') {
+            continue;
+        }
+        let rest = rest[1..].trim_start();
+        let quote = rest.chars().next().filter(|q| *q == '"' || *q == '\'')?;
+        return rest[1..].find(quote).map(|e| &rest[1..1 + e]);
+    }
+    None
+}
 
 /// The chapters of document `doc_index`, in order (the first may be empty: text before the
 /// first heading).
 pub(crate) fn chapters(doc_index: usize, xhtml: &str) -> Vec<Chapter> {
-    // Each opening h1/h2: (byte offset of its tag, its text). Counted as `scan` counts them.
-    let mut headings: Vec<(usize, String)> = Vec::new();
-    let mut open: Option<(usize, usize, &str)> = None; // (tag start, content start, name)
+    // Each opening h1/h2: (byte offset of its tag, its text, inside front or back matter).
+    // Counted as `scan` counts them.
+    let mut headings: Vec<(usize, String, bool)> = Vec::new();
+    // (tag start, content start, name, inside matter)
+    let mut open: Option<(usize, usize, &str, bool)> = None;
+    // The open elements, and whether each marks matter.
+    let mut stack: Vec<(&str, bool)> = Vec::new();
+    let mut body_matter = false;
     let b = xhtml.as_bytes();
     let mut i = 0;
     while i < b.len() {
@@ -472,29 +554,43 @@ pub(crate) fn chapters(doc_index: usize, xhtml: &str) -> Vec<Chapter> {
             continue;
         }
         let end = tag_end(xhtml, i);
-        if let Some((name, closing, selfclosing)) = tag_name(&xhtml[i..end])
-            && (name == "h1" || name == "h2")
-        {
+        let tag = &xhtml[i..end];
+        let Some((name, closing, selfclosing)) = tag_name(tag) else {
+            i = end;
+            continue;
+        };
+        if closing {
+            if let Some(k) = stack.iter().rposition(|(n, _)| *n == name) {
+                stack.truncate(k);
+            }
+        } else if !selfclosing && !VOID.contains(&name) {
+            stack.push((name, marks_matter(tag)));
+            if name == "body" {
+                body_matter = stack.iter().any(|(_, m)| *m);
+            }
+        }
+        if name == "h1" || name == "h2" {
+            let matter = stack.iter().any(|(_, m)| *m) || (selfclosing && marks_matter(tag));
             if !closing {
-                if let Some((start, from, _)) = open.take() {
-                    headings.push((start, heading_text(&xhtml[from..i])));
+                if let Some((start, from, _, m)) = open.take() {
+                    headings.push((start, heading_text(&xhtml[from..i]), m));
                 }
                 if selfclosing {
-                    headings.push((i, String::new()));
+                    headings.push((i, String::new(), matter));
                 } else {
-                    open = Some((i, end, name));
+                    open = Some((i, end, name, matter));
                 }
-            } else if let Some((start, from, n)) = open
+            } else if let Some((start, from, n, m)) = open
                 && n == name
             {
-                headings.push((start, heading_text(&xhtml[from..i])));
+                headings.push((start, heading_text(&xhtml[from..i]), m));
                 open = None;
             }
         }
         i = end;
     }
-    if let Some((start, from, _)) = open {
-        headings.push((start, heading_text(&xhtml[from..])));
+    if let Some((start, from, _, m)) = open {
+        headings.push((start, heading_text(&xhtml[from..]), m));
     }
 
     let body_end = xhtml.rfind("</body").unwrap_or(xhtml.len());
@@ -505,12 +601,19 @@ pub(crate) fn chapters(doc_index: usize, xhtml: &str) -> Vec<Chapter> {
             section,
             insert_at: headings
                 .get(section)
-                .map_or(body_end, |&(at, _)| back_up(xhtml, at)),
+                .map_or(body_end, |&(at, _, _)| back_up(xhtml, at)),
             heading: section
                 .checked_sub(1)
                 .map(|h| headings[h].1.clone())
                 .filter(|h| !h.is_empty()),
             text: String::new(),
+            matter: match section.checked_sub(1).map(|h| &headings[h]) {
+                None => body_matter,
+                Some((_, text, marked)) => {
+                    let text = text.to_lowercase();
+                    *marked || MATTER_NAMES.iter().any(|n| text.contains(n))
+                }
+            },
         })
         .collect();
     let mut last_block = None;

@@ -487,3 +487,54 @@ fn a_toc_anchor_before_a_heading_stays_with_its_chapter() {
         "{c0}"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Front and back matter
+
+/// Requests made and the chapters that got a recap, for a book whose second chapter is `matter`.
+fn with_matter(matter: &str) -> (usize, bool, bool) {
+    let r = run(
+        &epub(&[("One", &para(900)), ("End", matter)]),
+        local(),
+        None,
+        |_, _| Ok("Recap.".into()),
+    );
+    (
+        r.bodies.len(),
+        chapter(&r.bytes, 0).contains("deckle-recap"),
+        chapter(&r.bytes, 1).contains("deckle-recap"),
+    )
+}
+
+#[test]
+fn a_gutenberg_footer_gets_no_recap() {
+    let footer = format!(
+        "<footer class=\"pg-boilerplate pgheader\" id=\"pg-footer\"><div>*** END ***</div>\
+         <h2>Small print</h2>{}</footer>",
+        para(900)
+    );
+    assert_eq!(with_matter(&footer), (1, true, false));
+}
+
+#[test]
+fn the_gutenberg_licence_by_name_gets_no_recap() {
+    let licence = format!("<h2>THE FULL PROJECT GUTENBERG™ LICENSE</h2>{}", para(900));
+    assert_eq!(with_matter(&licence), (1, true, false));
+}
+
+#[test]
+fn marked_back_matter_gets_no_recap() {
+    for open in [
+        "<section epub:type=\"backmatter\">",
+        "<section role=\"doc-afterword appendix\" epub:type=\"bodymatter copyright-page\">",
+    ] {
+        let section = format!("{open}<h2>Notes on the text</h2>{}</section>", para(900));
+        assert_eq!(with_matter(&section), (1, true, false), "{open}");
+    }
+}
+
+#[test]
+fn acknowledgments_get_no_recap() {
+    let ack = format!("<h2>Acknowledgments</h2>{}", para(900));
+    assert_eq!(with_matter(&ack), (1, true, false));
+}
