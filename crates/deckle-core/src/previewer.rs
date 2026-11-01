@@ -216,11 +216,28 @@ fn probe_version(path: &Path) -> std::io::Result<String> {
     Ok(String::from("unknown"))
 }
 
-/// Runs the conversion. `out_dir` is created if needed (the CLI refuses a missing folder).
+/// Waits for any other Previewer run, in this process or another, to finish. Previewer works in
+/// `$TMPDIR/kpr_cli_<input stem>_epub` whatever folder the input is in, and every caller passes a
+/// `normalized.epub`, so overlapping runs delete each other's files (#235). The lock sits in the
+/// same temp folder, so it covers exactly the runs that would share that scratch folder. Held
+/// until the returned file is dropped.
+fn previewer_lock() -> std::io::Result<std::fs::File> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(std::env::temp_dir().join("deckle-kindle-previewer.lock"))?;
+    file.lock()?;
+    Ok(file)
+}
+
+/// Runs the conversion, one at a time. `out_dir` is created if needed (the CLI refuses a missing
+/// folder).
 pub fn convert(p: &Previewer, epub: &Path, out_dir: &Path) -> Result<KpfResult, ConvertError> {
     std::fs::create_dir_all(out_dir)?;
     let epub = std::path::absolute(epub)?;
     let out_dir = std::path::absolute(out_dir)?;
+    let _lock = previewer_lock()?;
     let started = Instant::now();
     let mut cmd = crate::quiet::command(&p.path);
     cmd.arg(&epub);
