@@ -42,9 +42,9 @@ export default function Online({ settings, set, onPage }: Props) {
     },
     {
       title: "Book summary",
-      sends: "each chapter's text, to recap it first",
+      sends: "each chapter's text",
       to: ai ? provider : "the AI model's provider",
-      why: "A summary of the whole book on a page after the last chapter. Needs the AI model.",
+      why: "A summary of the whole book on a page after the last chapter, made by recapping each chapter first. Needs the AI model.",
       on: settings.book_summary,
       toggle: (on) => set("book_summary", on),
       page: "reading",
