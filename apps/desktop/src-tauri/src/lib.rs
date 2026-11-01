@@ -35,6 +35,12 @@ pub fn run() {
                 preload_target: Mutex::new(preload_target.clone()),
                 start_tab,
             });
+            // A watcher still on the build this app replaced lacks its new routes (#234).
+            std::thread::spawn(|| {
+                if let Err(e) = deckle_digest::schedule::refresh_watcher() {
+                    eprintln!("watcher: can't restart it on this build: {e}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

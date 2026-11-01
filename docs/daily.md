@@ -508,6 +508,10 @@ large_print = true                # a layout for big type (below)
   (`\Deckle\Digest-<slug>`). A main paper you scheduled before many papers keeps its job
   until you set its time again. `schedule --off` removes everything; with `--paper`, only that
   paper's job.
+- **After an update.** The watcher notes which build it started from (`watcher.json`, next to
+  `digest.toml`). When the app opens and the watcher's program has been replaced since, or the
+  watcher predates that note, the app restarts it, so a new bookmarklet route works straight
+  away instead of after the next login.
 - **Large print.** `large_print = true` lays the paper out for big type: nothing smaller than
   the body text, bigger headlines, heavier rules, the five-day forecast as a list (one day a
   line), and one photo a story. Set the text size on the Kindle itself (Aa). It applies to

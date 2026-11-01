@@ -30,6 +30,7 @@ mod sections;
 mod shelf;
 mod sun;
 mod template_photos;
+mod watcher_refresh;
 mod weather_page;
 mod web_book;
 
