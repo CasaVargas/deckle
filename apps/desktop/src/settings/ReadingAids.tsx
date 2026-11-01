@@ -21,13 +21,17 @@ function Example({ level, on }: { level: number; on: boolean }) {
   );
 }
 
-/** Reading aids (Settings redesign §6): Word Wise and X-Ray, help that appears while you read. */
+/** The chapter recaps toggle's help (AI extras design §8). */
+const RECAPS_HELP =
+  "Adds a short AI-written recap at the end of each chapter. Uses your LLM setting: with a hosted provider the book's text is sent to it and billed to your key; with a local server (Ollama, LM Studio) nothing leaves this computer.";
+
+/** Reading aids (Settings redesign §6): Word Wise, X-Ray and chapter recaps, help that appears while you read. */
 export default function ReadingAids({ settings, set }: Props) {
   const caps = useCapabilities();
   const ai = settings.llm_provider !== "off";
   return (
     <div className="set-stack">
-      <p className="overview-lead">Help that appears while you read. Both need a book sent as a Kindle book.</p>
+      <p className="overview-lead">Help that appears while you read. Word Wise and X-Ray need a book sent as a Kindle book; chapter recaps go to every e-reader.</p>
 
       <section className="set-card set-pad" aria-label="Word Wise">
         <div className="set-card-head">
@@ -62,14 +66,14 @@ export default function ReadingAids({ settings, set }: Props) {
           <div className="mode-grid">
             <label className={`mode-card ${!ai ? "on" : ""}`}>
               <span className="mode-head">
-                <input type="radio" name="xray-by" checked={!ai} disabled={!settings.xray} onChange={() => set("llm_provider", "off")} />
+                <input type="radio" name="xray-by" checked={!ai} disabled={!settings.xray && !settings.chapter_recaps} onChange={() => set("llm_provider", "off")} />
                 <strong>Deckle, on this Mac</strong>
               </span>
               <span className="muted">Good lists of names; nothing goes online.</span>
             </label>
             <label className={`mode-card ${ai ? "on" : ""}`}>
               <span className="mode-head">
-                <input type="radio" name="xray-by" checked={ai} disabled={!settings.xray} onChange={() => set("llm_provider", "anthropic")} />
+                <input type="radio" name="xray-by" checked={ai} disabled={!settings.xray && !settings.chapter_recaps} onChange={() => set("llm_provider", "anthropic")} />
                 <strong>An AI model</strong>
                 <span className="tag">Online</span>
               </span>
@@ -109,6 +113,17 @@ export default function ReadingAids({ settings, set }: Props) {
             <strong>Add Wikipedia summaries</strong> <span className="muted">for real people and places</span> <span className="tag">Online</span>
           </span>
         </label>
+      </section>
+
+      <section className="set-card set-pad" aria-label="Chapter recaps">
+        <div className="set-card-head">
+          <h3 className="set-card-title">
+            Chapter recaps <span className="tag">AI</span>
+          </h3>
+          <Switch label="Chapter recaps" checked={settings.chapter_recaps} onChange={(on) => set("chapter_recaps", on)} />
+        </div>
+        <p className="muted">{RECAPS_HELP}</p>
+        {settings.chapter_recaps && !ai && <p className="muted small">Needs an AI model: choose "An AI model" under X-Ray above.</p>}
       </section>
     </div>
   );

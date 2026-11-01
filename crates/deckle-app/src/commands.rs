@@ -61,6 +61,8 @@ pub struct Settings {
     /// 1 (rarest words only) … 5 (every hint; the Kindle's slider filters further).
     pub word_wise_level: u8,
     pub wikipedia: bool,
+    /// An AI-written recap at the end of each chapter (issue #29); needs the LLM settings.
+    pub chapter_recaps: bool,
     pub amazon_match: bool,
     /// A typographic cover for a book that has none (issue #27).
     pub generated_cover: bool,
@@ -88,6 +90,7 @@ impl Default for Settings {
             word_wise: true,
             word_wise_level: 5,
             wikipedia: false,
+            chapter_recaps: false,
             amazon_match: false,
             generated_cover: true,
             metadata_fill: false,
@@ -820,7 +823,9 @@ pub fn run_books_with(
             replaces.push(u.file.clone());
         }
         let mut opts = RunOptions {
-            recaps: None,
+            recaps: settings
+                .chapter_recaps
+                .then(deckle_core::wordwise::default_cache_dir),
             preset: None,
             cover: b.cover.as_ref().map(CoverChoice::pick).unwrap_or_default(),
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
@@ -1701,6 +1706,7 @@ mod tests {
         );
         assert!(!s.typography, "the typography pass is off by default");
         assert!(!s.popup_notes, "the pop-up notes pass is off by default");
+        assert!(!s.chapter_recaps, "chapter recaps are off by default");
         assert!(s.book_presets.is_empty());
         let mut changed = s.clone();
         changed.book_presets.insert(
@@ -1712,6 +1718,7 @@ mod tests {
         changed.typography = true;
         changed.generated_cover = false;
         changed.popup_notes = true;
+        changed.chapter_recaps = true;
         changed.illustrations_api_key = "sk-image".into();
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
@@ -1726,6 +1733,10 @@ mod tests {
         let s = load_settings_from(&file);
         assert_eq!(s.illustrations_api_key, "");
         assert_eq!(s.llm_api_key, "sk-ant-x");
+        assert!(
+            !s.chapter_recaps,
+            "a file from before recaps keeps them off"
+        );
     }
 
     #[test]

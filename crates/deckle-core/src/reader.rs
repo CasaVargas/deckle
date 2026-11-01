@@ -273,13 +273,34 @@ pub fn stem(name: &str) -> &str {
         .unwrap_or(name)
 }
 
+/// What [`book_epub`] adds to a book besides importing and cleaning it.
+#[derive(Clone, Debug, Default)]
+pub struct BookOptions {
+    /// X-Ray's people and terms as a Who's who page (Who's who design §3); `None` = no page.
+    pub whos_who: Option<crate::xray::XRayOptions>,
+    /// A recap at the end of each chapter (AI extras design §4); `None` = none.
+    pub recaps: Option<crate::recaps::RecapOptions>,
+}
+
 /// A book made ready for the EPUB outbox: a Word document, PDF or text file imported first,
 /// then cleaned as for a Kindle (no Previewer). Each reader takes it through [`Reader::prepare`].
-/// With `whos_who`, X-Ray's people and terms go in as a Who's who page (Who's who design §3); a
-/// page that can't be made is a warning on stderr, never a lost book.
-pub fn book_epub(
+/// Chapter recaps, then the Who's who page, go in as `opts` asks; one that can't be made is a
+/// warning on stderr, never a lost book. Real HTTP.
+pub fn book_epub(source: &Path, opts: &BookOptions) -> Result<Vec<u8>, String> {
+    book_epub_with(
+        source,
+        opts,
+        &mut deckle_xray::llm::http_post,
+        &mut deckle_xray::wiki::http_get,
+    )
+}
+
+/// [`book_epub`] with the LLM and Wikipedia calls injected (tests).
+pub fn book_epub_with(
     source: &Path,
-    whos_who: Option<&crate::xray::XRayOptions>,
+    opts: &BookOptions,
+    post: &mut crate::xray::Post<'_>,
+    fetch: &mut crate::xray::Fetch<'_>,
 ) -> Result<Vec<u8>, String> {
     let work = tempfile::tempdir().map_err(|e| e.to_string())?;
     let epub = if crate::import::needs_import(source) {
@@ -296,11 +317,22 @@ pub fn book_epub(
         &crate::normalize::NormalizeOptions::default(),
     )
     .map_err(|e| e.to_string())?;
-    let bytes = std::fs::read(&normalized).map_err(|e| e.to_string())?;
-    let Some(opts) = whos_who else {
+    let mut bytes = std::fs::read(&normalized).map_err(|e| e.to_string())?;
+    if let Some(recaps) = &opts.recaps {
+        match crate::recaps::add_with(&bytes, recaps, post) {
+            Ok((with, summary)) => {
+                for w in summary.iter().flat_map(|s| &s.warnings) {
+                    eprintln!("{}: {w}", source.display());
+                }
+                bytes = with;
+            }
+            Err(e) => eprintln!("{}: Chapter recaps skipped: {e}", source.display()),
+        }
+    }
+    let Some(whos_who) = &opts.whos_who else {
         return Ok(bytes);
     };
-    match crate::whoswho::add(&bytes, opts) {
+    match crate::whoswho::add_with(&bytes, whos_who, post, fetch) {
         Ok((with, summary)) => {
             for w in summary.iter().flat_map(|s| &s.warnings) {
                 eprintln!("{}: {w}", source.display());
@@ -315,12 +347,8 @@ pub fn book_epub(
 }
 
 /// [`book_epub`], prepared for `reader`.
-pub fn book(
-    reader: &Reader,
-    source: &Path,
-    whos_who: Option<&crate::xray::XRayOptions>,
-) -> Result<Vec<u8>, String> {
-    reader.prepare(&book_epub(source, whos_who)?)
+pub fn book(reader: &Reader, source: &Path, opts: &BookOptions) -> Result<Vec<u8>, String> {
+    reader.prepare(&book_epub(source, opts)?)
 }
 
 #[cfg(test)]

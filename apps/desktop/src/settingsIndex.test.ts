@@ -89,7 +89,9 @@ describe("page cards", () => {
     expect(pageSummary("library", s, { root: null, auto_add: false, books: 0 }, [], "0.7.0")).toBe("Off: books you send aren't kept");
     expect(pageSummary("books", s, null, [], "0.7.0")).toBe("Page numbers, tidy typography and covers when missing");
     expect(pageSummary("reading", s, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia");
-    expect(pageSummary("reading", { ...s, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Both off");
+    expect(pageSummary("reading", { ...s, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("All off");
+    expect(pageSummary("reading", { ...s, chapter_recaps: true }, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia · Chapter recaps");
+    expect(pageSummary("reading", { ...s, chapter_recaps: true, llm_provider: "off", word_wise: false, xray: false }, null, [], "0.7.0")).toBe("All off");
     expect(pageSummary("kindles", s, null, [kindle], "0.7.0")).toBe("Paperwhite");
     expect(pageSummary("online", { ...s, metadata_fill: false, amazon_match: false }, null, [], "0.7.0")).toBe("2 features on");
     expect(pageSummary("about", s, null, [], "0.7.0")).toBe("Deckle 0.7.0");

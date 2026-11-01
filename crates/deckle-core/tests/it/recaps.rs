@@ -538,3 +538,67 @@ fn acknowledgments_get_no_recap() {
     let ack = format!("<h2>Acknowledgments</h2>{}", para(900));
     assert_eq!(with_matter(&ack), (1, true, false));
 }
+
+// ---------------------------------------------------------------------------------------------
+// Other e-readers (`reader::book_epub`)
+
+/// [`deckle_core::reader::book_epub_with`] on `book`; `answer` answers each LLM request.
+fn for_reader(
+    book: &[u8],
+    recaps: bool,
+    mut answer: impl FnMut(&str) -> Result<String, String>,
+) -> Vec<u8> {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("book.epub");
+    std::fs::write(&path, book).unwrap();
+    let opts = deckle_core::reader::BookOptions {
+        whos_who: None,
+        recaps: recaps.then(|| RecapOptions {
+            llm: local(),
+            cache_dir: None,
+        }),
+    };
+    let mut post =
+        |_: &str, _: &[(String, String)], body: &str| answer(body).map(|t| completion(&t));
+    let mut fetch = |_: &str| -> Result<String, String> { Err("offline".into()) };
+    deckle_core::reader::book_epub_with(&path, &opts, &mut post, &mut fetch).unwrap()
+}
+
+/// Every XHTML file's text in `bytes`, joined.
+fn all_text(bytes: &[u8]) -> String {
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut out = String::new();
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).unwrap();
+        let name = f.name().unwrap().into_owned();
+        if name.ends_with(".xhtml") || name.ends_with(".html") {
+            f.read_to_string(&mut out).unwrap();
+        }
+    }
+    out
+}
+
+#[test]
+fn a_book_for_another_reader_gets_recaps() {
+    let book = epub(&[("One", &para(900)), ("Two", &para(900))]);
+    let got = for_reader(&book, true, |_| Ok("What happened.".into()));
+    let text = all_text(&got);
+    assert_eq!(text.matches("class=\"deckle-recap\"").count(), 2, "{text}");
+    assert!(text.contains("What happened."));
+}
+
+#[test]
+fn a_book_for_another_reader_has_no_recaps_unless_asked() {
+    let book = epub(&[("One", &para(900))]);
+    let got = for_reader(&book, false, |_| panic!("no LLM call without recaps"));
+    assert!(!all_text(&got).contains("deckle-recap"));
+}
+
+#[test]
+fn a_failed_recap_still_sends_the_book() {
+    let book = epub(&[("One", &para(900)), ("Two", &para(900))]);
+    let got = for_reader(&book, true, |_| Err("connection refused".into()));
+    let text = all_text(&got);
+    assert!(!text.contains("deckle-recap"));
+    assert!(text.contains("w899"), "the chapters are all there");
+}

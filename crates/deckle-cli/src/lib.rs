@@ -534,15 +534,26 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     );
                 }
                 // X-Ray's people and terms as a Who's who page (Who's who design §3).
+                let config = llm.config(llm_model.clone(), llm_endpoint.clone());
                 let whos_who =
                     (xray != Some(cli::XRayArg::Off)).then(|| deckle_core::xray::XRayOptions {
-                        llm: llm.config(llm_model.clone(), llm_endpoint.clone()),
+                        llm: config.clone(),
                         wikipedia,
                     });
-                if recaps {
-                    eprintln!("Chapter recaps go to Kindle only for now");
-                }
-                return send_to_reader(&epubs, &reader, whos_who.as_ref(), json);
+                // Chapter recaps (AI extras design §4), as the Kindle pipeline adds them.
+                let recaps = match (recaps, config) {
+                    (false, _) => None,
+                    (true, None) => {
+                        eprintln!("Chapter recaps need an LLM; set one in Settings");
+                        None
+                    }
+                    (true, Some(llm)) => Some(deckle_core::recaps::RecapOptions {
+                        llm,
+                        cache_dir: Some(deckle_core::wordwise::default_cache_dir()),
+                    }),
+                };
+                let opts = deckle_core::reader::BookOptions { whos_who, recaps };
+                return send_to_reader(&epubs, &reader, &opts, json);
             }
             // Fail before any work (and before touching the target) when Previewer is missing.
             let located = previewer::locate(pv.as_deref()).map_err(|e| e.to_string())?;
@@ -4866,12 +4877,12 @@ pub(crate) fn record_koreader(
 }
 
 /// `deckle run … --to device` with no Kindle but a Kobo or a PocketBook: each book cleaned
-/// (with a Who's who page unless `--xray off`, and made a KEPUB for a Kobo; no Previewer), sent
-/// to its `Deckle/` folder.
+/// (with chapter recaps when `--recaps`, a Who's who page unless `--xray off`, and made a KEPUB
+/// for a Kobo; no Previewer), sent to its `Deckle/` folder.
 fn send_to_reader(
     inputs: &[PathBuf],
     reader: &deckle_core::reader::Reader,
-    whos_who: Option<&deckle_core::xray::XRayOptions>,
+    opts: &deckle_core::reader::BookOptions,
     json: bool,
 ) -> Result<ExitCode, String> {
     #[derive(serde::Serialize)]
@@ -4890,7 +4901,7 @@ fn send_to_reader(
                 } else {
                     input.clone()
                 };
-                let bytes = deckle_core::reader::book(reader, &source, whos_who)?;
+                let bytes = deckle_core::reader::book(reader, &source, opts)?;
                 let stem = source
                     .file_stem()
                     .map(|s| deckle_core::deliver::sanitize(&s.to_string_lossy()))

@@ -106,7 +106,7 @@ pub fn from_file_as(path: &Path, name: Option<&str>, now: &str) -> Result<Outgoi
 /// [`deckle_core::reader::book_epub`]), described from what it became. The calibre id the
 /// source carries is kept.
 pub fn built(source: &Path, now: &str) -> Result<Outgoing, String> {
-    let bytes = deckle_core::reader::book_epub(source, None)?;
+    let bytes = deckle_core::reader::book_epub(source, &Default::default())?;
     let work = tempfile::tempdir().map_err(|e| e.to_string())?;
     let stem = source
         .file_stem()

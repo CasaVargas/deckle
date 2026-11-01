@@ -120,7 +120,7 @@ fn every_spine_item_pre_paginated_counts_as_fixed_layout() {
 fn a_comic_keeps_its_layout_and_every_page_through_the_reader_path() {
     let dir = tempfile::tempdir().unwrap();
     // `book_epub` is what a PocketBook or an EPUB folder gets: import, then normalize.
-    let epub = deckle_core::reader::book_epub(&manga(dir.path()), None).unwrap();
+    let epub = deckle_core::reader::book_epub(&manga(dir.path()), &Default::default()).unwrap();
     let files = entries(&epub);
     let get = |name: &str| {
         files
@@ -422,7 +422,7 @@ mod kindle {
         assert!(report.error.unwrap().contains("DRM"));
 
         // Other readers can't take it: there's no EPUB to make.
-        let err = deckle_core::reader::book_epub(&azw3, None).unwrap_err();
+        let err = deckle_core::reader::book_epub(&azw3, &Default::default()).unwrap_err();
         assert!(err.contains("can't make an EPUB"), "{err}");
     }
 
