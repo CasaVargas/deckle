@@ -46,6 +46,8 @@ impl LogIssue {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct KpfResult {
+    /// Previewer's book: a KPF, or for a fixed-layout book a joint KF7+KF8 MOBI (with
+    /// `et_supported` false; fixed-layout spec §4).
     pub kpf: PathBuf,
     pub et_supported: bool,
     /// `Error` rows of the per-book log.
@@ -234,6 +236,18 @@ fn previewer_lock() -> std::io::Result<std::fs::File> {
 /// Runs the conversion, one at a time. `out_dir` is created if needed (the CLI refuses a missing
 /// folder).
 pub fn convert(p: &Previewer, epub: &Path, out_dir: &Path) -> Result<KpfResult, ConvertError> {
+    convert_as(p, epub, out_dir, false)
+}
+
+/// [`convert`], where a `fixed_layout` book may come back as the MOBI Previewer makes when it
+/// can't use Enhanced Typesetting (fixed-layout spec §4). A reflowable book refused Enhanced
+/// Typesetting is still an error: its MOBI would be a worse book than the KFX it should get.
+pub fn convert_as(
+    p: &Previewer,
+    epub: &Path,
+    out_dir: &Path,
+    fixed_layout: bool,
+) -> Result<KpfResult, ConvertError> {
     std::fs::create_dir_all(out_dir)?;
     let epub = std::path::absolute(epub)?;
     let out_dir = std::path::absolute(out_dir)?;
@@ -313,6 +327,30 @@ pub fn convert(p: &Previewer, epub: &Path, out_dir: &Path) -> Result<KpfResult, 
             .cloned()
             .unwrap_or_else(|| format!("status {status:?} ({})", console_tail()));
         return Err(ConvertError::ConversionFailed { message });
+    }
+    let is_mobi = |k: &Path| {
+        k.extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("mobi"))
+    };
+    if !et_supported
+        && fixed_layout
+        && let Some(mobi) = kpf.as_deref().filter(|k| is_mobi(k))
+    {
+        let mobi = if mobi.is_absolute() {
+            mobi.to_path_buf()
+        } else {
+            out_dir.join(mobi)
+        };
+        if !mobi.exists() {
+            return Err(ConvertError::NoOutput);
+        }
+        return Ok(KpfResult {
+            kpf: mobi,
+            et_supported,
+            log_errors,
+            log_issues,
+            duration_ms: started.elapsed().as_millis() as u64,
+        });
     }
     if !et_supported {
         let first_error = log_errors

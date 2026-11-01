@@ -167,3 +167,161 @@ fn a_folder_of_page_images_imports_but_a_notes_folder_stays_markdown() {
     let book = import(&notes, dir.path(), "notes.epub").unwrap().unwrap();
     assert!(!inspect(&book.epub).unwrap().fixed_layout);
 }
+
+#[cfg(unix)] // the fake Previewer is a shell script
+mod kindle {
+    use std::path::{Path, PathBuf};
+
+    use deckle_core::deliver::Target;
+    use deckle_core::pipeline::{RunOptions, XRayMode, run};
+    use deckle_kfx::convert::CdeType;
+
+    pub(super) fn opts(target: Target) -> RunOptions {
+        RunOptions {
+            preset: None,
+            cover: Default::default(),
+            cde_type: CdeType::Pdoc,
+            asin: None,
+            pages: Some(None),
+            target,
+            // As the real Previewer 4.0.3 does with a fixed-layout book: a MOBI, no KPF.
+            previewer: Some(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fake_previewer/fixed_layout.sh"),
+            ),
+            keep_work_dir: false,
+            cde_override: None,
+            amazon_match: false,
+            generated_cover: Some(None),
+            metadata_fill: false,
+            typography: true,
+            popup_notes: false,
+            verified_real_asin: false,
+            xray: XRayMode::Auto,
+            llm: None,
+            wikipedia: false,
+            word_wise: None,
+            replaces: Vec::new(),
+            originals: None,
+        }
+    }
+
+    fn fixed_layout_epub() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/comic/fixed-layout-rtl.epub")
+    }
+
+    #[test]
+    fn a_fixed_layout_epub_goes_to_a_folder_as_a_stamped_azw3() {
+        let out = tempfile::tempdir().unwrap();
+        let report = run(
+            &fixed_layout_epub(),
+            &opts(Target::Folder(out.path().into())),
+        );
+        assert_eq!(report.error, None, "{report:?}");
+        assert!(report.info.fixed_layout && report.info.right_to_left);
+        let delivered = report.delivered.clone().unwrap();
+        assert_eq!(delivered, out.path().join("Deckle - FXL Probe.azw3"));
+        let bytes = std::fs::read(&delivered).unwrap();
+        let meta = deckle_mobi::read_meta(&bytes).unwrap();
+        assert!(meta.kf8 && meta.fixed_layout);
+        // A folder gets PDOC with a generated ASIN, as a KFX would.
+        assert_eq!(meta.cde.as_deref(), Some("PDOC"));
+        assert_eq!(meta.asin, report.asin);
+        assert!(report.asin.as_deref().is_some_and(|a| a.starts_with("B0")));
+        assert_eq!(report.kfx, None);
+        assert_eq!(report.pages, None);
+        // (The fixture's DOCTYPE adds audit warnings of its own; Previewer adds none.)
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w == "fixed-layout book: typography, X-Ray, page numbers skipped"),
+            "{:?}",
+            report.warnings
+        );
+        assert!(!report.warnings.iter().any(|w| w.starts_with("previewer:")));
+        for stage in ["normalize", "convert", "repackage", "deliver"] {
+            assert!(report.stage_ms.contains_key(stage), "{stage}");
+        }
+    }
+
+    #[test]
+    fn a_cbz_reaches_a_mass_storage_kindle_as_ebok_with_a_thumbnail() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("documents")).unwrap();
+        std::fs::create_dir_all(root.path().join("system/thumbnails")).unwrap();
+        std::fs::write(
+            root.path().join("system/version.txt"),
+            "Kindle 5.16.2.1.1 (4184940002)\n",
+        )
+        .unwrap();
+        let device = deckle_core::deliver::detect_in(&[root.path().to_path_buf()]).remove(0);
+        let src = super::manga(root.path());
+        let mut o = opts(Target::MassStorage(device));
+        o.typography = false;
+        o.xray = XRayMode::Off;
+        o.pages = None;
+        let report = run(&src, &o);
+        assert_eq!(report.error, None, "{report:?}");
+        assert!(report.warnings.is_empty(), "{:?}", report.warnings);
+        let delivered = report.delivered.clone().unwrap();
+        assert_eq!(delivered, root.path().join("documents/Night Train.azw3"));
+        let meta = deckle_mobi::read_meta(&std::fs::read(&delivered).unwrap()).unwrap();
+        assert_eq!(meta.cde.as_deref(), Some("EBOK"));
+        let asin = report.asin.clone().unwrap();
+        let thumb: &Path = &root.path().join(format!(
+            "system/thumbnails/thumbnail_{asin}_EBOK_portrait.jpg"
+        ));
+        assert!(thumb.exists(), "{thumb:?}");
+        let img = image::load_from_memory(&std::fs::read(thumb).unwrap()).unwrap();
+        assert_eq!(img.height(), 500);
+    }
+
+    #[test]
+    fn a_reflowable_book_refused_enhanced_typesetting_still_fails() {
+        // The fixed-layout fake hands back a MOBI; a reflowable book mustn't ship it.
+        let out = tempfile::tempdir().unwrap();
+        let report = run(
+            &deckle_kfx::fixtures::path("deckle-mini.epub"),
+            &opts(Target::Folder(out.path().into())),
+        );
+        let err = report.error.expect("error");
+        assert!(err.starts_with("convert: "), "{err}");
+        assert!(report.delivered.is_none());
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn a_queued_fixed_layout_book_still_finishes_as_azw3() {
+    use deckle_core::deliver::{Conn, Target};
+    use deckle_core::pipeline::{Prepared, Wishes, finish};
+    // A queue entry keeps Previewer's output as `book.kpf`, whatever it is.
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("book.kpf");
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/comic/fixed-layout-rtl.mobi"),
+        &entry,
+    )
+    .unwrap();
+    let info = deckle_core::inspect::BookInfo {
+        title: "Night Train".into(),
+        fixed_layout: true,
+        ..Default::default()
+    };
+    let prepared = Prepared::from_parts(
+        entry.clone(),
+        info,
+        entry,
+        Wishes::default(),
+        Some("Night Train.kfx".into()),
+    );
+    let out = dir.path().join("out");
+    let target = Target::Folder(out.clone());
+    let mut opts = kindle::opts(target.clone());
+    opts.xray = deckle_core::pipeline::XRayMode::Off;
+    let report = finish(&prepared, &mut Conn::new(&target), &opts, &mut |_| {});
+    assert_eq!(report.error, None, "{report:?}");
+    assert_eq!(report.delivered, Some(out.join("Night Train.azw3")));
+}

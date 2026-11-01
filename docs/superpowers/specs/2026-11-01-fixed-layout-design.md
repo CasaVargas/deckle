@@ -72,8 +72,10 @@ metadata, converted with `--convert`.
 - **It doesn't refuse the book.** It prints "Enhanced Typesetting not supported for this book.
   Generating Mobi file", and `Summary_Log.csv` says `Not Supported` / `Success` with 0 errors.
   It writes `Mobi/<stem>_epub.mobi`, a KF7+KF8 file, and no KPF.
-- **The per-book log has no Error row.** `tests/fake_previewer/unsupported.sh` writes one, which
-  the real Previewer doesn't; phase 2 corrects the fake.
+- **The per-book log has no Error row.** `tests/fake_previewer/unsupported.sh` writes one, so it
+  stands for a *reflowable* book refused Enhanced Typesetting. Phase 2a adds `fixed_layout.sh`,
+  which copies the real MOBI (`fixtures/comic/fixed-layout-rtl.mobi`) and writes the real
+  logs.
 - **The MOBI's EXTH keeps the layout:**
   - 122 fixed layout, 123 `comic`, 124 orientation lock, 126 original resolution, 127/128
     zero gutter and zero margin;
@@ -197,11 +199,23 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
    `BookInfo.fixed_layout` / `right_to_left`. With it, a CBZ already reaches a PocketBook or a
    folder as a fixed-layout EPUB, through `reader::book_epub`. Kindle still stops at convert
    until phase 2.
-2. **Kindle:** MOBI output from Previewer, KF8 strip and EXTH stamp, `.azw3` delivery and
-   pruning, normalize and enrichment skips, the corrected fake. Also wiring: the app's file
-   picker, folder walk and library take `.cbz`, plus a `docs/devices.md` row. Device spike on a
-   Paperwhite and a Scribe: the cover shows, pages turn the right way for RTL, and PDOC vs EBOK
-   behave as for KFX.
+2. **Kindle**, in two PRs:
+   - **2a, the pipeline:**
+     - `previewer::convert_as` accepts the MOBI for a fixed-layout book;
+     - `deckle_mobi::azw3::kf8_only` does the KF8 strip and EXTH stamp;
+     - `finish` delivers `.azw3` under the cover rule's CDE type and ASIN, with the thumbnail
+       taken from the AZW3's cover on mass storage;
+     - `prepare` skips typography and pop-up notes, with one warning naming every skipped
+       extra;
+     - plus the `fixed_layout.sh` fake.
+   - **2b, the wiring:**
+     - the app's file picker, folder walk and library take `.cbz`;
+     - the outbox queue carries a MOBI where it now carries `book.kpf`, and the fallback build
+       learns `.azw3`;
+     - pruning and send records treat `.azw3` like `.kfx`;
+     - plus a `docs/devices.md` row.
+   - **Device spike** (after 2a) on a Paperwhite and a Scribe: the cover shows, pages turn the
+     right way for RTL, and PDOC vs EBOK behave as for KFX.
 3. **Screens and other readers:** the screen table, the image step, Kobo/PocketBook as plain
    EPUB, the reMarkable image PDF. Spike: Kobo RTL, and PocketBook's cover tile.
 4. **More inputs and control:** fixed-layout AZW3 in, CBR through `bsdtar`, image-only PDF
