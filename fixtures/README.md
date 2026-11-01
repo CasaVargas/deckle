@@ -106,3 +106,14 @@ The `committed_fixtures_match_their_builders` test keeps them in step.
 `pride-and-prejudice.epub` (Gutenberg #1342, epub3 images) converts to a 47 MB KPF and a 25 MB
 KFX; use it locally for size and perf checks:
 `curl -L -o pp.epub https://www.gutenberg.org/ebooks/1342.epub3.images`.
+
+## `comic/`
+
+| File | What | How it was made |
+|---|---|---|
+| `fixed-layout-rtl.epub` | 3-page pre-paginated EPUB 3, 1264×1680 grey pages, right-to-left spine, Kindle comic metadata | `python3 -I tools/ref/make_fxl_epub.py fixed-layout-rtl.epub rtl` |
+| `fixed-layout-rtl.mobi` | Kindle Previewer 4.0.3 output for it (2026-11-01): Enhanced Typesetting "Not Supported", a joint KF7+KF8 MOBI, no KPF | `KindlePreviewer4CLI fixed-layout-rtl.epub --convert --locale en --output out`, then `out/Mobi/*.mobi` |
+
+The MOBI's KF8 header sits at record 18. Its `first_resc` (11) is where the shared resources (KF7
+records 6–10: three GIF pages, RESC, the JPEG thumbnail) belong in a KF8-only file
+(fixed-layout spec §4).
