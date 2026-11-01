@@ -369,17 +369,20 @@ fn a_real_archive_cbr_is_unpacked_by_bsdtar_and_nothing_escapes_it() {
     assert_eq!((report.title.as_str(), report.pages), ("Picture Book", 2));
     assert!(text(&files, "OEBPS/pages/p0002.xhtml").contains("width=5, height=6"));
 
-    // An entry named `../escaped.png` is refused, never written outside the temp folder.
+    // An entry named `../escaped-1.png` is refused, never written outside the temp folder. The
+    // tar is written by hand: not every bsdtar build can rename entries (`-s`) to make one.
     let evil = dir.path().join("evil.cbr");
-    tar(&[
-        "-cf",
-        evil.to_str().unwrap(),
-        "-s",
-        ",^,../escaped-,",
-        "-C",
-        pages.to_str().unwrap(),
-        "1.png",
-    ]);
+    std::fs::write(&evil, tar_with("../escaped-1.png", &png(4, 6))).unwrap();
+    let listed = std::process::Command::new("tar")
+        .arg("-tf")
+        .arg(&evil)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout).trim(),
+        "../escaped-1.png",
+        "the hand-made tar holds the escaping entry"
+    );
     let _ = convert(&evil, &dir.path().join("evil.epub"));
     let tmp = std::env::temp_dir();
     assert!(!tmp.join("escaped-1.png").exists());
@@ -391,4 +394,26 @@ fn a_real_archive_cbr_is_unpacked_by_bsdtar_and_nothing_escapes_it() {
         convert(&junk, &dir.path().join("junk.epub")),
         Err(ComicError::NotArchive(_))
     ));
+}
+
+/// A one-entry ustar archive naming `name`, whatever that name is.
+fn tar_with(name: &str, data: &[u8]) -> Vec<u8> {
+    let mut h = [0u8; 512];
+    let put = |h: &mut [u8; 512], at: usize, v: &[u8]| h[at..at + v.len()].copy_from_slice(v);
+    put(&mut h, 0, name.as_bytes());
+    put(&mut h, 100, b"0000644\0");
+    put(&mut h, 108, b"0000000\0");
+    put(&mut h, 116, b"0000000\0");
+    put(&mut h, 124, format!("{:011o}\0", data.len()).as_bytes());
+    put(&mut h, 136, b"00000000000\0");
+    put(&mut h, 148, b"        ");
+    h[156] = b'0';
+    put(&mut h, 257, b"ustar\0");
+    put(&mut h, 263, b"00");
+    let sum: u32 = h.iter().map(|b| u32::from(*b)).sum();
+    put(&mut h, 148, format!("{sum:06o}\0 ").as_bytes());
+    let mut out = h.to_vec();
+    out.extend(data);
+    out.resize(out.len().next_multiple_of(512) + 1024, 0);
+    out
 }
