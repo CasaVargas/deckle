@@ -441,11 +441,7 @@ fn add_recaps(
         return;
     };
     let Some(llm) = &opts.llm else {
-        report.warnings.push(if extras.chapters {
-            "Chapter recaps need an LLM; set one in Settings".into()
-        } else {
-            "The book summary needs an LLM; set one in Settings".into()
-        });
+        report.warnings.push(extras.needs_llm());
         return;
     };
     on_stage("recaps");
@@ -468,7 +464,7 @@ fn add_recaps(
         Ok(None) => {}
         Err(e) => report
             .warnings
-            .push(format!("{} skipped: {e}", capitalized(extras.names()))),
+            .push(format!("{} skipped: {e}", capitalized(&extras.names()))),
     }
     report
         .stage_ms
@@ -484,21 +480,17 @@ fn capitalized(s: &str) -> String {
 
 /// The one warning naming every text extra `opts` asks for that a fixed-layout book skips.
 fn fixed_layout_skips(opts: &RunOptions) -> Option<String> {
-    let asked: Vec<&str> = [
+    let asked: Vec<String> = [
         (opts.typography, "typography"),
         (opts.popup_notes, "pop-up notes"),
         (opts.xray == XRayMode::Auto, "X-Ray"),
         (opts.word_wise.is_some(), "Word Wise"),
         (opts.pages.is_some(), "page numbers"),
-        (
-            opts.recaps.is_some(),
-            opts.recaps
-                .as_ref()
-                .map_or("", crate::recaps::Extras::names),
-        ),
     ]
     .into_iter()
-    .filter_map(|(on, what)| on.then_some(what))
+    .filter(|(on, _)| *on)
+    .map(|(_, what)| what.to_owned())
+    .chain(opts.recaps.as_ref().map(crate::recaps::Extras::names))
     .collect();
     (!asked.is_empty()).then(|| format!("fixed-layout book: {} skipped", asked.join(", ")))
 }

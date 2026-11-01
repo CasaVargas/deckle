@@ -232,6 +232,10 @@ pub enum Command {
         /// chapter, made from the chapter recaps (needs --llm; works without --recaps).
         #[arg(long)]
         book_summary: bool,
+        /// A "Previously" page before chapter 1 of a later book in a series, recapping the earlier
+        /// books sent with recaps, a summary or this on (needs --llm).
+        #[arg(long)]
+        series_recap: bool,
         /// Word Wise sidecar for EBOK books: `auto` (default) or `off`. The first use downloads
         /// Deckle's Word Wise database (about 12 MB) unless `--wordwise-db` is given.
         #[arg(long = "word-wise", value_enum)]

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Chapter recaps and the book summary (docs/superpowers/specs/2026-11-01-ai-extras-design.md):
-//! a short recap the owner's LLM writes at the end of each chapter, and a Summary page made from
-//! those recaps, all labelled as AI-generated.
+//! Chapter recaps, the book summary and the series recap
+//! (docs/superpowers/specs/2026-11-01-ai-extras-design.md): a short recap the owner's LLM writes
+//! at the end of each chapter, a Summary page made from those recaps, and a Previously page made
+//! from the earlier books of a series, all labelled as AI-generated.
 //!
 //! Like [`crate::whoswho`], the text is read and the recaps are written in one pass over each
 //! document's raw XHTML: nothing is parsed into a tree and written back.
@@ -49,6 +50,8 @@ const SUMMARY_SYSTEM: &str =
     "You write book summaries for an e-reader. Answer with the summary text only.";
 /// The Summary page's file, next to the OPF (design §13.4).
 pub const SUMMARY_PAGE: &str = "deckle-summary.xhtml";
+/// The Previously page's file, next to the OPF (design §14.4).
+pub const PREVIOUSLY_PAGE: &str = "deckle-previously.xhtml";
 const RULES: &str = "Say only what happens in this chapter. Do not guess at or hint about \
 anything that happens later. Do not judge or praise the writing.";
 const SUMMARY_RULES: &str = "Do not judge or praise the writing.";
@@ -62,6 +65,9 @@ pub struct RecapOptions {
     pub chapters: bool,
     /// A Summary page made from the recaps goes after the last chapter (design §13).
     pub summary: bool,
+    /// A Previously page made from the earlier books of the series goes before the first chapter
+    /// (design §14). Needs `cache_dir`, where the earlier books' records are.
+    pub series: bool,
 }
 
 /// What a run asks for, without the LLM, which comes from the run's own setting.
@@ -71,6 +77,7 @@ pub struct Extras {
     pub cache_dir: PathBuf,
     pub chapters: bool,
     pub summary: bool,
+    pub series: bool,
 }
 
 impl Extras {
@@ -80,6 +87,7 @@ impl Extras {
             cache_dir,
             chapters: true,
             summary: false,
+            series: false,
         }
     }
 
@@ -89,16 +97,41 @@ impl Extras {
             cache_dir: Some(self.cache_dir.clone()),
             chapters: self.chapters,
             summary: self.summary,
+            series: self.series,
         }
     }
 
-    /// The extras by name, for warnings: "chapter recaps", "a book summary", or both.
-    pub fn names(&self) -> &'static str {
-        match (self.chapters, self.summary) {
-            (true, true) => "chapter recaps and the book summary",
-            (false, true) => "the book summary",
-            _ => "chapter recaps",
+    /// The extras asked for, by name, for warnings: "chapter recaps and the book summary".
+    pub fn names(&self) -> String {
+        let named: Vec<&str> = [
+            (self.chapters, "chapter recaps"),
+            (self.summary, "the book summary"),
+            (self.series, "the series recap"),
+        ]
+        .into_iter()
+        .filter_map(|(on, name)| on.then_some(name))
+        .collect();
+        match named.as_slice() {
+            [] => String::new(),
+            [one] => (*one).to_owned(),
+            [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
         }
+    }
+
+    /// The warning for a run without an LLM.
+    pub fn needs_llm(&self) -> String {
+        let names = self.names();
+        let verb = if self.chapters || names.contains(" and ") {
+            "need"
+        } else {
+            "needs"
+        };
+        let mut c = names.chars();
+        let first: String = c
+            .next()
+            .map(|f| f.to_uppercase().chain(c).collect())
+            .unwrap_or_default();
+        format!("{first} {verb} an LLM; set one in Settings")
     }
 }
 
@@ -115,6 +148,9 @@ pub struct RecapSummary {
     /// A Summary page went in.
     #[serde(default)]
     pub summary: bool,
+    /// A Previously page went in.
+    #[serde(default)]
+    pub series: bool,
     /// Chapters whose recap failed, and a summary that couldn't be made.
     pub warnings: Vec<String>,
 }
@@ -135,9 +171,18 @@ pub fn add_with(
 ) -> Result<(Vec<u8>, Option<RecapSummary>), String> {
     let mut files = unzip(bytes)?;
     let book = Book::read(&files)?;
+    let has = |path: &str| files.iter().any(|(n, _)| n == path);
     let summary_path = book.page_at(SUMMARY_PAGE);
-    let want_summary = opts.summary && !files.iter().any(|(n, _)| *n == summary_path);
-    if book.fixed_layout || !(opts.chapters || want_summary) {
+    let want_summary = opts.summary && !has(&summary_path);
+    // The book's place in its series, for its record and its Previously page (design §14).
+    let me = opts
+        .cache_dir
+        .as_ref()
+        .filter(|_| !book.fixed_layout)
+        .and_then(|_| series_book(bytes));
+    let previously_path = book.page_at(PREVIOUSLY_PAGE);
+    let want_series = opts.series && me.is_some() && !has(&previously_path);
+    if book.fixed_layout || !(opts.chapters || want_summary || want_series) {
         return Ok((bytes.to_vec(), None));
     }
     let xhtml_of = |p: &str| {
@@ -235,7 +280,7 @@ pub fn add_with(
     }
 
     // The book summary (design §13): from every chapter's recap, or not at all.
-    let mut page = None;
+    let mut summary_text = None;
     if want_summary && missing > 0 {
         summary.warnings.push(format!(
             "Book summary skipped: {missing} {} no recap",
@@ -247,49 +292,234 @@ pub fn add_with(
         ));
     } else if want_summary && made.len() >= MIN_SUMMARY_CHAPTERS {
         match writer.summary(&made) {
-            Ok((text, _)) => page = Some(summary_page(&book, &text, &writer.model)),
+            Ok((text, _)) => summary_text = Some(text),
             Err(e) => summary
                 .warnings
                 .push(format!("Book summary skipped: {}", e.message)),
         }
     }
-    if !opts.chapters && page.is_none() {
+
+    // This book's record for the later books of its series (design §14.2), and its Previously
+    // page from the earlier ones.
+    let mut previously = None;
+    if let (Some(dir), Some(me)) = (&opts.cache_dir, &me) {
+        if missing == 0 {
+            write_record(dir, me, &writer.model, &made, summary_text.as_deref());
+        }
+        if want_series {
+            let earlier = earlier_records(dir, me);
+            // Whole-numbered books expect one record per earlier number.
+            let expected = if me.index.fract() == 0.0 {
+                me.index as usize - 1
+            } else {
+                0
+            };
+            if earlier.is_empty() {
+                if me.index > 1.0 {
+                    summary.warnings.push(format!(
+                        "Series recap skipped: no earlier book of {} was sent with recaps",
+                        me.series
+                    ));
+                }
+            } else {
+                if earlier.len() < expected {
+                    summary.warnings.push(format!(
+                        "Series recap covers {} of {expected} earlier books",
+                        earlier.len()
+                    ));
+                }
+                match writer.previously(me, &earlier) {
+                    Ok((text, _)) => {
+                        previously =
+                            Some(previously_page(&book, me, &earlier, &text, &writer.model))
+                    }
+                    Err(e) => summary
+                        .warnings
+                        .push(format!("Series recap skipped: {}", e.message)),
+                }
+            }
+        }
+    }
+    if !opts.chapters && summary_text.is_none() && previously.is_none() {
         return Ok((bytes.to_vec(), Some(summary)));
     }
-    if let Some(page) = page {
-        files.push((summary_path, page.into_bytes()));
+
+    if opts.chapters {
+        for (di, mut ins) in inserts.into_iter().enumerate() {
+            if ins.is_empty() {
+                continue;
+            }
+            let (Some(xhtml), Some(slot)) = (
+                &docs[di],
+                files.iter_mut().find(|(n, _)| *n == book.spine[di]),
+            ) else {
+                continue;
+            };
+            let mut out = xhtml.clone();
+            // Back to front, so earlier offsets stay put.
+            ins.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+            for (at, html) in ins {
+                out.insert_str(at, &html);
+            }
+            slot.1 = out.into_bytes();
+        }
+    }
+    if let Some(text) = summary_text {
+        files.push((
+            summary_path,
+            summary_page(&book, &text, &writer.model).into_bytes(),
+        ));
         book.register_page(&mut files, "deckle-summary", SUMMARY_PAGE, "Summary")?;
         summary.summary = true;
     }
-    if !opts.chapters {
-        return Ok((crate::kepub::write(&files)?, Some(summary)));
-    }
-
-    for (di, mut ins) in inserts.into_iter().enumerate() {
-        if ins.is_empty() {
-            continue;
-        }
-        let (Some(xhtml), Some(slot)) = (
-            &docs[di],
-            files.iter_mut().find(|(n, _)| *n == book.spine[di]),
-        ) else {
-            continue;
-        };
-        let mut out = xhtml.clone();
-        // Back to front, so earlier offsets stay put.
-        ins.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
-        for (at, html) in ins {
-            out.insert_str(at, &html);
-        }
-        slot.1 = out.into_bytes();
+    if let Some(page) = previously {
+        files.push((previously_path, page.into_bytes()));
+        let first = &book.spine[todo[0].0.doc];
+        book.register_page_before(
+            &mut files,
+            ("deckle-previously", PREVIOUSLY_PAGE, "Previously"),
+            first,
+        )?;
+        summary.series = true;
     }
     Ok((crate::kepub::write(&files)?, Some(summary)))
 }
 
-/// The Summary page (design §13.4): `text`'s paragraphs, split on blank lines.
-fn summary_page(book: &Book, text: &str, model: &str) -> String {
-    let paras: String = text
-        .split("\n\n")
+/// A book's place in its series (design §14.2), from its OPF as `inspect` reads it.
+#[derive(Clone, Debug)]
+struct SeriesBook {
+    title: String,
+    author: String,
+    series: String,
+    index: f32,
+}
+
+fn series_book(bytes: &[u8]) -> Option<SeriesBook> {
+    let dir = tempfile::tempdir().ok()?;
+    let path = dir.path().join("book.epub");
+    std::fs::write(&path, bytes).ok()?;
+    let info = crate::inspect::inspect(&path).ok()?;
+    let series = info.series?;
+    Some(SeriesBook {
+        author: info
+            .creators
+            .first()
+            .map(|c| c.name.clone())
+            .unwrap_or_default(),
+        title: info.title,
+        series: series.name,
+        index: series.index.filter(|i| i.is_finite() && *i > 0.0)?,
+    })
+}
+
+/// What a recapped book of a series leaves for the later books (design §14.2).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct Record {
+    title: String,
+    author: String,
+    series: String,
+    index: f32,
+    model: String,
+    recaps: Vec<String>,
+    summary: Option<String>,
+}
+
+/// Lowercased, whitespace collapsed: how authors and series names are matched.
+fn norm(s: &str) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+}
+
+fn records_dir(cache_dir: &std::path::Path) -> PathBuf {
+    cache_dir.join("recaps").join("books")
+}
+
+fn write_record(
+    cache_dir: &std::path::Path,
+    me: &SeriesBook,
+    model: &str,
+    recaps: &[String],
+    summary: Option<&str>,
+) {
+    let mut h = Sha256::new();
+    h.update(format!("{}\0{}\0{}", norm(&me.author), norm(&me.series), me.index).as_bytes());
+    let key: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let record = Record {
+        title: me.title.clone(),
+        author: me.author.clone(),
+        series: me.series.clone(),
+        index: me.index,
+        model: model.to_owned(),
+        recaps: recaps.to_vec(),
+        summary: summary.map(str::to_owned),
+    };
+    let dir = records_dir(cache_dir);
+    // A record that can't be written only means a later book's Previously page lacks this one.
+    if let Ok(json) = serde_json::to_vec_pretty(&record) {
+        let _ = std::fs::create_dir_all(&dir)
+            .and_then(|_| std::fs::write(dir.join(format!("{key}.json")), json));
+    }
+}
+
+/// The records of `me`'s series and author with a lower number, in series order.
+fn earlier_records(cache_dir: &std::path::Path, me: &SeriesBook) -> Vec<Record> {
+    let (author, series) = (norm(&me.author), norm(&me.series));
+    let mut out: Vec<Record> = std::fs::read_dir(records_dir(cache_dir))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| std::fs::read(e.path()).ok())
+        .filter_map(|b| serde_json::from_slice::<Record>(&b).ok())
+        .filter(|r| norm(&r.author) == author && norm(&r.series) == series && r.index < me.index)
+        .collect();
+    out.sort_by(|a, b| a.index.total_cmp(&b.index));
+    out.dedup_by(|a, b| a.index == b.index);
+    out
+}
+
+/// A series number as people write it: `2`, `2.5`.
+fn number(index: f32) -> String {
+    if index.fract() == 0.0 {
+        format!("{}", index as i64)
+    } else {
+        format!("{index}")
+    }
+}
+
+/// The Previously page (design §14.4).
+fn previously_page(
+    book: &Book,
+    me: &SeriesBook,
+    earlier: &[Record],
+    text: &str,
+    model: &str,
+) -> String {
+    let covered = earlier
+        .iter()
+        .map(|r| format!("Book {}: {}", number(r.index), r.title))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html \
+         xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" \
+         xml:lang=\"{l}\" lang=\"{l}\"><head><title>Previously</title></head><body>\
+         <section epub:type=\"prologue\" id=\"deckle-previously\"><h1>Previously</h1>\
+         <p><i>What happened in the earlier books of {s}: {c}.</i></p>{p}\
+         <p style=\"font-size: 0.8em; font-style: italic;\">AI-generated summary ({m}), not part \
+         of the original book.</p></section></body></html>\n",
+        l = esc(&book.lang),
+        s = esc(&me.series),
+        c = esc(&covered),
+        p = paragraphs(text),
+        m = esc(model)
+    )
+}
+
+/// `text`'s paragraphs (split on blank lines) as `<p>`s.
+fn paragraphs(text: &str) -> String {
+    text.split("\n\n")
         .map(str::trim)
         .filter(|p| !p.is_empty())
         .map(|p| {
@@ -298,7 +528,12 @@ fn summary_page(book: &Book, text: &str, model: &str) -> String {
                 esc(&p.split_whitespace().collect::<Vec<_>>().join(" "))
             )
         })
-        .collect();
+        .collect()
+}
+
+/// The Summary page (design §13.4): `text`'s paragraphs, split on blank lines.
+fn summary_page(book: &Book, text: &str, model: &str) -> String {
+    let paras = paragraphs(text);
     format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html \
          xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" \
@@ -423,44 +658,112 @@ impl<'a, 'p> Writer<'a, 'p> {
     /// The book summary from `recaps` (`{label}: {recap}`, in order), and whether it came from
     /// the cache (design §13.3).
     fn summary(&mut self, recaps: &[String]) -> Result<(String, bool), Failure> {
-        let all = recaps.join("\n\n");
+        let head = self.header.clone();
+        self.condense(
+            "summary",
+            &recaps.join("\n\n"),
+            |all| {
+                format!(
+                    "{head}\n\nThese are recaps of each chapter of the book, in order. Write a \
+                     summary of the whole book in 2–3 short paragraphs, in the book's language, \
+                     past tense, ending included. {SUMMARY_RULES}\n\n{all}"
+                )
+            },
+            |i, n, part| {
+                format!(
+                    "{head}\n\nThese are recaps of the chapters in part {i} of {n} of the book, \
+                     in order. Write a one-paragraph summary of this part, in the book's \
+                     language, past tense. {SUMMARY_RULES}\n\n{part}"
+                )
+            },
+            |got| {
+                format!(
+                    "{head}\n\nThese are summaries of the parts of the book, in order. Combine \
+                     them into one summary of the whole book in 2–3 short paragraphs, in the \
+                     book's language, past tense, ending included. {SUMMARY_RULES}\n\n{got}"
+                )
+            },
+        )
+    }
+
+    /// The Previously page's text from the earlier books' records, in series order, and whether
+    /// it came from the cache (design §14.3). Nothing of this book's text is sent.
+    fn previously(
+        &mut self,
+        me: &SeriesBook,
+        earlier: &[Record],
+    ) -> Result<(String, bool), Failure> {
+        let head = format!(
+            "{} · Series: {}, book {}",
+            self.header,
+            me.series,
+            number(me.index)
+        );
+        let input = earlier
+            .iter()
+            .map(|r| {
+                let body = r.summary.clone().unwrap_or_else(|| r.recaps.join("\n"));
+                format!("Book {}: {}\n{body}", number(r.index), r.title)
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let ask = "Write a recap of what happened in them for a reader about to start this \
+                   book, in 2–4 short paragraphs, in this book's language, past tense, including \
+                   how each book ended.";
+        self.condense(
+            "previously",
+            &input,
+            |all| {
+                format!(
+                    "{head}\n\nThese are summaries of the earlier books in this series, in \
+                     order. {ask} {SUMMARY_RULES}\n\n{all}"
+                )
+            },
+            |i, n, part| {
+                format!(
+                    "{head}\n\nThis is part {i} of {n} of the summaries of the earlier books in \
+                     this series, in order. Write a one-paragraph recap of this part, in this \
+                     book's language, past tense. {SUMMARY_RULES}\n\n{part}"
+                )
+            },
+            |got| {
+                format!(
+                    "{head}\n\nThese are recaps of the parts of the earlier books in this \
+                     series, in order. Combine them. {ask} {SUMMARY_RULES}\n\n{got}"
+                )
+            },
+        )
+    }
+
+    /// One text from `input`, through the cache (`{prefix}-{key}.txt`): one request when it fits
+    /// a request, else a request per part (`part(i, n, part)`, from 1) and one to `merge` them.
+    fn condense(
+        &mut self,
+        prefix: &str,
+        input: &str,
+        whole: impl Fn(&str) -> String,
+        part: impl Fn(usize, usize, &str) -> String,
+        merge: impl Fn(&str) -> String,
+    ) -> Result<(String, bool), Failure> {
         let file = self
             .cache
             .as_ref()
-            .map(|d| d.join(format!("summary-{}.txt", self.key_of(&all))));
+            .map(|d| d.join(format!("{prefix}-{}.txt", self.key_of(input))));
         if let Some(hit) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok())
             && !hit.trim().is_empty()
         {
             return Ok((hit.trim().to_owned(), true));
         }
-        let head = self.header.clone();
-        let parts = parts(&all, self.part_words);
+        let parts = parts(input, self.part_words);
         let text = if parts.len() <= 1 {
-            let user = format!(
-                "{head}\n\nThese are recaps of each chapter of the book, in order. Write a \
-                 summary of the whole book in 2–3 short paragraphs, in the book's language, past \
-                 tense, ending included. {SUMMARY_RULES}\n\n{all}"
-            );
-            self.ask_as(SUMMARY_SYSTEM, &user)?
+            self.ask_as(SUMMARY_SYSTEM, &whole(input))?
         } else {
             let n = parts.len();
             let mut got = Vec::with_capacity(n);
-            for (i, part) in parts.iter().enumerate() {
-                let user = format!(
-                    "{head}\n\nThese are recaps of the chapters in part {} of {n} of the book, \
-                     in order. Write a one-paragraph summary of this part, in the book's \
-                     language, past tense. {SUMMARY_RULES}\n\n{part}",
-                    i + 1
-                );
-                got.push(self.ask_as(SUMMARY_SYSTEM, &user)?);
+            for (i, p) in parts.iter().enumerate() {
+                got.push(self.ask_as(SUMMARY_SYSTEM, &part(i + 1, n, p))?);
             }
-            let user = format!(
-                "{head}\n\nThese are summaries of the parts of the book, in order. Combine them \
-                 into one summary of the whole book in 2–3 short paragraphs, in the book's \
-                 language, past tense, ending included. {SUMMARY_RULES}\n\n{}",
-                got.join("\n\n")
-            );
-            self.ask_as(SUMMARY_SYSTEM, &user)?
+            self.ask_as(SUMMARY_SYSTEM, &merge(&got.join("\n\n")))?
         };
         store(file, &text);
         Ok((text, false))

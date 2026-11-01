@@ -210,6 +210,8 @@ export interface Settings {
   chapter_recaps: boolean;
   /** A summary page after the last chapter, made from the recaps (issue #29); needs the LLM settings. */
   book_summary: boolean;
+  /** A Previously page in a later book of a series, from the earlier books' recaps (issue #29). */
+  series_recap: boolean;
   amazon_match: boolean;
   /** A typographic cover for a book that has none (issue #27). */
   generated_cover: boolean;

@@ -187,6 +187,7 @@ fn run(
         cache_dir,
         chapters: true,
         summary: false,
+        series: false,
     };
     run_with(book, &opts, answer)
 }
@@ -573,6 +574,7 @@ fn for_reader(
             cache_dir: None,
             chapters: true,
             summary: false,
+            series: false,
         }),
     };
     let mut post =
@@ -629,6 +631,7 @@ fn summary_opts(llm: LlmConfig, chapters: bool) -> RecapOptions {
         cache_dir: None,
         chapters,
         summary: true,
+        series: false,
     }
 }
 
@@ -873,4 +876,345 @@ fn zip_has(bytes: &[u8], name: &str) -> bool {
         .unwrap()
         .by_name(name)
         .is_ok()
+}
+
+// ---------------------------------------------------------------------------------------------
+// The series recap (design §14)
+
+/// Book `n` of the "Saga" series by Jane Austen: a short title page, then two long chapters
+/// whose words start at `n * 10_000`, so no two books share text or cache keys.
+fn saga(n: usize) -> Vec<u8> {
+    let meta = format!(
+        "<meta name=\"calibre:series\" content=\"Saga\"/>\
+         <meta name=\"calibre:series_index\" content=\"{n}\"/>"
+    );
+    let one = format!("<p>{}</p>", words(900, n * 10_000));
+    let two = format!("<p>{}</p>", words(900, n * 10_000 + 1_000));
+    epub_with(
+        &[("Title page", "<p>Saga</p>"), ("One", &one), ("Two", &two)],
+        &meta,
+        &[],
+    )
+}
+
+/// `bytes` with a NCX listing every chapter, playOrder 1, 2, 3…
+fn with_ncx(bytes: &[u8]) -> Vec<u8> {
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    for i in 0..z.len() {
+        let mut f = z.by_index(i).unwrap();
+        let name = f.name().unwrap().into_owned();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+        files.push((name, data));
+    }
+    let chapters = files
+        .iter()
+        .filter(|(n, _)| n.starts_with("OEBPS/text/c"))
+        .count();
+    let points: String = (0..chapters)
+        .map(|i| {
+            format!(
+                "<navPoint id=\"n{i}\" playOrder=\"{}\"><navLabel><text>C{i}</text></navLabel>\
+                 <content src=\"text/c{i}.xhtml\"/></navPoint>",
+                i + 1
+            )
+        })
+        .collect();
+    files.push((
+        "OEBPS/toc.ncx".into(),
+        format!(
+            "<?xml version=\"1.0\"?><ncx xmlns=\"http://www.daisy.org/z3986/2005/ncx/\" \
+             version=\"2005-1\"><navMap>{points}</navMap></ncx>"
+        )
+        .into_bytes(),
+    ));
+    for (n, d) in files.iter_mut() {
+        if n == "OEBPS/content.opf" {
+            let s = String::from_utf8(d.clone()).unwrap().replace(
+                "</manifest>",
+                "<item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\
+                 </manifest>",
+            );
+            *d = s.into_bytes();
+        }
+    }
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let stored =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for (n, d) in &files {
+        w.start_file(n.as_str(), stored).unwrap();
+        w.write_all(d).unwrap();
+    }
+    w.finish().unwrap().into_inner()
+}
+
+fn series_opts(
+    cache: &std::path::Path,
+    chapters: bool,
+    summary: bool,
+    series: bool,
+) -> RecapOptions {
+    RecapOptions {
+        llm: local(),
+        cache_dir: Some(cache.to_path_buf()),
+        chapters,
+        summary,
+        series,
+    }
+}
+
+/// Recaps are "Recap {n}.", summaries and Previously pages two paragraphs.
+fn saga_answer(n: usize, body: &str) -> Result<String, String> {
+    Ok(if asks_for_summary(body) {
+        "It began.\n\nIt ended.".into()
+    } else {
+        format!("Recap {n}.")
+    })
+}
+
+#[test]
+fn book_two_gets_a_previously_page_from_book_one() {
+    let tmp = tempfile::tempdir().unwrap();
+    let one = run_with(
+        &saga(1),
+        &series_opts(tmp.path(), true, false, false),
+        saga_answer,
+    );
+    assert_eq!(one.bodies.len(), 2);
+    assert_eq!(
+        std::fs::read_dir(tmp.path().join("recaps/books"))
+            .unwrap()
+            .count(),
+        1,
+        "book 1 leaves a record"
+    );
+
+    let book2 = with_ncx(&saga(2));
+    let two = run_with(
+        &book2,
+        &series_opts(tmp.path(), false, false, true),
+        saga_answer,
+    );
+    assert_eq!(
+        two.bodies.len(),
+        3,
+        "two recaps for book 2's record, then the page"
+    );
+    let ask = &two.bodies[2];
+    assert!(asks_for_summary(ask), "{ask}");
+    assert!(ask.contains("Series: Saga, book 2"), "{ask}");
+    assert!(ask.contains("Book 1: Pride"), "{ask}");
+    assert!(
+        ask.contains("One: Recap 0.") && ask.contains("Two: Recap 1."),
+        "{ask}"
+    );
+    assert!(!ask.contains("w20000"), "nothing of book 2 is sent: {ask}");
+
+    let page = read(&two.bytes, "OEBPS/deckle-previously.xhtml");
+    let dtd = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..Default::default()
+    };
+    roxmltree::Document::parse_with_options(&page, dtd).unwrap_or_else(|e| panic!("{e}: {page}"));
+    assert!(page.contains("<h1>Previously</h1>"), "{page}");
+    assert!(
+        page.contains("earlier books of Saga: Book 1: Pride."),
+        "{page}"
+    );
+    assert!(page.contains("<p>It began.</p><p>It ended.</p>"), "{page}");
+
+    let opf = read(&two.bytes, "OEBPS/content.opf");
+    let (c0, prev, c1) = (
+        opf.find("<itemref idref=\"c0\"/>").unwrap(),
+        opf.find("<itemref idref=\"deckle-previously\"/>").unwrap(),
+        opf.find("<itemref idref=\"c1\"/>").unwrap(),
+    );
+    assert!(
+        c0 < prev && prev < c1,
+        "after the title page, before chapter 1: {opf}"
+    );
+    let nav = read(&two.bytes, "OEBPS/nav.xhtml");
+    assert!(
+        nav.contains("<li><a href=\"deckle-previously.xhtml\">Previously</a></li><li><a href=\"text/c1.xhtml\">One</a></li>"),
+        "{nav}"
+    );
+    let ncx = read(&two.bytes, "OEBPS/toc.ncx");
+    assert!(
+        ncx.contains("<navPoint id=\"deckle-previously\" playOrder=\"2\">"),
+        "{ncx}"
+    );
+    assert!(
+        ncx.contains("<navPoint id=\"n1\" playOrder=\"3\">"),
+        "{ncx}"
+    );
+    assert!(
+        ncx.contains("<navPoint id=\"n2\" playOrder=\"4\">"),
+        "{ncx}"
+    );
+    assert!(
+        ncx.contains("<navPoint id=\"n0\" playOrder=\"1\">"),
+        "{ncx}"
+    );
+    for i in 0..3 {
+        assert_eq!(
+            chapter(&two.bytes, i),
+            chapter(&book2, i),
+            "series alone adds no recaps"
+        );
+    }
+    let s = two.summary.unwrap();
+    assert!(s.series && !s.summary);
+    assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+}
+
+#[test]
+fn an_earlier_summary_stands_in_for_its_recaps() {
+    let tmp = tempfile::tempdir().unwrap();
+    run_with(
+        &saga(1),
+        &series_opts(tmp.path(), false, true, false),
+        saga_answer,
+    );
+    let two = run_with(
+        &saga(2),
+        &series_opts(tmp.path(), false, false, true),
+        saga_answer,
+    );
+    let ask = two.bodies.last().unwrap();
+    assert!(
+        ask.contains("Book 1: Pride") && ask.contains("It began."),
+        "{ask}"
+    );
+    assert!(!ask.contains("One: Recap"), "{ask}");
+}
+
+#[test]
+fn no_earlier_book_means_no_page() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Another author's "Saga" doesn't count.
+    let books = tmp.path().join("recaps/books");
+    std::fs::create_dir_all(&books).unwrap();
+    std::fs::write(
+        books.join("other.json"),
+        r#"{"title":"Other","author":"Someone Else","series":"Saga","index":1.0,
+            "model":"m","recaps":["One: x"],"summary":null}"#,
+    )
+    .unwrap();
+    let two = run_with(
+        &saga(2),
+        &series_opts(tmp.path(), true, false, true),
+        saga_answer,
+    );
+    assert_eq!(two.bodies.len(), 2, "recaps only");
+    assert!(!zip_has(&two.bytes, "OEBPS/deckle-previously.xhtml"));
+    let s = two.summary.unwrap();
+    assert!(!s.series);
+    assert_eq!(
+        s.warnings,
+        ["Series recap skipped: no earlier book of Saga was sent with recaps"]
+    );
+}
+
+#[test]
+fn a_gap_in_the_series_is_named() {
+    let tmp = tempfile::tempdir().unwrap();
+    run_with(
+        &saga(1),
+        &series_opts(tmp.path(), true, false, false),
+        saga_answer,
+    );
+    let three = run_with(
+        &saga(3),
+        &series_opts(tmp.path(), false, false, true),
+        saga_answer,
+    );
+    let page = read(&three.bytes, "OEBPS/deckle-previously.xhtml");
+    assert!(
+        page.contains("earlier books of Saga: Book 1: Pride."),
+        "{page}"
+    );
+    assert_eq!(
+        three.summary.unwrap().warnings,
+        ["Series recap covers 1 of 2 earlier books"]
+    );
+}
+
+#[test]
+fn the_series_recap_alone_costs_nothing_outside_a_series() {
+    let tmp = tempfile::tempdir().unwrap();
+    let book = three_chapters();
+    let r = run_with(
+        &book,
+        &series_opts(tmp.path(), false, false, true),
+        |_, _| Err("no request expected".into()),
+    );
+    assert!(r.bodies.is_empty());
+    assert_eq!(r.bytes, book);
+    assert!(r.summary.is_none());
+}
+
+#[test]
+fn a_failed_series_recap_keeps_the_rest() {
+    let tmp = tempfile::tempdir().unwrap();
+    run_with(
+        &saga(1),
+        &series_opts(tmp.path(), true, false, false),
+        saga_answer,
+    );
+    let two = run_with(
+        &saga(2),
+        &series_opts(tmp.path(), true, false, true),
+        |n, b| {
+            if asks_for_summary(b) {
+                Err("status: 500".into())
+            } else {
+                saga_answer(n, b)
+            }
+        },
+    );
+    assert!(!zip_has(&two.bytes, "OEBPS/deckle-previously.xhtml"));
+    assert!(chapter(&two.bytes, 1).contains("deckle-recap"));
+    assert_eq!(
+        two.summary.unwrap().warnings,
+        ["Series recap skipped: LLM request failed: status: 500"]
+    );
+}
+
+#[test]
+fn a_cached_previously_page_costs_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    run_with(
+        &saga(1),
+        &series_opts(tmp.path(), true, false, false),
+        saga_answer,
+    );
+    let opts = series_opts(tmp.path(), false, false, true);
+    let first = run_with(&saga(2), &opts, saga_answer);
+    assert!(first.summary.unwrap().series);
+    let again = run_with(&saga(2), &opts, |_, _| Err("no request expected".into()));
+    assert!(again.bodies.is_empty());
+    assert_eq!(again.bytes, first.bytes);
+}
+
+#[test]
+fn the_extras_are_named_in_warnings() {
+    let e = |chapters, summary, series| deckle_core::recaps::Extras {
+        cache_dir: "/c".into(),
+        chapters,
+        summary,
+        series,
+    };
+    assert_eq!(
+        e(true, false, false).needs_llm(),
+        "Chapter recaps need an LLM; set one in Settings"
+    );
+    assert_eq!(
+        e(false, false, true).needs_llm(),
+        "The series recap needs an LLM; set one in Settings"
+    );
+    assert_eq!(
+        e(true, true, true).names(),
+        "chapter recaps, the book summary and the series recap"
+    );
 }

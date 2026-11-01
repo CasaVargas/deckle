@@ -46,6 +46,7 @@ export const INDEX: Entry[] = [
   { label: "AI model for X-Ray", page: "reading", words: "ai llm model anthropic claude openai ollama lm studio online" },
   { label: "Chapter recaps", page: "reading", words: "chapter recaps summary summaries ai llm recap previously" },
   { label: "Add a book summary", page: "reading", words: "book summary ending spoilers ai llm recap" },
+  { label: "Recap the series so far", page: "reading", words: "series recap previously earlier books volume ai llm" },
   { label: "API key", page: "reading", words: "api key token anthropic openai" },
   { label: "Word Wise", page: "reading", words: "word wise hints vocabulary" },
   { label: "How many hints", page: "reading", words: "word wise level slider hints dictionary" },
@@ -179,7 +180,8 @@ export function pageSummary(page: SettingsPage, s: Settings, library: LibrarySta
     case "reading": {
       const ww = s.word_wise ? (s.word_wise_level === 5 ? "Word Wise, every hint" : `Word Wise, ${s.word_wise_level} of 5`) : "";
       const xr = s.xray ? `X-Ray${s.llm_provider !== "off" ? " with an AI model" : ""}${s.wikipedia ? " and Wikipedia" : ""}` : "";
-      const rc = s.llm_provider === "off" ? "" : s.chapter_recaps && s.book_summary ? "Chapter recaps and a summary" : s.chapter_recaps ? "Chapter recaps" : s.book_summary ? "Book summary" : "";
+      const named = [s.chapter_recaps && "chapter recaps", s.book_summary && "a summary", s.series_recap && "a series recap"].filter((x): x is string => !!x);
+      const rc = s.llm_provider === "off" ? "" : list(named).replace(/^./, (c) => c.toUpperCase());
       return [ww, xr, rc].filter(Boolean).join(" · ") || "All off";
     }
     case "kindles":

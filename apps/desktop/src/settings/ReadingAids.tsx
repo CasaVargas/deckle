@@ -29,7 +29,7 @@ const RECAPS_HELP =
 export default function ReadingAids({ settings, set }: Props) {
   const caps = useCapabilities();
   const ai = settings.llm_provider !== "off";
-  const recaps = settings.chapter_recaps || settings.book_summary;
+  const recaps = settings.chapter_recaps || settings.book_summary || settings.series_recap;
   return (
     <div className="set-stack">
       <p className="overview-lead">Help that appears while you read. Word Wise and X-Ray need a book sent as a Kindle book; chapter recaps go to every e-reader.</p>
@@ -128,6 +128,12 @@ export default function ReadingAids({ settings, set }: Props) {
           <input type="checkbox" checked={settings.book_summary} onChange={(e) => set("book_summary", e.target.checked)} />
           <span>
             <strong>Add a book summary</strong> <span className="muted">on a page after the last chapter, written from the recaps. It gives away the ending.</span>
+          </span>
+        </label>
+        <label className="tick-row">
+          <input type="checkbox" checked={settings.series_recap} onChange={(e) => set("series_recap", e.target.checked)} />
+          <span>
+            <strong>Recap the series so far</strong> <span className="muted">on a page before chapter 1 of a later book, from the earlier books Deckle recapped.</span>
           </span>
         </label>
         {recaps && !ai && <p className="muted small">Needs an AI model: choose "An AI model" under X-Ray above.</p>}
