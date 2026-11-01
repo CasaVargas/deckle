@@ -178,6 +178,7 @@ mod kindle {
 
     pub(super) fn opts(target: Target) -> RunOptions {
         RunOptions {
+            recaps: None,
             preset: None,
             cover: Default::default(),
             cde_type: CdeType::Pdoc,
@@ -243,6 +244,29 @@ mod kindle {
         for stage in ["normalize", "convert", "repackage", "deliver"] {
             assert!(report.stage_ms.contains_key(stage), "{stage}");
         }
+    }
+
+    #[test]
+    fn a_fixed_layout_book_skips_chapter_recaps() {
+        let out = tempfile::tempdir().unwrap();
+        let mut o = opts(Target::Folder(out.path().into()));
+        o.recaps = Some(out.path().join("cache"));
+        o.llm = Some(deckle_core::xray::LlmConfig {
+            provider: deckle_xray::llm::Provider::OpenAi,
+            model: "test-model".into(),
+            endpoint: "http://127.0.0.1:1/v1".into(),
+            api_key: String::new(),
+        });
+        let report = run(&fixed_layout_epub(), &o);
+        assert_eq!(report.error, None, "{report:?}");
+        assert!(
+            report.warnings.iter().any(|w| w
+                == "fixed-layout book: typography, X-Ray, page numbers, chapter recaps skipped"),
+            "{:?}",
+            report.warnings
+        );
+        assert!(!report.stage_ms.contains_key("recaps"));
+        assert_eq!(report.recaps, None);
     }
 
     #[test]

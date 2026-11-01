@@ -535,6 +535,7 @@ fn push_options(wishes: &Wishes, finishing: &Finishing, target: &Target) -> RunO
         _ => None,
     };
     RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -947,6 +948,7 @@ mod tests {
         /// `digest run` asks for long reads.
         fn prepared_mini() -> Prepared {
             let opts = RunOptions {
+                recaps: None,
                 preset: None,
                 cover: Default::default(),
                 cde_type: CdeType::Pdoc,

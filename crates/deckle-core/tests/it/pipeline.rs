@@ -17,6 +17,7 @@ fn fake(name: &str) -> PathBuf {
 fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -83,6 +84,7 @@ fn run_with_fake_previewer_delivers_a_kfx_to_a_folder() {
 fn missing_previewer_fails_before_any_work() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -122,6 +124,7 @@ fn missing_previewer_fails_before_any_work() {
 fn enhanced_typesetting_refusal_is_reported_not_downgraded() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -164,6 +167,7 @@ fn docx_fixture() -> PathBuf {
 fn a_word_document_runs_through_the_whole_pipeline() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -219,6 +223,7 @@ fn a_broken_word_document_fails_at_import() {
     let bad = dir.path().join("notes.docx");
     std::fs::write(&bad, b"not really a document").unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -257,6 +262,7 @@ fn a_plain_text_file_runs_through_the_whole_pipeline() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/txt/gutenberg-mini.txt");
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -300,6 +306,7 @@ fn a_text_pdf_runs_through_the_whole_pipeline_with_a_quality_note() {
     let pdf = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf/book.pdf");
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -349,6 +356,7 @@ fn an_empty_text_file_fails_at_import() {
     let empty = dir.path().join("empty.txt");
     std::fs::write(&empty, b"\n\n").unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -400,6 +408,7 @@ fn real_previewer_end_to_end() {
     }
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -432,6 +441,7 @@ fn real_previewer_end_to_end() {
 fn missing_media_notice_from_previewer_reaches_the_report() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -469,6 +479,7 @@ fn run_with_progress_reports_each_stage_in_order() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -511,6 +522,7 @@ fn ebok_runs_enrich_and_ships_the_xray_sidecar() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Ebok,
@@ -583,6 +595,7 @@ fn run_with_progress_stops_at_the_failing_stage() {
     use deckle_core::pipeline::run_with_progress;
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -629,6 +642,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
     .unwrap();
     let device = deckle_core::deliver::detect_in(&[root.path().to_path_buf()]).remove(0);
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc, // ignored: the rule decides unless cde_override is set
@@ -678,6 +692,7 @@ fn mass_storage_target_gets_ebok_and_a_thumbnail_by_the_cover_rule() {
 fn folder_target_is_pdoc_and_an_override_wins() {
     let out = tempfile::tempdir().unwrap();
     let mut opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -716,6 +731,7 @@ fn folder_target_is_pdoc_and_an_override_wins() {
 fn a_folder_build_asking_for_xray_and_word_wise_ships_no_sidecars() {
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -781,6 +797,7 @@ fn an_ebok_book_ships_a_word_wise_sidecar_and_deckles_dictionary() {
     drop(conn);
     let out = tmp.path().join("out");
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -849,6 +866,7 @@ fn a_word_document_built_as_ebok_ships_xray_and_word_wise_sidecars() {
     drop(conn);
     let out = tmp.path().join("out");
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Ebok,
@@ -935,6 +953,7 @@ fn prepare_then_finish_to_a_folder_is_byte_identical_to_run() {
     let tmp = tempfile::tempdir().unwrap();
     let (a, b) = (tmp.path().join("run"), tmp.path().join("split"));
     let opts = |dir: &std::path::Path| RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -1019,6 +1038,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
     // The library's record names one more (an MTP-style hint); one that's gone is ignored.
     std::fs::write(out.path().join("Renamed by hand.kfx"), &store).unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -1063,6 +1083,7 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
 #[cfg(unix)]
 fn fill_opts(out: &std::path::Path, metadata_fill: bool) -> RunOptions {
     RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -1307,6 +1328,7 @@ fn a_bound_book_runs_through_the_whole_pipeline() {
     .unwrap();
     let out = tempfile::tempdir().unwrap();
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,
@@ -1382,6 +1404,7 @@ fn built_in_presets_reach_normalization_and_select_stage_defaults() {
     let out = tempfile::tempdir().unwrap();
     for preset in [Preset::Academic, Preset::Novel, Preset::Manual] {
         let mut opts = RunOptions {
+            recaps: None,
             preset: None,
             cover: Default::default(),
             cde_type: CdeType::Pdoc,
@@ -1608,5 +1631,213 @@ fn mobi_real_previewer_smoke() {
         assert_eq!(report.error, None, "{source}: {report:?}");
         let bytes = std::fs::read(report.delivered.unwrap()).unwrap();
         assert!(deckle_kfx::container::read_kfx(&bytes).is_ok());
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Chapter recaps (docs/superpowers/specs/2026-11-01-ai-extras-design.md)
+
+/// An EPUB with two 900-word chapters, written into `dir`.
+#[cfg(unix)]
+fn recap_book(dir: &std::path::Path) -> PathBuf {
+    use std::io::Write;
+    let mut z = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let stored =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    let mut put = |name: &str, body: &str| {
+        z.start_file(name, stored).unwrap();
+        z.write_all(body.as_bytes()).unwrap();
+    };
+    put("mimetype", "application/epub+zip");
+    put(
+        "META-INF/container.xml",
+        "<?xml version=\"1.0\"?><container version=\"1.0\" \
+         xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile \
+         full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\
+         </rootfiles></container>",
+    );
+    put(
+        "OEBPS/content.opf",
+        "<?xml version=\"1.0\"?><package xmlns=\"http://www.idpf.org/2007/opf\" version=\"3.0\" \
+         unique-identifier=\"id\"><metadata xmlns:dc=\"http://purl.org/dc/elements/1.1/\">\
+         <dc:identifier id=\"id\">urn:uuid:recaps-test</dc:identifier><dc:title>Recaps</dc:title>\
+         <dc:creator>Test Author</dc:creator><dc:language>en</dc:language></metadata><manifest>\
+         <item id=\"nav\" href=\"nav.xhtml\" properties=\"nav\" media-type=\"application/xhtml+xml\"/>\
+         <item id=\"c0\" href=\"c0.xhtml\" media-type=\"application/xhtml+xml\"/>\
+         <item id=\"c1\" href=\"c1.xhtml\" media-type=\"application/xhtml+xml\"/></manifest>\
+         <spine><itemref idref=\"c0\"/><itemref idref=\"c1\"/></spine></package>",
+    );
+    put(
+        "OEBPS/nav.xhtml",
+        "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\" \
+         xmlns:epub=\"http://www.idpf.org/2007/ops\"><head><title>Contents</title></head><body>\
+         <nav epub:type=\"toc\"><ol><li><a href=\"c0.xhtml\">One</a></li><li><a \
+         href=\"c1.xhtml\">Two</a></li></ol></nav></body></html>",
+    );
+    let words: String = (0..900).map(|i| format!("word{i} ")).collect();
+    for (i, title) in ["One", "Two"].iter().enumerate() {
+        put(
+            &format!("OEBPS/c{i}.xhtml"),
+            &format!(
+                "<?xml version=\"1.0\"?><html xmlns=\"http://www.w3.org/1999/xhtml\"><head>\
+                 <title>{title}</title></head><body><h1>{title}</h1><p>{words}</p></body></html>"
+            ),
+        );
+    }
+    let path = dir.join("recaps.epub");
+    std::fs::write(&path, z.finish().unwrap().into_inner()).unwrap();
+    path
+}
+
+/// A local OpenAI-compatible server that answers every request with the same recap; its port.
+#[cfg(unix)]
+fn fake_llm() -> u16 {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut s) = stream else { continue };
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                let n = s.read(&mut chunk).unwrap_or(0);
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                let Some(h) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                    continue;
+                };
+                let head = String::from_utf8_lossy(&buf[..h]).to_ascii_lowercase();
+                let len: usize = head
+                    .lines()
+                    .find_map(|l| l.strip_prefix("content-length:"))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0);
+                if buf.len() >= h + 4 + len {
+                    break;
+                }
+            }
+            let body = serde_json::json!({"choices": [{"message": {"content": "A fake recap."},
+                "finish_reason": "stop"}]})
+            .to_string();
+            let _ = write!(
+                s,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\
+                 connection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    port
+}
+
+#[cfg(unix)]
+fn recap_options(out: &std::path::Path, llm: Option<deckle_core::xray::LlmConfig>) -> RunOptions {
+    RunOptions {
+        preset: None,
+        cover: Default::default(),
+        cde_type: CdeType::Pdoc,
+        asin: None,
+        pages: None,
+        target: Target::Folder(out.to_path_buf()),
+        previewer: Some(fake("ok.sh")),
+        keep_work_dir: true,
+        cde_override: None,
+        amazon_match: false,
+        generated_cover: None,
+        metadata_fill: false,
+        typography: false,
+        popup_notes: false,
+        verified_real_asin: false,
+        xray: XRayMode::Off,
+        llm,
+        wikipedia: false,
+        recaps: Some(out.join("cache")),
+        word_wise: None,
+        replaces: Vec::new(),
+        originals: None,
+    }
+}
+
+#[cfg(unix)]
+fn local_llm(endpoint: String) -> deckle_core::xray::LlmConfig {
+    deckle_core::xray::LlmConfig {
+        provider: deckle_xray::llm::Provider::OpenAi,
+        model: "test-model".into(),
+        endpoint,
+        api_key: String::new(),
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn recaps_without_an_llm_warn_and_ship() {
+    let dir = tempfile::tempdir().unwrap();
+    let report = run(&recap_book(dir.path()), &recap_options(dir.path(), None));
+    assert_eq!(report.error, None, "{report:?}");
+    assert!(report.delivered.is_some());
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w == "Chapter recaps need an LLM; set one in Settings"),
+        "{:?}",
+        report.warnings
+    );
+    assert_eq!(report.recaps, None);
+}
+
+#[test]
+#[cfg(unix)]
+fn recaps_reach_the_normalized_epub() {
+    use std::io::Read;
+    let dir = tempfile::tempdir().unwrap();
+    let llm = local_llm(format!("http://127.0.0.1:{}/v1", fake_llm()));
+    let report = run(
+        &recap_book(dir.path()),
+        &recap_options(dir.path(), Some(llm)),
+    );
+    assert_eq!(report.error, None, "{report:?}");
+    let summary = report.recaps.clone().expect("recaps summary");
+    assert_eq!(summary.recapped, 2, "{summary:?}");
+    assert!(report.stage_ms.contains_key("recaps"));
+    let work = report.work_dir.clone().expect("work dir kept");
+    let bytes = std::fs::read(work.join("normalized.epub")).unwrap();
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut found = 0;
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).unwrap();
+        let mut s = String::new();
+        if f.read_to_string(&mut s).is_ok() {
+            found += s.matches("class=\"deckle-recap\"").count();
+        }
+    }
+    assert_eq!(found, 2);
+    let _ = std::fs::remove_dir_all(work);
+}
+
+#[test]
+#[cfg(unix)]
+fn an_unreachable_llm_is_a_warning_not_a_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let llm = local_llm("http://127.0.0.1:1/v1".into());
+    let report = run(
+        &recap_book(dir.path()),
+        &recap_options(dir.path(), Some(llm)),
+    );
+    assert_eq!(report.error, None, "{report:?}");
+    assert!(report.delivered.is_some());
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("Chapter recap skipped for")),
+        "{:?}",
+        report.warnings
+    );
+    if let Some(w) = report.work_dir {
+        let _ = std::fs::remove_dir_all(w);
     }
 }

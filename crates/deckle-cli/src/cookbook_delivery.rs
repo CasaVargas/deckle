@@ -240,6 +240,7 @@ fn due(store: &Store) -> bool {
 /// Previewer run a build), with page numbers as an ordinary book gets them.
 fn run_options(previewer: PathBuf) -> RunOptions {
     RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: deckle_kfx::convert::CdeType::Pdoc,

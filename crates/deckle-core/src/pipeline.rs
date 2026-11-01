@@ -72,6 +72,9 @@ pub struct RunOptions {
     pub llm: Option<LlmConfig>,
     /// Wikipedia summaries for X-Ray terms (opt-in network).
     pub wikipedia: bool,
+    /// Chapter recaps (issue #29), cached in this directory (`recaps/` under it); `None` = off.
+    /// Needs `llm`.
+    pub recaps: Option<PathBuf>,
     /// Word Wise sidecar on EBOK books; `None` = off.
     pub word_wise: Option<WordWiseOptions>,
     /// Older copies of this book under other names in `documents/` (the library's send
@@ -112,6 +115,8 @@ pub struct RunReport {
     pub xray: Option<XRaySummary>,
     /// What went into the Word Wise sidecar, when one shipped.
     pub word_wise: Option<WordWiseSummary>,
+    /// What the chapter recaps did, when they ran.
+    pub recaps: Option<crate::recaps::RecapSummary>,
     pub work_dir: Option<PathBuf>,
     /// The target Kindle's firmware, when known (`system/version.txt`, or read over MTP).
     pub firmware: Option<String>,
@@ -393,6 +398,9 @@ pub fn prepare_with(
     );
     report.warnings.extend(nreport.warnings.iter().cloned());
     report.normalize = nreport;
+    if !info.fixed_layout {
+        add_recaps(&normalized, opts, &mut report, on_stage);
+    }
 
     let kpf = stage!(
         report,
@@ -421,6 +429,51 @@ pub fn prepare_with(
     })
 }
 
+/// Chapter recaps written into the normalized EPUB when asked for (AI extras design §4). Never
+/// fails the run: every problem is a warning, and the book ships without recaps.
+fn add_recaps(
+    normalized: &Path,
+    opts: &RunOptions,
+    report: &mut RunReport,
+    on_stage: &mut dyn FnMut(&'static str),
+) {
+    let Some(cache_dir) = &opts.recaps else {
+        return;
+    };
+    let Some(llm) = &opts.llm else {
+        report
+            .warnings
+            .push("Chapter recaps need an LLM; set one in Settings".into());
+        return;
+    };
+    on_stage("recaps");
+    let t = Instant::now();
+    let recap_opts = crate::recaps::RecapOptions {
+        llm: llm.clone(),
+        cache_dir: Some(cache_dir.clone()),
+    };
+    let done = std::fs::read(normalized)
+        .map_err(|e| e.to_string())
+        .and_then(|bytes| crate::recaps::add(&bytes, &recap_opts))
+        .and_then(|(bytes, summary)| {
+            if summary.as_ref().is_some_and(|s| s.recapped > 0) {
+                std::fs::write(normalized, bytes).map_err(|e| e.to_string())?;
+            }
+            Ok(summary)
+        });
+    match done {
+        Ok(Some(summary)) => {
+            report.warnings.extend(summary.warnings.iter().cloned());
+            report.recaps = Some(summary);
+        }
+        Ok(None) => {}
+        Err(e) => report.warnings.push(format!("Chapter recaps skipped: {e}")),
+    }
+    report
+        .stage_ms
+        .insert("recaps", t.elapsed().as_millis() as u64);
+}
+
 /// The one warning naming every text extra `opts` asks for that a fixed-layout book skips.
 fn fixed_layout_skips(opts: &RunOptions) -> Option<String> {
     let asked: Vec<&str> = [
@@ -429,6 +482,7 @@ fn fixed_layout_skips(opts: &RunOptions) -> Option<String> {
         (opts.xray == XRayMode::Auto, "X-Ray"),
         (opts.word_wise.is_some(), "Word Wise"),
         (opts.pages.is_some(), "page numbers"),
+        (opts.recaps.is_some(), "chapter recaps"),
     ]
     .into_iter()
     .filter_map(|(on, what)| on.then_some(what))
@@ -1014,6 +1068,7 @@ pub fn fallback_kfx(prepared: &Prepared) -> Result<Vec<u8>, String> {
     let dir = tempfile::tempdir().map_err(|e| format!("workdir: {e}"))?;
     let target = Target::Folder(dir.path().to_path_buf());
     let opts = RunOptions {
+        recaps: None,
         preset: None,
         cover: Default::default(),
         cde_type: CdeType::Pdoc,

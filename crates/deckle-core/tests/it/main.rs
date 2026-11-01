@@ -20,6 +20,7 @@ mod notes;
 mod pipeline;
 mod preflight;
 mod previewer;
+mod recaps;
 mod thumbnail;
 mod whoswho;
 mod wordwise;
