@@ -29,6 +29,30 @@ fn fake_previewer_converts_to_kpf_with_enhanced_typesetting() {
 
 #[test]
 #[cfg(unix)] // the fake Previewer is a shell script
+fn overlapping_conversions_of_same_named_books_both_succeed() {
+    // Previewer's scratch folder comes from the input's file name, and every caller passes
+    // `<workdir>/normalized.epub`, so two runs at once used to delete each other's files (#235).
+    let p = locate(Some(&fake("scratch.sh"))).unwrap();
+    let dirs: Vec<_> = (0..2).map(|_| tempfile::tempdir().unwrap()).collect();
+    let results: Vec<_> = std::thread::scope(|s| {
+        let handles: Vec<_> = dirs
+            .iter()
+            .map(|d| {
+                let epub = d.path().join("deckle-issue-235.epub");
+                std::fs::copy(deckle_kfx::fixtures::path("deckle-mini.epub"), &epub).unwrap();
+                let p = &p;
+                s.spawn(move || convert(p, &epub, &d.path().join("previewer")))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for r in results {
+        assert!(r.unwrap().kpf.exists());
+    }
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
 fn enhanced_typesetting_refusal_reports_the_first_error_row() {
     let p = locate(Some(&fake("unsupported.sh"))).unwrap();
     let out = tempfile::tempdir().unwrap();
