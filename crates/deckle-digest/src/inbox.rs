@@ -63,7 +63,7 @@ static WEBLOC: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?s)<key>URL</key>\s*<string>([^<]+)</string>").unwrap());
 
 /// Extensions the Inbox treats as books rather than articles.
-pub const BOOK_EXTENSIONS: [&str; 3] = ["epub", "docx", "kfx"];
+pub const BOOK_EXTENSIONS: [&str; 5] = ["epub", "docx", "kfx", "cbz", "cbr"];
 
 /// A book to send later (by extension, any case), not an article.
 pub fn is_book(path: &Path) -> bool {

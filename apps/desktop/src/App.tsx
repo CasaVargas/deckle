@@ -372,7 +372,7 @@ function Deckle() {
   };
 
   const pickBooks = async () => {
-    const picked = await platform.pickFiles({ multiple: true, filterName: "Books, documents and web articles", extensions: ["epub", "kfx", "docx", "odt", "ott", "fodt", "rtf", "mobi", "azw", "azw3", "prc", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] });
+    const picked = await platform.pickFiles({ multiple: true, filterName: "Books, documents and web articles", extensions: ["epub", "kfx", "cbz", "cbr", "docx", "odt", "ott", "fodt", "rtf", "mobi", "azw", "azw3", "prc", "txt", "fb2", "zip", "md", "markdown", "pdf", "webloc", "url", "html", "htm"] });
     if (picked) addPaths(picked);
   };
 

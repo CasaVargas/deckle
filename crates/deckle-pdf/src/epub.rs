@@ -41,11 +41,13 @@ fn picture_name(i: usize) -> String {
 }
 
 /// The book's files and the report. `pictures[n]` is the PNG for the n-th figure block.
+/// `from_outline`: the h1s and h2s are the PDF's bookmarks, so each h1 starts a chapter.
 pub fn write(
     blocks: &[Block],
     pictures: &[Vec<u8>],
     info: &Info,
     stem: &str,
+    from_outline: bool,
 ) -> (Files, ImportReport) {
     let mut warnings = Vec::new();
     // Chapters start at the highest heading level whose headings, at least two of them, all
@@ -70,6 +72,7 @@ pub fn write(
             .collect();
         at.len() >= 2 && at.iter().all(|&i| starts_chapter(i))
     });
+    let split_level = if from_outline { Some(1) } else { split_level };
     // The title: the document's own, else the largest heading near the start.
     let title = info
         .title
@@ -114,7 +117,7 @@ pub fn write(
                 }
                 format!("<h{level} id=\"h{heading_no}\">{}</h{level}>", escape(text))
             }
-            Block::Para { text, small } => {
+            Block::Para { text, small, .. } => {
                 let class = if *small { " class=\"small\"" } else { "" };
                 format!("<p{class}>{}</p>", escape(text))
             }

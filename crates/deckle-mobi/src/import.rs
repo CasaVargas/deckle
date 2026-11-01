@@ -62,7 +62,9 @@ pub fn to_epub(bytes: &[u8], epub: &Path, fallback_title: &str) -> Result<Import
     }
     if meta.fixed_layout {
         return Err(MobiError::Unsupported(
-            "a fixed-layout book (comics and picture books aren't imported yet)".into(),
+            "a fixed-layout Kindle book: Deckle sends it to a Kindle as it is, but can't make an \
+             EPUB of it for other readers"
+                .into(),
         ));
     }
     let r = if meta.kf8 {

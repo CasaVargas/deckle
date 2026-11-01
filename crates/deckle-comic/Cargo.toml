@@ -1,0 +1,21 @@
+[package]
+name = "deckle-comic"
+description = "Deckle import: a comic (CBZ or a folder of page images) to a fixed-layout EPUB 3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+zip.workspace = true
+sha2.workspace = true
+roxmltree.workspace = true
+tempfile.workspace = true
+image = { workspace = true, features = ["gif"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+roxmltree.workspace = true
+zip.workspace = true
+image.workspace = true

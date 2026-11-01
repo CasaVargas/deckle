@@ -4,6 +4,7 @@
 //! DRM-free book rebuilt as an EPUB for the library's upgrade (§5) and the import stage (MOBI
 //! import design). A DRM-protected file is never decrypted.
 
+pub mod azw3;
 pub mod epub;
 pub mod fixture;
 mod import;
