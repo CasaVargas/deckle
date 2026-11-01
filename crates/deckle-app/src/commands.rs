@@ -63,6 +63,8 @@ pub struct Settings {
     pub wikipedia: bool,
     /// An AI-written recap at the end of each chapter (issue #29); needs the LLM settings.
     pub chapter_recaps: bool,
+    /// A summary page after the last chapter, made from the recaps (issue #29); needs the LLM.
+    pub book_summary: bool,
     pub amazon_match: bool,
     /// A typographic cover for a book that has none (issue #27).
     pub generated_cover: bool,
@@ -91,6 +93,7 @@ impl Default for Settings {
             word_wise_level: 5,
             wikipedia: false,
             chapter_recaps: false,
+            book_summary: false,
             amazon_match: false,
             generated_cover: true,
             metadata_fill: false,
@@ -694,6 +697,15 @@ pub fn set_illustrations_key_at(file: &Path, key: &str) -> Result<(), String> {
     save_settings_to(file, &s)
 }
 
+/// Chapter recaps and the book summary as a run asks for them; `None` when both are off.
+pub fn extras(settings: &Settings) -> Option<deckle_core::recaps::Extras> {
+    (settings.chapter_recaps || settings.book_summary).then(|| deckle_core::recaps::Extras {
+        cache_dir: deckle_core::wordwise::default_cache_dir(),
+        chapters: settings.chapter_recaps,
+        summary: settings.book_summary,
+    })
+}
+
 /// The LLM settings as a pipeline config; `off` (or anything unknown) disables it.
 pub fn llm_config(settings: &Settings) -> Option<LlmConfig> {
     use deckle_xray::llm::Provider;
@@ -823,9 +835,7 @@ pub fn run_books_with(
             replaces.push(u.file.clone());
         }
         let mut opts = RunOptions {
-            recaps: settings
-                .chapter_recaps
-                .then(deckle_core::wordwise::default_cache_dir),
+            recaps: extras(settings),
             preset: None,
             cover: b.cover.as_ref().map(CoverChoice::pick).unwrap_or_default(),
             cde_type: cde_from(override_str.unwrap_or("pdoc")),
@@ -1686,6 +1696,21 @@ mod tests {
     }
 
     #[test]
+    fn the_summary_alone_makes_recaps_without_putting_them_in_chapters() {
+        let s = Settings {
+            book_summary: true,
+            ..Default::default()
+        };
+        let e = extras(&s).unwrap();
+        assert!(e.summary && !e.chapters);
+        let both = Settings {
+            chapter_recaps: true,
+            ..s
+        };
+        assert!(extras(&both).is_some_and(|e| e.summary && e.chapters));
+    }
+
+    #[test]
     fn settings_round_trip_through_json_and_defaults() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("settings.json");
@@ -1707,6 +1732,8 @@ mod tests {
         assert!(!s.typography, "the typography pass is off by default");
         assert!(!s.popup_notes, "the pop-up notes pass is off by default");
         assert!(!s.chapter_recaps, "chapter recaps are off by default");
+        assert!(!s.book_summary, "the book summary is off by default");
+        assert_eq!(extras(&s), None);
         assert!(s.book_presets.is_empty());
         let mut changed = s.clone();
         changed.book_presets.insert(
@@ -1719,6 +1746,7 @@ mod tests {
         changed.generated_cover = false;
         changed.popup_notes = true;
         changed.chapter_recaps = true;
+        changed.book_summary = true;
         changed.illustrations_api_key = "sk-image".into();
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();
@@ -1737,6 +1765,7 @@ mod tests {
             !s.chapter_recaps,
             "a file from before recaps keeps them off"
         );
+        assert!(!s.book_summary);
     }
 
     #[test]

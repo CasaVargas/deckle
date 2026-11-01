@@ -228,6 +228,10 @@ pub enum Command {
         /// book's text is sent to it; with a local server nothing leaves this computer.
         #[arg(long)]
         recaps: bool,
+        /// An AI-written summary of the whole book, ending included, on a page after the last
+        /// chapter, made from the chapter recaps (needs --llm; works without --recaps).
+        #[arg(long)]
+        book_summary: bool,
         /// Word Wise sidecar for EBOK books: `auto` (default) or `off`. The first use downloads
         /// Deckle's Word Wise database (about 12 MB) unless `--wordwise-db` is given.
         #[arg(long = "word-wise", value_enum)]

@@ -494,6 +494,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             llm_endpoint,
             wikipedia,
             recaps,
+            book_summary,
             word_wise,
             word_wise_level,
             wordwise_db,
@@ -518,6 +519,12 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 .transpose()?;
             let pages_explicit = pages.is_some();
             let pages = cli::parse_pages(pages.as_deref())?;
+            // Chapter recaps and the book summary (AI extras design §4, §13).
+            let extras = (recaps || book_summary).then(|| deckle_core::recaps::Extras {
+                cache_dir: deckle_core::wordwise::default_cache_dir(),
+                chapters: recaps,
+                summary: book_summary,
+            });
             if kindle.is_some() && to != "device" {
                 return Err("--kindle sends to a Kindle; leave out --to".into());
             }
@@ -540,17 +547,14 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                         llm: config.clone(),
                         wikipedia,
                     });
-                // Chapter recaps (AI extras design §4), as the Kindle pipeline adds them.
-                let recaps = match (recaps, config) {
-                    (false, _) => None,
-                    (true, None) => {
-                        eprintln!("Chapter recaps need an LLM; set one in Settings");
+                // As the Kindle pipeline adds them.
+                let recaps = match (&extras, config) {
+                    (None, _) => None,
+                    (Some(_), None) => {
+                        eprintln!("Chapter recaps and the book summary need an LLM (--llm)");
                         None
                     }
-                    (true, Some(llm)) => Some(deckle_core::recaps::RecapOptions {
-                        llm,
-                        cache_dir: Some(deckle_core::wordwise::default_cache_dir()),
-                    }),
+                    (Some(e), Some(llm)) => Some(e.options(llm)),
                 };
                 let opts = deckle_core::reader::BookOptions { whos_who, recaps };
                 return send_to_reader(&epubs, &reader, &opts, json);
@@ -584,7 +588,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                 }
             };
             let mut opts = RunOptions {
-                recaps: recaps.then(deckle_core::wordwise::default_cache_dir),
+                recaps: extras,
                 preset: None,
                 cover: Default::default(),
                 cde_type: cde.into(),
@@ -4877,7 +4881,7 @@ pub(crate) fn record_koreader(
 }
 
 /// `deckle run … --to device` with no Kindle but a Kobo or a PocketBook: each book cleaned
-/// (with chapter recaps when `--recaps`, a Who's who page unless `--xray off`, and made a KEPUB
+/// (with chapter recaps and a summary page when `--recaps` / `--book-summary`, a Who's who page unless `--xray off`, and made a KEPUB
 /// for a Kobo; no Previewer), sent to its `Deckle/` folder.
 fn send_to_reader(
     inputs: &[PathBuf],

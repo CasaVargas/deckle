@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Chapter recaps (docs/superpowers/specs/2026-11-01-ai-extras-design.md): a short recap the
-//! owner's LLM writes at the end of each chapter, labelled as AI-generated.
+//! Chapter recaps and the book summary (docs/superpowers/specs/2026-11-01-ai-extras-design.md):
+//! a short recap the owner's LLM writes at the end of each chapter, and a Summary page made from
+//! those recaps, all labelled as AI-generated.
 //!
 //! Like [`crate::whoswho`], the text is read and the recaps are written in one pass over each
 //! document's raw XHTML: nothing is parsed into a tree and written back.
@@ -31,6 +32,8 @@ const PROMPT_VERSION: u32 = 1;
 const MAX_WARNINGS: usize = 3;
 /// Requests in a row that can't reach the LLM before the remaining chapters are skipped.
 const MAX_UNREACHABLE: usize = 3;
+/// Recapped chapters a book needs for a summary: one chapter's recap already is one.
+const MIN_SUMMARY_CHAPTERS: usize = 2;
 
 /// Why a recap failed.
 #[derive(Debug)]
@@ -42,14 +45,61 @@ struct Failure {
 
 const SYSTEM: &str =
     "You write short chapter recaps for an e-reader. Answer with the recap text only.";
+const SUMMARY_SYSTEM: &str =
+    "You write book summaries for an e-reader. Answer with the summary text only.";
+/// The Summary page's file, next to the OPF (design §13.4).
+pub const SUMMARY_PAGE: &str = "deckle-summary.xhtml";
 const RULES: &str = "Say only what happens in this chapter. Do not guess at or hint about \
 anything that happens later. Do not judge or praise the writing.";
+const SUMMARY_RULES: &str = "Do not judge or praise the writing.";
 
 #[derive(Clone, Debug)]
 pub struct RecapOptions {
     pub llm: LlmConfig,
     /// Recaps are kept under `{cache_dir}/recaps/`; `None`: no cache.
     pub cache_dir: Option<PathBuf>,
+    /// The recaps go at the end of their chapters (design §7).
+    pub chapters: bool,
+    /// A Summary page made from the recaps goes after the last chapter (design §13).
+    pub summary: bool,
+}
+
+/// What a run asks for, without the LLM, which comes from the run's own setting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Extras {
+    /// Recaps are cached under `{cache_dir}/recaps/`.
+    pub cache_dir: PathBuf,
+    pub chapters: bool,
+    pub summary: bool,
+}
+
+impl Extras {
+    /// Chapter recaps only, cached in `cache_dir`.
+    pub fn chapters(cache_dir: PathBuf) -> Extras {
+        Extras {
+            cache_dir,
+            chapters: true,
+            summary: false,
+        }
+    }
+
+    pub fn options(&self, llm: LlmConfig) -> RecapOptions {
+        RecapOptions {
+            llm,
+            cache_dir: Some(self.cache_dir.clone()),
+            chapters: self.chapters,
+            summary: self.summary,
+        }
+    }
+
+    /// The extras by name, for warnings: "chapter recaps", "a book summary", or both.
+    pub fn names(&self) -> &'static str {
+        match (self.chapters, self.summary) {
+            (true, true) => "chapter recaps and the book summary",
+            (false, true) => "the book summary",
+            _ => "chapter recaps",
+        }
+    }
 }
 
 /// What a book got.
@@ -57,19 +107,22 @@ pub struct RecapOptions {
 pub struct RecapSummary {
     /// Chapters long enough for a recap.
     pub chapters: usize,
-    /// Recaps written into the book.
+    /// Recaps made (written into the chapters when [`RecapOptions::chapters`] is on).
     pub recapped: usize,
     /// Of those, how many came from the cache.
     pub cached: usize,
     pub model: String,
-    /// Chapters whose recap failed.
+    /// A Summary page went in.
+    #[serde(default)]
+    pub summary: bool,
+    /// Chapters whose recap failed, and a summary that couldn't be made.
     pub warnings: Vec<String>,
 }
 
-/// Writes a recap at the end of each chapter of the EPUB `bytes`. The bytes come back unchanged
-/// with `None` for a fixed-layout book, a book that already has recaps, or one with no chapter
-/// of [`MIN_WORDS`]; unchanged with a summary when every recap failed. `Err` only for an EPUB
-/// that can't be read. Real HTTP.
+/// Writes a recap at the end of each chapter of the EPUB `bytes` and/or a Summary page after the
+/// last one, as `opts` asks. The bytes come back unchanged with `None` for a fixed-layout book, a
+/// book that already has recaps, or one with no chapter of [`MIN_WORDS`]; unchanged with a
+/// summary when every recap failed. `Err` only for an EPUB that can't be read. Real HTTP.
 pub fn add(bytes: &[u8], opts: &RecapOptions) -> Result<(Vec<u8>, Option<RecapSummary>), String> {
     add_with(bytes, opts, &mut llm::http_post)
 }
@@ -82,7 +135,9 @@ pub fn add_with(
 ) -> Result<(Vec<u8>, Option<RecapSummary>), String> {
     let mut files = unzip(bytes)?;
     let book = Book::read(&files)?;
-    if book.fixed_layout {
+    let summary_path = book.page_at(SUMMARY_PAGE);
+    let want_summary = opts.summary && !files.iter().any(|(n, _)| *n == summary_path);
+    if book.fixed_layout || !(opts.chapters || want_summary) {
         return Ok((bytes.to_vec(), None));
     }
     let xhtml_of = |p: &str| {
@@ -138,6 +193,8 @@ pub fn add_with(
     };
     let mut failed = Vec::new();
     let mut inserts: Vec<Vec<(usize, String)>> = vec![Vec::new(); docs.len()];
+    // `{label}: {recap}` in reading order, for the summary.
+    let mut made: Vec<String> = Vec::new();
     // Requests that couldn't reach the LLM, in a row: a server that hangs costs each chapter a
     // full timeout, so after a few the rest are skipped.
     let mut unreachable = 0;
@@ -153,6 +210,7 @@ pub fn add_with(
                 summary.recapped += 1;
                 summary.cached += usize::from(cached);
                 inserts[c.doc].push((c.insert_at, aside(c, &text, &writer.model)));
+                made.push(format!("{label}: {text}"));
             }
             Err(e) => {
                 unreachable = if e.unreachable { unreachable + 1 } else { 0 };
@@ -170,9 +228,41 @@ pub fn add_with(
             "The LLM stopped answering: {abandoned} more chapters skipped"
         ));
     }
+    let missing = todo.len() - summary.recapped;
     summary.warnings = failed;
     if summary.recapped == 0 {
         return Ok((bytes.to_vec(), Some(summary)));
+    }
+
+    // The book summary (design §13): from every chapter's recap, or not at all.
+    let mut page = None;
+    if want_summary && missing > 0 {
+        summary.warnings.push(format!(
+            "Book summary skipped: {missing} {} no recap",
+            if missing == 1 {
+                "chapter has"
+            } else {
+                "chapters have"
+            }
+        ));
+    } else if want_summary && made.len() >= MIN_SUMMARY_CHAPTERS {
+        match writer.summary(&made) {
+            Ok((text, _)) => page = Some(summary_page(&book, &text, &writer.model)),
+            Err(e) => summary
+                .warnings
+                .push(format!("Book summary skipped: {}", e.message)),
+        }
+    }
+    if !opts.chapters && page.is_none() {
+        return Ok((bytes.to_vec(), Some(summary)));
+    }
+    if let Some(page) = page {
+        files.push((summary_path, page.into_bytes()));
+        book.register_page(&mut files, "deckle-summary", SUMMARY_PAGE, "Summary")?;
+        summary.summary = true;
+    }
+    if !opts.chapters {
+        return Ok((crate::kepub::write(&files)?, Some(summary)));
     }
 
     for (di, mut ins) in inserts.into_iter().enumerate() {
@@ -194,6 +284,32 @@ pub fn add_with(
         slot.1 = out.into_bytes();
     }
     Ok((crate::kepub::write(&files)?, Some(summary)))
+}
+
+/// The Summary page (design §13.4): `text`'s paragraphs, split on blank lines.
+fn summary_page(book: &Book, text: &str, model: &str) -> String {
+    let paras: String = text
+        .split("\n\n")
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            format!(
+                "<p>{}</p>",
+                esc(&p.split_whitespace().collect::<Vec<_>>().join(" "))
+            )
+        })
+        .collect();
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n<html \
+         xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\" \
+         xml:lang=\"{l}\" lang=\"{l}\"><head><title>Summary</title></head><body>\
+         <section epub:type=\"appendix\" id=\"deckle-summary\"><h1>Summary</h1>\
+         <p><i>This summary covers the whole book, including the ending.</i></p>{paras}\
+         <p style=\"font-size: 0.8em; font-style: italic;\">AI-generated summary ({m}), not part \
+         of the original book.</p></section></body></html>\n",
+        l = esc(&book.lang),
+        m = esc(model)
+    )
 }
 
 /// The recap's markup (design §7).
@@ -300,24 +416,67 @@ impl<'a, 'p> Writer<'a, 'p> {
                 got.join("\n")
             ))?
         };
-        if let Some(f) = file {
-            // A cache that can't be written only costs a request next time.
-            let _ = f
-                .parent()
-                .map(std::fs::create_dir_all)
-                .transpose()
-                .and_then(|_| std::fs::write(&f, &recap));
-        }
+        store(file, &recap);
         Ok((recap, false))
     }
 
+    /// The book summary from `recaps` (`{label}: {recap}`, in order), and whether it came from
+    /// the cache (design §13.3).
+    fn summary(&mut self, recaps: &[String]) -> Result<(String, bool), Failure> {
+        let all = recaps.join("\n\n");
+        let file = self
+            .cache
+            .as_ref()
+            .map(|d| d.join(format!("summary-{}.txt", self.key_of(&all))));
+        if let Some(hit) = file.as_ref().and_then(|f| std::fs::read_to_string(f).ok())
+            && !hit.trim().is_empty()
+        {
+            return Ok((hit.trim().to_owned(), true));
+        }
+        let head = self.header.clone();
+        let parts = parts(&all, self.part_words);
+        let text = if parts.len() <= 1 {
+            let user = format!(
+                "{head}\n\nThese are recaps of each chapter of the book, in order. Write a \
+                 summary of the whole book in 2–3 short paragraphs, in the book's language, past \
+                 tense, ending included. {SUMMARY_RULES}\n\n{all}"
+            );
+            self.ask_as(SUMMARY_SYSTEM, &user)?
+        } else {
+            let n = parts.len();
+            let mut got = Vec::with_capacity(n);
+            for (i, part) in parts.iter().enumerate() {
+                let user = format!(
+                    "{head}\n\nThese are recaps of the chapters in part {} of {n} of the book, \
+                     in order. Write a one-paragraph summary of this part, in the book's \
+                     language, past tense. {SUMMARY_RULES}\n\n{part}",
+                    i + 1
+                );
+                got.push(self.ask_as(SUMMARY_SYSTEM, &user)?);
+            }
+            let user = format!(
+                "{head}\n\nThese are summaries of the parts of the book, in order. Combine them \
+                 into one summary of the whole book in 2–3 short paragraphs, in the book's \
+                 language, past tense, ending included. {SUMMARY_RULES}\n\n{}",
+                got.join("\n\n")
+            );
+            self.ask_as(SUMMARY_SYSTEM, &user)?
+        };
+        store(file, &text);
+        Ok((text, false))
+    }
+
     fn ask(&mut self, user: &str) -> Result<String, Failure> {
+        self.ask_as(SYSTEM, user)
+    }
+
+    fn ask_as(&mut self, system: &str, user: &str) -> Result<String, Failure> {
         let raw = llm::complete(
             self.provider,
             &self.model,
             &self.key,
             &self.endpoint,
-            SYSTEM,
+            system,
             user,
             MAX_TOKENS,
             self.post,
@@ -327,7 +486,7 @@ impl<'a, 'p> Writer<'a, 'p> {
             message: e.to_string(),
         })?;
         clean(&raw).ok_or_else(|| Failure {
-            message: "the LLM answered with an empty recap".to_owned(),
+            message: "the LLM answered with nothing".to_owned(),
             unreachable: false,
         })
     }
@@ -338,6 +497,17 @@ impl<'a, 'p> Writer<'a, 'p> {
         h.update(format!("{PROMPT_VERSION}\0{:?}\0{}\0", self.provider, self.model).as_bytes());
         h.update(text.as_bytes());
         h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
+/// Keeps `text` in the cache `file`; one that can't be written only costs a request next time.
+fn store(file: Option<PathBuf>, text: &str) {
+    if let Some(f) = file {
+        let _ = f
+            .parent()
+            .map(std::fs::create_dir_all)
+            .transpose()
+            .and_then(|_| std::fs::write(&f, text));
     }
 }
 

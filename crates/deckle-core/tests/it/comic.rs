@@ -250,7 +250,9 @@ mod kindle {
     fn a_fixed_layout_book_skips_chapter_recaps() {
         let out = tempfile::tempdir().unwrap();
         let mut o = opts(Target::Folder(out.path().into()));
-        o.recaps = Some(out.path().join("cache"));
+        o.recaps = Some(deckle_core::recaps::Extras::chapters(
+            out.path().join("cache"),
+        ));
         o.llm = Some(deckle_core::xray::LlmConfig {
             provider: deckle_xray::llm::Provider::OpenAi,
             model: "test-model".into(),

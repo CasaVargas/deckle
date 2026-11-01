@@ -208,6 +208,8 @@ export interface Settings {
   wikipedia: boolean;
   /** An AI-written recap at the end of each chapter (issue #29); needs the LLM settings. */
   chapter_recaps: boolean;
+  /** A summary page after the last chapter, made from the recaps (issue #29); needs the LLM settings. */
+  book_summary: boolean;
   amazon_match: boolean;
   /** A typographic cover for a book that has none (issue #27). */
   generated_cover: boolean;

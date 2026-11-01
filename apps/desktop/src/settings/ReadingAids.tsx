@@ -29,6 +29,7 @@ const RECAPS_HELP =
 export default function ReadingAids({ settings, set }: Props) {
   const caps = useCapabilities();
   const ai = settings.llm_provider !== "off";
+  const recaps = settings.chapter_recaps || settings.book_summary;
   return (
     <div className="set-stack">
       <p className="overview-lead">Help that appears while you read. Word Wise and X-Ray need a book sent as a Kindle book; chapter recaps go to every e-reader.</p>
@@ -66,14 +67,14 @@ export default function ReadingAids({ settings, set }: Props) {
           <div className="mode-grid">
             <label className={`mode-card ${!ai ? "on" : ""}`}>
               <span className="mode-head">
-                <input type="radio" name="xray-by" checked={!ai} disabled={!settings.xray && !settings.chapter_recaps} onChange={() => set("llm_provider", "off")} />
+                <input type="radio" name="xray-by" checked={!ai} disabled={!settings.xray && !recaps} onChange={() => set("llm_provider", "off")} />
                 <strong>Deckle, on this Mac</strong>
               </span>
               <span className="muted">Good lists of names; nothing goes online.</span>
             </label>
             <label className={`mode-card ${ai ? "on" : ""}`}>
               <span className="mode-head">
-                <input type="radio" name="xray-by" checked={ai} disabled={!settings.xray && !settings.chapter_recaps} onChange={() => set("llm_provider", "anthropic")} />
+                <input type="radio" name="xray-by" checked={ai} disabled={!settings.xray && !recaps} onChange={() => set("llm_provider", "anthropic")} />
                 <strong>An AI model</strong>
                 <span className="tag">Online</span>
               </span>
@@ -123,7 +124,13 @@ export default function ReadingAids({ settings, set }: Props) {
           <Switch label="Chapter recaps" checked={settings.chapter_recaps} onChange={(on) => set("chapter_recaps", on)} />
         </div>
         <p className="muted">{RECAPS_HELP}</p>
-        {settings.chapter_recaps && !ai && <p className="muted small">Needs an AI model: choose "An AI model" under X-Ray above.</p>}
+        <label className="tick-row">
+          <input type="checkbox" checked={settings.book_summary} onChange={(e) => set("book_summary", e.target.checked)} />
+          <span>
+            <strong>Add a book summary</strong> <span className="muted">on a page after the last chapter, written from the recaps. It gives away the ending.</span>
+          </span>
+        </label>
+        {recaps && !ai && <p className="muted small">Needs an AI model: choose "An AI model" under X-Ray above.</p>}
       </section>
     </div>
   );
