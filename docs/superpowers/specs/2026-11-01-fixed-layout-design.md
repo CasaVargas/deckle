@@ -270,8 +270,13 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
        `.azw3`. The library reads its title and authors from its own header. Other readers
        refuse it, since there's no EPUB to make.
    - **4b:**
-     - image-only PDF through PDFium page images;
-     - a per-book reading-direction override.
+     - **Scanned PDFs:** a PDF the reflow refuses as a scan has each page rendered by PDFium at
+       2480 px tall into a page folder, with a `ComicInfo.xml` holding the PDF's own title and
+       author, and becomes Deckle's own comic, fitted per device. No OCR.
+     - **Reading direction:** `deckle run --direction rtl|ltr` sets it for comics (CBZ, CBR,
+       page folders) through `deckle_comic::convert_with`. The CLI makes the EPUB itself, so
+       `RunOptions` doesn't change. A publisher's fixed-layout EPUB keeps its own direction.
+       The app's per-book toggle is left for a UI pass.
 
 ## 10. Calls made without the owner
 

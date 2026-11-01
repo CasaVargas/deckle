@@ -118,19 +118,39 @@ pub fn is_comic(path: &Path) -> bool {
 
 /// Converts the comic at `source` (a CBZ, a CBR or a folder) and writes the EPUB to `epub`.
 pub fn convert(source: &Path, epub: &Path) -> Result<ImportReport, ComicError> {
+    convert_with(source, epub, None)
+}
+
+/// Reading order, when the owner sets it for a book.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    LeftToRight,
+    RightToLeft,
+}
+
+/// [`convert`], reading in `direction` when given, whatever `ComicInfo.xml` says (fixed-layout
+/// spec §3: the owner's choice comes first).
+pub fn convert_with(
+    source: &Path,
+    epub: &Path,
+    direction: Option<Direction>,
+) -> Result<ImportReport, ComicError> {
     let mut src = Source::open(source)?;
     let stem = source
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
     let mut names = src.names();
-    let info = match names.iter().position(|n| is_comicinfo(n)) {
+    let mut info = match names.iter().position(|n| is_comicinfo(n)) {
         Some(i) => {
             let name = names.remove(i);
             ComicInfo::parse(&src.read(&name)?)
         }
         None => ComicInfo::default(),
     };
+    if let Some(d) = direction {
+        info.right_to_left = d == Direction::RightToLeft;
+    }
     names.retain(|n| is_image_name(n) || is_unsupported_image_name(n));
     order::natural_sort(&mut names);
 

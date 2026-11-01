@@ -29,6 +29,7 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+deckle-comic.workspace = true
 # `digest email password`: the SMTP password, read without echo.
 rpassword = "7"
 # `digest daemon`: SIGTERM/SIGINT stop it cleanly in a container.

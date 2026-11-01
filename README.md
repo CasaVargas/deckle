@@ -155,14 +155,15 @@ in, press **Send**.
   numbers, X-Ray and Word Wise. DRM-protected files are refused, never decrypted.
 - **PDFs, reflowed.** Columns read in order, running heads and page numbers dropped, broken words
   joined; tables, equations and figures kept as pictures. Never as good as a real ebook, and the
-  run says so. Scans aren't supported.
+  run says so. A scan, with no text to reflow, goes as its page pictures, the way a comic does
+  (no OCR).
 - **Markdown and notes folders.** A file or a flat folder of notes becomes one book: headings,
   tables, local images and links between notes, a chapter per file. See [docs/markdown.md](docs/markdown.md).
 - **Comics, manga and picture books** (`.cbz`, `.cbr`, a folder of page images, a fixed-layout
   EPUB or a fixed-layout AZW3) keep their pages as they are: on a Kindle as an AZW3, since Kindle
   Previewer makes no KFX for fixed layout. A CBR needs the system's `bsdtar` (built into macOS
   and Windows as `tar`; `libarchive-tools` on Linux). `ComicInfo.xml` gives the title and series, and manga marked right to left reads
-  right to left. No X-Ray, Word Wise or page numbers. Fitting pages to each screen comes later
+  right to left (`deckle run --direction rtl` sets it for a comic that doesn't say). No X-Ray, Word Wise or page numbers. Fitting pages to each screen comes later
   (#20).
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
 - **Several files, one book.** Bind any of the above in your order, each with its own entry in the

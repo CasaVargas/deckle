@@ -1117,6 +1117,7 @@ version = "0.10.0"
 dependencies = [
  "assert_cmd",
  "clap",
+ "deckle-comic",
  "deckle-core",
  "deckle-digest",
  "deckle-highlights",
