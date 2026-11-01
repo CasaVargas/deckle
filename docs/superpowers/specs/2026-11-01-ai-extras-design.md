@@ -205,10 +205,7 @@ recap text lives only in the book and the cache.
 
 ## 9. Later extras (sketch, not in this increment)
 
-- **Book summary.** A back-matter "Summary" page (spoilers allowed: it's after the end), made by one
-  request over the cached chapter recaps — no second pass over the book. A front-matter version
-  would have to be premise-only and mostly duplicates the publisher's description, so it's off the
-  table unless the owner asks.
+- **Book summary.** Specified in §13 (increment 3).
 - **Series recap.** A front-matter "Previously" page in volume N, made from the cached recaps of
   volumes 1…N-1 found through the library's series metadata. Needs those volumes to have been sent
   with recaps on (or a "recap this book only" action).
@@ -219,9 +216,9 @@ Each gets its own spec section and increment.
 
 1. **This PR:** this spec; `deckle_core::recaps` with tests (mocked `Post`); Kindle pipeline
    wiring behind `RunOptions.recaps`; CLI `--recaps`.
-2. Other readers (`book_epub`, the Inbox, the wireless reader server) and the desktop setting and
-   toggle, with the §8 copy.
-3. Book summary. 4. Series recap.
+2. Other readers (`book_epub`) and the desktop setting and toggle, with the §8 copy (PR #282).
+   The Inbox and the wireless reader server have no LLM setting, so they don't add recaps.
+3. Book summary (§13). 4. Series recap.
 
 ## 11. Tests the build must add
 
@@ -246,3 +243,94 @@ Each gets its own spec section and increment.
 
 How the chapter splitter is shared with `whoswho` (extract a common helper or reuse its scanner);
 the exact cleanup regexes; the warning wording beyond §6.
+
+## 13. Book summary (increment 3)
+
+A back-matter **Summary** page: what happens in the whole book, ending included, written in one
+request from the chapter recaps. It is for a reader who has finished a book, or who returns to a
+series and wants the last volume back in a page.
+
+### 13.1 Decisions (builder's calls; the owner can overturn any)
+
+| Question | Decision |
+|---|---|
+| What it's made from | The chapter recaps of §6, from the cache or freshly made. The book's text is never sent a second time. |
+| Setting | A separate `book_summary` switch. With chapter recaps off, the recaps are still made and cached, but not put in the chapters. |
+| Where it goes | A new page at the end of the spine, after the last chapter and before the Who's who page, listed last but one in the nav and the NCX as "Summary". |
+| Spoilers | Allowed and announced: the page opens with "This summary covers the whole book, including the ending." |
+| Partial recaps | No summary when any eligible chapter has no recap. A summary of part of a book reads like a summary of all of it. |
+
+### 13.2 Where it runs
+
+In `recaps::add`, after the chapter recaps, so each caller (Kindle `pipeline`, `reader::book_epub`)
+gets it with no new stage. `RecapOptions` gains two fields:
+
+```rust
+pub struct RecapOptions { pub llm: LlmConfig, pub cache_dir: Option<PathBuf>,
+                          pub chapters: bool,   // recaps go in the chapters (§7)
+                          pub summary: bool }   // the Summary page (§13)
+```
+
+`RunOptions.recaps` becomes `Option<recaps::Extras>`, where `Extras { cache_dir, chapters,
+summary }` is `RecapOptions` without the LLM, which comes from `RunOptions.llm`. `None` is off,
+as before. `RecapSummary` gains `summary: bool` (the page went in). `recapped` now counts recaps
+made, whether or not they went into the chapters.
+
+- **CLI:** `deckle run … --book-summary`, which works with or without `--recaps`.
+- **Desktop:** `Settings.book_summary: bool`, default `false`. Its switch sits in the Chapter
+  recaps card, and the Online & privacy row covers both.
+
+### 13.3 Generating it
+
+- **Input:** the recaps in reading order, each as `{label}: {recap}`.
+- **Prompt:** the system prompt is "You write book summaries for an e-reader. Answer with the
+  summary text only." The user message:
+
+  > Book: {title} · Author: {author} · Language: {lang}
+  > These are recaps of each chapter of the book, in order. Write a summary of the whole book in
+  > 2–3 short paragraphs, in the book's language, past tense, ending included. Do not judge or
+  > praise the writing. {recaps}
+
+- **Long books on a local server:** when the recaps run past 2,000 words, they are grouped in
+  order into parts of at most 2,000 words. Each part gets a one-paragraph summary, and a final
+  request combines them, the same pattern as §6's long chapters. A hosted provider gets one
+  request (the 40,000-word limit).
+- **Cleanup, budget and transport:** as §6. Paragraphs are split on blank lines.
+- **Cache:** `{cache_dir}/recaps/summary-{key}.txt`, where `key` is the SHA-256 of the prompt
+  version, the provider, the model and the joined recaps.
+- **Minimum:** at least 2 recapped chapters. A one-chapter book's recap is already its summary.
+
+### 13.4 The page
+
+`deckle-summary.xhtml`, next to the OPF:
+
+```html
+<section epub:type="appendix" id="deckle-summary"><h1>Summary</h1>
+  <p><i>This summary covers the whole book, including the ending.</i></p>
+  <p>{paragraph}</p>…
+  <p style="font-size: 0.8em; font-style: italic;">AI-generated summary ({model}), not part of the original book.</p>
+</section>
+```
+
+- Its `h1` makes it a chapter to Who's who, which is accepted (names in it count as mentions, as
+  they do for recaps, §4). It is added after the recap pass, so it never gets a recap of its own.
+- A book that already has `deckle-summary.xhtml` keeps it, and no new summary is made. A book that
+  already has recaps but no summary comes back unchanged (§5), and gets no summary either.
+
+### 13.5 Failures
+
+A failed summary request is one warning, "Book summary skipped: {error}", and the book keeps
+everything else. Missing recaps give the warning "Book summary skipped: {n} chapters have no
+recap". A fixed-layout book gets no summary.
+
+### 13.6 Tests
+
+- Three long chapters with summary on: three recap requests, then one summary request that holds
+  all three recaps in order. A `deckle-summary.xhtml` sits last in the spine, the manifest, the
+  nav and the NCX, says "including the ending", and parses as XML.
+- `chapters: false, summary: true`: the chapters have no asides, and the Summary page is there.
+- One recap fails: no summary, and the warning names the count.
+- Local server with recaps over 2,000 words: the part requests, then a merge request.
+- Cache: a second run makes zero requests and produces identical bytes.
+- The summary request fails: the recaps are still in, with one warning.
+- `reader::book_epub` with summary on: the Summary page comes before the Who's who page.
