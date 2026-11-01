@@ -244,6 +244,11 @@ impl Painter<'_> {
     }
 }
 
+/// Pages in the book's PDF: the title, a page a puzzle, and the answers.
+pub fn pages(b: &Book) -> usize {
+    1 + b.puzzles.len() + b.puzzles.len().div_ceil(ANSWERS_PER_PAGE)
+}
+
 /// The book as a PDF for `page`, or [`BookError::DoesNotFit`] when its grids would be too fine
 /// to write in there. The same book gives the same bytes.
 pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
