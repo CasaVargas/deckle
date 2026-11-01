@@ -9,7 +9,7 @@ use std::sync::OnceLock;
 use pdfium_render::prelude::*;
 
 use crate::PdfError;
-use crate::layout::{Glyph, Page, Rect};
+use crate::layout::{Glyph, Mark, Page, Rect};
 
 /// Points to pixels when a page is rendered for its pictures: 144 dpi, sharp on any Kindle.
 const RENDER_SCALE: f32 = 2.0;
@@ -123,6 +123,38 @@ impl<'a> Document<'a> {
             title: real(m.get(PdfDocumentMetadataTagType::Title)),
             author: real(m.get(PdfDocumentMetadataTagType::Author)),
         }
+    }
+
+    /// The outline's top two levels, in order, with the page each bookmark opens. Bookmarks
+    /// that open no page in this document are left out.
+    pub fn outline(&self) -> Vec<Mark> {
+        let page = |b: &PdfBookmark| {
+            b.destination()
+                .and_then(|d| d.page_index().ok())
+                .or_else(|| {
+                    let action = b.action()?;
+                    let dest = action.as_local_destination_action()?.destination().ok()?;
+                    dest.page_index().ok()
+                })
+                .map(|i| i as usize)
+        };
+        let mut out = Vec::new();
+        let mut push = |level: u8, b: &PdfBookmark| {
+            if let (Some(title), Some(page)) = (b.title(), page(b)) {
+                out.push(Mark { level, title, page });
+            }
+        };
+        let mut top = self.doc.bookmarks().root();
+        // An outline can loop back on itself; no real book has this many chapters.
+        for _ in 0..2000 {
+            let Some(b) = top else { break };
+            push(1, &b);
+            for c in b.iter_direct_children().take(2000) {
+                push(2, &c);
+            }
+            top = b.next_sibling();
+        }
+        out
     }
 
     /// Every page's glyphs, images and drawings.
