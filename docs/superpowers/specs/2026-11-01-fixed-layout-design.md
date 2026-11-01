@@ -259,8 +259,19 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
      stop oversized scans. A publisher's book goes byte for byte. The reMarkable PDF is
      deferred (§5).
    - Spike: Kobo RTL, and PocketBook's cover tile.
-4. **More inputs and control:** fixed-layout AZW3 in, CBR through `bsdtar`, image-only PDF
-   through PDFium page images, and a per-book reading-direction override in the app and CLI.
+4. **More inputs and control**, in two PRs:
+   - **4a:**
+     - **CBR:** a CBR that is really a zip is read as one. Any other is unpacked by the
+       system's `bsdtar` into a temp folder (found as `DECKLE_BSDTAR`, `bsdtar`, or a `tar`
+       that reports bsdtar), and bsdtar's own refusal of absolute and `..` paths keeps entries
+       inside it.
+     - **Fixed-layout AZW3/MOBI in:** on a Kindle it goes as it is. It skips import, normalize
+       and Previewer (no Previewer needed), gets restamped by `kf8_only`, and is delivered as
+       `.azw3`. The library reads its title and authors from its own header. Other readers
+       refuse it, since there's no EPUB to make.
+   - **4b:**
+     - image-only PDF through PDFium page images;
+     - a per-book reading-direction override.
 
 ## 10. Calls made without the owner
 

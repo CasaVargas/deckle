@@ -92,6 +92,30 @@ fn attr<'a>(n: roxmltree::Node<'a, 'a>, name: &str) -> Option<&'a str> {
     n.attributes().find(|a| a.name() == name).map(|a| a.value())
 }
 
+/// What a Kindle book's record 0 says, as a [`BookInfo`]: for a fixed-layout AZW3, which goes to
+/// a Kindle as it is and is never an EPUB (fixed-layout spec §3).
+pub fn from_kindle(meta: &deckle_mobi::Meta, fallback_title: &str) -> BookInfo {
+    BookInfo {
+        title: meta
+            .title
+            .clone()
+            .unwrap_or_else(|| fallback_title.to_owned()),
+        creators: meta
+            .authors
+            .iter()
+            .map(|a| Creator {
+                name: a.clone(),
+                file_as: None,
+            })
+            .collect(),
+        identifiers: meta.isbn.iter().cloned().collect(),
+        isbn: meta.isbn.clone(),
+        calibre_id: meta.calibre_id.clone(),
+        fixed_layout: meta.fixed_layout,
+        ..Default::default()
+    }
+}
+
 /// Parses the EPUB at `path`.
 pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
     let mut epub = EpubReader::open(path)?;

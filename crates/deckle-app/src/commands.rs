@@ -378,7 +378,7 @@ fn is_imported(p: &Path) -> bool {
 }
 
 /// What a folder walk takes: EPUB, KFX, Word, OpenDocument and RTF files, Kindle books, FB2,
-/// PDFs and comics (CBZ). A `.txt` in a folder is far
+/// PDFs and comics (CBZ, CBR). A `.txt` in a folder is far
 /// more often a note or a README than a book, so text files are taken only when named directly.
 fn is_book(p: &Path) -> bool {
     has_extension(p, "epub")
@@ -389,7 +389,7 @@ fn is_book(p: &Path) -> bool {
         || deckle_rtf::is_rtf(p)
         || deckle_mobi::is_mobi_file(p)
         || deckle_pdf::is_pdf(p)
-        || deckle_comic::is_cbz(p)
+        || deckle_comic::is_comic_archive(p)
 }
 
 /// Files and folders for the send queue. A folder with top-level Markdown is one notes book, and

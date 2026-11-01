@@ -310,3 +310,110 @@ fn a_spread_after_the_cover_becomes_two_pages_in_reading_order() {
     // Right to left: the spread's right half is read first.
     assert_eq!(page_colours(&rtl), "bgbrg");
 }
+
+/// Whether this machine has bsdtar (macOS and Windows do); CBR tests that need it skip without.
+fn has_bsdtar() -> bool {
+    ["bsdtar", "tar"].iter().any(|t| {
+        std::process::Command::new(t)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("bsdtar"))
+    })
+}
+
+#[test]
+fn a_cbr_that_is_really_a_zip_reads_without_bsdtar() {
+    let dir = tempfile::tempdir().unwrap();
+    let zip = cbz(
+        dir.path(),
+        "x.cbz",
+        &[("1.png", png(4, 6)), ("2.png", png(4, 6))],
+    );
+    let cbr = dir.path().join("Night Train.CBR");
+    std::fs::rename(&zip, &cbr).unwrap();
+    assert!(deckle_comic::is_cbr(&cbr) && is_comic(&cbr));
+    let (_, report) = import(&cbr);
+    assert_eq!((report.title.as_str(), report.pages), ("Night Train", 2));
+}
+
+#[test]
+fn a_real_archive_cbr_is_unpacked_by_bsdtar_and_nothing_escapes_it() {
+    if !has_bsdtar() {
+        eprintln!("skipped: no bsdtar");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let pages = dir.path().join("pages");
+    std::fs::create_dir(&pages).unwrap();
+    std::fs::write(pages.join("1.png"), png(4, 6)).unwrap();
+    std::fs::write(pages.join("2.png"), png(5, 6)).unwrap();
+    // A tar under a .cbr name: bsdtar reads it the way it reads RAR.
+    let cbr = dir.path().join("Picture Book.cbr");
+    let tar = |args: &[&str]| {
+        let ok = std::process::Command::new("tar")
+            .args(args)
+            .status()
+            .unwrap()
+            .success();
+        assert!(ok, "{args:?}");
+    };
+    tar(&[
+        "-cf",
+        cbr.to_str().unwrap(),
+        "-C",
+        pages.to_str().unwrap(),
+        "1.png",
+        "2.png",
+    ]);
+    let (files, report) = import(&cbr);
+    assert_eq!((report.title.as_str(), report.pages), ("Picture Book", 2));
+    assert!(text(&files, "OEBPS/pages/p0002.xhtml").contains("width=5, height=6"));
+
+    // An entry named `../escaped-1.png` is refused, never written outside the temp folder. The
+    // tar is written by hand: not every bsdtar build can rename entries (`-s`) to make one.
+    let evil = dir.path().join("evil.cbr");
+    std::fs::write(&evil, tar_with("../escaped-1.png", &png(4, 6))).unwrap();
+    let listed = std::process::Command::new("tar")
+        .arg("-tf")
+        .arg(&evil)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&listed.stdout).trim(),
+        "../escaped-1.png",
+        "the hand-made tar holds the escaping entry"
+    );
+    let _ = convert(&evil, &dir.path().join("evil.epub"));
+    let tmp = std::env::temp_dir();
+    assert!(!tmp.join("escaped-1.png").exists());
+
+    // Not an archive at all: bsdtar's own reason.
+    let junk = dir.path().join("junk.cbr");
+    std::fs::write(&junk, b"definitely not an archive").unwrap();
+    assert!(matches!(
+        convert(&junk, &dir.path().join("junk.epub")),
+        Err(ComicError::NotArchive(_))
+    ));
+}
+
+/// A one-entry ustar archive naming `name`, whatever that name is.
+fn tar_with(name: &str, data: &[u8]) -> Vec<u8> {
+    let mut h = [0u8; 512];
+    let put = |h: &mut [u8; 512], at: usize, v: &[u8]| h[at..at + v.len()].copy_from_slice(v);
+    put(&mut h, 0, name.as_bytes());
+    put(&mut h, 100, b"0000644\0");
+    put(&mut h, 108, b"0000000\0");
+    put(&mut h, 116, b"0000000\0");
+    put(&mut h, 124, format!("{:011o}\0", data.len()).as_bytes());
+    put(&mut h, 136, b"00000000000\0");
+    put(&mut h, 148, b"        ");
+    h[156] = b'0';
+    put(&mut h, 257, b"ustar\0");
+    put(&mut h, 263, b"00");
+    let sum: u32 = h.iter().map(|b| u32::from(*b)).sum();
+    put(&mut h, 148, format!("{sum:06o}\0 ").as_bytes());
+    let mut out = h.to_vec();
+    out.extend(data);
+    out.resize(out.len().next_multiple_of(512) + 1024, 0);
+    out
+}

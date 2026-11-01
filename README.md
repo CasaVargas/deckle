@@ -158,9 +158,10 @@ in, press **Send**.
   run says so. Scans aren't supported.
 - **Markdown and notes folders.** A file or a flat folder of notes becomes one book: headings,
   tables, local images and links between notes, a chapter per file. See [docs/markdown.md](docs/markdown.md).
-- **Comics, manga and picture books** (`.cbz`, a folder of page images, or a fixed-layout EPUB)
-  keep their pages as they are: on a Kindle as an AZW3, since Kindle Previewer makes no KFX for
-  fixed layout. `ComicInfo.xml` gives the title and series, and manga marked right to left reads
+- **Comics, manga and picture books** (`.cbz`, `.cbr`, a folder of page images, a fixed-layout
+  EPUB or a fixed-layout AZW3) keep their pages as they are: on a Kindle as an AZW3, since Kindle
+  Previewer makes no KFX for fixed layout. A CBR needs the system's `bsdtar` (built into macOS
+  and Windows as `tar`; `libarchive-tools` on Linux). `ComicInfo.xml` gives the title and series, and manga marked right to left reads
   right to left. No X-Ray, Word Wise or page numbers. Fitting pages to each screen comes later
   (#20).
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
@@ -339,7 +340,7 @@ deckle run book.epub --to device --cde ebok --llm openai \
 deckle run book.epub --to device --word-wise-level 3            # hints for rarer words only
 deckle run book.epub --preset academic            # or novel, manual
 deckle run ./notes --to device                    # a flat Markdown folder, one note per chapter
-deckle run notes.docx --to device                 # also .odt, .rtf, .mobi/.azw3, .txt, .fb2, .pdf, .cbz, a URL, .webloc/.url/.html
+deckle run notes.docx --to device                 # also .odt, .rtf, .mobi/.azw3, .txt, .fb2, .pdf, .cbz/.cbr, a URL, .webloc/.url/.html
 deckle bind a.pdf b.docx https://… --title "Pack"  # several files into one book, then `deckle run` it
 deckle inspect book.epub --json                   # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF

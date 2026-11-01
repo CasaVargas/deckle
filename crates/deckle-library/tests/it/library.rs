@@ -682,3 +682,24 @@ fn a_cbz_is_kept_as_it_is_and_a_page_folder_as_an_epub_snapshot() {
     assert_eq!(info.title, "Picture Book");
     assert!(info.fixed_layout);
 }
+
+#[test]
+fn a_fixed_layout_kindle_book_reads_its_own_header() {
+    let temp = tempfile::tempdir().unwrap();
+    let book = temp.path().join("Picture Book.azw3");
+    std::fs::write(
+        &book,
+        deckle_mobi::fixture::build(&deckle_mobi::fixture::Book {
+            title: "The Picture Book",
+            authors: &["A. Painter"],
+            kf8: true,
+            fixed_layout: true,
+            ..Default::default()
+        }),
+    )
+    .unwrap();
+    let info = deckle_library::book_info(&book).unwrap();
+    assert_eq!(info.title, "The Picture Book");
+    assert_eq!(info.creators[0].name, "A. Painter");
+    assert!(info.fixed_layout);
+}
