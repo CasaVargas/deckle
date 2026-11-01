@@ -19,6 +19,8 @@ pub struct Fmt {
     pub sup: bool,
     pub sub: bool,
     pub hidden: bool,
+    /// Font size in half-points (`w:sz`), when anything on the chain sets one.
+    pub size: Option<u16>,
 }
 
 /// The formatting one `w:rPr` sets; `None` leaves the inherited value.
@@ -31,6 +33,7 @@ pub struct FmtPatch {
     small_caps: Option<bool>,
     vert: Option<(bool, bool)>,
     hidden: Option<bool>,
+    size: Option<u16>,
 }
 
 pub fn child<'a, 'i>(n: Node<'a, 'i>, name: &str) -> Option<Node<'a, 'i>> {
@@ -53,6 +56,7 @@ impl FmtPatch {
                 "strike" | "dstrike" => p.strike = Some(toggle(c)),
                 "smallCaps" => p.small_caps = Some(toggle(c)),
                 "vanish" => p.hidden = Some(toggle(c)),
+                "sz" => p.size = attr(c, "val").and_then(|v| v.parse().ok()),
                 "vertAlign" => {
                     p.vert = Some(match attr(c, "val") {
                         Some("superscript") => (true, false),
@@ -82,6 +86,9 @@ impl FmtPatch {
             f.sup = sup;
             f.sub = sub;
         }
+        if self.size.is_some() {
+            f.size = self.size;
+        }
     }
 }
 
@@ -101,6 +108,8 @@ pub struct Styles {
     pub default_paragraph: Option<String>,
     /// `w:docDefaults` language, e.g. `en-US`.
     pub language: Option<String>,
+    /// `w:docDefaults` font size in half-points.
+    pub default_size: Option<u16>,
 }
 
 /// `w:numPr` as (numId, ilvl).
@@ -125,12 +134,17 @@ impl Styles {
         let mut out = Styles::default();
         let Some(doc) = doc else { return out };
         let root = doc.root_element();
-        out.language = root
+        let defaults = root
             .descendants()
-            .find(|n| n.tag_name().name() == "docDefaults")
+            .find(|n| n.tag_name().name() == "docDefaults");
+        out.language = defaults
             .and_then(|d| d.descendants().find(|n| n.tag_name().name() == "lang"))
             .and_then(|l| attr(l, "val"))
             .map(str::to_owned);
+        out.default_size = defaults
+            .and_then(|d| d.descendants().find(|n| n.tag_name().name() == "sz"))
+            .and_then(|s| attr(s, "val"))
+            .and_then(|v| v.parse().ok());
         for s in root.children().filter(|n| n.tag_name().name() == "style") {
             let Some(id) = attr(s, "styleId") else {
                 continue;

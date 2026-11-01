@@ -39,7 +39,9 @@ A reflowed PDF is never as good as a book made for reading. Deckle says so every
   "this PDF has no text in it, only pictures of pages (a scan)…". OCR is #19.
 - **Fixed layout.** Comics and picture books are #20.
 - **The desktop app** was a follow-up (#133); see §8.
-- **Bookmarks as the contents.** The contents come from the headings the layout finds.
+- **Bookmarks as the contents.** The contents come from the headings the layout finds. *(Since
+  #25, a PDF's bookmarks are its chapters and contents when it has them; see
+  `2026-11-01-structure-recovery-design.md` §4.)*
 - **Language.** Like TXT, the book is tagged English.
 
 ## 3. PDFium

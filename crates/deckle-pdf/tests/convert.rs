@@ -172,6 +172,37 @@ fn chapters_split_at_headings_with_contents() {
 }
 
 #[test]
+fn bookmarks_are_the_chapters_and_contents() {
+    let (_d, epub, report) = convert_ok("outlined.pdf");
+    // The title page, then a file per top-level bookmark.
+    assert_eq!(report.chapters, 3);
+    assert_eq!(report.contents, 3);
+    let all = files(&epub);
+    let file = |name: &str| {
+        String::from_utf8(all.iter().find(|(n, _)| n == name).unwrap().1.clone()).unwrap()
+    };
+    let nav = file("OEBPS/nav.xhtml");
+    let one = at(&nav, ">Part One: Beginnings</a>");
+    let two = at(&nav, ">The Second Part</a>");
+    let aside = at(&nav, ">An Aside</a>");
+    assert!(one < two && two < aside, "{nav}");
+    assert!(
+        nav[two..aside].contains("<ol>"),
+        "the aside nests under its part:\n{nav}"
+    );
+    assert!(!nav.contains("Loud Words"), "{nav}");
+    let part_one = file("OEBPS/chapter-002.xhtml");
+    assert!(
+        part_one.contains(">Part One: Beginnings</h1><p>Quebec opens"),
+        "{part_one}"
+    );
+    assert!(part_one.contains(">Loud Words</h3>"), "{part_one}");
+    let part_two = file("OEBPS/chapter-003.xhtml");
+    assert!(part_two.contains(">The Second Part</h1>"), "{part_two}");
+    assert!(part_two.contains(">An Aside</h2>"), "{part_two}");
+}
+
+#[test]
 fn a_scan_is_refused_with_a_reason() {
     let dir = tempfile::tempdir().unwrap();
     match convert(&fixture("scan.pdf"), &dir.path().join("out.epub")) {
