@@ -170,6 +170,34 @@ The image step for Deckle's own comic EPUBs:
 The work is per device, so it runs at finish time, after the device-independent EPUB is
 cached, the same split the device-aware build uses for KPF/KFX.
 
+### 7.1 How phase 3a does it
+
+- **Reading the model:**
+  - **Mass storage:** a Kindle only gives "Kindle" and its firmware (`system/version.txt`).
+  - **MTP:** it gives a product name ("Kindle Scribe", "Kindle Paperwhite").
+  - So `screens::for_kindle` goes by **family**, with the largest panel in each: Scribe 1860 ×
+    2480; Paperwhite and Oasis 1264 × 1680; Colorsoft 1264 × 1680 in colour; anything else the
+    1264 × 1680 grey default.
+  - Fitting to a panel a little larger than the real one costs nothing, since pages are never
+    upscaled and the Kindle scales the rest of the way.
+  - Telling models apart by their serial-number prefix is left for later.
+- **Spreads split at import,** in `deckle-comic`, because splitting changes the page count and
+  Previewer's MOBI is made before the device is known.
+  - A landscape page becomes two portrait pages: left half first, or right half first for right
+    to left.
+  - The first page is never split: a wraparound cover would put the back cover first.
+  - Split halves are re-encoded in the page's own format (JPEG quality 90).
+- **Fit and grey at finish,** per Kindle, on the AZW3's image records
+  (`deckle_mobi::azw3::map_images`), so Previewer doesn't run again for each device.
+  - Each page is scaled down to fit the screen (never up) and turned grey on a black-and-white
+    screen.
+  - It's re-encoded **in its own format** (JPEG stays JPEG, quality 85; PNG and GIF stay what
+    they are), because KF8 markup names each image's MIME type.
+  - Only Deckle's own comics are touched (identifier `urn:deckle:comic:…`); a publisher's
+    fixed-layout book goes as made.
+  - A folder export has no device, so it isn't fitted. The queue's fallback is that build.
+  - A page that won't decode stays as it was, and the run gets one warning.
+
 ## 8. Pipeline changes
 
 - **Import (phase 1):** `import::import` routes `.cbz` and image folders to `deckle-comic`
@@ -221,8 +249,11 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
      - plus README, CLI help and a `docs/devices.md` row.
    - **Device spike** (after 2a) on a Paperwhite and a Scribe: the cover shows, pages turn the
      right way for RTL, and PDOC vs EBOK behave as for KFX.
-3. **Screens and other readers:** the screen table, the image step, Kobo/PocketBook as plain
-   EPUB, the reMarkable image PDF. Spike: Kobo RTL, and PocketBook's cover tile.
+3. **Screens and other readers**, in two PRs:
+   - **3a:** the screen table, spread splitting at import, and fit/grey on the Kindle AZW3
+     (§7.1).
+   - **3b:** Kobo and PocketBook as plain, fitted EPUB, and the reMarkable image PDF.
+   - Spike: Kobo RTL, and PocketBook's cover tile.
 4. **More inputs and control:** fixed-layout AZW3 in, CBR through `bsdtar`, image-only PDF
    through PDFium page images, and a per-book reading-direction override in the app and CLI.
 

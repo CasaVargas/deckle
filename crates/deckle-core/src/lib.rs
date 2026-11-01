@@ -36,6 +36,7 @@ pub mod quiet;
 pub mod reader;
 pub mod reading;
 pub mod remarkable;
+pub mod screens;
 pub mod shelves;
 pub mod sync;
 pub mod thumbnail;
