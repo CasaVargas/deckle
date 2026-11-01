@@ -3609,6 +3609,10 @@ fn digest(
                  outbox {}",
                 queue.dir.display()
             );
+            // So the app can tell this watcher is on an older build after an update (#234).
+            if let Err(e) = deckle_digest::schedule::record_watcher_start() {
+                eprintln!("watcher: can't note this build: {e}");
+            }
             // The bookmarklet's listener (save-to-paper §4). A busy port only costs the
             // bookmarklet; watching goes on.
             let reading = reading_queue(&cfg);

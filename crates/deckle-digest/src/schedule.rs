@@ -647,7 +647,10 @@ fn linux_instructions_all(jobs: &[Schedule], exe: &Path, config: Option<&Path>) 
 pub trait WatcherService {
     fn matches(&mut self, exe: &Path, config: &Path) -> Result<bool, String>;
     fn install(&mut self, exe: &Path, config: &Path) -> Result<(), String>;
+    /// Starts the watcher if it isn't running; a running one is left as it is.
     fn start(&mut self) -> Result<(), String>;
+    /// Stops the running watcher, if any, and starts it again from its program on disk.
+    fn restart(&mut self) -> Result<(), String>;
 }
 
 /// Ensure the single watcher is configured and started, preserving all edition schedules.
@@ -744,6 +747,105 @@ impl WatcherService for NativeWatcher {
         }
         Ok(())
     }
+    fn restart(&mut self) -> Result<(), String> {
+        if cfg!(target_os = "macos") {
+            // `-k` replaces a running instance; plain `kickstart` leaves it be.
+            run(Command::new("launchctl").args([
+                "kickstart",
+                "-k",
+                &format!("{}/{WATCH_LABEL}", gui_domain()?),
+            ]))?;
+        } else if cfg!(target_os = "windows") {
+            // `/Run` won't start a second instance; `/End` fails when none is running.
+            let _ = run(Command::new("schtasks").args(["/End", "/TN", &task_name("watch")]));
+            run(Command::new("schtasks").args(["/Run", "/TN", &task_name("watch")]))?;
+        } else {
+            return Err("Watcher installation is unsupported on this platform".into());
+        }
+        Ok(())
+    }
+}
+
+/// Which build a watcher started from: its program and that file's size and modified time then.
+/// A program replaced since (an update) no longer matches.
+#[derive(Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+struct WatcherBuild {
+    exe: PathBuf,
+    len: u64,
+    modified_ns: u64,
+}
+
+impl WatcherBuild {
+    fn of(exe: &Path) -> Option<Self> {
+        let meta = std::fs::metadata(exe).ok()?;
+        let modified = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?;
+        Some(Self {
+            exe: exe.to_owned(),
+            len: meta.len(),
+            modified_ns: modified.as_nanos() as u64,
+        })
+    }
+}
+
+/// Where the watcher notes its build when it starts: one per user, like the watcher.
+pub fn watcher_marker_path() -> PathBuf {
+    crate::config::default_path().with_file_name("watcher.json")
+}
+
+/// Notes the running program as the watcher's build (`digest watch` calls this on start).
+pub fn record_watcher_start() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    record_watcher_start_at(&watcher_marker_path(), &exe)
+}
+
+/// [`record_watcher_start`] for an explicit marker and program.
+pub fn record_watcher_start_at(marker: &Path, exe: &Path) -> Result<(), String> {
+    let build = WatcherBuild::of(exe).ok_or_else(|| format!("{}: unreadable", exe.display()))?;
+    if let Some(dir) = marker.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let json = serde_json::to_string(&build).map_err(|e| e.to_string())?;
+    std::fs::write(marker, json).map_err(|e| format!("{}: {e}", marker.display()))
+}
+
+/// Restarts an installed watcher that runs an older build than its program on disk: one whose
+/// program was replaced since it started, or one from before the marker (#234). A watcher whose
+/// program is gone is left alone. Returns whether it restarted.
+pub fn refresh_watcher_with(
+    installed: bool,
+    marker: &Path,
+    service: &mut impl WatcherService,
+) -> Result<bool, String> {
+    if !installed {
+        return Ok(false);
+    }
+    let started: Option<WatcherBuild> = std::fs::read(marker)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok());
+    let stale = match started {
+        Some(s) => WatcherBuild::of(&s.exe).is_some_and(|now| now != s),
+        None => true,
+    };
+    if stale {
+        service.restart()?;
+    }
+    Ok(stale)
+}
+
+/// [`refresh_watcher_with`] for this user's watcher job; the app calls it when it opens. A
+/// daemon install's watcher is the container's to restart.
+pub fn refresh_watcher() -> Result<bool, String> {
+    if dry_run()
+        || crate::secret::daemon_install()
+        || !cfg!(any(target_os = "macos", target_os = "windows"))
+    {
+        return Ok(false);
+    }
+    refresh_watcher_with(status().watch, &watcher_marker_path(), &mut NativeWatcher)
 }
 
 /// Install/start only the existing watcher using the supported platform scheduler. Service

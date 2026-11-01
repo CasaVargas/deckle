@@ -318,6 +318,10 @@ impl WatcherService for Service {
         self.calls.push("start watcher".into());
         Ok(())
     }
+    fn restart(&mut self) -> Result<(), String> {
+        self.calls.push("restart watcher".into());
+        Ok(())
+    }
 }
 #[test]
 fn press_setup_watcher_is_reused_and_install_failure_is_returned() {
