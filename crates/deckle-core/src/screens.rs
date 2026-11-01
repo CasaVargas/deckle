@@ -38,6 +38,29 @@ pub const KINDLES: [(&str, Screen); 4] = [
     ("oasis", DEFAULT),
 ];
 
+/// A Kobo, by its largest current panel (Sage), in colour: its model isn't read yet, and a
+/// colour Kobo must keep its colour. Fitting only stops oversized scans.
+pub const KOBO: Screen = Screen {
+    width: 1440,
+    height: 1920,
+    color: true,
+};
+
+/// A PocketBook, likewise (InkPad).
+pub const POCKETBOOK: Screen = Screen {
+    width: 1404,
+    height: 1872,
+    color: true,
+};
+
+/// The screen to fit pages to on an EPUB reader.
+pub fn for_reader(reader: &crate::reader::Reader) -> Screen {
+    match reader {
+        crate::reader::Reader::Kobo(_) => KOBO,
+        crate::reader::Reader::PocketBook(_) => POCKETBOOK,
+    }
+}
+
 /// The screen of a Kindle called `name` (a model hint or an MTP product name).
 pub fn for_kindle(name: &str) -> Screen {
     let name = name.to_lowercase();
@@ -62,7 +85,12 @@ mod tests {
 
     #[test]
     fn every_row_is_a_real_portrait_screen() {
-        for (word, s) in KINDLES.iter().chain([("default", DEFAULT)].iter()) {
+        let others = [
+            ("default", DEFAULT),
+            ("kobo", KOBO),
+            ("pocketbook", POCKETBOOK),
+        ];
+        for (word, s) in KINDLES.iter().chain(others.iter()) {
             assert!(s.width > 0 && s.height > s.width, "{word}");
         }
     }

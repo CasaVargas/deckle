@@ -91,9 +91,9 @@ delivered as `.azw3`, not KFX.
 | Target | Sends | Notes |
 | --- | --- | --- |
 | Kindle | `.azw3`: Previewer's MOBI, KF8 half only, with EXTH 501 and 113/504 stamped | CDE type follows the cover rule; X-Ray, Word Wise and page list are skipped |
-| Kobo | the fixed-layout EPUB as `.epub`, **not** KEPUB | `kepub::convert` only adds text spans, and spans on image pages do nothing but risk the layout. Phase 3 spike: whether Kobo honours `page-progression-direction` |
+| Kobo | the fixed-layout EPUB **without KEPUB markup**, still named `.kepub.epub` | `kepub::convert` only adds text spans and wrapper divs, which do nothing on image pages but risk the layout. The `.kepub.epub` name stays because a Kobo opens plain `.epub` in Adobe's renderer, which handles fixed layout poorly, and `.kepub.epub` in its own (changed in 3b; the spike confirms). Phase 3 spike: whether Kobo honours `page-progression-direction` |
 | PocketBook, Boox, folder with `Epub` | the fixed-layout EPUB as `.epub` | PocketBook also reads CBZ; EPUB keeps direction and metadata |
-| reMarkable, folder with `Pdf` | an image-only PDF, one page per image, sized to the screen | reMarkable's EPUB reader reflows; PDF is the only reliable fixed page there |
+| reMarkable, folder with `Pdf` | an image-only PDF, one page per image, sized to the screen | reMarkable's EPUB reader reflows; PDF is the only reliable fixed page there. **Deferred:** Deckle sends only the paper and its long reads to a reMarkable today, so there's no book send to hang a comic PDF on; it comes with book sends to the reMarkable |
 
 A publisher's fixed-layout EPUB goes through **without content changes**. `normalize` makes no
 typography, pop-up note, preset or cover changes to it, and phase 3's image step doesn't
@@ -216,8 +216,9 @@ cached, the same split the device-aware build uses for KPF/KFX.
   - delivery writes `<Author sort> - <Title>.azw3` to `documents/`;
   - pruning and send records treat `.azw3` like `.kfx`;
   - X-Ray, Word Wise and the page list are skipped with one warning.
-- **Finish on other readers (phase 3):** `Reader::prepare` sends fixed-layout EPUBs as `.epub`,
-  never KEPUB, and reMarkable gets the image PDF.
+- **Finish on other readers (phase 3b):** `Reader::prepare` sends a fixed-layout EPUB with no
+  KEPUB markup (still `.kepub.epub` on a Kobo), fitting Deckle's own comics to the reader. The
+  reMarkable image PDF waits for book sends to the reMarkable.
 
 ## 9. Phases
 
@@ -252,7 +253,11 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
 3. **Screens and other readers**, in two PRs:
    - **3a:** the screen table, spread splitting at import, and fit/grey on the Kindle AZW3
      (§7.1).
-   - **3b:** Kobo and PocketBook as plain, fitted EPUB, and the reMarkable image PDF.
+   - **3b:** Kobo and PocketBook take a fixed-layout book with no KEPUB markup, and Deckle's
+     own comics fitted to the reader's screen. The model isn't read yet, so these are the
+     largest current panels, in colour: Kobo 1440 × 1920, PocketBook 1404 × 1872. They only
+     stop oversized scans. A publisher's book goes byte for byte. The reMarkable PDF is
+     deferred (§5).
    - Spike: Kobo RTL, and PocketBook's cover tile.
 4. **More inputs and control:** fixed-layout AZW3 in, CBR through `bsdtar`, image-only PDF
    through PDFium page images, and a per-book reading-direction override in the app and CLI.
@@ -261,8 +266,8 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
 
 - **Kindle output is `.azw3` from Previewer's MOBI, not KFX.** It's what Previewer makes (§4).
   KFX would mean reverse-engineering fixed-layout structures for a gain readers wouldn't see.
-- **No KEPUB for fixed layout on Kobo.**
-- **reMarkable gets PDF.**
+- **No KEPUB markup for fixed layout on Kobo,** but the `.kepub.epub` name kept (§5).
+- **reMarkable gets PDF,** once Deckle sends books to it at all.
 - **CBR uses the system `bsdtar`, never a bundled unRAR.** unRAR's licence is a poor fit for
   GPL-3. macOS and Windows 10+ ship `bsdtar` as `tar`; on Linux, when it's missing, the CBR is
   refused with a message saying so.
