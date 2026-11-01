@@ -314,6 +314,8 @@ const INFLECTED: &str = r#"{"word":"card","pos":"noun","lang_code":"en","senses"
 {"word":"baking","pos":"verb","lang_code":"en","senses":[{"tags":["form-of","participle","present"],"form_of":[{"word":"bake"}],"glosses":["present participle of bake"]}]}
 {"word":"oven","pos":"noun","lang_code":"en","senses":[{"glosses":["A chamber used for baking or heating."]}]}
 {"word":"ovens","pos":"noun","lang_code":"en","senses":[{"tags":["form-of","plural"],"form_of":[{"word":"oven"}],"glosses":["plural of oven"]}]}
+{"word":"write","pos":"verb","lang_code":"en","senses":[{"glosses":["To form letters, words or symbols on a surface."]}]}
+{"word":"written","pos":"verb","lang_code":"en","senses":[{"tags":["form-of","participle","past"],"form_of":[{"word":"write"}],"glosses":["past participle of write"]}]}
 {"word":"prime","pos":"adj","lang_code":"en","senses":[{"glosses":["First in importance."]}]}
 {"word":"prime","pos":"verb","lang_code":"en","senses":[{"glosses":["To prepare for use."]}]}
 {"word":"primed","pos":"verb","lang_code":"en","senses":[{"tags":["form-of","participle","past"],"form_of":[{"word":"prime"}],"glosses":["simple past and past participle of prime"]}]}
@@ -332,6 +334,8 @@ fn crossword_words_take_inflections_with_marked_clues() {
         ("baking", 3.6),
         ("oven", 3.9),
         ("ovens", 2.9),
+        ("write", 5.0),
+        ("written", 4.5),
         ("prime", 4.8),
         ("primed", 3.1),
         ("principal", 4.5),
@@ -355,6 +359,11 @@ fn crossword_words_take_inflections_with_marked_clues() {
     // the clue of the word's sense the form belongs to: "primed" is the verb's, not the
     // adjective's; "principals" has no noun to take one from
     assert_eq!(clue("primed"), Some("To prepare for use (past tense)"));
+    // only a simple past is a past tense: "written" isn't
+    assert_eq!(
+        clue("written"),
+        Some("To form letters, words or symbols on a surface (past participle)")
+    );
     assert_eq!(clue("principals"), None);
     // a clue that gives the answer away is no clue: "baking or heating" holds "ovens"? no, but
     // the plural's clue must not hold the plural itself

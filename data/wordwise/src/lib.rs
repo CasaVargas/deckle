@@ -211,7 +211,19 @@ pub fn word_list(
                 let how = if t.contains(&"plural") {
                     "plural"
                 } else if t.contains(&"past") {
-                    "past tense"
+                    // "baked" is a simple past too; "written" is only a participle
+                    let simple = s
+                        .get("glosses")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .any(|g| g.contains("simple past"));
+                    if simple {
+                        "past tense"
+                    } else {
+                        "past participle"
+                    }
                 } else if t.contains(&"participle") && t.contains(&"present") {
                     "-ing form"
                 } else if t.contains(&"third-person") {
