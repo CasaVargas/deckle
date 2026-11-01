@@ -2,7 +2,7 @@
 //! The KF8-only AZW3 made from Kindle Previewer's joint MOBI of a fixed-layout comic
 //! (`fixtures/comic/fixed-layout-rtl.mobi`, fixed-layout spec §4).
 
-use deckle_mobi::azw3::{Stamp, kf8_only};
+use deckle_mobi::azw3::{Stamp, kf8_only, map_images};
 use deckle_mobi::fixture::{Book, build};
 use deckle_mobi::palmdb::{PalmDb, be32};
 use deckle_mobi::{MobiError, read_meta};
@@ -149,5 +149,34 @@ fn drm_and_books_with_no_kf8_part_are_refused() {
     assert!(matches!(
         kf8_only(&old, &PDOC),
         Err(MobiError::Unsupported(w)) if w.contains("no KF8 part")
+    ));
+}
+
+#[test]
+fn map_images_replaces_only_image_records() {
+    let azw3 = kf8_only(&previewer_mobi(), &PDOC).unwrap();
+    let before = PalmDb::parse(&azw3).unwrap();
+    let mut seen = 0;
+    let out = map_images(&azw3, |img| {
+        seen += 1;
+        // Leave the thumbnail (a JPEG) alone, swap each page (a GIF) for a marker.
+        img.starts_with(b"GIF8").then(|| b"GIF89a-page".to_vec())
+    })
+    .unwrap();
+    let after = PalmDb::parse(&out).unwrap();
+    assert_eq!(seen, 4, "3 pages and the thumbnail");
+    assert_eq!(before.len(), after.len());
+    for i in 0..before.len() {
+        let (b, a) = (before.record(i), after.record(i));
+        if (11..14).contains(&i) {
+            assert_eq!(a, b"GIF89a-page", "record {i}");
+        } else {
+            assert_eq!(a, b, "record {i}");
+        }
+    }
+    // A joint file has to be made KF8-only first.
+    assert!(matches!(
+        map_images(&previewer_mobi(), |_| None),
+        Err(MobiError::Unsupported(_))
     ));
 }

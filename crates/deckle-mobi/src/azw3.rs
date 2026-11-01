@@ -99,6 +99,36 @@ pub fn kf8_only(bytes: &[u8], stamp: &Stamp<'_>) -> Result<Vec<u8>, MobiError> {
     Ok(palm_db(&bytes[..PDB_HEADER], &all))
 }
 
+/// A KF8-only book with each image resource (from the first resource record on) passed through
+/// `f`, which returns its replacement or `None` to keep it. Every other record stays as it was.
+/// For fitting pages to a Kindle's screen (fixed-layout spec §7.1).
+pub fn map_images(
+    bytes: &[u8],
+    mut f: impl FnMut(&[u8]) -> Option<Vec<u8>>,
+) -> Result<Vec<u8>, MobiError> {
+    let db = PalmDb::parse(bytes)?;
+    if kf8_base(&db)? != 0 {
+        return Err(MobiError::Unsupported(
+            "a joint KF7+KF8 file; make it KF8-only first".into(),
+        ));
+    }
+    let first = be32(db.record(0), FIRST_RESOURCE)
+        .filter(|f| *f != NONE)
+        .map_or(db.len(), |f| f as usize);
+    let replaced: Vec<Option<Vec<u8>>> = (0..db.len())
+        .map(|i| {
+            let rec = db.record(i);
+            (i >= first && crate::is_image(rec))
+                .then(|| f(rec))
+                .flatten()
+        })
+        .collect();
+    let records: Vec<&[u8]> = (0..db.len())
+        .map(|i| replaced[i].as_deref().unwrap_or(db.record(i)))
+        .collect();
+    Ok(palm_db(&bytes[..PDB_HEADER], &records))
+}
+
 const EOF: [u8; 4] = [0xE9, 0x8E, 0x0D, 0x0A];
 
 fn header_len(rec0: &[u8]) -> usize {

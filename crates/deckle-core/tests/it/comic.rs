@@ -277,6 +277,69 @@ mod kindle {
         assert_eq!(img.height(), 500);
     }
 
+    /// A mass-storage Kindle in a temp folder.
+    fn kindle_root(root: &Path) -> Target {
+        std::fs::create_dir_all(root.join("documents")).unwrap();
+        std::fs::create_dir_all(root.join("system/thumbnails")).unwrap();
+        std::fs::write(
+            root.join("system/version.txt"),
+            "Kindle 5.16.2.1.1 (4184940002)\n",
+        )
+        .unwrap();
+        Target::MassStorage(deckle_core::deliver::detect_in(&[root.to_path_buf()]).remove(0))
+    }
+
+    /// The page records (11–13) of a delivered AZW3.
+    fn pages(azw3: &Path) -> Vec<Vec<u8>> {
+        let bytes = std::fs::read(azw3).unwrap();
+        let db = deckle_mobi::palmdb::PalmDb::parse(&bytes).unwrap();
+        (11..14).map(|i| db.record(i).to_vec()).collect()
+    }
+
+    #[test]
+    fn only_deckles_own_comics_are_fitted_to_the_kindle() {
+        let mut o = opts(Target::Folder("/unused".into()));
+        o.typography = false;
+        o.xray = XRayMode::Off;
+        o.pages = None;
+        let previewers = {
+            let joint = std::fs::read(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../fixtures/comic/fixed-layout-rtl.mobi"),
+            )
+            .unwrap();
+            let stamp = deckle_mobi::azw3::Stamp {
+                cde: "EBOK",
+                asin: "B0X",
+            };
+            let azw3 = deckle_mobi::azw3::kf8_only(&joint, &stamp).unwrap();
+            let db = deckle_mobi::palmdb::PalmDb::parse(&azw3).unwrap();
+            (11..14).map(|i| db.record(i).to_vec()).collect::<Vec<_>>()
+        };
+
+        // A CBZ is Deckle's: its pages are re-encoded for this (grey) Kindle.
+        let a = tempfile::tempdir().unwrap();
+        o.target = kindle_root(a.path());
+        let report = run(&super::manga(a.path()), &o);
+        assert_eq!(report.error, None, "{report:?}");
+        assert!(report.stage_ms.contains_key("fit"));
+        let fitted = pages(&report.delivered.unwrap());
+        for (page, original) in fitted.iter().zip(&previewers) {
+            assert_ne!(page, original);
+            let img = image::load_from_memory(page).unwrap().to_rgb8();
+            assert!(img.width() <= 1264 && img.height() <= 1680);
+            assert!(img.pixels().all(|p| p[0] == p[1] && p[1] == p[2]), "grey");
+        }
+
+        // A publisher's fixed-layout EPUB goes as Previewer made it.
+        let b = tempfile::tempdir().unwrap();
+        o.target = kindle_root(b.path());
+        let report = run(&fixed_layout_epub(), &o);
+        assert_eq!(report.error, None, "{report:?}");
+        assert!(!report.stage_ms.contains_key("fit"));
+        assert_eq!(pages(&report.delivered.unwrap()), previewers);
+    }
+
     #[test]
     fn a_reflowable_book_refused_enhanced_typesetting_still_fails() {
         // The fixed-layout fake hands back a MOBI; a reflowable book mustn't ship it.

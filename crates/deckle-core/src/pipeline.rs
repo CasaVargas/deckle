@@ -813,6 +813,14 @@ fn is_mobi(path: &Path) -> bool {
         .is_ok_and(|()| deckle_mobi::is_mobi(&head))
 }
 
+/// A comic Deckle made from a CBZ or page folder (its `deckle-comic` identifier), as opposed to
+/// a publisher's fixed-layout book.
+fn is_deckle_comic(info: &BookInfo) -> bool {
+    info.identifiers
+        .iter()
+        .any(|i| i.starts_with("urn:deckle:comic:"))
+}
+
 /// The device file name for a fixed-layout book: the KFX name, as `.azw3`.
 pub fn azw3_name(info: &BookInfo) -> String {
     let kfx = crate::deliver::device_filename(info);
@@ -851,6 +859,39 @@ fn finish_fixed_layout(
             }),
         report
     );
+    // Deckle's own comic is fitted to this Kindle's screen; a publisher's goes as it was made
+    // (fixed-layout spec §7.1).
+    let azw3 = match crate::screens::for_target(conn.target).filter(|_| is_deckle_comic(info)) {
+        Some(screen) => {
+            on_stage("fit");
+            let t = Instant::now();
+            let mut failed = 0;
+            let fitted = deckle_mobi::azw3::map_images(&azw3, |img| {
+                deckle_comic::pages::fit(img, screen).unwrap_or_else(|_| {
+                    failed += 1;
+                    None
+                })
+            });
+            report
+                .stage_ms
+                .insert("fit", t.elapsed().as_millis() as u64);
+            if failed > 0 {
+                report.warnings.push(format!(
+                    "{failed} page image(s) couldn't be fitted to the screen and went as they were"
+                ));
+            }
+            match fitted {
+                Ok(fitted) => fitted,
+                Err(e) => {
+                    report
+                        .warnings
+                        .push(format!("pages not fitted to the screen: {e}"));
+                    azw3
+                }
+            }
+        }
+        None => azw3,
+    };
     report.asin = Some(asin.to_owned());
     report.cde_type = Some(cde_type.as_str().to_owned());
     if let Some(work) = report.work_dir.clone() {
