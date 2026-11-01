@@ -47,6 +47,44 @@ pub fn fit(bytes: &[u8], screen: Screen) -> Result<Option<Vec<u8>>, String> {
     encode(&img, format, FIT_QUALITY).map(Some)
 }
 
+/// A comic EPUB (Deckle's own, from [`crate::convert`]) with each page image under `images/`
+/// passed through [`fit`]: what an EPUB reader gets (fixed-layout spec §5, §7.1). A page that
+/// won't decode stays as it was; the count of those comes back with the bytes.
+pub fn fit_epub(epub: &[u8], screen: Screen) -> Result<(Vec<u8>, usize), String> {
+    use std::io::{Read, Write};
+    let mut zin = zip::ZipArchive::new(Cursor::new(epub)).map_err(|e| e.to_string())?;
+    let mut zout = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let mut failed = 0;
+    for i in 0..zin.len() {
+        let mut f = zin.by_index(i).map_err(|e| e.to_string())?;
+        let name = f.name().map_err(|e| e.to_string())?.into_owned();
+        let mut bytes = Vec::with_capacity(f.size() as usize);
+        f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        let page = name.contains("/images/") && image::guess_format(&bytes).is_ok();
+        if page {
+            match fit(&bytes, screen) {
+                Ok(Some(fitted)) => bytes = fitted,
+                Ok(None) => {}
+                Err(_) => failed += 1,
+            }
+        }
+        // `mimetype` and images stored, the rest deflated, as the importer writes them.
+        let method = if name == "mimetype" || page {
+            zip::CompressionMethod::Stored
+        } else {
+            zip::CompressionMethod::Deflated
+        };
+        zout.start_file(
+            name.as_str(),
+            zip::write::SimpleFileOptions::default().compression_method(method),
+        )
+        .map_err(|e| e.to_string())?;
+        zout.write_all(&bytes).map_err(|e| e.to_string())?;
+    }
+    let out = zout.finish().map_err(|e| e.to_string())?;
+    Ok((out.into_inner(), failed))
+}
+
 /// Which half of a spread.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Half {

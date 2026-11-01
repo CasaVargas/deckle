@@ -66,7 +66,26 @@ impl Reader {
 
     /// An EPUB as this reader takes it: a KEPUB for a Kobo, as it is for a PocketBook (once it
     /// opens as a zip, so a broken file isn't sent).
+    ///
+    /// A fixed-layout book never gets KEPUB markup: its pages are laid out on purpose and have
+    /// no text to count (fixed-layout spec §5). It keeps the Kobo's `.kepub.epub` name all the
+    /// same, so the Kobo opens it in its own renderer, the one that handles fixed layout, not
+    /// Adobe's. Deckle's own comics are fitted to the reader's screen first.
     pub fn prepare(&self, epub: &[u8]) -> Result<Vec<u8>, String> {
+        if let Some(layout) = fixed_layout_of(epub) {
+            if !layout.deckle_comic {
+                return Ok(epub.to_vec());
+            }
+            let (fitted, failed) =
+                deckle_comic::pages::fit_epub(epub, crate::screens::for_reader(self))?;
+            if failed > 0 {
+                eprintln!(
+                    "{failed} page image(s) couldn't be fitted to the {} and went as they were",
+                    self.name()
+                );
+            }
+            return Ok(fitted);
+        }
         match self {
             Reader::Kobo(_) => crate::kepub::convert(epub),
             Reader::PocketBook(_) => zip::ZipArchive::new(std::io::Cursor::new(epub))
@@ -78,6 +97,56 @@ impl Reader {
     fn folder(&self) -> PathBuf {
         self.root().join(FOLDER)
     }
+}
+
+/// What the OPF of a fixed-layout EPUB says about it.
+struct FixedLayout {
+    /// Deckle made it from a CBZ or page folder (`urn:deckle:comic:` identifier).
+    deckle_comic: bool,
+}
+
+/// `Some` when the EPUB in `bytes` is fixed layout: `rendition:layout` `pre-paginated` for the
+/// whole book or on every spine item, as `inspect` decides.
+fn fixed_layout_of(bytes: &[u8]) -> Option<FixedLayout> {
+    use std::io::Read;
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut read = |name: &str| -> Option<String> {
+        let mut s = String::new();
+        zip.by_name(name).ok()?.read_to_string(&mut s).ok()?;
+        Some(s)
+    };
+    let container = read("META-INF/container.xml")?;
+    let doc = roxmltree::Document::parse(&container).ok()?;
+    let opf_path = doc
+        .descendants()
+        .find(|n| n.has_tag_name("rootfile"))?
+        .attribute("full-path")?
+        .to_owned();
+    let opf = read(&opf_path)?;
+    let doc = roxmltree::Document::parse(&opf).ok()?;
+    let whole = doc.descendants().any(|n| {
+        n.has_tag_name("meta")
+            && n.attribute("property") == Some("rendition:layout")
+            && n.text().is_some_and(|t| t.trim() == "pre-paginated")
+    });
+    let itemrefs: Vec<_> = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("itemref"))
+        .collect();
+    let every = !itemrefs.is_empty()
+        && itemrefs.iter().all(|r| {
+            r.attribute("properties").is_some_and(|p| {
+                p.split_whitespace()
+                    .any(|p| p == "rendition:layout-pre-paginated")
+            })
+        });
+    (whole || every).then(|| FixedLayout {
+        deckle_comic: doc.descendants().any(|n| {
+            n.has_tag_name("identifier")
+                && n.text()
+                    .is_some_and(|t| t.trim().starts_with("urn:deckle:comic:"))
+        }),
+    })
 }
 
 fn volume(root: &Path) -> String {
@@ -300,6 +369,64 @@ mod tests {
             kobo.file_name("deckle-daily-2026-10-01"),
             "deckle-daily-2026-10-01.kepub.epub"
         );
+    }
+
+    /// A Deckle comic EPUB with one oversized colour page (1600 × 2400).
+    fn comic_epub(dir: &Path) -> Vec<u8> {
+        use std::io::Write;
+        let img = image::RgbImage::from_pixel(1600, 2400, image::Rgb([200, 40, 40]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let cbz = dir.join("c.cbz");
+        let mut zw = zip::ZipWriter::new(std::fs::File::create(&cbz).unwrap());
+        zw.start_file("1.png", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(png.get_ref()).unwrap();
+        zw.finish().unwrap();
+        let epub = dir.join("c.epub");
+        deckle_comic::convert(&cbz, &epub).unwrap();
+        std::fs::read(epub).unwrap()
+    }
+
+    fn entry(epub: &[u8], name: &str) -> Vec<u8> {
+        use std::io::Read;
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(epub)).unwrap();
+        let mut out = Vec::new();
+        z.by_name(name).unwrap().read_to_end(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn a_fixed_layout_book_gets_no_kepub_markup_and_deckles_comics_are_fitted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kobo = Reader::Kobo(fake_kobo(&tmp.path().join("K"), ""));
+        let pb = fake_pocketbook(&tmp.path().join("PB"));
+        let comic = comic_epub(tmp.path());
+        for (reader, (w, h)) in [(&kobo, (1280, 1920)), (&pb, (1248, 1872))] {
+            let out = reader.prepare(&comic).unwrap();
+            let page = String::from_utf8(entry(&out, "OEBPS/pages/p0001.xhtml")).unwrap();
+            assert!(!page.contains("koboSpan") && !page.contains("book-columns"));
+            let img = image::load_from_memory(&entry(&out, "OEBPS/images/p0001.png")).unwrap();
+            // Scaled down to the screen, colour kept.
+            assert_eq!((img.width(), img.height()), (w, h), "{}", reader.name());
+            assert_eq!(img.color(), image::ColorType::Rgb8);
+            assert_eq!(entry(&out, "mimetype"), b"application/epub+zip");
+        }
+        // The Kobo still calls it a KEPUB: its own renderer is the one that does fixed layout.
+        assert!(kobo.file_name("Night Train").ends_with(".kepub.epub"));
+
+        // A publisher's fixed-layout book goes exactly as it came.
+        let publisher = std::fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../fixtures/comic/fixed-layout-rtl.epub"),
+        )
+        .unwrap();
+        assert_eq!(kobo.prepare(&publisher).unwrap(), publisher);
+
+        // A reflowable book is a KEPUB as before.
+        let mini = std::fs::read(deckle_kfx::fixtures::path("deckle-mini.epub")).unwrap();
+        let kepub = kobo.prepare(&mini).unwrap();
+        assert!(String::from_utf8_lossy(&entry(&kepub, "OEBPS/c0.xhtml")).contains("koboSpan"));
     }
 
     #[test]
