@@ -29,6 +29,16 @@ pub const MAX_TOKENS: u64 = 4096;
 const PROMPT_VERSION: u32 = 1;
 /// Failed chapters named in the warnings; the rest are counted.
 const MAX_WARNINGS: usize = 3;
+/// Requests in a row that can't reach the LLM before the remaining chapters are skipped.
+const MAX_UNREACHABLE: usize = 3;
+
+/// Why a recap failed.
+#[derive(Debug)]
+struct Failure {
+    message: String,
+    /// The request didn't get an answer (connection, timeout or HTTP status).
+    unreachable: bool,
+}
 
 const SYSTEM: &str =
     "You write short chapter recaps for an e-reader. Answer with the recap text only.";
@@ -128,20 +138,37 @@ pub fn add_with(
     };
     let mut failed = Vec::new();
     let mut inserts: Vec<Vec<(usize, String)>> = vec![Vec::new(); docs.len()];
+    // Requests that couldn't reach the LLM, in a row: a server that hangs costs each chapter a
+    // full timeout, so after a few the rest are skipped.
+    let mut unreachable = 0;
+    let mut abandoned = 0;
     for (c, label) in &todo {
+        if unreachable >= MAX_UNREACHABLE {
+            abandoned += 1;
+            continue;
+        }
         match writer.recap(label, &c.text) {
             Ok((text, cached)) => {
+                unreachable = 0;
                 summary.recapped += 1;
                 summary.cached += usize::from(cached);
                 inserts[c.doc].push((c.insert_at, aside(c, &text, &writer.model)));
             }
-            Err(e) => failed.push(format!("Chapter recap skipped for {label}: {e}")),
+            Err(e) => {
+                unreachable = if e.unreachable { unreachable + 1 } else { 0 };
+                failed.push(format!("Chapter recap skipped for {label}: {}", e.message));
+            }
         }
     }
     if failed.len() > MAX_WARNINGS {
         let more = failed.len() - MAX_WARNINGS;
         failed.truncate(MAX_WARNINGS);
         failed.push(format!("…and {more} more chapter recaps skipped"));
+    }
+    if abandoned > 0 {
+        failed.push(format!(
+            "The LLM stopped answering: {abandoned} more chapters skipped"
+        ));
     }
     summary.warnings = failed;
     if summary.recapped == 0 {
@@ -239,7 +266,7 @@ impl<'a, 'p> Writer<'a, 'p> {
     }
 
     /// The chapter's recap, and whether it came from the cache.
-    fn recap(&mut self, label: &str, text: &str) -> Result<(String, bool), String> {
+    fn recap(&mut self, label: &str, text: &str) -> Result<(String, bool), Failure> {
         let file = self
             .cache
             .as_ref()
@@ -284,7 +311,7 @@ impl<'a, 'p> Writer<'a, 'p> {
         Ok((recap, false))
     }
 
-    fn ask(&mut self, user: &str) -> Result<String, String> {
+    fn ask(&mut self, user: &str) -> Result<String, Failure> {
         let raw = llm::complete(
             self.provider,
             &self.model,
@@ -295,8 +322,14 @@ impl<'a, 'p> Writer<'a, 'p> {
             MAX_TOKENS,
             self.post,
         )
-        .map_err(|e| e.to_string())?;
-        clean(&raw).ok_or_else(|| "the LLM answered with an empty recap".to_owned())
+        .map_err(|e| Failure {
+            unreachable: matches!(e, llm::LlmError::Http(_)),
+            message: e.to_string(),
+        })?;
+        clean(&raw).ok_or_else(|| Failure {
+            message: "the LLM answered with an empty recap".to_owned(),
+            unreachable: false,
+        })
     }
 
     /// Cache file name: the prompt version, the provider, the model and the chapter's text.
@@ -310,9 +343,16 @@ impl<'a, 'p> Writer<'a, 'p> {
 
 /// The recap without a "Recap:" label, wrapping quotes or emphasis; `None` when nothing's left.
 fn clean(raw: &str) -> Option<String> {
+    // Characters XML 1.0 forbids would make the chapter unreadable to Previewer.
+    let raw: String = raw
+        .chars()
+        .filter(|&c| !matches!(c, '\u{0}'..='\u{8}' | '\u{B}' | '\u{C}' | '\u{E}'..='\u{1F}' | '\u{FFFE}' | '\u{FFFF}'))
+        .collect();
     let mut s = raw.trim();
     for label in ["recap:", "summary:"] {
-        if s.len() >= label.len() && s[..label.len()].eq_ignore_ascii_case(label) {
+        if s.get(..label.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(label))
+        {
             s = s[label.len()..].trim_start();
         }
     }
@@ -415,6 +455,8 @@ pub(crate) struct Chapter {
 
 /// Elements a recap is never put in front of when backing up from a heading.
 const NOT_BEFORE: &[&str] = &["html", "head", "body"];
+/// Inline elements that, empty, are link targets for the heading after them.
+const ANCHORS: &[&str] = &["a", "span"];
 
 /// The chapters of document `doc_index`, in order (the first may be empty: text before the
 /// first heading).
@@ -515,6 +557,17 @@ fn back_up(xhtml: &str, mut at: usize) -> usize {
         };
         match tag_name(&before[lt..]) {
             Some((name, false, false)) if !NOT_BEFORE.contains(&name) => at = lt,
+            // A TOC target (`<a id="ch3"/>`) belongs to the chapter after it.
+            Some((name, false, true)) if ANCHORS.contains(&name) => at = lt,
+            // So does an empty one, `<a id="ch3"></a>`.
+            Some((name, true, false)) if ANCHORS.contains(&name) => {
+                let inner = before[..lt].trim_end();
+                let open = inner.rfind('<').filter(|_| inner.ends_with('>'));
+                match open.and_then(|o| tag_name(&inner[o..]).map(|t| (o, t))) {
+                    Some((o, (n, false, false))) if n == name => at = o,
+                    _ => return at,
+                }
+            }
             _ => return at,
         }
     }

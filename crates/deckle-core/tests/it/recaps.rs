@@ -367,7 +367,9 @@ fn all_failures_leave_the_book_unchanged() {
     let long = para(900);
     let chapters: Vec<(&str, &str)> = names.iter().map(|n| (*n, long.as_str())).collect();
     let book = epub(&chapters);
-    let r = run(&book, local(), None, |_, _| Err("status: 500".into()));
+    // Empty answers: failures that aren't the server going away, so every chapter is tried.
+    let r = run(&book, local(), None, |_, _| Ok(String::new()));
+    assert_eq!(r.bodies.len(), 5);
     assert_eq!(r.bytes, book);
     let s = r.summary.unwrap();
     assert_eq!(s.recapped, 0);
@@ -419,4 +421,69 @@ fn nonlinear_spine_items_are_skipped() {
     let r = run(&book, local(), None, |_, _| Ok("Recap.".into()));
     assert_eq!(r.bodies.len(), 1);
     assert!(!chapter(&r.bytes, 1).contains("deckle-recap"));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Review fixes
+
+#[test]
+fn non_latin_answers_are_kept() {
+    for answer in [
+        "猫が庭で眠り、少年はそれを見つめる。",
+        "В главе Анна уезжает из города.",
+        "이 장에서 소년은 떠난다.",
+    ] {
+        let r = run(&epub(&[("One", &para(900))]), local(), None, |_, _| {
+            Ok(answer.to_owned())
+        });
+        assert!(chapter(&r.bytes, 0).contains(answer), "{answer}");
+    }
+}
+
+#[test]
+fn characters_xml_forbids_are_dropped() {
+    let r = run(&epub(&[("One", &para(900))]), local(), None, |_, _| {
+        Ok("Tom\u{1}leaves\u{FFFF} town.".into())
+    });
+    let c0 = chapter(&r.bytes, 0);
+    assert!(c0.contains(">Tomleaves town.</p>"), "{c0}");
+    parses(&c0);
+}
+
+#[test]
+fn a_dead_server_stops_after_three_failures() {
+    let names = ["A", "B", "C", "D", "E", "F"];
+    let long = para(900);
+    let chapters: Vec<(&str, &str)> = names.iter().map(|n| (*n, long.as_str())).collect();
+    let r = run(&epub(&chapters), local(), None, |_, _| {
+        Err("timed out".into())
+    });
+    assert_eq!(
+        r.bodies.len(),
+        3,
+        "stops asking after three failures in a row"
+    );
+    let s = r.summary.unwrap();
+    assert_eq!(s.recapped, 0);
+    assert_eq!(
+        s.warnings.last().unwrap(),
+        "The LLM stopped answering: 3 more chapters skipped"
+    );
+}
+
+#[test]
+fn a_toc_anchor_before_a_heading_stays_with_its_chapter() {
+    let body = format!(
+        "<h2>Two</h2>{}<a id=\"ch3\"></a><h2>Three</h2>{}",
+        para(900),
+        para(900)
+    );
+    let r = run(&epub(&[("One", &body)]), local(), None, |_, _| {
+        Ok("Recap.".into())
+    });
+    let c0 = chapter(&r.bytes, 0);
+    assert!(
+        c0.contains("</aside><a id=\"ch3\"></a><h2>Three</h2>"),
+        "{c0}"
+    );
 }
