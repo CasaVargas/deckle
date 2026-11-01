@@ -4,6 +4,7 @@
 
 pub mod book;
 pub mod check;
+pub mod cross;
 pub mod grid;
 pub mod ladder;
 pub mod search;

@@ -170,3 +170,52 @@ fn own_words_file_themes_the_book() {
         "{v}"
     );
 }
+
+#[test]
+fn puzzles_crossword_writes_a_pdf() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = puzzles(&[
+        "crossword",
+        "--count",
+        "2",
+        "--size",
+        "9",
+        "--seed",
+        "7",
+        "--date",
+        "2026-11-01",
+        "-o",
+        dir.path().to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("Crossword 2026-11-01 0000.pdf"),
+        "{v}"
+    );
+    assert_eq!(v["puzzles"], 2);
+    assert!(v["pages"].as_u64().unwrap() >= 4, "{v}");
+}
+
+#[test]
+fn crossword_bad_size_says_the_range() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = puzzles(&[
+        "crossword",
+        "--size",
+        "16",
+        "-o",
+        dir.path().to_str().unwrap(),
+    ]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("from 5 to 15 for a crossword"), "{err}");
+}

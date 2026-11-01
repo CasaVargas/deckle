@@ -14,11 +14,14 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
+use super::cross::{self, Crossword, Lexicon};
 use super::search::{self, Options, Search, Way};
 use super::words::Words;
 
 /// Grid sizes a word-search book takes (puzzle books §3.2).
 pub const SEARCH_SIZES: std::ops::RangeInclusive<usize> = 8..=20;
+/// Grid sizes a crossword book takes (puzzle books §3.3).
+pub const CROSS_SIZES: std::ops::RangeInclusive<usize> = 5..=15;
 /// Puzzles in a book.
 pub const COUNTS: std::ops::RangeInclusive<usize> = 1..=200;
 /// Words a word search hides at least, whatever its size.
@@ -30,6 +33,32 @@ const RESEEDS: u64 = 8;
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
     Search,
+    Crossword,
+}
+
+impl Kind {
+    /// "word search", "crossword".
+    pub fn name(self) -> &'static str {
+        match self {
+            Kind::Search => "word search",
+            Kind::Crossword => "crossword",
+        }
+    }
+
+    /// The sizes its grids take.
+    pub fn sizes(self) -> std::ops::RangeInclusive<usize> {
+        match self {
+            Kind::Search => SEARCH_SIZES,
+            Kind::Crossword => CROSS_SIZES,
+        }
+    }
+
+    fn title(self) -> &'static str {
+        match self {
+            Kind::Search => "Word Search",
+            Kind::Crossword => "Crossword",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -48,6 +77,16 @@ impl Difficulty {
             Difficulty::Easy => &[Way::Across, Way::Down],
             Difficulty::Medium => &Way::ALL,
             Difficulty::Hard => &Way::EVERY,
+        }
+    }
+
+    /// How far a crossword's fill lets rarer words in among the common ones (puzzle books
+    /// §3.3): everyday words for `easy`, the whole list mixed for `hard`.
+    pub fn spread(self) -> f32 {
+        match self {
+            Difficulty::Easy => 0.5,
+            Difficulty::Medium => 1.5,
+            Difficulty::Hard => 4.0,
         }
     }
 
@@ -82,21 +121,78 @@ pub struct Book {
     pub subtitle: String,
     pub date: NaiveDate,
     pub seed: u64,
-    pub puzzles: Vec<Search>,
+    pub puzzles: Puzzles,
     pub warnings: Vec<String>,
+}
+
+/// A book's puzzles: all of one kind.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Puzzles {
+    Search(Vec<Search>),
+    Crossword(Vec<Crossword>),
+}
+
+impl Puzzles {
+    pub fn len(&self) -> usize {
+        match self {
+            Puzzles::Search(p) => p.len(),
+            Puzzles::Crossword(p) => p.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Squares on a side of its grids.
+    pub fn size(&self) -> usize {
+        match self {
+            Puzzles::Search(p) => p.first().map_or(0, Search::size),
+            Puzzles::Crossword(p) => p.first().map_or(0, |x| x.rows.len()),
+        }
+    }
+
+    pub fn kind(&self) -> Kind {
+        match self {
+            Puzzles::Search(_) => Kind::Search,
+            Puzzles::Crossword(_) => Kind::Crossword,
+        }
+    }
+}
+
+impl Book {
+    /// Its word searches; none in a crossword book.
+    pub fn searches(&self) -> &[Search] {
+        match &self.puzzles {
+            Puzzles::Search(p) => p,
+            Puzzles::Crossword(_) => &[],
+        }
+    }
+
+    /// Its crosswords; none in a word-search book.
+    pub fn crosswords(&self) -> &[Crossword] {
+        match &self.puzzles {
+            Puzzles::Crossword(p) => p,
+            Puzzles::Search(_) => &[],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BookError {
     Size {
+        kind: Kind,
         min: usize,
         max: usize,
     },
     Count,
     /// Your words that fit the grid, fewer than a word search needs.
     TooFewWords(usize),
+    /// `--words` for a kind whose words need clues (a crossword, until LLM clues).
+    WordsNeedClues,
     /// A grid too fine to write in on this screen, and the largest that fits.
     DoesNotFit {
+        kind: Kind,
         size: usize,
         largest: usize,
     },
@@ -107,8 +203,12 @@ pub enum BookError {
 impl fmt::Display for BookError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BookError::Size { min, max } => {
-                write!(f, "--size must be from {min} to {max} for a word search")
+            BookError::Size { kind, min, max } => {
+                write!(
+                    f,
+                    "--size must be from {min} to {max} for a {}",
+                    kind.name()
+                )
             }
             BookError::Count => write!(
                 f,
@@ -121,12 +221,21 @@ impl fmt::Display for BookError {
                 "--words has {n} usable words; a word search needs at least {MIN_WORDS} \
                  (3 letters or more, and no longer than the grid)"
             ),
-            BookError::DoesNotFit { size, largest } if *largest == 0 => write!(
+            BookError::WordsNeedClues => write!(
+                f,
+                "--words isn't for crosswords yet: their words need clues"
+            ),
+            BookError::DoesNotFit {
+                kind,
+                size,
+                largest,
+            } if *largest == 0 => write!(
                 f,
                 "a {size}×{size} grid is too fine to write in on this screen, and so is every \
-                 word search size"
+                 {} size",
+                kind.name()
             ),
-            BookError::DoesNotFit { size, largest } => write!(
+            BookError::DoesNotFit { size, largest, .. } => write!(
                 f,
                 "a {size}×{size} grid is too fine to write in on this screen; \
                  the largest that fits is {largest}×{largest}"
@@ -182,19 +291,88 @@ pub fn words_wanted(size: usize) -> usize {
 pub fn make(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
     match o.kind {
         Kind::Search => make_search(o, words),
+        Kind::Crossword => make_crossword(o, Lexicon::embedded()),
     }
 }
 
-fn make_search(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
-    if !SEARCH_SIZES.contains(&o.size) {
+/// The size and count checks every kind shares.
+fn check(o: &BookOptions) -> Result<(), BookError> {
+    let sizes = o.kind.sizes();
+    if !sizes.contains(&o.size) {
         return Err(BookError::Size {
-            min: *SEARCH_SIZES.start(),
-            max: *SEARCH_SIZES.end(),
+            kind: o.kind,
+            min: *sizes.start(),
+            max: *sizes.end(),
         });
     }
     if !COUNTS.contains(&o.count) {
         return Err(BookError::Count);
     }
+    Ok(())
+}
+
+fn finish(o: &BookOptions, seed: u64, puzzles: Puzzles, warnings: Vec<String>) -> Book {
+    let plural = if o.count == 1 { "puzzle" } else { "puzzles" };
+    let size = o.size;
+    Book {
+        title: o.title.clone().unwrap_or_else(|| o.kind.title().to_owned()),
+        subtitle: format!(
+            "{size}×{size} · {} · {} {plural}",
+            o.difficulty.name(),
+            o.count
+        ),
+        date: o.date,
+        seed,
+        puzzles,
+        warnings,
+    }
+}
+
+/// The first fill `fill` makes at `d`'s spread, then at each wider one, with the spread that
+/// made it (puzzle books §3.3).
+fn first_fill(
+    d: Difficulty,
+    mut fill: impl FnMut(f32) -> Option<Crossword>,
+) -> Option<(f32, Crossword)> {
+    [Difficulty::Easy, Difficulty::Medium, Difficulty::Hard]
+        .into_iter()
+        .map(Difficulty::spread)
+        .filter(|s| *s >= d.spread())
+        .find_map(|s| fill(s).map(|x| (s, x)))
+}
+
+/// A crossword book: each puzzle filled from the whole list, preferring common words as the
+/// difficulty asks; one that won't fill so takes rarer words, with a warning.
+fn make_crossword(o: &BookOptions, lex: &Lexicon) -> Result<Book, BookError> {
+    check(o)?;
+    if o.words.is_some() {
+        return Err(BookError::WordsNeedClues);
+    }
+    let seed = o.seed.unwrap_or_else(|| default_seed(o));
+    let mut puzzles = Vec::with_capacity(o.count);
+    let mut warnings = Vec::new();
+    for i in 0..o.count {
+        let mut again = 0u64;
+        let (spread, x) = first_fill(o.difficulty, |spread| {
+            let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20) ^ (again << 40));
+            again += 1;
+            cross::fill(lex, o.size, spread, &mut rng)
+        })
+        .ok_or(BookError::Unfilled(i + 1))?;
+        if spread != o.difficulty.spread() {
+            warnings.push(format!(
+                "puzzle {} has rarer words than {} asks: it wouldn't fill otherwise",
+                i + 1,
+                o.difficulty.name()
+            ));
+        }
+        puzzles.push(x);
+    }
+    Ok(finish(o, seed, Puzzles::Crossword(puzzles), warnings))
+}
+
+fn make_search(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
+    check(o)?;
     let size = o.size;
     let seed = o.seed.unwrap_or_else(|| default_seed(o));
     let want = words_wanted(size);
@@ -249,19 +427,7 @@ fn make_search(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
         }
         puzzles.push(s);
     }
-    let plural = if o.count == 1 { "puzzle" } else { "puzzles" };
-    Ok(Book {
-        title: o.title.clone().unwrap_or_else(|| "Word Search".to_owned()),
-        subtitle: format!(
-            "{size}×{size} · {} · {} {plural}",
-            o.difficulty.name(),
-            o.count
-        ),
-        date: o.date,
-        seed,
-        puzzles,
-        warnings,
-    })
+    Ok(finish(o, seed, Puzzles::Search(puzzles), warnings))
 }
 
 /// `<Title> <YYYY-MM-DD> <seed4>.pdf`, filesystem-safe and at most 120 characters: two books
@@ -316,8 +482,12 @@ mod tests {
     fn count_and_size_respected() {
         let b = make(&opts(3, 15), Words::embedded()).unwrap();
         assert_eq!(b.puzzles.len(), 3);
-        assert!(b.puzzles.iter().all(|p| p.rows.len() == 15));
-        assert!(b.puzzles.iter().all(|p| (20..=25).contains(&p.words.len())));
+        assert!(b.searches().iter().all(|p| p.rows.len() == 15));
+        assert!(
+            b.searches()
+                .iter()
+                .all(|p| (20..=25).contains(&p.words.len()))
+        );
         assert_eq!(b.title, "Word Search");
         assert_eq!(b.subtitle, "15×15 · medium · 3 puzzles");
     }
@@ -333,7 +503,7 @@ mod tests {
         let mut o = opts(3, 12);
         o.words = Some(list.clone());
         let b = make(&o, Words::embedded()).unwrap();
-        for p in &b.puzzles {
+        for p in b.searches() {
             let themes: Vec<&String> = p
                 .words
                 .iter()
@@ -366,7 +536,7 @@ mod tests {
             .into(),
         );
         let b = make(&o, Words::embedded()).unwrap();
-        for p in &b.puzzles {
+        for p in b.searches() {
             assert!(p.words.len() >= 8);
             let both = ["sun", "sunset"]
                 .iter()
@@ -392,7 +562,11 @@ mod tests {
         for size in [7, 21] {
             assert_eq!(
                 make(&opts(1, size), Words::embedded()),
-                Err(BookError::Size { min: 8, max: 20 })
+                Err(BookError::Size {
+                    kind: Kind::Search,
+                    min: 8,
+                    max: 20
+                })
             );
         }
         for count in [0, 201] {
@@ -432,7 +606,7 @@ mod tests {
         )
         .unwrap();
         assert!(
-            b.puzzles
+            b.searches()
                 .iter()
                 .all(|p| p.words.iter().filter(|h| h.theme).count() >= 8)
         );
@@ -447,7 +621,7 @@ mod tests {
             "desserts",
         ];
         let b = make(&with_words(12, Difficulty::Hard, &words), Words::embedded()).unwrap();
-        for p in &b.puzzles {
+        for p in b.searches() {
             assert!(p.words.iter().any(|h| h.word == "kayak"));
         }
     }
@@ -461,10 +635,73 @@ mod tests {
         ];
         let b = make(&with_words(20, Difficulty::Hard, &words), Words::embedded()).unwrap();
         assert!(
-            b.puzzles
+            b.searches()
                 .iter()
                 .all(|p| p.words.iter().filter(|h| h.theme).count() >= 6)
         );
+    }
+
+    fn crossword(count: usize, size: usize, difficulty: Difficulty) -> BookOptions {
+        let mut o = opts(count, size);
+        o.kind = Kind::Crossword;
+        o.difficulty = difficulty;
+        o
+    }
+
+    #[test]
+    fn a_crossword_book_has_its_count_and_size() {
+        let b = make(&crossword(2, 11, Difficulty::Medium), Words::embedded()).unwrap();
+        assert_eq!(b.crosswords().len(), 2);
+        assert!(b.searches().is_empty());
+        assert!(b.crosswords().iter().all(|x| x.rows.len() == 11));
+        assert_eq!(b.title, "Crossword");
+        assert_eq!(b.subtitle, "11×11 · medium · 2 puzzles");
+        assert_eq!(
+            make(&crossword(2, 11, Difficulty::Medium), Words::embedded()),
+            Ok(b)
+        );
+    }
+
+    /// The commonest words at the biggest size still fill.
+    #[test]
+    fn an_easy_fifteen_still_builds() {
+        let b = make(&crossword(1, 15, Difficulty::Easy), Words::embedded()).unwrap();
+        assert_eq!(b.crosswords()[0].rows.len(), 15);
+    }
+
+    #[test]
+    fn crossword_sizes_and_words_are_checked() {
+        for size in [4, 16] {
+            assert_eq!(
+                make(&crossword(1, size, Difficulty::Medium), Words::embedded()),
+                Err(BookError::Size {
+                    kind: Kind::Crossword,
+                    min: 5,
+                    max: 15
+                })
+            );
+        }
+        let mut o = crossword(1, 9, Difficulty::Medium);
+        o.words = Some(vec!["router".into()]);
+        assert_eq!(make(&o, Words::embedded()), Err(BookError::WordsNeedClues));
+    }
+
+    /// A puzzle that won't fill with everyday words tries a wider spread before the book gives
+    /// up.
+    #[test]
+    fn a_crossword_that_wont_fill_tries_a_wider_spread() {
+        let x = Crossword {
+            rows: Vec::new(),
+            clues: Vec::new(),
+        };
+        let mut tried = Vec::new();
+        let got = first_fill(Difficulty::Easy, |s| {
+            tried.push(s);
+            (s > 1.0).then(|| x.clone())
+        });
+        assert_eq!(got, Some((Difficulty::Medium.spread(), x)));
+        assert_eq!(tried, [0.5, 1.5]);
+        assert_eq!(first_fill(Difficulty::Hard, |_| None), None);
     }
 
     #[test]

@@ -31,12 +31,18 @@ pub fn run(json: bool, action: PuzzlesCommand) -> Result<ExitCode, String> {
             difficulty,
             words,
             book,
-        } => search(json, size, difficulty, words, book),
+        } => make(json, Kind::Search, size, difficulty, words, book),
+        PuzzlesCommand::Crossword {
+            size,
+            difficulty,
+            book,
+        } => make(json, Kind::Crossword, size, difficulty, None, book),
     }
 }
 
-fn search(
+fn make(
     json: bool,
+    kind: Kind,
     size: usize,
     difficulty: DifficultyArg,
     words: Option<PathBuf>,
@@ -60,7 +66,7 @@ fn search(
         DifficultyArg::Hard => Difficulty::Hard,
     };
     let opts = BookOptions {
-        kind: Kind::Search,
+        kind,
         count: args.count,
         size,
         difficulty,
@@ -75,7 +81,11 @@ fn search(
     let path = deliver(&bytes, &name, &args)?;
 
     let mut again = format!(
-        "deckle puzzles search --count {} --size {size} --difficulty {}",
+        "deckle puzzles {} --count {} --size {size} --difficulty {}",
+        match kind {
+            Kind::Search => "search",
+            Kind::Crossword => "crossword",
+        },
         b.puzzles.len(),
         difficulty.name()
     );
@@ -96,7 +106,7 @@ fn search(
     }
     let report = Report {
         path,
-        pages: pdf::pages(&b),
+        pages: pdf::pages(&b, page),
         puzzles: b.puzzles.len(),
         seed: b.seed,
         date: b.date.to_string(),

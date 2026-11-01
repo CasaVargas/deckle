@@ -95,6 +95,15 @@ const PUZZLE_MARKED: &[&str] = &[
 /// Longer definitions don't fit beside a 5×5 grid.
 const MAX_CLUE: usize = 90;
 
+/// Which words a puzzle list keeps: their lengths, and the least zipf for each length.
+pub struct ListRules {
+    pub lens: std::ops::RangeInclusive<usize>,
+    pub min_zipf: fn(usize) -> f64,
+    /// Regular plurals and verb forms of kept words, clued with their word's clue marked
+    /// "(plural)", "(past tense)" and so on: a crossword needs them, a 5×5 mini doesn't.
+    pub inflections: bool,
+}
+
 /// The word list for the puzzle page (puzzle design §4): lowercase a–z words of 3 to 5 letters
 /// at zipf 3.0 or more, each with the short definition of its first everyday sense as the clue,
 /// sorted by word. Proper nouns, abbreviations, marked senses, plain inflections of a kept
@@ -104,6 +113,48 @@ pub fn puzzle_words(
     freq: &HashMap<String, f64>,
     blocklist: &HashSet<String>,
 ) -> Vec<(String, String)> {
+    let rules = ListRules {
+        lens: 3..=5,
+        min_zipf: |_| 3.0,
+        inflections: false,
+    };
+    word_list(jsonl, freq, blocklist, &rules)
+}
+
+/// The least zipf a crossword entry needs: lower than the mini's 3.0, since a big grid needs
+/// many more short words than the common ones give (puzzle books §3.3).
+fn crossword_zipf(_len: usize) -> f64 {
+    2.0
+}
+
+/// The crossword list (puzzle books §3.3): [`puzzle_words`]' rules for 3 to 15 letters at zipf
+/// 2.0 or more, with plurals and verb forms, each word with its zipf.
+pub fn crossword_words(
+    jsonl: impl BufRead,
+    freq: &HashMap<String, f64>,
+    blocklist: &HashSet<String>,
+) -> Vec<(String, f64, String)> {
+    let rules = ListRules {
+        lens: 3..=15,
+        min_zipf: crossword_zipf,
+        inflections: true,
+    };
+    word_list(jsonl, freq, blocklist, &rules)
+        .into_iter()
+        .map(|(w, c)| {
+            let z = zipf(freq, &w).unwrap_or(0.0);
+            (w, z, c)
+        })
+        .collect()
+}
+
+/// A puzzle word list by `rules`, as [`puzzle_words`] describes.
+pub fn word_list(
+    jsonl: impl BufRead,
+    freq: &HashMap<String, f64>,
+    blocklist: &HashSet<String>,
+    rules: &ListRules,
+) -> Vec<(String, String)> {
     // word → its clue, from the first entry and sense that give one; word → the lemmas it
     // inflects; word → whether its lowercase entries are all nouns; names ("Goa", "Beth")
     let mut best: BTreeMap<String, String> = BTreeMap::new();
@@ -111,6 +162,10 @@ pub fn puzzle_words(
     let mut nouns_only: HashMap<String, bool> = HashMap::new();
     let mut names: HashSet<String> = HashSet::new();
     let mut function_word: HashMap<String, bool> = HashMap::new();
+    // word → the word it inflects, its part of speech and how ("cards" → "card", noun, plural);
+    // (word, part of speech) → that sense's clue, for an inflection to take
+    let mut forms: BTreeMap<String, (String, String, &'static str)> = BTreeMap::new();
+    let mut by_pos: HashMap<(String, String), String> = HashMap::new();
     for line in jsonl.lines() {
         let line = match line {
             Ok(l) => l,
@@ -127,7 +182,7 @@ pub fn puzzle_words(
             continue;
         };
         if entry.get("lang_code").and_then(Value::as_str) != Some("en")
-            || !(3..=5).contains(&word.len())
+            || !rules.lens.contains(&word.len())
             || !word.bytes().all(|b| b.is_ascii_alphabetic())
         {
             continue;
@@ -147,6 +202,49 @@ pub fn puzzle_words(
             .and_then(Value::as_array)
             .map(Vec::as_slice)
             .unwrap_or_default();
+        if rules.inflections
+            && !blocklist.contains(word)
+            && zipf(freq, word).is_some_and(|z| z >= (rules.min_zipf)(word.len()))
+        {
+            for s in senses {
+                let t = tags(s);
+                let how = if t.contains(&"plural") {
+                    "plural"
+                } else if t.contains(&"past") {
+                    // "baked" is a simple past too; "written" is only a participle
+                    let simple = s
+                        .get("glosses")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(Value::as_str)
+                        .any(|g| g.contains("simple past"));
+                    if simple {
+                        "past tense"
+                    } else {
+                        "past participle"
+                    }
+                } else if t.contains(&"participle") && t.contains(&"present") {
+                    "-ing form"
+                } else if t.contains(&"third-person") {
+                    "3rd person"
+                } else {
+                    continue;
+                };
+                let lemma = s
+                    .get("form_of")
+                    .and_then(Value::as_array)
+                    .and_then(|a| a.first())
+                    .and_then(|f| f.get("word"))
+                    .and_then(Value::as_str);
+                if let Some(lemma) = lemma {
+                    forms
+                        .entry(word.to_owned())
+                        .or_insert((lemma.to_owned(), pos.to_owned(), how));
+                    break;
+                }
+            }
+        }
         for s in senses {
             for lemma in s
                 .get("form_of")
@@ -165,7 +263,7 @@ pub fn puzzle_words(
         if kindle_pos(pos).is_none_or(|p| p == "other")
             || tags(&entry).iter().any(|t| SKIP_SENSE_TAGS.contains(t))
             || blocklist.contains(word)
-            || zipf(freq, word).is_none_or(|z| z < 3.0)
+            || zipf(freq, word).is_none_or(|z| z < (rules.min_zipf)(word.len()))
         {
             continue;
         }
@@ -193,10 +291,14 @@ pub fn puzzle_words(
                 && !gives_away(word, c)
         });
         if let Some(c) = clue {
+            by_pos
+                .entry((word.to_owned(), pos.to_owned()))
+                .or_insert(c.clone());
             best.entry(word.to_owned()).or_insert(c);
         }
     }
-    best.iter()
+    let mut kept: BTreeMap<String, String> = best
+        .iter()
         .filter(|(w, _)| !function_word.get(*w).copied().unwrap_or(false))
         // wordfreq counts "goa" for Goa: a name whose lowercase spelling is only a rare noun.
         // "bath" (a verb too) is a word whatever Bath is.
@@ -210,7 +312,40 @@ pub fn puzzle_words(
             })
         })
         .map(|(w, c)| (w.clone(), c.clone()))
-        .collect()
+        .collect();
+    for (w, (lemma, pos, how)) in forms {
+        if kept.contains_key(&w) || !kept.contains_key(&lemma) {
+            continue;
+        }
+        // the clue of the sense it inflects: "primed" takes the verb's, not the adjective's
+        let Some(base) = by_pos.get(&(lemma, pos)) else {
+            continue;
+        };
+        let clue = marked_clue(base, how);
+        if !gives_away(&w, &clue) {
+            kept.insert(w, clue);
+        }
+    }
+    kept.into_iter().collect()
+}
+
+/// An inflection's clue: its word's, marked with how it's inflected. A plural drops the
+/// singular's article: "A flat card" → "Flat card (plural)".
+fn marked_clue(base: &str, how: &str) -> String {
+    let base = match how {
+        "plural" => {
+            let rest = ["A ", "An "]
+                .iter()
+                .find_map(|a| base.strip_prefix(a))
+                .unwrap_or(base);
+            let mut c = rest.chars();
+            c.next()
+                .map(|f| f.to_uppercase().chain(c).collect())
+                .unwrap_or_default()
+        }
+        _ => base.to_owned(),
+    };
+    format!("{base} ({how})")
 }
 
 /// A definition as a clue: its first clause whole when it fits, else the Word Wise short
