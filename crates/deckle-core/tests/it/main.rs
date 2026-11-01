@@ -17,6 +17,7 @@ mod metadata_fill;
 mod normalize;
 mod notes;
 mod pipeline;
+mod recaps;
 mod preflight;
 mod previewer;
 mod thumbnail;
