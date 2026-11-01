@@ -175,11 +175,26 @@ struct Ran {
     bodies: Vec<String>,
 }
 
-/// Runs [`add_with`]; `answer(n, body)` answers the `n`th request (from 0).
+/// Runs [`add_with`] for chapter recaps; `answer(n, body)` answers the `n`th request (from 0).
 fn run(
     book: &[u8],
     llm: LlmConfig,
     cache_dir: Option<std::path::PathBuf>,
+    answer: impl FnMut(usize, &str) -> Result<String, String>,
+) -> Ran {
+    let opts = RecapOptions {
+        llm,
+        cache_dir,
+        chapters: true,
+        summary: false,
+    };
+    run_with(book, &opts, answer)
+}
+
+/// Runs [`add_with`] with `opts`; `answer(n, body)` answers the `n`th request (from 0).
+fn run_with(
+    book: &[u8],
+    opts: &RecapOptions,
     mut answer: impl FnMut(usize, &str) -> Result<String, String>,
 ) -> Ran {
     let mut bodies = Vec::new();
@@ -188,7 +203,7 @@ fn run(
         bodies.push(body.to_owned());
         answer(n, body).map(|t| completion(&t))
     };
-    let (bytes, summary) = add_with(book, &RecapOptions { llm, cache_dir }, &mut post).unwrap();
+    let (bytes, summary) = add_with(book, opts, &mut post).unwrap();
     Ran {
         bytes,
         summary,
@@ -556,6 +571,8 @@ fn for_reader(
         recaps: recaps.then(|| RecapOptions {
             llm: local(),
             cache_dir: None,
+            chapters: true,
+            summary: false,
         }),
     };
     let mut post =
@@ -601,4 +618,259 @@ fn a_failed_recap_still_sends_the_book() {
     let text = all_text(&got);
     assert!(!text.contains("deckle-recap"));
     assert!(text.contains("w899"), "the chapters are all there");
+}
+
+// ---------------------------------------------------------------------------------------------
+// The book summary (design §13)
+
+fn summary_opts(llm: LlmConfig, chapters: bool) -> RecapOptions {
+    RecapOptions {
+        llm,
+        cache_dir: None,
+        chapters,
+        summary: true,
+    }
+}
+
+/// A summary request (the recap requests say "this chapter").
+fn asks_for_summary(body: &str) -> bool {
+    body.contains("You write book summaries")
+}
+
+/// Recaps are "Recap {n}.", the summary two paragraphs.
+fn recap_or_summary(n: usize, body: &str) -> Result<String, String> {
+    Ok(if asks_for_summary(body) {
+        "They met.\n\nThey married.".into()
+    } else {
+        format!("Recap {n}.")
+    })
+}
+
+fn three_chapters() -> Vec<u8> {
+    epub(&[
+        ("One", &para(900)),
+        ("Two", &para(900)),
+        ("Three", &para(900)),
+    ])
+}
+
+#[test]
+fn a_summary_page_follows_the_last_chapter() {
+    let r = run_with(
+        &three_chapters(),
+        &summary_opts(local(), true),
+        recap_or_summary,
+    );
+    assert_eq!(r.bodies.len(), 4);
+    let last = &r.bodies[3];
+    assert!(asks_for_summary(last), "{last}");
+    let (a, b, c) = (
+        last.find("One: Recap 0.").unwrap(),
+        last.find("Two: Recap 1.").unwrap(),
+        last.find("Three: Recap 2.").unwrap(),
+    );
+    assert!(a < b && b < c, "recaps go in reading order: {last}");
+    assert!(last.contains("ending included"), "{last}");
+
+    let page = read(&r.bytes, "OEBPS/deckle-summary.xhtml");
+    let dtd = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..Default::default()
+    };
+    roxmltree::Document::parse_with_options(&page, dtd).unwrap_or_else(|e| panic!("{e}: {page}"));
+    assert!(page.contains("<h1>Summary</h1>"), "{page}");
+    assert!(page.contains("including the ending"), "{page}");
+    assert!(
+        page.contains("<p>They met.</p><p>They married.</p>"),
+        "{page}"
+    );
+    assert!(page.contains("AI-generated summary (test-model)"), "{page}");
+    let opf = read(&r.bytes, "OEBPS/content.opf");
+    assert!(
+        opf.contains("<item id=\"deckle-summary\" href=\"deckle-summary.xhtml\""),
+        "{opf}"
+    );
+    assert!(
+        opf.contains("<itemref idref=\"deckle-summary\"/></spine>"),
+        "{opf}"
+    );
+    let nav = read(&r.bytes, "OEBPS/nav.xhtml");
+    assert!(
+        nav.contains("<li><a href=\"deckle-summary.xhtml\">Summary</a></li></ol>"),
+        "{nav}"
+    );
+    for i in 0..3 {
+        assert!(chapter(&r.bytes, i).contains("deckle-recap"));
+    }
+    let s = r.summary.unwrap();
+    assert!(s.summary);
+    assert_eq!(s.recapped, 3);
+    assert!(s.warnings.is_empty(), "{:?}", s.warnings);
+}
+
+#[test]
+fn the_summary_alone_leaves_the_chapters_as_they_were() {
+    let book = three_chapters();
+    let r = run_with(&book, &summary_opts(local(), false), recap_or_summary);
+    assert_eq!(r.bodies.len(), 4);
+    for i in 0..3 {
+        assert_eq!(chapter(&r.bytes, i), chapter(&book, i));
+    }
+    assert!(read(&r.bytes, "OEBPS/deckle-summary.xhtml").contains("They married."));
+    let s = r.summary.unwrap();
+    assert!(s.summary);
+    assert_eq!(
+        s.recapped, 3,
+        "recaps are made, just not put in the chapters"
+    );
+}
+
+#[test]
+fn a_missing_recap_means_no_summary() {
+    let r = run_with(&three_chapters(), &summary_opts(local(), true), |n, b| {
+        if n == 1 {
+            Err("status: 500".into())
+        } else {
+            recap_or_summary(n, b)
+        }
+    });
+    assert_eq!(r.bodies.len(), 3, "no summary request");
+    assert!(!zip_has(&r.bytes, "OEBPS/deckle-summary.xhtml"));
+    assert!(chapter(&r.bytes, 0).contains("deckle-recap"));
+    let s = r.summary.unwrap();
+    assert!(!s.summary);
+    assert_eq!(
+        s.warnings.last().map(String::as_str),
+        Some("Book summary skipped: 1 chapter has no recap")
+    );
+}
+
+#[test]
+fn a_one_chapter_book_gets_no_summary() {
+    let book = epub(&[("One", &para(900))]);
+    let r = run_with(&book, &summary_opts(local(), false), recap_or_summary);
+    assert_eq!(r.bodies.len(), 1);
+    assert_eq!(r.bytes, book);
+    assert!(!r.summary.unwrap().summary);
+}
+
+#[test]
+fn a_failed_summary_keeps_the_recaps() {
+    let r = run_with(&three_chapters(), &summary_opts(local(), true), |n, b| {
+        if asks_for_summary(b) {
+            Err("status: 500".into())
+        } else {
+            recap_or_summary(n, b)
+        }
+    });
+    assert!(!zip_has(&r.bytes, "OEBPS/deckle-summary.xhtml"));
+    for i in 0..3 {
+        assert!(chapter(&r.bytes, i).contains("deckle-recap"));
+    }
+    let s = r.summary.unwrap();
+    assert_eq!(
+        s.warnings,
+        ["Book summary skipped: LLM request failed: status: 500"]
+    );
+}
+
+#[test]
+fn long_recaps_on_a_local_server_are_summarized_in_parts() {
+    // Three 800-word recaps: 2,400 words, more than a local server's 2,000 per request.
+    let long_recaps = |n: usize, b: &str| -> Result<String, String> {
+        Ok(if asks_for_summary(b) {
+            format!("Summary {n}.")
+        } else {
+            words(800, n * 1000)
+        })
+    };
+    let r = run_with(
+        &three_chapters(),
+        &summary_opts(local(), false),
+        long_recaps,
+    );
+    assert_eq!(r.bodies.len(), 6, "3 recaps, 2 part summaries, 1 merge");
+    assert!(r.bodies[3].contains("part 1 of 2"), "{}", r.bodies[3]);
+    assert!(r.bodies[4].contains("part 2 of 2"), "{}", r.bodies[4]);
+    assert!(
+        r.bodies[5].contains("summaries of the parts"),
+        "{}",
+        r.bodies[5]
+    );
+    assert!(r.bodies[5].contains("Summary 3.") && r.bodies[5].contains("Summary 4."));
+    assert!(read(&r.bytes, "OEBPS/deckle-summary.xhtml").contains("Summary 5."));
+
+    let hosted = run_with(
+        &three_chapters(),
+        &summary_opts(hosted(), false),
+        long_recaps,
+    );
+    assert_eq!(
+        hosted.bodies.len(),
+        4,
+        "a hosted provider gets one summary request"
+    );
+}
+
+#[test]
+fn a_cached_summary_costs_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let opts = RecapOptions {
+        cache_dir: Some(tmp.path().to_path_buf()),
+        ..summary_opts(local(), true)
+    };
+    let first = run_with(&three_chapters(), &opts, recap_or_summary);
+    assert_eq!(first.bodies.len(), 4);
+    let second = run_with(&three_chapters(), &opts, |_, _| {
+        Err("no request expected".into())
+    });
+    assert!(second.bodies.is_empty());
+    assert_eq!(second.bytes, first.bytes);
+}
+
+#[test]
+fn a_book_with_a_summary_keeps_it() {
+    let once = run_with(
+        &three_chapters(),
+        &summary_opts(local(), false),
+        recap_or_summary,
+    );
+    let again = run_with(&once.bytes, &summary_opts(local(), false), |_, _| {
+        Err("no request expected".into())
+    });
+    assert!(again.bodies.is_empty());
+    assert_eq!(again.bytes, once.bytes);
+}
+
+#[test]
+fn a_book_for_another_reader_gets_a_summary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("book.epub");
+    std::fs::write(&path, three_chapters()).unwrap();
+    let opts = deckle_core::reader::BookOptions {
+        whos_who: None,
+        recaps: Some(summary_opts(local(), false)),
+    };
+    let mut n = 0;
+    let mut post = |_: &str, _: &[(String, String)], body: &str| {
+        n += 1;
+        recap_or_summary(n - 1, body).map(|t| completion(&t))
+    };
+    let mut fetch = |_: &str| -> Result<String, String> { Err("offline".into()) };
+    let got = deckle_core::reader::book_epub_with(&path, &opts, &mut post, &mut fetch).unwrap();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(&got)).unwrap();
+    let names: Vec<String> = (0..z.len())
+        .map(|i| z.by_index(i).unwrap().name().unwrap().into_owned())
+        .collect();
+    assert!(
+        names.iter().any(|n| n.ends_with("deckle-summary.xhtml")),
+        "{names:?}"
+    );
+}
+
+fn zip_has(bytes: &[u8], name: &str) -> bool {
+    zip::ZipArchive::new(std::io::Cursor::new(bytes))
+        .unwrap()
+        .by_name(name)
+        .is_ok()
 }

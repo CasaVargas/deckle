@@ -40,6 +40,16 @@ export default function Online({ settings, set, onPage }: Props) {
       page: "reading",
       where: "Reading aids",
     },
+    {
+      title: "Book summary",
+      sends: "each chapter's text, to recap it first",
+      to: ai ? provider : "the AI model's provider",
+      why: "A summary of the whole book on a page after the last chapter. Needs the AI model.",
+      on: settings.book_summary,
+      toggle: (on) => set("book_summary", on),
+      page: "reading",
+      where: "Reading aids",
+    },
   ];
   return (
     <div className="set-stack">

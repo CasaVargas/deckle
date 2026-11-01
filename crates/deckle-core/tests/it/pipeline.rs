@@ -1754,7 +1754,7 @@ fn recap_options(out: &std::path::Path, llm: Option<deckle_core::xray::LlmConfig
         xray: XRayMode::Off,
         llm,
         wikipedia: false,
-        recaps: Some(out.join("cache")),
+        recaps: Some(deckle_core::recaps::Extras::chapters(out.join("cache"))),
         word_wise: None,
         replaces: Vec::new(),
         originals: None,

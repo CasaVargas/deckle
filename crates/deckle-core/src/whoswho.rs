@@ -136,7 +136,7 @@ pub fn add_with(
     let labels = book.nav_labels(&files);
     let page = page(&entities, &first_link, &book, &labels, &lang);
     files.push((book.page_path(), page.into_bytes()));
-    book.register(&mut files)?;
+    book.register_page(&mut files, "deckle-whoswho", PAGE, "Who's who")?;
 
     let people = entities
         .iter()
@@ -268,7 +268,12 @@ impl Book {
     }
 
     fn page_path(&self) -> String {
-        crate::epub::join(dir_of(&self.opf_path), PAGE)
+        self.page_at(PAGE)
+    }
+
+    /// A page Deckle adds, `file` next to the OPF, as a path in the zip.
+    pub(crate) fn page_at(&self, file: &str) -> String {
+        crate::epub::join(dir_of(&self.opf_path), file)
     }
 
     /// Spine document path → its label in the nav (else the NCX), for "First mentioned in …".
@@ -324,27 +329,30 @@ impl Book {
         out
     }
 
-    /// The page in the manifest, at the end of the spine, and last in the nav and the NCX.
-    fn register(&self, files: &mut [(String, Vec<u8>)]) -> Result<(), String> {
-        let opf_dir = dir_of(&self.opf_path).to_owned();
+    /// The page `file` (next to the OPF, manifest id `id`) in the manifest, at the end of the
+    /// spine, and last in the nav and the NCX as `label`.
+    pub(crate) fn register_page(
+        &self,
+        files: &mut [(String, Vec<u8>)],
+        id: &str,
+        file: &str,
+        label: &str,
+    ) -> Result<(), String> {
         let opf = slot(files, &self.opf_path)?;
         let mut s = String::from_utf8_lossy(&opf.1).into_owned();
-        let item = format!(
-            "<item id=\"deckle-whoswho\" href=\"{PAGE}\" media-type=\"application/xhtml+xml\"/>"
-        );
+        let item =
+            format!("<item id=\"{id}\" href=\"{file}\" media-type=\"application/xhtml+xml\"/>");
         insert_before_close(&mut s, "manifest", &item)?;
-        insert_before_close(&mut s, "spine", "<itemref idref=\"deckle-whoswho\"/>")?;
+        insert_before_close(&mut s, "spine", &format!("<itemref idref=\"{id}\"/>"))?;
         opf.1 = s.into_bytes();
-        let page = crate::epub::join(&opf_dir, PAGE);
+        let page = self.page_at(file);
+        let label = esc(label);
 
         if let Some(path) = &self.nav {
             let nav = slot(files, path)?;
             let mut s = String::from_utf8_lossy(&nav.1).into_owned();
             let href = relative(dir_of(path), &page);
-            add_to_toc(
-                &mut s,
-                &format!("<li><a href=\"{href}\">Who's who</a></li>"),
-            );
+            add_to_toc(&mut s, &format!("<li><a href=\"{href}\">{label}</a></li>"));
             nav.1 = s.into_bytes();
         }
         if let Some(path) = &self.ncx {
@@ -361,8 +369,8 @@ impl Book {
                 + 1;
             let href = relative(dir_of(path), &page);
             let point = format!(
-                "<navPoint id=\"deckle-whoswho\" playOrder=\"{order}\"><navLabel><text>Who's \
-                 who</text></navLabel><content src=\"{href}\"/></navPoint>"
+                "<navPoint id=\"{id}\" playOrder=\"{order}\"><navLabel><text>{label}</text>\
+                 </navLabel><content src=\"{href}\"/></navPoint>"
             );
             // A NCX without a navMap is left alone; the nav document still lists the page.
             let _ = insert_before_close(&mut s, "navMap", &point);

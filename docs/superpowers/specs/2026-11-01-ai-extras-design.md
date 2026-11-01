@@ -326,11 +326,15 @@ recap". A fixed-layout book gets no summary.
 ### 13.6 Tests
 
 - Three long chapters with summary on: three recap requests, then one summary request that holds
-  all three recaps in order. A `deckle-summary.xhtml` sits last in the spine, the manifest, the
-  nav and the NCX, says "including the ending", and parses as XML.
+  all three recaps in order. A `deckle-summary.xhtml` sits last in the spine, the manifest and the
+  nav, says "including the ending", and parses as XML. The NCX entry is written by the same code
+  as Who's who's, and that code is tested there.
 - `chapters: false, summary: true`: the chapters have no asides, and the Summary page is there.
 - One recap fails: no summary, and the warning names the count.
 - Local server with recaps over 2,000 words: the part requests, then a merge request.
 - Cache: a second run makes zero requests and produces identical bytes.
 - The summary request fails: the recaps are still in, with one warning.
-- `reader::book_epub` with summary on: the Summary page comes before the Who's who page.
+- A book that already has a Summary page keeps it, and makes no requests.
+- A one-chapter book gets no summary.
+- `reader::book_epub` with summary on: the Summary page is in the book. Who's who runs after
+  recaps, so its page comes later.

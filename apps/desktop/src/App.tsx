@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS: Settings = {
   word_wise_level: 5,
   wikipedia: false,
   chapter_recaps: false,
+  book_summary: false,
   amazon_match: false,
   generated_cover: true,
   metadata_fill: false,

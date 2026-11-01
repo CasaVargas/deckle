@@ -72,9 +72,8 @@ pub struct RunOptions {
     pub llm: Option<LlmConfig>,
     /// Wikipedia summaries for X-Ray terms (opt-in network).
     pub wikipedia: bool,
-    /// Chapter recaps (issue #29), cached in this directory (`recaps/` under it); `None` = off.
-    /// Needs `llm`.
-    pub recaps: Option<PathBuf>,
+    /// Chapter recaps and the book summary (issue #29), as asked; `None` = off. Needs `llm`.
+    pub recaps: Option<crate::recaps::Extras>,
     /// Word Wise sidecar on EBOK books; `None` = off.
     pub word_wise: Option<WordWiseOptions>,
     /// Older copies of this book under other names in `documents/` (the library's send
@@ -429,35 +428,35 @@ pub fn prepare_with(
     })
 }
 
-/// Chapter recaps written into the normalized EPUB when asked for (AI extras design §4). Never
-/// fails the run: every problem is a warning, and the book ships without recaps.
+/// Chapter recaps and the book summary written into the normalized EPUB when asked for (AI
+/// extras design §4, §13). Never fails the run: every problem is a warning, and the book ships
+/// without them.
 fn add_recaps(
     normalized: &Path,
     opts: &RunOptions,
     report: &mut RunReport,
     on_stage: &mut dyn FnMut(&'static str),
 ) {
-    let Some(cache_dir) = &opts.recaps else {
+    let Some(extras) = &opts.recaps else {
         return;
     };
     let Some(llm) = &opts.llm else {
-        report
-            .warnings
-            .push("Chapter recaps need an LLM; set one in Settings".into());
+        report.warnings.push(if extras.chapters {
+            "Chapter recaps need an LLM; set one in Settings".into()
+        } else {
+            "The book summary needs an LLM; set one in Settings".into()
+        });
         return;
     };
     on_stage("recaps");
     let t = Instant::now();
-    let recap_opts = crate::recaps::RecapOptions {
-        llm: llm.clone(),
-        cache_dir: Some(cache_dir.clone()),
-    };
+    let recap_opts = extras.options(llm.clone());
     let done = std::fs::read(normalized)
         .map_err(|e| e.to_string())
-        .and_then(|bytes| crate::recaps::add(&bytes, &recap_opts))
-        .and_then(|(bytes, summary)| {
-            if summary.as_ref().is_some_and(|s| s.recapped > 0) {
-                std::fs::write(normalized, bytes).map_err(|e| e.to_string())?;
+        .and_then(|before| {
+            let (after, summary) = crate::recaps::add(&before, &recap_opts)?;
+            if after != before {
+                std::fs::write(normalized, after).map_err(|e| e.to_string())?;
             }
             Ok(summary)
         });
@@ -467,11 +466,20 @@ fn add_recaps(
             report.recaps = Some(summary);
         }
         Ok(None) => {}
-        Err(e) => report.warnings.push(format!("Chapter recaps skipped: {e}")),
+        Err(e) => report
+            .warnings
+            .push(format!("{} skipped: {e}", capitalized(extras.names()))),
     }
     report
         .stage_ms
         .insert("recaps", t.elapsed().as_millis() as u64);
+}
+
+fn capitalized(s: &str) -> String {
+    let mut c = s.chars();
+    c.next()
+        .map(|f| f.to_uppercase().chain(c).collect())
+        .unwrap_or_default()
 }
 
 /// The one warning naming every text extra `opts` asks for that a fixed-layout book skips.
@@ -482,7 +490,12 @@ fn fixed_layout_skips(opts: &RunOptions) -> Option<String> {
         (opts.xray == XRayMode::Auto, "X-Ray"),
         (opts.word_wise.is_some(), "Word Wise"),
         (opts.pages.is_some(), "page numbers"),
-        (opts.recaps.is_some(), "chapter recaps"),
+        (
+            opts.recaps.is_some(),
+            opts.recaps
+                .as_ref()
+                .map_or("", crate::recaps::Extras::names),
+        ),
     ]
     .into_iter()
     .filter_map(|(on, what)| on.then_some(what))
