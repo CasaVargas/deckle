@@ -37,6 +37,9 @@ pub fn run(json: bool, action: PuzzlesCommand) -> Result<ExitCode, String> {
             difficulty,
             book,
         } => make(json, Kind::Crossword, size, difficulty, None, book),
+        PuzzlesCommand::Sudoku { difficulty, book } => {
+            make(json, Kind::Sudoku, 9, difficulty, None, book)
+        }
     }
 }
 
@@ -81,14 +84,19 @@ fn make(
     let path = deliver(&bytes, &name, &args)?;
 
     let mut again = format!(
-        "deckle puzzles {} --count {} --size {size} --difficulty {}",
+        "deckle puzzles {} --count {}",
         match kind {
             Kind::Search => "search",
             Kind::Crossword => "crossword",
+            Kind::Sudoku => "sudoku",
         },
         b.puzzles.len(),
-        difficulty.name()
     );
+    // a sudoku is always 9×9
+    if kind != Kind::Sudoku {
+        again += &format!(" --size {size}");
+    }
+    again += &format!(" --difficulty {}", difficulty.name());
     if let Some(w) = &words {
         again += &format!(" --words {}", quote(&w.to_string_lossy()));
     }

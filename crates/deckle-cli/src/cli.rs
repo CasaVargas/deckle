@@ -349,6 +349,14 @@ pub enum PuzzlesCommand {
         #[command(flatten)]
         book: BookArgs,
     },
+    /// A book of 9×9 sudoku.
+    Sudoku {
+        /// easy: singles solve it; medium: needs pairs and pointing; hard: needs more.
+        #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
+        difficulty: DifficultyArg,
+        #[command(flatten)]
+        book: BookArgs,
+    },
     /// A book of crosswords.
     Crossword {
         /// Squares on a side, 5 to 15.

@@ -13,6 +13,7 @@ use crate::pdf::{BOLD, EmbedFace, REGULAR, Screen, embed_font, glyph_bytes, shap
 use crate::puzzle::cross::{self, Crossword};
 use crate::puzzle::grid::Dir;
 use crate::puzzle::search::Search;
+use crate::puzzle::sudoku::Grid;
 
 /// The page a book is laid out for: the Kindle Scribe's screen, or one of the Daily's.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -66,8 +67,21 @@ const FOOT: f32 = 9.0;
 const GUTTER: f32 = 12.0;
 const CELL_LINE: f32 = 0.75;
 const BORDER: f32 = 2.0;
-/// Answers a page, two by two.
-const ANSWERS_PER_PAGE: usize = 4;
+/// A sudoku square, at least: a digit and pencil marks (§4.2).
+const MIN_SUDOKU_CELL: f32 = 40.0;
+
+/// Answers a page and their columns: two by two, or two by three for sudoku's small grids.
+fn answer_grid(kind: Kind) -> (usize, usize) {
+    match kind {
+        Kind::Sudoku => (2, 3),
+        _ => (2, 2),
+    }
+}
+
+fn answers_per_page(kind: Kind) -> usize {
+    let (cols, rows) = answer_grid(kind);
+    cols * rows
+}
 /// A crossword square, at least: room to write a letter (§4.2).
 const MIN_CROSS_CELL: f32 = 22.0;
 /// A crossword square, at most: a 5×5 needn't fill the page.
@@ -288,6 +302,31 @@ impl Painter<'_> {
         }
     }
 
+    /// A sudoku: its squares, heavier lines round each 3×3 box, the givens in bold and, for an
+    /// answer, the rest of `solution` in the regular face.
+    fn sudoku(&mut self, givens: &Grid, solution: Option<&Grid>, x: f32, y: f32, cell: f32) {
+        let side = cell * 9.0;
+        for k in 1..9 {
+            let d = k as f32 * cell;
+            let w = if k % 3 == 0 { BORDER } else { CELL_LINE };
+            self.line(w, (x + d, y), (x + d, y + side));
+            self.line(w, (x, y + d), (x + side, y + d));
+        }
+        self.c.set_line_width(BORDER);
+        self.c.rect(x, self.ph - y - side, side, side);
+        self.c.stroke();
+        for i in 0..81 {
+            let (face, digit, size) = match (givens[i], solution) {
+                (0, Some(sol)) => (Face::Regular, sol[i], 0.55 * cell),
+                (0, None) => continue,
+                (g, _) => (Face::Bold, g, 0.6 * cell),
+            };
+            let cx = x + ((i % 9) as f32 + 0.5) * cell;
+            let base = y + ((i / 9) as f32 + 0.5) * cell + 0.35 * size;
+            self.centred(face, size, cx, base, &digit.to_string());
+        }
+    }
+
     /// A rounded outline round a hidden word's squares, from its first to its last.
     fn capsule(&mut self, from: (f32, f32), to: (f32, f32), r: f32) {
         let flip = |(x, y): (f32, f32)| (x, self.ph - y);
@@ -451,6 +490,13 @@ fn lay_out_cross(faces: &Faces, page: (f32, f32), x: &Crossword) -> Option<Cross
 enum Layouts {
     Search(Vec<PuzzleLayout>),
     Crossword(Vec<CrossLayout>),
+    /// Every sudoku's grid: its top left and square.
+    Sudoku {
+        count: usize,
+        x: f32,
+        y: f32,
+        cell: f32,
+    },
 }
 
 impl Layouts {
@@ -459,6 +505,7 @@ impl Layouts {
         match self {
             Layouts::Search(l) => vec![1; l.len()],
             Layouts::Crossword(l) => l.iter().map(|x| x.pages).collect(),
+            Layouts::Sudoku { count, .. } => vec![1; *count],
         }
     }
 }
@@ -487,6 +534,25 @@ fn lay_out_book(faces: &Faces, b: &Book, page: (f32, f32)) -> Result<Layouts, Bo
                         .unwrap_or(0),
                 })
         }
+        Puzzles::Sudoku(ps) => {
+            let (w, h) = page;
+            let y = MARGIN + HEAD + GAP;
+            let side = (w - 2.0 * MARGIN).min(h - y - MARGIN - FOOT - GAP);
+            let cell = side / 9.0;
+            if cell < MIN_SUDOKU_CELL {
+                return Err(BookError::DoesNotFit {
+                    kind,
+                    size,
+                    largest: 0,
+                });
+            }
+            Ok(Layouts::Sudoku {
+                count: ps.len(),
+                x: (w - side) / 2.0,
+                y,
+                cell,
+            })
+        }
         Puzzles::Crossword(xs) => xs
             .iter()
             .map(|x| lay_out_cross(faces, page, x))
@@ -509,7 +575,7 @@ pub fn pages(b: &Book, page: PageSize) -> usize {
     let puzzles: usize = lay_out_book(&faces, b, page.page())
         .map(|l| l.pages().iter().sum())
         .unwrap_or(b.puzzles.len());
-    1 + puzzles + b.puzzles.len().div_ceil(ANSWERS_PER_PAGE)
+    1 + puzzles + b.puzzles.len().div_ceil(answers_per_page(b.puzzles.kind()))
 }
 
 /// The book as a PDF for `page`, or [`BookError::DoesNotFit`] when its grids would be too fine
@@ -563,7 +629,7 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
 
     // The puzzles: a page each, or more for a crossword's clues.
     for i in 0..b.puzzles.len() {
-        let answer_page = first_answers + i / ANSWERS_PER_PAGE + 1;
+        let answer_page = first_answers + i / answers_per_page(b.puzzles.kind()) + 1;
         let foot = format!("Answers on page {answer_page}");
         for k in 0..counts[i] {
             let mut p = Painter {
@@ -602,6 +668,9 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
                         p.text(line.face, line.size, line.x, line.y, &line.text);
                     }
                 }
+                (Puzzles::Sudoku(ps), Layouts::Sudoku { x, y, cell, .. }) => {
+                    p.sudoku(&ps[i].givens, None, *x, *y, *cell);
+                }
                 _ => unreachable!("a book's layouts are of its own kind"),
             }
             p.text(Face::Regular, FOOT, MARGIN, ph - MARGIN, &foot);
@@ -611,9 +680,11 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
 
     // The answers, two by two.
     let top = MARGIN + HEAD + GAP;
-    let slot_w = (pw - 2.0 * MARGIN - GAP) / 2.0;
-    let slot_h = (ph - MARGIN - top - GAP) / 2.0;
-    for n in 0..b.puzzles.len().div_ceil(ANSWERS_PER_PAGE) {
+    let (cols, rows) = answer_grid(b.puzzles.kind());
+    let per = cols * rows;
+    let slot_w = (pw - 2.0 * MARGIN - (cols - 1) as f32 * GAP) / cols as f32;
+    let slot_h = (ph - MARGIN - top - (rows - 1) as f32 * GAP) / rows as f32;
+    for n in 0..b.puzzles.len().div_ceil(per) {
         let mut p = Painter {
             c: Content::new(),
             ph,
@@ -621,11 +692,11 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
             used: &mut used,
         };
         p.text(Face::Bold, HEAD, MARGIN, MARGIN + HEAD, "Answers");
-        let first = n * ANSWERS_PER_PAGE;
-        for k in 0..ANSWERS_PER_PAGE.min(b.puzzles.len() - first) {
+        let first = n * per;
+        for k in 0..per.min(b.puzzles.len() - first) {
             let number = first + k + 1;
-            let x = MARGIN + (k % 2) as f32 * (slot_w + GAP);
-            let y = top + (k / 2) as f32 * (slot_h + GAP);
+            let x = MARGIN + (k % cols) as f32 * (slot_w + GAP);
+            let y = top + (k / cols) as f32 * (slot_h + GAP);
             p.text(Face::Bold, LIST, x, y + LIST, &format!("No. {number}"));
             let side = slot_w.min(slot_h - LIST - 6.0);
             let gy = y + LIST + 6.0;
@@ -637,6 +708,10 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
                     p.blacks(rows, x, gy, cell);
                     p.grid(x, gy, cell, rows.len());
                     p.letters(rows, x, gy, cell, |_, _| 0.55 * cell);
+                }
+                Puzzles::Sudoku(ps) => {
+                    let s = &ps[first + k];
+                    p.sudoku(&s.givens, Some(&s.solution), x, gy, side / 9.0);
                 }
             }
         }
