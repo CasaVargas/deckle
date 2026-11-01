@@ -84,6 +84,10 @@ pub fn convert(pdf: &Path, epub: &Path) -> Result<ImportReport, PdfError> {
         return Err(PdfError::Scanned);
     }
     let (blocks, stats) = layout::blocks(&pages);
+    // The document's own bookmarks, when it has them, are better chapters than any guess.
+    let outlined = layout::apply_outline(&blocks, &doc.outline());
+    let from_outline = outlined.is_some();
+    let blocks = outlined.unwrap_or(blocks);
     let stem = pdf
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
@@ -94,7 +98,7 @@ pub fn convert(pdf: &Path, epub: &Path) -> Result<ImportReport, PdfError> {
             pictures.push(doc.picture(*page, *rect)?);
         }
     }
-    let (files, mut report) = epub::write(&blocks, &pictures, &info, &stem);
+    let (files, mut report) = epub::write(&blocks, &pictures, &info, &stem, from_outline);
     report.pages = pages.len();
     report.stats = stats;
     report.warnings.insert(0, QUALITY_NOTE.to_owned());

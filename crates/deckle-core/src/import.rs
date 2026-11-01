@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! The `import` stage: a Word, OpenDocument or RTF file, a DRM-free Kindle book, text file, FB2
-//! or PDF becomes an EPUB first, and every later stage runs on that (DOCX spec §3, ODT spec §3,
-//! RTF spec §3, MOBI spec §3, TXT spec §3, FB2 spec §3, PDF spec §6). Shared by the pipeline and
-//! bind.
+//! The `import` stage: a Word, OpenDocument or RTF file, a DRM-free Kindle book, text file, FB2,
+//! PDF or comic becomes an EPUB first, and every later stage runs on that (DOCX spec §3, ODT spec
+//! §3, RTF spec §3, MOBI spec §3, TXT spec §3, FB2 spec §3, PDF spec §6, fixed-layout spec §6).
+//! Shared by the pipeline and bind.
 
 use std::path::{Path, PathBuf};
 
@@ -22,6 +22,7 @@ pub fn needs_import(path: &Path) -> bool {
         || deckle_rtf::is_rtf(path)
         || deckle_mobi::is_mobi_file(path)
         || deckle_markdown::is_markdown_file(path)
+        || deckle_comic::is_comic_archive(path)
         || path.is_dir()
 }
 
@@ -29,7 +30,12 @@ pub fn needs_import(path: &Path) -> bool {
 /// importers don't take). The error is the importer's own message.
 pub fn import(source: &Path, dir: &Path, name: &str) -> Option<Result<Imported, String>> {
     let epub = dir.join(name);
-    let warnings = if deckle_markdown::is_markdown_file(source) || source.is_dir() {
+    // A folder of page images is a comic; any other folder is Markdown notes.
+    let warnings = if deckle_comic::is_comic(source) {
+        deckle_comic::convert(source, &epub)
+            .map(|r| r.warnings)
+            .map_err(|e| e.to_string())
+    } else if deckle_markdown::is_markdown_file(source) || source.is_dir() {
         deckle_markdown::convert(source, &epub)
             .map(|r| r.warnings)
             .map_err(|e| e.to_string())

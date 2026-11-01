@@ -37,6 +37,7 @@ pub mod reader;
 pub mod reading;
 pub mod recaps;
 pub mod remarkable;
+pub mod screens;
 pub mod shelves;
 pub mod sync;
 pub mod thumbnail;

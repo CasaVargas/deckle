@@ -27,6 +27,18 @@ pub enum Block {
     },
     /// Notes referenced by the blocks just before, by index into [`Body::notes`].
     Notes(Vec<usize>),
+    /// A plain paragraph that could be a heading set by hand (bold or large text). It leaves
+    /// [`Body::body`] as a [`Block::Heading`] or a [`Block::Html`], never as itself.
+    Candidate {
+        /// The finished `<p>`, if it stays a paragraph.
+        html: String,
+        /// The inline markup without bold, if it becomes a heading.
+        bare: String,
+        text: String,
+        /// Smallest font size in half-points, and whether every visible character is bold.
+        size: u16,
+        bold: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -81,14 +93,33 @@ pub fn escape(s: &str) -> String {
 #[derive(Default)]
 struct Inline {
     html: String,
+    /// The same markup without `<b>`, for a paragraph that turns out to be a heading.
+    bare: String,
     pending: Option<(Fmt, String)>,
     text: String,
     has_image: bool,
+    /// (size, bold, characters) for each piece of visible text.
+    looks: Vec<(Option<u16>, bool, usize)>,
+}
+
+/// A paragraph's inline content, finished.
+struct Finished {
+    html: String,
+    bare: String,
+    text: String,
+    has_image: bool,
+    looks: Vec<(Option<u16>, bool, usize)>,
 }
 
 impl Inline {
-    fn text(&mut self, f: Fmt, s: &str) {
+    fn text(&mut self, mut f: Fmt, s: &str) {
         self.text.push_str(s);
+        let visible = s.chars().filter(|c| !c.is_whitespace()).count();
+        if visible > 0 {
+            self.looks.push((f.size, f.bold, visible));
+        }
+        // Size isn't carried into the XHTML, so it mustn't split a run of tags.
+        f.size = None;
         match &mut self.pending {
             Some((pf, t)) if *pf == f => t.push_str(&escape(s)),
             _ => {
@@ -101,13 +132,14 @@ impl Inline {
     fn raw(&mut self, s: &str) {
         self.flush();
         self.html.push_str(s);
+        self.bare.push_str(s);
     }
 
     fn flush(&mut self) {
         let Some((f, t)) = self.pending.take() else {
             return;
         };
-        let tags: Vec<(&str, &str)> = [
+        let tags: Vec<(bool, &str, &str)> = [
             (f.bold, ("<b>", "</b>")),
             (f.italic, ("<i>", "</i>")),
             (f.underline, ("<u>", "</u>")),
@@ -117,20 +149,38 @@ impl Inline {
             (f.sub && !f.sup, ("<sub>", "</sub>")),
         ]
         .into_iter()
-        .filter_map(|(on, t)| on.then_some(t))
+        .enumerate()
+        .filter_map(|(i, (on, (open, close)))| on.then_some((i == 0, open, close)))
         .collect();
-        for (open, _) in &tags {
+        for (_, open, _) in &tags {
             self.html.push_str(open);
         }
         self.html.push_str(&t);
-        for (_, close) in tags.iter().rev() {
+        for (_, _, close) in tags.iter().rev() {
             self.html.push_str(close);
+        }
+        for (is_bold, open, _) in &tags {
+            if !is_bold {
+                self.bare.push_str(open);
+            }
+        }
+        self.bare.push_str(&t);
+        for (is_bold, _, close) in tags.iter().rev() {
+            if !is_bold {
+                self.bare.push_str(close);
+            }
         }
     }
 
-    fn finish(mut self) -> (String, String, bool) {
+    fn finish(mut self) -> Finished {
         self.flush();
-        (self.html, self.text, self.has_image)
+        Finished {
+            html: self.html,
+            bare: self.bare,
+            text: self.text,
+            has_image: self.has_image,
+            looks: self.looks,
+        }
     }
 }
 
@@ -150,6 +200,13 @@ pub struct Body<'d, 'i> {
     headings: usize,
     footnote_count: usize,
     endnote_count: usize,
+    /// Body text so far, for telling a hand-set heading from the text around it: characters by
+    /// font size, bold characters, and the body's paragraphs.
+    size_chars: HashMap<u16, usize>,
+    bold_chars: usize,
+    paragraphs: usize,
+    /// Tables the reader is inside; their paragraphs are never headings.
+    table_depth: usize,
 }
 
 impl<'d, 'i> Body<'d, 'i> {
@@ -169,6 +226,10 @@ impl<'d, 'i> Body<'d, 'i> {
             headings: 0,
             footnote_count: 0,
             endnote_count: 0,
+            size_chars: HashMap::new(),
+            bold_chars: 0,
+            paragraphs: 0,
+            table_depth: 0,
         }
     }
 
@@ -181,7 +242,85 @@ impl<'d, 'i> Body<'d, 'i> {
                 out.push(Block::Notes(std::mem::take(&mut self.pending_notes)));
             }
         }
+        self.recover_headings(&mut out);
         out
+    }
+
+    /// A document with no heading styles: paragraphs set apart by size or bold become headings
+    /// (structure-recovery spec §3). Every [`Block::Candidate`] is resolved here.
+    fn recover_headings(&mut self, out: &mut [Block]) {
+        let styled = out.iter().any(|b| matches!(b, Block::Heading { .. }));
+        let total: usize = self.size_chars.values().sum();
+        let body = self
+            .size_chars
+            .iter()
+            .max_by_key(|(size, n)| (**n, std::cmp::Reverse(**size)))
+            .map(|(size, _)| u32::from(*size));
+        let bold_cue = self.bold_chars * 2 < total;
+        // A heading's look, by which levels are ranked. "Chapter 7" set like the text around it
+        // gets a look of its own that outranks every other.
+        let look = |text: &str, size: u16, bold: bool| {
+            if body.is_some_and(|body| u32::from(size) * 20 >= body * 23) || (bold && bold_cue) {
+                Some((size, bold))
+            } else if chapter_title(text) {
+                Some((u16::MAX, true))
+            } else {
+                None
+            }
+        };
+        let mut looks: Vec<(u16, bool)> = Vec::new();
+        let mut count = 0;
+        if !styled {
+            for b in out.iter() {
+                if let Block::Candidate {
+                    text, size, bold, ..
+                } = b
+                    && let Some(l) = look(text, *size, *bold)
+                {
+                    count += 1;
+                    if !looks.contains(&l) {
+                        looks.push(l);
+                    }
+                }
+            }
+        }
+        // When a third of the paragraphs qualify, the cue isn't telling headings apart.
+        let recover = count > 0 && count * 3 <= self.paragraphs;
+        looks.sort_by_key(|&(size, bold)| std::cmp::Reverse((size, bold)));
+        for b in out.iter_mut() {
+            let Block::Candidate {
+                html,
+                bare,
+                text,
+                size,
+                bold,
+            } = b
+            else {
+                continue;
+            };
+            let rank = look(text, *size, *bold).and_then(|l| looks.iter().position(|x| *x == l));
+            *b = match rank {
+                Some(rank) if recover => {
+                    self.headings += 1;
+                    let level = (rank + 1).min(3) as u8;
+                    let id = format!("h{}", self.headings);
+                    Block::Heading {
+                        level,
+                        html: format!("<h{level} id=\"{id}\">{}</h{level}>", bare.trim()),
+                        id,
+                        text: text.trim().to_owned(),
+                    }
+                }
+                _ => Block::Html(std::mem::take(html)),
+            };
+        }
+        if recover {
+            let s = if count == 1 { "" } else { "s" };
+            self.warnings.push(format!(
+                "guessed {count} heading{s} from bold or large text and chapter titles (the \
+                 document uses no Word heading styles)"
+            ));
+        }
     }
 
     fn blocks(&mut self, parent: Node, part: Part, out: &mut Vec<Block>) {
@@ -226,9 +365,32 @@ impl<'d, 'i> Body<'d, 'i> {
         };
         let mut inline = Inline::default();
         self.inline(p, part, base, &mut inline);
-        let (html, text, has_image) = inline.finish();
+        let Finished {
+            html,
+            bare,
+            text,
+            has_image,
+            looks,
+        } = inline.finish();
         if text.trim().is_empty() && !has_image && !html.contains("<a ") {
             return;
+        }
+        let body_text = part == Part::Doc && self.table_depth == 0;
+        let default_size = self.styles.default_size.unwrap_or(20);
+        let mut look: Option<(u16, bool)> = None;
+        if body_text && level.is_none() {
+            self.paragraphs += 1;
+            for &(size, bold, n) in &looks {
+                let size = size.unwrap_or(default_size);
+                *self.size_chars.entry(size).or_default() += n;
+                if bold {
+                    self.bold_chars += n;
+                }
+                look = Some(match look {
+                    Some((s, b)) => (s.min(size), b && bold),
+                    None => (size, bold),
+                });
+            }
         }
         if let Some(level) = level {
             self.headings += 1;
@@ -285,11 +447,30 @@ impl<'d, 'i> Body<'d, 'i> {
         };
         let para = format!("<p{class}>{html}</p>");
         let quote = matches!(name.as_str(), "quote" | "intense quote" | "block text");
-        out.push(Block::Html(if quote {
-            format!("<blockquote>{para}</blockquote>")
-        } else {
-            para
-        }));
+        if quote {
+            out.push(Block::Html(format!("<blockquote>{para}</blockquote>")));
+            return;
+        }
+        let trimmed = text.trim();
+        match look {
+            Some((size, bold))
+                if !has_image
+                    && !matches!(name.as_str(), "title" | "subtitle")
+                    && trimmed.chars().count() < 100
+                    && trimmed.chars().any(char::is_alphanumeric)
+                    && !ends_sentence(trimmed)
+                    && !trimmed.contains(". ") =>
+            {
+                out.push(Block::Candidate {
+                    html: para,
+                    bare,
+                    text,
+                    size,
+                    bold,
+                })
+            }
+            _ => out.push(Block::Html(para)),
+        }
     }
 
     fn inline(&mut self, n: Node, part: Part, base: Fmt, out: &mut Inline) {
@@ -337,6 +518,9 @@ impl<'d, 'i> Body<'d, 'i> {
                 f.sup |= sf.sup;
                 f.sub |= sf.sub;
                 f.hidden |= sf.hidden;
+                if sf.size.is_some() {
+                    f.size = sf.size;
+                }
             }
             FmtPatch::parse(rpr).apply(&mut f);
         }
@@ -512,6 +696,7 @@ impl<'d, 'i> Body<'d, 'i> {
     }
 
     fn table(&mut self, tbl: Node, part: Part) -> String {
+        self.table_depth += 1;
         let mut html = String::from("<table>");
         for tr in tbl.children().filter(|c| c.tag_name().name() == "tr") {
             let header = child(tr, "trPr")
@@ -536,8 +721,86 @@ impl<'d, 'i> Body<'d, 'i> {
             html.push_str("</tr>");
         }
         html.push_str("</table>");
+        self.table_depth -= 1;
         html
     }
+}
+
+/// Words that open a chapter title on their own ("Prologue") or before a number ("Part II").
+const CHAPTER_WORDS: [&str; 9] = [
+    "chapter",
+    "part",
+    "book",
+    "prologue",
+    "epilogue",
+    "interlude",
+    "afterword",
+    "foreword",
+    "introduction",
+];
+
+const NUMBER_WORDS: [&str; 28] = [
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+];
+
+/// "Chapter 7", "CHAPTER SEVEN", "Part II: The Return", "Prologue": a chapter word, then a
+/// number, a number word or a Roman numeral, then nothing or a separator and a title.
+fn chapter_title(text: &str) -> bool {
+    let t = text.trim().to_lowercase();
+    let mut words = t.splitn(2, char::is_whitespace);
+    let raw = words.next().unwrap_or("");
+    let word = raw.trim_end_matches([':', '.', '—', '–']);
+    if !CHAPTER_WORDS.contains(&word) {
+        return false;
+    }
+    let rest = words.next().unwrap_or("").trim_start();
+    let separated = |r: &str| r.is_empty() || r.starts_with([':', '.', '—', '–', '-', '|']);
+    if !matches!(word, "chapter" | "part" | "book") {
+        // "Prologue", "Prologue: The Fall", "Prologue — The Fall".
+        return word.len() < raw.len() || separated(rest);
+    }
+    let end = rest
+        .find(|c: char| c.is_whitespace() || matches!(c, ':' | '.' | '—' | '–' | '|'))
+        .unwrap_or(rest.len());
+    let (number, after) = rest.split_at(end);
+    let is_number = !number.is_empty()
+        && (number.chars().all(|c| c.is_ascii_digit())
+            || (number.len() <= 7 && number.chars().all(|c| "ivxlc".contains(c)))
+            || number.split('-').all(|w| NUMBER_WORDS.contains(&w)));
+    is_number && separated(after.trim_start())
+}
+
+/// Whether a paragraph ends like a sentence or a clause, so it reads as text, not a title.
+fn ends_sentence(t: &str) -> bool {
+    t.trim_end_matches(['"', '\'', '”', '’', ')', ']'])
+        .ends_with(['.', '!', '?', ':', ';', ','])
 }
 
 /// Blocks as one HTML string: runs of list items become nested `<ul>`/`<ol>`; note markers are
@@ -564,7 +827,9 @@ pub fn flatten(blocks: &[Block]) -> String {
             items.clear();
         }
         match b {
-            Block::Heading { html, .. } | Block::Html(html) => out.push_str(html),
+            Block::Heading { html, .. } | Block::Html(html) | Block::Candidate { html, .. } => {
+                out.push_str(html)
+            }
             _ => {}
         }
     }
@@ -619,7 +884,34 @@ pub fn nest(items: &[(u8, bool, u32, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::nest;
+    use super::{chapter_title, nest};
+
+    #[test]
+    fn chapter_titles_are_recognised() {
+        for t in [
+            "Chapter 7",
+            "CHAPTER SEVEN",
+            "Chapter Twenty-One",
+            "Part II: The Return",
+            "Book iv",
+            "Chapter 3 — Rain",
+            "Prologue",
+            "Epilogue: After",
+            "Introduction",
+        ] {
+            assert!(chapter_title(t), "{t}");
+        }
+        for t in [
+            "Chapter of accidents",
+            "Part of the problem is time",
+            "Book reviews",
+            "Introduction to Rust",
+            "Chapters",
+            "The Prologue",
+        ] {
+            assert!(!chapter_title(t), "{t}");
+        }
+    }
 
     #[test]
     fn list_items_nest_by_level() {

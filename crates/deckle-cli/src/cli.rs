@@ -132,9 +132,10 @@ pub enum Command {
         action: Option<DevicesCommand>,
     },
     /// Run the whole pipeline on one or more EPUBs, Word documents (.docx), OpenDocument text (.odt), RTF (.rtf), DRM-free Kindle books (.mobi, .azw, .azw3, .prc), text files (.txt), FictionBook (.fb2, .fb2.zip), Markdown files or notes folders,
-    /// text PDFs (.pdf, reflowed; needs PDFium) or web articles.
+    /// text PDFs (.pdf, reflowed; needs PDFium), comics (.cbz, .cbr, a folder of page images or a
+    /// fixed-layout AZW3; an AZW3 on a Kindle) or web articles.
     Run {
-        /// EPUBs; Word documents (.docx); OpenDocument text (.odt/.ott/.fodt); RTF (.rtf); DRM-free Kindle books (.mobi/.azw/.azw3/.prc); text files (.txt); FictionBook (.fb2/.fb2.zip); Markdown (.md/.markdown) or flat notes folders; text PDFs (.pdf); or web articles:
+        /// EPUBs; Word documents (.docx); OpenDocument text (.odt/.ott/.fodt); RTF (.rtf); DRM-free Kindle books (.mobi/.azw/.azw3/.prc); text files (.txt); FictionBook (.fb2/.fb2.zip); Markdown (.md/.markdown) or flat notes folders; text PDFs (.pdf); comics (.cbz/.cbr) or folders of page images; or web articles:
         /// an address, a .webloc/.url link file or a saved .html page, each built into its own
         /// book first.
         epubs: Vec<PathBuf>,

@@ -89,15 +89,18 @@ pub enum Figure {
 /// The book, in reading order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Block {
-    /// `top`: it starts in the top third of its page, where a chapter starts.
+    /// `top`: it starts in the top third of its page, where a chapter starts. `page`: the
+    /// page it starts on, from 0.
     Heading {
         level: u8,
         text: String,
         top: bool,
+        page: usize,
     },
     Para {
         text: String,
         small: bool,
+        page: usize,
     },
     Figure {
         kind: Figure,
@@ -114,6 +117,115 @@ pub struct Stats {
     pub equations: usize,
     pub images: usize,
     pub columns: usize,
+}
+
+/// A bookmark in the PDF's outline: its depth (1 for the top level), title, and the page it
+/// opens, from 0.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mark {
+    pub level: u8,
+    pub title: String,
+    pub page: usize,
+}
+
+/// Lowercase letters and digits, one space between words: for matching a bookmark's title
+/// with the text the page sets.
+fn words(s: &str) -> String {
+    s.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The PDF's own outline as the book's headings (structure-recovery spec §4). Each bookmark of
+/// the top two levels becomes an h1 or h2: the block on its page that reads the same, else a
+/// new heading with the bookmark's title before the page's first block. The layout's own
+/// headings drop to h3, under them. `None` when fewer than two top-level bookmarks land, so the
+/// layout's headings stand.
+pub fn apply_outline(blocks: &[Block], marks: &[Mark]) -> Option<Vec<Block>> {
+    let page_of = |b: &Block| match b {
+        Block::Heading { page, .. } | Block::Para { page, .. } | Block::Figure { page, .. } => {
+            *page
+        }
+    };
+    // (block index, mark, whether the mark names that block or goes before it)
+    let mut anchors: Vec<(usize, &Mark, bool)> = Vec::new();
+    let (mut cursor, mut last_page) = (0, 0);
+    for m in marks.iter().filter(|m| (1..=2).contains(&m.level)) {
+        if m.page < last_page {
+            continue;
+        }
+        let title = words(&m.title);
+        let named = (cursor..blocks.len())
+            .take_while(|&i| page_of(&blocks[i]) <= m.page)
+            .filter(|&i| page_of(&blocks[i]) == m.page)
+            .find(|&i| match &blocks[i] {
+                Block::Heading { text, .. } | Block::Para { text, .. } => {
+                    !title.is_empty() && words(text) == title
+                }
+                Block::Figure { .. } => false,
+            });
+        let anchor = match named {
+            Some(i) => Some((i, true)),
+            None => (cursor..blocks.len())
+                .find(|&i| page_of(&blocks[i]) >= m.page)
+                .map(|i| (i, false)),
+        };
+        let Some((i, names)) = anchor else { continue };
+        anchors.push((i, m, names));
+        cursor = if names { i + 1 } else { i };
+        last_page = m.page;
+    }
+    if anchors.iter().filter(|(_, m, _)| m.level == 1).count() < 2 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(blocks.len() + anchors.len());
+    let mut next = anchors.iter().peekable();
+    for (i, b) in blocks.iter().enumerate() {
+        let mut named = None;
+        while let Some(&&(at, m, names)) = next.peek()
+            && at == i
+        {
+            next.next();
+            if names {
+                named = Some(m);
+            } else {
+                out.push(Block::Heading {
+                    level: m.level,
+                    text: m.title.trim().to_owned(),
+                    top: true,
+                    page: m.page,
+                });
+            }
+        }
+        out.push(match (named, b) {
+            (Some(m), Block::Heading { text, page, .. } | Block::Para { text, page, .. }) => {
+                Block::Heading {
+                    level: m.level,
+                    text: text.clone(),
+                    top: true,
+                    page: *page,
+                }
+            }
+            (
+                None,
+                Block::Heading {
+                    level,
+                    text,
+                    top,
+                    page,
+                },
+            ) => Block::Heading {
+                level: (*level).max(3),
+                text: text.clone(),
+                top: *top,
+                page: *page,
+            },
+            _ => b.clone(),
+        });
+    }
+    Some(out)
 }
 
 /// A run of text on one line, with no gap wider than a column gutter inside it.
@@ -697,6 +809,13 @@ fn ends_sentence(t: &str) -> bool {
         .ends_with(['.', '!', '?', ':'])
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct Opening {
+    top: bool,
+    spaced: bool,
+    page: usize,
+}
+
 /// Lines into paragraphs and headings. A paragraph ends at a wider gap, an indent, a short line
 /// that ends a sentence, or a change of size; it runs on across columns and pages when the
 /// sentence does.
@@ -755,8 +874,12 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
 
     let mut out: Vec<Block> = Vec::new();
     let mut para: Option<(String, Line, bool)> = None; // text, last line, soft hyphen at end
-    let mut first_top = false;
-    let flush = |para: &mut Option<(String, Line, bool)>, out: &mut Vec<Block>, top: bool| {
+    // Where the paragraph opens: in the top third of its page; its page's first text, or at
+    // least three lines' space below the text above; and the page.
+    let mut first = Opening::default();
+    let mut last: Option<(usize, f32)> = None;
+    let flush = |para: &mut Option<(String, Line, bool)>, out: &mut Vec<Block>, first: Opening| {
+        let Opening { top, spaced, page } = first;
         if let Some((text, last, _)) = para.take() {
             let small = last.size < body * 0.85;
             // A superscript or footnote mark left on a line of its own.
@@ -768,13 +891,21 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                 && !ends_sentence(&text)
                 && !text.contains(". ");
             match level_of(last.size) {
-                Some(level) => out.push(Block::Heading { level, text, top }),
-                None if lone_bold && !small => out.push(Block::Heading {
-                    level: 3,
+                Some(level) => out.push(Block::Heading {
+                    level,
                     text,
                     top,
+                    page,
                 }),
-                None => out.push(Block::Para { text, small }),
+                // Set apart by space, a bold line ranks above one inside the text
+                // (structure-recovery spec §5).
+                None if lone_bold && !small => out.push(Block::Heading {
+                    level: if spaced { 2 } else { 3 },
+                    text,
+                    top,
+                    page,
+                }),
+                None => out.push(Block::Para { text, small, page }),
             }
         }
     };
@@ -807,7 +938,8 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                     let open = *kind != Figure::Equation
                         && para.as_ref().is_some_and(|(t, _, _)| !ends_sentence(t));
                     let held = if open { para.take() } else { None };
-                    flush(&mut para, &mut out, first_top);
+                    last = Some((*page_no, rect.y1));
+                    flush(&mut para, &mut out, first);
                     out.push(Block::Figure {
                         kind: *kind,
                         page: *page_no,
@@ -819,9 +951,16 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                 Item::Text(l) => l,
             };
             let top = l.rect.y0 < heights.get(l.page).copied().unwrap_or(f32::MAX) / 3.0;
+            let spaced =
+                last.is_none_or(|(page, y0)| page != l.page || l.rect.y0 - y0 >= step * 3.0);
+            last = Some((l.page, l.rect.y0));
             let Some((text, prev, _)) = &para else {
                 para = Some((l.text.clone(), l.clone(), l.soft_end));
-                first_top = top;
+                first = Opening {
+                    top,
+                    spaced,
+                    page: l.page,
+                };
                 lines_in_para = 1;
                 continue;
             };
@@ -858,9 +997,13 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                 ends_sentence(&prev.text) && !l.text.starts_with(|c: char| c.is_lowercase())
             };
             if new_para {
-                flush(&mut para, &mut out, first_top);
+                flush(&mut para, &mut out, first);
                 para = Some((l.text.clone(), l.clone(), l.soft_end));
-                first_top = top;
+                first = Opening {
+                    top,
+                    spaced,
+                    page: l.page,
+                };
                 lines_in_para = 1;
                 continue;
             }
@@ -876,7 +1019,7 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
             lines_in_para += 1;
         }
     }
-    flush(&mut para, &mut out, first_top);
+    flush(&mut para, &mut out, first);
     out
 }
 
@@ -1022,6 +1165,115 @@ mod tests {
                 "• First item that wraps onto a second line",
                 "• Second item"
             ]
+        );
+    }
+
+    fn para(text: &str, page: usize) -> Block {
+        Block::Para {
+            text: text.into(),
+            small: false,
+            page,
+        }
+    }
+
+    fn mark(level: u8, title: &str, page: usize) -> Mark {
+        Mark {
+            level,
+            title: title.into(),
+            page,
+        }
+    }
+
+    #[test]
+    fn bookmarks_name_their_blocks_or_open_their_pages() {
+        let blocks = vec![
+            para("A Bookmarked Book", 0),
+            para("Opening words of the first part.", 1),
+            Block::Heading {
+                level: 1,
+                text: "A Loud Title".into(),
+                top: true,
+                page: 1,
+            },
+            para("THE SECOND PART", 2),
+            para("More words.", 2),
+            para("An Aside", 2),
+            para("Last words.", 2),
+        ];
+        let marks = [
+            mark(1, "Part One: Beginnings", 1),
+            mark(1, "The Second Part", 2),
+            mark(2, "An aside!", 2),
+            mark(3, "Too deep", 2),
+        ];
+        let t = texts(&apply_outline(&blocks, &marks).unwrap());
+        assert_eq!(
+            t,
+            [
+                "A Bookmarked Book",
+                "h1:Part One: Beginnings",
+                "Opening words of the first part.",
+                "h3:A Loud Title",
+                "h1:THE SECOND PART",
+                "More words.",
+                "h2:An Aside",
+                "Last words.",
+            ]
+        );
+    }
+
+    #[test]
+    fn one_bookmark_or_none_leaves_the_layout_alone() {
+        let blocks = vec![para("Text.", 0), para("More.", 1)];
+        assert_eq!(apply_outline(&blocks, &[]), None);
+        assert_eq!(apply_outline(&blocks, &[mark(1, "Only", 0)]), None);
+        // A bookmark past the last page lands nowhere.
+        assert_eq!(
+            apply_outline(&blocks, &[mark(1, "One", 0), mark(1, "Gone", 9)]),
+            None
+        );
+    }
+
+    #[test]
+    fn a_bold_line_set_apart_outranks_one_inside_the_text() {
+        let mut pages = Vec::new();
+        for ch in ["Chapter One", "Chapter Two"] {
+            let mut g = Vec::new();
+            styled(&mut g, 72.0, 100.0, ch, 10.0, true);
+            let mut y = 124.0;
+            let para = |g: &mut Vec<Glyph>, y: &mut f32| {
+                for i in 0..4 {
+                    text_at(
+                        g,
+                        72.0,
+                        *y,
+                        &format!("Body text line {i} of the chapter goes on"),
+                    );
+                    *y += 12.0;
+                }
+                text_at(g, 72.0, *y, "Short end.");
+                *y += 12.0;
+            };
+            para(&mut g, &mut y);
+            // A section title with a little space above it, then one with a lot.
+            y += 6.0;
+            styled(&mut g, 72.0, y, "A Section", 10.0, true);
+            y += 12.0;
+            para(&mut g, &mut y);
+            y += 30.0;
+            styled(&mut g, 72.0, y, "A Part", 10.0, true);
+            y += 12.0;
+            para(&mut g, &mut y);
+            pages.push(page(g));
+        }
+        let t = texts(&blocks(&pages).0);
+        assert!(t.contains(&"h2:Chapter One".to_owned()), "{t:?}");
+        assert!(t.contains(&"h2:Chapter Two".to_owned()), "{t:?}");
+        assert!(t.contains(&"h2:A Part".to_owned()), "{t:?}");
+        assert_eq!(
+            t.iter().filter(|x| *x == "h3:A Section").count(),
+            2,
+            "{t:?}"
         );
     }
 

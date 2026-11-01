@@ -142,6 +142,49 @@ def book():
     c.save()
 
 
+def outlined():
+    """Bookmarks that name chapters the layout can't see: one with no title on its page, one
+    and its section set as plain text, and a large heading the bookmarks outrank."""
+    c = doc("outlined.pdf", title="A Bookmarked Book", author="C. Marker")
+    c.setFont("Times-Bold", 22)
+    c.drawString(72, H - 100, "A Bookmarked Book")
+    lines(c, 72, H - 140, ["A title page, with a line of text under the title."])
+    c.showPage()
+
+    c.bookmarkPage("p1")
+    c.addOutlineEntry("Part One: Beginnings", "p1", level=0)
+    y = lines(c, 72, H - 100, [
+        "Quebec opens the first part with no title of its own on the page, so only",
+        "the bookmark says where the part begins and what it is called. The text",
+        "goes on long enough to read like the start of a real part of a book.",
+    ])
+    c.setFont("Times-Bold", 22)
+    c.drawString(72, y - 30, "Loud Words")
+    lines(c, 72, y - 70, [
+        "Romeo follows a heading set large, which the layout alone would take for",
+        "a chapter title; under the bookmarks it is only a heading in the text.",
+    ])
+    c.showPage()
+
+    # One destination per entry: reportlab keys outline entries by destination.
+    c.bookmarkPage("p2")
+    c.bookmarkPage("p2-aside")
+    c.addOutlineEntry("The Second Part", "p2", level=0)
+    c.addOutlineEntry("An Aside", "p2-aside", level=1)
+    y = lines(c, 72, H - 100, ["The Second Part"])
+    y = lines(c, 72, y - 12, [
+        "Sierra begins the second part, whose title is set as plain text like the",
+        "lines around it, so nothing but the bookmark marks it as a title.",
+    ])
+    y = lines(c, 72, y - 12, ["An Aside"])
+    lines(c, 72, y - 12, [
+        "Tango is the aside, a section the outline lists under the second part,",
+        "and it ends the book here.",
+    ])
+    c.showPage()
+    c.save()
+
+
 def scan():
     c = doc("scan.pdf")
     import struct, zlib
@@ -160,5 +203,6 @@ if __name__ == "__main__":
     two_column()
     tables_and_pictures()
     book()
+    outlined()
     scan()
     print("wrote", ", ".join(sorted(os.listdir(OUT))), file=sys.stderr)

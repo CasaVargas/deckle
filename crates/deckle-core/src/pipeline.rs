@@ -296,6 +296,9 @@ pub fn prepare_with(
     on_stage: &mut dyn FnMut(&'static str),
     fetch: &mut Fetcher,
 ) -> Result<Prepared, Box<RunReport>> {
+    if let Some(prepared) = prepare_kindle_fixed_layout(epub, opts, on_stage) {
+        return prepared;
+    }
     let mut report = RunReport {
         input: epub.to_path_buf(),
         ..Default::default()
@@ -364,6 +367,11 @@ pub fn prepare_with(
     };
     report.info = info.clone();
     report.warnings.extend(info.warnings.iter().cloned());
+    // A fixed-layout page is laid out on purpose: no text changes, no text enrichments
+    // (fixed-layout spec §2, §8).
+    if info.fixed_layout {
+        report.warnings.extend(fixed_layout_skips(opts));
+    }
 
     let (generated_cover, replace_cover) = cover_for(
         &info,
@@ -375,10 +383,10 @@ pub fn prepare_with(
     let normalize_opts = NormalizeOptions {
         preset: opts.preset,
         fill,
-        typography: opts.typography,
+        typography: opts.typography && !info.fixed_layout,
         generated_cover,
         replace_cover,
-        popup_notes: opts.popup_notes,
+        popup_notes: opts.popup_notes && !info.fixed_layout,
         ..Default::default()
     };
     let nreport = stage!(
@@ -390,13 +398,20 @@ pub fn prepare_with(
     );
     report.warnings.extend(nreport.warnings.iter().cloned());
     report.normalize = nreport;
-    add_recaps(&normalized, opts, &mut report, on_stage);
+    if !info.fixed_layout {
+        add_recaps(&normalized, opts, &mut report, on_stage);
+    }
 
     let kpf = stage!(
         report,
         on_stage,
         "convert",
-        previewer::convert(&previewer, &normalized, &work_path.join("previewer")),
+        previewer::convert_as(
+            &previewer,
+            &normalized,
+            &work_path.join("previewer"),
+            info.fixed_layout
+        ),
         Err(Box::new(report))
     );
     report.kpf = Some(kpf.kpf.clone());
@@ -457,6 +472,72 @@ fn add_recaps(
     report
         .stage_ms
         .insert("recaps", t.elapsed().as_millis() as u64);
+}
+
+/// The one warning naming every text extra `opts` asks for that a fixed-layout book skips.
+fn fixed_layout_skips(opts: &RunOptions) -> Option<String> {
+    let asked: Vec<&str> = [
+        (opts.typography, "typography"),
+        (opts.popup_notes, "pop-up notes"),
+        (opts.xray == XRayMode::Auto, "X-Ray"),
+        (opts.word_wise.is_some(), "Word Wise"),
+        (opts.pages.is_some(), "page numbers"),
+        (opts.recaps.is_some(), "chapter recaps"),
+    ]
+    .into_iter()
+    .filter_map(|(on, what)| on.then_some(what))
+    .collect();
+    (!asked.is_empty()).then(|| format!("fixed-layout book: {} skipped", asked.join(", ")))
+}
+
+/// A fixed-layout Kindle book (an AZW3, or a MOBI with a KF8 part) is already what Previewer
+/// would make: it's prepared as it is, with no import, normalize or Previewer, and finished like
+/// any fixed-layout book (fixed-layout spec §3, §9 phase 4). `None` for anything else.
+fn prepare_kindle_fixed_layout(
+    path: &Path,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+) -> Option<Result<Prepared, Box<RunReport>>> {
+    if !deckle_mobi::is_mobi_file(path) {
+        return None;
+    }
+    let meta = std::fs::read(path)
+        .ok()
+        .and_then(|b| deckle_mobi::read_meta(&b).ok())
+        .filter(|m| m.fixed_layout)?;
+    on_stage("inspect");
+    let mut report = RunReport {
+        input: path.to_path_buf(),
+        ..Default::default()
+    };
+    let refused = if meta.drm {
+        Some("this book is DRM-protected, and Deckle never removes DRM; use a DRM-free copy")
+    } else if !meta.kf8 {
+        Some("a fixed-layout MOBI with no KF8 part, which current Kindles don't show as made")
+    } else {
+        None
+    };
+    if let Some(why) = refused {
+        report.error = Some(format!("inspect: {why}"));
+        return Some(Err(Box::new(report)));
+    }
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    report.info = crate::inspect::from_kindle(&meta, &stem);
+    report
+        .warnings
+        .push("a fixed-layout Kindle book: sent as it is, without Kindle Previewer".into());
+    report.warnings.extend(fixed_layout_skips(opts));
+    report.kpf = Some(path.to_path_buf());
+    Some(Ok(Prepared {
+        report,
+        kpf: path.to_path_buf(),
+        wishes: Wishes::of(opts),
+        name: None,
+        _work: None,
+    }))
 }
 
 /// The cover normalize adds, and whether it replaces the book's own: what `pick` asks for,
@@ -672,6 +753,9 @@ pub fn finish_with(
     };
     let cde_type = decision.cde;
     report.decision = Some(decision.clone());
+    if is_mobi(kpf) {
+        return finish_fixed_layout(prepared, conn, opts, on_stage, report, &decision, &asin);
+    }
     // WordDumb does the same: the Kindle hides Word Wise hints unless the language is `en`.
     let english_word_wise = cde_type == CdeType::Ebok
         && opts.word_wise.is_some()
@@ -816,6 +900,156 @@ pub fn finish_with(
             && deliver_opts.thumbnail.is_none(),
         xray: report.xray.is_some(),
         word_wise: report.word_wise.is_some(),
+    };
+    let (compat_warnings, firmware) = device_compat(conn, &used);
+    for w in compat_warnings {
+        if !report.warnings.contains(&w) {
+            report.warnings.push(w);
+        }
+    }
+    report.firmware = firmware;
+    report
+}
+
+/// Previewer's output is a MOBI, what it makes for a fixed-layout book (fixed-layout spec §4).
+/// Read from the file, not its name: a queued entry keeps it as `book.kpf`.
+fn is_mobi(path: &Path) -> bool {
+    use std::io::Read;
+    let mut head = [0u8; 68];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .is_ok_and(|()| deckle_mobi::is_mobi(&head))
+}
+
+/// A comic Deckle made from a CBZ or page folder (its `deckle-comic` identifier), as opposed to
+/// a publisher's fixed-layout book.
+fn is_deckle_comic(info: &BookInfo) -> bool {
+    info.identifiers
+        .iter()
+        .any(|i| i.starts_with("urn:deckle:comic:"))
+}
+
+/// The device file name for a fixed-layout book: the KFX name, as `.azw3`.
+pub fn azw3_name(info: &BookInfo) -> String {
+    let kfx = crate::deliver::device_filename(info);
+    format!("{}.azw3", kfx.strip_suffix(".kfx").unwrap_or(&kfx))
+}
+
+/// [`finish_with`] for a fixed-layout book: Previewer's joint MOBI cut to its KF8 half, stamped
+/// with the cover rule's CDE type and ASIN, delivered as `.azw3` (fixed-layout spec §8). No
+/// X-Ray, Word Wise or page list: they read KFX text, and a comic page has none.
+fn finish_fixed_layout(
+    prepared: &Prepared,
+    conn: &mut Conn<'_>,
+    opts: &RunOptions,
+    on_stage: &mut dyn FnMut(&'static str),
+    mut report: RunReport,
+    decision: &Decision,
+    asin: &str,
+) -> RunReport {
+    let info = &prepared.report.info;
+    let cde_type = decision.cde;
+    let azw3 = stage!(
+        report,
+        on_stage,
+        "repackage",
+        std::fs::read(&prepared.kpf)
+            .map_err(|e| e.to_string())
+            .and_then(|joint| {
+                deckle_mobi::azw3::kf8_only(
+                    &joint,
+                    &deckle_mobi::azw3::Stamp {
+                        cde: cde_type.as_str(),
+                        asin,
+                    },
+                )
+                .map_err(|e| e.to_string())
+            }),
+        report
+    );
+    // Deckle's own comic is fitted to this Kindle's screen; a publisher's goes as it was made
+    // (fixed-layout spec §7.1).
+    let azw3 = match crate::screens::for_target(conn.target).filter(|_| is_deckle_comic(info)) {
+        Some(screen) => {
+            on_stage("fit");
+            let t = Instant::now();
+            let mut failed = 0;
+            let fitted = deckle_mobi::azw3::map_images(&azw3, |img| {
+                deckle_comic::pages::fit(img, screen).unwrap_or_else(|_| {
+                    failed += 1;
+                    None
+                })
+            });
+            report
+                .stage_ms
+                .insert("fit", t.elapsed().as_millis() as u64);
+            if failed > 0 {
+                report.warnings.push(format!(
+                    "{failed} page image(s) couldn't be fitted to the screen and went as they were"
+                ));
+            }
+            match fitted {
+                Ok(fitted) => fitted,
+                Err(e) => {
+                    report
+                        .warnings
+                        .push(format!("pages not fitted to the screen: {e}"));
+                    azw3
+                }
+            }
+        }
+        None => azw3,
+    };
+    report.asin = Some(asin.to_owned());
+    report.cde_type = Some(cde_type.as_str().to_owned());
+    if let Some(work) = report.work_dir.clone() {
+        keep_file(&mut report, &work, "book.azw3", &azw3);
+    }
+
+    let mut deliver_opts = DeliverOptions::default();
+    if decision.write_thumbnail {
+        match deckle_mobi::read_meta(&azw3)
+            .ok()
+            .and_then(|m| m.cover)
+            .map(|c| crate::thumbnail::render(&c, crate::thumbnail::THUMBNAIL_HEIGHT))
+        {
+            Some(Ok(jpeg)) => {
+                deliver_opts.thumbnail =
+                    Some((crate::thumbnail::thumbnail_name(asin, cde_type), jpeg))
+            }
+            Some(Err(e)) => report.warnings.push(format!("thumbnail not written: {e}")),
+            None => report
+                .warnings
+                .push("thumbnail not written: the book has no cover".into()),
+        }
+    }
+    let name = prepared
+        .name
+        .as_deref()
+        .map(|n| format!("{}.azw3", n.strip_suffix(".kfx").unwrap_or(n)))
+        .unwrap_or_else(|| azw3_name(info));
+    let delivered = stage!(
+        report,
+        on_stage,
+        "deliver",
+        deliver_named_on(&azw3, &name, conn, &deliver_opts),
+        report
+    );
+    replace_older_copies(
+        conn,
+        &mut report,
+        asin,
+        &opts.replaces,
+        opts.originals.as_deref(),
+        &delivered,
+    );
+    report.delivered = Some(delivered);
+    let used = SendUse {
+        ebok_without_cover_source: cde_type == CdeType::Ebok
+            && decision.asin == AsinChoice::Generated
+            && deliver_opts.thumbnail.is_none(),
+        xray: false,
+        word_wise: false,
     };
     let (compat_warnings, firmware) = device_compat(conn, &used);
     for w in compat_warnings {

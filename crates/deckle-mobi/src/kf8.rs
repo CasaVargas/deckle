@@ -99,7 +99,7 @@ pub(crate) fn exth(rec0: &[u8]) -> Vec<(u32, Vec<u8>)> {
 
 /// The record that holds the KF8 header: record 0 of an AZW3, else the one after a joint
 /// file's boundary (EXTH 121).
-fn kf8_base(db: &PalmDb<'_>) -> Result<usize, MobiError> {
+pub(crate) fn kf8_base(db: &PalmDb<'_>) -> Result<usize, MobiError> {
     let rec0 = db.record(0);
     if be32(rec0, 0x24) == Some(8) {
         return Ok(0);

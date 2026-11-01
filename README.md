@@ -158,6 +158,12 @@ in, press **Send**.
   run says so. Scans aren't supported.
 - **Markdown and notes folders.** A file or a flat folder of notes becomes one book: headings,
   tables, local images and links between notes, a chapter per file. See [docs/markdown.md](docs/markdown.md).
+- **Comics, manga and picture books** (`.cbz`, `.cbr`, a folder of page images, a fixed-layout
+  EPUB or a fixed-layout AZW3) keep their pages as they are: on a Kindle as an AZW3, since Kindle
+  Previewer makes no KFX for fixed layout. A CBR needs the system's `bsdtar` (built into macOS
+  and Windows as `tar`; `libarchive-tools` on Linux). `ComicInfo.xml` gives the title and series, and manga marked right to left reads
+  right to left. No X-Ray, Word Wise or page numbers. Fitting pages to each screen comes later
+  (#20).
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
 - **Several files, one book.** Bind any of the above in your order, each with its own entry in the
   contents: a course packet, a week of long reads, a report in pieces.
@@ -334,7 +340,7 @@ deckle run book.epub --to device --cde ebok --llm openai \
 deckle run book.epub --to device --word-wise-level 3            # hints for rarer words only
 deckle run book.epub --preset academic            # or novel, manual
 deckle run ./notes --to device                    # a flat Markdown folder, one note per chapter
-deckle run notes.docx --to device                 # also .odt, .rtf, .mobi/.azw3, .txt, .fb2, .pdf, a URL, .webloc/.url/.html
+deckle run notes.docx --to device                 # also .odt, .rtf, .mobi/.azw3, .txt, .fb2, .pdf, .cbz/.cbr, a URL, .webloc/.url/.html
 deckle bind a.pdf b.docx https://… --title "Pack"  # several files into one book, then `deckle run` it
 deckle inspect book.epub --json                   # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF
@@ -373,7 +379,7 @@ deckle run novel.epub --preset novel --popup-notes=false --pages off --xray off
 ```
 
 Styles use generic fonts and relative spacing; Kindle reader settings can affect their
-appearance. Fixed-layout EPUBs skip styling with a warning. Presets apply to Kindle/KFX
+appearance. Fixed-layout books skip styling with a warning. Presets apply to Kindle/KFX
 conversion; the direct Kobo/PocketBook route doesn't support them yet. The full defaults are in
 the [preset design](docs/superpowers/specs/2026-10-24-book-style-presets-design.md).
 

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Fake Previewer that refuses Enhanced Typesetting and emits a MOBI plus an Error row.
+# Fake Previewer that refuses Enhanced Typesetting for a reflowable book and emits a MOBI plus an
+# Error row. (For a fixed-layout book the real 4.0.3 writes no Error row: see fixed_layout.sh.)
 if [ "$1" = "--help" ]; then printf 'Kindle Previewer 4.0.3 Copyright (c) Amazon.com\n'; exit 0; fi
 INPUT="$1"; shift
 OUT=""

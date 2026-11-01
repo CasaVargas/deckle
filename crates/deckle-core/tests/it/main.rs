@@ -3,6 +3,7 @@
 
 mod accessibility;
 mod bind;
+mod comic;
 mod compat;
 mod cover_rule;
 mod deliver;
