@@ -206,9 +206,7 @@ recap text lives only in the book and the cache.
 ## 9. Later extras (sketch, not in this increment)
 
 - **Book summary.** Specified in §13 (increment 3).
-- **Series recap.** A front-matter "Previously" page in volume N, made from the cached recaps of
-  volumes 1…N-1 found through the library's series metadata. Needs those volumes to have been sent
-  with recaps on (or a "recap this book only" action).
+- **Series recap.** Specified in §14 (increment 4).
 
 Each gets its own spec section and increment.
 
@@ -218,7 +216,7 @@ Each gets its own spec section and increment.
    wiring behind `RunOptions.recaps`; CLI `--recaps`.
 2. Other readers (`book_epub`) and the desktop setting and toggle, with the §8 copy (PR #282).
    The Inbox and the wireless reader server have no LLM setting, so they don't add recaps.
-3. Book summary (§13). 4. Series recap.
+3. Book summary (§13, PR #286). 4. Series recap (§14).
 
 ## 11. Tests the build must add
 
@@ -338,3 +336,92 @@ recap". A fixed-layout book gets no summary.
 - A one-chapter book gets no summary.
 - `reader::book_epub` with summary on: the Summary page is in the book. Who's who runs after
   recaps, so its page comes later.
+
+## 14. Series recap (increment 4)
+
+A front-matter **Previously** page in book N of a series: what happened in the earlier books,
+endings included, just before chapter 1. For a reader returning to a series after months away.
+
+### 14.1 Decisions (builder's calls; the owner can overturn any)
+
+| Question | Decision |
+|---|---|
+| How earlier books are found | From the recap cache, not the library. Every run that recaps every eligible chapter of a book with series metadata writes a **book record**, and book N reads the records of the same series and author with a lower number. This lives in `deckle_core` with no library plumbing, so Kindle, other readers and the CLI all get it. |
+| What earlier books must have had | Sent with any of the three extras on: chapter recaps, the summary, or this switch. |
+| Setting | A separate `series_recap` switch. On a book in a series, it makes the recaps for the book's record even when chapter recaps are off (it does not put them in the chapters). On a book with no series metadata it does nothing and costs nothing. |
+| Where the page goes | Before the spine document of the first chapter long enough for a recap, so after the cover, title, copyright and contents pages. It is listed in the nav before that chapter's entry, and in the NCX it gets that chapter's `playOrder`. |
+| Missing earlier books | The page covers the books it found, and names them. A warning says how many earlier books had no record. |
+
+### 14.2 The book record
+
+`{cache_dir}/recaps/books/{key}.json`, where `key` is the SHA-256 of the lowercased author, the
+lowercased series name and the series number:
+
+```json
+{ "title": "…", "author": "…", "series": "…", "index": 2.0, "model": "…",
+  "recaps": ["Chapter 1: …", "…"], "summary": "…" }
+```
+
+- `summary` is set when the run made one, else `null`.
+- It is written only when every eligible chapter has a recap. Sending the same book again
+  overwrites its record.
+- Series metadata is read as `inspect` reads it: `calibre:series`, `calibre:series_index`, or
+  EPUB 3 `belongs-to-collection` with `group-position`. A book with no series number gets no
+  record and no Previously page.
+- Matching is on author and series name, both lowercased with whitespace collapsed. The record
+  must have a lower number than the book being sent.
+
+### 14.3 Generating it
+
+- **Input:** each earlier book, in series order, as `Book {n}: {title}` followed by its summary,
+  or by its recaps when it has no summary.
+- **Prompt:** the system prompt is the summary one (§13.3). The user message:
+
+  > Book: {title} · Author: {author} · Language: {lang} · Series: {series}, book {n}
+  > These are summaries of the earlier books in this series, in order. Write a recap of what
+  > happened in them for a reader about to start this book, in 2–4 short paragraphs, in this
+  > book's language, past tense, including how each book ended. Do not judge or praise the
+  > writing. {input}
+
+- Nothing from book N's text is sent, which is what keeps the page free of spoilers for book N.
+- **Long input on a local server:** parts, then a merge, as §13.3.
+- **Cache:** `previously-{key}.txt`, keyed on the prompt version, the provider, the model and
+  the input.
+
+### 14.4 The page
+
+`deckle-previously.xhtml`, next to the OPF:
+
+```html
+<section epub:type="prologue" id="deckle-previously"><h1>Previously</h1>
+  <p><i>What happened in the earlier books of {series}: {Book 1: Title}, {Book 2: Title}.</i></p>
+  <p>{paragraph}</p>…
+  <p style="font-size: 0.8em; font-style: italic;">AI-generated summary ({model}), not part of the original book.</p>
+</section>
+```
+
+- `epub:type="prologue"` is not `"footnote"` or `"note"`, so no reader hides it as a popup.
+- It is added after the recap pass, so it gets no recap of its own. Its names count for Who's
+  who and X-Ray, as with the summary (§13.4).
+- A book that already has `deckle-previously.xhtml` keeps it.
+
+### 14.5 Failures
+
+- No earlier records: "Series recap skipped: no earlier book of {series} was sent with recaps".
+- A failed request: "Series recap skipped: {error}".
+- Earlier books missing (fewer records than the book's number minus one, for whole numbers):
+  "Series recap covers {k} of {n} earlier books".
+- None of these ever costs the book.
+
+### 14.6 Tests
+
+- Book 1 of a series, sent with recaps, leaves a record. Book 2 with `series` on then gets a
+  Previously page that holds book 1's recaps. The page is before chapter 1 in the spine, before
+  its entry in the nav, and has a NCX `playOrder` lower than chapter 1's, with later points
+  renumbered. The request holds no text from book 2.
+- Book 1's summary is used when its record has one.
+- No record: a warning and no page. Another author's series of the same name doesn't match.
+- Book 3 with only book 1 recorded: the page names book 1, plus the "covers 1 of 2" warning.
+- `series` alone on a book without series metadata makes no requests.
+- A failed request: a warning, and the book keeps everything else.
+- A cached Previously page makes zero requests on a second run.
