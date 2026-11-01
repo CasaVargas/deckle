@@ -30,6 +30,7 @@ mod papers;
 mod pocketbook;
 mod press;
 mod puzzle;
+mod puzzle_book;
 mod reader_server;
 mod readership;
 mod remarkable;

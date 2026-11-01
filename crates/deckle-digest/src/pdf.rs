@@ -23,8 +23,8 @@ use crate::print::{FRONT_LABEL, PrintPlan};
 use crate::sources::feeds::photo_token;
 use crate::{Gathered, long_date};
 
-const REGULAR: &[u8] = include_bytes!("../fonts/OldStandard-Regular.ttf");
-const BOLD: &[u8] = include_bytes!("../fonts/OldStandard-Bold.ttf");
+pub(crate) const REGULAR: &[u8] = include_bytes!("../fonts/OldStandard-Regular.ttf");
+pub(crate) const BOLD: &[u8] = include_bytes!("../fonts/OldStandard-Bold.ttf");
 const ITALIC: &[u8] = include_bytes!("../fonts/OldStandard-Italic.ttf");
 
 /// A screen the PDF edition is laid out for: its page is the screen's size.
@@ -106,22 +106,7 @@ impl Fonts {
     /// `text` as glyphs of `face`, each with the character it stands for. A character the font
     /// lacks is transliterated first ("ł" → "l"); what still has no glyph is left out.
     fn shape(&self, face: Face, text: &str) -> Vec<(u16, char)> {
-        let font = self.font(face);
-        let mut out = Vec::with_capacity(text.len());
-        for c in text.chars() {
-            let g = font.glyph_id(c);
-            if g.0 != 0 {
-                out.push((g.0, c));
-                continue;
-            }
-            for t in deunicode::deunicode_char(c).unwrap_or("").chars() {
-                let g = font.glyph_id(t);
-                if g.0 != 0 {
-                    out.push((g.0, t));
-                }
-            }
-        }
-        out
+        shape(self.font(face), text)
     }
 
     fn width(&self, face: Face, size: f32, text: &str) -> f32 {
@@ -133,6 +118,95 @@ impl Fonts {
             .sum();
         units / self.upm(face) * size
     }
+}
+
+/// `text` as glyphs of `font`, each with the character it stands for. A character the font
+/// lacks is transliterated first ("ł" → "l"); what still has no glyph is left out.
+pub(crate) fn shape(font: &FontRef, text: &str) -> Vec<(u16, char)> {
+    let mut out = Vec::with_capacity(text.len());
+    for c in text.chars() {
+        let g = font.glyph_id(c);
+        if g.0 != 0 {
+            out.push((g.0, c));
+            continue;
+        }
+        for t in deunicode::deunicode_char(c).unwrap_or("").chars() {
+            let g = font.glyph_id(t);
+            if g.0 != 0 {
+                out.push((g.0, t));
+            }
+        }
+    }
+    out
+}
+
+/// One face to embed: its PostScript name, its file, the glyphs used and what they stand for.
+pub(crate) struct EmbedFace<'a> {
+    pub name: &'a str,
+    pub file: &'a [u8],
+    pub font: &'a FontRef<'a>,
+    pub italic: bool,
+    pub bold: bool,
+    pub used: &'a BTreeMap<u16, char>,
+}
+
+/// Embeds `f` as a Type0 font over a CIDFontType2, Identity-H, with the glyphs used and a
+/// ToUnicode map. `refs`: the Type0 font, its CID font, descriptor, file and map.
+pub(crate) fn embed_font(pdf: &mut Pdf, refs: [Ref; 5], f: &EmbedFace) {
+    let [type0, cid, descriptor, file, cmap] = refs;
+    let info = SystemInfo {
+        registry: Str(b"Adobe"),
+        ordering: Str(b"Identity"),
+        supplement: 0,
+    };
+    let name = Name(f.name.as_bytes());
+    pdf.type0_font(type0)
+        .base_font(name)
+        .encoding_predefined(Name(b"Identity-H"))
+        .descendant_font(cid)
+        .to_unicode(cmap);
+    let font = f.font;
+    let scale = 1000.0 / font.units_per_em().unwrap_or(1000.0);
+    let mut c = pdf.cid_font(cid);
+    c.subtype(CidFontType::Type2)
+        .base_font(name)
+        .system_info(info)
+        .font_descriptor(descriptor)
+        .default_width(0.0)
+        .cid_to_gid_map_predefined(Name(b"Identity"));
+    {
+        let mut w = c.widths();
+        for g in f.used.keys() {
+            w.consecutive(*g, [font.h_advance_unscaled(GlyphId(*g)) * scale]);
+        }
+    }
+    c.finish();
+    let mut flags = FontFlags::SERIF | FontFlags::NON_SYMBOLIC;
+    if f.italic {
+        flags |= FontFlags::ITALIC;
+    }
+    let ascent = font.ascent_unscaled() * scale;
+    let descent = font.descent_unscaled() * scale;
+    pdf.font_descriptor(descriptor)
+        .name(name)
+        .flags(flags)
+        .bbox(Rect::new(-200.0, descent, 1200.0, ascent))
+        .italic_angle(if f.italic { -12.0 } else { 0.0 })
+        .ascent(ascent)
+        .descent(descent)
+        .cap_height(ascent * 0.9)
+        .stem_v(if f.bold { 120.0 } else { 80.0 })
+        .font_file2(file);
+    let data = deflate(f.file);
+    pdf.stream(file, &data)
+        .filter(Filter::FlateDecode)
+        .pair(Name(b"Length1"), f.file.len() as i32);
+    let mut map = UnicodeCmap::new(Name(b"Deckle-UCS"), info);
+    for (g, ch) in f.used {
+        map.pair(*g, *ch);
+    }
+    let map = map.finish();
+    pdf.cmap(cmap, &map);
 }
 
 // ---- blocks -----------------------------------------------------------------------------------
@@ -2494,13 +2568,13 @@ struct Furniture<'a> {
     ranges: &'a [(usize, char)],
 }
 
-fn deflate(data: &[u8]) -> Vec<u8> {
+pub(crate) fn deflate(data: &[u8]) -> Vec<u8> {
     let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
     e.write_all(data).expect("in memory");
     e.finish().expect("in memory")
 }
 
-fn glyph_bytes(glyphs: &[(u16, char)]) -> Vec<u8> {
+pub(crate) fn glyph_bytes(glyphs: &[(u16, char)]) -> Vec<u8> {
     glyphs.iter().flat_map(|(g, _)| g.to_be_bytes()).collect()
 }
 
@@ -2686,65 +2760,24 @@ fn write(fonts: &Fonts, doc: &Doc, lay: &Layout, furniture: &Furniture) -> Vec<u
         fonts.masthead.name(),
     ];
     let files = [REGULAR, BOLD, ITALIC, fonts.masthead.bytes()];
-    let info = SystemInfo {
-        registry: Str(b"Adobe"),
-        ordering: Str(b"Identity"),
-        supplement: 0,
-    };
     for face in FACES {
         let i = face.index();
         if used[i].is_empty() {
             continue;
         }
         let (cid, descriptor, file, cmap) = (alloc(), alloc(), alloc(), alloc());
-        let name = Name(names[i].as_bytes());
-        pdf.type0_font(font_refs[i])
-            .base_font(name)
-            .encoding_predefined(Name(b"Identity-H"))
-            .descendant_font(cid)
-            .to_unicode(cmap);
-        let font = fonts.font(face);
-        let scale = 1000.0 / fonts.upm(face);
-        let mut c = pdf.cid_font(cid);
-        c.subtype(CidFontType::Type2)
-            .base_font(name)
-            .system_info(info)
-            .font_descriptor(descriptor)
-            .default_width(0.0)
-            .cid_to_gid_map_predefined(Name(b"Identity"));
-        {
-            let mut w = c.widths();
-            for g in used[i].keys() {
-                w.consecutive(*g, [font.h_advance_unscaled(GlyphId(*g)) * scale]);
-            }
-        }
-        c.finish();
-        let mut flags = FontFlags::SERIF | FontFlags::NON_SYMBOLIC;
-        if face == Face::Italic {
-            flags |= FontFlags::ITALIC;
-        }
-        let ascent = font.ascent_unscaled() * scale;
-        let descent = font.descent_unscaled() * scale;
-        pdf.font_descriptor(descriptor)
-            .name(name)
-            .flags(flags)
-            .bbox(Rect::new(-200.0, descent, 1200.0, ascent))
-            .italic_angle(if face == Face::Italic { -12.0 } else { 0.0 })
-            .ascent(ascent)
-            .descent(descent)
-            .cap_height(ascent * 0.9)
-            .stem_v(if face == Face::Bold { 120.0 } else { 80.0 })
-            .font_file2(file);
-        let data = deflate(files[i]);
-        pdf.stream(file, &data)
-            .filter(Filter::FlateDecode)
-            .pair(Name(b"Length1"), files[i].len() as i32);
-        let mut map = UnicodeCmap::new(Name(b"Deckle-UCS"), info);
-        for (g, ch) in &used[i] {
-            map.pair(*g, *ch);
-        }
-        let map = map.finish();
-        pdf.cmap(cmap, &map);
+        embed_font(
+            &mut pdf,
+            [font_refs[i], cid, descriptor, file, cmap],
+            &EmbedFace {
+                name: names[i],
+                file: files[i],
+                font: fonts.font(face),
+                italic: face == Face::Italic,
+                bold: face == Face::Bold,
+                used: &used[i],
+            },
+        );
     }
 
     // Outline: the front page and each section, with its stories under it.
