@@ -524,7 +524,7 @@ fn write_epub(
 }
 
 fn opf(book: &Book, pages: &[Page]) -> String {
-    let first = &pages[0];
+    let (w, h) = typical_size(pages);
     let mut meta = String::new();
     if let Some(w) = &book.writer {
         meta.push_str(&format!("<dc:creator>{}</dc:creator>", escape(w)));
@@ -599,14 +599,27 @@ fn opf(book: &Book, pages: &[Page]) -> String {
         id = escape(&book.identifier),
         title = escape(&book.title),
         first_name = page_name(0),
-        w = first.width,
-        h = first.height,
         ppd = if book.right_to_left {
             " page-progression-direction=\"rtl\""
         } else {
             ""
         },
     )
+}
+
+/// The size most pages have (the larger on a tie): what Kindle's `original-resolution` should
+/// say. Not the first page's: a comic can open on a wide title banner (Pepper&Carrot's does) or
+/// a wraparound cover, and every page would be laid out to that shape.
+fn typical_size(pages: &[Page]) -> (u32, u32) {
+    let mut counts: std::collections::BTreeMap<(u32, u32), usize> = Default::default();
+    for p in pages {
+        *counts.entry((p.width, p.height)).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|((w, h), n)| (*n, u64::from(*w) * u64::from(*h)))
+        .map(|(size, _)| size)
+        .expect("a comic has pages")
 }
 
 fn page_xhtml(book: &Book, page: &Page, i: usize) -> String {
