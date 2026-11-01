@@ -1,6 +1,6 @@
 # Structure recovery for messy Word and PDF files — design
 
-**Status:** for [#25](https://github.com/CasaVargas/deckle/issues/25) ("Smart structure recovery
+**Status:** built in #268, all four increments, for [#25](https://github.com/CasaVargas/deckle/issues/25) ("Smart structure recovery
 for messy DOCX/PDF"), following option 1 of the issue's triage (extend the importers) ·
 **Date:** 2026-11-01 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-21-docx-import-design.md`, `2026-10-23-pdf-reflow-design.md`
@@ -78,12 +78,30 @@ guessed (wording in §6).
 
 ## 4. PDF bookmarks (increment 2)
 
-When the PDF has an outline (`pdfium-render`'s `PdfBookmarks`), it replaces the size ranking
-for chapters and contents. Each top-level bookmark that resolves to a page starts a chapter at
-the first block on that page whose text matches the bookmark title (else at the page's first
-block), and second-level bookmarks become h2s the same way. Bookmarks that don't resolve are
-dropped, and if fewer than two resolve, the layout's headings are used as today. Fixture:
-`book.pdf` regenerated with an outline whose titles differ from the set text.
+`engine::Document::outline` reads the top two levels of the outline (`pdfium-render`'s
+bookmarks). Each bookmark's page comes from its destination, else from its go-to action, and a
+bookmark with neither is left out. `layout::apply_outline` places them as pure code:
+
+- A bookmark *names* a block when a paragraph or heading on its page reads the same, comparing
+  only letters and digits in lowercase ("THE SECOND PART" and "The Second Part!" match). That
+  block becomes the h1 (top level) or h2 (second level) and keeps its own text.
+- Otherwise the bookmark *opens* its page: a new heading with the bookmark's title goes before
+  the first block on the page.
+- Bookmarks are taken in order. One that points back before the previous one, or past the last
+  page, is dropped.
+- The layout's own headings drop to h3, under the bookmarks.
+- If fewer than two top-level bookmarks land, the outline is ignored and the layout's headings
+  stand as before.
+
+With an outline, `epub::write` starts a new file at every h1, without the layout's "opens a
+page, leads into 200 characters" test (the author put the bookmark there). The contents are
+the h1s with their h2s nested under them. To support this, blocks now carry the page they start
+on.
+
+Fixture: `fixtures/pdf/outlined.pdf` (`tools/pdf-fixtures/make.py`, `outlined()`). It has a
+title page, a part whose title is only in its bookmark, a part and its section set as plain
+text that the bookmarks name, and a 22 pt heading the bookmarks outrank. Tested in
+`tests/convert.rs` and in `layout.rs`.
 
 ## 5. PDF spacing cue (increment 3)
 
