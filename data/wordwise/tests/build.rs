@@ -306,3 +306,67 @@ fn crossword_words_keeps_longer_words() {
         assert!(!c.to_lowercase().contains(w.as_str()), "{w}: {c}");
     }
 }
+
+const INFLECTED: &str = r#"{"word":"card","pos":"noun","lang_code":"en","senses":[{"glosses":["A flat, rectangular piece of stiff paper, used for writing on."]}]}
+{"word":"cards","pos":"noun","lang_code":"en","senses":[{"tags":["form-of","plural"],"form_of":[{"word":"card"}],"glosses":["plural of card"]}]}
+{"word":"bake","pos":"verb","lang_code":"en","senses":[{"glosses":["To cook in an oven."]}]}
+{"word":"baked","pos":"verb","lang_code":"en","senses":[{"tags":["form-of","participle","past"],"form_of":[{"word":"bake"}],"glosses":["simple past and past participle of bake"]}]}
+{"word":"baking","pos":"verb","lang_code":"en","senses":[{"tags":["form-of","participle","present"],"form_of":[{"word":"bake"}],"glosses":["present participle of bake"]}]}
+{"word":"oven","pos":"noun","lang_code":"en","senses":[{"glosses":["A chamber used for baking or heating."]}]}
+{"word":"ovens","pos":"noun","lang_code":"en","senses":[{"tags":["form-of","plural"],"form_of":[{"word":"oven"}],"glosses":["plural of oven"]}]}
+{"word":"prime","pos":"adj","lang_code":"en","senses":[{"glosses":["First in importance."]}]}
+{"word":"prime","pos":"verb","lang_code":"en","senses":[{"glosses":["To prepare for use."]}]}
+{"word":"primed","pos":"verb","lang_code":"en","senses":[{"tags":["form-of","participle","past"],"form_of":[{"word":"prime"}],"glosses":["simple past and past participle of prime"]}]}
+{"word":"principal","pos":"adj","lang_code":"en","senses":[{"glosses":["Primary."]}]}
+{"word":"principals","pos":"noun","lang_code":"en","senses":[{"tags":["form-of","plural"],"form_of":[{"word":"principal"}],"glosses":["plural of principal"]}]}
+"#;
+
+/// A crossword needs its plurals and verb forms: each takes its word's clue, marked.
+#[test]
+fn crossword_words_take_inflections_with_marked_clues() {
+    let freq: HashMap<String, f64> = [
+        ("card", 4.6),
+        ("cards", 4.4),
+        ("bake", 3.6),
+        ("baked", 3.5),
+        ("baking", 3.6),
+        ("oven", 3.9),
+        ("ovens", 2.9),
+        ("prime", 4.8),
+        ("primed", 3.1),
+        ("principal", 4.5),
+        ("principals", 3.5),
+    ]
+    .into_iter()
+    .map(|(w, z)| (w.to_owned(), z))
+    .collect();
+    let list = crossword_words(INFLECTED.as_bytes(), &freq, &HashSet::new());
+    let clue = |w: &str| {
+        list.iter()
+            .find(|(x, _, _)| x == w)
+            .map(|(_, _, c)| c.as_str())
+    };
+    assert_eq!(
+        clue("cards"),
+        Some("Flat, rectangular piece of stiff paper, used for writing on (plural)")
+    );
+    assert_eq!(clue("baked"), Some("To cook in an oven (past tense)"));
+    assert_eq!(clue("baking"), Some("To cook in an oven (-ing form)"));
+    // the clue of the word's sense the form belongs to: "primed" is the verb's, not the
+    // adjective's; "principals" has no noun to take one from
+    assert_eq!(clue("primed"), Some("To prepare for use (past tense)"));
+    assert_eq!(clue("principals"), None);
+    // a clue that gives the answer away is no clue: "baking or heating" holds "ovens"? no, but
+    // the plural's clue must not hold the plural itself
+    assert!(
+        list.iter()
+            .all(|(w, _, c)| !c.to_lowercase().contains(w.as_str()))
+    );
+    let words: Vec<&str> = list.iter().map(|(w, _, _)| w.as_str()).collect();
+    let mut sorted = words.clone();
+    sorted.sort_unstable();
+    assert_eq!(words, sorted);
+    // the 5×5 mini's list stays without them
+    let mini = puzzle_words(INFLECTED.as_bytes(), &freq, &HashSet::new());
+    assert!(mini.iter().all(|(w, _)| w != "cards" && w != "baked"));
+}
