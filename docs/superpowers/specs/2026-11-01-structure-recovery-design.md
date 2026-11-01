@@ -87,9 +87,13 @@ dropped, and if fewer than two resolve, the layout's headings are used as today.
 
 ## 5. PDF spacing cue (increment 3)
 
-A lone bold line (`layout.rs`, `lone_bold`) is an h2 instead of an h3 when it starts a page's
-text or has a gap above it of at least twice the usual line step. Fixture: a PDF whose chapter
-titles are bold at body size, each at the top of a page.
+A lone bold line (`layout.rs`, `lone_bold`) is an h2 instead of an h3 when it opens its page's
+text, or when the line above it (or the bottom of a picture above it) is at least three line
+steps up. An ordinary section title has a line or two of space above it and stays an h3. The
+point is the mix: bold chapter titles that open pages and bold section titles inside them
+used to be all h3s, which failed the chapter rule (every heading at the split level opens a
+page), so the book didn't split. Now the chapter titles are h2s and do split. Tested in
+`layout.rs` on hand-made pages.
 
 ## 6. Chapter words (increment 4)
 

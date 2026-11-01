@@ -756,28 +756,34 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
     let mut out: Vec<Block> = Vec::new();
     let mut para: Option<(String, Line, bool)> = None; // text, last line, soft hyphen at end
     let mut first_top = false;
-    let flush = |para: &mut Option<(String, Line, bool)>, out: &mut Vec<Block>, top: bool| {
-        if let Some((text, last, _)) = para.take() {
-            let small = last.size < body * 0.85;
-            // A superscript or footnote mark left on a line of its own.
-            if small && text.chars().count() <= 3 && !text.chars().any(char::is_alphabetic) {
-                return;
+    // The paragraph opens its page's text, or has at least three lines' space above it.
+    let mut first_spaced = false;
+    let mut last: Option<(usize, f32)> = None;
+    let flush =
+        |para: &mut Option<(String, Line, bool)>, out: &mut Vec<Block>, top: bool, spaced: bool| {
+            if let Some((text, last, _)) = para.take() {
+                let small = last.size < body * 0.85;
+                // A superscript or footnote mark left on a line of its own.
+                if small && text.chars().count() <= 3 && !text.chars().any(char::is_alphabetic) {
+                    return;
+                }
+                let lone_bold = last.bold
+                    && text.chars().count() < 100
+                    && !ends_sentence(&text)
+                    && !text.contains(". ");
+                match level_of(last.size) {
+                    Some(level) => out.push(Block::Heading { level, text, top }),
+                    // Set apart by space, a bold line ranks above one inside the text
+                    // (structure-recovery spec §5).
+                    None if lone_bold && !small => out.push(Block::Heading {
+                        level: if spaced { 2 } else { 3 },
+                        text,
+                        top,
+                    }),
+                    None => out.push(Block::Para { text, small }),
+                }
             }
-            let lone_bold = last.bold
-                && text.chars().count() < 100
-                && !ends_sentence(&text)
-                && !text.contains(". ");
-            match level_of(last.size) {
-                Some(level) => out.push(Block::Heading { level, text, top }),
-                None if lone_bold && !small => out.push(Block::Heading {
-                    level: 3,
-                    text,
-                    top,
-                }),
-                None => out.push(Block::Para { text, small }),
-            }
-        }
-    };
+        };
     let mut lines_in_para = 0usize;
     for (page_no, items) in flow {
         // The right edge of the column a line sits in: the furthest any line starting near it
@@ -807,7 +813,8 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                     let open = *kind != Figure::Equation
                         && para.as_ref().is_some_and(|(t, _, _)| !ends_sentence(t));
                     let held = if open { para.take() } else { None };
-                    flush(&mut para, &mut out, first_top);
+                    last = Some((*page_no, rect.y1));
+                    flush(&mut para, &mut out, first_top, first_spaced);
                     out.push(Block::Figure {
                         kind: *kind,
                         page: *page_no,
@@ -819,9 +826,13 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                 Item::Text(l) => l,
             };
             let top = l.rect.y0 < heights.get(l.page).copied().unwrap_or(f32::MAX) / 3.0;
+            let spaced =
+                last.is_none_or(|(page, y0)| page != l.page || l.rect.y0 - y0 >= step * 3.0);
+            last = Some((l.page, l.rect.y0));
             let Some((text, prev, _)) = &para else {
                 para = Some((l.text.clone(), l.clone(), l.soft_end));
                 first_top = top;
+                first_spaced = spaced;
                 lines_in_para = 1;
                 continue;
             };
@@ -858,9 +869,10 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                 ends_sentence(&prev.text) && !l.text.starts_with(|c: char| c.is_lowercase())
             };
             if new_para {
-                flush(&mut para, &mut out, first_top);
+                flush(&mut para, &mut out, first_top, first_spaced);
                 para = Some((l.text.clone(), l.clone(), l.soft_end));
                 first_top = top;
+                first_spaced = spaced;
                 lines_in_para = 1;
                 continue;
             }
@@ -876,7 +888,7 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
             lines_in_para += 1;
         }
     }
-    flush(&mut para, &mut out, first_top);
+    flush(&mut para, &mut out, first_top, first_spaced);
     out
 }
 
@@ -1022,6 +1034,49 @@ mod tests {
                 "• First item that wraps onto a second line",
                 "• Second item"
             ]
+        );
+    }
+
+    #[test]
+    fn a_bold_line_set_apart_outranks_one_inside_the_text() {
+        let mut pages = Vec::new();
+        for ch in ["Chapter One", "Chapter Two"] {
+            let mut g = Vec::new();
+            styled(&mut g, 72.0, 100.0, ch, 10.0, true);
+            let mut y = 124.0;
+            let mut para = |g: &mut Vec<Glyph>, y: &mut f32| {
+                for i in 0..4 {
+                    text_at(
+                        g,
+                        72.0,
+                        *y,
+                        &format!("Body text line {i} of the chapter goes on"),
+                    );
+                    *y += 12.0;
+                }
+                text_at(g, 72.0, *y, "Short end.");
+                *y += 12.0;
+            };
+            para(&mut g, &mut y);
+            // A section title with a little space above it, then one with a lot.
+            y += 6.0;
+            styled(&mut g, 72.0, y, "A Section", 10.0, true);
+            y += 12.0;
+            para(&mut g, &mut y);
+            y += 30.0;
+            styled(&mut g, 72.0, y, "A Part", 10.0, true);
+            y += 12.0;
+            para(&mut g, &mut y);
+            pages.push(page(g));
+        }
+        let t = texts(&blocks(&pages).0);
+        assert!(t.contains(&"h2:Chapter One".to_owned()), "{t:?}");
+        assert!(t.contains(&"h2:Chapter Two".to_owned()), "{t:?}");
+        assert!(t.contains(&"h2:A Part".to_owned()), "{t:?}");
+        assert_eq!(
+            t.iter().filter(|x| *x == "h3:A Section").count(),
+            2,
+            "{t:?}"
         );
     }
 
