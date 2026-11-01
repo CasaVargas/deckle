@@ -44,6 +44,7 @@ export const INDEX: Entry[] = [
   { label: "X-Ray", page: "reading", words: "xray characters people places terms" },
   { label: "Wikipedia summaries", page: "reading", words: "wikipedia online" },
   { label: "AI model for X-Ray", page: "reading", words: "ai llm model anthropic claude openai ollama lm studio online" },
+  { label: "Chapter recaps", page: "reading", words: "chapter recaps summary summaries ai llm recap previously" },
   { label: "API key", page: "reading", words: "api key token anthropic openai" },
   { label: "Word Wise", page: "reading", words: "word wise hints vocabulary" },
   { label: "How many hints", page: "reading", words: "word wise level slider hints dictionary" },
@@ -177,7 +178,8 @@ export function pageSummary(page: SettingsPage, s: Settings, library: LibrarySta
     case "reading": {
       const ww = s.word_wise ? (s.word_wise_level === 5 ? "Word Wise, every hint" : `Word Wise, ${s.word_wise_level} of 5`) : "";
       const xr = s.xray ? `X-Ray${s.llm_provider !== "off" ? " with an AI model" : ""}${s.wikipedia ? " and Wikipedia" : ""}` : "";
-      return [ww, xr].filter(Boolean).join(" · ") || "Both off";
+      const rc = s.chapter_recaps && s.llm_provider !== "off" ? "Chapter recaps" : "";
+      return [ww, xr, rc].filter(Boolean).join(" · ") || "All off";
     }
     case "kindles":
       return devices.length ? list(devices.map((d) => d.name || d.model_hint)) : "None plugged in";

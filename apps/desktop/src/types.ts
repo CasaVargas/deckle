@@ -206,6 +206,8 @@ export interface Settings {
   word_wise: boolean;
   word_wise_level: number;
   wikipedia: boolean;
+  /** An AI-written recap at the end of each chapter (issue #29); needs the LLM settings. */
+  chapter_recaps: boolean;
   amazon_match: boolean;
   /** A typographic cover for a book that has none (issue #27). */
   generated_cover: boolean;
