@@ -540,3 +540,9 @@ fn a_link_that_comes_good_is_added_after_a_retry() {
     assert_eq!(r.recipes, 1, "{:?}", r.retry);
     assert!(inbox.join("Recipes/Sent/c.url").exists());
 }
+
+#[test]
+fn a_comic_in_the_inbox_is_a_book() {
+    assert!(deckle_digest::inbox::is_book(Path::new("Night Train.CBZ")));
+    assert!(!deckle_digest::inbox::is_book(Path::new("page.png")));
+}

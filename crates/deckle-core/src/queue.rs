@@ -15,7 +15,7 @@
 //! <name>.book/
 //!   book.kpf        Previewer's output
 //!   prepared.json   the book's info and wishes, versioned
-//!   fallback.kfx    the PDOC build, shipped if finishing fails
+//!   fallback.kfx    the PDOC build, shipped if finishing fails (an AZW3 for fixed layout)
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -588,7 +588,13 @@ fn deliver_prepared(
         path: fallback.clone(),
         source,
     })?;
-    let path = deliver_named_on(&bytes, name, conn, &DeliverOptions::default())?;
+    // A fixed-layout book's fallback is an AZW3, not a KFX (fixed-layout spec §8).
+    let name = if deckle_mobi::is_mobi(&bytes) {
+        format!("{}.azw3", name.strip_suffix(".kfx").unwrap_or(name))
+    } else {
+        name.to_owned()
+    };
+    let path = deliver_named_on(&bytes, &name, conn, &DeliverOptions::default())?;
     Ok((
         path,
         vec![format!(

@@ -87,10 +87,11 @@ pub struct Library {
     pub root: PathBuf,
 }
 
-/// EPUB, Word, OpenDocument or RTF file, DRM-free Kindle book, plain text, FB2, PDF or Markdown
-/// (kept as an EPUB snapshot).
+/// EPUB, Word, OpenDocument or RTF file, DRM-free Kindle book, plain text, FB2, PDF, CBZ, or
+/// Markdown or a folder of page images (both kept as an EPUB snapshot).
 pub fn is_source(path: &Path) -> bool {
-    deckle_docx::is_word(path)
+    deckle_comic::is_comic(path)
+        || deckle_docx::is_word(path)
         || deckle_txt::is_text(path)
         || deckle_fb2::is_fb2(path)
         || deckle_odt::is_odt(path)
@@ -103,8 +104,15 @@ pub fn is_source(path: &Path) -> bool {
             .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
 }
 
-/// The book's metadata: the EPUB's, or the EPUB a Word document, text file or PDF imports as.
+/// The book's metadata: the EPUB's, or the EPUB a Word document, text file, PDF or comic imports
+/// as.
 pub fn book_info(path: &Path) -> Result<BookInfo, String> {
+    if deckle_comic::is_comic(path) {
+        let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let epub = dir.path().join("imported.epub");
+        deckle_comic::convert(path, &epub).map_err(|e| e.to_string())?;
+        return deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string());
+    }
     if deckle_markdown::is_markdown(path) {
         let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
         let epub = dir.path().join("imported.epub");
@@ -351,9 +359,17 @@ impl Library {
             deckle_markdown::convert(source, &epub).map_err(|e| e.to_string())?;
             return self.add(&epub);
         }
+        // A folder of page images, likewise: the comic's own EPUB, named after the folder.
+        if deckle_comic::is_image_folder(source) {
+            let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+            let name = source.file_name().unwrap_or_default().to_string_lossy();
+            let epub = dir.path().join(format!("{name}.epub"));
+            deckle_comic::convert(source, &epub).map_err(|e| e.to_string())?;
+            return self.add(&epub);
+        }
         if !is_source(source) {
             return Err(format!(
-                "{}: the library takes EPUBs, Word, OpenDocument and RTF files, DRM-free Kindle books, text, FB2, PDFs and Markdown",
+                "{}: the library takes EPUBs, Word, OpenDocument and RTF files, DRM-free Kindle books, text, FB2, PDFs, comics (CBZ or a folder of page images) and Markdown",
                 source.display()
             ));
         }

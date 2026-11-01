@@ -201,6 +201,12 @@ fn a_notes_folder_or_an_empty_one_is_not_a_comic() {
     let empty = dir.path().join("empty");
     std::fs::create_dir(&empty).unwrap();
     assert!(!is_image_folder(&empty));
+    // A shelf of books with a stray image is walked for its books, not read as a comic.
+    let shelf = dir.path().join("shelf");
+    std::fs::create_dir(&shelf).unwrap();
+    std::fs::write(shelf.join("cover.jpg"), jpeg(2, 2)).unwrap();
+    std::fs::write(shelf.join("Night Train.cbz"), b"zip").unwrap();
+    assert!(!is_image_folder(&shelf));
     assert!(is_cbz(Path::new("x/Y.CBZ")) && !is_cbz(Path::new("y.zip")));
 }
 

@@ -1084,6 +1084,7 @@ version = "0.10.0"
 dependencies = [
  "base64 0.23.1",
  "deckle-cli",
+ "deckle-comic",
  "deckle-core",
  "deckle-digest",
  "deckle-docx",
@@ -1317,6 +1318,7 @@ dependencies = [
 name = "deckle-library"
 version = "0.10.0"
 dependencies = [
+ "deckle-comic",
  "deckle-core",
  "deckle-docx",
  "deckle-fb2",

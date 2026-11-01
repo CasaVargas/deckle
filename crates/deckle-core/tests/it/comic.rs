@@ -325,3 +325,70 @@ fn a_queued_fixed_layout_book_still_finishes_as_azw3() {
     assert_eq!(report.error, None, "{report:?}");
     assert_eq!(report.delivered, Some(out.join("Night Train.azw3")));
 }
+
+#[test]
+#[cfg(unix)]
+fn a_queued_comic_flushes_as_azw3_and_so_does_its_fallback() {
+    use deckle_core::deliver::{Conn, Target};
+    use deckle_core::pipeline::{Prepared, Wishes};
+    use deckle_core::queue::{Finishing, Queue};
+    let dir = tempfile::tempdir().unwrap();
+    let mobi = dir.path().join("previewer.mobi");
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/comic/fixed-layout-rtl.mobi"),
+        &mobi,
+    )
+    .unwrap();
+    let prepared = Prepared::from_parts(
+        mobi.clone(),
+        deckle_core::inspect::BookInfo {
+            title: "Night Train".into(),
+            fixed_layout: true,
+            ..Default::default()
+        },
+        mobi,
+        Wishes::default(),
+        None,
+    );
+    let finishing = Finishing {
+        profile: None,
+        word_wise: deckle_core::wordwise::WordWiseOptions {
+            level: 5,
+            database: None,
+            cache_dir: dir.path().join("cache"),
+        },
+    };
+    let q = Queue::new(dir.path().join("outbox"));
+    let flush = |kindle: &Path| {
+        q.flush_with(
+            &mut Conn::new(&Target::Folder(kindle.to_path_buf())),
+            None,
+            &finishing,
+            &mut |_, _, _| {},
+        )
+        .unwrap()
+    };
+
+    // Finished for the Kindle that takes it.
+    q.add_prepared(&prepared, "Night Train.kfx", None).unwrap();
+    let kindle = dir.path().join("kindle");
+    let r = flush(&kindle);
+    assert_eq!(r.delivered, [kindle.join("Night Train.azw3")]);
+    assert!(deckle_mobi::is_mobi(
+        &std::fs::read(&r.delivered[0]).unwrap()
+    ));
+
+    // Finishing fails: the fallback goes, still as an AZW3, never under a .kfx name.
+    let entry = q.add_prepared(&prepared, "Night Train.kfx", None).unwrap();
+    std::fs::write(entry.join("book.kpf"), b"not a KPF").unwrap();
+    let other = dir.path().join("other");
+    let r = flush(&other);
+    assert_eq!(r.delivered, [other.join("Night Train.azw3")]);
+    assert!(!other.join("Night Train.kfx").exists());
+    assert!(
+        r.warnings.iter().any(|w| w.contains("not finished")),
+        "{:?}",
+        r.warnings
+    );
+}

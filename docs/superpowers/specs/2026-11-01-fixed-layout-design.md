@@ -209,11 +209,16 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
        extra;
      - plus the `fixed_layout.sh` fake.
    - **2b, the wiring:**
-     - the app's file picker, folder walk and library take `.cbz`;
-     - the outbox queue carries a MOBI where it now carries `book.kpf`, and the fallback build
-       learns `.azw3`;
-     - pruning and send records treat `.azw3` like `.kfx`;
-     - plus a `docs/devices.md` row.
+     - the app's file picker, folder walk, book rows and library take `.cbz` and page folders;
+       the Inbox takes `.cbz`;
+     - a page folder in the library is kept as its EPUB snapshot, as a notes folder is;
+     - a folder holding books of its own (EPUB, CBZ, PDF…) is a shelf to walk, not a comic,
+       even with a stray image in it;
+     - the outbox queue already carries the MOBI as `book.kpf` (2a recognises it by its bytes);
+       a fallback that is an AZW3 is delivered as `.azw3`, never under the `.kfx` name;
+     - pruning needs nothing: it only touches dated papers. The Kindle inventory already lists
+       `.azw3`, and send records keep the delivered name;
+     - plus README, CLI help and a `docs/devices.md` row.
    - **Device spike** (after 2a) on a Paperwhite and a Scribe: the cover shows, pages turn the
      right way for RTL, and PDOC vs EBOK behave as for KFX.
 3. **Screens and other readers:** the screen table, the image step, Kobo/PocketBook as plain
