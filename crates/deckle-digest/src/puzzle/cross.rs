@@ -666,4 +666,24 @@ mod tests {
         });
         assert!(crowd.iter().all(|c| *c == alone));
     }
+
+    /// Spec §7's sweep: every size fills for 30 seeds at each difficulty's spread. Slow in a
+    /// debug build, so run on demand: `cargo test --release -p deckle-digest --lib
+    /// sweep_every_size_and_spread -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn sweep_every_size_and_spread() {
+        let lex = Lexicon::embedded();
+        for size in 5..=15 {
+            let mut line = format!("{size:>2}×{size:<2}");
+            for spread in [0.5, 1.5, 4.0] {
+                let made = (0..30)
+                    .filter(|&seed| fill(lex, size, spread, &mut rng(seed)).is_some())
+                    .count();
+                line += &format!("  spread {spread}: {made}/30");
+                assert_eq!(made, 30, "size {size} spread {spread}");
+            }
+            println!("{line}");
+        }
+    }
 }

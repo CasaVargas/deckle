@@ -171,6 +171,11 @@ at sizes 6–15). The settings below are what the measurements supported.*
   - Words are tried commonest first, each moved down the order by up to a random 0.5 zipf for
     `easy`, 1.5 for `medium` and 4.0 for `hard`.
   - Filtering the list instead (zipf ≥ 3.5 for `easy`) left too few words to fill.
+  - If a puzzle won't fill at its difficulty's spread, it tries the next wider one and the
+    book warns. In the sweep below, that never happened.
+- **Measured (2026-11-01):** `sweep_every_size_and_spread` (ignored by default; run it in
+  release) made 990 of 990 crosswords: sizes 5–15 × 30 seeds × all three spreads. That took
+  about 2 minutes in release.
 
 ### 3.4 Sudoku (increment 3)
 
