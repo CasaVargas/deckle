@@ -253,3 +253,60 @@ fn bad_comics_are_refused_with_their_own_message() {
     std::fs::write(&not_zip, b"Rar!\x1a\x07\x00").unwrap();
     assert!(matches!(refuse(&not_zip), ComicError::NotZip(_)));
 }
+
+/// A landscape spread: red on the left half, blue on the right.
+fn spread(w: u32, h: u32) -> Vec<u8> {
+    let img = image::RgbImage::from_fn(w, h, |x, _| {
+        if x < w / 2 {
+            image::Rgb([220, 20, 20])
+        } else {
+            image::Rgb([20, 20, 220])
+        }
+    });
+    let mut out = Cursor::new(Vec::new());
+    img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+    out.into_inner()
+}
+
+/// The middle pixel's colour of each page, in spine order: 'r'ed, 'b'lue or 'g'rey.
+fn page_colours(files: &Files) -> String {
+    spine_images(files)
+        .iter()
+        .map(|img| {
+            let px = image::load_from_memory(&files[&format!("OEBPS/{img}")])
+                .unwrap()
+                .to_rgb8();
+            match px.get_pixel(px.width() / 2, px.height() / 2).0 {
+                [r, _, b] if r > 150 && b < 100 => 'r',
+                [r, _, b] if b > 150 && r < 100 => 'b',
+                _ => 'g',
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn a_spread_after_the_cover_becomes_two_pages_in_reading_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let files = |info: &str| {
+        vec![
+            ("ComicInfo.xml", info.as_bytes().to_vec()),
+            // A landscape cover (a wraparound) stays whole.
+            ("00.png", spread(40, 20)),
+            ("01.png", png(20, 30)),
+            ("02.png", spread(40, 30)),
+            ("03.png", png(20, 30)),
+        ]
+    };
+    let (ltr, report) = import(&cbz(dir.path(), "ltr.cbz", &files("<ComicInfo/>")));
+    assert_eq!((report.pages, report.spreads), (5, 1));
+    // cover (whole, so its middle is the seam: blue), grey, red half, blue half, grey.
+    assert_eq!(page_colours(&ltr), "bgrbg");
+    assert!(text(&ltr, "OEBPS/pages/p0003.xhtml").contains("width=20, height=30"));
+    assert!(text(&ltr, "OEBPS/pages/p0001.xhtml").contains("width=40, height=20"));
+
+    let manga = "<ComicInfo><Manga>YesAndRightToLeft</Manga></ComicInfo>";
+    let (rtl, _) = import(&cbz(dir.path(), "rtl.cbz", &files(manga)));
+    // Right to left: the spread's right half is read first.
+    assert_eq!(page_colours(&rtl), "bgbrg");
+}

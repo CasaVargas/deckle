@@ -4,11 +4,13 @@
 //! spec §6).
 //!
 //! One page per image, in natural filename order, each sized to its own image; the images are
-//! copied as they are. `ComicInfo.xml` gives the metadata and, for manga, the right-to-left
-//! reading order. Fitting pages to a screen is a later stage (spec §7), not this one.
+//! copied as they are, except that a landscape spread after the cover becomes two pages (spec
+//! §7.1). `ComicInfo.xml` gives the metadata and, for manga, the right-to-left reading order.
+//! Fitting pages to a device's screen happens at finish ([`pages::fit`]), not here.
 
 mod comicinfo;
 mod order;
+pub mod pages;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -16,6 +18,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use comicinfo::ComicInfo;
+use pages::Half;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ComicError {
@@ -37,6 +40,8 @@ pub enum ComicError {
 pub struct ImportReport {
     pub title: String,
     pub pages: usize,
+    /// Landscape spreads split into two pages each.
+    pub spreads: usize,
     /// The spine reads right to left (manga).
     pub right_to_left: bool,
     pub warnings: Vec<String>,
@@ -110,6 +115,7 @@ pub fn convert(source: &Path, epub: &Path) -> Result<ImportReport, ComicError> {
     order::natural_sort(&mut names);
 
     let mut pages = Vec::with_capacity(names.len());
+    let mut spreads = 0;
     for name in names {
         if is_unsupported_image_name(&name) {
             return Err(ComicError::UnsupportedPage {
@@ -118,7 +124,20 @@ pub fn convert(source: &Path, epub: &Path) -> Result<ImportReport, ComicError> {
             });
         }
         let bytes = src.read(&name)?;
-        pages.push(Page::probe(name, &bytes)?);
+        let page = Page::probe(name, &bytes)?;
+        // A landscape page after the cover is a spread: two pages on a portrait screen. The
+        // cover isn't split, since a wraparound one would put the back cover first.
+        if !pages.is_empty() && page.width > page.height {
+            spreads += 1;
+            let halves = if info.right_to_left {
+                [Half::Right, Half::Left]
+            } else {
+                [Half::Left, Half::Right]
+            };
+            pages.extend(halves.map(|h| page.half(h)));
+        } else {
+            pages.push(page);
+        }
     }
     if pages.is_empty() {
         return Err(ComicError::NoPages);
@@ -129,6 +148,7 @@ pub fn convert(source: &Path, epub: &Path) -> Result<ImportReport, ComicError> {
     Ok(ImportReport {
         title: book.title,
         pages: pages.len(),
+        spreads,
         right_to_left: book.right_to_left,
         warnings: book.warnings,
     })
@@ -248,6 +268,8 @@ struct Page {
     media_type: &'static str,
     width: u32,
     height: u32,
+    /// The half of a spread this page is, cut at write time.
+    half: Option<Half>,
 }
 
 impl Page {
@@ -279,7 +301,25 @@ impl Page {
             media_type,
             width,
             height,
+            half: None,
         })
+    }
+
+    /// One half of this spread (a GIF's halves are PNG: see [`pages::split`]).
+    fn half(&self, half: Half) -> Page {
+        let (ext, media_type) = if self.ext == "gif" {
+            ("png", "image/png")
+        } else {
+            (self.ext, self.media_type)
+        };
+        Page {
+            source: self.source.clone(),
+            ext,
+            media_type,
+            width: pages::half_width(self.width, half),
+            height: self.height,
+            half: Some(half),
+        }
     }
 }
 
@@ -401,7 +441,12 @@ fn write_epub(
     }
     // Images are already compressed; one at a time, so a large CBZ isn't held in memory.
     for (i, page) in pages.iter().enumerate() {
-        let bytes = src.read(&page.source)?;
+        let mut bytes = src.read(&page.source)?;
+        if let Some(half) = page.half {
+            bytes = pages::split(&bytes, half)
+                .map_err(|_| ComicError::BadPage(page.source.clone()))?
+                .0;
+        }
         put(
             &mut zw,
             &format!("OEBPS/images/{}.{}", page_name(i), page.ext),
