@@ -222,7 +222,7 @@ pub enum BookError {
         size: usize,
         largest: usize,
     },
-    /// Puzzle N wouldn't fill with any of its seeds.
+    /// Puzzle N couldn't be made with any of its seeds.
     Unfilled(usize),
 }
 
@@ -260,6 +260,12 @@ impl fmt::Display for BookError {
                 "--words isn't for crosswords yet: their words need clues"
             ),
             BookError::DoesNotFit {
+                kind: Kind::Sudoku, ..
+            } => write!(
+                f,
+                "a sudoku's squares would be too small to write in on this screen"
+            ),
+            BookError::DoesNotFit {
                 kind,
                 size,
                 largest,
@@ -275,7 +281,7 @@ impl fmt::Display for BookError {
                  the largest that fits is {largest}×{largest}"
             ),
             BookError::Unfilled(n) => {
-                write!(f, "puzzle {n} wouldn't fill; try another --seed")
+                write!(f, "puzzle {n} couldn't be made; try another --seed")
             }
         }
     }
@@ -789,6 +795,24 @@ mod tests {
         assert_eq!(
             make(&o, Words::embedded()),
             Err(BookError::NoWords(Kind::Sudoku))
+        );
+    }
+
+    /// Messages that fit every kind: a sudoku isn't "filled", nor does it come in sizes.
+    #[test]
+    fn errors_read_right_for_sudoku() {
+        assert_eq!(
+            BookError::Unfilled(3).to_string(),
+            "puzzle 3 couldn't be made; try another --seed"
+        );
+        assert_eq!(
+            BookError::DoesNotFit {
+                kind: Kind::Sudoku,
+                size: 9,
+                largest: 0
+            }
+            .to_string(),
+            "a sudoku's squares would be too small to write in on this screen"
         );
     }
 

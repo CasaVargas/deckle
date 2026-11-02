@@ -187,7 +187,10 @@ at sizes 6–15). The settings below are what the measurements supported.*
   3. Grade the result by the techniques a logical solver needs:
      - `easy`: naked and hidden singles only.
      - `medium`: adds naked/hidden pairs and pointing/claiming.
-     - `hard`: needs more than that, but is still unique.
+     - `hard`: needs naked/hidden triples, X-wing or XY-wing, and nothing past those
+       *(builder's call, from the increment 3 review)*. Without that ceiling, a "hard" puzzle
+       could need chains or guessing, which feels broken in a pen-and-ink book. Puzzles past it
+       grade `expert` and are never made.
   4. Try again until the grade matches the one asked for.
 - Answers: solved grids, 6 per page.
 - `--size` is refused for sudoku.
@@ -197,7 +200,7 @@ at sizes 6–15). The settings below are what the measurements supported.*
   - `easy` keeps at least 36 givens *(builder's call)*.
   - Up to 200 full grids are tried for a grade, counted, not timed.
   - Sanity checks: Project Euler 96's first grid grades `easy`, and Arto Inkala's "hardest"
-    grades `hard`.
+    grades `expert`.
 
 ### 3.5 Themes
 

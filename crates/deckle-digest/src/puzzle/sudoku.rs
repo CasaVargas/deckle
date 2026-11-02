@@ -25,8 +25,11 @@ pub enum Grade {
     Easy,
     /// Also naked and hidden pairs, pointing and claiming.
     Medium,
-    /// More than those.
+    /// Also naked and hidden triples, X-wing and XY-wing: still logic, never a guess.
     Hard,
+    /// More than those (chains, guessing). Graded, never made: a book's hardest stays one a
+    /// person can finish in ink.
+    Expert,
 }
 
 /// Givens an easy puzzle keeps, at least.
@@ -302,11 +305,119 @@ impl Logic {
         }
         moved
     }
+
+    /// Naked and hidden triples, X-wing and XY-wing: one round. Whether anything changed.
+    fn harder(&mut self) -> bool {
+        let mut moved = false;
+        for unit in units() {
+            let open: Vec<usize> = unit.iter().copied().filter(|&i| self.val[i] == 0).collect();
+            // naked triple: three squares whose digits are three between them
+            for a in 0..open.len() {
+                for b in a + 1..open.len() {
+                    for c in b + 1..open.len() {
+                        let trio = [open[a], open[b], open[c]];
+                        let m = trio.iter().fold(0, |m, &i| m | self.cand[i]);
+                        if m.count_ones() == 3 {
+                            for &k in &open {
+                                if !trio.contains(&k) {
+                                    moved |= self.strike(k, m);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // hidden triple: three digits only three squares of the unit can take
+            for d in 1..=9u8 {
+                for e in d + 1..=9 {
+                    for f in e + 1..=9 {
+                        let (pd, pe, pf) = (
+                            self.places(&open, d),
+                            self.places(&open, e),
+                            self.places(&open, f),
+                        );
+                        if pd.is_empty() || pe.is_empty() || pf.is_empty() {
+                            continue;
+                        }
+                        let mut cells: Vec<usize> =
+                            pd.iter().chain(&pe).chain(&pf).copied().collect();
+                        cells.sort_unstable();
+                        cells.dedup();
+                        if cells.len() == 3 {
+                            let keep = bit(d) | bit(e) | bit(f);
+                            for &i in &cells {
+                                moved |= self.strike(i, !keep);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // X-wing: a digit in just the same two columns of two rows (or rows of two columns)
+        for d in 1..=9u8 {
+            for (lines, across) in [
+                (&units()[..9], &units()[9..18]),
+                (&units()[9..18], &units()[..9]),
+            ] {
+                let spots: Vec<Vec<usize>> = lines
+                    .iter()
+                    .map(|line| {
+                        (0..9)
+                            .filter(|&k| self.val[line[k]] == 0 && self.cand[line[k]] & bit(d) != 0)
+                            .collect()
+                    })
+                    .collect();
+                for a in 0..9 {
+                    for b in a + 1..9 {
+                        if spots[a].len() == 2 && spots[a] == spots[b] {
+                            for &k in &spots[a] {
+                                for (l, &i) in across[k].iter().enumerate() {
+                                    if l != a && l != b {
+                                        moved |= self.strike(i, bit(d));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // XY-wing: a two-digit pivot {a,b} seeing pincers {a,c} and {b,c}; c goes from every
+        // square that sees both pincers
+        let two = |m: u16| m.count_ones() == 2;
+        for p in 0..81 {
+            let pm = self.cand[p];
+            if self.val[p] != 0 || !two(pm) {
+                continue;
+            }
+            let wings: Vec<usize> = peers()[p]
+                .iter()
+                .copied()
+                .filter(|&q| {
+                    self.val[q] == 0 && two(self.cand[q]) && (self.cand[q] & pm).count_ones() == 1
+                })
+                .collect();
+            for (x, &q) in wings.iter().enumerate() {
+                for &r in &wings[x + 1..] {
+                    let (qm, rm) = (self.cand[q], self.cand[r]);
+                    let c = qm & rm & !pm;
+                    if c.count_ones() != 1 || qm & pm == rm & pm {
+                        continue;
+                    }
+                    for &k in &peers()[q] {
+                        if k != r && k != p && peers()[r].contains(&k) {
+                            moved |= self.strike(k, c);
+                        }
+                    }
+                }
+            }
+        }
+        moved
+    }
 }
 
-/// `g` solved by logic alone, using the medium techniques when `medium`; `None` when they
-/// get stuck.
-fn logic(g: &Grid, medium: bool) -> Option<Grid> {
+/// `g` solved by logic alone with the techniques up to `level`'s; `None` when they get stuck.
+fn logic(g: &Grid, level: Grade) -> Option<Grid> {
     let mut l = Logic {
         val: *g,
         cand: candidates(g)?,
@@ -316,30 +427,29 @@ fn logic(g: &Grid, medium: bool) -> Option<Grid> {
         if l.val.iter().all(|d| *d != 0) {
             return Some(l.val);
         }
-        if !(medium && l.pairs_and_lines()) {
+        let moved =
+            level >= Grade::Medium && l.pairs_and_lines() || level >= Grade::Hard && l.harder();
+        if !moved {
             return None;
         }
     }
 }
 
-fn solves(g: &Grid, medium: bool) -> bool {
-    logic(g, medium).is_some()
+fn solves(g: &Grid, level: Grade) -> bool {
+    logic(g, level).is_some()
 }
 
 /// The techniques a unique puzzle needs.
 pub fn grade(g: &Grid) -> Grade {
-    if solves(g, false) {
-        Grade::Easy
-    } else if solves(g, true) {
-        Grade::Medium
-    } else {
-        Grade::Hard
-    }
+    [Grade::Easy, Grade::Medium, Grade::Hard]
+        .into_iter()
+        .find(|&level| solves(g, level))
+        .unwrap_or(Grade::Expert)
 }
 
-/// A puzzle of `want`'s grade: givens taken from a full grid in symmetric pairs, in an order
-/// shuffled by `rng`, while the puzzle stays unique and (for easy and medium) within its
-/// techniques. `None` when [`ATTEMPTS`] grids don't give one.
+/// A puzzle of `want`'s grade (never [`Grade::Expert`]): givens taken from a full grid in
+/// symmetric pairs, in an order shuffled by `rng`, while the puzzle stays unique and within
+/// its grade's techniques. `None` when [`ATTEMPTS`] grids don't give one.
 pub fn make(want: Grade, rng: &mut StdRng) -> Option<Sudoku> {
     for _ in 0..ATTEMPTS {
         let solution = full(rng);
@@ -355,12 +465,7 @@ pub fn make(want: Grade, rng: &mut StdRng) -> Option<Sudoku> {
             let (a, b) = (givens[i], givens[80 - i]);
             givens[i] = 0;
             givens[80 - i] = 0;
-            let fits = count_solutions(&givens, 2) == 1
-                && match want {
-                    Grade::Easy => solves(&givens, false),
-                    Grade::Medium => solves(&givens, true),
-                    Grade::Hard => true,
-                };
+            let fits = count_solutions(&givens, 2) == 1 && solves(&givens, want);
             if fits {
                 left -= pair;
             } else {
@@ -441,7 +546,8 @@ mod tests {
     #[test]
     fn grades_known_puzzles() {
         assert_eq!(grade(&grid(SINGLES)), Grade::Easy);
-        assert_eq!(grade(&grid(INKALA)), Grade::Hard);
+        // past what a book's "hard" may ask: it isn't made, only graded
+        assert_eq!(grade(&grid(INKALA)), Grade::Expert);
     }
 
     /// Every grade comes out unique, symmetric, true to its solution and of the grade asked.
@@ -458,10 +564,9 @@ mod tests {
                     assert_eq!(s.givens[i] == 0, s.givens[80 - i] == 0, "symmetric");
                 }
                 assert_eq!(grade(&s.givens), want, "seed {seed}");
-                // the techniques that grade it also solve it, to the one solution
-                if want != Grade::Hard {
-                    assert_eq!(logic(&s.givens, want == Grade::Medium), Some(s.solution));
-                }
+                // the techniques that grade it also solve it, to the one solution: a hard puzzle
+                // too, with no guessing
+                assert_eq!(logic(&s.givens, want), Some(s.solution));
                 let givens = s.givens.iter().filter(|d| **d != 0).count();
                 if want == Grade::Easy {
                     assert!(givens >= EASY_GIVENS, "{givens}");

@@ -68,7 +68,8 @@ kinds. There's no `--size` and no `--words`.
 - **Difficulty** depends on which techniques you need:
   - `easy`: naked and hidden singles are enough, and at least 36 numbers are given;
   - `medium`: you need pairs or pointing/claiming at least once;
-  - `hard`: you need more than those.
+  - `hard`: you also need triples, X-wing or XY-wing. You never need to guess, so every
+    hard puzzle can be finished in ink.
 - **One solution:** every puzzle has exactly one, and its given numbers are symmetric when
   you turn the page upside down.
 - **Pages:** one big grid per page, with squares of at least 40 pt (14 mm), so there's room
