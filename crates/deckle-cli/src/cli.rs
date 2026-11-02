@@ -161,7 +161,10 @@ pub enum Command {
         /// Built-in font, spacing and enhancement defaults: academic, novel, manual.
         #[arg(long)]
         preset: Option<deckle_core::preset::Preset>,
-        /// A folder path, or `device` for the first connected Kindle.
+        /// A folder path; `device` for the first connected Kindle (or Kobo or PocketBook); or
+        /// `remarkable` for a reMarkable over its USB web interface (a comic goes as an image
+        /// PDF for `[remarkable] screen`; other books as EPUB; they wait in its outbox until it
+        /// answers).
         #[arg(long, default_value = "device")]
         to: String,
         /// The Kindle to send to, by its name (`deckle devices name`) or sync id. When it isn't

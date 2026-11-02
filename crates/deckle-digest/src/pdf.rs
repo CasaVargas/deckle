@@ -53,6 +53,18 @@ impl Screen {
         }
     }
 
+    /// The screen in pixels, portrait: what a comic's pages are fitted to (fixed-layout spec
+    /// §12.2).
+    pub fn pixels(self) -> (u32, u32) {
+        match self {
+            Screen::Remarkable2 => (1404, 1872),
+            Screen::RemarkablePaperPro => (1620, 2160),
+            Screen::RemarkablePaperProMove => (954, 1696),
+            Screen::Ipad => (1640, 2360),
+            Screen::A5 => (1240, 1754),
+        }
+    }
+
     /// The photos it shows best: in color on a color screen.
     pub fn photos(self) -> Photos {
         match self {

@@ -124,6 +124,50 @@ fn fastish_id(bytes: &[u8]) -> u64 {
     u64::from_be_bytes(h[..8].try_into().expect("8 bytes"))
 }
 
+/// A book made ready for the reMarkable's outbox (fixed-layout spec §12.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Book {
+    pub bytes: Vec<u8>,
+    /// `.pdf` for a comic, `.epub` for anything else.
+    pub ext: &'static str,
+    /// A comic's page images that wouldn't decode and were left out.
+    pub skipped: usize,
+}
+
+/// The book at `source` as a reMarkable takes it: Deckle's own comic (a CBZ, CBR, page folder,
+/// scanned PDF, or the EPUB made from one) as an image-only PDF fitted to `screen` on pages
+/// `page` points big; any other book as the EPUB [`crate::reader::book_epub`] makes, which the
+/// tablet's own reader reflows. A publisher's fixed-layout EPUB is refused: its pages would
+/// need rendering, and the tablet would reflow them.
+pub fn book(
+    source: &std::path::Path,
+    opts: &crate::reader::BookOptions,
+    screen: deckle_comic::pages::Screen,
+    page: (f32, f32),
+) -> Result<Book, String> {
+    let epub = crate::reader::book_epub(source, opts)?;
+    match crate::reader::fixed_layout_of(&epub) {
+        Some(layout) if layout.deckle_comic => {
+            let made = deckle_comic::pdf::from_epub(&epub, screen, page)?;
+            Ok(Book {
+                bytes: made.pdf,
+                ext: ".pdf",
+                skipped: made.skipped,
+            })
+        }
+        Some(_) => Err(
+            "a publisher's fixed-layout book can't go to a reMarkable yet (its \
+                        reader would reflow the pages); a CBZ, CBR or folder of page images can"
+                .into(),
+        ),
+        None => Ok(Book {
+            bytes: epub,
+            ext: ".epub",
+            skipped: 0,
+        }),
+    }
+}
+
 /// The document name a file shows as: its name without the extension.
 pub fn shown_as(file: &str) -> &str {
     file.strip_suffix(".pdf")
@@ -222,6 +266,41 @@ pub mod tests {
         assert!(body.contains("name=\"file\"; filename=\"deckle-daily-2026-10-23.pdf\""));
         assert!(body.contains("Content-Type: application/pdf"));
         assert!(body.contains("%PDF-1.7 the paper"));
+    }
+
+    #[test]
+    fn a_comic_becomes_a_pdf_a_book_an_epub_and_a_publishers_fixed_layout_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let img = image::RgbImage::from_pixel(600, 800, image::Rgb([200, 40, 40]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let cbz = tmp.path().join("c.cbz");
+        let mut zw = zip::ZipWriter::new(std::fs::File::create(&cbz).unwrap());
+        zw.start_file("1.png", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(png.get_ref()).unwrap();
+        zw.finish().unwrap();
+        let screen = deckle_comic::pages::Screen {
+            width: 351,
+            height: 468,
+            color: false,
+        };
+        let page = (111.8, 149.1);
+        let opts = crate::reader::BookOptions::default();
+
+        let comic = book(&cbz, &opts, screen, page).unwrap();
+        assert_eq!((comic.ext, comic.skipped), (".pdf", 0));
+        assert!(comic.bytes.starts_with(b"%PDF-"));
+
+        let mini = deckle_kfx::fixtures::path("deckle-mini.epub");
+        let text = book(&mini, &opts, screen, page).unwrap();
+        assert_eq!(text.ext, ".epub");
+        assert_eq!(&text.bytes[..2], b"PK");
+
+        let publisher = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../fixtures/comic/fixed-layout-rtl.epub");
+        let err = book(&publisher, &opts, screen, page).unwrap_err();
+        assert!(err.contains("publisher's fixed-layout"), "{err}");
     }
 
     #[test]

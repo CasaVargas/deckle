@@ -100,7 +100,7 @@ skips a morning. Only the newest three papers stay on the reader.
 | **Kindle** | Over USB when it's plugged in, or by email over Wi-Fi through your own mail account |
 | **Kobo** | As a KEPUB, in a Deckle folder, the first time it's plugged in. Long reads and Inbox books too |
 | **PocketBook** | The same, as EPUB |
-| **reMarkable 2, Paper Pro, Paper Pro Move** | A PDF laid out for its screen, crossword and all, uploaded over its USB web interface. No account |
+| **reMarkable 2, Paper Pro, Paper Pro Move** | A PDF laid out for its screen, crossword and all, uploaded over its USB web interface. No account. `deckle run --to remarkable` sends books too: a comic as an image PDF fitted to its screen, anything else as EPUB |
 | **Boox, iPad, anything** | An export folder (iCloud Drive, Dropbox, a USB stick) gets each edition as EPUB or PDF, photos in color if you like |
 
 Only Kindle books need Kindle Previewer. Every setting is in [docs/daily.md](docs/daily.md).
@@ -163,7 +163,8 @@ in, press **Send**.
   EPUB or a fixed-layout AZW3) keep their pages as they are: on a Kindle as an AZW3, since Kindle
   Previewer makes no KFX for fixed layout. A CBR needs the system's `bsdtar` (built into macOS
   and Windows as `tar`; `libarchive-tools` on Linux). `ComicInfo.xml` gives the title and series, and manga marked right to left reads
-  right to left (`deckle run --direction rtl` sets it for a comic that doesn't say). No X-Ray, Word Wise or page numbers. Fitting pages to each screen comes later
+  right to left (`deckle run --direction rtl` sets it for a comic that doesn't say). No X-Ray, Word Wise or page numbers. On a reMarkable
+  (`--to remarkable`) a comic goes as an image-only PDF fitted to its screen, since its EPUB reader reflows. Fitting pages to each screen comes later
   (#20).
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
 - **Several files, one book.** Bind any of the above in your order, each with its own entry in the
@@ -342,6 +343,7 @@ deckle run book.epub --to device --word-wise-level 3            # hints for rare
 deckle run book.epub --preset academic            # or novel, manual
 deckle run ./notes --to device                    # a flat Markdown folder, one note per chapter
 deckle run notes.docx --to device                 # also .odt, .rtf, .mobi/.azw3, .txt, .fb2, .pdf, .cbz/.cbr, a URL, .webloc/.url/.html
+deckle run manga.cbz --to remarkable              # a comic as an image PDF for the reMarkable's screen; other books as EPUB
 deckle bind a.pdf b.docx https://… --title "Pack"  # several files into one book, then `deckle run` it
 deckle inspect book.epub --json                   # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF

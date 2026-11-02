@@ -558,6 +558,27 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             if kindle.is_some() && to != "device" {
                 return Err("--kindle sends to a Kindle; leave out --to".into());
             }
+            // A reMarkable: books into its outbox, a comic as an image PDF (fixed-layout spec
+            // §12). No Previewer.
+            if to == "remarkable" {
+                if preset.is_some() {
+                    return Err(
+                        "style presets currently require a Kindle or --to <folder> KFX export"
+                            .into(),
+                    );
+                }
+                let config = llm.config(llm_model.clone(), llm_endpoint.clone());
+                let whos_who =
+                    (xray != Some(cli::XRayArg::Off)).then(|| deckle_core::xray::XRayOptions {
+                        llm: config.clone(),
+                        wikipedia,
+                    });
+                let recaps = extras.as_ref().zip(config).map(|(e, llm)| e.options(llm));
+                let opts = deckle_core::reader::BookOptions { whos_who, recaps };
+                let cfg = deckle_digest::Config::load(&deckle_digest::config::default_path())
+                    .unwrap_or_default();
+                return send_to_remarkable(&epubs, &cfg.remarkable, &opts, json);
+            }
             // No Kindle but a Kobo or a PocketBook: neither needs Previewer (other readers §8).
             if to == "device"
                 && kindle.is_none()
@@ -3358,7 +3379,7 @@ fn digest(
                     .map_err(|e| format!("reading queue: {e}"))?;
             }
             // A reMarkable plugged in now takes the PDF at once.
-            let remarkable = rm_queued.then(|| push_remarkable(&cfg)).flatten();
+            let remarkable = rm_queued.then(push_remarkable).flatten();
             // A Kobo or a PocketBook plugged in now takes its copy at once.
             let device = detect_reader().filter(|_| folder.is_none() && epub_queued);
             let reader = match push_reader(&kobo_queue, std::slice::from_ref(&cfg), device.as_ref())
@@ -3629,7 +3650,6 @@ fn digest(
         }
         cli::DigestCommand::Push { to } => {
             let papers = all_papers(&path)?;
-            let cfg = papers[0].clone();
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
             let target = match to.as_str() {
                 "device" => detect_kindle(),
@@ -3643,7 +3663,7 @@ fn digest(
             };
             // A reMarkable that answers takes its outbox too (other readers design §9).
             let remarkable = match to.as_str() {
-                "device" => push_remarkable(&cfg),
+                "device" => push_remarkable(),
                 _ => None,
             };
             if target.is_none()
@@ -3840,9 +3860,10 @@ fn digest(
                         Err(e) => eprintln!("error: {e}"),
                     }
                 }
-                if cfg.remarkable.enabled {
+                {
                     let pending = rm_queue.pending();
-                    // Asked only while something waits: an absent tablet costs a second a tick.
+                    // Asked only while something waits (the paper's, or books from `run --to
+                    // remarkable`): an absent tablet costs a second a tick.
                     let tablet = (!pending.is_empty())
                         .then(deckle_core::remarkable::detect)
                         .flatten();
@@ -4711,11 +4732,10 @@ fn with_direction(
         .collect()
 }
 
-/// Uploads the reMarkable outbox when `[remarkable]` is on and the tablet answers.
-fn push_remarkable(cfg: &deckle_digest::Config) -> Option<deckle_core::sync::RemarkablePush> {
-    if !cfg.remarkable.enabled {
-        return None;
-    }
+/// Uploads the reMarkable outbox when something waits in it and the tablet answers.
+fn push_remarkable() -> Option<deckle_core::sync::RemarkablePush> {
+    // Whatever waits goes, `[remarkable] enabled` or not: that key says the paper goes there;
+    // `run --to remarkable` queues books without it (fixed-layout spec §12.1).
     let queue = remarkable_queue();
     if queue.pending().is_empty() {
         return None;
@@ -4961,6 +4981,118 @@ fn send_to_reader(
             })
             .collect::<Vec<_>>()
             .join("\n")
+    })?;
+    Ok(if failed > 0 {
+        ExitCode::from(EXIT_FAILURE)
+    } else {
+        ExitCode::SUCCESS
+    })
+}
+
+/// `run --to remarkable`: each book into the reMarkable's outbox, a comic as an image PDF for
+/// `rm.screen`, then one push when the tablet answers; otherwise they wait for `digest push`
+/// or `watch` (fixed-layout spec §12.1).
+fn send_to_remarkable(
+    inputs: &[PathBuf],
+    rm: &deckle_digest::config::RemarkableConfig,
+    opts: &deckle_core::reader::BookOptions,
+    json: bool,
+) -> Result<ExitCode, String> {
+    #[derive(serde::Serialize)]
+    struct Queued {
+        input: PathBuf,
+        queued: Option<String>,
+        error: Option<String>,
+    }
+    #[derive(serde::Serialize)]
+    struct Report {
+        books: Vec<Queued>,
+        remarkable: Option<deckle_core::sync::RemarkablePush>,
+    }
+    let (w, h) = rm.screen.pixels();
+    let screen = deckle_comic::pages::Screen {
+        width: w,
+        height: h,
+        color: rm.photos() == deckle_digest::config::Photos::Color,
+    };
+    let page = rm.screen.page();
+    let queue = remarkable_queue();
+    let work = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let books: Vec<Queued> = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| {
+            let arg = input.to_string_lossy();
+            let r = (|| {
+                let source = if deckle_digest::web_book::is_article(&arg) {
+                    import_article(&arg, &deckle_digest::Http, &articles_dir())?.path
+                } else {
+                    input.clone()
+                };
+                let book = deckle_core::remarkable::book(&source, opts, screen, page)?;
+                if book.skipped > 0 {
+                    eprintln!(
+                        "{}: {} page image(s) wouldn't decode and were left out",
+                        input.display(),
+                        book.skipped
+                    );
+                }
+                let stem = source
+                    .file_stem()
+                    .map(|s| deckle_core::deliver::sanitize(&s.to_string_lossy()))
+                    .unwrap_or_else(|| "book".into());
+                let name = format!("{stem}{}", book.ext);
+                let made = work.path().join(format!("{i}{}", book.ext));
+                std::fs::write(&made, &book.bytes).map_err(|e| e.to_string())?;
+                queue
+                    .add(&made, &name, None)
+                    .map_err(|e| format!("outbox: {e}"))?;
+                Ok::<_, String>(name)
+            })();
+            match r {
+                Ok(name) => Queued {
+                    input: input.clone(),
+                    queued: Some(name),
+                    error: None,
+                },
+                Err(e) => Queued {
+                    input: input.clone(),
+                    queued: None,
+                    error: Some(e),
+                },
+            }
+        })
+        .collect();
+    let any_queued = books.iter().any(|b| b.queued.is_some());
+    let remarkable = any_queued
+        .then(deckle_core::remarkable::detect)
+        .flatten()
+        .map(|r| deckle_core::sync::run_remarkable(&queue, &r));
+    let failed = books.iter().filter(|b| b.error.is_some()).count();
+    let report = Report { books, remarkable };
+    emit(json, &report, || {
+        let mut lines: Vec<String> = report
+            .books
+            .iter()
+            .map(|b| match (&b.error, &b.queued) {
+                (Some(e), _) => format!("FAIL  {}\n      {e}", b.input.display()),
+                (None, Some(n)) => format!(
+                    "OK    {}\n      queued for the reMarkable as {n}",
+                    b.input.display()
+                ),
+                _ => String::new(),
+            })
+            .collect();
+        match &report.remarkable {
+            Some(p) => lines.push(remarkable_lines(p)),
+            None if any_queued => lines.push(
+                "      no reMarkable answered; plug it in with its USB web interface on and run \
+                 `deckle digest push`"
+                    .into(),
+            ),
+            None => {}
+        }
+        lines.join("\n")
     })?;
     Ok(if failed > 0 {
         ExitCode::from(EXIT_FAILURE)

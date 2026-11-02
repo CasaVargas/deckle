@@ -100,14 +100,14 @@ impl Reader {
 }
 
 /// What the OPF of a fixed-layout EPUB says about it.
-struct FixedLayout {
+pub struct FixedLayout {
     /// Deckle made it from a CBZ or page folder (`urn:deckle:comic:` identifier).
-    deckle_comic: bool,
+    pub deckle_comic: bool,
 }
 
 /// `Some` when the EPUB in `bytes` is fixed layout: `rendition:layout` `pre-paginated` for the
 /// whole book or on every spine item, as `inspect` decides.
-fn fixed_layout_of(bytes: &[u8]) -> Option<FixedLayout> {
+pub fn fixed_layout_of(bytes: &[u8]) -> Option<FixedLayout> {
     use std::io::Read;
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).ok()?;
     let mut read = |name: &str| -> Option<String> {

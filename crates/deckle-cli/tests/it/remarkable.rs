@@ -138,3 +138,128 @@ fn an_absent_tablet_keeps_the_paper_for_the_next_push_and_it_goes_once() {
         .success();
     assert_eq!(uploads.lock().unwrap().len(), 1);
 }
+
+/// A one-page CBZ at `<dir>/<name>`.
+fn cbz(dir: &Path, name: &str) -> PathBuf {
+    let img = image::RgbImage::from_pixel(600, 800, image::Rgb([200, 40, 40]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+    let path = dir.join(name);
+    let mut zw = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
+    zw.start_file("1.png", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zw.write_all(png.get_ref()).unwrap();
+    zw.finish().unwrap();
+    path
+}
+
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../fixtures/{name}"))
+}
+
+fn has(hay: &[u8], needle: &[u8]) -> bool {
+    hay.windows(needle.len()).any(|w| w == needle)
+}
+
+/// `run --to remarkable` (fixed-layout spec §12.1): a comic goes as an image PDF, a book as an
+/// EPUB, both uploaded at once when the tablet answers.
+#[test]
+fn run_to_remarkable_sends_a_comic_as_a_pdf_and_a_book_as_an_epub() {
+    let (base, uploads) = tablet("[]");
+    let (tmp, home) = setup("");
+    let comic = cbz(tmp.path(), "Ink.cbz");
+    let o = deckle(&home, &base)
+        .args(["run", "--to", "remarkable"])
+        .arg(&comic)
+        .arg(fixture("mini/deckle-mini.epub"))
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        o.status.success(),
+        "{out}\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(
+        out.contains("queued for the reMarkable as Ink.pdf"),
+        "{out}"
+    );
+    assert!(
+        out.contains("queued for the reMarkable as deckle-mini.epub"),
+        "{out}"
+    );
+    assert!(out.contains("reMarkable -> Ink.pdf"), "{out}");
+    assert!(out.contains("reMarkable -> deckle-mini.epub"), "{out}");
+    let got = uploads.lock().unwrap();
+    assert_eq!(got.len(), 2);
+    let pdf = got
+        .iter()
+        .find(|b| has(b, b"filename=\"Ink.pdf\""))
+        .expect("the comic's PDF");
+    assert!(has(pdf, b"Content-Type: application/pdf"));
+    assert!(has(pdf, b"%PDF-"));
+    let epub = got
+        .iter()
+        .find(|b| has(b, b"filename=\"deckle-mini.epub\""))
+        .expect("the book's EPUB");
+    assert!(has(epub, b"Content-Type: application/epub+zip"));
+}
+
+#[test]
+fn a_publishers_fixed_layout_book_is_refused_for_a_remarkable() {
+    let (base, uploads) = tablet("[]");
+    let (_tmp, home) = setup("");
+    let o = deckle(&home, &base)
+        .args(["run", "--to", "remarkable"])
+        .arg(fixture("comic/fixed-layout-rtl.epub"))
+        .output()
+        .unwrap();
+    assert!(!o.status.success());
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.contains("publisher's fixed-layout book"), "{out}");
+    assert!(uploads.lock().unwrap().is_empty());
+}
+
+/// Books wait for the tablet and go with the next push, with no `[remarkable]` section at all:
+/// `enabled` is about the paper.
+#[test]
+fn books_wait_for_the_tablet_and_push_sends_them_without_the_paper_set_up() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let dir = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/deckle")
+    } else {
+        home.join("deckle")
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("digest.toml"), "sections = [\"horoscope\"]\n").unwrap();
+    let comic = cbz(tmp.path(), "Ink.cbz");
+    let free = TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = format!("http://{}", free.local_addr().unwrap());
+    drop(free);
+    let o = deckle(&home, &gone)
+        .args(["run", "--to", "remarkable"])
+        .arg(&comic)
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        o.status.success(),
+        "{out}\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(out.contains("no reMarkable answered"), "{out}");
+    let (base, uploads) = tablet("[]");
+    let o = deckle(&home, &base)
+        .args(["digest", "push"])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        o.status.success(),
+        "{out}\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(out.contains("reMarkable -> Ink.pdf"), "{out}");
+    assert_eq!(uploads.lock().unwrap().len(), 1);
+}

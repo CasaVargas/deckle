@@ -224,7 +224,9 @@ fn write(book: &Book, images: &[PageImage], screen: Screen, page: (f32, f32)) ->
     let info = alloc();
 
     pdf.catalog(catalog).pages(tree);
-    pdf.pages(tree).kids(page_refs.iter().copied()).count(page_refs.len() as i32);
+    pdf.pages(tree)
+        .kids(page_refs.iter().copied())
+        .count(page_refs.len() as i32);
 
     for (i, img) in images.iter().enumerate() {
         let (w, h) = img.size();
@@ -340,7 +342,10 @@ mod tests {
         let epub = comic(
             tmp.path(),
             &[
-                ("ComicInfo.xml", b"<ComicInfo><Title>Ink</Title><Writer>Ada</Writer></ComicInfo>".to_vec()),
+                (
+                    "ComicInfo.xml",
+                    b"<ComicInfo><Title>Ink</Title><Writer>Ada</Writer></ComicInfo>".to_vec(),
+                ),
                 ("1.jpg", image(300, 400, ImageFormat::Jpeg)),
                 ("2.png", image(300, 400, ImageFormat::Png)),
                 // Twice the screen: fitted down.
@@ -365,7 +370,10 @@ mod tests {
         assert_eq!(count(&pdf, "/Width 351 /Height 468"), 1);
         assert_eq!(count(&pdf, "/Width 300 /Height 400"), 2);
         let s = String::from_utf8_lossy(&pdf);
-        assert!(s.contains("/Title (Ink)") && s.contains("/Author (Ada)"), "info");
+        assert!(
+            s.contains("/Title (Ink)") && s.contains("/Author (Ada)"),
+            "info"
+        );
     }
 
     #[test]
@@ -394,10 +402,7 @@ mod tests {
             zout.write_all(&bytes).unwrap();
         }
         let broken = zout.finish().unwrap().into_inner();
-        let colour = Screen {
-            color: true,
-            ..RM2
-        };
+        let colour = Screen { color: true, ..RM2 };
         let made = from_epub(&broken, colour, PAGE).unwrap();
         assert_eq!((made.pages, made.skipped), (1, 1));
         assert_eq!(count(&made.pdf, "/ColorSpace /DeviceRGB"), 1);
@@ -439,7 +444,10 @@ mod tests {
         // Grey of pure blue (30,30,200) is darker than grey of red (200,30,30).
         let blue_grey = 0.299 * 30.0 + 0.587 * 30.0 + 0.114 * 200.0;
         let got = img.get_pixel(150, 200)[0] as f32;
-        assert!((got - blue_grey).abs() < 12.0, "second page is the right half: {got}");
+        assert!(
+            (got - blue_grey).abs() < 12.0,
+            "second page is the right half: {got}"
+        );
     }
 
     #[test]
@@ -469,7 +477,10 @@ mod tests {
 
     #[test]
     fn paths_join_as_the_zip_names_them() {
-        assert_eq!(join("OEBPS/pages", "../images/p0001.jpg"), "OEBPS/images/p0001.jpg");
+        assert_eq!(
+            join("OEBPS/pages", "../images/p0001.jpg"),
+            "OEBPS/images/p0001.jpg"
+        );
         assert_eq!(join("", "OEBPS/content.opf"), "OEBPS/content.opf");
         assert_eq!(join("OEBPS", "./nav.xhtml"), "OEBPS/nav.xhtml");
     }
