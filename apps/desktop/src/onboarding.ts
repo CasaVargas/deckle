@@ -41,6 +41,11 @@ export function firstSave(entries: ReadingEntry[], since: string): ReadingEntry 
   return landed[0];
 }
 
+/** The miniature paper's dateline: "Tuesday, 3 November 2026". */
+export function dateline(now: Date): string {
+  return now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+
 /** The check line on page 3 (§4.3). */
 export function saveLine(save: ReadingEntry | null): string {
   if (!save) return "Try it: open any article in your browser and click Save to paper.";
