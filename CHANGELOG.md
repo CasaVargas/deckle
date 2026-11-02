@@ -9,10 +9,9 @@
   Cookbook's Add page and the welcome) opens a page in your browser with **Save to paper** and
   **Save recipe** as buttons to drag to the bookmarks bar, and how to show the bar in each
   browser. The web app shows the buttons in place. Copy is still there.
-- **Whole stories only.** A story the paper couldn't read in full (a paywall, a video page, a
-  fetch that failed) is left out of a full-text section instead of printing as a headline with
-  "Full story unavailable offline." A section where none could be read says so in one line. A
-  `lead` section still prints its briefs, as before.
+- **No more "Full story unavailable offline."** A story the paper couldn't read in full (a
+  paywall, a video page, a fetch that failed) still runs after the whole stories as a brief,
+  but without that line, the way a `lead` section's briefs always have.
 
 ## 0.10.0 — Deckle on Linux
 

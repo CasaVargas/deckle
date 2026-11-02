@@ -13,7 +13,7 @@ plus any local feeds), your RSS/Atom feeds, Powerball and Mega Millions, a horos
 writes itself, a puzzle page, and "On this day" from Wikipedia. Its cover is a generated front page, so the
 Kindle library tile is today's paper. Every story comes with its full text and photos (grayscale
 for e-ink), pulled Reader-View style from the publisher, so nothing sends you to a browser; a
-story that can't be read in full (a paywall, a video page) is left out. No keys or accounts; a source that fails prints
+story behind a paywall runs as a brief. No keys or accounts; a source that fails prints
 "unavailable today" and the paper still ships.
 
 ```sh

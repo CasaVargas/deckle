@@ -1,4 +1,4 @@
-# A welcome, the bookmarklets installed by hand, and whole stories only — design
+# A welcome, the bookmarklets installed by hand, and no "unavailable offline" line — design
 
 **Status:** built from the owner's one-line brief, calls marked · **Date:** 2026-11-01 · **Owner:**
 Jonathan (CasaVargas LLC) · **Builds on:** `2026-10-20-save-to-paper-design.md` (the bookmarklet
@@ -24,7 +24,7 @@ Two things stand between a new Deckle and a paper that reads well:
 
 **Success:** a first launch walks you to a paper that prints on schedule and a browser with
 **Save to paper** and **Save recipe** on its bookmarks bar, and the first click on one is
-confirmed inside Deckle. A paper has no story that stops at its headline for want of the text.
+confirmed inside Deckle. No story in the paper carries the line "Full story unavailable offline."
 
 ## 2. Goals, non-goals, anti-goals
 
@@ -32,7 +32,7 @@ confirmed inside Deckle. A paper has no story that stops at its headline for wan
 
 1. An onboarding flow in the app.
 2. It gets the bookmarklets installed with as little fuss as the browser allows.
-3. No story printed with "Full story unavailable offline."
+3. No story printed with the line "Full story unavailable offline."
 
 **Goals (mine, *builder's call*)**
 
@@ -56,31 +56,35 @@ confirmed inside Deckle. A paper has no story that stops at its headline for wan
 
 - A welcome that nags. It shows once. Skip is always one click away. It never shows to a build
   that already had its settings file say so.
-- Dropping a story that *could* be read. Only the stories the pipeline already marks as fallen
-  back go; subscriber stories with their reason stay as designed.
+- Dropping stories. A story that couldn't be read whole still runs as a brief; only the line
+  goes. Subscriber stories keep their reason note as designed.
 
-## 3. Whole stories only (goal 3)
+## 3. No "unavailable offline" line (goal 3)
 
 Today `section_of` in `Yes` mode fetches every story in parallel and partitions by whether the
-body carries the `UNAVAILABLE` note: whole stories lead, the fallen-back ones follow as briefs.
-`full_article` falls back when the Google News interstitial can't be resolved, when the page
-can't be fetched, or when extraction gives nothing (and the page isn't a known subscriber wall).
+body carries the `UNAVAILABLE` note: whole stories lead, the fallen-back ones follow as briefs
+that end with "Full story unavailable offline." `full_article` falls back when the Google News
+interstitial can't be resolved, when the page can't be fetched, or when extraction gives nothing
+(and the page isn't a known subscriber wall).
 
-**Change:** in `Yes` mode the fallen-back stories are **dropped**. They are not printed and not
-recorded as printed, so a story that failed for a passing reason (a timeout, an interstitial
-that didn't resolve) gets another try tomorrow.
+**Change:** the fallen-back stories still run after the whole ones, as briefs (the feed's own
+text, the source line), but **without the note**. That is what a `lead` section's briefs have
+always looked like, so the paper reads the same way throughout.
 
-- A section where *every* story fell back prints its note line, as an empty section does today:
-  `No story could be read in full today.` *(builder's call: a note over a silent empty section,
-  so the reader knows the feed was reached.)*
-- `Lead` mode is unchanged: one story whole, the rest briefs by design, none with the note.
-- `No` mode is unchanged: the feed's text, never fetched, never noted.
+- *Rejected (first cut, 2026-11-01):* dropping fallen-back stories altogether, with a one-line
+  "No story could be read in full today." for a section where all of them fell back. The
+  integration suite, whose fake network serves feeds but no story pages, showed what that does
+  when article fetches fail wholesale (the Google News resolver is undocumented and does break):
+  every section turns into that one line. A brief is a worse story than a whole one but a
+  better paper than an empty section.
+- `Lead` and `No` modes are unchanged.
 - Subscriber stories that the site withholds keep their reason note (publisher subscriptions
   design §9). That is a different line and the owner didn't ask about it.
-- No new config key *(builder's call)*. The owner asked for the line to be gone; a knob to bring
-  it back can be added if someone wants briefs.
-- README, `docs/daily.md` and the daily-digest spec's §5a say "a story that can't be read in full
-  is left out" where they said "stays a headline".
+- `UNAVAILABLE` stays as the internal marker `full_article` hands back; `section_of` strips it
+  from the briefs, and the interests section goes on using it to skip a failing lead.
+- No new config key *(builder's call)*.
+- README, `docs/daily.md` and the daily-digest spec's §5a say "runs as a brief" where they
+  said "stays a headline".
 
 ## 4. The welcome
 
@@ -159,5 +163,6 @@ whose result the page can read; a cookbook save shows on the Cookbook tab)*.
 - The overlay's styling (`.welcome*`), following `.sheet` and `.setup`.
 - Pure logic in `onboarding.ts` with tests: the step list, the first-save check, the schedule
   line.
-- Rust tests: the install page carries both bookmarklets; `section_of` in `Yes` mode drops
-  fallen-back stories and notes an all-fallen section; `Settings` defaults `welcome_seen` false.
+- Rust tests: the install page carries both bookmarklets; `section_of` in `Yes` mode runs
+  fallen-back stories as note-free briefs after the whole ones; `Settings` defaults
+  `welcome_seen` false.

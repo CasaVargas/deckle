@@ -165,10 +165,9 @@ browser. Every story carries its full text and photos inside the edition.
     `ul`/`ol`/`li`, `em`/`strong`, `br`, and `figure` with `img` and `figcaption`.
   - Everything else is unwrapped to its text, and links become plain text.
 - **Thresholds:** a story under 120 words after extraction counts as a failure (paywall,
-  consent wall, video page). Such a story is left out of a full-text section (it used to
-  print as a brief with the line "Full story unavailable offline."; see the welcome design,
-  2026-11-01, §3). A section where none could be read says so in one line. Text is capped at
-  6,000 words.
+  consent wall, video page). The item then falls back to the feed's own summary as a brief,
+  with no note (it used to carry the line "Full story unavailable offline."; see the welcome
+  design, 2026-11-01, §3). Text is capped at 6,000 words.
 - **Photos:**
   - At most 4 per story: the lead image (`og:image`) first, then inline images in order,
     deduplicated by URL without its query, then by a 64-bit difference hash of the picture
@@ -183,8 +182,8 @@ browser. Every story carries its full text and photos inside the edition.
     unknown agents, and the edition is read only by the person who built it.
   - APIs keep the honest `Deckle/<version>` agent.
   - Up to 8 fetches run in parallel: 15 s per API request, 25 s per publisher page.
-- **Order:** within a section, the feed's order; a `lead` section prints one story whole
-  and the rest as briefs (headline, outlet, time), with no note.
+- **Order:** within a section, stories with full text come first; the ones that fell back
+  follow, like briefs. A `lead` section prints one story whole and the rest as briefs.
 - **No outbound links:** the "Read online" link is gone. Each story ends with a small
   "Source: <outlet>" line in plain text.
 - **Config:** `full_text = true` and `photos = true` at the top level, both default on.
