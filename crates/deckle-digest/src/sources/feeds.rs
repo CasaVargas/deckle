@@ -327,6 +327,9 @@ pub(crate) fn story_body(
 pub(crate) const LEAD_TRIES: usize = 3;
 /// A section's note when every story it found was already printed or too old.
 pub const NO_NEW_STORIES: &str = "No new stories today.";
+/// A section's note when it found stories but none could be read in full (welcome design §3).
+pub const NO_WHOLE_STORIES: &str = "No story could be read in full today.";
+/// The note a fallen-back story carries; such a story never prints in a full-text section.
 pub(crate) const UNAVAILABLE: &str = "Full story unavailable offline.";
 /// Article pages fetched at once.
 const WORKERS: usize = 8;
@@ -403,12 +406,12 @@ pub(crate) fn section_of(
             None => items.iter().map(brief).collect(),
         }
     } else if mode == FullText::Yes {
-        // Whole stories lead; ones only the feed could give run after them, like briefs.
-        let (mut full, briefs): (Vec<_>, Vec<_>) = par_map(items, |i| full_article(i, cfg, net))
+        // Only whole stories print (welcome design §3). One that couldn't be read is left out,
+        // and not recorded as printed, so a passing failure gets another try tomorrow.
+        par_map(items, |i| full_article(i, cfg, net))
             .into_iter()
-            .partition(|a| !a.body.contains(UNAVAILABLE));
-        full.extend(briefs);
-        full
+            .filter(|a| !a.body.contains(UNAVAILABLE))
+            .collect()
     } else {
         items.iter().map(|i| article(i, None)).collect()
     };
@@ -424,6 +427,8 @@ pub(crate) fn section_of(
     };
     if items.is_empty() {
         section.unavailable = Some(NO_NEW_STORIES.into());
+    } else if section.articles.is_empty() {
+        section.unavailable = Some(NO_WHOLE_STORIES.into());
     }
     section
 }
@@ -755,6 +760,98 @@ mod tests {
             site: "gazette.example".into(),
             why: crate::publisher::Walled::NotSignedIn,
         }
+    }
+
+    /// A site where some pages read and the rest are gone (offline, a wall, a video page).
+    struct Patchy;
+    impl Net for Patchy {
+        fn get(&self, url: &str) -> Result<Vec<u8>, String> {
+            if url.ends_with("/whole") {
+                let words = "word ".repeat(300);
+                Ok(format!(
+                    "<html><body><article><h1>T</h1><p>{words}</p><p>{words}</p></article></body></html>"
+                )
+                .into_bytes())
+            } else {
+                Err("offline".into())
+            }
+        }
+    }
+
+    fn items(links: &[&str]) -> Vec<Item> {
+        links
+            .iter()
+            .map(|l| Item {
+                link: Some(format!("https://www.gazette.example{l}")),
+                title: l.trim_start_matches('/').to_owned(),
+                ..item()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_story_that_cannot_be_read_in_full_is_left_out() {
+        let s = section_of(
+            "News",
+            None,
+            &items(&["/gone", "/whole", "/walled"]),
+            &[],
+            &Config::default(),
+            &Patchy,
+            FullText::Yes,
+        );
+        assert_eq!(
+            s.articles
+                .iter()
+                .map(|a| a.title.as_str())
+                .collect::<Vec<_>>(),
+            ["whole"]
+        );
+        assert!(!s.articles[0].body.contains(UNAVAILABLE));
+        assert!(s.unavailable.is_none(), "{:?}", s.unavailable);
+    }
+
+    #[test]
+    fn a_section_with_no_whole_story_says_so() {
+        let s = section_of(
+            "News",
+            None,
+            &items(&["/gone", "/walled"]),
+            &[],
+            &Config::default(),
+            &Patchy,
+            FullText::Yes,
+        );
+        assert!(s.articles.is_empty());
+        assert_eq!(s.unavailable.as_deref(), Some(NO_WHOLE_STORIES));
+        // An empty feed still says what it said before.
+        let empty = section_of(
+            "News",
+            None,
+            &[],
+            &[],
+            &Config::default(),
+            &Patchy,
+            FullText::Yes,
+        );
+        assert_eq!(empty.unavailable.as_deref(), Some(NO_NEW_STORIES));
+    }
+
+    #[test]
+    fn briefs_without_a_lead_still_print_as_briefs() {
+        // Lead mode: the top story whole when one reads, the rest briefs by design; none noted.
+        let s = section_of(
+            "News",
+            None,
+            &items(&["/gone", "/walled", "/whole"]),
+            &[],
+            &Config::default(),
+            &Patchy,
+            FullText::Lead,
+        );
+        assert_eq!(s.articles.len(), 3);
+        assert!(s.articles.iter().all(|a| !a.body.contains(UNAVAILABLE)));
+        assert_eq!(s.articles[0].title, "whole");
     }
 
     #[test]

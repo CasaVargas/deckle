@@ -78,6 +78,11 @@ commands! { ctx;
     book_preflight { path: String, cover: Option<CoverChoice> } =>
         books::book_preflight(&ctx.state, path, cover),
     bookmarklet {} => daily::bookmarklet(),
+    bookmarklet_page_open {} => if ctx.web {
+        Err(NOT_IN_WEB.to_owned())
+    } else {
+        daily::bookmarklet_page_open()
+    },
     calibre_create_columns {} => crate::calibre::calibre_create_columns(),
     calibre_set_password { password: String } => crate::calibre::calibre_set_password(password),
     calibre_writeback_confirm { keys: Vec<String> } => crate::calibre::calibre_writeback_confirm(keys),

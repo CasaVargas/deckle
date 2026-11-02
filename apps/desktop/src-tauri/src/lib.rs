@@ -87,6 +87,7 @@ pub fn run() {
             wrap::reading_save,
             wrap::reading_remove,
             wrap::bookmarklet,
+            wrap::bookmarklet_page_open,
             wrap::recipe_bookmarklet,
             wrap::edition_preview,
             wrap::daily_run,

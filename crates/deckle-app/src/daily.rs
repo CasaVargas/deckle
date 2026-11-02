@@ -596,6 +596,33 @@ pub fn bookmarklet() -> Result<String, String> {
     Ok(deckle_digest::bookmarklet::javascript(&token))
 }
 
+/// The install page (welcome design §4.2), written as `bookmarklets.html` next to the token;
+/// returns its path.
+pub fn bookmarklet_page_write() -> Result<PathBuf, String> {
+    let cfg = Config::load(&config_path()).ok();
+    let q = queue_for(cfg.as_ref());
+    let dir = q.path.parent().unwrap_or(Path::new(".")).to_path_buf();
+    let token = deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join("bookmarklets.html");
+    std::fs::write(&path, deckle_digest::bookmarklet::install_page(&token))
+        .map_err(|e| format!("can't write {}: {e}", path.display()))?;
+    Ok(path)
+}
+
+/// Writes the install page and opens it in the default browser, where the bookmarklets can
+/// be dragged to the bookmarks bar.
+pub fn bookmarklet_page_open() -> Result<(), String> {
+    let path = bookmarklet_page_write()?;
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(&path).spawn();
+    // explorer is a windowed program: no console flashes (0.9.0).
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("explorer").arg(&path).spawn();
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let r = std::process::Command::new("xdg-open").arg(&path).spawn();
+    r.map(|_| ()).map_err(|e| e.to_string())
+}
+
 /// **Save recipe** (cookbook design §8.3): the same listener and token as [`bookmarklet`].
 pub fn recipe_bookmarklet() -> Result<String, String> {
     let cfg = Config::load(&config_path()).ok();

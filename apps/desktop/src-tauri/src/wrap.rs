@@ -533,6 +533,11 @@ pub fn bookmarklet() -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn bookmarklet_page_open() -> Result<(), String> {
+    deckle_app::daily::bookmarklet_page_open()
+}
+
+#[tauri::command]
 pub fn recipe_bookmarklet() -> Result<String, String> {
     deckle_app::daily::recipe_bookmarklet()
 }

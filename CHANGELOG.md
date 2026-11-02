@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **A welcome on first launch.** Four pages: your paper and its morning schedule, the
+  bookmarklets, and where things are. The Save to paper page watches for your first save and
+  says when it landed. **Settings → About** shows it again.
+- **Bookmarklets you drag, not paste.** *Open the install page* (on the Reading room, the
+  Cookbook's Add page and the welcome) opens a page in your browser with **Save to paper** and
+  **Save recipe** as buttons to drag to the bookmarks bar, and how to show the bar in each
+  browser. The web app shows the buttons in place. Copy is still there.
+- **Whole stories only.** A story the paper couldn't read in full (a paywall, a video page, a
+  fetch that failed) is left out of a full-text section instead of printing as a headline with
+  "Full story unavailable offline." A section where none could be read says so in one line. A
+  `lead` section still prints its briefs, as before.
+
 ## 0.10.0 — Deckle on Linux
 
 - **Deckle in a container.** A Linux image, `ghcr.io/casavargas/deckle`, runs the Daily

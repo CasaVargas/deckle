@@ -7,6 +7,7 @@ import { platform } from "./platform";
 import { useEffect, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { api } from "./api";
+import BookmarkletInstall from "./BookmarkletInstall";
 import { parseAddresses } from "./articles";
 import { addIsCurrent, addResultLine, bookLine, chipPicture, deliveryLine, factsLine, lastAddedLine, sourceLine, takeNext, wantsDrawing, waitingLine, webUrl } from "./cookbookRooms";
 import type { CookbookBook, CookbookDelivery, CookbookPicture, CookbookSaved, RecipePreview } from "./types";
@@ -54,7 +55,6 @@ export default function CookbookAdd({
   const [text, setText] = useState("");
   const [fetching, setFetching] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [preview, setPreview] = useState<{ target: string; p: RecipePreview } | null>(null);
   const [pick, setPick] = useState<CookbookPicture>("default");
   const [chapter, setChapter] = useState<string | null>(null);
@@ -230,29 +230,7 @@ export default function CookbookAdd({
               {drawing && <span className="muted small"> Drawing the illustration…</span>}
             </p>
           )}
-          <div className="row-pair">
-            <div>
-              <div className="label">Save recipe bookmarklet</div>
-              <p className="muted small">
-                Copy it, then add a bookmark in your browser and paste it as the address. On a recipe page, click it: the recipe goes in from the page you&rsquo;re looking
-                at, so it works on sites that won&rsquo;t let Deckle fetch them.
-              </p>
-            </div>
-            <button
-              className="ghost"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(await api.recipeBookmarklet());
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                } catch (e) {
-                  onNotice(String(e));
-                }
-              }}
-            >
-              {copied ? "Copied" : "Copy bookmarklet"}
-            </button>
-          </div>
+          <BookmarkletInstall which="recipe" onNotice={onNotice} />
         </section>
 
         {p && (

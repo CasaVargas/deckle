@@ -12,6 +12,7 @@ import SectionsTab from "./SectionsTab";
 import type { Change } from "./SectionsTab";
 import { platform } from "./platform";
 import { api } from "./api";
+import BookmarkletInstall from "./BookmarkletInstall";
 import { ROOMS, goesLine, stopLine, toggleDay } from "./dailyRooms";
 import PaperSheet from "./PaperSheet";
 import type { Room } from "./dailyRooms";
@@ -99,7 +100,6 @@ export default function DailyView({
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [next, setNext] = useState<NextPaper | null>(null);
   const [time, setTime] = useState("05:30");
-  const [copied, setCopied] = useState(false);
   const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null);
   const [password, setPassword] = useState("");
   const [emailMsg, setEmailMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -723,26 +723,7 @@ export default function DailyView({
                   Change…
                 </button>
               </div>
-              <div className="row-pair">
-                <div>
-                  <div className="label">Bookmarklet</div>
-                  <p className="muted small">Copy it, then add a bookmark in your browser and paste it as the address. Clicking it saves the page you're on (while Deckle's morning schedule is on).</p>
-                </div>
-                <button
-                  className="ghost"
-                  onClick={async () => {
-                    try {
-                      await navigator.clipboard.writeText(await api.bookmarklet());
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    } catch (e) {
-                      onNotice(String(e));
-                    }
-                  }}
-                >
-                  {copied ? "Copied" : "Copy bookmarklet"}
-                </button>
-              </div>
+              <BookmarkletInstall which="paper" onNotice={onNotice} />
             </section>
 
             <Shelf inPaper={draft.sections.includes("shelf")} />

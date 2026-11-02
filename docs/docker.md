@@ -184,8 +184,9 @@ downloaded to your browser.
 
 ## The bookmarklet over your network
 
-Copy the bookmarklet from `docker exec deckle deckle save --bookmarklet`, or from the desktop
-app. By default it points at `127.0.0.1:47219`, which is your own computer, not the server. To
+Copy the bookmarklet from `docker exec deckle deckle save --bookmarklet`, from the web app
+(the Daily tab's Reading room shows it as a button to drag), or from the desktop app. `docker exec
+deckle deckle save --bookmarklet --page > bookmarklets.html` writes the install page instead. By default it points at `127.0.0.1:47219`, which is your own computer, not the server. To
 use it from another machine:
 
 1. Publish the port (`"47219:47219"` in compose).

@@ -5,7 +5,7 @@ import { UPDATER_REASON } from "../web/gates";
 import { platform } from "../platform";
 import { install, type UpdateState } from "../updates";
 import CasaVargas from "./CasaVargas";
-import { Link, REPO } from "./Row";
+import { Link, REPO, Row } from "./Row";
 
 interface Props {
   version: string;
@@ -13,13 +13,15 @@ interface Props {
   onUpdateState: (s: UpdateState) => void;
   /** A conversion or send is running: nothing that closes Deckle may start. */
   busy: boolean;
+  /** Shows the welcome again (welcome design §4). */
+  onWelcome: () => void;
 }
 
 const WINDOWS = navigator.userAgent.includes("Windows");
 const mb = (bytes: number) => `${(bytes / 1048576).toFixed(1)} MB`;
 
 /** The update line: one state at a time, and nothing happens without a click. */
-function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version">) {
+function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version" | "onWelcome">) {
   const releases = <Link href={`${REPO}/releases`}>Releases</Link>;
   switch (update.kind) {
     case "checking":
@@ -71,7 +73,7 @@ function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version">) {
   }
 }
 
-export default function About({ version, update, onUpdateState, busy }: Props) {
+export default function About({ version, update, onUpdateState, busy, onWelcome }: Props) {
   const caps = useCapabilities();
   return (
     <>
@@ -81,6 +83,11 @@ export default function About({ version, update, onUpdateState, busy }: Props) {
       <div className="set-block">
         {caps.updater ? <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} /> : <Unavailable reason={UPDATER_REASON} />}
       </div>
+      <Row label="The welcome" note="The pages from first launch: your paper, the bookmarklets, where things are.">
+        <button className="ghost" onClick={onWelcome}>
+          Show it again
+        </button>
+      </Row>
       <CasaVargas />
       <p className="set-prose">
         What Deckle sends online, and when, is under <strong>Online &amp; privacy</strong>.

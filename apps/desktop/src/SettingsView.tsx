@@ -40,6 +40,8 @@ interface Props {
   onUpdateState: (s: UpdateState) => void;
   /** A conversion or send is running: nothing that closes Deckle may start. */
   busy: boolean;
+  /** About's "Show it again": the welcome (welcome design §4). */
+  onWelcome: () => void;
 }
 
 /** Settings take over the window: pages in a sidebar, one page at a time, and a search over every setting (Settings redesign §3). */
@@ -153,7 +155,7 @@ export default function SettingsView(props: Props) {
           {page === "koreader" && <Koreader />}
           {page === "highlights" && <HighlightsReading />}
           {page === "online" && <Online settings={settings} set={set} onPage={onPage} />}
-          {page === "about" && <About version={props.version} update={props.update} onUpdateState={props.onUpdateState} busy={props.busy} />}
+          {page === "about" && <About version={props.version} update={props.update} onUpdateState={props.onUpdateState} busy={props.busy} onWelcome={props.onWelcome} />}
           </>
           )}
         </div>

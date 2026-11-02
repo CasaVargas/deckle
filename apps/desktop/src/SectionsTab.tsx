@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { platform } from "./platform";
 import { api } from "./api";
+import BookmarkletInstall from "./BookmarkletInstall";
 import AddSection from "./AddSection";
 import Icon from "./Icon";
 import { listText, removeInterest, setList, setQuery } from "./interests";
@@ -548,7 +549,6 @@ function ReadingBody({
   onReading: () => void;
   onNotice: (m: string) => void;
 }) {
-  const [copied, setCopied] = useState(false);
   return (
     <>
       <label className="sec-field inline">
@@ -579,26 +579,7 @@ function ReadingBody({
           Change…
         </button>
       </div>
-      <div className="row-pair">
-        <div>
-          <div className="label">Bookmarklet</div>
-          <p className="muted small">Add it as a bookmark; clicking it saves the page you're on (while the morning schedule is on).</p>
-        </div>
-        <button
-          className="ghost"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(await api.bookmarklet());
-              setCopied(true);
-              setTimeout(() => setCopied(false), 2000);
-            } catch (e) {
-              onNotice(String(e));
-            }
-          }}
-        >
-          {copied ? "Copied" : "Copy bookmarklet"}
-        </button>
-      </div>
+      <BookmarkletInstall which="paper" onNotice={onNotice} />
       <button className="link" onClick={onReading}>
         What's saved, on Reading
       </button>

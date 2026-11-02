@@ -268,6 +268,10 @@ pub enum Command {
         /// Print the bookmarklet to drag to your browser's bookmarks bar.
         #[arg(long)]
         bookmarklet: bool,
+        /// With --bookmarklet: the install page instead, as HTML. Save it and open it in a
+        /// browser; each bookmarklet is a button to drag to the bookmarks bar.
+        #[arg(long, requires = "bookmarklet")]
+        page: bool,
     },
     /// Bind several files into one book, in the order given: EPUBs, Word, OpenDocument and RTF files, DRM-free Kindle books, text files, FB2,
     /// text PDFs and web articles (an address, a .webloc/.url link file or a saved .html page).

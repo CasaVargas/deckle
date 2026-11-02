@@ -13,7 +13,7 @@ plus any local feeds), your RSS/Atom feeds, Powerball and Mega Millions, a horos
 writes itself, a puzzle page, and "On this day" from Wikipedia. Its cover is a generated front page, so the
 Kindle library tile is today's paper. Every story comes with its full text and photos (grayscale
 for e-ink), pulled Reader-View style from the publisher, so nothing sends you to a browser; a
-story behind a paywall stays a headline. No keys or accounts; a source that fails prints
+story that can't be read in full (a paywall, a video page) is left out. No keys or accounts; a source that fails prints
 "unavailable today" and the paper still ships.
 
 ```sh
@@ -43,6 +43,7 @@ along with the paper.
 deckle save https://example.com/story     # or a saved .html page (sites you're signed into)
 deckle save --list                        # what's waiting, and what printed
 deckle save --bookmarklet                 # bookmarklets for your browser (needs `digest watch`)
+deckle save --bookmarklet --page > b.html # the same as a page: open it, drag each to the bookmarks bar
 ```
 
 Or drop links (`.webloc`, `.url`, `.txt`) and saved pages into `~/Deckle/Inbox`. Point
@@ -52,6 +53,13 @@ saves from your phone. The queue is a plain file, `reading.jsonl`, next to `dige
 `deckle save --bookmarklet` prints two bookmarklets: **Save to paper** (above) and **Save recipe**,
 which sends the page to the cookbook instead (see below). Both send only the page's address and
 title, never its contents, and both need `digest watch` running.
+
+In the app, **Open the install page** (on the Daily tab's Reading room, the Cookbook's Add page,
+and the welcome on first launch) writes `bookmarklets.html` next to `digest.toml` and opens it in
+your browser, where each bookmarklet is a button to drag to the bookmarks bar, with a line on how
+to show the bar in Safari, Chrome, Edge and Firefox. The web app shows the same buttons in place.
+The welcome's Save to paper page watches for your first save and says when it landed; **Settings →
+About** shows the welcome again.
 
 The same Inbox takes books: drop an `.epub`, `.docx` or `.kfx` there and it's sent later. The
 file's extension decides: `.epub`, `.docx` and `.kfx` are books, and `.webloc`, `.url`, `.txt`

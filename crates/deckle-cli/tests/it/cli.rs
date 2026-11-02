@@ -508,6 +508,31 @@ fn bookmarklet_prints_save_recipe_beside_save_to_paper() {
 }
 
 #[test]
+fn bookmarklet_page_prints_the_install_page_with_the_same_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let q = dir.path().join("reading.jsonl");
+    let (ok, js) = save(&q, &["--bookmarklet"]);
+    assert!(ok, "{js}");
+    let token = js
+        .split("token=")
+        .nth(1)
+        .map(|t| t[..32].to_owned())
+        .unwrap();
+    let (ok, page) = save(&q, &["--bookmarklet", "--page"]);
+    assert!(ok, "{page}");
+    assert!(page.starts_with("<!doctype html>"), "{page}");
+    assert!(
+        page.contains("Drag each button to your bookmarks bar"),
+        "{page}"
+    );
+    // Two links and two Copy buttons; Save recipe carries the token twice.
+    assert_eq!(page.matches(&token).count(), 6, "{page}");
+    // --page needs --bookmarklet.
+    let (ok, text) = save(&q, &["--page"]);
+    assert!(!ok && text.contains("--bookmarklet"), "{text}");
+}
+
+#[test]
 fn digest_email_has_password_test_and_forget() {
     let out = Command::cargo_bin("deckle")
         .unwrap()
