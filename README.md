@@ -482,7 +482,9 @@ model = ""                      # blank uses the provider default (Ollama: qwen3
 endpoint = ""                   # Ollama elsewhere, or an OpenAI-compatible API base URL
 ```
 
-**Ollama** keeps everything on this computer and needs no key: install it from
+**Ollama** keeps everything on this computer and needs no key. In the app, **Settings → AI →
+On this Mac** sets it up: it says whether Ollama is running (with a Get Ollama button), downloads
+the model with a progress bar and tries a prompt. On the command line, install Ollama from
 [ollama.com/download](https://ollama.com/download), then `deckle llm check` says whether it's
 running, whether the model is there (`deckle llm pull` downloads it, with progress) and how
 fast it answers. Deckle talks to Ollama's own API, so it sets the context the paper needs

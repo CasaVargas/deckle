@@ -1040,6 +1040,37 @@ export interface BookSearchReport {
 export type StylePreset = "academic" | "novel" | "manual";
 export type ReadingDirection = "ltr" | "rtl";
 
+// The AI page's "On this computer" checklist (local-model design §3). Mirrors deckle_xray::llm.
+export interface LlmInstalledModel {
+  name: string;
+  size: number;
+}
+export interface LlmServer {
+  version: string;
+  models: LlmInstalledModel[];
+}
+export interface LlmCheck {
+  endpoint: string;
+  model: string;
+  server: { Ok: LlmServer } | { Err: string };
+  installed: boolean | null;
+  answered: { Ok: number } | { Err: string } | null;
+}
+export interface LlmRecommendation {
+  model: string;
+  download: number;
+  memory: number | null;
+  ollama_url: string;
+}
+export interface LlmPullEvent {
+  model: string;
+  status: string;
+  completed: number;
+  total: number;
+  done: boolean;
+  error: string | null;
+}
+
 export interface DailyEditorConfig {
   enabled: boolean;
   provider: "openai" | "anthropic" | "ollama";

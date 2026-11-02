@@ -13,6 +13,7 @@ pub mod dispatch;
 pub mod events;
 pub mod kindle;
 pub mod koreader;
+pub mod llm;
 pub mod morgue;
 pub mod next;
 pub mod press;

@@ -37,7 +37,7 @@ pub(crate) fn run(json: bool, action: LlmCommand) -> Result<ExitCode, String> {
             let mut last = String::new();
             let mut progress = |p: &Progress| {
                 if json {
-                    return;
+                    return true;
                 }
                 let mut out = std::io::stdout().lock();
                 if let Some(pct) = (p.completed * 100).checked_div(p.total) {
@@ -47,6 +47,7 @@ pub(crate) fn run(json: bool, action: LlmCommand) -> Result<ExitCode, String> {
                 }
                 last = p.status.clone();
                 let _ = out.flush();
+                true
             };
             llm::pull(&endpoint, &model, &mut llm::http_post_lines, &mut progress)?;
             if !json {

@@ -11,7 +11,16 @@
   Ollama running, is the model installed, does it answer, and what to do about whichever
   isn't) and `deckle llm pull` (download the model, with progress). A local model gets
   shorter story excerpts in the editor's request, and a paper too long for one request says
-  so in its note. Design: `docs/superpowers/specs/2026-11-02-local-model-design.md`.
+  so in its note.
+- **Settings → AI.** One page for where the AI runs, for X-Ray, chapter recaps and the Daily
+  editor alike: **Off**, **On this Mac** or **A service online**. On this Mac is a checklist
+  that fills itself in: Ollama running (with **Get Ollama**, and a check every few seconds
+  until it answers), the model installed (**Download**, with a progress bar and a Stop) and
+  **Try it**, then a line on what to expect. Advanced holds every model Ollama has and an
+  address for Ollama on another computer. The service card keeps the provider, model and key
+  fields with a price table beside them. Reading aids and Online & privacy point there, and
+  Online & privacy says "nowhere online" when the model runs on this Mac. Design:
+  `docs/superpowers/specs/2026-11-02-local-model-design.md`.
 
 ## 0.11.0 — every reader, comics, puzzle books and KOReader
 

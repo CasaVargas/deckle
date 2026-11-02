@@ -192,8 +192,8 @@ pub type Post<'a> = dyn FnMut(&str, &[(String, String)], &str) -> Result<String,
 /// `url -> response body`. Production uses [`http_get`].
 pub type Get<'a> = dyn FnMut(&str) -> Result<String, String> + 'a;
 /// `(url, json body, line)`: POSTs and hands each line of a streamed answer to `line` as it
-/// arrives. Production uses [`http_post_lines`].
-pub type Lines<'a> = dyn FnMut(&str, &str, &mut dyn FnMut(&str)) -> Result<(), String> + 'a;
+/// arrives, until `line` answers `false`. Production uses [`http_post_lines`].
+pub type Lines<'a> = dyn FnMut(&str, &str, &mut dyn FnMut(&str) -> bool) -> Result<(), String> + 'a;
 
 /// How many candidates we send: enough for a novel's cast, cheap enough for every run.
 pub const MAX_CANDIDATES: usize = 120;
@@ -608,8 +608,13 @@ pub fn http_get(url: &str) -> Result<String, String> {
 }
 
 /// Real streaming HTTP POST (ureq), for use as the `lines` argument: no overall timeout, since
-/// a model download takes as long as it takes; a stall of a minute ends it.
-pub fn http_post_lines(url: &str, body: &str, line: &mut dyn FnMut(&str)) -> Result<(), String> {
+/// a model download takes as long as it takes; a stall of a minute ends it. Dropping the
+/// connection when `line` says stop is how Ollama learns to stop downloading.
+pub fn http_post_lines(
+    url: &str,
+    body: &str,
+    line: &mut dyn FnMut(&str) -> bool,
+) -> Result<(), String> {
     use std::io::BufRead;
     let mut resp = ureq::post(url)
         .config()
@@ -623,8 +628,8 @@ pub fn http_post_lines(url: &str, body: &str, line: &mut dyn FnMut(&str)) -> Res
     let reader = std::io::BufReader::new(resp.body_mut().as_reader());
     for l in reader.lines() {
         let l = l.map_err(|e| e.to_string())?;
-        if !l.trim().is_empty() {
-            line(&l);
+        if !l.trim().is_empty() && !line(&l) {
+            break;
         }
     }
     Ok(())
@@ -695,25 +700,30 @@ pub struct Progress {
     pub total: u64,
 }
 
-/// Downloads `model` into the Ollama at `endpoint`, reporting each status line as it comes.
-/// Returns when Ollama says success; an error line (no such model, no disk) is the error.
+/// What stopped a download.
+pub const PULL_CANCELLED: &str = "the download was stopped";
+
+/// Downloads `model` into the Ollama at `endpoint`, reporting each status line as it comes;
+/// `progress` answers `false` to stop (the error is then [`PULL_CANCELLED`]). Returns when
+/// Ollama says success; an error line (no such model, no disk) is the error.
 pub fn pull(
     endpoint: &str,
     model: &str,
     lines: &mut Lines<'_>,
-    progress: &mut dyn FnMut(&Progress),
+    progress: &mut dyn FnMut(&Progress) -> bool,
 ) -> Result<(), String> {
     let base = ollama_base(endpoint);
     let body = serde_json::json!({"model": model, "stream": true}).to_string();
     let mut failed = None;
     let mut done = false;
+    let mut stopped = false;
     lines(&format!("{base}/api/pull"), &body, &mut |line| {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
-            return;
+            return true;
         };
         if let Some(e) = v["error"].as_str() {
             failed.get_or_insert_with(|| e.to_owned());
-            return;
+            return true;
         }
         let p = Progress {
             status: v["status"].as_str().unwrap_or_default().to_owned(),
@@ -723,13 +733,18 @@ pub fn pull(
         if p.status == "success" {
             done = true;
         }
-        progress(&p);
+        if !progress(&p) {
+            stopped = true;
+            return false;
+        }
+        true
     })
     .map_err(|e| format!("the download failed: {e}"))?;
-    match (failed, done) {
-        (Some(e), _) => Err(format!("Ollama couldn't download {model}: {e}")),
-        (None, true) => Ok(()),
-        (None, false) => Err(format!("the download of {model} ended early")),
+    match (failed, done, stopped) {
+        (Some(e), _, _) => Err(format!("Ollama couldn't download {model}: {e}")),
+        (None, true, _) => Ok(()),
+        (None, false, true) => Err(PULL_CANCELLED.to_owned()),
+        (None, false, false) => Err(format!("the download of {model} ended early")),
     }
 }
 

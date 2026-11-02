@@ -779,6 +779,26 @@ pub fn cookbook_illustrate_stop() {
     deckle_app::cookbook::cookbook_illustrate_stop()
 }
 
+#[tauri::command]
+pub fn llm_recommended() -> deckle_app::llm::Recommendation {
+    deckle_app::llm::llm_recommended()
+}
+
+#[tauri::command]
+pub async fn llm_check(endpoint: String, model: String) -> Result<deckle_app::llm::Check, String> {
+    blocking(move || Ok(deckle_app::llm::llm_check(endpoint, model))).await
+}
+
+#[tauri::command]
+pub async fn llm_pull(app: AppHandle, endpoint: String, model: String) -> Result<(), String> {
+    blocking(move || deckle_app::llm::llm_pull(Arc::new(TauriEvents(app)), endpoint, model)).await
+}
+
+#[tauri::command]
+pub fn llm_pull_stop() {
+    deckle_app::llm::llm_pull_stop()
+}
+
 use deckle_app::koreader::{KoreaderPreview, KoreaderView};
 
 #[tauri::command]

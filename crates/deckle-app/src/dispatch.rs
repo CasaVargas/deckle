@@ -187,6 +187,14 @@ commands! { ctx;
     library_watch_scan {} => books::library_watch_scan(),
     library_watch_set { dir: Option<String> } => books::library_watch_set(dir),
     list_devices {} => Ok(commands::list_devices(&ctx.state)),
+    llm_check { endpoint: String, model: String } => Ok(crate::llm::llm_check(endpoint, model)),
+    llm_pull { endpoint: String, model: String } =>
+        crate::llm::llm_pull(ctx.events.clone(), endpoint, model),
+    llm_pull_stop {} => {
+        crate::llm::llm_pull_stop();
+        Ok(())
+    },
+    llm_recommended {} => Ok(crate::llm::llm_recommended()),
     masthead_missing { title: String } => Ok(daily::masthead_missing(title)),
     morgue_month { year: i32, month: u32 } => morgue::morgue_month(year, month),
     morgue_open { date: String } => if ctx.web {

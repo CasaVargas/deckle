@@ -500,7 +500,10 @@ fn pull_streams_progress_and_ends_on_success_or_error() {
             line(r#"{"status":"success"}"#);
             Ok(())
         },
-        &mut |p: &Progress| seen.push(p.clone()),
+        &mut |p: &Progress| {
+            seen.push(p.clone());
+            true
+        },
     )
     .unwrap();
     assert_eq!(seen.len(), 4);
@@ -515,14 +518,37 @@ fn pull_streams_progress_and_ends_on_success_or_error() {
             line(r#"{"error":"pull model manifest: file does not exist"}"#);
             Ok(())
         },
-        &mut |_| {},
+        &mut |_| true,
     )
     .unwrap_err();
     assert!(err.contains("couldn't download nope:1b"), "{err}");
-    let err = pull("", "m", &mut |_, _, _| Ok(()), &mut |_| {}).unwrap_err();
+    let err = pull("", "m", &mut |_, _, _| Ok(()), &mut |_| true).unwrap_err();
     assert!(err.contains("ended early"), "{err}");
-    let err = pull("", "m", &mut |_, _, _| Err("refused".into()), &mut |_| {}).unwrap_err();
+    let err = pull("", "m", &mut |_, _, _| Err("refused".into()), &mut |_| true).unwrap_err();
     assert!(err.contains("refused"), "{err}");
+    // stopping: the stream is left as soon as progress says so
+    let mut fed = 0;
+    let err = pull(
+        "",
+        "m",
+        &mut |_, _, line| {
+            for l in [
+                r#"{"status":"pulling a","total":10,"completed":1}"#,
+                r#"{"status":"pulling a","total":10,"completed":2}"#,
+                r#"{"status":"success"}"#,
+            ] {
+                fed += 1;
+                if !line(l) {
+                    break;
+                }
+            }
+            Ok(())
+        },
+        &mut |p| p.completed < 2,
+    )
+    .unwrap_err();
+    assert_eq!(err, deckle_xray::llm::PULL_CANCELLED);
+    assert_eq!(fed, 2, "the stream is dropped at the stop");
 }
 
 #[test]

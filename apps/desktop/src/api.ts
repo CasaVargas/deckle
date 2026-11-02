@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke, listen } from "./transport";
 import { platform } from "./platform";
-import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, ShelvesConfig, ShelvesView, WirelessView } from "./types";
+import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, LlmCheck, LlmPullEvent, LlmRecommendation, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, ShelvesConfig, ShelvesView, WirelessView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -107,6 +107,13 @@ export const api = {
   shelfSet: (on: boolean) => invoke<ShelfStatus>("shelf_set", { on }),
   /** Opens an https link in the default browser (webview links do not). */
   openLink: (url: string) => platform.openUrl(url),
+  // The AI page's "On this computer" (local-model design §3)
+  llmRecommended: () => invoke<LlmRecommendation>("llm_recommended"),
+  llmCheck: (endpoint: string, model: string) => invoke<LlmCheck>("llm_check", { endpoint, model }),
+  /** Downloads the model into Ollama; progress comes as `llm-pull` events. Resolves when it's over. */
+  llmPull: (endpoint: string, model: string) => invoke<void>("llm_pull", { endpoint, model }),
+  llmPullStop: () => invoke<void>("llm_pull_stop"),
+  onLlmPull: (cb: (e: LlmPullEvent) => void): Promise<() => void> => listen<LlmPullEvent>("llm-pull", cb),
   onProgress: (cb: (e: ProgressEvent) => void): Promise<() => void> =>
     listen<ProgressEvent>("book-progress", cb),
   onRunFinished: (cb: () => void): Promise<() => void> => listen("run-finished", () => cb()),

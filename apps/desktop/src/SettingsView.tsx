@@ -8,6 +8,7 @@ import { escStaysInField } from "./settingsKeys";
 import { PAGES, onlineOn, pageNotes, pageSummary, searchSettings, setupChecks } from "./settingsIndex";
 import type { Check, SettingsPage } from "./settingsIndex";
 import About from "./settings/About";
+import Ai from "./settings/Ai";
 import Books from "./settings/Books";
 import HighlightsReading from "./settings/HighlightsReading";
 import LibraryPage from "./settings/LibraryPage";
@@ -150,7 +151,8 @@ export default function SettingsView(props: Props) {
             />
           )}
           {page === "books" && <Books settings={settings} set={set} />}
-          {page === "reading" && <ReadingAids settings={settings} set={set} />}
+          {page === "reading" && <ReadingAids settings={settings} set={set} onPage={onPage} />}
+          {page === "ai" && <Ai settings={settings} onChange={onChange} />}
           {page === "kindles" && <Kindles devices={props.devices} onDeviceOptions={props.onDeviceOptions} />}
           {page === "koreader" && <Koreader />}
           {page === "highlights" && <HighlightsReading />}

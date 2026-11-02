@@ -1,6 +1,6 @@
 # A model on this computer, without the setup — design
 
-**Status:** increment 1 (§6) built, 2026-11-02 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** increments 1 and 2 (§6) built, 2026-11-02 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-18-deckle-design.md` (§7 LLM policy), `2026-10-24-daily-llm-editor-design.md`,
 `2026-11-01-ai-extras-design.md` (§1, why no bundled model)
 
@@ -60,8 +60,10 @@ Three cards, one chosen:
   with the price table from ai-extras §1 beside them. Marked **Online**, as now.
 
 Naming: "Deckle, on this Mac" (the heuristic) and "On this computer" (the model) must not read
-as the same thing. Proposed labels on the X-Ray card: *Deckle's own lists* / *The AI model you
-chose*, and the AI page says which that is.
+as the same thing. As built, the X-Ray card says who finds the people and places in one line
+("Deckle's own lists of names" or "the AI model, Ollama on this Mac") with a link to the AI
+page; the card's own radio buttons went, since the choice lives on one page now. In the web
+app the card reads "On the server".
 
 The Online & privacy page keeps its rows; "On this computer" reads "Sends nothing anywhere".
 

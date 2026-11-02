@@ -1134,3 +1134,13 @@ input[type=checkbox] { padding: 0; }
 .bookmarklet { display: inline-block; padding: 7px 14px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); font-weight: 600; font-size: 13px; text-decoration: none; cursor: grab; user-select: none; margin-bottom: 4px; }
 .bookmarklet:active { cursor: grabbing; }
 .bookmarklet-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+
+/* The AI page (local-model design §3) */
+.ai-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.ai-checks { border: 1px solid var(--line); border-radius: 10px; }
+.ai-checks .setup-row { padding: 10px 14px; }
+.ai-advanced summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+.ai-advanced[open] summary { margin-bottom: 10px; }
+.ai-prices { border-collapse: collapse; font-size: 13px; }
+.ai-prices caption { caption-side: top; text-align: left; padding: 0 0 6px; }
+.ai-prices td { padding: 5px 16px 5px 0; border-top: 1px solid var(--line); }

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { aiSummary, providerName, sendsOnline } from "./aiView";
 import { PREVIEWER_REASON } from "./web/gates";
 import type { DeviceRow, LibraryStatus, PreviewerStatus, Settings, SourcesStatus } from "./types";
 
 /** The Settings pages (Settings redesign §2). */
-export type SettingsPage = "overview" | "sending" | "library" | "books" | "reading" | "kindles" | "koreader" | "highlights" | "online" | "about";
+export type SettingsPage = "overview" | "sending" | "library" | "books" | "reading" | "ai" | "kindles" | "koreader" | "highlights" | "online" | "about";
 
 export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "overview", title: "Overview" },
@@ -11,6 +12,7 @@ export const PAGES: { id: SettingsPage; title: string }[] = [
   { id: "library", title: "Library" },
   { id: "books", title: "Books" },
   { id: "reading", title: "Reading aids" },
+  { id: "ai", title: "AI" },
   { id: "kindles", title: "Kindles" },
   { id: "koreader", title: "KOReader" },
   { id: "highlights", title: "Highlights & reading" },
@@ -43,11 +45,12 @@ export const INDEX: Entry[] = [
   { label: "Pop-up footnotes", page: "books", words: "footnotes notes popup" },
   { label: "X-Ray", page: "reading", words: "xray characters people places terms" },
   { label: "Wikipedia summaries", page: "reading", words: "wikipedia online" },
-  { label: "AI model for X-Ray", page: "reading", words: "ai llm model anthropic claude openai ollama lm studio online" },
+  { label: "Where the AI runs", page: "ai", words: "ai llm model anthropic claude openai ollama lm studio online local computer mac private free" },
+  { label: "On this computer (Ollama)", page: "ai", words: "ollama local model download install qwen on this mac computer private offline" },
   { label: "Chapter recaps", page: "reading", words: "chapter recaps summary summaries ai llm recap previously" },
   { label: "Add a book summary", page: "reading", words: "book summary ending spoilers ai llm recap" },
   { label: "Recap the series so far", page: "reading", words: "series recap previously earlier books volume ai llm" },
-  { label: "API key", page: "reading", words: "api key token anthropic openai" },
+  { label: "API key", page: "ai", words: "api key token anthropic openai" },
   { label: "Word Wise", page: "reading", words: "word wise hints vocabulary" },
   { label: "How many hints", page: "reading", words: "word wise level slider hints dictionary" },
   { label: "Highlights folder", page: "highlights", words: "highlights markdown clippings notes folder" },
@@ -142,9 +145,8 @@ export function setupHeading(checks: Check[]): string {
 }
 
 /** The optional features that are on and go online, by name. */
-export function onlineOn(s: Pick<Settings, "metadata_fill" | "amazon_match" | "wikipedia" | "llm_provider">): string[] {
-  const provider = s.llm_provider === "anthropic" ? "Anthropic" : "an OpenAI-compatible provider";
-  return [s.metadata_fill && "Open Library details", s.amazon_match && "store-cover matching", s.wikipedia && "Wikipedia summaries", s.llm_provider !== "off" && `the AI model (${provider})`].filter(
+export function onlineOn(s: Pick<Settings, "metadata_fill" | "amazon_match" | "wikipedia" | "llm_provider" | "llm_endpoint">): string[] {
+  return [s.metadata_fill && "Open Library details", s.amazon_match && "store-cover matching", s.wikipedia && "Wikipedia summaries", sendsOnline(s) && `the AI model (${providerName(s)})`].filter(
     (x): x is string => !!x,
   );
 }
@@ -180,11 +182,13 @@ export function pageSummary(page: SettingsPage, s: Settings, library: LibrarySta
     }
     case "reading": {
       const ww = s.word_wise ? (s.word_wise_level === 5 ? "Word Wise, every hint" : `Word Wise, ${s.word_wise_level} of 5`) : "";
-      const xr = s.xray ? `X-Ray${s.llm_provider !== "off" ? " with an AI model" : ""}${s.wikipedia ? " and Wikipedia" : ""}` : "";
+      const xr = s.xray ? `X-Ray${s.llm_provider !== "off" ? " with the AI model" : ""}${s.wikipedia ? " and Wikipedia" : ""}` : "";
       const named = [s.chapter_recaps && "chapter recaps", s.book_summary && "a summary", s.series_recap && "a series recap"].filter((x): x is string => !!x);
       const rc = s.llm_provider === "off" ? "" : list(named).replace(/^./, (c) => c.toUpperCase());
       return [ww, xr, rc].filter(Boolean).join(" · ") || "All off";
     }
+    case "ai":
+      return aiSummary(s);
     case "kindles":
       return devices.length ? list(devices.map((d) => d.name || d.model_hint)) : "None plugged in";
     case "online": {

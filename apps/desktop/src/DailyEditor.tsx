@@ -13,11 +13,11 @@ export default function DailyEditor({ value, onChange }: { value?: DailyEditorCo
     try {
       const settings = await api.getSettings();
       if (settings.llm_provider !== "openai" && settings.llm_provider !== "anthropic" && settings.llm_provider !== "ollama") {
-        setNote("Choose an AI model in Settings → Reading aids first.");
+        setNote("Choose where the AI runs in Settings → AI first.");
         return;
       }
       onChange({ ...latest.current, provider: settings.llm_provider, model: settings.llm_model, endpoint: settings.llm_endpoint });
-      setNote("Provider copied. Daily reads its API key from the environment; saved book API keys are not copied.");
+      setNote(settings.llm_provider === "ollama" ? "Copied: the paper's editor runs on this computer too." : "Copied. The Daily reads its API key from the environment; the saved key isn't copied.");
     } catch (e) { setNote(String(e)); }
   };
   return <div className="daily-editor">
@@ -37,7 +37,7 @@ export default function DailyEditor({ value, onChange }: { value?: DailyEditorCo
         <label><span className="label">Model</span><input value={config.model} placeholder="Provider default" onChange={(e) => onChange({ ...config, model: e.target.value })} /></label>
         <label><span className="label">API base URL</span><input value={config.endpoint} placeholder={config.provider === "ollama" ? "http://localhost:11434" : "Provider default, or your local server"} spellCheck={false} onChange={(e) => onChange({ ...config, endpoint: e.target.value })} /></label>
       </div>
-      <button className="ghost" onClick={copyProvider}>Use Books provider</button>
+      <button className="ghost" onClick={copyProvider}>Use the AI setting</button>
       {config.provider === "ollama"
         ? <p className="muted small">Nothing leaves this computer and no key is needed. Ollama must be running when the paper builds; <code>deckle llm check</code> says whether it's ready.</p>
         : <p className="muted small">Set {config.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} in the environment that runs Deckle. Local OpenAI-compatible servers can run without a key.</p>}
