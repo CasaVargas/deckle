@@ -16,6 +16,9 @@ interface Props {
   settings: Pick<Settings, "xray" | "word_wise">;
   preset?: StylePreset | null;
   onPreset?: (preset: StylePreset | null) => void;
+  /** A comic's reading order (#280): true right to left; null or missing for other books. */
+  rtl?: boolean | null;
+  onDirection?: (rtl: boolean) => void;
   onOverride: (id: string, cde: "pdoc" | "ebok" | null) => void;
   onToggleReport: (id: string) => void;
   onRemove: (id: string) => void;
@@ -42,7 +45,7 @@ function Line({ chips, children }: { chips: Chip[]; children?: React.ReactNode }
 
 const SOURCE = { llm: "AI model", wikipedia: "Wikipedia", basic: "basic" } as const;
 
-export default function BookRowView({ book, busy, plan, settings, preset, onPreset, onOverride, onToggleReport, onRemove, onReveal, onOpen }: Props) {
+export default function BookRowView({ book, busy, plan, settings, preset, onPreset, rtl, onDirection, onOverride, onToggleReport, onRemove, onReveal, onOpen }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const effectiveCde = book.cdeOverride ?? plan?.cde ?? "pdoc";
   const before = beforeChip(book, plan, settings);
@@ -76,6 +79,7 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
     const notes = book.warnings.length;
     const chips: Chip[] = [before];
     if (preset) chips.push({ text: `${PRESETS[preset]} style`, tone: "plain", title: "Saved book style" });
+    if (rtl) chips.push({ text: "Right to left", tone: "plain", title: "Pages turn right to left, as manga read" });
     if (book.coverPick && book.coverPick.kind !== "own")
       chips.push({ text: book.coverPick.kind === "generated" ? "Typographic cover" : "Open Library cover", tone: "plain", title: "The cover picked in the book’s Cover tab" });
     if (notes > 0) chips.push({ text: `${notes} note${notes > 1 ? "s" : ""}`, tone: "warn", title: book.warnings.join("\n") });
@@ -169,6 +173,11 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
                 <option value="">Original style / app settings</option>
                 {Object.entries(PRESETS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
+            </label>}
+            {onDirection && rtl != null && <label className="direction-toggle">
+              <input type="checkbox" checked={rtl} disabled={busy}
+                onChange={(e) => onDirection(e.target.checked)} />
+              Reads right to left
             </label>}
             <button onClick={() => { onOverride(book.id, "ebok"); setMenuOpen(false); }} disabled={effectiveCde === "ebok" || book.mode === "error" || book.mode === "ready"}>
               Prefer features (EBOK)

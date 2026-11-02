@@ -14,6 +14,9 @@ export interface BookRow {
   reason: string;
   warnings: string[];
   error: string | null;
+  /** A comic (CBZ, CBR, page folder): whether it reads right to left before any choice in
+   * settings. null: not a comic. */
+  comic_rtl: boolean | null;
 }
 
 export interface BookState extends BookRow {
@@ -193,6 +196,8 @@ export interface PlanRow {
 
 export interface Settings {
   book_presets: Record<string, StylePreset>;
+  /** A comic's reading order, set per book by its path (#280). */
+  book_directions: Record<string, ReadingDirection>;
   previewer_path: string | null;
   cde: "auto" | "pdoc" | "ebok";
   pages_auto: boolean;
@@ -1023,6 +1028,7 @@ export interface BookSearchReport {
 }
 
 export type StylePreset = "academic" | "novel" | "manual";
+export type ReadingDirection = "ltr" | "rtl";
 
 export interface DailyEditorConfig {
   enabled: boolean;

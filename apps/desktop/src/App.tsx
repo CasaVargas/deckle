@@ -25,6 +25,7 @@ import KindleView from "./KindleView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import { refreshCapabilities, useCapabilities } from "./capabilities";
 import { onSessionLost, restartEvents } from "./transport/web";
+import { readsRtl, withDirection } from "./comicDirection";
 import Login from "./web/Login";
 import Unavailable from "./web/Unavailable";
 import { NO_DEVICE_REASON, PREVIEWER_REASON } from "./web/gates";
@@ -32,6 +33,7 @@ import type { BookRow, BookState, CatalogView, CoverChoice, DeviceRow, LibrarySt
 
 const DEFAULT_SETTINGS: Settings = {
   book_presets: {},
+  book_directions: {},
   previewer_path: null,
   cde: "auto",
   pages_auto: true,
@@ -756,6 +758,13 @@ function Deckle() {
                     if (preset) book_presets[b.path] = preset;
                     else delete book_presets[b.path];
                     const next = { ...settings, book_presets };
+                    setBusy(true);
+                    api.setSettings(next).then(() => setSettings(next))
+                      .catch((e) => setNotice(String(e))).finally(() => setBusy(false));
+                  }}
+                  rtl={readsRtl(b, settings.book_directions)}
+                  onDirection={(isRtl) => {
+                    const next = { ...settings, book_directions: withDirection(settings.book_directions, b, isRtl) };
                     setBusy(true);
                     api.setSettings(next).then(() => setSettings(next))
                       .catch((e) => setNotice(String(e))).finally(() => setBusy(false));

@@ -98,4 +98,20 @@ impl Sidecar {
             .find(|s| s.device == device)
             .or_else(|| self.sends.iter().find(|s| same_device(&s.device, device)))
     }
+
+    /// The reading direction the owner set for a kept comic (#280), when they set one. Kept in
+    /// `extra` as `"direction": "rtl" | "ltr"`, so an older Deckle keeps it on rewrite.
+    pub fn direction(&self) -> Option<deckle_comic::Direction> {
+        self.extra
+            .get(DIRECTION)
+            .and_then(Value::as_str)
+            .and_then(deckle_comic::Direction::from_code)
+    }
+
+    pub fn set_direction(&mut self, direction: deckle_comic::Direction) {
+        self.extra
+            .insert(DIRECTION.into(), Value::from(direction.code()));
+    }
 }
+
+const DIRECTION: &str = "direction";

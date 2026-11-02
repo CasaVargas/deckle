@@ -1109,6 +1109,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "zip 9.0.5",
 ]
 
 [[package]]
@@ -1331,6 +1332,7 @@ dependencies = [
  "deckle-rtf",
  "deckle-txt",
  "deckle-xray",
+ "image",
  "regex",
  "roxmltree",
  "rusqlite",

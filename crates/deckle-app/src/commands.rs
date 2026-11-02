@@ -36,12 +36,50 @@ pub struct BookRow {
     pub reason: String,
     pub warnings: Vec<String>,
     pub error: Option<String>,
+    /// For a comic (CBZ, CBR, page folder): whether it reads right to left before any choice in
+    /// settings, from what the library remembers or its `ComicInfo.xml`. None: not a comic.
+    #[serde(default)]
+    pub comic_rtl: Option<bool>,
+}
+
+/// A comic's reading order, as the owner sets it for one book (#280; fixed-layout spec §3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReadingDirection {
+    Ltr,
+    Rtl,
+}
+
+impl From<ReadingDirection> for deckle_comic::Direction {
+    fn from(d: ReadingDirection) -> Self {
+        match d {
+            ReadingDirection::Ltr => deckle_comic::Direction::LeftToRight,
+            ReadingDirection::Rtl => deckle_comic::Direction::RightToLeft,
+        }
+    }
+}
+
+/// The reading order the owner set for the comic at `path`: its entry in settings, else what
+/// the library remembers for the copy it keeps. None for anything but a comic, or a comic left
+/// to its own `ComicInfo.xml`.
+pub fn comic_direction(settings: &Settings, path: &Path) -> Option<deckle_comic::Direction> {
+    if !deckle_comic::is_comic(path) {
+        return None;
+    }
+    settings
+        .book_directions
+        .get(path.to_string_lossy().as_ref())
+        .map(|&d| d.into())
+        .or_else(|| deckle_library::kept_direction(path))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub book_presets: std::collections::BTreeMap<String, deckle_core::preset::Preset>,
+    /// A comic's reading order, set per book by its path (#280); a comic not here reads as its
+    /// `ComicInfo.xml` (or the library's remembered choice) says.
+    pub book_directions: std::collections::BTreeMap<String, ReadingDirection>,
     pub previewer_path: Option<String>,
     /// `auto` (cover rule) | `pdoc` | `ebok`
     pub cde: String,
@@ -84,6 +122,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             book_presets: Default::default(),
+            book_directions: Default::default(),
             previewer_path: None,
             cde: "auto".into(),
             pages_auto: true,
@@ -513,6 +552,11 @@ pub fn book_row(path: &Path) -> BookRow {
                 },
                 warnings: info.warnings,
                 error: None,
+                comic_rtl: deckle_comic::is_comic(path).then(|| {
+                    deckle_library::kept_direction(path).map_or(info.right_to_left, |d| {
+                        d == deckle_comic::Direction::RightToLeft
+                    })
+                }),
             }
         }
         Err(e) => BookRow {
@@ -526,6 +570,7 @@ pub fn book_row(path: &Path) -> BookRow {
             reason: e.to_string(),
             warnings: Vec::new(),
             error: Some(e.to_string()),
+            comic_rtl: None,
         },
     }
 }
@@ -554,6 +599,7 @@ pub fn article_rows(targets: &[String], net: &dyn deckle_digest::Net, dir: &Path
                     reason: e.clone(),
                     warnings: Vec::new(),
                     error: Some(e),
+                    comic_rtl: None,
                 }
             }
         })
@@ -601,6 +647,7 @@ pub fn kfx_row(path: &Path) -> BookRow {
                 ),
                 warnings: Vec::new(),
                 error: None,
+                comic_rtl: None,
             }
         }
         Err(e) => BookRow {
@@ -614,6 +661,7 @@ pub fn kfx_row(path: &Path) -> BookRow {
             reason: format!("not a readable KFX: {e}"),
             warnings: Vec::new(),
             error: Some(format!("not a readable KFX: {e}")),
+            comic_rtl: None,
         },
     }
 }
@@ -770,6 +818,44 @@ pub fn resolve_run_target(target: &RunTarget) -> Result<Target, String> {
     }
 }
 
+/// The comic at `source` made into its EPUB, read in `direction`, in a folder that goes when the
+/// first item is dropped. Named as the library names a page folder's EPUB.
+fn with_direction(
+    source: &Path,
+    direction: deckle_comic::Direction,
+) -> Result<(tempfile::TempDir, PathBuf), String> {
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let name = if deckle_comic::is_image_folder(source) {
+        source.file_name()
+    } else {
+        source.file_stem()
+    }
+    .map_or_else(|| "comic".into(), |n| n.to_string_lossy().into_owned());
+    let epub = dir.path().join(format!("{name}.epub"));
+    deckle_comic::convert_with(source, &epub, Some(direction)).map_err(|e| e.to_string())?;
+    Ok((dir, epub))
+}
+
+/// A book's final event when it failed before its run started.
+fn failed(id: &str, error: String) -> ProgressEvent {
+    ProgressEvent {
+        id: id.to_owned(),
+        status: "failed".into(),
+        stage: None,
+        delivered: None,
+        pages: None,
+        warnings: Vec::new(),
+        cde: None,
+        asin: None,
+        reason: None,
+        matched: None,
+        xray: None,
+        word_wise: None,
+        replaced: Vec::new(),
+        error: Some(error),
+    }
+}
+
 pub fn run_books_with(
     books: &[RunRequest],
     target: &RunTarget,
@@ -884,7 +970,19 @@ pub fn run_books_with(
             preset.apply(&mut opts);
         }
         let id = b.id.clone();
-        let report = run_with_progress(Path::new(&b.path), &opts, &mut |stage| {
+        // A comic read in the order the owner set: made into its EPUB here, then sent as one,
+        // as `deckle run --direction` does (#280).
+        let source = Path::new(&b.path);
+        let direction = comic_direction(settings, source);
+        let comic = match direction.map(|d| with_direction(source, d)).transpose() {
+            Ok(c) => c,
+            Err(e) => {
+                emit(failed(&b.id, e));
+                continue;
+            }
+        };
+        let run_path = comic.as_ref().map_or(source, |(_, epub)| epub.as_path());
+        let report = run_with_progress(run_path, &opts, &mut |stage| {
             emit(ProgressEvent {
                 id: id.clone(),
                 status: "running".into(),
@@ -906,9 +1004,26 @@ pub fn run_books_with(
             firmware = report.firmware.clone();
         }
         let mut report = report;
-        // Every book sent goes into the library, when there is one (library design §3).
-        if let Err(e) = deckle_library::auto_add(&library, Path::new(&b.path), &report, &target) {
-            report.warnings.push(deckle_library::auto_add_warning(&e));
+        // Every book sent goes into the library, when there is one (library design §3). A page
+        // folder is kept as its EPUB, so as the one made in the owner's order; a CBZ or CBR is
+        // kept as it is, with its order remembered beside it.
+        let to_keep = match &comic {
+            Some((_, epub)) if deckle_comic::is_image_folder(source) => epub.as_path(),
+            _ => source,
+        };
+        match deckle_library::auto_add(&library, to_keep, &report, &target) {
+            Ok(Some(mut book)) if deckle_comic::is_comic_archive(source) => {
+                if let (Some(d), Some((lib, _))) =
+                    (direction, deckle_library::Library::configured(&library))
+                    && let Err(e) = lib.remember_direction(&mut book, d)
+                {
+                    report.warnings.push(format!(
+                        "the library won't remember this comic's reading order: {e}"
+                    ));
+                }
+            }
+            Ok(_) => {}
+            Err(e) => report.warnings.push(deckle_library::auto_add_warning(&e)),
         }
         if let (Some(u), Some(kept)) = (upgrade, &kept)
             && let Err(e) = deckle_library::upgrade::record(
@@ -1874,6 +1989,153 @@ mod tests {
         );
         let sent = out.path().join("deckle-daily-2026-10-20.kfx");
         assert_eq!(std::fs::read(sent).unwrap(), std::fs::read(&kfx).unwrap());
+    }
+
+    /// A one-page CBZ with no `ComicInfo.xml`: it reads left to right by itself.
+    fn ltr_cbz(path: &Path) -> PathBuf {
+        use std::io::Write;
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbImage::new(4, 6)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        let mut zw = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        zw.start_file("1.png", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(png.get_ref()).unwrap();
+        zw.finish().unwrap();
+        path.to_path_buf()
+    }
+
+    #[test]
+    fn a_comics_reading_order_comes_from_settings_and_only_for_comics() {
+        use deckle_comic::Direction;
+        let tmp = tempfile::tempdir().unwrap();
+        let cbz = ltr_cbz(&tmp.path().join("Night Train.cbz"));
+        let epub = deckle_kfx::fixtures::path("deckle-mini.epub");
+        let mut settings = Settings::default();
+        assert_eq!(comic_direction(&settings, &cbz), None);
+        for p in [&cbz, &epub] {
+            settings
+                .book_directions
+                .insert(p.to_string_lossy().into_owned(), ReadingDirection::Rtl);
+        }
+        assert_eq!(
+            comic_direction(&settings, &cbz),
+            Some(Direction::RightToLeft)
+        );
+        // An EPUB keeps its own spine, whatever settings say.
+        assert_eq!(comic_direction(&settings, &epub), None);
+
+        // The row says how the comic reads by itself; not a comic: none.
+        assert_eq!(book_row(&cbz).comic_rtl, Some(false));
+        assert_eq!(book_row(&epub).comic_rtl, None);
+
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            json["book_directions"][cbz.to_string_lossy().as_ref()],
+            "rtl"
+        );
+        let back: Settings = serde_json::from_value(json).unwrap();
+        assert_eq!(back, settings);
+    }
+
+    #[test]
+    fn a_comic_set_right_to_left_is_made_into_a_right_to_left_epub() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cbz = ltr_cbz(&tmp.path().join("Night Train.cbz"));
+        let (_dir, epub) = with_direction(&cbz, deckle_comic::Direction::RightToLeft).unwrap();
+        assert_eq!(epub.file_name().unwrap(), "Night Train.epub");
+        let info = inspect(&epub).unwrap();
+        assert!(info.fixed_layout && info.right_to_left);
+
+        // A page folder keeps its whole name, as the library names its EPUB.
+        let pages = tmp.path().join("Vol. 2");
+        std::fs::create_dir(&pages).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::RgbImage::new(4, 6)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(pages.join("1.png"), png.into_inner()).unwrap();
+        let (_dir, epub) = with_direction(&pages, deckle_comic::Direction::LeftToRight).unwrap();
+        assert_eq!(epub.file_name().unwrap(), "Vol. 2.epub");
+        assert!(!inspect(&epub).unwrap().right_to_left);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_comic_set_right_to_left_is_sent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let cbz = ltr_cbz(&tmp.path().join("Night Train.cbz"));
+        let fake = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../deckle-core/tests/fake_previewer/ok.sh");
+        let mut settings = Settings {
+            previewer_path: Some(fake.to_string_lossy().into_owned()),
+            pages_auto: false,
+            ..Settings::default()
+        };
+        settings
+            .book_directions
+            .insert(cbz.to_string_lossy().into_owned(), ReadingDirection::Rtl);
+        let mut events: Vec<ProgressEvent> = Vec::new();
+        run_books_inner(
+            &[RunRequest {
+                id: "c1".into(),
+                path: cbz.to_string_lossy().into_owned(),
+                cde: None,
+                asin: None,
+                upgrade_of: None,
+                cover: None,
+            }],
+            &RunTarget::Folder {
+                path: out.path().to_string_lossy().into_owned(),
+            },
+            &settings,
+            &mut |e| events.push(e),
+        );
+        let last = events.last().unwrap();
+        assert_eq!(last.status, "done", "{:?}", last.error);
+        let sent = PathBuf::from(last.delivered.as_deref().unwrap());
+        assert!(sent.starts_with(out.path()), "{}", sent.display());
+        assert!(
+            sent.file_stem()
+                .unwrap()
+                .to_string_lossy()
+                .contains("Night Train"),
+            "{}",
+            sent.display()
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_comic_that_wont_convert_in_its_set_order_fails_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let broken = tmp.path().join("Broken.cbz");
+        std::fs::write(&broken, b"not a zip").unwrap();
+        let mut settings = Settings::default();
+        settings
+            .book_directions
+            .insert(broken.to_string_lossy().into_owned(), ReadingDirection::Rtl);
+        let mut events: Vec<ProgressEvent> = Vec::new();
+        run_books_inner(
+            &[RunRequest {
+                id: "c1".into(),
+                path: broken.to_string_lossy().into_owned(),
+                cde: None,
+                asin: None,
+                upgrade_of: None,
+                cover: None,
+            }],
+            &RunTarget::Folder {
+                path: tmp.path().to_string_lossy().into_owned(),
+            },
+            &settings,
+            &mut |e| events.push(e),
+        );
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].status, "failed");
+        assert!(events[0].error.is_some());
     }
 
     #[test]
