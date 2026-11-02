@@ -465,8 +465,9 @@ function Deckle() {
 
   const start = async (target: RunTarget) => {
     if (runnable.length === 0 || busy) return;
-    // A finished KFX is copied as is; only EPUBs need Kindle Previewer.
-    if (!previewer?.found && runnable.some((b) => b.mode !== "ready")) {
+    // A finished KFX is copied as is; only EPUBs need Kindle Previewer. A reMarkable gets EPUB
+    // or an image PDF, never KFX, so it needs no Previewer either.
+    if (!previewer?.found && target.kind !== "remarkable" && runnable.some((b) => b.mode !== "ready")) {
       // No Previewer to download on the server: say why, nothing to open.
       if (caps.web) {
         setNotice(PREVIEWER_REASON);
@@ -501,6 +502,10 @@ function Deckle() {
     const dir = await platform.pickFolder({});
     if (dir !== null) start({ kind: "folder", path: dir });
   };
+
+  // A comic as an image PDF, anything else as EPUB, into the reMarkable's outbox; it goes when
+  // the tablet answers (fixed-layout spec §12.4).
+  const sendToRemarkable = () => start({ kind: "remarkable" });
 
   // `--export-to DIR` on the command line: run as soon as the books and Previewer status are in.
   useEffect(() => {
@@ -789,6 +794,16 @@ function Deckle() {
               <button className="quiet" onClick={exportToFolder} disabled={busy || runnable.length === 0}>
                 Export to folder…
               </button>
+              {!caps.web && (
+                <button
+                  className="quiet"
+                  onClick={sendToRemarkable}
+                  disabled={busy || runnable.length === 0}
+                  title="A comic as an image PDF fitted to its screen, anything else as EPUB, over the tablet's USB web interface. Waits in the outbox until it answers."
+                >
+                  Send to reMarkable
+                </button>
+              )}
               <button className="quiet" disabled={busy || parts.length < 2} title={parts.length < 2 ? "Add at least two files to bind them." : undefined} onClick={() => setBindOpen(true)}>
                 Bind into one book…
               </button>

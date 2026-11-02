@@ -11,21 +11,33 @@
 
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// The tablet's address on its USB network.
 pub const ADDRESS: &str = "http://10.11.99.1";
 
 /// `DECKLE_REMARKABLE_URL` stands in for [`ADDRESS`] (tests, or a tablet reached otherwise).
 pub fn base() -> String {
+    base_for(None)
+}
+
+/// The address to ask: `DECKLE_REMARKABLE_URL`, else `address` (`[remarkable] address`, a
+/// tablet reached over Wi-Fi), else the USB link's (fixed-layout spec §12.4).
+pub fn base_for(address: Option<&str>) -> String {
     std::env::var("DECKLE_REMARKABLE_URL")
         .ok()
         .filter(|u| !u.is_empty())
+        .or_else(|| address.map(|a| a.trim_end_matches('/').to_owned()))
         .unwrap_or_else(|| ADDRESS.to_owned())
 }
 
+/// The reMarkable at `address` (or the USB link), when its web interface answers.
+pub fn detect_with(address: Option<&str>) -> Option<Remarkable> {
+    detect_at(&base_for(address))
+}
+
 /// A reMarkable that answered.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Remarkable {
     pub base: String,
 }
@@ -301,6 +313,16 @@ pub mod tests {
             .join("../../fixtures/comic/fixed-layout-rtl.epub");
         let err = book(&publisher, &opts, screen, page).unwrap_err();
         assert!(err.contains("publisher's fixed-layout"), "{err}");
+    }
+
+    #[test]
+    fn the_config_address_stands_in_for_the_usb_link() {
+        // The env var is the tests' own; it isn't set in the unit tests.
+        assert_eq!(base_for(None), ADDRESS);
+        assert_eq!(
+            base_for(Some("http://192.168.1.50/")),
+            "http://192.168.1.50"
+        );
     }
 
     #[test]

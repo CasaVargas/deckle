@@ -139,6 +139,40 @@ fn an_absent_tablet_keeps_the_paper_for_the_next_push_and_it_goes_once() {
     assert_eq!(uploads.lock().unwrap().len(), 1);
 }
 
+/// `[remarkable] address` reaches a tablet off the USB link (fixed-layout spec §12.4): with the
+/// test env var blank, the configured address is where the paper goes; `deckle devices` shows
+/// the tablet, and says when none answers.
+#[test]
+fn the_configured_address_stands_in_for_the_usb_link_and_devices_lists_the_tablet() {
+    let (base, uploads) = tablet("[]");
+    let (_tmp, home) = setup(&format!("address = \"{base}\"\n"));
+    let o = deckle(&home, "").args(["devices"]).output().unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out}");
+    assert!(
+        out.contains(&format!(
+            "reMarkable at {base}  USB web interface  sync id \"remarkable/usb\""
+        )),
+        "{out}"
+    );
+    let o = deckle(&home, "")
+        .args(["digest", "run", "--date", "2026-10-23"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    assert_eq!(uploads.lock().unwrap().len(), 1);
+
+    // No tablet at the configured address: `devices` says so.
+    let free = TcpListener::bind("127.0.0.1:0").unwrap();
+    let gone = format!("http://{}", free.local_addr().unwrap());
+    drop(free);
+    let (_tmp, home) = setup(&format!("address = \"{gone}\"\n"));
+    let o = deckle(&home, "").args(["devices"]).output().unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out}");
+    assert!(out.contains("no reMarkable answered"), "{out}");
+}
+
 /// A one-page CBZ at `<dir>/<name>`.
 fn cbz(dir: &Path, name: &str) -> PathBuf {
     let img = image::RgbImage::from_pixel(600, 800, image::Rgb([200, 40, 40]));

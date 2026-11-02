@@ -43,6 +43,20 @@ export default function RemarkableCard({
             <span>Long reads too, as EPUBs</span>
             <Switch label="Long reads to the reMarkable" checked={current.books} onChange={(on) => change({ books: on })} />
           </div>
+          <div className="export-row">
+            <label>
+              <span className="label">Address</span>
+              <input
+                type="url"
+                placeholder="http://10.11.99.1 (USB)"
+                value={current.address ?? ""}
+                onChange={(ev) => change({ address: ev.target.value.trim() || undefined })}
+              />
+            </label>
+            <p className="muted small">
+              Leave blank for the USB cable. Fill in the tablet's address on your Wi-Fi if you've put its web interface there.
+            </p>
+          </div>
         </>
       )}
     </section>

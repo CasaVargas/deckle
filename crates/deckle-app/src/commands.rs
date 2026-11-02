@@ -151,9 +151,18 @@ impl Default for Settings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum RunTarget {
-    Device { root: String },
-    Mtp { bus: u8, address: u8 },
-    Folder { path: String },
+    Device {
+        root: String,
+    },
+    Mtp {
+        bus: u8,
+        address: u8,
+    },
+    Folder {
+        path: String,
+    },
+    /// The reMarkable's outbox, pushed when the tablet answers (fixed-layout spec §12.4).
+    Remarkable,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -815,6 +824,133 @@ pub fn resolve_run_target(target: &RunTarget) -> Result<Target, String> {
             .find(|d| d.root.to_string_lossy() == *root)
             .map(Target::MassStorage)
             .ok_or_else(|| format!("Kindle at {root} is no longer connected")),
+        RunTarget::Remarkable => Err("a reMarkable has its own send".into()),
+    }
+}
+
+/// Send to reMarkable (fixed-layout spec §12.4): each book made as the tablet takes it
+/// (`remarkable::book`: a comic as an image PDF for `[remarkable] screen`, else an EPUB), into
+/// the outbox at `queue`, then one push to the tablet at `address` (or the USB link) when it
+/// answers. One final event per book, after the push: delivered, or waiting in the outbox.
+pub fn send_books_to_remarkable(
+    books: &[RunRequest],
+    settings: &Settings,
+    rm: &deckle_digest::config::RemarkableConfig,
+    queue: &deckle_core::queue::Queue,
+    address: Option<&str>,
+    emit: &mut dyn FnMut(ProgressEvent),
+) {
+    let (w, h) = rm.screen.pixels();
+    let screen = deckle_comic::pages::Screen {
+        width: w,
+        height: h,
+        color: rm.photos() == deckle_digest::config::Photos::Color,
+    };
+    let page = rm.screen.page();
+    let llm = llm_config(settings);
+    let opts = deckle_core::reader::BookOptions {
+        whos_who: settings.xray.then(|| deckle_core::xray::XRayOptions {
+            llm: llm.clone(),
+            wikipedia: settings.wikipedia,
+        }),
+        recaps: extras(settings).zip(llm).map(|(e, llm)| e.options(llm)),
+    };
+    let work = match tempfile::tempdir() {
+        Ok(w) => w,
+        Err(e) => {
+            for b in books {
+                emit(failed(&b.id, e.to_string()));
+            }
+            return;
+        }
+    };
+    // Each book's queued name, or why it wasn't.
+    let mut queued: Vec<(String, Result<String, String>)> = Vec::with_capacity(books.len());
+    for (i, b) in books.iter().enumerate() {
+        emit(ProgressEvent {
+            id: b.id.clone(),
+            status: "running".into(),
+            stage: Some("deliver".into()),
+            delivered: None,
+            pages: None,
+            warnings: Vec::new(),
+            error: None,
+            cde: None,
+            asin: None,
+            reason: None,
+            matched: None,
+            xray: None,
+            word_wise: None,
+            replaced: Vec::new(),
+        });
+        let source = Path::new(&b.path);
+        let made = (|| {
+            // A comic in the order the owner set, as a Kindle send does (#280).
+            let comic = comic_direction(settings, source)
+                .map(|d| with_direction(source, d))
+                .transpose()?;
+            let run_path = comic.as_ref().map_or(source, |(_, epub)| epub.as_path());
+            let book = deckle_core::remarkable::book(run_path, &opts, screen, page)?;
+            let stem = source
+                .file_stem()
+                .map(|s| deckle_core::deliver::sanitize(&s.to_string_lossy()))
+                .unwrap_or_else(|| "book".into());
+            let name = format!("{stem}{}", book.ext);
+            let file = work.path().join(format!("{i}{}", book.ext));
+            std::fs::write(&file, &book.bytes).map_err(|e| e.to_string())?;
+            queue
+                .add(&file, &name, None)
+                .map_err(|e| format!("outbox: {e}"))?;
+            Ok::<_, String>(name)
+        })();
+        queued.push((b.id.clone(), made));
+    }
+    let push = queued
+        .iter()
+        .any(|(_, r)| r.is_ok())
+        .then(|| deckle_core::remarkable::detect_with(address))
+        .flatten()
+        .map(|r| deckle_core::sync::run_remarkable(queue, &r));
+    for (id, made) in queued {
+        let name = match made {
+            Ok(name) => name,
+            Err(e) => {
+                emit(failed(&id, e));
+                continue;
+            }
+        };
+        let went = push
+            .as_ref()
+            .is_some_and(|p| p.uploaded.contains(&name) || p.already.contains(&name));
+        let error = push
+            .as_ref()
+            .and_then(|p| {
+                p.errors
+                    .iter()
+                    .find(|e| e.starts_with(&format!("{name}: ")))
+            })
+            .cloned();
+        let delivered = if went {
+            format!("reMarkable: {name}")
+        } else {
+            format!("{name}, waiting in the reMarkable's outbox")
+        };
+        emit(ProgressEvent {
+            id,
+            status: "done".into(),
+            stage: None,
+            delivered: Some(delivered),
+            pages: None,
+            warnings: error.into_iter().collect(),
+            error: None,
+            cde: None,
+            asin: None,
+            reason: None,
+            matched: None,
+            xray: None,
+            word_wise: None,
+            replaced: Vec::new(),
+        });
     }
 }
 
@@ -864,6 +1000,14 @@ pub fn run_books_with(
     verified: bool,
     emit: &mut dyn FnMut(ProgressEvent),
 ) -> Option<String> {
+    if let RunTarget::Remarkable = target {
+        let rm = deckle_digest::Config::load(&deckle_digest::config::default_path())
+            .unwrap_or_default()
+            .remarkable;
+        let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::remarkable_dir());
+        send_books_to_remarkable(books, settings, &rm, &queue, rm.address(), emit);
+        return None;
+    }
     let target = match resolve_run_target(target) {
         Ok(t) => t,
         Err(e) => {
@@ -1183,7 +1327,8 @@ pub fn set_device_options(
 pub fn plan_books(state: &AppState, books: Vec<RunRequest>, target: RunTarget) -> Vec<PlanRow> {
     let reg = DeviceRegistry::load(&state.devices_file);
     let (class, profile) = match &target {
-        RunTarget::Folder { .. } => (DeviceClass::Folder, None),
+        // A reMarkable gets no KFX, so the cover rule has nothing to decide: as a folder.
+        RunTarget::Folder { .. } | RunTarget::Remarkable => (DeviceClass::Folder, None),
         RunTarget::Mtp { bus, address } => {
             let p = deckle_transport::usb::detect()
                 .into_iter()
@@ -1301,7 +1446,7 @@ pub fn run_books(
             .into_iter()
             .find(|m| m.bus == *bus && m.address == *address)
             .and_then(|m| reg.get(&seen_mtp(&m).key).cloned()),
-        RunTarget::Folder { .. } => None,
+        RunTarget::Folder { .. } | RunTarget::Remarkable => None,
     };
     let (device_override, verified) = (
         profile.as_ref().and_then(|p| p.cde_override.clone()),
@@ -2260,5 +2405,133 @@ mod tests {
         assert_eq!(result["id"], "gone");
         assert_eq!(result["status"], "failed");
         assert!(result["error"].is_string(), "{result}");
+    }
+}
+
+#[cfg(test)]
+mod remarkable_tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpListener;
+    use std::sync::Mutex;
+
+    /// A stand-in tablet: lists nothing, records each upload's body.
+    fn tablet() -> (String, Arc<Mutex<Vec<Vec<u8>>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let uploads = Arc::new(Mutex::new(Vec::new()));
+        let seen = uploads.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut r = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                if r.read_line(&mut line).is_err() {
+                    continue;
+                }
+                let mut len = 0usize;
+                loop {
+                    let mut h = String::new();
+                    if r.read_line(&mut h).is_err() || h == "\r\n" || h.is_empty() {
+                        break;
+                    }
+                    if let Some(v) = h.to_ascii_lowercase().strip_prefix("content-length:") {
+                        len = v.trim().parse().unwrap_or(0);
+                    }
+                }
+                let mut body = vec![0; len];
+                let _ = r.read_exact(&mut body);
+                let (status, reply) = if line.starts_with("GET /documents/") {
+                    ("200 OK", "[]")
+                } else if line.starts_with("POST /upload") {
+                    seen.lock().unwrap().push(body);
+                    ("201 Created", "{}")
+                } else {
+                    ("404 Not Found", "")
+                };
+                let mut s = stream;
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                );
+            }
+        });
+        (base, uploads)
+    }
+
+    fn request(id: &str, path: &Path) -> RunRequest {
+        RunRequest {
+            id: id.into(),
+            path: path.to_string_lossy().into_owned(),
+            cde: None,
+            asin: None,
+            upgrade_of: None,
+            cover: None,
+        }
+    }
+
+    /// Send to reMarkable (fixed-layout spec §12.4): a comic goes as a PDF, a missing book
+    /// fails, and with no tablet the book waits in the outbox.
+    #[test]
+    fn a_comic_goes_to_the_tablet_as_a_pdf_and_waits_when_none_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let img = image::RgbImage::from_pixel(600, 800, image::Rgb([200, 40, 40]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let cbz = dir.path().join("Ink.cbz");
+        let mut zw = zip::ZipWriter::new(std::fs::File::create(&cbz).unwrap());
+        zw.start_file("1.png", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(png.get_ref()).unwrap();
+        zw.finish().unwrap();
+        let settings = Settings::default();
+        let rm = deckle_digest::config::RemarkableConfig::default();
+        let queue = deckle_core::queue::Queue::new(dir.path().join("outbox"));
+
+        let (base, uploads) = tablet();
+        let mut events = Vec::new();
+        send_books_to_remarkable(
+            &[
+                request("comic", &cbz),
+                request("gone", &dir.path().join("missing.epub")),
+            ],
+            &settings,
+            &rm,
+            &queue,
+            Some(&base),
+            &mut |e| events.push(e),
+        );
+        let finals: Vec<&ProgressEvent> = events.iter().filter(|e| e.status != "running").collect();
+        assert_eq!(finals.len(), 2, "{events:?}");
+        let comic = finals.iter().find(|e| e.id == "comic").unwrap();
+        assert_eq!(comic.status, "done");
+        assert_eq!(comic.delivered.as_deref(), Some("reMarkable: Ink.pdf"));
+        let gone = finals.iter().find(|e| e.id == "gone").unwrap();
+        assert_eq!(gone.status, "failed");
+        let got = uploads.lock().unwrap();
+        assert_eq!(got.len(), 1);
+        assert!(got[0].windows(5).any(|w| w == b"%PDF-"));
+        assert!(queue.pending().is_empty(), "sent, so nothing waits");
+
+        // No tablet: the book waits.
+        let free = TcpListener::bind("127.0.0.1:0").unwrap();
+        let gone = format!("http://{}", free.local_addr().unwrap());
+        drop(free);
+        let mut events = Vec::new();
+        send_books_to_remarkable(
+            &[request("comic", &cbz)],
+            &settings,
+            &rm,
+            &queue,
+            Some(&gone),
+            &mut |e| events.push(e),
+        );
+        let last = events.last().unwrap();
+        assert_eq!(last.status, "done");
+        assert_eq!(
+            last.delivered.as_deref(),
+            Some("Ink.pdf, waiting in the reMarkable's outbox")
+        );
+        assert_eq!(queue.pending().len(), 1);
     }
 }

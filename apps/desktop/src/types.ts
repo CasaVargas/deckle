@@ -270,7 +270,9 @@ export interface ProgressEvent {
 export type RunTarget =
   | { kind: "device"; root: string }
   | { kind: "mtp"; bus: number; address: number }
-  | { kind: "folder"; path: string };
+  | { kind: "folder"; path: string }
+  /** The reMarkable's outbox, pushed when the tablet answers (fixed-layout spec §12.4). */
+  | { kind: "remarkable" };
 
 export const STAGES = ["inspect", "normalize", "convert", "repackage", "enrich", "deliver"] as const;
 export const STAGE_LABEL: Record<string, string> = {
@@ -460,6 +462,8 @@ export interface RemarkableConfig {
   /** Absent: the screen's own choice (color on a Paper Pro). */
   photos?: "color" | "gray";
   books: boolean;
+  /** The tablet's address when its web interface is reached over Wi-Fi; absent for USB. */
+  address?: string;
 }
 
 export interface PressSetupStatus {

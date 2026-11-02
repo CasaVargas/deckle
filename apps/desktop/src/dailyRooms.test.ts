@@ -45,6 +45,10 @@ test("each place says what it's set to", () => {
   const status = Object.fromEntries(rows.map((r) => [r.key, r.status]));
   expect(status).toEqual({ kindle: "Keeps 1 edition", email: "me@kindle.com", remarkable: "reMarkable Paper Pro", exports: "Deckle Daily", readers: "Automatic" });
   expect(destinations(cfg({ export: [one, newExport("/x/Boox", [one])] })).find((r) => r.key === "exports")?.status).toBe("2 folders");
+  // A tablet reached over Wi-Fi says so (fixed-layout spec §12.4).
+  const how = (rm: DailyConfig["remarkable"]) => destinations(cfg({ remarkable: rm })).find((r) => r.key === "remarkable")?.how;
+  expect(how({ enabled: true, screen: "remarkable-2", books: false })).toBe("A PDF over its USB web interface");
+  expect(how({ enabled: true, screen: "remarkable-2", books: false, address: "http://192.168.1.50" })).toBe("A PDF over Wi-Fi at http://192.168.1.50");
 });
 
 test("press days toggle in week order, and say themselves", () => {

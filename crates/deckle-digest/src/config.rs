@@ -1246,9 +1246,21 @@ pub struct RemarkableConfig {
     pub photos: Option<Photos>,
     /// Also the long reads, as EPUBs.
     pub books: bool,
+    /// The tablet's address when it isn't on the USB link (`http://10.11.99.1`): the web
+    /// interface put on the home network (fixed-layout spec §12.4). Unset for USB.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
 }
 
 impl RemarkableConfig {
+    /// The address to ask: `address` when set and not blank, else the USB link's.
+    pub fn address(&self) -> Option<&str> {
+        self.address
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+    }
+
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -1538,6 +1550,8 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # enabled = true
 # screen = "remarkable-2"         # or remarkable-paper-pro, remarkable-paper-pro-move
 # books = false                   # also the long reads, as EPUBs
+# address = "http://10.11.99.1"   # or the tablet's address on your Wi-Fi, when its web
+#                                 # interface is reachable there
 
 # KOReader on any reader can browse your papers (an OPDS catalog) and sync its reading
 # progress here, over the home network. Set the password with `deckle reader-server password`.
