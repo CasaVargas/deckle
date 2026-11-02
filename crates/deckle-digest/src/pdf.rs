@@ -68,8 +68,10 @@ impl Screen {
     /// The photos it shows best: in color on a color screen.
     pub fn photos(self) -> Photos {
         match self {
-            Screen::RemarkablePaperPro | Screen::Ipad => Photos::Color,
-            _ => Photos::Gray,
+            Screen::RemarkablePaperPro | Screen::RemarkablePaperProMove | Screen::Ipad => {
+                Photos::Color
+            }
+            Screen::Remarkable2 | Screen::A5 => Photos::Gray,
         }
     }
 }
@@ -2939,8 +2941,12 @@ mod tests {
             "{w} {h}"
         );
         assert_eq!(Screen::A5.page(), (420.0, 595.0));
+        // Both Paper Pros carry the colour panel; the 2 and paper are grey (#297).
         assert_eq!(Screen::RemarkablePaperPro.photos(), Photos::Color);
+        assert_eq!(Screen::RemarkablePaperProMove.photos(), Photos::Color);
+        assert_eq!(Screen::Ipad.photos(), Photos::Color);
         assert_eq!(Screen::Remarkable2.photos(), Photos::Gray);
+        assert_eq!(Screen::A5.photos(), Photos::Gray);
         let parsed: Screen = serde_json::from_str("\"remarkable-2\"").unwrap();
         assert_eq!(parsed, Screen::Remarkable2);
         let parsed: Screen = serde_json::from_str("\"remarkable-paper-pro-move\"").unwrap();
