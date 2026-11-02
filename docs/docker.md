@@ -245,26 +245,27 @@ Mount your old Morgue under `/data/Deckle` if you want the history.
 ## The AI editor, with Ollama beside it
 
 The Daily's optional editor (`[llm]` in `digest.toml`; see the README) can run on a model in
-a second container, so nothing leaves your server. Add an `ollama` service (the commented
-block in `compose.example.yml`), then in the web app choose **Settings → AI → On the server**
-and put `http://ollama:11434` under Advanced → Address (every paper with the editor on follows
-it), or name it in the paper's own table:
-
-```toml
-[llm]
-enabled = true
-provider = "ollama"
-endpoint = "http://ollama:11434"
-```
+a second container, so nothing leaves your server. The compose file carries an `ollama`
+service behind the `ai` profile, and `DECKLE_OLLAMA_URL` already points Deckle at it:
 
 ```sh
-docker compose exec deckle deckle llm pull     # qwen3:4b, about 2.6 GB, into the ollama volume
+docker compose --profile ai up -d
+```
+
+Then in the web app choose **Settings → AI → On the server**: the checklist finds Ollama,
+**Download** pulls the model into the `./ollama` folder, and **Try it** proves it answers. Every
+paper with the editor on follows that choice. The same from the shell:
+
+```sh
+docker compose exec deckle deckle llm pull     # qwen3:4b, about 2.6 GB
 docker compose exec deckle deckle llm check    # running, installed, answers
 ```
 
-A CPU-only server builds the paper's edit in a few minutes; a GPU passed to the `ollama`
-service (see Ollama's image notes) in well under one. The model stays in the `ollama` volume
-across updates.
+A paper that should use a different service names it in its own table (`provider`, `model`,
+`endpoint` under `[llm]`). A CPU-only server builds the paper's edit in a few minutes; a GPU
+passed to the `ollama` service (see Ollama's image notes) in well under one. The model stays
+in `./ollama` across updates. `DECKLE_OLLAMA_URL` (or an `OLLAMA_HOST` that is a URL) is where
+Deckle looks whenever the setting leaves the address blank.
 
 ## Linux without Docker
 

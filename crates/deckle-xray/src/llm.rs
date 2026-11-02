@@ -503,8 +503,14 @@ fn send_completion(
     mut body: serde_json::Value,
     post: &mut Post<'_>,
 ) -> Result<(String, bool), LlmError> {
+    let env_base;
     let base = if endpoint.is_empty() {
-        provider.default_endpoint()
+        if provider == Provider::Ollama {
+            env_base = default_ollama_endpoint();
+            env_base.as_str()
+        } else {
+            provider.default_endpoint()
+        }
     } else {
         endpoint
     }
@@ -807,10 +813,25 @@ pub fn check(endpoint: &str, model: &str, get: &mut Get<'_>, post: &mut Post<'_>
     }
 }
 
+/// Where Ollama is when the setting doesn't say: `DECKLE_OLLAMA_URL` (the compose file's `ai`
+/// profile sets it to the `ollama` service), else an `OLLAMA_HOST` that is a URL (Ollama's own
+/// variable), else this computer.
+pub fn default_ollama_endpoint() -> String {
+    for var in ["DECKLE_OLLAMA_URL", "OLLAMA_HOST"] {
+        if let Ok(v) = std::env::var(var) {
+            let v = v.trim().trim_end_matches('/').to_owned();
+            if v.starts_with("http://") || v.starts_with("https://") {
+                return v;
+            }
+        }
+    }
+    Provider::Ollama.default_endpoint().to_owned()
+}
+
 fn ollama_base(endpoint: &str) -> String {
     let e = endpoint.trim().trim_end_matches('/');
     if e.is_empty() {
-        Provider::Ollama.default_endpoint().to_owned()
+        default_ollama_endpoint()
     } else {
         e.to_owned()
     }

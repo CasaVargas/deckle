@@ -597,3 +597,30 @@ fn check_runs_the_three_steps_and_stops_at_the_first_that_fails() {
     });
     assert!(c.model.starts_with("qwen3:"), "{}", c.model);
 }
+
+#[test]
+fn a_blank_ollama_address_follows_the_environment() {
+    use deckle_xray::llm::default_ollama_endpoint;
+    // Other tests don't set these, so the process-wide variable is ours to try.
+    // SAFETY: this test's process; nothing else reads the environment concurrently here.
+    unsafe {
+        std::env::set_var("DECKLE_OLLAMA_URL", "http://ollama:11434/");
+    }
+    assert_eq!(default_ollama_endpoint(), "http://ollama:11434");
+    unsafe {
+        std::env::remove_var("DECKLE_OLLAMA_URL");
+        std::env::set_var("OLLAMA_HOST", "0.0.0.0:11434");
+    }
+    assert_eq!(
+        default_ollama_endpoint(),
+        "http://localhost:11434",
+        "not a URL: ignored"
+    );
+    unsafe {
+        std::env::set_var("OLLAMA_HOST", "http://nas.local:11434");
+    }
+    assert_eq!(default_ollama_endpoint(), "http://nas.local:11434");
+    unsafe {
+        std::env::remove_var("OLLAMA_HOST");
+    }
+}
