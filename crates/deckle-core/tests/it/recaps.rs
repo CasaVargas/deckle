@@ -1218,3 +1218,24 @@ fn the_extras_are_named_in_warnings() {
         "chapter recaps, the book summary and the series recap"
     );
 }
+
+#[test]
+fn a_comment_before_a_heading_keeps_the_recap_out_of_it() {
+    let body = format!(
+        "<h2>Two</h2>{}<!-- <b> old markup --><h2>Three</h2>{}",
+        para(900),
+        para(900)
+    );
+    let r = run(&epub(&[("One", &body)]), local(), None, |_, _| {
+        Ok("Recap.".into())
+    });
+    let c0 = chapter(&r.bytes, 0);
+    assert!(c0.contains("--><aside class=\"deckle-recap\""), "{c0}");
+    parses(&c0);
+    let doc = roxmltree::Document::parse(&c0).unwrap();
+    let asides = doc
+        .descendants()
+        .filter(|n| n.has_tag_name("aside"))
+        .count();
+    assert_eq!(asides, 2, "both recaps are elements, not comment text");
+}

@@ -1125,7 +1125,8 @@ fn heading_text(raw: &str) -> String {
 fn back_up(xhtml: &str, mut at: usize) -> usize {
     loop {
         let before = xhtml[..at].trim_end();
-        if !before.ends_with('>') {
+        // Not into a comment: its `<`s aren't tags.
+        if !before.ends_with('>') || before.ends_with("-->") {
             return at;
         }
         let Some(lt) = before.rfind('<') else {

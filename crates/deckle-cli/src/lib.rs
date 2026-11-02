@@ -110,6 +110,22 @@ fn notes_line(n: &deckle_core::notes::NotesReport) -> String {
     )
 }
 
+/// `Recaps: 12/12 chapters (5 cached, qwen3:8b), Summary page, Previously page` (AI extras
+/// design §4).
+fn recaps_line(r: &deckle_core::recaps::RecapSummary) -> String {
+    let pages: String = [
+        (r.summary, ", Summary page"),
+        (r.series, ", Previously page"),
+    ]
+    .into_iter()
+    .filter_map(|(on, what)| on.then_some(what))
+    .collect();
+    format!(
+        "\n      Recaps: {}/{} chapters ({} cached, {}){pages}",
+        r.recapped, r.chapters, r.cached, r.model
+    )
+}
+
 fn emit<T: serde::Serialize>(
     json: bool,
     value: &T,
@@ -531,6 +547,13 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     summary: book_summary,
                     series: series_recap,
                 });
+            if extras.is_some()
+                && llm
+                    .config(llm_model.clone(), llm_endpoint.clone())
+                    .is_none()
+            {
+                return Err("--recaps, --book-summary and --series-recap need --llm".into());
+            }
             if kindle.is_some() && to != "device" {
                 return Err("--kindle sends to a Kindle; leave out --to".into());
             }
@@ -553,15 +576,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                         llm: config.clone(),
                         wikipedia,
                     });
-                // As the Kindle pipeline adds them.
-                let recaps = match (&extras, config) {
-                    (None, _) => None,
-                    (Some(_), None) => {
-                        eprintln!("AI extras need an LLM (--llm)");
-                        None
-                    }
-                    (Some(e), Some(llm)) => Some(e.options(llm)),
-                };
+                // As the Kindle pipeline adds them (an LLM is there: checked above).
+                let recaps = extras.as_ref().zip(config).map(|(e, llm)| e.options(llm));
                 let opts = deckle_core::reader::BookOptions { whos_who, recaps };
                 return send_to_reader(&epubs, &reader, &opts, json);
             }
@@ -663,7 +679,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                     .map(|r| match (&r.error, &r.delivered) {
                         (Some(e), _) => format!("FAIL  {}\n      {e}", r.input.display()),
                         (None, Some(d)) => format!(
-                            "OK    {}\n      -> {}{}{}{}{}{}{}{}{}{}",
+                            "OK    {}\n      -> {}{}{}{}{}{}{}{}{}{}{}",
                             r.input.display(),
                             d.display(),
                             r.pages
@@ -687,6 +703,7 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                                     w.hints, w.level, w.dictionary
                                 ))
                                 .unwrap_or_default(),
+                            r.recaps.as_ref().map(recaps_line).unwrap_or_default(),
                             r.normalize
                                 .cover_generated
                                 .as_ref()
@@ -6199,6 +6216,27 @@ mod tests {
     use super::*;
     use deckle_core::pipeline::XRayMode;
     use deckle_digest::reading::Outcome;
+
+    #[test]
+    fn recaps_line_counts_chapters_and_pages() {
+        let mut r = deckle_core::recaps::RecapSummary {
+            chapters: 12,
+            recapped: 12,
+            cached: 5,
+            model: "qwen3:8b".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            recaps_line(&r),
+            "\n      Recaps: 12/12 chapters (5 cached, qwen3:8b)"
+        );
+        r.summary = true;
+        r.series = true;
+        assert_eq!(
+            recaps_line(&r),
+            "\n      Recaps: 12/12 chapters (5 cached, qwen3:8b), Summary page, Previously page"
+        );
+    }
 
     #[test]
     fn direction_makes_each_comic_an_epub_and_refuses_anything_else() {

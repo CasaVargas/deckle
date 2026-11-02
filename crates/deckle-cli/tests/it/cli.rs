@@ -1062,3 +1062,26 @@ fn email_only_paper_builds_without_previewer() {
         .collect();
     assert_eq!(kept.len(), 1, "{kept:?}");
 }
+
+#[test]
+fn ai_extras_without_an_llm_fail_before_any_work() {
+    for flag in ["--recaps", "--book-summary", "--series-recap"] {
+        let out = Command::cargo_bin("deckle")
+            .unwrap()
+            .args([
+                "run",
+                "/nonexistent/book.epub",
+                "--to",
+                "/nonexistent/out",
+                flag,
+            ])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{flag}");
+        let err = String::from_utf8(out.stderr).unwrap();
+        assert!(
+            err.contains("--recaps, --book-summary and --series-recap need --llm"),
+            "{flag}: {err}"
+        );
+    }
+}
