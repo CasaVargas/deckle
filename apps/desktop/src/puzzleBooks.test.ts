@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { bookLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices } from "./puzzlesView";
+import { bookLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices } from "./puzzleBooks";
 import type { MadePuzzleBook, PuzzleKind } from "./types";
 
 const cross: PuzzleKind = { key: "crossword", name: "crossword", title: "Crossword", blurb: "", sizes: [5, 15], default_size: 11, takes: "clued", graded: true, difficulties: ["a", "b", "c"] };

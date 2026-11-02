@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { platform } from "./platform";
 import PuzzlePreview from "./PuzzlePreview";
-import { DIFFICULTIES, SCREENS, bookLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices } from "./puzzlesView";
+import { DIFFICULTIES, SCREENS, bookLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices } from "./puzzleBooks";
 import type { DeviceRow, MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzlePreview as Preview, PuzzleProgress, RunTarget } from "./types";
 
 interface Props {

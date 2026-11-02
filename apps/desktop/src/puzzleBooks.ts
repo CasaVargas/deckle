@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Puzzles tab's pure parts (Puzzles tab design §1): the request a kind starts from, what
 // its options mean, and the lines of copy worked out from a book. Beside the tab, as
-// cookbookRooms.ts is beside the Cookbook.
+// cookbookRooms.ts is beside the Cookbook. (Not puzzlesView.ts: on a Mac or Windows that name
+// is the same file as PuzzlesView.tsx.)
 import type { MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzleKindKey } from "./types";
 
 /** The screens a book can be laid out for, as `--screen` names them. */
