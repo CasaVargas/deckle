@@ -210,15 +210,15 @@ fn options(r: &BookRequest) -> Result<(BookOptions, PageSize, Vec<String>), Stri
         }
         o.quotes = Some(q);
     }
-    if let Some(p) = r.picture.as_deref().filter(|p| !p.trim().is_empty()) {
-        if kind == Kind::Nonogram {
-            let bytes = std::fs::read(p).map_err(|e| format!("can't read the picture: {e}"))?;
-            let name = Path::new(p)
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            o.picture = Some((bytes, name));
-        }
+    if let Some(p) = r.picture.as_deref().filter(|p| !p.trim().is_empty())
+        && kind == Kind::Nonogram
+    {
+        let bytes = std::fs::read(p).map_err(|e| format!("can't read the picture: {e}"))?;
+        let name = Path::new(p)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        o.picture = Some((bytes, name));
     }
     Ok((o, page, warnings))
 }
@@ -473,7 +473,7 @@ pub fn list_in(dir: &Path) -> Vec<MadeBook> {
             Some((meta.modified().ok()?, made))
         })
         .collect();
-    out.sort_by(|a, b| b.0.cmp(&a.0));
+    out.sort_by_key(|a| std::cmp::Reverse(a.0));
     out.into_iter().map(|(_, m)| m).collect()
 }
 
