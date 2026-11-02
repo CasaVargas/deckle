@@ -83,10 +83,10 @@ London, Pemberley, Rosings, Hertfordshire …); noise remains in the long tail (
 most 120) in batches of 25, one request each, and asks for a JSON array
 `[{name, kind, description, aliases}]`: spoiler-free 1–2 sentence descriptions in the book's
 language, `person`/`term`, aliases among the listed names, and an empty description to drop
-noise. Anthropic Messages (`/v1/messages`, `x-api-key`, `anthropic-version 2023-06-01`) or any
-OpenAI-compatible chat endpoint (`<base>/chat/completions`, `Authorization: Bearer` when a key
-is set; none for local servers). The JSON array is extracted from a possibly fenced or chatty
-answer. A failed batch keeps the basic descriptions for its entities and adds a warning; the
+noise. Anthropic Messages (`/v1/messages`, `x-api-key`, `anthropic-version 2023-06-01`),
+Ollama's own API (`<base>/api/chat`, below) or any OpenAI-compatible chat endpoint
+(`<base>/chat/completions`, `Authorization: Bearer` when a key is set; none for local
+servers). The JSON array is extracted from a possibly fenced or chatty answer. A failed batch keeps the basic descriptions for its entities and adds a warning; the
 other batches still apply. The prompt names the book's author (a first-person narrator is
 usually the author), says any individual is a person, and lists sentence-start words and
 interjections ("Yeah", "Hey") as noise. It does **not** send the heuristic's person/term guess:
@@ -103,9 +103,24 @@ batch. OpenAI-compatible requests to a non-default endpoint also send
 server that rejects it with a 4xx gets the batch again without it. OpenAI's own endpoint and
 Anthropic never get the field.
 
+**Ollama natively (local-model design §4, 2026-11-02).** `Provider::Ollama` posts to
+`/api/chat` instead of the OpenAI shim, because only the native request takes
+`options.num_ctx` (8,192 for a batch; the Daily editor asks for 32,768), `think: false`, a
+`format` JSON schema (the entity array's, so a 4B model can't answer in prose) and
+`keep_alive` (10 min, so the model stays loaded between batches). `done_reason: "length"` is
+the truncation signal; a 200 with `{"error"}` (a model that isn't installed) is an HTTP-class
+error. The default endpoint is `http://localhost:11434` and the default model the one
+`llm::recommended_model` picks for the machine's memory: `qwen3:4b`, or `qwen3:8b` with 16 GB
+or more (`RECOMMENDED_MODELS`, pinned). `llm::probe` (`/api/version`, `/api/tags`),
+`llm::pull` (`/api/pull`, streamed NDJSON progress) and `llm::check` (server, model, a
+one-word test prompt) are what `deckle llm check` / `deckle llm pull` and the app's setting
+run. The batch size and part sizes stay as they are: they're the floor that also fits a
+server Deckle can't configure.
+
 Keys: `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`, or the API key field in the desktop settings
-(stored in Deckle's settings file; the keychain is a follow-up). Defaults: `claude-sonnet-5-5`,
-`gpt-5-mini`. `max_tokens` scales with the candidate count (1024 + 120 per entity, max 16384);
+(stored in Deckle's settings file; the keychain is a follow-up); Ollama needs none
+(`OLLAMA_API_KEY` only serves a proxy put in front of it). Defaults: `claude-sonnet-5-5`,
+`gpt-5-mini`, `qwen3:4b`. `max_tokens` scales with the candidate count (1024 + 120 per entity, max 16384);
 a `max_tokens` / `length` stop is reported as "answer truncated" rather than "not JSON".
 
 **Deferred from design §7 (decision 2026-10-19):** no per-book token budget and no cost

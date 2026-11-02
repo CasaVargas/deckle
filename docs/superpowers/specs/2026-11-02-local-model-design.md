@@ -1,6 +1,6 @@
 # A model on this computer, without the setup — design
 
-**Status:** draft for discussion, 2026-11-02 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** increment 1 (§6) built, 2026-11-02 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-18-deckle-design.md` (§7 LLM policy), `2026-10-24-daily-llm-editor-design.md`,
 `2026-11-01-ai-extras-design.md` (§1, why no bundled model)
 
@@ -90,12 +90,11 @@ Also on this provider:
 - `deckle llm check` (CLI) runs the three checks and prints them.
 
 **Daily editor on a local model.** Besides the larger `num_ctx`, the local path trims the
-request: excerpts bounded at 600 characters instead of 1,600 and at most 40 stories per request,
-splitting the paper's sections across two requests when it has more. Duplicate groups are found
-within a request only, which is the common case (the same story from two feeds lands in the
-same request when sections are kept whole). A request that still doesn't fit falls back as
-today, but the runner note names the cause ("the editor's prompt is too long for the local
-model") instead of the generic line.
+request: excerpts bounded at 600 characters instead of 1,600, which puts the full 80 stories
+inside 32k with the plan's answer. (Increment 1 chose this over splitting the paper across two
+requests: one request keeps duplicate groups whole and the validation untouched.) A paper over
+the 80-story or 160 KB limit falls back as today, but the runner note names the cause ("today's
+paper is too long for one request") instead of the generic line.
 
 **Config.** `Settings.llm_provider` gains `"ollama"`; `llm_model` empty means the recommended
 model. The digest's `[llm]` table gains `provider = "ollama"`; absent, the Daily editor reads the

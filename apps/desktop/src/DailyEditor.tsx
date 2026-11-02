@@ -12,7 +12,7 @@ export default function DailyEditor({ value, onChange }: { value?: DailyEditorCo
   const copyProvider = async () => {
     try {
       const settings = await api.getSettings();
-      if (settings.llm_provider !== "openai" && settings.llm_provider !== "anthropic") {
+      if (settings.llm_provider !== "openai" && settings.llm_provider !== "anthropic" && settings.llm_provider !== "ollama") {
         setNote("Choose an AI model in Settings → Reading aids first.");
         return;
       }
@@ -31,14 +31,16 @@ export default function DailyEditor({ value, onChange }: { value?: DailyEditorCo
       <div className="grid2">
         <label><span className="label">Provider</span>
           <select aria-label="Daily AI provider" value={config.provider} onChange={(e) => onChange({ ...config, provider: e.target.value as DailyEditorConfig["provider"] })}>
-            <option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama, on this computer</option><option value="openai">OpenAI-compatible</option><option value="anthropic">Anthropic</option>
           </select>
         </label>
         <label><span className="label">Model</span><input value={config.model} placeholder="Provider default" onChange={(e) => onChange({ ...config, model: e.target.value })} /></label>
-        <label><span className="label">API base URL</span><input value={config.endpoint} placeholder="Provider default, or your local server" spellCheck={false} onChange={(e) => onChange({ ...config, endpoint: e.target.value })} /></label>
+        <label><span className="label">API base URL</span><input value={config.endpoint} placeholder={config.provider === "ollama" ? "http://localhost:11434" : "Provider default, or your local server"} spellCheck={false} onChange={(e) => onChange({ ...config, endpoint: e.target.value })} /></label>
       </div>
       <button className="ghost" onClick={copyProvider}>Use Books provider</button>
-      <p className="muted small">Set {config.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} in the environment that runs Deckle. Local OpenAI-compatible servers can run without a key.</p>
+      {config.provider === "ollama"
+        ? <p className="muted small">Nothing leaves this computer and no key is needed. Ollama must be running when the paper builds; <code>deckle llm check</code> says whether it's ready.</p>
+        : <p className="muted small">Set {config.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"} in the environment that runs Deckle. Local OpenAI-compatible servers can run without a key.</p>}
     </>}
     {note && <p className="muted small" role="status">{note}</p>}
   </div>;

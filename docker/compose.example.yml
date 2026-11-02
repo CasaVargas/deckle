@@ -31,3 +31,13 @@ services:
       # broadcast through Docker's network: type the server's address on the reader, or use
       # network_mode: host instead of ports.
       # - "9090:9090"
+
+  # The Daily's AI editor on a model beside Deckle, nothing leaving your server: uncomment,
+  # set `[llm] provider = "ollama"` and `endpoint = "http://ollama:11434"` in digest.toml, then
+  # `docker compose exec deckle deckle llm pull` once (docs/docker.md).
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ./ollama:/root/.ollama   # the downloaded model

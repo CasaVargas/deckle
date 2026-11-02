@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **Ollama, on this computer, as its own choice.** `--llm ollama`, `[llm] provider = "ollama"`
+  and "Ollama, on this computer" in the app talk to Ollama's own API instead of its
+  OpenAI-compatible shim, so Deckle sets the context size itself (the Daily editor's one
+  request no longer silently overflows Ollama's 4k default), turns thinking off, holds the
+  model to a JSON schema for X-Ray and the editor, and needs no key. The default model is
+  `qwen3:4b`, or `qwen3:8b` on a machine with 16 GB or more. New: `deckle llm check` (is
+  Ollama running, is the model installed, does it answer, and what to do about whichever
+  isn't) and `deckle llm pull` (download the model, with progress). A local model gets
+  shorter story excerpts in the editor's request, and a paper too long for one request says
+  so in its note. Design: `docs/superpowers/specs/2026-11-02-local-model-design.md`.
+
 ## 0.11.0 — every reader, comics, puzzle books and KOReader
 
 About sixty pull requests since 0.10.0, in ten themes.

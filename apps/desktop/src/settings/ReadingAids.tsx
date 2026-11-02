@@ -87,25 +87,40 @@ export default function ReadingAids({ settings, set }: Props) {
             <label>
               <span className="tk-label">Provider</span>
               <select value={settings.llm_provider} onChange={(e) => set("llm_provider", e.target.value as Settings["llm_provider"])}>
+                <option value="ollama">Ollama, on this computer</option>
                 <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI-compatible (Ollama, LM Studio…)</option>
+                <option value="openai">OpenAI-compatible (LM Studio…)</option>
               </select>
             </label>
             <label>
               <span className="tk-label">Model</span>
-              <input type="text" value={settings.llm_model} onChange={(e) => set("llm_model", e.target.value)} placeholder="claude-sonnet-5-5" />
+              <input
+                type="text"
+                value={settings.llm_model}
+                onChange={(e) => set("llm_model", e.target.value)}
+                placeholder={settings.llm_provider === "ollama" ? "qwen3:4b" : settings.llm_provider === "openai" ? "gpt-5-mini" : "claude-sonnet-5-5"}
+              />
             </label>
             {settings.llm_provider === "openai" && (
               <label>
                 <span className="tk-label">Endpoint</span>
-                <input type="text" value={settings.llm_endpoint} onChange={(e) => set("llm_endpoint", e.target.value)} placeholder="http://localhost:11434/v1" />
+                <input type="text" value={settings.llm_endpoint} onChange={(e) => set("llm_endpoint", e.target.value)} placeholder="http://localhost:1234/v1" />
               </label>
             )}
-            <label>
-              <span className="tk-label">API key</span>
-              <input type="password" value={settings.llm_api_key} onChange={(e) => set("llm_api_key", e.target.value)} placeholder="Optional" autoComplete="off" />
-              <span className="muted small">Stored on {caps.web ? "the server" : "this computer"}. Empty uses ANTHROPIC_API_KEY / OPENAI_API_KEY.</span>
-            </label>
+            {settings.llm_provider === "ollama" && (
+              <label>
+                <span className="tk-label">Address</span>
+                <input type="text" value={settings.llm_endpoint} onChange={(e) => set("llm_endpoint", e.target.value)} placeholder="http://localhost:11434" />
+                <span className="muted small">Nothing leaves this computer and no key is needed. Ollama must be running; a model that isn't installed yet is downloaded by `deckle llm pull`.</span>
+              </label>
+            )}
+            {settings.llm_provider !== "ollama" && (
+              <label>
+                <span className="tk-label">API key</span>
+                <input type="password" value={settings.llm_api_key} onChange={(e) => set("llm_api_key", e.target.value)} placeholder="Optional" autoComplete="off" />
+                <span className="muted small">Stored on {caps.web ? "the server" : "this computer"}. Empty uses ANTHROPIC_API_KEY / OPENAI_API_KEY.</span>
+              </label>
+            )}
           </div>
         )}
         <label className="tick-row">

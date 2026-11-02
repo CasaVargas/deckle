@@ -19,7 +19,8 @@ use crate::xray::{LlmConfig, Post};
 
 /// Chapters shorter than this get no recap (title pages, contents, epigraphs).
 pub const MIN_WORDS: usize = 800;
-/// Words per request on a self-hosted server: fits a local model's default 4k context.
+/// Words per request on a self-hosted server: fits a local model's default 4k context (and
+/// Ollama's native request, which asks for [`llm::OLLAMA_CONTEXT`], with room to spare).
 pub const LOCAL_PART_WORDS: usize = 2_000;
 /// Words per request on a hosted provider: in practice one request per chapter.
 pub const HOSTED_PART_WORDS: usize = 40_000;
@@ -592,11 +593,9 @@ impl<'a, 'p> Writer<'a, 'p> {
         } else {
             cfg.api_key.clone()
         };
-        let endpoint = cfg.endpoint.trim_end_matches('/');
-        // A self-hosted OpenAI-compatible server, as `llm` tells them apart.
-        let local = cfg.provider == Provider::OpenAi
-            && !endpoint.is_empty()
-            && endpoint != Provider::OpenAi.default_endpoint();
+        // A server on this computer (Ollama, or an OpenAI-compatible one), as `llm` tells them
+        // apart.
+        let local = llm::is_local(cfg.provider, &cfg.endpoint);
         Writer {
             provider: cfg.provider,
             model,

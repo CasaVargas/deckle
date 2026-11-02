@@ -201,7 +201,7 @@ export interface Settings {
   previewer_path: string | null;
   cde: "auto" | "pdoc" | "ebok";
   pages_auto: boolean;
-  llm_provider: "off" | "anthropic" | "openai";
+  llm_provider: "off" | "anthropic" | "openai" | "ollama";
   llm_model: string;
   llm_endpoint: string;
   llm_api_key: string;
@@ -1042,7 +1042,7 @@ export type ReadingDirection = "ltr" | "rtl";
 
 export interface DailyEditorConfig {
   enabled: boolean;
-  provider: "openai" | "anthropic";
+  provider: "openai" | "anthropic" | "ollama";
   model: string;
   endpoint: string;
 }

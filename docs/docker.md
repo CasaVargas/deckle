@@ -242,6 +242,28 @@ books from Settings → KOReader or `docker exec deckle deckle wireless queue an
 
 Mount your old Morgue under `/data/Deckle` if you want the history.
 
+## The AI editor, with Ollama beside it
+
+The Daily's optional editor (`[llm]` in `digest.toml`; see the README) can run on a model in
+a second container, so nothing leaves your server. Add an `ollama` service (the commented
+block in `compose.example.yml`), point Deckle at it and download the model once:
+
+```toml
+[llm]
+enabled = true
+provider = "ollama"
+endpoint = "http://ollama:11434"
+```
+
+```sh
+docker compose exec deckle deckle llm pull     # qwen3:4b, about 2.6 GB, into the ollama volume
+docker compose exec deckle deckle llm check    # running, installed, answers
+```
+
+A CPU-only server builds the paper's edit in a few minutes; a GPU passed to the `ollama`
+service (see Ollama's image notes) in well under one. The model stays in the `ollama` volume
+across updates.
+
 ## Linux without Docker
 
 The release has `deckle-<version>-x86_64-unknown-linux-gnu.tar.gz` and

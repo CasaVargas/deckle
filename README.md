@@ -123,8 +123,8 @@ in, press **Send**.
   KFX a Kindle reads, with approximate page numbers.
 - **Covers that stick.** On Kindles where it can, Deckle writes its own cover thumbnail and puts it
   back on every send.
-- **X-Ray.** The people and terms in the book. Optionally a model (Anthropic, or any
-  OpenAI-compatible endpoint including a local Ollama) writes spoiler-free descriptions, and
+- **X-Ray.** The people and terms in the book. Optionally a model (Ollama on this computer,
+  Anthropic, or any OpenAI-compatible endpoint) writes spoiler-free descriptions, and
   Wikipedia adds summaries. A Kobo or PocketBook gets the same people and terms as a Who's who
   page at the back, with each name's first mention in a chapter linked to it.
 - **Word Wise.** Hints from a Wiktionary-derived English lexicon, pointed at the Kindle's own
@@ -477,12 +477,17 @@ builds. It doesn't copy saved Books API keys.
 ```toml
 [llm]
 enabled = true
-provider = "openai"             # or "anthropic"
-model = ""                      # blank uses the provider default
-endpoint = ""                   # or a local OpenAI-compatible API base URL
+provider = "ollama"             # on this computer; or "anthropic" / "openai"
+model = ""                      # blank uses the provider default (Ollama: qwen3:4b, or 8b with 16 GB)
+endpoint = ""                   # Ollama elsewhere, or an OpenAI-compatible API base URL
 ```
 
-Local OpenAI-compatible servers can run without a key. API keys don't belong in this file.
+**Ollama** keeps everything on this computer and needs no key: install it from
+[ollama.com/download](https://ollama.com/download), then `deckle llm check` says whether it's
+running, whether the model is there (`deckle llm pull` downloads it, with progress) and how
+fast it answers. Deckle talks to Ollama's own API, so it sets the context the paper needs
+itself. Other local OpenAI-compatible servers (LM Studio) also run without a key. API keys
+don't belong in this file.
 Feed and local-news titles and bounded excerpts, the date and horoscope signs go to the provider;
 saved reading, calendars, highlights, photos and source URLs never do. AI output is labeled and
 can be wrong. The editor keeps the first story in each duplicate group and leaves news text

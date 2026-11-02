@@ -62,6 +62,8 @@ pub enum LlmArg {
     Off,
     Anthropic,
     Openai,
+    /// Ollama on this computer: nothing leaves it, no key. `deckle llm check` sets it up.
+    Ollama,
 }
 
 impl LlmArg {
@@ -75,6 +77,7 @@ impl LlmArg {
             LlmArg::Off => return None,
             LlmArg::Anthropic => Provider::Anthropic,
             LlmArg::Openai => Provider::OpenAi,
+            LlmArg::Ollama => Provider::Ollama,
         };
         Some(deckle_core::xray::LlmConfig {
             provider,
@@ -215,13 +218,16 @@ pub enum Command {
         /// X-Ray sidecar for EBOK books: `auto` (default) or `off`.
         #[arg(long, value_enum)]
         xray: Option<XRayArg>,
-        /// LLM for X-Ray descriptions (key from ANTHROPIC_API_KEY / OPENAI_API_KEY).
+        /// LLM for X-Ray descriptions: `ollama` on this computer (no key), or `anthropic` /
+        /// `openai` with the key from ANTHROPIC_API_KEY / OPENAI_API_KEY.
         #[arg(long, value_enum, default_value_t = LlmArg::Off)]
         llm: LlmArg,
-        /// Model name for `--llm` (provider default when omitted).
+        /// Model name for `--llm` (provider default when omitted; for `ollama`, the model
+        /// `deckle llm check` recommends for this machine).
         #[arg(long)]
         llm_model: Option<String>,
-        /// Base URL for `--llm openai` (OpenAI-compatible servers, e.g. http://localhost:11434/v1).
+        /// Base URL for `--llm openai` (OpenAI-compatible servers, e.g. http://localhost:1234/v1
+        /// for LM Studio) or `--llm ollama` (default http://localhost:11434).
         #[arg(long)]
         llm_endpoint: Option<String>,
         /// Wikipedia summaries for X-Ray terms (network).
@@ -373,6 +379,33 @@ pub enum Command {
     Puzzles {
         #[command(subcommand)]
         action: PuzzlesCommand,
+    },
+    /// An AI model on this computer, through Ollama: check it's ready, download the model.
+    Llm {
+        #[command(subcommand)]
+        action: LlmCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LlmCommand {
+    /// Whether Ollama answers, the model is installed and a test prompt comes back; what to
+    /// do about whichever isn't.
+    Check {
+        /// Ollama's address (default http://localhost:11434).
+        #[arg(long)]
+        endpoint: Option<String>,
+        /// The model (default: the one Deckle recommends for this machine's memory).
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Download a model into Ollama, with progress.
+    Pull {
+        /// The model (default: the one Deckle recommends for this machine's memory).
+        model: Option<String>,
+        /// Ollama's address (default http://localhost:11434).
+        #[arg(long)]
+        endpoint: Option<String>,
     },
 }
 

@@ -681,3 +681,75 @@ fn the_prompt_tells_the_editor_briefs_cover_only_scored_stories() {
         answer_with_interest(json!([])),
     );
 }
+
+#[test]
+fn ollama_needs_no_key_and_gets_a_schema_a_wide_context_and_shorter_excerpts() {
+    let mut g = original();
+    let long: String = "word ".repeat(400); // 2,000 chars of body
+    g.edition.sections[0].articles[0].body = format!("<p>{long}</p>");
+    let cfg = EditorConfig {
+        provider: Provider::Ollama,
+        ..on()
+    };
+    let mut calls = 0;
+    edit(
+        &mut g,
+        &cfg,
+        "",
+        &mut |url, headers, body| {
+            calls += 1;
+            assert_eq!(url, "http://localhost:11434/api/chat");
+            assert!(!headers.iter().any(|(k, _)| k == "authorization"));
+            let b: Value = serde_json::from_str(body).unwrap();
+            assert_eq!(b["think"], false);
+            assert_eq!(
+                b["options"]["num_ctx"], 32_768,
+                "the whole paper in one request"
+            );
+            assert_eq!(b["options"]["num_predict"], 8192);
+            assert_eq!(b["format"]["type"], "object", "held to the plan's schema");
+            assert_eq!(b["format"]["required"][0], "duplicate_groups");
+            let user: Value =
+                serde_json::from_str(b["messages"][1]["content"].as_str().unwrap()).unwrap();
+            let excerpt = user["news"][0]["stories"][0]["excerpt"].as_str().unwrap();
+            assert_eq!(
+                excerpt.chars().count(),
+                600,
+                "a local model gets a third of the excerpt"
+            );
+            Ok(
+                json!({"message":{"content":answer().to_string()},"done_reason":"stop"})
+                    .to_string(),
+            )
+        },
+        &[],
+        &[],
+    );
+    assert_eq!(calls, 1);
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert_eq!(
+        g.edition.sections[1].articles.len(),
+        0,
+        "the duplicate was removed"
+    );
+}
+
+#[test]
+fn a_paper_too_long_for_one_request_says_so() {
+    let mut g = original();
+    g.edition.sections[0].articles = vec![g.edition.sections[0].articles[0].clone(); 81];
+    edit(
+        &mut g,
+        &on(),
+        "secret",
+        &mut |_, _, _| panic!("not sent"),
+        &[],
+        &[],
+    );
+    assert_eq!(
+        g.notes,
+        [
+            "AI editor unavailable: today's paper is too long for one request; using the original edition."
+        ]
+    );
+}
