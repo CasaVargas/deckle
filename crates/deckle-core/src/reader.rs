@@ -430,7 +430,9 @@ mod tests {
         let kobo = Reader::Kobo(fake_kobo(&tmp.path().join("K"), ""));
         let pb = fake_pocketbook(&tmp.path().join("PB"));
         let comic = comic_epub(tmp.path());
-        for (reader, (w, h)) in [(&kobo, (1280, 1920)), (&pb, (1248, 1872))] {
+        // The fake Kobo's `.kobo/version` ends in 390, a Libra Colour (1264 × 1680, colour): its
+        // own panel, not the Kobo family's 1440 × 1920 (#281).
+        for (reader, (w, h)) in [(&kobo, (1120, 1680)), (&pb, (1248, 1872))] {
             let out = reader.prepare(&comic).unwrap();
             let page = String::from_utf8(entry(&out, "OEBPS/pages/p0001.xhtml")).unwrap();
             assert!(!page.contains("koboSpan") && !page.contains("book-columns"));

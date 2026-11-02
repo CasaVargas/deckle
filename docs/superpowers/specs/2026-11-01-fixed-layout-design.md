@@ -180,7 +180,14 @@ cached, the same split the device-aware build uses for KPF/KFX.
     1264 × 1680 grey default.
   - Fitting to a panel a little larger than the real one costs nothing, since pages are never
     upscaled and the Kindle scales the rest of the way.
-  - Telling models apart by their serial-number prefix is left for later.
+  - **By model (#281):** a Kindle's USB serial (mass storage: `usb_serial`; MTP: the USB
+    serial, else the end of the product name) names its model by the device code at characters
+    4–6 (3–4 on the oldest, `B…`/`9…`); a Kobo by the product id ending `.kobo/version`. The
+    tables (`screens::KINDLE_CODES`, `KINDLE_OLD_CODES`, `KOBO_MODELS`) follow KOReader's
+    `device.lua`, with FBInk's `fbink.h` agreeing on the Kobo ids; the serial wins, the family
+    above is the fallback. A colour Kobo is fitted to its grey panel. The 2025 Scribe and Scribe
+    Colorsoft wait for a confirmed pixel size and fall back to the Scribe by name (a name with
+    "Colorsoft" keeps colour). A PocketBook has no model marker, so it keeps the family panel.
 - **Spreads split at import,** in `deckle-comic`, because splitting changes the page count and
   Previewer's MOBI is made before the device is known.
   - A landscape page becomes two portrait pages: left half first, or right half first for right
