@@ -1,13 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 — every reader, comics, puzzle books and KOReader
 
-- **Books to a reMarkable.** `deckle run --to remarkable` sends books over the tablet's USB
-  web interface, the way the paper goes: a comic (CBZ, CBR, a folder of pages, a scan) as an
-  image-only PDF, one page per image fitted to the `[remarkable] screen` and grey unless the
-  photos are colour; any other book as an EPUB. They wait in the reMarkable's outbox until it
-  answers, then `deckle digest push` or `watch` sends them, with or without the paper set up.
-  A publisher's fixed-layout EPUB is refused for now, since the tablet's reader would reflow it.
+About sixty pull requests since 0.10.0, in ten themes.
+
+**The reMarkable, wireless and with books.** Until now a reMarkable only got the paper, only
+over the USB cable.
+
+- **Books to a reMarkable.** `deckle run --to remarkable` and **Send to reMarkable** on the
+  app's Inbox send books the way the paper goes: a comic (CBZ, CBR, a folder of pages, a scan)
+  as an image-only PDF, one page per image fitted to the `[remarkable] screen` and grey unless
+  the panel is colour; any other book as an EPUB, with its Who's who page and recaps if asked.
+  They wait in the reMarkable's outbox until it answers, then `deckle digest push` or `watch`
+  sends them, with or without the paper set up. A publisher's fixed-layout EPUB is refused for
+  now, since the tablet's reader would reflow it.
 - **A reMarkable over SSH.** `[remarkable] transport = "ssh"` writes the paper and books
   straight into the tablet's document folder, over Wi-Fi as well as the cable, in a Deckle
   folder, and prunes old papers there, which the web interface can't do. The password (from
@@ -16,27 +22,161 @@
   restart to show new files, so Deckle restarts it only when the tablet has been idle for ten
   minutes, and says so otherwise. Deckle never changes a tablet setting: SSH over Wi-Fi, and
   Developer Mode on a Paper Pro (a factory reset), are yours to turn on, and the docs say so.
-- **A reMarkable that's easier to reach.** **Send to reMarkable** on the app's Inbox does what
-  `run --to remarkable` does. `[remarkable] address` (**Address** on the card) points Deckle at
-  a tablet whose web interface you've put on your Wi-Fi, instead of the USB link. `deckle
+- **Easier to reach.** `[remarkable] address` (**Address** on the card) points Deckle at a
+  tablet whose web interface you've put on your Wi-Fi, instead of the USB link. `deckle
   devices` lists the tablet when it answers. And `docs/daily.md` says how to pull the paper
   from Dropbox, Google Drive or OneDrive with the tablet's own integration, no cloud account
   with Deckle.
 - **The Paper Pro Move gets colour.** `[remarkable] screen = "remarkable-paper-pro-move"` now
   sends the paper's photos and a comic's pages in colour, as the Paper Pro does; it had been
   treated as a grey screen (#297).
+
+**Comics, manga and scanned books, on every reader** (#20). A page of pictures goes to each
+reader as pictures, fitted to its screen.
+
+- **Bring in a comic any way you have it.** A `.cbz`, a `.cbr` (through the system's
+  `bsdtar`), a folder of page images, a fixed-layout EPUB or AZW3, or a scanned PDF, with or
+  without an invisible text layer. Drop it on the window, keep it in the library, or queue it
+  from the Inbox. Two-page spreads are split at import; `ComicInfo.xml` gives the title and
+  series.
+- **Kindle.** A comic arrives as a fixed-layout AZW3, which the Kindle opens as it would a
+  bought comic, with its pages fitted to that Kindle's own screen: nineteen models known by
+  their serial number, the Colorsoft in colour. Checked on a Kindle Scribe over MTP (#278).
+- **Kobo and PocketBook.** A fixed-layout EPUB without the KEPUB markup Deckle normally adds,
+  which would break picture pages. Thirty Kobo models are recognised and fitted; a colour Kobo
+  keeps colour.
+- **Reads right to left.** A checkbox on the comic's row in the app, remembered per book, for
+  manga, and `deckle run --direction rtl` on the command line. A comic that says so in its
+  own metadata gets it without asking.
+- **Send a PDF as it is.** `deckle send` copies a PDF, TXT, AZW3 or MOBI to a Kindle or a
+  folder untouched, under its own name. On a Scribe 2024 that's the way to put a document on
+  the tablet that takes pen ink.
+
+**Puzzle books you solve in ink on a Kindle Scribe** (`deckle puzzles`). A device test
+settled that only a PDF takes pen ink on the Scribe, so these are PDFs: a title page, one
+puzzle per page, the answers at the back, and a `--screen` for a reMarkable, an iPad or A5
+paper. See [docs/puzzle-books.md](docs/puzzle-books.md).
+
+- **Word search books.** Pick the size (8 to 20) and the directions, or give your own words.
+  Every puzzle is checked against a blocklist so nothing rude appears by accident.
+- **Crossword books.** Any size from 5×5 to 15×15, symmetric, filled from a 45,000-word
+  clue list drawn from Wiktionary. A grid that won't fill takes rarer words and says so.
+  `--words` with `word: clue` lines seeds each puzzle with as many of your own as will fit.
+- **Sudoku books.** Easy, medium and hard, each with exactly one solution. A hard puzzle is
+  always solvable by logic, never a guess.
+- The same options, seed and date make the same book, byte for byte, and each run prints the
+  command that makes it again. Books go to a folder or straight to a plugged-in Kindle.
+
+**AI recaps for books, without spoilers** (#29). Optional, with the model you already set up
+for X-Ray (Anthropic, OpenAI, or a local server). Nothing is bundled and nothing is sent
+unless you turn it on.
+
+- **Chapter recaps.** A short, labelled recap at the end of each chapter, written from that
+  chapter alone so it can't spoil what's ahead. For Kindle, Kobo, PocketBook, a reMarkable
+  and any EPUB reader. Results are cached, so a book is never summarised twice.
+- **A Summary page** at the back of the book, the whole story including the ending, built
+  from the chapter recaps rather than sending the book's text again.
+- **A Previously page** for a later book in a series: what happened in the earlier ones,
+  placed before chapter one and written only from those books' recaps, so it can't spoil the
+  one you're starting.
+- **Settings → Reading aids** has the switch and the app a per-book toggle; `deckle run
+  --recaps` on the command line, which now stops up front if no model is set rather than
+  after the whole conversion.
+
+**KOReader as a first-class reader.** KOReader runs on jailbroken Kindles, Kobos,
+PocketBooks, Boox tablets and reMarkables. Deckle now reads from it, serves it and manages it.
+
+- **Highlights and progress from any reader running it.** Deckle reads KOReader's files
+  beside each book, over USB or from a folder the reader syncs back, and never writes them.
+  Highlights come out as Markdown like a Kindle's; books in progress reach From Your Shelf.
+- **Today's paper over Wi-Fi, no cable.** Deckle's watcher serves an OPDS catalog on your
+  home network, behind one account with a password of your choosing. KOReader browses it and
+  downloads the paper and your books, a KEPUB for a Kobo. **Daily → Delivery** has the card
+  and the two addresses; `deckle reader-server password|status` on the command line.
+- **Progress sync, served by Deckle.** Point KOReader's own sync at the same address and
+  every reader reports how far you read, down to the section of the paper, so the readership
+  report is exact.
+- **A Deckle plugin for KOReader** (`deckle koreader plugins install deckle`). It fetches the
+  morning paper on its own when the reader wakes or joins Wi-Fi, checks the download, tidies
+  its own old papers, and sets up progress sync with one tap.
+- **Plugins, managed from Deckle.** List, install, update, remove and roll back KOReader
+  plugins from a zip, a folder or a GitHub release, over USB. Switch them and user patches on
+  and off. **Backup and restore** of KOReader's settings and reading data now carries plugins.
+- **A plugin store.** A reviewed, pinned list of recommended plugins, each install checked
+  byte for byte against the reviewed file, and a Discover list beyond it.
+- **Settings → KOReader** in the app: the plugged-in reader, the Deckle plugin, your plugins
+  with switches, and the store.
+- **Papers open as designed.** Each paper Deckle sends to a reader carries KOReader settings
+  for its fonts, styles and hyphenation, written once and never over your own.
+
+**Deckle as the bridge to your calibre library.** calibre stays the library of record;
+Deckle moves books out and reading data back, over Wi-Fi, and never edits calibre's database.
+
+- **KOReader's calibre connection, answered by Deckle.** Tap *Connect* in KOReader and
+  Deckle appears as calibre would. Your books, calibre's books and the paper go to the reader
+  over Wi-Fi, with no plugin and no calibre running. The app shows every reader that has
+  connected, its books and free space, and a queue; `deckle wireless` on the command line.
+- **Reading data back into calibre.** Progress, finished, last read and rating into calibre
+  columns you choose, through calibre's own tools. Off by default, with a preview, and a
+  value you changed in calibre is left alone.
+- **Highlights into calibre.** Every highlight and note as Markdown in a column, and
+  optionally into calibre's own annotations.
+- **Shelves from calibre rules.** A tag, series, author, column or saved search becomes a
+  shelf on a Kobo or a collection in KOReader, holding the books that are actually on the
+  reader. Only shelves Deckle made are ever changed.
+
+**Kobo and PocketBook catch up with the Kindle.**
+
+- **Who's who.** The people, places and terms Deckle finds for a Kindle's X-Ray now go inside
+  the EPUB as a Who's who page at the back, on a Kobo, a PocketBook, a reMarkable and any
+  EPUB reader. The first mention of each name in a chapter links to its entry, and back.
+- **The paper to a Kobo over Dropbox.** Point an export folder at Dropbox's *Rakuten Kobo*
+  folder as KEPUB and the Kobo fetches the paper each morning when you tap Sync. Deckle still
+  signs in to nothing.
+
+**The paper.**
+
+- **A daily word search.** A 9×9 grid with eight to ten hidden words beside the mini
+  crossword, with yesterday's answers, in every edition: EPUB, PDF and the bundle.
+- **No repeat crosswords.** The mini once printed the same grid two days running, with the
+  answers above it. A grid from the last sixty days is never reused.
+- **Google News stories read in full again.** For a week, every story linked through Google
+  News arrived as a stub. Dropped connections are retried and the reply is parsed properly.
+- **Teasers stop at a sentence.** One teaser was a whole 37,000-character article. Teasers
+  now end at a whole sentence within about 300 characters, and spaces around italics are kept.
+- **No more "Full story unavailable offline."** A story the paper couldn't read in full (a
+  paywall, a video page, a fetch that failed) still runs after the whole stories as a brief,
+  but without that line, the way a `lead` section's briefs always have.
+- **Kindle readership works again.** The print layout's section folios had hidden every
+  section from the readership report.
+
+**The app and the importers.**
+
 - **A welcome on first launch.** Four pages: your paper and its morning schedule, the
   bookmarklets, and where things are. The Save to paper page watches for your first save and
-  says when it landed. **Settings → About** shows it again. Beside the pages sits tomorrow's
-  front page in miniature, in your paper's name and masthead face, with the day's date and the
-  press time as you set it; the first story you save lands on it as a clipping.
+  says when it landed. Beside the pages sits tomorrow's front page in miniature, in your
+  paper's name and masthead face, with the day's date and the press time as you set it; the
+  first story you save lands on it as a clipping. **Settings → About** shows it again.
 - **Bookmarklets you drag, not paste.** *Open the install page* (on the Reading room, the
   Cookbook's Add page and the welcome) opens a page in your browser with **Save to paper** and
   **Save recipe** as buttons to drag to the bookmarks bar, and how to show the bar in each
   browser. The web app shows the buttons in place. Copy is still there.
-- **No more "Full story unavailable offline."** A story the paper couldn't read in full (a
-  paywall, a video page, a fetch that failed) still runs after the whole stories as a brief,
-  but without that line, the way a `lead` section's briefs always have.
+- **Messy Word and PDF files get their structure back** (#268). A document with no real
+  headings gets chapters recognised from size, weight and "Chapter" lines, with no model and
+  no network. Documents that already have structure convert as before.
+
+**Fixes you'd otherwise hit.**
+
+- The watcher restarts after an update. It used to keep running the old build until the next
+  login, so a new bookmarklet hit an old watcher and got *Not found*.
+- Kindle Previewer runs one conversion at a time. Two at once shared a scratch folder and
+  both failed; jobs now wait their turn.
+- Found on real readers: KOReader's own SSH plugin no longer gets Update and Remove buttons;
+  a reader's free space shows correctly instead of 0 MB; the paper goes over the calibre
+  connection once, not on every connect.
+- A comic with a wide title banner no longer stretches every page to the banner's shape on a
+  Kindle.
+- A scan with an invisible OCR layer is treated as a scan, not as text to reflow.
 
 ## 0.10.0 — Deckle on Linux
 

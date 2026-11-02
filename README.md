@@ -64,8 +64,8 @@ finish. Deckle sets one each morning:
   folder or an iPhone Shortcut, and it prints the next morning, whole. A long read becomes its own
   book and rides along.
 - **The back pages.** A 5×5 mini crossword whose theme answers are yesterday's headlines, a word
-  ladder, an almanac with sunrise, the moon, the usual first frost and tonight's meteor shower, a
-  horoscope, and On this day.
+  search, a word ladder, an almanac with sunrise, the moon, the usual first frost and tonight's
+  meteor shower, a horoscope, and On this day.
 - **From Your Shelf.** The books you're in the middle of, a past highlight and the words you looked
   up this week, read from your own Kindle. It stays on your computer.
 - **It learns, quietly.** It notices which sections you actually reach and suggests changes and new
@@ -100,7 +100,8 @@ skips a morning. Only the newest three papers stay on the reader.
 | **Kindle** | Over USB when it's plugged in, or by email over Wi-Fi through your own mail account |
 | **Kobo** | As a KEPUB, in a Deckle folder, the first time it's plugged in. Long reads and Inbox books too |
 | **PocketBook** | The same, as EPUB |
-| **reMarkable 2, Paper Pro, Paper Pro Move** | A PDF laid out for its screen, crossword and all, uploaded over its USB web interface. No account. `deckle run --to remarkable` sends books too: a comic as an image PDF fitted to its screen, anything else as EPUB |
+| **reMarkable 2, Paper Pro, Paper Pro Move** | A PDF laid out for its screen, crossword and all, in colour on a Paper Pro. Over its USB web interface, or over SSH and Wi-Fi into a Deckle folder that Deckle keeps tidy. No account. `deckle run --to remarkable` and **Send to reMarkable** send books too: a comic as an image PDF fitted to its screen, anything else as EPUB |
+| **Anything running KOReader** | Over Wi-Fi, no cable: KOReader browses Deckle's catalog on your network, or the Deckle plugin fetches the paper by itself when the reader wakes. Progress sync, served by Deckle, tells the paper how far you read |
 | **Boox, iPad, anything** | An export folder (iCloud Drive, Dropbox, a USB stick) gets each edition as EPUB or PDF, photos in color if you like |
 
 Only Kindle books need Kindle Previewer. Every setting is in [docs/daily.md](docs/daily.md).
@@ -128,6 +129,10 @@ in, press **Send**.
   page at the back, with each name's first mention in a chapter linked to it.
 - **Word Wise.** Hints from a Wiktionary-derived English lexicon, pointed at the Kindle's own
   dictionary when it has one.
+- **Recaps, without spoilers.** Off by default. With the model you set up for X-Ray, a short
+  labeled recap at the end of each chapter, written from that chapter alone; a Summary page at
+  the back; and for a later book in a series, a Previously page before chapter one, made only
+  from the earlier books' recaps. On every reader, and a book is never summarised twice.
 - **Book styles.** Novel, Academic or Manual, per book: the paragraph style, pop-up notes, pages
   and X-Ray set the way that kind of book reads.
 - **Cleanups.** Typography fixes, footnotes as pop-up notes, language tags repaired, images missing
@@ -162,10 +167,19 @@ in, press **Send**.
 - **Comics, manga and picture books** (`.cbz`, `.cbr`, a folder of page images, a fixed-layout
   EPUB or a fixed-layout AZW3) keep their pages as they are: on a Kindle as an AZW3, since Kindle
   Previewer makes no KFX for fixed layout. A CBR needs the system's `bsdtar` (built into macOS
-  and Windows as `tar`; `libarchive-tools` on Linux). `ComicInfo.xml` gives the title and series, and manga marked right to left reads
-  right to left (`deckle run --direction rtl` sets it for a comic that doesn't say). No X-Ray, Word Wise or page numbers. On a reMarkable
-  (`--to remarkable`) a comic goes as an image-only PDF fitted to its screen, since its EPUB reader reflows. Fitting pages to each screen comes later
-  (#20).
+  and Windows as `tar`; `libarchive-tools` on Linux). Pages are fitted to the screen of the Kindle
+  or Kobo that's plugged in (nineteen Kindles and thirty Kobos known by model), spreads are split
+  at import, and `ComicInfo.xml` gives the title and series. Manga marked right to left reads right
+  to left; a **Reads right to left** checkbox on the book's row (or `deckle run --direction rtl`)
+  sets it for a comic that doesn't say. A Kobo or PocketBook gets a fixed-layout EPUB; a reMarkable
+  (`--to remarkable`) an image-only PDF fitted to its screen, since its EPUB reader reflows. No
+  X-Ray, Word Wise or page numbers.
+- **Puzzle books to write on.** `deckle puzzles search|crossword|sudoku` makes a book of word
+  searches, crosswords (5×5 to 15×15, your own words and clues if you like) or sudoku as a PDF
+  that takes pen ink on a Kindle Scribe, sized for a Scribe, a reMarkable, an iPad or A5 paper.
+  See [docs/puzzle-books.md](docs/puzzle-books.md).
+- **A PDF as it is.** `deckle send` copies a PDF, TXT, AZW3 or MOBI to a Kindle or a folder
+  untouched, which is how a document that takes ink gets onto a Scribe.
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
 - **Several files, one book.** Bind any of the above in your order, each with its own entry in the
   contents: a course packet, a week of long reads, a report in pieces.
@@ -205,6 +219,55 @@ on a Kindle it could now build better.
   you met it in and the book.
 - **Several Kindles in one home.** Name each Kindle, then send a book to *Mom's Kindle* even when
   it's in her bag: it waits in the outbox until that Kindle connects, and no other Kindle takes it.
+
+## KOReader and calibre
+
+KOReader runs on jailbroken Kindles, Kobos, PocketBooks, Boox tablets and reMarkables. Deckle
+reads from it, serves it and manages it, and calibre stays your library of record.
+
+- **The paper over Wi-Fi.** Deckle's watcher serves an OPDS catalog on your home network, behind
+  one account with a password you choose. KOReader browses it and downloads today's paper and
+  your books (a KEPUB for a Kobo). Point KOReader's own progress sync at the same address and
+  every reader reports how far you read, down to the section of the paper. **Daily → Delivery**
+  has the card and both addresses; `deckle reader-server` on the command line.
+- **The Deckle plugin.** `deckle koreader plugins install deckle` puts a plugin on the reader that
+  fetches the morning paper by itself when the reader wakes or joins Wi-Fi, checks the download,
+  keeps three, and sets up progress sync with one tap.
+- **Plugins, from Deckle.** **Settings → KOReader** lists the plugged-in reader's plugins with
+  switches, installs, updates, removes and rolls them back from a zip, a folder or a GitHub
+  release, and has a store: a reviewed list pinned by hash, and a Discover list beyond it.
+  Backup and restore of KOReader's settings and reading data carries plugins too.
+- **calibre's wireless connection, answered by Deckle.** Tap *Connect* in KOReader and Deckle
+  appears as calibre would: your books, calibre's books and the paper go over Wi-Fi, with no
+  plugin and no calibre running. The app shows every reader that has connected, its books and
+  free space, and a queue.
+- **Reading data back into calibre.** Progress, finished, last read, rating and highlights into
+  calibre columns you choose, through calibre's own `calibredb`, never by editing its database.
+  Off by default, with a preview; a value you changed in calibre is left alone.
+- **Shelves from calibre.** A tag, series, author, column or saved search becomes a shelf on a
+  Kobo or a collection in KOReader, holding the books that are actually on the reader. Only
+  shelves Deckle made are ever changed.
+
+## What each reader gets
+
+| | Kindle (USB) | Kindle (email) | Kindle Scribe | Kobo | PocketBook | reMarkable | KOReader (Wi-Fi) | A folder |
+|---|---|---|---|---|---|---|---|---|
+| The paper | KFX | EPUB, Amazon sets it | KFX over MTP | KEPUB | EPUB | PDF, colour on a Paper Pro | EPUB or KEPUB | EPUB, KEPUB, PDF or bundle |
+| Crossword and word search | yes, scored from your notes | yes | yes, no score | yes | yes | yes | yes | yes |
+| How far you read | yes | – | yes | with KOReader | with KOReader | – | yes, by sync | – |
+| Highlights read back | yes | – | – ([#99](https://github.com/CasaVargas/deckle/issues/99)) | yes | with KOReader | – | over USB or a synced folder | KOReader's |
+| Books, finished | KFX, cover, pages | – | KFX, cover first | clean KEPUB | clean EPUB | EPUB | EPUB over the calibre connection | KFX |
+| X-Ray and Word Wise | yes | – | with a real ASIN | Who's who page | Who's who page | Who's who page | – | – |
+| AI recaps, Summary, Previously | yes | – | yes | yes | yes | yes | – | yes |
+| Comics, manga, scans | AZW3, fitted per model | – | AZW3, checked on device | fixed-layout EPUB | fixed-layout EPUB | image PDF, colour on a Paper Pro | – | AZW3 |
+| Puzzle books | PDF, no ink | – | PDF, write on it | – | – | PDF, sized for it | – | PDF |
+| calibre connection, reading data back, shelves | with KOReader | – | with KOReader | yes | with KOReader | – | yes | – |
+| The Kitchen Book | yes | – | yes | – | – | – | – | EPUB |
+
+Every cell is a feature of the free app; Kindle books and the Kindle's paper need Kindle Previewer,
+which runs on Mac and Windows. A Kobo, PocketBook or reMarkable needs no Previewer. The Linux
+container prints the paper for email and export folders and serves KOReader; Kindle books aren't
+converted there.
 
 ## Install
 
@@ -344,6 +407,10 @@ deckle run book.epub --preset academic            # or novel, manual
 deckle run ./notes --to device                    # a flat Markdown folder, one note per chapter
 deckle run notes.docx --to device                 # also .odt, .rtf, .mobi/.azw3, .txt, .fb2, .pdf, .cbz/.cbr, a URL, .webloc/.url/.html
 deckle run manga.cbz --to remarkable              # a comic as an image PDF for the reMarkable's screen; other books as EPUB
+deckle run manga.cbz --to device --direction rtl  # a comic that doesn't say it reads right to left
+deckle run book.epub --to device --llm anthropic --recaps --book-summary --series-recap  # AI recaps, off unless asked
+deckle send notes.pdf --to device                 # a PDF as it is: on a Scribe, a document you can write on
+deckle puzzles crossword --to device --size 13    # a book of crosswords to solve in ink (also search, sudoku)
 deckle bind a.pdf b.docx https://… --title "Pack"  # several files into one book, then `deckle run` it
 deckle inspect book.epub --json                   # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF
@@ -360,6 +427,16 @@ deckle kindle backup                              # DRM-free books and their .sd
 deckle kindle restore "…/kindle-backups/Kindle Scribe 2026-10-23T22-30"  # onto any Kindle
 deckle highlights export --to ~/Notes/Reading     # one Markdown file per book (folder remembered)
 deckle words anki --to ~/Desktop/words.csv        # looked-up words as Anki cards (File → Import)
+
+# KOReader, the reMarkable and calibre
+deckle reader-server password                     # the paper and your books over Wi-Fi, in KOReader's catalog and sync
+deckle koreader plugins install deckle            # the Deckle plugin: the paper fetches itself
+deckle koreader store list                        # reviewed plugins, pinned by hash
+deckle koreader backup                            # KOReader's reading state, settings and plugins, to this computer
+deckle digest remarkable password                 # SSH to the tablet: a Deckle folder, over Wi-Fi, pruned
+deckle wireless status                            # calibre's wireless connection, answered by Deckle
+deckle calibre preview                            # reading data back into calibre, through calibredb
+deckle shelves add "Space opera" tag:space-opera  # a Kobo shelf or KOReader collection from a calibre rule
 ```
 
 `deckle --help` and `deckle <command> --help` list everything else.
@@ -417,10 +494,11 @@ sections, the original paper ships with one notice.
 ## Status
 
 Early, and moving fast. The whole pipeline works from the app and the CLI and is tested against
-fixtures and simulated devices. On real hardware it's verified on a **Kindle Scribe (2024)** and a
-**Kindle Paperwhite**; other Kindles are pending. Kobo, PocketBook and reMarkable are tested only
-against simulated devices so far. Results per device are in [docs/devices.md](docs/devices.md), and
-bug reports with your model and firmware are very welcome.
+fixtures and simulated devices. On real hardware it's verified on a **Kindle Scribe (2024)**,
+comics included, and a **Kindle Paperwhite**; KOReader and the calibre connection are partly
+checked on those two. Other Kindles are pending, and Kobo, PocketBook and reMarkable are tested
+only against simulated devices so far. Results per device are in [docs/devices.md](docs/devices.md),
+and bug reports with your model and firmware are very welcome.
 
 On Linux, the Daily runs headless in a [container](docs/docker.md) (Docker, Unraid); Kindle books
 can't be converted there, because Kindle Previewer only runs on Mac and Windows. What's next is on the
