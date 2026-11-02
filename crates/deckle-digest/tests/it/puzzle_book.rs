@@ -19,6 +19,8 @@ fn book(count: usize, size: usize, difficulty: Difficulty) -> Book {
             title: None,
             seed: Some(7),
             date: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+            quotes: None,
+            picture: None,
         },
         Words::embedded(),
     )
@@ -137,6 +139,8 @@ fn crosswords(count: usize, size: usize) -> Book {
             title: None,
             seed: Some(7),
             date: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+            quotes: None,
+            picture: None,
         },
         Words::embedded(),
     )
@@ -215,6 +219,8 @@ fn sudokus(count: usize) -> Book {
             title: None,
             seed: Some(7),
             date: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+            quotes: None,
+            picture: None,
         },
         Words::embedded(),
     )

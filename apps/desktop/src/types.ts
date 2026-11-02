@@ -1071,6 +1071,68 @@ export interface LlmPullEvent {
   error: string | null;
 }
 
+// The Puzzles tab (Puzzles tab design). These mirror the DTOs in deckle-app/src/puzzles.rs.
+export type PuzzleKindKey = "crossword" | "search" | "sudoku" | "ladder" | "cryptogram" | "nonogram" | "maze";
+export interface PuzzleKind {
+  key: PuzzleKindKey;
+  name: string;
+  title: string;
+  blurb: string;
+  sizes: [number, number] | null;
+  default_size: number;
+  takes: "words" | "clued" | "quotes" | "picture" | "none";
+  graded: boolean;
+  difficulties: [string, string, string];
+}
+export interface PuzzleBookRequest {
+  kind: PuzzleKindKey;
+  count: number;
+  size: number;
+  difficulty: "easy" | "medium" | "hard";
+  title: string;
+  screen: string;
+  words: string;
+  quotes: string;
+  picture: string | null;
+  seed: number | null;
+  date: string;
+}
+export type PuzzleDto =
+  | { kind: "search"; rows: string[]; words: [string, boolean][] }
+  | { kind: "crossword"; rows: string[]; clues: [number, "across" | "down", string, boolean][] }
+  | { kind: "sudoku"; givens: number[] }
+  | { kind: "ladder"; ladders: [string, string, number][] }
+  | { kind: "cryptogram"; words: string[]; given: [string, string][] }
+  | { kind: "nonogram"; size: number; rows: number[][]; cols: number[][] }
+  | { kind: "maze"; size: number; walls: number[] };
+export interface PuzzlePreview {
+  title: string;
+  subtitle: string;
+  seed: number;
+  date: string;
+  pages: number;
+  warnings: string[];
+  first: PuzzleDto | null;
+}
+export interface PuzzleProgress {
+  made: number;
+  of: number;
+}
+export interface MadePuzzleBook {
+  path: string;
+  name: string;
+  kind: PuzzleKindKey;
+  title: string;
+  subtitle: string;
+  date: string;
+  seed: number;
+  pages: number;
+  puzzles: number;
+  bytes: number;
+  warnings: string[];
+  request: PuzzleBookRequest;
+}
+
 export interface DailyEditorConfig {
   enabled: boolean;
   /** `null` with an empty model and endpoint: the paper follows Settings → AI. */

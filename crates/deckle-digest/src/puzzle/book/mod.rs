@@ -15,6 +15,10 @@ use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 use super::cross::{self, Crossword, Lexicon};
+use super::cryptogram::{self, Cryptogram};
+use super::ladder::{self, Ladder};
+use super::maze::{self, Maze};
+use super::nonogram::{self, Nonogram};
 use super::search::{self, Options, Search, Way};
 use super::sudoku::{self, Grade, Sudoku};
 use super::words::Words;
@@ -32,6 +36,10 @@ const MIN_WORDS: usize = 8;
 const MIN_CLUED: usize = 3;
 /// Fresh seeds tried for one puzzle before the book gives up.
 const RESEEDS: u64 = 8;
+/// Ladders on a page: one is a few rungs, three make an evening.
+pub const LADDERS_PER_PAGE: usize = 3;
+/// Quotes a cryptogram book needs, at least, when they're your own.
+const MIN_QUOTES: usize = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -39,32 +47,90 @@ pub enum Kind {
     Search,
     Crossword,
     Sudoku,
+    Ladder,
+    Cryptogram,
+    Nonogram,
+    Maze,
 }
 
 impl Kind {
+    pub const ALL: [Kind; 7] = [
+        Kind::Crossword,
+        Kind::Search,
+        Kind::Sudoku,
+        Kind::Ladder,
+        Kind::Cryptogram,
+        Kind::Nonogram,
+        Kind::Maze,
+    ];
+
     /// "word search", "crossword".
     pub fn name(self) -> &'static str {
         match self {
             Kind::Search => "word search",
             Kind::Crossword => "crossword",
             Kind::Sudoku => "sudoku",
+            Kind::Ladder => "word ladder",
+            Kind::Cryptogram => "cryptogram",
+            Kind::Nonogram => "nonogram",
+            Kind::Maze => "maze",
         }
     }
 
-    /// The sizes its grids take.
+    /// The `deckle puzzles` subcommand, and the kind's name in a saved book's options.
+    pub fn key(self) -> &'static str {
+        match self {
+            Kind::Search => "search",
+            Kind::Crossword => "crossword",
+            Kind::Sudoku => "sudoku",
+            Kind::Ladder => "ladder",
+            Kind::Cryptogram => "cryptogram",
+            Kind::Nonogram => "nonogram",
+            Kind::Maze => "maze",
+        }
+    }
+
+    /// The sizes its grids take. A ladder, a cryptogram and a sudoku have one size.
     pub fn sizes(self) -> std::ops::RangeInclusive<usize> {
         match self {
             Kind::Search => SEARCH_SIZES,
             Kind::Crossword => CROSS_SIZES,
             Kind::Sudoku => 9..=9,
+            Kind::Ladder => 4..=4,
+            Kind::Cryptogram => 0..=0,
+            Kind::Nonogram => nonogram::SIZES,
+            Kind::Maze => maze::SIZES,
         }
     }
 
-    fn title(self) -> &'static str {
+    /// The size a book of this kind takes when none is asked for.
+    pub fn default_size(self) -> usize {
+        match self {
+            Kind::Search => 12,
+            Kind::Crossword => 11,
+            Kind::Sudoku => 9,
+            Kind::Ladder => 4,
+            Kind::Cryptogram => 0,
+            Kind::Nonogram => 15,
+            Kind::Maze => 20,
+        }
+    }
+
+    /// Whether `--size` means anything for it.
+    pub fn sized(self) -> bool {
+        let s = self.sizes();
+        s.start() != s.end()
+    }
+
+    pub fn title(self) -> &'static str {
         match self {
             Kind::Search => "Word Search",
             Kind::Crossword => "Crossword",
             Kind::Sudoku => "Sudoku",
+            Kind::Ladder => "Word Ladders",
+            Kind::Cryptogram => "Cryptograms",
+            Kind::Nonogram => "Nonograms",
+            Kind::Maze => "Mazes",
         }
     }
 }
@@ -114,6 +180,39 @@ impl Difficulty {
             Difficulty::Hard => "hard",
         }
     }
+
+    /// A ladder's rungs (words between the ends, plus one): 3 for easy, 4, 5 and 6 for hard.
+    pub fn rungs(self) -> std::ops::RangeInclusive<usize> {
+        match self {
+            Difficulty::Easy => 3..=3,
+            Difficulty::Medium => 4..=4,
+            Difficulty::Hard => 5..=6,
+        }
+    }
+
+    /// Letters a cryptogram gives away to start.
+    pub fn reveals(self) -> usize {
+        match self {
+            Difficulty::Easy => 3,
+            Difficulty::Medium => 1,
+            Difficulty::Hard => 0,
+        }
+    }
+
+    /// The letters a cryptogram's quote has, at most: short for easy, any for hard.
+    pub fn quote_letters(self) -> usize {
+        match self {
+            Difficulty::Easy => 60,
+            Difficulty::Medium => 90,
+            Difficulty::Hard => *cryptogram::LETTERS.end(),
+        }
+    }
+}
+
+/// A page of word ladders (puzzle books: three to a page).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LadderPage {
+    pub ladders: Vec<Ladder>,
 }
 
 /// What to make. `seed` `None` takes [`default_seed`].
@@ -132,6 +231,36 @@ pub struct BookOptions {
     pub seed: Option<u64>,
     /// Printed on the title page, and part of the default seed.
     pub date: NaiveDate,
+    /// A cryptogram book's own quotes, each with who said it, already through
+    /// [`cryptogram::quotes_from_file`].
+    pub quotes: Option<Vec<(String, String)>>,
+    /// A nonogram book's own picture (the file's bytes and its name): puzzle 1; the rest are
+    /// Deckle's pictograms and shapes.
+    pub picture: Option<(Vec<u8>, String)>,
+}
+
+impl BookOptions {
+    pub fn with_count(mut self, count: usize) -> BookOptions {
+        self.count = count;
+        self
+    }
+
+    /// A book of `kind` with its defaults, dated `date`.
+    pub fn new(kind: Kind, date: NaiveDate) -> BookOptions {
+        BookOptions {
+            kind,
+            count: 10,
+            size: kind.default_size(),
+            difficulty: Difficulty::Medium,
+            words: None,
+            clued: None,
+            title: None,
+            seed: None,
+            date,
+            quotes: None,
+            picture: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -151,6 +280,10 @@ pub enum Puzzles {
     Search(Vec<Search>),
     Crossword(Vec<Crossword>),
     Sudoku(Vec<Sudoku>),
+    Ladder(Vec<LadderPage>),
+    Cryptogram(Vec<Cryptogram>),
+    Nonogram(Vec<Nonogram>),
+    Maze(Vec<Maze>),
 }
 
 impl Puzzles {
@@ -159,6 +292,10 @@ impl Puzzles {
             Puzzles::Search(p) => p.len(),
             Puzzles::Crossword(p) => p.len(),
             Puzzles::Sudoku(p) => p.len(),
+            Puzzles::Ladder(p) => p.len(),
+            Puzzles::Cryptogram(p) => p.len(),
+            Puzzles::Nonogram(p) => p.len(),
+            Puzzles::Maze(p) => p.len(),
         }
     }
 
@@ -172,6 +309,10 @@ impl Puzzles {
             Puzzles::Search(p) => p.first().map_or(0, Search::size),
             Puzzles::Crossword(p) => p.first().map_or(0, |x| x.rows.len()),
             Puzzles::Sudoku(_) => 9,
+            Puzzles::Ladder(_) => 4,
+            Puzzles::Cryptogram(_) => 0,
+            Puzzles::Nonogram(p) => p.first().map_or(0, Nonogram::size),
+            Puzzles::Maze(p) => p.first().map_or(0, |m| m.size),
         }
     }
 
@@ -180,6 +321,10 @@ impl Puzzles {
             Puzzles::Search(_) => Kind::Search,
             Puzzles::Crossword(_) => Kind::Crossword,
             Puzzles::Sudoku(_) => Kind::Sudoku,
+            Puzzles::Ladder(_) => Kind::Ladder,
+            Puzzles::Cryptogram(_) => Kind::Cryptogram,
+            Puzzles::Nonogram(_) => Kind::Nonogram,
+            Puzzles::Maze(_) => Kind::Maze,
         }
     }
 }
@@ -208,6 +353,34 @@ impl Book {
             _ => &[],
         }
     }
+
+    pub fn ladders(&self) -> &[LadderPage] {
+        match &self.puzzles {
+            Puzzles::Ladder(p) => p,
+            _ => &[],
+        }
+    }
+
+    pub fn cryptograms(&self) -> &[Cryptogram] {
+        match &self.puzzles {
+            Puzzles::Cryptogram(p) => p,
+            _ => &[],
+        }
+    }
+
+    pub fn nonograms(&self) -> &[Nonogram] {
+        match &self.puzzles {
+            Puzzles::Nonogram(p) => p,
+            _ => &[],
+        }
+    }
+
+    pub fn mazes(&self) -> &[Maze] {
+        match &self.puzzles {
+            Puzzles::Maze(p) => p,
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -232,6 +405,10 @@ pub enum BookError {
     },
     /// Puzzle N couldn't be made with any of its seeds.
     Unfilled(usize),
+    /// `--quotes` had no quote of a usable length.
+    TooFewQuotes,
+    /// `--picture` couldn't be read, with why.
+    BadPicture(String),
 }
 
 impl fmt::Display for BookError {
@@ -297,6 +474,13 @@ impl fmt::Display for BookError {
             BookError::Unfilled(n) => {
                 write!(f, "puzzle {n} couldn't be made; try another --seed")
             }
+            BookError::TooFewQuotes => write!(
+                f,
+                "--quotes has no quote of {} to {} letters",
+                cryptogram::LETTERS.start(),
+                cryptogram::LETTERS.end()
+            ),
+            BookError::BadPicture(why) => write!(f, "--picture: {why}"),
         }
     }
 }
@@ -369,9 +553,13 @@ fn fnv(text: &str) -> u64 {
 /// The seed a book takes when none is given: its options and its date, so one day's runs make
 /// the same book and the next day's a new one (puzzle books §5.2).
 pub fn default_seed(o: &BookOptions) -> u64 {
+    let picture = o
+        .picture
+        .as_ref()
+        .map(|(bytes, name)| format!("{name}:{}", bytes.len()));
     fnv(&format!(
-        "{:?}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}",
-        o.kind, o.count, o.size, o.difficulty, o.words, o.clued, o.title, o.date
+        "{:?}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}|{:?}|{:?}",
+        o.kind, o.count, o.size, o.difficulty, o.words, o.clued, o.title, o.date, o.quotes, picture
     ))
 }
 
@@ -382,26 +570,177 @@ pub fn words_wanted(size: usize) -> usize {
 
 /// The book `o` asks for. The same options (and seed) make the same book on any machine.
 pub fn make(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
+    make_with(o, words, &mut |_, _| {})
+}
+
+/// [`make`], telling `progress` after each puzzle: `(made, of)`.
+pub fn make_with(
+    o: &BookOptions,
+    words: &Words,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Book, BookError> {
     match o.kind {
-        Kind::Search => make_search(o, words),
-        Kind::Crossword => make_crossword(o, Lexicon::embedded()),
-        Kind::Sudoku => make_sudoku(o),
+        Kind::Search => make_search(o, words, progress),
+        Kind::Crossword => make_crossword(o, Lexicon::embedded(), progress),
+        Kind::Sudoku => make_sudoku(o, progress),
+        Kind::Ladder => make_ladders(o, words, progress),
+        Kind::Cryptogram => make_cryptograms(o, progress),
+        Kind::Nonogram => make_nonograms(o, progress),
+        Kind::Maze => make_mazes(o, progress),
     }
 }
 
+/// A book of mazes: each from its own seed.
+fn make_mazes(o: &BookOptions, progress: &mut dyn FnMut(usize, usize)) -> Result<Book, BookError> {
+    check(o)?;
+    let seed = o.seed.unwrap_or_else(|| default_seed(o));
+    let mut puzzles = Vec::with_capacity(o.count);
+    for i in 0..o.count {
+        let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20));
+        puzzles.push(maze::make(o.size, &mut rng));
+        progress(i + 1, o.count);
+    }
+    Ok(finish(o, seed, Puzzles::Maze(puzzles), Vec::new()))
+}
+
+/// A book of nonograms: your picture first when there is one, then Deckle's pictograms in
+/// an order from the seed, then random shapes; every one solves by line logic, or the book
+/// says which don't.
+fn make_nonograms(
+    o: &BookOptions,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Book, BookError> {
+    check(o)?;
+    let seed = o.seed.unwrap_or_else(|| default_seed(o));
+    let mut warnings = Vec::new();
+    let mut puzzles = Vec::with_capacity(o.count);
+    if let Some((bytes, name)) = &o.picture {
+        let n = nonogram::from_picture(bytes, o.size, name).map_err(BookError::BadPicture)?;
+        if !n.line_solvable() {
+            warnings.push("puzzle 1, your picture, needs a guess or two to finish".to_owned());
+        }
+        puzzles.push(n);
+        progress(1, o.count);
+    }
+    let mut names: Vec<&str> = nonogram::PICTOGRAMS.iter().map(|(n, _)| *n).collect();
+    names.shuffle(&mut StdRng::seed_from_u64(seed));
+    let mut next = 0;
+    while puzzles.len() < o.count {
+        let i = puzzles.len();
+        let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20));
+        let n = names
+            .get(next)
+            .and_then(|name| nonogram::pictogram(name))
+            .map(|p| nonogram::scaled(&p, o.size))
+            .filter(Nonogram::line_solvable);
+        next += 1;
+        puzzles.push(n.unwrap_or_else(|| nonogram::random(o.size, &mut rng)));
+        progress(i + 1, o.count);
+    }
+    Ok(finish(o, seed, Puzzles::Nonogram(puzzles), warnings))
+}
+
+/// A book of cryptograms: your quotes, or Deckle's, each with a key of its own and the
+/// difficulty's reveals; quotes go round the book, never twice until all are used.
+fn make_cryptograms(
+    o: &BookOptions,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Book, BookError> {
+    check(o)?;
+    let seed = o.seed.unwrap_or_else(|| default_seed(o));
+    let own = o.quotes.as_ref();
+    let max = o.difficulty.quote_letters();
+    let letters = |q: &str| q.chars().filter(char::is_ascii_alphabetic).count();
+    let mut pool: Vec<(String, String)> = match own {
+        Some(q) => q.clone(),
+        None => cryptogram::QUOTES
+            .iter()
+            .filter_map(|(q, s)| cryptogram::clean(q).map(|q| (q, (*s).to_owned())))
+            .collect(),
+    };
+    if own.is_some() && pool.len() < MIN_QUOTES {
+        return Err(BookError::TooFewQuotes);
+    }
+    // the difficulty's length first; longer ones only when the short run out
+    pool.sort_by_key(|(q, _)| letters(q) > max);
+    let short = pool.iter().filter(|(q, _)| letters(q) <= max).count();
+    let mut rng = StdRng::seed_from_u64(seed);
+    pool[..short].shuffle(&mut rng);
+    pool[short..].shuffle(&mut rng);
+    let mut puzzles = Vec::with_capacity(o.count);
+    for i in 0..o.count {
+        let (q, s) = &pool[i % pool.len()];
+        let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20));
+        puzzles.push(cryptogram::make(q, s, o.difficulty.reveals(), &mut rng));
+        progress(i + 1, o.count);
+    }
+    let mut warnings = Vec::new();
+    if o.count > pool.len() {
+        warnings.push(format!(
+            "{} quotes for {} puzzles: some repeat with a new key",
+            pool.len(),
+            o.count
+        ));
+    }
+    Ok(finish(o, seed, Puzzles::Cryptogram(puzzles), warnings))
+}
+
+/// A book of ladder pages: [`LADDERS_PER_PAGE`] ladders a page, each the difficulty's rungs,
+/// from Deckle's pairs first and then from any two words that far apart; no pair twice.
+fn make_ladders(
+    o: &BookOptions,
+    words: &Words,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Book, BookError> {
+    check(o)?;
+    let seed = o.seed.unwrap_or_else(|| default_seed(o));
+    let want = o.difficulty.rungs();
+    let mut rng = StdRng::seed_from_u64(seed);
+    let mut pairs: Vec<(&str, &str)> = ladder::PAIRS.to_vec();
+    pairs.shuffle(&mut rng);
+    let mut fitting = pairs.into_iter().filter_map(|(from, to)| {
+        let path = ladder::shortest(words, from, to)?;
+        want.contains(&(path.len() - 1)).then_some(Ladder {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            path,
+        })
+    });
+    let mut used: HashSet<(String, String)> = HashSet::new();
+    let mut pages = Vec::with_capacity(o.count);
+    let warnings = Vec::new();
+    for i in 0..o.count {
+        let mut ladders = Vec::with_capacity(LADDERS_PER_PAGE);
+        while ladders.len() < LADDERS_PER_PAGE {
+            let next = fitting
+                .next()
+                .or_else(|| ladder::random(words, &want, &mut rng, &used));
+            match next {
+                Some(l) if used.insert((l.from.clone(), l.to.clone())) => ladders.push(l),
+                Some(_) => continue,
+                None => return Err(BookError::Unfilled(i + 1)),
+            }
+        }
+        pages.push(LadderPage { ladders });
+        progress(i + 1, o.count);
+    }
+    Ok(finish(o, seed, Puzzles::Ladder(pages), warnings))
+}
+
 /// A sudoku book: each puzzle of the difficulty's grade (puzzle books §3.4).
-fn make_sudoku(o: &BookOptions) -> Result<Book, BookError> {
+fn make_sudoku(o: &BookOptions, progress: &mut dyn FnMut(usize, usize)) -> Result<Book, BookError> {
     check(o)?;
     if o.words.is_some() {
         return Err(BookError::NoWords(Kind::Sudoku));
     }
     let seed = o.seed.unwrap_or_else(|| default_seed(o));
-    let puzzles = (0..o.count)
-        .map(|i| {
-            let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20));
-            sudoku::make(o.difficulty.grade(), &mut rng).ok_or(BookError::Unfilled(i + 1))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut puzzles = Vec::with_capacity(o.count);
+    for i in 0..o.count {
+        let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20));
+        puzzles
+            .push(sudoku::make(o.difficulty.grade(), &mut rng).ok_or(BookError::Unfilled(i + 1))?);
+        progress(i + 1, o.count);
+    }
     Ok(finish(o, seed, Puzzles::Sudoku(puzzles), Vec::new()))
 }
 
@@ -424,13 +763,25 @@ fn check(o: &BookOptions) -> Result<(), BookError> {
 fn finish(o: &BookOptions, seed: u64, puzzles: Puzzles, warnings: Vec<String>) -> Book {
     let plural = if o.count == 1 { "puzzle" } else { "puzzles" };
     let size = o.size;
+    let what = match o.kind {
+        Kind::Ladder => {
+            let r = o.difficulty.rungs();
+            if r.start() == r.end() {
+                format!("{} rungs", r.start())
+            } else {
+                format!("{} to {} rungs", r.start(), r.end())
+            }
+        }
+        Kind::Cryptogram => format!("{} letters given", o.difficulty.reveals()),
+        _ => format!("{size}×{size}"),
+    };
+    let count = match o.kind {
+        Kind::Ladder => format!("{} pages", o.count),
+        _ => format!("{} {plural}", o.count),
+    };
     Book {
         title: o.title.clone().unwrap_or_else(|| o.kind.title().to_owned()),
-        subtitle: format!(
-            "{size}×{size} · {} · {} {plural}",
-            o.difficulty.name(),
-            o.count
-        ),
+        subtitle: format!("{what} · {} · {count}", o.difficulty.name()),
         date: o.date,
         seed,
         puzzles,
@@ -453,7 +804,11 @@ fn first_fill(
 
 /// A crossword book: each puzzle filled from the whole list, preferring common words as the
 /// difficulty asks; one that won't fill so takes rarer words, with a warning.
-fn make_crossword(o: &BookOptions, lex: &Lexicon) -> Result<Book, BookError> {
+fn make_crossword(
+    o: &BookOptions,
+    lex: &Lexicon,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Book, BookError> {
     check(o)?;
     if o.words.is_some() {
         return Err(BookError::NoWords(Kind::Crossword));
@@ -507,11 +862,16 @@ fn make_crossword(o: &BookOptions, lex: &Lexicon) -> Result<Book, BookError> {
             ));
         }
         puzzles.push(x);
+        progress(i + 1, o.count);
     }
     Ok(finish(o, seed, Puzzles::Crossword(puzzles), warnings))
 }
 
-fn make_search(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
+fn make_search(
+    o: &BookOptions,
+    words: &Words,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<Book, BookError> {
     check(o)?;
     let size = o.size;
     let seed = o.seed.unwrap_or_else(|| default_seed(o));
@@ -566,6 +926,7 @@ fn make_search(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
             warnings.push(format!("puzzle {} is mostly built-in words", i + 1));
         }
         puzzles.push(s);
+        progress(i + 1, o.count);
     }
     Ok(finish(o, seed, Puzzles::Search(puzzles), warnings))
 }
@@ -600,6 +961,8 @@ mod tests {
             title: None,
             seed: None,
             date: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+            quotes: None,
+            picture: None,
         }
     }
 
@@ -684,6 +1047,149 @@ mod tests {
                 .filter(|w| p.words.iter().any(|h| h.word == **w))
                 .count();
             assert!(both <= 1, "a word inside another is found twice");
+        }
+    }
+
+    fn kind_opts(kind: Kind, count: usize) -> BookOptions {
+        BookOptions {
+            seed: Some(11),
+            ..BookOptions::new(kind, NaiveDate::from_ymd_opt(2026, 11, 2).unwrap())
+        }
+        .with_count(count)
+    }
+
+    #[test]
+    fn ladders_cryptograms_nonograms_and_mazes_make_and_render() {
+        let w = Words::embedded();
+        for kind in [Kind::Ladder, Kind::Cryptogram, Kind::Nonogram, Kind::Maze] {
+            let o = kind_opts(kind, 3);
+            let mut told = Vec::new();
+            let b = make_with(&o, w, &mut |i, n| told.push((i, n))).unwrap();
+            assert_eq!(b.puzzles.len(), 3, "{kind:?}");
+            assert_eq!(told, [(1, 3), (2, 3), (3, 3)], "{kind:?}");
+            assert_eq!(b.puzzles.kind(), kind);
+            let again = make(&o, w).unwrap();
+            assert_eq!(again.puzzles, b.puzzles, "{kind:?} is deterministic");
+            let bytes = pdf::render(&b, pdf::PageSize::KindleScribe)
+                .unwrap_or_else(|e| panic!("{kind:?}: {e}"));
+            assert!(bytes.len() > 2000, "{kind:?}");
+            assert!(pdf::pages(&b, pdf::PageSize::KindleScribe) >= 5, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn ladder_pages_keep_to_their_rungs_and_never_repeat_a_pair() {
+        let w = Words::embedded();
+        for (d, rungs) in [
+            (Difficulty::Easy, 3..=3),
+            (Difficulty::Medium, 4..=4),
+            (Difficulty::Hard, 5..=6),
+        ] {
+            let mut o = kind_opts(Kind::Ladder, 12);
+            o.difficulty = d;
+            let b = make(&o, w).unwrap();
+            let mut seen = HashSet::new();
+            for page in b.ladders() {
+                assert_eq!(page.ladders.len(), LADDERS_PER_PAGE);
+                for l in &page.ladders {
+                    assert!(rungs.contains(&(l.path.len() - 1)), "{d:?}: {l:?}");
+                    assert!(seen.insert((l.from.clone(), l.to.clone())), "{l:?} twice");
+                    assert!(l.path.iter().all(|x| w.contains(x)));
+                }
+            }
+        }
+        assert_eq!(
+            make(&kind_opts(Kind::Ladder, 2), w).unwrap().subtitle,
+            "4 rungs · medium · 2 pages"
+        );
+    }
+
+    #[test]
+    fn cryptograms_take_your_quotes_and_the_difficulty_reveals() {
+        let w = Words::embedded();
+        let mut o = kind_opts(Kind::Cryptogram, 4);
+        o.difficulty = Difficulty::Easy;
+        o.quotes = Some(vec![
+            (
+                "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG.".into(),
+                "A typist".into(),
+            ),
+            (
+                "ALL THAT GLITTERS IS NOT GOLD, THEY SAY.".into(),
+                "Proverb".into(),
+            ),
+        ]);
+        let b = make(&o, w).unwrap();
+        let cs = b.cryptograms();
+        assert_eq!(cs.len(), 4);
+        assert!(cs.iter().all(|c| c.given.len() == 3));
+        assert_ne!(cs[0].plain, cs[1].plain, "both quotes before a repeat");
+        assert_ne!(cs[0].key, cs[2].key, "a repeat gets a new key");
+        assert!(b.warnings[0].contains("some repeat"), "{:?}", b.warnings);
+        assert_eq!(b.subtitle, "3 letters given · easy · 4 puzzles");
+        o.quotes = Some(vec![]);
+        assert_eq!(make(&o, w).unwrap_err(), BookError::TooFewQuotes);
+        let hard = make(
+            &BookOptions {
+                difficulty: Difficulty::Hard,
+                ..kind_opts(Kind::Cryptogram, 2)
+            },
+            w,
+        )
+        .unwrap();
+        assert!(hard.cryptograms().iter().all(|c| c.given.is_empty()));
+    }
+
+    #[test]
+    fn nonograms_start_with_your_picture_then_pictograms() {
+        let w = Words::embedded();
+        let mut img = image::GrayImage::new(4, 4);
+        for y in 0..4 {
+            for x in 0..4 {
+                img.put_pixel(x, y, image::Luma([if x < 2 { 0 } else { 255 }]));
+            }
+        }
+        let mut bytes = Vec::new();
+        image::DynamicImage::ImageLuma8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        let mut o = kind_opts(Kind::Nonogram, 3);
+        o.size = 10;
+        o.picture = Some((bytes, "half.png".into()));
+        let b = make(&o, w).unwrap();
+        let ns = b.nonograms();
+        assert_eq!(ns[0].title, "half.png");
+        assert!(ns[0].cells.iter().all(|r| r[0] && !r[9]));
+        assert!(
+            ns[1].title != "Shapes" || ns[2].title != "Shapes",
+            "pictograms come next"
+        );
+        assert!(ns.iter().all(|n| n.size() == 10));
+        assert!(ns.iter().skip(1).all(Nonogram::line_solvable));
+        o.picture = Some((b"junk".to_vec(), "x".into()));
+        assert!(matches!(make(&o, w), Err(BookError::BadPicture(_))));
+    }
+
+    #[test]
+    fn mazes_grow_with_the_size_and_a_tiny_screen_refuses_a_big_one() {
+        let w = Words::embedded();
+        let mut o = kind_opts(Kind::Maze, 2);
+        o.size = 40;
+        let b = make(&o, w).unwrap();
+        assert!(
+            b.mazes()
+                .iter()
+                .all(|m| m.size == 40 && m.solution.len() > 79)
+        );
+        let small = pdf::PageSize::Screen(crate::pdf::Screen::RemarkablePaperProMove);
+        match pdf::render(&b, small) {
+            Err(BookError::DoesNotFit { largest, .. }) => {
+                assert!((6..40).contains(&largest), "{largest}")
+            }
+            other => panic!("{other:?}"),
         }
     }
 

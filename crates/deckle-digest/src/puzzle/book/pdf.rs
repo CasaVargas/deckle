@@ -7,11 +7,15 @@ use std::collections::BTreeMap;
 
 use ab_glyph::{Font, FontRef, GlyphId};
 use pdf_writer::{Content, Name, Pdf, Rect, Ref, Str, TextStr};
+use rand::SeedableRng;
 
-use super::{Book, BookError, CROSS_SIZES, Kind, Puzzles, SEARCH_SIZES, words_wanted};
+use super::{Book, BookError, CROSS_SIZES, Kind, LadderPage, Puzzles, SEARCH_SIZES, words_wanted};
 use crate::pdf::{BOLD, EmbedFace, REGULAR, Screen, embed_font, glyph_bytes, shape};
 use crate::puzzle::cross::{self, Crossword};
+use crate::puzzle::cryptogram::Cryptogram;
 use crate::puzzle::grid::Dir;
+use crate::puzzle::maze::{self, Maze};
+use crate::puzzle::nonogram::{self, Nonogram};
 use crate::puzzle::search::Search;
 use crate::puzzle::sudoku::Grid;
 
@@ -70,13 +74,27 @@ const BORDER: f32 = 2.0;
 /// A sudoku square, at least: a digit and pencil marks (§4.2).
 const MIN_SUDOKU_CELL: f32 = 40.0;
 
-/// Answers a page and their columns: two by two, or two by three for sudoku's small grids.
+/// Answers a page and their columns: two by two, or two by three for sudoku's small grids;
+/// ladders and cryptograms are lines of text, more to a page.
 fn answer_grid(kind: Kind) -> (usize, usize) {
     match kind {
-        Kind::Sudoku => (2, 3),
+        Kind::Sudoku | Kind::Nonogram => (2, 3),
+        Kind::Ladder => (2, 5),
+        Kind::Cryptogram => (1, 6),
         _ => (2, 2),
     }
 }
+
+/// A nonogram square, at least: room to shade it with a pen (§4.2).
+const MIN_NONO_CELL: f32 = 14.0;
+/// A maze corridor, at least: a pen's line with room either side.
+const MIN_MAZE_CELL: f32 = 9.0;
+/// A cryptogram's letter square and its row (the blank, the cipher letter under it).
+const CRYPT_CELL: f32 = 13.0;
+const CRYPT_ROW: f32 = 34.0;
+const CRYPT_WORD_GAP: f32 = 9.0;
+/// A ladder's letter square, at most.
+const MAX_LADDER_CELL: f32 = 26.0;
 
 fn answers_per_page(kind: Kind) -> usize {
     let (cols, rows) = answer_grid(kind);
@@ -273,6 +291,17 @@ impl Painter<'_> {
                 self.centred(Face::Regular, size, cx, base, &ch.to_string());
             }
         }
+    }
+
+    /// One row of `n` squares: a ladder's rung.
+    fn boxes(&mut self, x: f32, y: f32, cell: f32, n: usize) {
+        for k in 1..n {
+            let d = k as f32 * cell;
+            self.line(CELL_LINE, (x + d, y), (x + d, y + cell));
+        }
+        self.c.set_line_width(BORDER);
+        self.c.rect(x, self.ph - y - cell, cell * n as f32, cell);
+        self.c.stroke();
     }
 
     /// A crossword's black squares, filled.
@@ -497,6 +526,11 @@ enum Layouts {
         y: f32,
         cell: f32,
     },
+    /// A page a puzzle, laid out as it's drawn: ladders, cryptograms, mazes.
+    Plain {
+        count: usize,
+    },
+    Nonogram(Vec<NonoLayout>),
 }
 
 impl Layouts {
@@ -506,8 +540,50 @@ impl Layouts {
             Layouts::Search(l) => vec![1; l.len()],
             Layouts::Crossword(l) => l.iter().map(|x| x.pages).collect(),
             Layouts::Sudoku { count, .. } => vec![1; *count],
+            Layouts::Plain { count } => vec![1; *count],
+            Layouts::Nonogram(l) => vec![1; l.len()],
         }
     }
+}
+
+/// Where a nonogram's grid sits once its clues have their room.
+struct NonoLayout {
+    x: f32,
+    y: f32,
+    cell: f32,
+    /// Row clues' width, left of the grid; column clues' height, above it.
+    left: f32,
+    top: f32,
+}
+
+/// The clue text size for a nonogram's squares.
+fn nono_clue_size(cell: f32) -> f32 {
+    (0.55 * cell).clamp(6.0, 11.0)
+}
+
+fn lay_out_nonogram(page: (f32, f32), n: &Nonogram) -> Option<NonoLayout> {
+    let (pw, ph) = page;
+    let size = n.size() as f32;
+    let rows = n.row_clues().iter().map(Vec::len).max().unwrap_or(1) as f32;
+    let cols = n.col_clues().iter().map(Vec::len).max().unwrap_or(1) as f32;
+    // a clue takes about 0.7 of a square in its line
+    let fit_w = (pw - 2.0 * MARGIN) / (size + 0.7 * rows + 0.3);
+    let top_y = MARGIN + HEAD + GAP;
+    let fit_h = (ph - top_y - MARGIN - FOOT - GAP) / (size + 0.7 * cols + 0.3);
+    let cell = fit_w.min(fit_h).min(30.0);
+    if cell < MIN_NONO_CELL {
+        return None;
+    }
+    let left = 0.7 * rows * cell + 0.3 * cell;
+    let top = 0.7 * cols * cell + 0.3 * cell;
+    let x = (pw - left - size * cell) / 2.0 + left;
+    Some(NonoLayout {
+        x,
+        y: top_y + top,
+        cell,
+        left,
+        top,
+    })
 }
 
 /// Lays the book's puzzles out, or [`BookError::DoesNotFit`] with the largest size that does.
@@ -515,6 +591,44 @@ fn lay_out_book(faces: &Faces, b: &Book, page: (f32, f32)) -> Result<Layouts, Bo
     let size = b.puzzles.size();
     let kind = b.puzzles.kind();
     match &b.puzzles {
+        Puzzles::Ladder(ps) => Ok(Layouts::Plain { count: ps.len() }),
+        Puzzles::Cryptogram(ps) => Ok(Layouts::Plain { count: ps.len() }),
+        Puzzles::Maze(ps) => {
+            let (w, h) = page;
+            let y = MARGIN + HEAD + GAP;
+            let side = (w - 2.0 * MARGIN).min(h - y - MARGIN - FOOT - GAP);
+            if side / (size as f32) < MIN_MAZE_CELL {
+                return Err(BookError::DoesNotFit {
+                    kind,
+                    size,
+                    largest: maze::SIZES
+                        .rev()
+                        .find(|&s| s < size && side / s as f32 >= MIN_MAZE_CELL)
+                        .unwrap_or(0),
+                });
+            }
+            Ok(Layouts::Plain { count: ps.len() })
+        }
+        Puzzles::Nonogram(ps) => ps
+            .iter()
+            .map(|n| lay_out_nonogram(page, n))
+            .collect::<Option<Vec<_>>>()
+            .map(Layouts::Nonogram)
+            .ok_or_else(|| BookError::DoesNotFit {
+                kind,
+                size,
+                largest: nonogram::SIZES
+                    .rev()
+                    .find(|&s| {
+                        s < size
+                            && lay_out_nonogram(
+                                page,
+                                &nonogram::random(s, &mut rand::rngs::StdRng::seed_from_u64(1)),
+                            )
+                            .is_some()
+                    })
+                    .unwrap_or(0),
+            }),
         Puzzles::Search(ps) => {
             let widest = ps
                 .iter()
@@ -671,6 +785,27 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
                 (Puzzles::Sudoku(ps), Layouts::Sudoku { x, y, cell, .. }) => {
                     p.sudoku(&ps[i].givens, None, *x, *y, *cell);
                 }
+                (Puzzles::Ladder(ps), Layouts::Plain { .. }) => {
+                    p.ladder_page(&ps[i], (pw, ph));
+                }
+                (Puzzles::Cryptogram(ps), Layouts::Plain { .. }) => {
+                    p.cryptogram(&ps[i], (pw, ph));
+                }
+                (Puzzles::Maze(ps), Layouts::Plain { .. }) => {
+                    let y = MARGIN + HEAD + GAP;
+                    let side = (pw - 2.0 * MARGIN).min(ph - y - MARGIN - FOOT - GAP);
+                    p.maze(
+                        &ps[i],
+                        (pw - side) / 2.0,
+                        y,
+                        side / ps[i].size as f32,
+                        false,
+                    );
+                }
+                (Puzzles::Nonogram(ps), Layouts::Nonogram(ls)) => {
+                    let (n, l) = (&ps[i], &ls[i]);
+                    p.nonogram(n, l.x, l.y, l.cell, l.left, l.top, false);
+                }
                 _ => unreachable!("a book's layouts are of its own kind"),
             }
             p.text(Face::Regular, FOOT, MARGIN, ph - MARGIN, &foot);
@@ -713,6 +848,59 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
                     let s = &ps[first + k];
                     p.sudoku(&s.givens, Some(&s.solution), x, gy, side / 9.0);
                 }
+                Puzzles::Ladder(ps) => {
+                    for (j, l) in ps[first + k].ladders.iter().enumerate() {
+                        let text = format!(
+                            "{}. {}",
+                            (b'a' + j as u8) as char,
+                            l.path
+                                .iter()
+                                .map(|w| w.to_uppercase())
+                                .collect::<Vec<_>>()
+                                .join(" → ")
+                        );
+                        p.text(
+                            Face::Regular,
+                            LIST - 1.0,
+                            x,
+                            gy + 2.0 + LEAD * j as f32,
+                            &text,
+                        );
+                    }
+                }
+                Puzzles::Cryptogram(ps) => {
+                    let c = &ps[first + k];
+                    let lines = wrap(&faces, Face::Regular, LIST - 1.0, &c.plain, slot_w);
+                    for (j, line) in lines.iter().take(3).enumerate() {
+                        p.text(
+                            Face::Regular,
+                            LIST - 1.0,
+                            x,
+                            gy + 2.0 + LEAD * j as f32,
+                            line,
+                        );
+                    }
+                    if !c.source.is_empty() {
+                        let j = lines.len().min(3) as f32;
+                        p.text(
+                            Face::Bold,
+                            LIST - 2.0,
+                            x,
+                            gy + 2.0 + LEAD * j,
+                            &format!("— {}", c.source),
+                        );
+                    }
+                }
+                Puzzles::Nonogram(ps) => {
+                    let n = &ps[first + k];
+                    let cell = side / n.size() as f32;
+                    p.nonogram(n, x, gy, cell, 0.0, 0.0, true);
+                    p.text(Face::Regular, FOOT, x, gy + side + FOOT + 3.0, &n.title);
+                }
+                Puzzles::Maze(ps) => {
+                    let m = &ps[first + k];
+                    p.maze(m, x, gy, side / m.size as f32, true);
+                }
             }
         }
         pages.push(p.c);
@@ -727,6 +915,280 @@ pub fn render(b: &Book, page: PageSize) -> Result<Vec<u8>, BookError> {
         &starts,
         first_answers,
     ))
+}
+
+impl Painter<'_> {
+    /// A nonogram: its grid with the row clues to the left and the column clues above (the
+    /// clue room `left` and `top`, none for an answer), heavier lines every fifth square, and
+    /// the squares shaded when `filled`.
+    #[allow(clippy::too_many_arguments)]
+    fn nonogram(
+        &mut self,
+        n: &Nonogram,
+        x: f32,
+        y: f32,
+        cell: f32,
+        left: f32,
+        top: f32,
+        filled: bool,
+    ) {
+        let size = n.size();
+        let side = cell * size as f32;
+        if filled {
+            for (r, row) in n.cells.iter().enumerate() {
+                for (c, &on) in row.iter().enumerate() {
+                    if on {
+                        let ty = y + r as f32 * cell;
+                        self.c
+                            .rect(x + c as f32 * cell, self.ph - ty - cell, cell, cell);
+                        self.c.fill_nonzero();
+                    }
+                }
+            }
+        }
+        for k in 1..size {
+            let d = k as f32 * cell;
+            let w = if k % 5 == 0 { BORDER * 0.75 } else { CELL_LINE };
+            self.line(w, (x + d, y), (x + d, y + side));
+            self.line(w, (x, y + d), (x + side, y + d));
+        }
+        self.c.set_line_width(BORDER);
+        self.c.rect(x, self.ph - y - side, side, side);
+        self.c.stroke();
+        if left <= 0.0 && top <= 0.0 {
+            return;
+        }
+        let fs = nono_clue_size(cell);
+        let step = 0.7 * cell;
+        // row clues, right-aligned up to the grid's edge
+        for (r, clues) in n.row_clues().iter().enumerate() {
+            let base = y + (r as f32 + 0.5) * cell + 0.35 * fs;
+            for (k, clue) in clues.iter().rev().enumerate() {
+                let cx = x - 0.3 * cell - (k as f32 + 0.5) * step;
+                self.centred(Face::Regular, fs, cx, base, &clue.to_string());
+            }
+        }
+        // column clues, bottom-aligned down to the grid's edge
+        for (c, clues) in n.col_clues().iter().enumerate() {
+            let cx = x + (c as f32 + 0.5) * cell;
+            for (k, clue) in clues.iter().rev().enumerate() {
+                let base = y - 0.3 * cell - (k as f32 + 0.5) * step + 0.35 * fs;
+                self.centred(Face::Regular, fs, cx, base, &clue.to_string());
+            }
+        }
+    }
+
+    /// A maze: every standing wall as a line, the outer edge heavier, an arrow in at the top
+    /// and out at the bottom, and the solution drawn through the squares when `path`.
+    fn maze(&mut self, m: &Maze, x: f32, y: f32, cell: f32, path: bool) {
+        let size = m.size;
+        let side = cell * size as f32;
+        for r in 0..size {
+            for c in 0..size {
+                let w = m.at(r, c);
+                let (x0, y0) = (x + c as f32 * cell, y + r as f32 * cell);
+                let (x1, y1) = (x0 + cell, y0 + cell);
+                let edge = |k: usize| {
+                    if k == 0 || k == size - 1 {
+                        BORDER
+                    } else {
+                        CELL_LINE * 1.6
+                    }
+                };
+                if w & maze::N != 0 {
+                    self.line(if r == 0 { BORDER } else { edge(size) }, (x0, y0), (x1, y0));
+                }
+                if w & maze::S != 0 {
+                    self.line(
+                        if r == size - 1 { BORDER } else { edge(size) },
+                        (x0, y1),
+                        (x1, y1),
+                    );
+                }
+                if w & maze::W != 0 {
+                    self.line(if c == 0 { BORDER } else { edge(size) }, (x0, y0), (x0, y1));
+                }
+                if w & maze::E != 0 {
+                    self.line(
+                        if c == size - 1 { BORDER } else { edge(size) },
+                        (x1, y0),
+                        (x1, y1),
+                    );
+                }
+            }
+        }
+        // in and out: a short arrow above the entrance, another below the exit
+        let arrow = |p: &mut Painter, cx: f32, top: f32, len: f32| {
+            p.line(CELL_LINE * 1.6, (cx, top), (cx, top + len));
+            p.line(
+                CELL_LINE * 1.6,
+                (cx - 0.2 * len, top + 0.7 * len),
+                (cx, top + len),
+            );
+            p.line(
+                CELL_LINE * 1.6,
+                (cx + 0.2 * len, top + 0.7 * len),
+                (cx, top + len),
+            );
+        };
+        let len = (0.9 * cell).max(8.0);
+        arrow(self, x + 0.5 * cell, y - len - 1.0, len);
+        arrow(self, x + side - 0.5 * cell, y + side + 1.0, len);
+        if path {
+            self.c.set_line_width((0.3 * cell).max(1.5));
+            self.c.set_stroke_gray(0.45);
+            let centre = |(r, c): (usize, usize)| {
+                (
+                    x + (c as f32 + 0.5) * cell,
+                    self.ph - (y + (r as f32 + 0.5) * cell),
+                )
+            };
+            let mut it = m.solution.iter().copied();
+            if let Some(first) = it.next() {
+                let (fx, fy) = centre(first);
+                self.c.move_to(fx, fy);
+                for p in it {
+                    let (px, py) = centre(p);
+                    self.c.line_to(px, py);
+                }
+                self.c.stroke();
+            }
+            self.c.set_stroke_gray(0.0);
+        }
+    }
+
+    /// A page of ladders side by side: each ladder's words in squares, the top and bottom
+    /// words given, the rungs between them blank.
+    fn ladder_page(&mut self, page: &LadderPage, (pw, ph): (f32, f32)) {
+        let n = page.ladders.len().max(1);
+        let col_w = (pw - 2.0 * MARGIN - (n - 1) as f32 * GAP) / n as f32;
+        let tallest = page.ladders.iter().map(|l| l.path.len()).max().unwrap_or(1) as f32;
+        let top = MARGIN + HEAD + GAP + LIST + 6.0;
+        let cell = ((col_w - 8.0) / 4.0)
+            .min((ph - top - MARGIN - FOOT - GAP - 2.0 * LEAD) / (tallest * 1.25))
+            .min(MAX_LADDER_CELL);
+        self.text(
+            Face::Regular,
+            FOOT + 1.0,
+            MARGIN,
+            MARGIN + HEAD + GAP + 2.0,
+            "Change one letter a rung, each rung a word, to climb from the top word to the bottom one.",
+        );
+        for (j, l) in page.ladders.iter().enumerate() {
+            let x0 = MARGIN + j as f32 * (col_w + GAP);
+            let letter = (b'a' + j as u8) as char;
+            self.text(
+                Face::Bold,
+                LIST,
+                x0,
+                top,
+                &format!(
+                    "{letter}. {} to {}",
+                    l.from.to_uppercase(),
+                    l.to.to_uppercase()
+                ),
+            );
+            let gx = x0 + (col_w - 4.0 * cell) / 2.0;
+            let mut gy = top + 8.0;
+            let steps = l.path.len();
+            for (k, word) in l.path.iter().enumerate() {
+                let given = k == 0 || k == steps - 1;
+                self.boxes(gx, gy, cell, 4);
+                if given {
+                    let row = [word.to_uppercase()];
+                    self.letters(&row, gx, gy, cell, |_, _| 0.6 * cell);
+                }
+                gy += cell * 1.25;
+            }
+        }
+    }
+
+    /// A cryptogram page: the cipher's words as rows of squares with a blank above each
+    /// cipher letter (the given letters filled in), then the key, A to Z, to work in.
+    fn cryptogram(&mut self, c: &Cryptogram, (pw, ph): (f32, f32)) {
+        let left = MARGIN;
+        let width = pw - 2.0 * MARGIN;
+        let mut x = left;
+        let mut y = MARGIN + HEAD + GAP + CRYPT_ROW;
+        self.text(
+            Face::Regular,
+            FOOT + 1.0,
+            MARGIN,
+            MARGIN + HEAD + GAP + 2.0,
+            "Each letter stands for another, the same way throughout. Write the real letter above its stand-in.",
+        );
+        y += 4.0;
+        for word in c.words() {
+            let w = word.chars().count() as f32 * CRYPT_CELL;
+            if x > left && x + w > left + width {
+                x = left;
+                y += CRYPT_ROW;
+            }
+            for ch in word.chars() {
+                if ch.is_ascii_alphabetic() {
+                    // the blank, the cipher letter under it
+                    self.line(
+                        CELL_LINE,
+                        (x + 1.0, y - 12.0),
+                        (x + CRYPT_CELL - 1.0, y - 12.0),
+                    );
+                    self.centred(
+                        Face::Regular,
+                        8.0,
+                        x + CRYPT_CELL / 2.0,
+                        y - 3.0,
+                        &ch.to_string(),
+                    );
+                    if c.given.contains(&ch)
+                        && let Some(plain) = c.decode(ch)
+                    {
+                        self.centred(
+                            Face::Bold,
+                            10.0,
+                            x + CRYPT_CELL / 2.0,
+                            y - 14.5,
+                            &plain.to_string(),
+                        );
+                    }
+                } else {
+                    self.centred(
+                        Face::Regular,
+                        9.0,
+                        x + CRYPT_CELL / 2.0,
+                        y - 3.0,
+                        &ch.to_string(),
+                    );
+                }
+                x += CRYPT_CELL;
+            }
+            x += CRYPT_WORD_GAP;
+        }
+        // the key: two rows of thirteen, A to Z, a blank beside each
+        let ky = (y + CRYPT_ROW + GAP).min(ph - MARGIN - FOOT - GAP - 2.0 * CRYPT_ROW);
+        self.text(Face::Bold, LIST, left, ky, "Key");
+        let kw = width / 13.0;
+        for (i, letter) in (b'A'..=b'Z').enumerate() {
+            let kx = left + (i % 13) as f32 * kw;
+            let row_y = ky + 6.0 + (i / 13) as f32 * CRYPT_ROW + 14.0;
+            self.text(Face::Regular, 9.0, kx, row_y, &(letter as char).to_string());
+            self.line(
+                CELL_LINE,
+                (kx + 10.0, row_y + 1.0),
+                (kx + kw - 6.0, row_y + 1.0),
+            );
+            if c.given.contains(&(letter as char))
+                && let Some(plain) = c.decode(letter as char)
+            {
+                self.centred(
+                    Face::Bold,
+                    10.0,
+                    kx + 10.0 + (kw - 16.0) / 2.0,
+                    row_y - 1.0,
+                    &plain.to_string(),
+                );
+            }
+        }
+    }
 }
 
 /// A word search's answer: the grid, each hidden word outlined, the filler letters smaller so

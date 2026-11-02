@@ -18,6 +18,7 @@ import { runSummary } from "./bookStatus";
 import CookbookView from "./CookbookView";
 import type { Incoming } from "./CookbookAdd";
 import DailyView from "./DailyView";
+import PuzzlesView from "./PuzzlesView";
 import Welcome from "./Welcome";
 import type { Room } from "./dailyRooms";
 import Icon from "./Icon";
@@ -127,7 +128,7 @@ function Deckle() {
   const [binding, setBinding] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState<string | null>(null);
-  const [tab, setTab] = useState<"books" | "daily" | "cookbook" | "kindle">("books");
+  const [tab, setTab] = useState<"books" | "daily" | "cookbook" | "puzzles" | "kindle">("books");
   /** The welcome (welcome design §4): open on a first launch, or again from Settings → About. */
   const [welcomeOpen, setWelcomeOpen] = useState(false);
   /** Bumped when the welcome closes: the Daily tab mounts afresh, since the welcome may have set the paper up. */
@@ -622,6 +623,9 @@ function Deckle() {
             <button role="tab" aria-selected={tab === "cookbook"} className={tab === "cookbook" ? "on" : ""} onClick={() => setTab("cookbook")}>
               Cookbook
             </button>
+            <button role="tab" aria-selected={tab === "puzzles"} className={tab === "puzzles" ? "on" : ""} onClick={() => setTab("puzzles")}>
+              Puzzles
+            </button>
             <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
               Kindle
             </button>
@@ -695,6 +699,7 @@ function Deckle() {
             }}
           />
         )}
+        {tab === "puzzles" && <PuzzlesView onNotice={setNotice} device={device ?? null} deviceTarget={deviceTarget} />}
         {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
         {tab === "books" && articleOpen && (
           <ArticleField

@@ -1147,3 +1147,33 @@ input[type=checkbox] { padding: 0; }
 .ai-prices { border-collapse: collapse; font-size: 13px; }
 .ai-prices caption { caption-side: top; text-align: left; padding: 0 0 6px; }
 .ai-prices td { padding: 5px 16px 5px 0; border-top: 1px solid var(--line); }
+
+/* The Puzzles tab (Puzzles tab design §1) */
+.puzzles-head p { margin: 4px 0 0; }
+.puzzles-columns { align-items: start; }
+.puzzles-form { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.puzzles-kinds { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.puzzles-kinds .mode-card { padding: 11px 12px; gap: 5px; }
+.puzzles-own { display: flex; flex-direction: column; gap: 6px; }
+.puzzles-own textarea { font: inherit; font-size: 13px; line-height: 1.45; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; min-height: 72px; }
+.puzzles-options .ai-fields { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+.puzzles-options .puzzles-title { grid-column: 1 / -1; }
+.puzzles-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.puzzles-actions .progress { flex: 1 1 160px; margin: 0; }
+.puzzles-side { position: sticky; top: 12px; }
+.warn { color: var(--warn); }
+.pz-preview { display: flex; flex-direction: column; gap: 10px; }
+.pz-preview svg { width: 100%; height: auto; background: #fff; border-radius: 4px; }
+.pz-clues { columns: 2; column-gap: 14px; font-size: 11px; line-height: 1.35; }
+.pz-clues p { margin: 0 0 3px; break-inside: avoid; }
+.pz-clues strong { display: block; margin-bottom: 3px; }
+.pz-clues .theme, .pz-words .theme { color: var(--accent); font-weight: 600; }
+.pz-words { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; }
+.pz-crypt { display: flex; flex-wrap: wrap; gap: 10px 12px; padding: 8px 4px; background: #fff; border-radius: 4px; color: #1b1813; }
+.pz-word { display: inline-flex; gap: 2px; }
+.pz-letter { display: flex; flex-direction: column; align-items: center; width: 13px; }
+.pz-letter em { font-style: normal; font-size: 11px; line-height: 13px; height: 13px; border-bottom: 1px solid #1b1813; width: 11px; text-align: center; font-weight: 700; }
+.pz-letter small { font-size: 8px; margin-top: 2px; }
+.pz-punct { align-self: flex-end; font-size: 11px; width: 8px; }
+.puzzles-books { overflow: hidden; }
+.puzzles-book-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }

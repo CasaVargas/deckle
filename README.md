@@ -174,10 +174,13 @@ in, press **Send**.
   sets it for a comic that doesn't say. A Kobo or PocketBook gets a fixed-layout EPUB; a reMarkable
   (`--to remarkable`) an image-only PDF fitted to its screen, since its EPUB reader reflows. No
   X-Ray, Word Wise or page numbers.
-- **Puzzle books to write on.** `deckle puzzles search|crossword|sudoku` makes a book of word
-  searches, crosswords (5×5 to 15×15, your own words and clues if you like) or sudoku as a PDF
-  that takes pen ink on a Kindle Scribe, sized for a Scribe, a reMarkable, an iPad or A5 paper.
-  See [docs/puzzle-books.md](docs/puzzle-books.md).
+- **Puzzle books to write on.** The **Puzzles** tab (and `deckle puzzles`) makes a book of
+  crosswords (5×5 to 15×15, your own words and clues if you like), word searches, sudoku, word
+  ladders, cryptograms (your own quotes, or public-domain ones), nonograms (your own photo as
+  the first) or mazes, as a PDF that takes pen ink on a Kindle Scribe, sized for a Scribe, a
+  reMarkable, an iPad or A5 paper, with the first page previewed before you make it and every
+  book kept so **Make again** gives the same one. See
+  [docs/puzzle-books.md](docs/puzzle-books.md).
 - **A PDF as it is.** `deckle send` copies a PDF, TXT, AZW3 or MOBI to a Kindle or a folder
   untouched, which is how a document that takes ink gets onto a Scribe.
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.

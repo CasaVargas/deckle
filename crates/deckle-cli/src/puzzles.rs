@@ -41,7 +41,68 @@ pub fn run(json: bool, action: PuzzlesCommand) -> Result<ExitCode, String> {
         PuzzlesCommand::Sudoku { difficulty, book } => {
             make(json, Kind::Sudoku, 9, difficulty, None, book)
         }
+        PuzzlesCommand::Ladder { difficulty, book } => {
+            make_more(json, Kind::Ladder, 4, difficulty, None, None, book)
+        }
+        PuzzlesCommand::Cryptogram {
+            difficulty,
+            quotes,
+            book,
+        } => make_more(json, Kind::Cryptogram, 0, difficulty, quotes, None, book),
+        PuzzlesCommand::Nonogram {
+            size,
+            picture,
+            book,
+        } => make_more(
+            json,
+            Kind::Nonogram,
+            size,
+            DifficultyArg::Medium,
+            None,
+            picture,
+            book,
+        ),
+        PuzzlesCommand::Maze { size, book } => make_more(
+            json,
+            Kind::Maze,
+            size,
+            DifficultyArg::Medium,
+            None,
+            None,
+            book,
+        ),
     }
+}
+
+/// The options every kind shares, from the command line.
+fn base_options(
+    kind: Kind,
+    size: usize,
+    difficulty: DifficultyArg,
+    args: &BookArgs,
+) -> Result<(BookOptions, PageSize), String> {
+    let date = match &args.date {
+        Some(d) => NaiveDate::parse_from_str(d, "%Y-%m-%d")
+            .map_err(|_| format!("--date must be YYYY-MM-DD, not {d}"))?,
+        None => Local::now().date_naive(),
+    };
+    let page = PageSize::parse(&args.screen).ok_or_else(|| format!("no screen {}", args.screen))?;
+    let difficulty = match difficulty {
+        DifficultyArg::Easy => Difficulty::Easy,
+        DifficultyArg::Medium => Difficulty::Medium,
+        DifficultyArg::Hard => Difficulty::Hard,
+    };
+    Ok((
+        BookOptions {
+            count: args.count,
+            size,
+            difficulty,
+            title: args.title.clone(),
+            seed: args.seed,
+            ..BookOptions::new(kind, date)
+        },
+        page,
+    ))
 }
 
 fn make(
@@ -59,65 +120,93 @@ fn make(
         None => None,
     };
     // a crossword's words come with clues; a word search's are bare
-    let mut unclued = Vec::new();
+    let mut warnings = Vec::new();
     let (own, clued) = match (&text, kind) {
         (Some(t), Kind::Crossword) => {
             let (clued, skipped) = book::clued_words_from_file(t);
-            unclued = skipped;
+            if !skipped.is_empty() {
+                let names: Vec<String> = skipped.iter().map(|w| w.to_uppercase()).collect();
+                warnings.push(format!("skipped, no clue: {}", names.join(", ")));
+            }
             (None, Some(clued))
         }
         (Some(t), _) => (Some(book::words_from_file(t)), None),
         (None, _) => (None, None),
     };
-    let date = match &args.date {
-        Some(d) => NaiveDate::parse_from_str(d, "%Y-%m-%d")
-            .map_err(|_| format!("--date must be YYYY-MM-DD, not {d}"))?,
-        None => Local::now().date_naive(),
+    let (mut opts, page) = base_options(kind, size, difficulty, &args)?;
+    opts.words = own;
+    opts.clued = clued;
+    let extra = match &words {
+        Some(w) => format!(" --words {}", quote(&w.to_string_lossy())),
+        None => String::new(),
     };
-    let page = PageSize::parse(&args.screen).ok_or_else(|| format!("no screen {}", args.screen))?;
-    let difficulty = match difficulty {
-        DifficultyArg::Easy => Difficulty::Easy,
-        DifficultyArg::Medium => Difficulty::Medium,
-        DifficultyArg::Hard => Difficulty::Hard,
-    };
-    let opts = BookOptions {
-        kind,
-        count: args.count,
-        size,
-        difficulty,
-        words: own,
-        clued,
-        title: args.title.clone(),
-        seed: args.seed,
-        date,
-    };
-    let mut b = book::make(&opts, Words::embedded()).map_err(|e| e.to_string())?;
-    if !unclued.is_empty() {
-        let names: Vec<String> = unclued.iter().map(|w| w.to_uppercase()).collect();
-        b.warnings
-            .insert(0, format!("skipped, no clue: {}", names.join(", ")));
+    make_book(json, opts, page, &args, warnings, &extra)
+}
+
+/// `make` for the kinds that take quotes or a picture rather than words.
+fn make_more(
+    json: bool,
+    kind: Kind,
+    size: usize,
+    difficulty: DifficultyArg,
+    quotes: Option<PathBuf>,
+    picture: Option<PathBuf>,
+    args: BookArgs,
+) -> Result<ExitCode, String> {
+    let mut warnings = Vec::new();
+    let (mut opts, page) = base_options(kind, size, difficulty, &args)?;
+    let mut extra = String::new();
+    if let Some(p) = &quotes {
+        let text =
+            std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+        let (q, skipped) = deckle_digest::puzzle::cryptogram::quotes_from_file(&text);
+        if !skipped.is_empty() {
+            warnings.push(format!(
+                "skipped, too short or too long: {}",
+                skipped.join("; ")
+            ));
+        }
+        opts.quotes = Some(q);
+        extra += &format!(" --quotes {}", quote(&p.to_string_lossy()));
     }
+    if let Some(p) = &picture {
+        let bytes = std::fs::read(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?;
+        let name = p
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        opts.picture = Some((bytes, name));
+        extra += &format!(" --picture {}", quote(&p.to_string_lossy()));
+    }
+    make_book(json, opts, page, &args, warnings, &extra)
+}
+
+/// Makes the book, writes or sends it, and prints the report with the command that remakes
+/// it; `extra` is that command's kind-specific flags.
+fn make_book(
+    json: bool,
+    opts: BookOptions,
+    page: PageSize,
+    args: &BookArgs,
+    mut warnings: Vec<String>,
+    extra: &str,
+) -> Result<ExitCode, String> {
+    let kind = opts.kind;
+    let mut b = book::make(&opts, Words::embedded()).map_err(|e| e.to_string())?;
+    warnings.append(&mut b.warnings);
+    b.warnings = warnings;
     let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
     let name = book::file_name(&b);
-    let path = deliver(&bytes, &name, &args)?;
+    let path = deliver(&bytes, &name, args)?;
 
-    let mut again = format!(
-        "deckle puzzles {} --count {}",
-        match kind {
-            Kind::Search => "search",
-            Kind::Crossword => "crossword",
-            Kind::Sudoku => "sudoku",
-        },
-        b.puzzles.len(),
-    );
-    // a sudoku is always 9×9
-    if kind != Kind::Sudoku {
-        again += &format!(" --size {size}");
+    let mut again = format!("deckle puzzles {} --count {}", kind.key(), b.puzzles.len());
+    if kind.sized() {
+        again += &format!(" --size {}", opts.size);
     }
-    again += &format!(" --difficulty {}", difficulty.name());
-    if let Some(w) = &words {
-        again += &format!(" --words {}", quote(&w.to_string_lossy()));
+    if !matches!(kind, Kind::Nonogram | Kind::Maze) {
+        again += &format!(" --difficulty {}", opts.difficulty.name());
     }
+    again += extra;
     if let Some(t) = &args.title {
         again += &format!(" --title {}", quote(t));
     }

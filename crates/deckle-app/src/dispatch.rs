@@ -215,6 +215,14 @@ commands! { ctx;
         press::press_setup(paper, export_index, enabled, expected, &ctx.exe),
     press_stop { on: bool, paper: Option<String> } => next::press_stop(on, paper),
     previewer_status {} => Ok(commands::previewer_status(&ctx.state)),
+    puzzles_kinds {} => Ok(crate::puzzles::puzzles_kinds()),
+    puzzles_list {} => Ok(crate::puzzles::puzzles_list()),
+    puzzles_make { request: crate::puzzles::BookRequest } =>
+        crate::puzzles::puzzles_make(ctx.events.clone(), request),
+    puzzles_preview { request: crate::puzzles::BookRequest } =>
+        crate::puzzles::puzzles_preview(request),
+    puzzles_send { path: String, target: RunTarget, replace: bool } =>
+        crate::puzzles::puzzles_send(path, target, replace),
     reader_server_set_password { password: String } =>
         crate::reader_server::reader_server_set_password(password),
     reader_server_status {} => Ok(crate::reader_server::reader_server_status()),

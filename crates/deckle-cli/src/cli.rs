@@ -447,6 +447,45 @@ pub enum PuzzlesCommand {
         #[command(flatten)]
         book: BookArgs,
     },
+    /// A book of word ladders: three a page, one word into another a letter a rung.
+    Ladder {
+        /// easy: 3 rungs; medium: 4; hard: 5 or 6.
+        #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
+        difficulty: DifficultyArg,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+    /// A book of cryptograms: a sentence enciphered letter for letter, with a key to work in.
+    Cryptogram {
+        /// easy: short quotes, 3 letters given; medium: 1 given; hard: none.
+        #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
+        difficulty: DifficultyArg,
+        /// Your own quotes, one a line as `quote — who said it` (`#` lines skipped).
+        #[arg(long)]
+        quotes: Option<PathBuf>,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+    /// A book of nonograms: shade the squares the row and column counts describe.
+    Nonogram {
+        /// Squares on a side, 5 to 25.
+        #[arg(long, default_value_t = 15)]
+        size: usize,
+        /// A picture (PNG, JPEG, GIF, WebP) as the first puzzle, thresholded; the rest are
+        /// Deckle's.
+        #[arg(long)]
+        picture: Option<PathBuf>,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+    /// A book of mazes, in at the top left and out at the bottom right.
+    Maze {
+        /// Squares on a side, 6 to 40 (10 for a child, 30 for an evening).
+        #[arg(long, default_value_t = 20)]
+        size: usize,
+        #[command(flatten)]
+        book: BookArgs,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]

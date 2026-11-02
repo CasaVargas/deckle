@@ -5,8 +5,11 @@
 pub mod book;
 pub mod check;
 pub mod cross;
+pub mod cryptogram;
 pub mod grid;
 pub mod ladder;
+pub mod maze;
+pub mod nonogram;
 pub mod search;
 pub mod store;
 pub mod sudoku;

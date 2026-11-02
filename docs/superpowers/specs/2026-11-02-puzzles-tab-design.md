@@ -1,6 +1,7 @@
 # The Puzzles tab: puzzle books from the app, themed on what you read — design
 
-**Status:** draft for discussion, 2026-11-02 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** increment 1 built (the tab with seven kinds, own lists, no theme), 2026-11-02 ·
+**Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-11-01-puzzle-books-design.md` (§3.5 themes, §6 increment 5 "the app's
 Puzzle Books screen"), `2026-10-22-puzzle-page-design.md`, `2026-10-31-word-search-design.md`,
 `2026-10-25-interests-design.md`, `2026-11-02-local-model-design.md`
@@ -73,8 +74,11 @@ means everyone gets the same grid. A reader's own interests make their own book.
 
 ## 5. Increments
 
-1. The tab with Crossword, Word search and Sudoku, **Your own list** and **No theme**, Your
-   books, Send and Save. (The CLI's engine behind commands.)
+1. The tab with seven kinds (Crossword, Word search, Sudoku, Word ladder, Cryptogram,
+   Nonogram, Maze), **Your own list** (words, clued words, quotes, a picture) and **No theme**,
+   the first-page preview, Your books, Send and Save. (The CLI's engine behind commands;
+   `make_with` reports progress.) *Built 2026-11-02.* As built, the preview makes puzzle 1
+   alone with the whole book's seed, so it is the same puzzle 1 the book gets.
 2. Interests, This week's paper and Words you looked up; the preview; progress events.
 3. The book you're reading and Your cookbook; the AI's clues and styles.
 4. Every Sunday, and the solved count from the Kindle's notes.

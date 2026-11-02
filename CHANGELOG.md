@@ -20,6 +20,16 @@
   address for Ollama on another computer. The service card keeps the provider, model and key
   fields with a price table beside them. Reading aids and Online & privacy point there, and
   Online & privacy says "nowhere online" when the model runs on this Mac.
+- **The Puzzles tab, and four new kinds of book.** A fifth tab makes a write-on puzzle book:
+  crossword, word search, sudoku, and now word ladders (three a page, the rungs by
+  difficulty), cryptograms (public-domain quotes or your own, letters given by difficulty, a
+  key to work in), nonograms (Deckle's pictures and shapes, every one solvable by line logic,
+  or your own photo as puzzle 1) and mazes (6 to 40 a side, the path drawn in the answers).
+  The first page is previewed as it will print while you change the options, a progress bar
+  follows the making, and every book is kept in `~/Deckle/Puzzles` with the options that made
+  it, so **Make again** gives the same book and **Send** copies it to the plugged-in Kindle or
+  **Save a copy** to a folder. The same four kinds on the command line: `deckle puzzles
+  ladder|cryptogram|nonogram|maze`. Design: `docs/superpowers/specs/2026-11-02-puzzles-tab-design.md`.
 - **The welcome shows the back pages.** A fourth page in the first-launch tour: the Mini with
   yesterday's headlines as its answers, the word search, the word ladder, the almanac, the
   horoscope and On this day, how a Kindle's notes mark the answers, the puzzle books to write

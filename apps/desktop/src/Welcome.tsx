@@ -252,8 +252,8 @@ export default function Welcome({ onDone, onNotice, onSettings }: { onDone: (goD
                   paper says how many you solved.
                 </p>
                 <p>
-                  <strong>Puzzle books to write on.</strong> Word searches, crosswords up to 15×15 with your own words and clues, and sudoku, as a book that takes pen ink on a Kindle Scribe
-                  or a reMarkable. From the command line for now: <code>deckle puzzles</code>.
+                  <strong>Puzzle books to write on.</strong> Crosswords with your own words and clues, word searches, sudoku, word ladders, cryptograms, nonograms and mazes, as a book that
+                  takes pen ink on a Kindle Scribe or a reMarkable. The Puzzles tab makes one in a minute.
                 </p>
                 <p>
                   <strong>From Your Shelf.</strong> The books you're in the middle of, a past highlight and the words you looked up this week, read from your own Kindle, on this computer only.
@@ -293,6 +293,10 @@ export default function Welcome({ onDone, onNotice, onSettings }: { onDone: (goD
                   <div>
                     <dt>Cookbook</dt>
                     <dd>The recipes you save, as one book that keeps up with itself.</dd>
+                  </div>
+                  <div>
+                    <dt>Puzzles</dt>
+                    <dd>A puzzle book to write on, seven kinds, sent to the Scribe or saved for a reMarkable.</dd>
                   </div>
                   <div>
                     <dt>Kindle</dt>
