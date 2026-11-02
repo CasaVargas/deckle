@@ -969,6 +969,18 @@ Screens: `remarkable-2` (the default), `remarkable-paper-pro`, `remarkable-paper
   uploaded the next time the tablet is plugged in and answers (`digest run`, `push` or `watch`).
   The photos are gray on a reMarkable 2 and in color on a Paper Pro (`photos = "gray"` or
   `"color"` overrides it). A file the tablet already shows is not sent twice.
+- **Over Wi-Fi:** the tablet's web interface answers only on the USB cable out of the box. If
+  you've put it on your network (the community `webinterface-wifi` tweak, or an SSH port
+  forward), set `address = "http://<the tablet's address>"` under `[remarkable]`, or **Address**
+  on the card; Deckle asks there instead. `deckle devices` shows the tablet when it answers.
+- **Books too:** `deckle run --to remarkable book.epub manga.cbz`, or **Send to reMarkable** on
+  the app's Inbox. A comic goes as an image-only PDF fitted to the screen; anything else as an
+  EPUB. They wait in the same outbox and go with the next push.
+- **Without the tablet's cloud:** Deckle never signs in to reMarkable's cloud. If you'd rather
+  pull than push, an export folder in Dropbox, Google Drive or OneDrive (`[[export]]`,
+  `format = "pdf"`, `screen = "remarkable-2"`) shows up in the tablet's own integration for that
+  service, which reMarkable says works without a Connect subscription; open it there and tap
+  the paper to import it.
 - **No pruning on a reMarkable:** its USB web interface can't delete, so older papers stay on the
   tablet until you remove them there.
 - **No Kindle Previewer needed** for either.

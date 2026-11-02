@@ -404,9 +404,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             action: Some(cli::DevicesCommand::Name { name, kindle }),
         } => name_kindle(json, &name, kindle.as_deref()),
         cli::Command::Devices { action: None } => {
-            let names = deckle_digest::Config::load(&deckle_digest::config::default_path())
-                .unwrap_or_default()
-                .sync;
+            let cfg = deckle_digest::Config::load(&deckle_digest::config::default_path())
+                .unwrap_or_default();
+            let names = cfg.sync;
             let named = |t: &Target| {
                 names
                     .device_name(&deckle_core::sync::device_id(t))
@@ -415,14 +415,19 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             };
             let devices = detect_mass_storage();
             let mtp = deckle_transport::usb::detect();
+            // A reMarkable whose web interface answers (fixed-layout spec §12.4): a second's
+            // wait at most when none does.
+            let remarkable = deckle_core::remarkable::detect_with(cfg.remarkable.address());
             #[derive(serde::Serialize)]
             struct All<'a> {
                 mass_storage: &'a [deckle_core::deliver::Device],
                 mtp: &'a [deckle_transport::usb::MtpInfo],
+                remarkable: Option<&'a deckle_core::remarkable::Remarkable>,
             }
             let all = All {
                 mass_storage: &devices,
                 mtp: &mtp,
+                remarkable: remarkable.as_ref(),
             };
             emit(json, &all, || {
                 let mut lines: Vec<String> = devices
@@ -453,8 +458,15 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                         deckle_core::sync::device_id(&Target::Mtp(m.clone()))
                     )
                 }));
+                if let Some(r) = &remarkable {
+                    lines.push(format!(
+                        "reMarkable at {}  USB web interface  sync id \"{}\"",
+                        r.base,
+                        r.id()
+                    ));
+                }
                 if lines.is_empty() {
-                    "no Kindle connected".to_owned()
+                    "no Kindle connected, and no reMarkable answered".to_owned()
                 } else {
                     lines.join("\n")
                 }
@@ -3379,7 +3391,9 @@ fn digest(
                     .map_err(|e| format!("reading queue: {e}"))?;
             }
             // A reMarkable plugged in now takes the PDF at once.
-            let remarkable = rm_queued.then(push_remarkable).flatten();
+            let remarkable = rm_queued
+                .then(|| push_remarkable(&cfg.remarkable))
+                .flatten();
             // A Kobo or a PocketBook plugged in now takes its copy at once.
             let device = detect_reader().filter(|_| folder.is_none() && epub_queued);
             let reader = match push_reader(&kobo_queue, std::slice::from_ref(&cfg), device.as_ref())
@@ -3663,7 +3677,7 @@ fn digest(
             };
             // A reMarkable that answers takes its outbox too (other readers design §9).
             let remarkable = match to.as_str() {
-                "device" => push_remarkable(),
+                "device" => push_remarkable(&papers[0].remarkable),
                 _ => None,
             };
             if target.is_none()
@@ -3865,7 +3879,7 @@ fn digest(
                     // Asked only while something waits (the paper's, or books from `run --to
                     // remarkable`): an absent tablet costs a second a tick.
                     let tablet = (!pending.is_empty())
-                        .then(deckle_core::remarkable::detect)
+                        .then(|| deckle_core::remarkable::detect_with(cfg.remarkable.address()))
                         .flatten();
                     let id = tablet.as_ref().map(deckle_core::remarkable::Remarkable::id);
                     let push_only = deckle_core::sync::Actions {
@@ -4733,14 +4747,16 @@ fn with_direction(
 }
 
 /// Uploads the reMarkable outbox when something waits in it and the tablet answers.
-fn push_remarkable() -> Option<deckle_core::sync::RemarkablePush> {
+fn push_remarkable(
+    rm: &deckle_digest::config::RemarkableConfig,
+) -> Option<deckle_core::sync::RemarkablePush> {
     // Whatever waits goes, `[remarkable] enabled` or not: that key says the paper goes there;
     // `run --to remarkable` queues books without it (fixed-layout spec §12.1).
     let queue = remarkable_queue();
     if queue.pending().is_empty() {
         return None;
     }
-    let r = deckle_core::remarkable::detect()?;
+    let r = deckle_core::remarkable::detect_with(rm.address())?;
     Some(deckle_core::sync::run_remarkable(&queue, &r))
 }
 
@@ -5065,7 +5081,7 @@ fn send_to_remarkable(
         .collect();
     let any_queued = books.iter().any(|b| b.queued.is_some());
     let remarkable = any_queued
-        .then(deckle_core::remarkable::detect)
+        .then(|| deckle_core::remarkable::detect_with(rm.address()))
         .flatten()
         .map(|r| deckle_core::sync::run_remarkable(&queue, &r));
     let failed = books.iter().filter(|b| b.error.is_some()).count();

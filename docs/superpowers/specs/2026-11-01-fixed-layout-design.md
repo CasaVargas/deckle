@@ -355,6 +355,23 @@ This phase adds the book send and the comic PDF together, since the send alone i
   were cut right half first at import), so the PDF's pages are the spine's; nothing more.
 - The title and author from the OPF go in the PDF's Info dictionary.
 
+### 12.4 Easier to reach (follow-up to #279)
+
+- **`[remarkable] address`**: the tablet's address when it isn't `http://10.11.99.1` — the
+  community `webinterface-wifi` tweak, or an SSH port-forward, puts the same web interface on
+  the home network. `DECKLE_REMARKABLE_URL` still wins (tests); then `address`; then the USB
+  address. On the app's reMarkable card as **Address**, blank for USB.
+- **`deckle devices`** lists a reMarkable that answers, beside the Kindles, with its address
+  and sync id, so the owner can tell the USB web interface toggle took.
+- **App: Send to reMarkable** on the Inbox, beside Export to folder. A `remarkable` run
+  target: each book through `remarkable::book` (comic → PDF, else EPUB, with recaps and
+  Who's who as the settings ask, and the comic's reading direction from the settings), into
+  the outbox, then one push when the tablet answers. A book's final event says it went or
+  that it waits in the outbox. No Previewer check for this target. Not in the web app.
+- Still owed on hardware (spike 4): whether the web interface can upload into a folder, and
+  whether it answers over Wi-Fi with the toggle alone. SSH delivery (prune, model detection,
+  a Deckle folder) stays a research issue.
+
 ### 12.3 Tests
 
 - `deckle-comic`: a three-page comic (JPEG, PNG, oversized page) becomes a three-page PDF,

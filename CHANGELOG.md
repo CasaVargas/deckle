@@ -8,6 +8,12 @@
   photos are colour; any other book as an EPUB. They wait in the reMarkable's outbox until it
   answers, then `deckle digest push` or `watch` sends them, with or without the paper set up.
   A publisher's fixed-layout EPUB is refused for now, since the tablet's reader would reflow it.
+- **A reMarkable that's easier to reach.** **Send to reMarkable** on the app's Inbox does what
+  `run --to remarkable` does. `[remarkable] address` (**Address** on the card) points Deckle at
+  a tablet whose web interface you've put on your Wi-Fi, instead of the USB link. `deckle
+  devices` lists the tablet when it answers. And `docs/daily.md` says how to pull the paper
+  from Dropbox, Google Drive or OneDrive with the tablet's own integration, no cloud account
+  with Deckle.
 - **A welcome on first launch.** Four pages: your paper and its morning schedule, the
   bookmarklets, and where things are. The Save to paper page watches for your first save and
   says when it landed. **Settings → About** shows it again.

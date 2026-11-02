@@ -4,6 +4,11 @@ import { DEFAULT_READER_SERVER, DEFAULT_WIRELESS, SCREEN_LABEL } from "./types";
 import { DAYS } from "./papersView";
 import type { DailyConfig, Day, ReadershipView } from "./types";
 
+/** How the paper reaches the reMarkable: its USB link, or an address on the Wi-Fi (`address`). */
+export function rmHow(rm: { address?: string }): string {
+  return rm.address?.trim() ? `A PDF over Wi-Fi at ${rm.address.trim()}` : "A PDF over its USB web interface";
+}
+
 /** The Daily tab's tabs (Daily tab redesign §2): tomorrow's paper first, then what's in it. */
 export type Room = "today" | "sections" | "reading" | "editions" | "delivery";
 
@@ -39,7 +44,7 @@ export function destinations(cfg: DailyConfig, web = false): Place[] {
   return [
     { key: "kindle", name: "Kindle", how: "Over USB when it's plugged in", status: `Keeps ${plural(cfg.keep, "edition")}`, on: true, open: false },
     { key: "email", name: "Email to Kindle", how: "Over Wi-Fi, from your own mail account", status: email?.enabled ? email.to || "On" : "Off", on: !!email?.enabled, open: true },
-    { key: "remarkable", name: "reMarkable", how: "A PDF over its USB web interface", status: rm.enabled ? SCREEN_LABEL[rm.screen] : "Off", on: rm.enabled, open: true },
+    { key: "remarkable", name: "reMarkable", how: rmHow(rm), status: rm.enabled ? SCREEN_LABEL[rm.screen] : "Off", on: rm.enabled, open: true },
     {
       key: "exports",
       name: "Export folders",
@@ -84,7 +89,7 @@ export function deliveryGroups(cfg: DailyConfig): { kindle: DeliveryRow[]; other
       },
     ],
     others: [
-      { key: "remarkable", name: "reMarkable", how: "A PDF over its USB web interface", status: rm.enabled ? SCREEN_LABEL[rm.screen] : "Off", on: rm.enabled, opens: true },
+      { key: "remarkable", name: "reMarkable", how: rmHow(rm), status: rm.enabled ? SCREEN_LABEL[rm.screen] : "Off", on: rm.enabled, opens: true },
       ...(cfg.export ?? []).map((e, i) => ({
         key: `folder:${i}`,
         name: e.name,
