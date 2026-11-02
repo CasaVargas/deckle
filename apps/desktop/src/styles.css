@@ -1107,6 +1107,9 @@ input[type=checkbox] { padding: 0; }
 .mini-head.short { width: 70%; margin-top: 0; }
 .mini-head.small { height: 6px; margin-top: 8px; }
 .mini-photo { height: 76px; margin: 4px 0 6px; background: linear-gradient(160deg, #d8cfbf, #b9ae9c); }
+.mini-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; padding: 1px; margin: 2px 0 6px; background: var(--ink); border-radius: 1px; }
+.mini-grid i { aspect-ratio: 1; background: var(--paper); border-radius: 0; }
+.mini-grid i.black { background: var(--ink); }
 .mini-weather { height: 38px; margin-bottom: 6px; border: 1px solid var(--rule); background: repeating-linear-gradient(90deg, transparent 0 11px, var(--rule) 11px 12px); }
 .mini-clip { position: absolute; right: -6px; bottom: 26px; width: 164px; padding: 9px 11px; font-family: ui-serif, Georgia, serif; font-size: 10.5px; line-height: 1.3; color: var(--head); background: var(--paper); border: 1px dashed var(--head); border-radius: 2px; transform: rotate(3deg); }
 .mini-clip.landed { color: var(--ink); border: 1px solid var(--rule); border-left: 3px solid var(--press); box-shadow: 0 6px 16px rgb(40 24 8 / 0.22); animation: welcome-land .45s cubic-bezier(.2, .8, .2, 1) both; }

@@ -20,6 +20,11 @@
   address for Ollama on another computer. The service card keeps the provider, model and key
   fields with a price table beside them. Reading aids and Online & privacy point there, and
   Online & privacy says "nowhere online" when the model runs on this Mac.
+- **The welcome shows the back pages.** A fourth page in the first-launch tour: the Mini with
+  yesterday's headlines as its answers, the word search, the word ladder, the almanac, the
+  horoscope and On this day, how a Kindle's notes mark the answers, the puzzle books to write
+  on, From Your Shelf, and the AI model with a link straight to Settings → AI. The miniature
+  paper beside it shows a crossword grid on that page.
 - **One setting for the paper too.** A paper's AI editor now runs where Settings → AI says,
   with the key saved there when the environment has none, so there's nothing to copy between
   Books and the Daily. A `[llm]` table that names a provider, model or endpoint stays that

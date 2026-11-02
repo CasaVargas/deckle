@@ -7,6 +7,7 @@ export const STEPS = [
   { key: "welcome", title: "Welcome" },
   { key: "paper", title: "Your paper" },
   { key: "save", title: "Save to paper" },
+  { key: "extras", title: "The back pages" },
   { key: "where", title: "Where things are" },
 ] as const;
 export type StepKey = (typeof STEPS)[number]["key"];

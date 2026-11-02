@@ -832,7 +832,7 @@ function Deckle() {
         {!settingsPage && noticeBar}
 
       </div>
-      {welcomeOpen && <Welcome onDone={finishWelcome} onNotice={setNotice} />}
+      {welcomeOpen && <Welcome onDone={finishWelcome} onNotice={setNotice} onSettings={openSettings} />}
     </div>
   );
 }

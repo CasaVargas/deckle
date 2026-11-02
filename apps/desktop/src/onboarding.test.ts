@@ -18,7 +18,7 @@ const entry = (p: Partial<ReadingEntry>): ReadingEntry => ({
 });
 
 test("four pages, the paper before the bookmarklet", () => {
-  expect(STEPS.map((s) => s.key)).toEqual(["welcome", "paper", "save", "where"]);
+  expect(STEPS.map((s) => s.key)).toEqual(["welcome", "paper", "save", "extras", "where"]);
 });
 
 test("the clock drops a leading zero and leaves anything else alone", () => {
