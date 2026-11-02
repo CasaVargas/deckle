@@ -8,7 +8,7 @@ a title page, one puzzle per page, and the answers at the back. Design:
 AZW3 books don't, whichever way they're sent. Ink on a PDF stays after you turn the page and
 after you close and reopen the book.
 
-Word searches and crosswords are available now. Sudoku and LLM-written themes come next.
+Word searches, crosswords and sudoku are available now. LLM-written themes come next.
 
 ## Commands
 
@@ -19,6 +19,7 @@ Add `--json` for machine-readable output: `{path, pages, puzzles, seed, date, wa
 | `deckle puzzles search --to device` | Make a book of 10 word searches and copy it to the first connected Kindle, in `documents/`. |
 | `deckle puzzles search -o <folder>` | Write the book into a folder instead. |
 | `deckle puzzles crossword --to device` | Make a book of 10 crosswords and copy it to the Kindle. |
+| `deckle puzzles sudoku --to device` | Make a book of 10 sudoku and copy it to the Kindle. |
 
 ### Options
 
@@ -58,6 +59,23 @@ After each run, Deckle prints the command that makes that book again, with its s
 - **Not yet:** `--words`, because your own words would need clues. That arrives with LLM
   themes.
 
+## Sudoku
+
+`deckle puzzles sudoku` makes classic 9×9 sudoku. It takes `--difficulty`, plus the same
+`--count`, `--title`, `--seed`, `--date`, `--screen`, `-o`/`--to` and `--replace` as the other
+kinds. There's no `--size` and no `--words`.
+
+- **Difficulty** depends on which techniques you need:
+  - `easy`: naked and hidden singles are enough, and at least 36 numbers are given;
+  - `medium`: you need pairs or pointing/claiming at least once;
+  - `hard`: you also need triples, X-wing or XY-wing. You never need to guess, so every
+    hard puzzle can be finished in ink.
+- **One solution:** every puzzle has exactly one, and its given numbers are symmetric when
+  you turn the page upside down.
+- **Pages:** one big grid per page, with squares of at least 40 pt (14 mm), so there's room
+  for pencil marks. Givens are bold.
+- **Answers:** six per page, with the givens in bold.
+
 ## Names and ink
 
 The Kindle keeps a PDF's ink in a `.sdr` folder named after the PDF. So every book gets its own
@@ -84,7 +102,6 @@ Answers.
 
 ## Not yet
 
-- Sudoku books.
 - `--theme "technology"` written by your LLM, and `--theme current-events` from the Daily's
   headlines.
 - A Puzzle Books screen in the app.

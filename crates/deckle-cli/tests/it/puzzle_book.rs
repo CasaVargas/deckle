@@ -219,3 +219,39 @@ fn crossword_bad_size_says_the_range() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("from 5 to 15 for a crossword"), "{err}");
 }
+
+#[test]
+fn puzzles_sudoku_writes_a_pdf() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = puzzles(&[
+        "sudoku",
+        "--count",
+        "2",
+        "--difficulty",
+        "hard",
+        "--seed",
+        "7",
+        "--date",
+        "2026-11-01",
+        "-o",
+        dir.path().to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(
+        v["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("Sudoku 2026-11-01 0000.pdf"),
+        "{v}"
+    );
+    assert_eq!(v["pages"], 4, "title, two puzzles, one page of answers");
+    // a sudoku is always 9×9: there's no --size to give
+    let sized = puzzles(&["sudoku", "--size", "9", "-o", dir.path().to_str().unwrap()]);
+    assert!(!sized.status.success());
+}

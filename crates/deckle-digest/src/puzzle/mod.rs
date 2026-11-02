@@ -9,6 +9,7 @@ pub mod grid;
 pub mod ladder;
 pub mod search;
 pub mod store;
+pub mod sudoku;
 pub mod theme;
 pub mod words;
 

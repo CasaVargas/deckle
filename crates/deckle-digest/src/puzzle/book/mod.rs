@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 
 use super::cross::{self, Crossword, Lexicon};
 use super::search::{self, Options, Search, Way};
+use super::sudoku::{self, Grade, Sudoku};
 use super::words::Words;
 
 /// Grid sizes a word-search book takes (puzzle books §3.2).
@@ -34,6 +35,7 @@ const RESEEDS: u64 = 8;
 pub enum Kind {
     Search,
     Crossword,
+    Sudoku,
 }
 
 impl Kind {
@@ -42,6 +44,7 @@ impl Kind {
         match self {
             Kind::Search => "word search",
             Kind::Crossword => "crossword",
+            Kind::Sudoku => "sudoku",
         }
     }
 
@@ -50,6 +53,7 @@ impl Kind {
         match self {
             Kind::Search => SEARCH_SIZES,
             Kind::Crossword => CROSS_SIZES,
+            Kind::Sudoku => 9..=9,
         }
     }
 
@@ -57,6 +61,7 @@ impl Kind {
         match self {
             Kind::Search => "Word Search",
             Kind::Crossword => "Crossword",
+            Kind::Sudoku => "Sudoku",
         }
     }
 }
@@ -87,6 +92,15 @@ impl Difficulty {
             Difficulty::Easy => 0.5,
             Difficulty::Medium => 1.5,
             Difficulty::Hard => 4.0,
+        }
+    }
+
+    /// The sudoku grade it asks for (puzzle books §3.4).
+    pub fn grade(self) -> Grade {
+        match self {
+            Difficulty::Easy => Grade::Easy,
+            Difficulty::Medium => Grade::Medium,
+            Difficulty::Hard => Grade::Hard,
         }
     }
 
@@ -130,6 +144,7 @@ pub struct Book {
 pub enum Puzzles {
     Search(Vec<Search>),
     Crossword(Vec<Crossword>),
+    Sudoku(Vec<Sudoku>),
 }
 
 impl Puzzles {
@@ -137,6 +152,7 @@ impl Puzzles {
         match self {
             Puzzles::Search(p) => p.len(),
             Puzzles::Crossword(p) => p.len(),
+            Puzzles::Sudoku(p) => p.len(),
         }
     }
 
@@ -149,6 +165,7 @@ impl Puzzles {
         match self {
             Puzzles::Search(p) => p.first().map_or(0, Search::size),
             Puzzles::Crossword(p) => p.first().map_or(0, |x| x.rows.len()),
+            Puzzles::Sudoku(_) => 9,
         }
     }
 
@@ -156,6 +173,7 @@ impl Puzzles {
         match self {
             Puzzles::Search(_) => Kind::Search,
             Puzzles::Crossword(_) => Kind::Crossword,
+            Puzzles::Sudoku(_) => Kind::Sudoku,
         }
     }
 }
@@ -165,7 +183,7 @@ impl Book {
     pub fn searches(&self) -> &[Search] {
         match &self.puzzles {
             Puzzles::Search(p) => p,
-            Puzzles::Crossword(_) => &[],
+            _ => &[],
         }
     }
 
@@ -173,7 +191,15 @@ impl Book {
     pub fn crosswords(&self) -> &[Crossword] {
         match &self.puzzles {
             Puzzles::Crossword(p) => p,
-            Puzzles::Search(_) => &[],
+            _ => &[],
+        }
+    }
+
+    /// Its sudoku; none in another kind of book.
+    pub fn sudokus(&self) -> &[Sudoku] {
+        match &self.puzzles {
+            Puzzles::Sudoku(p) => p,
+            _ => &[],
         }
     }
 }
@@ -188,21 +214,28 @@ pub enum BookError {
     Count,
     /// Your words that fit the grid, fewer than a word search needs.
     TooFewWords(usize),
-    /// `--words` for a kind whose words need clues (a crossword, until LLM clues).
-    WordsNeedClues,
+    /// `--words` for a kind that takes none: a crossword (until LLM clues) or a sudoku.
+    NoWords(Kind),
     /// A grid too fine to write in on this screen, and the largest that fits.
     DoesNotFit {
         kind: Kind,
         size: usize,
         largest: usize,
     },
-    /// Puzzle N wouldn't fill with any of its seeds.
+    /// Puzzle N couldn't be made with any of its seeds.
     Unfilled(usize),
 }
 
 impl fmt::Display for BookError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            BookError::Size { kind, min, max } if min == max => {
+                write!(
+                    f,
+                    "a {} is always {min}×{min}: leave out --size",
+                    kind.name()
+                )
+            }
             BookError::Size { kind, min, max } => {
                 write!(
                     f,
@@ -221,9 +254,16 @@ impl fmt::Display for BookError {
                 "--words has {n} usable words; a word search needs at least {MIN_WORDS} \
                  (3 letters or more, and no longer than the grid)"
             ),
-            BookError::WordsNeedClues => write!(
+            BookError::NoWords(Kind::Sudoku) => write!(f, "--words isn't for sudoku"),
+            BookError::NoWords(_) => write!(
                 f,
                 "--words isn't for crosswords yet: their words need clues"
+            ),
+            BookError::DoesNotFit {
+                kind: Kind::Sudoku, ..
+            } => write!(
+                f,
+                "a sudoku's squares would be too small to write in on this screen"
             ),
             BookError::DoesNotFit {
                 kind,
@@ -241,7 +281,7 @@ impl fmt::Display for BookError {
                  the largest that fits is {largest}×{largest}"
             ),
             BookError::Unfilled(n) => {
-                write!(f, "puzzle {n} wouldn't fill; try another --seed")
+                write!(f, "puzzle {n} couldn't be made; try another --seed")
             }
         }
     }
@@ -292,7 +332,24 @@ pub fn make(o: &BookOptions, words: &Words) -> Result<Book, BookError> {
     match o.kind {
         Kind::Search => make_search(o, words),
         Kind::Crossword => make_crossword(o, Lexicon::embedded()),
+        Kind::Sudoku => make_sudoku(o),
     }
+}
+
+/// A sudoku book: each puzzle of the difficulty's grade (puzzle books §3.4).
+fn make_sudoku(o: &BookOptions) -> Result<Book, BookError> {
+    check(o)?;
+    if o.words.is_some() {
+        return Err(BookError::NoWords(Kind::Sudoku));
+    }
+    let seed = o.seed.unwrap_or_else(|| default_seed(o));
+    let puzzles = (0..o.count)
+        .map(|i| {
+            let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20));
+            sudoku::make(o.difficulty.grade(), &mut rng).ok_or(BookError::Unfilled(i + 1))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(finish(o, seed, Puzzles::Sudoku(puzzles), Vec::new()))
 }
 
 /// The size and count checks every kind shares.
@@ -346,7 +403,7 @@ fn first_fill(
 fn make_crossword(o: &BookOptions, lex: &Lexicon) -> Result<Book, BookError> {
     check(o)?;
     if o.words.is_some() {
-        return Err(BookError::WordsNeedClues);
+        return Err(BookError::NoWords(Kind::Crossword));
     }
     let seed = o.seed.unwrap_or_else(|| default_seed(o));
     let mut puzzles = Vec::with_capacity(o.count);
@@ -683,7 +740,10 @@ mod tests {
         }
         let mut o = crossword(1, 9, Difficulty::Medium);
         o.words = Some(vec!["router".into()]);
-        assert_eq!(make(&o, Words::embedded()), Err(BookError::WordsNeedClues));
+        assert_eq!(
+            make(&o, Words::embedded()),
+            Err(BookError::NoWords(Kind::Crossword))
+        );
     }
 
     /// A puzzle that won't fill with everyday words tries a wider spread before the book gives
@@ -702,6 +762,58 @@ mod tests {
         assert_eq!(got, Some((Difficulty::Medium.spread(), x)));
         assert_eq!(tried, [0.5, 1.5]);
         assert_eq!(first_fill(Difficulty::Hard, |_| None), None);
+    }
+
+    fn sudoku(count: usize, difficulty: Difficulty) -> BookOptions {
+        let mut o = opts(count, 9);
+        o.kind = Kind::Sudoku;
+        o.difficulty = difficulty;
+        o
+    }
+
+    #[test]
+    fn a_sudoku_book_has_its_count_and_grade() {
+        let b = make(&sudoku(3, Difficulty::Hard), Words::embedded()).unwrap();
+        assert_eq!(b.sudokus().len(), 3);
+        assert!(b.searches().is_empty() && b.crosswords().is_empty());
+        assert_eq!(b.title, "Sudoku");
+        assert_eq!(b.subtitle, "9×9 · hard · 3 puzzles");
+        for s in b.sudokus() {
+            assert_eq!(sudoku::grade(&s.givens), sudoku::Grade::Hard);
+        }
+        assert_eq!(make(&sudoku(3, Difficulty::Hard), Words::embedded()), Ok(b));
+    }
+
+    #[test]
+    fn a_sudoku_is_nine_by_nine_with_no_words() {
+        let mut o = sudoku(1, Difficulty::Easy);
+        o.size = 12;
+        let err = make(&o, Words::embedded()).unwrap_err();
+        assert_eq!(err.to_string(), "a sudoku is always 9×9: leave out --size");
+        let mut o = sudoku(1, Difficulty::Easy);
+        o.words = Some(vec!["nine".into()]);
+        assert_eq!(
+            make(&o, Words::embedded()),
+            Err(BookError::NoWords(Kind::Sudoku))
+        );
+    }
+
+    /// Messages that fit every kind: a sudoku isn't "filled", nor does it come in sizes.
+    #[test]
+    fn errors_read_right_for_sudoku() {
+        assert_eq!(
+            BookError::Unfilled(3).to_string(),
+            "puzzle 3 couldn't be made; try another --seed"
+        );
+        assert_eq!(
+            BookError::DoesNotFit {
+                kind: Kind::Sudoku,
+                size: 9,
+                largest: 0
+            }
+            .to_string(),
+            "a sudoku's squares would be too small to write in on this screen"
+        );
     }
 
     #[test]

@@ -200,3 +200,53 @@ fn same_crossword_book_same_bytes() {
     let b = render(&crosswords(2, 9), PageSize::KindleScribe).unwrap();
     assert_eq!(a, b);
 }
+
+fn sudokus(count: usize) -> Book {
+    make(
+        &BookOptions {
+            kind: Kind::Sudoku,
+            count,
+            size: 9,
+            difficulty: Difficulty::Medium,
+            words: None,
+            title: None,
+            seed: Some(7),
+            date: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
+        },
+        Words::embedded(),
+    )
+    .unwrap()
+}
+
+/// Seven sudoku: a page each, then answers six to a page, so the seventh's are on the second
+/// answers page.
+#[test]
+fn sudoku_book_reads_back() {
+    let b = sudokus(7);
+    let bytes = render(&b, PageSize::KindleScribe).unwrap();
+    let doc = deckle_pdf::engine::pdfium()
+        .unwrap()
+        .load_pdf_from_byte_slice(&bytes, None)
+        .unwrap();
+    assert_eq!(doc.pages().len(), 1 + 7 + 2);
+    assert_eq!(
+        doc.pages().len() as usize,
+        pages(&b, PageSize::KindleScribe)
+    );
+    let first = flat(doc.pages().get(1).unwrap().text().unwrap().all());
+    assert!(first.starts_with("No. 1"), "{first}");
+    let givens: String = b.sudokus()[0]
+        .givens
+        .iter()
+        .filter(|d| **d != 0)
+        .map(|d| d.to_string())
+        .collect();
+    let printed: String = first.chars().filter(char::is_ascii_digit).collect();
+    assert!(printed.contains(&givens), "{printed} vs {givens}");
+    assert!(first.contains("Answers on page 9"), "{first}");
+    let seventh = flat(doc.pages().get(7).unwrap().text().unwrap().all());
+    assert!(seventh.contains("Answers on page 10"), "{seventh}");
+    assert_eq!(doc.bookmarks().iter().count(), 1 + 7 + 1);
+    assert!(!bytes.windows(7).any(|w| w == b"/Annots"));
+    assert_eq!(bytes, render(&sudokus(7), PageSize::KindleScribe).unwrap());
+}
