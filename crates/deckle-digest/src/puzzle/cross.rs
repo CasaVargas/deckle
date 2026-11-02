@@ -8,7 +8,7 @@ use std::io::Read;
 use std::sync::OnceLock;
 
 use rand::rngs::StdRng;
-use rand::seq::IndexedRandom;
+use rand::seq::{IndexedRandom, SliceRandom};
 use rand::{Rng, SeedableRng};
 
 use super::grid::{Dir, Slot, TEMPLATES};
@@ -19,6 +19,10 @@ static EMBEDDED: &[u8] = include_bytes!("../../assets/puzzle/words-long.tsv.gz")
 
 /// Longest entry a list holds.
 pub const MAX_LEN: usize = 15;
+/// The frequency a book's own words take: above every list word's, so they're tried first.
+const OWN_ZIPF: f32 = 9.0;
+/// A book's own words seeded into one puzzle, at most (puzzle books §3.5).
+pub const MAX_SEEDS: usize = 8;
 
 /// The crossword word list: words by length, each with its frequency (zipf) and a clue.
 #[derive(Clone, Debug, Default)]
@@ -70,6 +74,23 @@ impl Lexicon {
         }
         for list in &mut lex.by_len {
             list.sort_unstable();
+        }
+        lex
+    }
+
+    /// This list with `words` added (or their clues replacing the list's): a book's own
+    /// words, tried before every list word of their length (puzzle books §3.5).
+    pub fn with(&self, words: &[(String, String)]) -> Lexicon {
+        let mut lex = self.clone();
+        for (w, clue) in words {
+            if !(3..=MAX_LEN).contains(&w.len()) {
+                continue;
+            }
+            if lex.clues.insert(w.clone(), clue.clone()).is_none() {
+                lex.by_len[w.len()].push(w.clone());
+                lex.by_len[w.len()].sort_unstable();
+            }
+            lex.zipf.insert(w.clone(), OWN_ZIPF);
         }
         lex
     }
@@ -288,11 +309,40 @@ const PATTERNS: usize = 24;
 /// small spread keeps to everyday words, a large one mixes in rarer ones. The same `rng` makes
 /// the same crossword on any machine.
 pub fn fill(lex: &Lexicon, size: usize, spread: f32, rng: &mut StdRng) -> Option<Crossword> {
-    for _ in 0..PATTERNS {
+    fill_themed(lex, size, spread, &[], rng)
+}
+
+/// [`fill`] with `seeds` (words of `lex`, a book's own) placed first: up to [`MAX_SEEDS`] of
+/// them, in an order shuffled from `rng`, each in a slot of its length whose crossings still
+/// have words. A pattern that won't fill around them is followed by others, one seed fewer
+/// every third pattern, so a puzzle keeps as many as will fill. Seeded answers are marked
+/// `theme`.
+pub fn fill_themed(
+    lex: &Lexicon,
+    size: usize,
+    spread: f32,
+    seeds: &[String],
+    rng: &mut StdRng,
+) -> Option<Crossword> {
+    for attempt in 0..PATTERNS {
         let rows = pattern(size, rng);
         let seed = rng.random::<u64>();
-        if let Some(x) = fill_pattern(lex, &rows, spread, &mut StdRng::seed_from_u64(seed)) {
-            return Some(x);
+        let mut rng = StdRng::seed_from_u64(seed);
+        let mut search = Search::new(lex, &rows, spread, &mut rng);
+        if !seeds.is_empty() {
+            let mut order: Vec<&str> = seeds
+                .iter()
+                .map(String::as_str)
+                .filter(|w| w.len() <= LONGEST.min(size))
+                .collect();
+            order.shuffle(&mut rng);
+            // one fewer every third pattern, a fresh shuffle each time
+            order.truncate(MAX_SEEDS.saturating_sub(attempt / 3));
+            order.sort_by_key(|w| std::cmp::Reverse(w.len()));
+            search.seed(&order, &mut rng);
+        }
+        if search.solve() {
+            return Some(search.crossword(lex, &rows, seeds));
         }
     }
     None
@@ -415,6 +465,108 @@ impl<'a> Search<'a> {
         Some(least)
     }
 
+    /// Word `w` into slot `i`, each open crossing narrowed to the words with its letter there;
+    /// `None` (and nothing changed) when a crossing would have none left. The narrowed
+    /// crossings' old bitsets come back, for [`Search::unplace`].
+    fn place(&mut self, i: usize, w: usize) -> Option<Vec<(usize, Vec<u64>)>> {
+        let word = self.lists[self.slots[i].len][w];
+        let mut saved: Vec<(usize, Vec<u64>)> = Vec::new();
+        for (k, b) in word.bytes().enumerate() {
+            let Some((j, p)) = self.cross[i][k] else {
+                continue;
+            };
+            if self.chosen[j].is_some() {
+                continue;
+            }
+            let jl = self.slots[j].len;
+            saved.push((j, self.fits[j].clone()));
+            for (x, y) in self.fits[j]
+                .iter_mut()
+                .zip(&self.index[jl][p][(b - b'a') as usize])
+            {
+                *x &= y;
+            }
+            if count(&self.fits[j]) == 0 {
+                for (j, bits) in saved.into_iter().rev() {
+                    self.fits[j] = bits;
+                }
+                return None;
+            }
+        }
+        self.chosen[i] = Some(w);
+        self.used.insert(word);
+        Some(saved)
+    }
+
+    fn unplace(&mut self, i: usize, saved: Vec<(usize, Vec<u64>)>) {
+        let w = self.chosen[i].take().expect("placed");
+        self.used.remove(self.lists[self.slots[i].len][w]);
+        for (j, bits) in saved.into_iter().rev() {
+            self.fits[j] = bits;
+        }
+    }
+
+    /// Each of `words` (longest first) into an open slot of its length that still takes it,
+    /// tried in an order shuffled from `rng`: as many as fit.
+    fn seed(&mut self, words: &[&str], rng: &mut StdRng) {
+        for word in words {
+            let len = word.len();
+            if self.used.contains(word) || len >= self.lists.len() {
+                continue;
+            }
+            // the search's lists are in its own order, not sorted
+            let Some(w) = self.lists[len].iter().position(|x| x == word) else {
+                continue;
+            };
+            let mut open: Vec<usize> = (0..self.slots.len())
+                .filter(|&i| {
+                    self.chosen[i].is_none()
+                        && self.slots[i].len == len
+                        && self.fits[i][w / 64] & (1 << (w % 64)) != 0
+                })
+                .collect();
+            // shuffled, then the slots leaving their crossings most room first
+            open.shuffle(rng);
+            let mut ranked: Vec<(u32, usize)> = open
+                .into_iter()
+                .filter_map(|i| self.room(i, w).map(|r| (r, i)))
+                .collect();
+            ranked.sort_by_key(|(r, _)| std::cmp::Reverse(*r));
+            for (_, i) in ranked {
+                if self.place(i, w).is_some() {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// The filled grid and its clues; `seeds`' answers marked as theme answers.
+    fn crossword(&self, lex: &Lexicon, rows: &[String], seeds: &[String]) -> Crossword {
+        let mut grid: Vec<Vec<u8>> = rows.iter().map(|r| r.bytes().collect()).collect();
+        let mut clues = Vec::with_capacity(self.slots.len());
+        for (s, w) in self.slots.iter().zip(&self.chosen) {
+            let word = self.lists[s.len][w.expect("filled")];
+            for (k, b) in word.bytes().enumerate() {
+                let (r, c) = s.cell(k);
+                grid[r][c] = b.to_ascii_uppercase();
+            }
+            clues.push(Clue {
+                number: s.number,
+                dir: s.dir,
+                answer: word.to_owned(),
+                clue: lex.clue(word).expect("a list word").to_owned(),
+                theme: seeds.iter().any(|x| x == word),
+            });
+        }
+        Crossword {
+            rows: grid
+                .into_iter()
+                .map(|r| String::from_utf8(r).expect("ascii"))
+                .collect(),
+            clues,
+        }
+    }
+
     fn solve(&mut self) -> bool {
         let open = (0..self.slots.len())
             .filter(|&i| self.chosen[i].is_none())
@@ -441,45 +593,15 @@ impl<'a> Search<'a> {
             .collect();
         ranked.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         for (_, w) in ranked {
-            let word = self.lists[len][w];
             self.steps += 1;
             if self.steps > BUDGET {
                 return false;
             }
-            // narrow each open crossing to the words with this word's letter there
-            let mut saved: Vec<(usize, Vec<u64>)> = Vec::new();
-            let mut dead = false;
-            for (k, b) in word.bytes().enumerate() {
-                let Some((j, p)) = self.cross[i][k] else {
-                    continue;
-                };
-                if self.chosen[j].is_some() {
-                    continue;
-                }
-                let jl = self.slots[j].len;
-                saved.push((j, self.fits[j].clone()));
-                for (x, y) in self.fits[j]
-                    .iter_mut()
-                    .zip(&self.index[jl][p][(b - b'a') as usize])
-                {
-                    *x &= y;
-                }
-                if count(&self.fits[j]) == 0 {
-                    dead = true;
-                    break;
-                }
-            }
-            if !dead {
-                self.chosen[i] = Some(w);
-                self.used.insert(word);
+            if let Some(saved) = self.place(i, w) {
                 if self.solve() {
                     return true;
                 }
-                self.chosen[i] = None;
-                self.used.remove(word);
-            }
-            for (j, bits) in saved.into_iter().rev() {
-                self.fits[j] = bits;
+                self.unplace(i, saved);
             }
             if self.steps > BUDGET {
                 return false;
@@ -487,41 +609,6 @@ impl<'a> Search<'a> {
         }
         false
     }
-}
-
-fn fill_pattern(
-    lex: &Lexicon,
-    rows: &[String],
-    spread: f32,
-    rng: &mut StdRng,
-) -> Option<Crossword> {
-    let mut search = Search::new(lex, rows, spread, rng);
-    if !search.solve() {
-        return None;
-    }
-    let mut grid: Vec<Vec<u8>> = rows.iter().map(|r| r.bytes().collect()).collect();
-    let mut clues = Vec::with_capacity(search.slots.len());
-    for (s, w) in search.slots.iter().zip(&search.chosen) {
-        let word = search.lists[s.len][w.expect("filled")];
-        for (k, b) in word.bytes().enumerate() {
-            let (r, c) = s.cell(k);
-            grid[r][c] = b.to_ascii_uppercase();
-        }
-        clues.push(Clue {
-            number: s.number,
-            dir: s.dir,
-            answer: word.to_owned(),
-            clue: lex.clue(word).expect("a list word").to_owned(),
-            theme: false,
-        });
-    }
-    Some(Crossword {
-        rows: grid
-            .into_iter()
-            .map(|r| String::from_utf8(r).expect("ascii"))
-            .collect(),
-        clues,
-    })
 }
 
 #[cfg(test)]
@@ -641,6 +728,58 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn apple() -> Vec<(String, String)> {
+        [
+            ("jobs", "Co-founder who returned in 1997"),
+            ("xcode", "Apple's developer tool"),
+            ("ipod", "A thousand songs in your pocket"),
+            ("newton", "Apple's early handheld"),
+            ("pixar", "Studio its co-founder ran"),
+            ("siri", "Voice assistant since 2011"),
+            ("macintosh", "Too long for these grids"),
+            ("ive", "Designer Jony"),
+        ]
+        .map(|(w, c)| (w.to_owned(), c.to_owned()))
+        .into()
+    }
+
+    /// Your words go in first, with your clues, marked as theme answers; a word longer than
+    /// the patterns allow can't.
+    #[test]
+    fn your_words_go_in_first_with_your_clues() {
+        let theme = apple();
+        let lex = Lexicon::embedded().with(&theme);
+        let seeds: Vec<String> = theme.iter().map(|(w, _)| w.clone()).collect();
+        for seed in 0..3 {
+            let x = fill_themed(&lex, 11, 1.5, &seeds, &mut rng(seed)).expect("fills");
+            let mine: Vec<&Clue> = x.clues.iter().filter(|c| c.theme).collect();
+            // a few theme answers a puzzle: from seven words with J, X and V among them, two at
+            // least (a longer list gives 3–6; puzzle books §3.5)
+            assert!(mine.len() >= 2, "seed {seed}: {mine:?}");
+            for c in &mine {
+                let (_, clue) = theme.iter().find(|(w, _)| *w == c.answer).unwrap();
+                assert_eq!(&c.clue, clue);
+            }
+            assert!(x.clues.iter().all(|c| c.answer != "macintosh"));
+            let others = x.clues.iter().filter(|c| !c.theme);
+            assert!(others.into_iter().all(|c| !seeds.contains(&c.answer)));
+        }
+        assert_eq!(
+            fill_themed(&lex, 11, 1.5, &seeds, &mut rng(9)),
+            fill_themed(&lex, 11, 1.5, &seeds, &mut rng(9))
+        );
+    }
+
+    /// No words to seed is the plain fill, draw for draw.
+    #[test]
+    fn no_words_is_the_plain_fill() {
+        let lex = Lexicon::embedded();
+        assert_eq!(
+            fill_themed(lex, 9, 1.5, &[], &mut rng(4)),
+            fill(lex, 9, 1.5, &mut rng(4))
+        );
     }
 
     #[test]

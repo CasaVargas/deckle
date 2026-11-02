@@ -148,8 +148,9 @@ at sizes 6–15). The settings below are what the measurements supported.*
     placements per pattern, and up to 24 patterns.
   - **Theme words are placed first** (§3.5): each puzzle shuffles them from its seed and puts
     as many as fit into slots of their length whose crossings still have words, then fills
-    the rest. If a pattern won't fill around them, the next patterns seed half as many, then a
-    quarter.
+    the rest, each in the slot that leaves its crossings most room. If a pattern won't fill
+    around them, the next ones seed one fewer every third pattern, so a puzzle keeps as many
+    as will fill.
 - **Words and clues:** a new embedded list, `words-long.tsv.gz`, built with
   `deckle-wordwise-build crossword`. It has 45,271 entries of 3–15 letters, 826 KB gzipped, each
   with its zipf and a clue.
@@ -222,6 +223,9 @@ Theme words come from these sources, in order:
   - A crossword needs at least 3 usable words.
   - Each puzzle seeds up to 8 of them *(builder's call)*. The book warns about a puzzle that
     took fewer than 3.
+  - **Measured:** with 27 Apple-history words, 10 seeds per size, a puzzle took 3–6 of them,
+    as many as 8 and as few as 1 or 2 (2 of 40). That's about 1.5 s a puzzle in release. Rare
+    letters (J, X, V, W) are what crowd a grid.
   - Your words are marked as theme answers in the puzzle data.
   - Repeats across puzzles are fine; within one puzzle, a word appears at most once.
 - **LLM (increment 4).**
