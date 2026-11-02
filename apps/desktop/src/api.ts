@@ -129,6 +129,8 @@ export const api = {
   readingSave: (url: string) => invoke<string>("reading_save", { url }),
   readingRemove: (id: string) => invoke<boolean>("reading_remove", { id }),
   bookmarklet: () => invoke<string>("bookmarklet"),
+  /** Desktop: writes the install page and opens it in the default browser (welcome design §4.2). */
+  bookmarkletPageOpen: () => invoke<void>("bookmarklet_page_open"),
   recipeBookmarklet: () => invoke<string>("recipe_bookmarklet"),
   editionPreview: (paper: string | null = null) => invoke<EditionPreview | null>("edition_preview", { paper }),
   dailyRun: (send: boolean, paper: string | null = null) => invoke<void>("daily_run", { send, paper }),

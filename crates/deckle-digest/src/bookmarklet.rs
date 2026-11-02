@@ -117,6 +117,66 @@ fn recipe_script(origin: &str, token: &str) -> String {
     )
 }
 
+/// The install page (welcome design §4.2): both bookmarklets as real links to drag to the
+/// bookmarks bar, how to show the bar in each browser (the one the page is open in picked out),
+/// and *Copy* for a browser that won't take a drag. The desktop app writes it to a file and
+/// opens it; it carries the token, as the bookmarklets do, and nothing else.
+pub fn install_page(token: &str) -> String {
+    install_page_with(&javascript(token), &recipe_javascript(token))
+}
+
+fn install_page_with(paper: &str, recipe: &str) -> String {
+    // Save recipe quotes its selectors, so each goes into its attribute escaped.
+    let (paper, recipe) = (esc(paper), esc(recipe));
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\
+         <title>Deckle bookmarklets</title>\
+         <style>body{{font:17px/1.5 Georgia,serif;margin:0;color:#1f1b16;background:#f6f3ee}}\
+         main{{max-width:560px;margin:0 auto;padding:48px 24px}}\
+         h1{{font-size:26px;margin:0 0 6px}}h2{{font-size:17px;margin:28px 0 6px}}\
+         p{{margin:0 0 12px}}.muted{{color:#7a7169}}.small{{font-size:14px}}\
+         .row{{display:flex;align-items:center;gap:14px;margin:14px 0 6px}}\
+         a.bm{{display:inline-block;padding:9px 18px;border-radius:9px;background:#b5533c;\
+         color:#fff;font-weight:700;text-decoration:none;cursor:grab;user-select:none}}\
+         a.bm:active{{cursor:grabbing}}\
+         button{{font:inherit;font-size:14px;padding:4px 12px;border:1px solid #d9d2c7;\
+         border-radius:8px;background:#fffdf9;color:#1f1b16;cursor:pointer}}\
+         ol{{padding-left:20px}}li{{margin:4px 0}}li.you{{font-weight:700}}\
+         li.you::after{{content:\" \\2190  this browser\";font-weight:400;color:#7a7169}}\
+         </style></head><body><main>\
+         <h1>Deckle's bookmarklets</h1>\
+         <p class=\"muted\">Drag each button to your bookmarks bar. They work while Deckle's \
+         morning schedule is on.</p>\
+         <h2>Save to paper</h2>\
+         <p>On any article, click it: the story is in tomorrow's paper, whole, with its photos.</p>\
+         <div class=\"row\"><a class=\"bm\" href=\"{paper}\" onclick=\"return false\">Save to paper</a>\
+         <button data-copy=\"{paper}\">Copy</button></div>\
+         <h2>Save recipe</h2>\
+         <p>On a recipe page, click it: the recipe goes to your cookbook, taken from the page \
+         you're looking at.</p>\
+         <div class=\"row\"><a class=\"bm\" href=\"{recipe}\" onclick=\"return false\">Save recipe</a>\
+         <button data-copy=\"{recipe}\">Copy</button></div>\
+         <h2>Can't see your bookmarks bar?</h2>\
+         <ol>\
+         <li id=\"safari\">Safari: View &rarr; Show Favorites Bar (&#8679;&#8984;B).</li>\
+         <li id=\"chrome\">Chrome and Edge: View &rarr; Always Show Bookmarks Bar \
+         (&#8679;&#8984;B on a Mac, Ctrl+Shift+B on Windows).</li>\
+         <li id=\"firefox\">Firefox: right-click the toolbar &rarr; Bookmarks Toolbar &rarr; Always Show.</li>\
+         </ol>\
+         <p class=\"muted small\">If a drag won't take, Copy one, make a new bookmark and paste it \
+         as the address. Each sends only the page's address and title to Deckle on this computer, \
+         never its contents.</p>\
+         </main><script>\
+         const ua=navigator.userAgent,id=/Firefox\\//.test(ua)?'firefox':/Chrome\\/|Edg\\//.test(ua)?'chrome':\
+         /Safari\\//.test(ua)?'safari':'';if(id)document.getElementById(id).className='you';\
+         for(const b of document.querySelectorAll('button[data-copy]'))b.onclick=()=>\
+         navigator.clipboard.writeText(b.dataset.copy).then(()=>{{b.textContent='Copied';\
+         setTimeout(()=>b.textContent='Copy',2000)}});\
+         </script></body></html>"
+    )
+}
+
 /// The most a carried recipe may weigh, and the most blocks it may bring.
 const MAX_CARRIED: usize = 4 * 1024 * 1024;
 const MAX_BLOCKS: usize = 20;
@@ -770,6 +830,34 @@ mod tests {
             !javascript("abc").contains("kind="),
             "the paper's is unchanged"
         );
+    }
+
+    #[test]
+    fn the_install_page_carries_both_bookmarklets_as_links() {
+        let page = install_page("abc");
+        let paper = esc(&javascript("abc"));
+        let recipe = esc(&recipe_javascript("abc"));
+        assert!(page.contains(&format!("href=\"{paper}\"")), "{page}");
+        assert!(page.contains(&format!("href=\"{recipe}\"")), "{page}");
+        assert!(page.contains(&format!("data-copy=\"{paper}\"")), "{page}");
+        assert!(page.contains(&format!("data-copy=\"{recipe}\"")), "{page}");
+        // The token is in the two links and the two Copy buttons, and nowhere else (Save recipe
+        // carries it twice: its popup and its fallback).
+        let per = |js: &str| js.matches("abc").count();
+        assert_eq!(per(&javascript("abc")), 1);
+        assert_eq!(per(&recipe_javascript("abc")), 2);
+        assert_eq!(page.matches("abc").count(), 2 * (1 + 2), "{page}");
+        // Save recipe quotes its selectors: unescaped, the attribute would end there.
+        assert!(recipe_javascript("abc").contains('"'));
+        assert!(
+            recipe.contains("&quot;") && !recipe.contains('"'),
+            "{recipe}"
+        );
+        for b in ["safari", "chrome", "firefox"] {
+            assert!(page.contains(&format!("id=\"{b}\"")), "{b}");
+        }
+        assert!(page.contains("Drag each button to your bookmarks bar"));
+        assert!(!page.contains('\n'), "one line, as the popups are");
     }
 
     const ORIGIN: Option<&str> = Some("http://127.0.0.1:47219");

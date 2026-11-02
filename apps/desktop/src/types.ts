@@ -221,6 +221,8 @@ export interface Settings {
   typography: boolean;
   /** Footnotes and endnotes to Kindle pop-up notes (issue #31). */
   popup_notes: boolean;
+  /** The welcome has been seen or skipped once; Settings → About shows it again. */
+  welcome_seen: boolean;
 }
 
 export interface PreviewerStatus {

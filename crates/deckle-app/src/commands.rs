@@ -76,6 +76,8 @@ pub struct Settings {
     pub typography: bool,
     /// Footnotes and endnotes to Kindle pop-up notes (issue #31).
     pub popup_notes: bool,
+    /// The welcome has been seen (or skipped) once; Settings → About shows it again.
+    pub welcome_seen: bool,
 }
 
 impl Default for Settings {
@@ -102,6 +104,7 @@ impl Default for Settings {
             metadata_fill: false,
             typography: false,
             popup_notes: false,
+            welcome_seen: false,
         }
     }
 }
@@ -1746,6 +1749,7 @@ mod tests {
         assert!(!s.chapter_recaps, "chapter recaps are off by default");
         assert!(!s.book_summary, "the book summary is off by default");
         assert!(!s.series_recap, "the series recap is off by default");
+        assert!(!s.welcome_seen, "a new install gets the welcome");
         assert_eq!(extras(&s), None);
         assert!(s.book_presets.is_empty());
         let mut changed = s.clone();
@@ -1761,6 +1765,7 @@ mod tests {
         changed.chapter_recaps = true;
         changed.book_summary = true;
         changed.series_recap = true;
+        changed.welcome_seen = true;
         changed.illustrations_api_key = "sk-image".into();
         changed.previewer_path = Some("/x/KindlePreviewer4CLI".into());
         save_settings_to(&file, &changed).unwrap();

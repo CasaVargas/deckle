@@ -489,7 +489,8 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             list,
             remove,
             bookmarklet,
-        } => save(json, targets, title, list, remove, bookmarklet),
+            page,
+        } => save(json, targets, title, list, remove, bookmarklet, page),
         cli::Command::Run {
             epubs,
             preset,
@@ -6126,12 +6127,17 @@ fn save(
     list: bool,
     remove: Option<String>,
     bookmarklet: bool,
+    page: bool,
 ) -> Result<ExitCode, String> {
     use deckle_digest::reading::{Added, ReadingQueue, State};
     let queue = ReadingQueue::new(ReadingQueue::default_path());
     if bookmarklet {
         let dir = queue.path.parent().unwrap_or(Path::new("."));
         let token = deckle_digest::bookmarklet::token(dir).map_err(|e| e.to_string())?;
+        if page {
+            println!("{}", deckle_digest::bookmarklet::install_page(&token));
+            return Ok(ExitCode::SUCCESS);
+        }
         println!(
             "Drag these to your bookmarks bar (or make a bookmark with each as the address).\n\
              They work while `deckle digest watch` is running.\n\n\

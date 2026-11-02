@@ -18,6 +18,7 @@ import { runSummary } from "./bookStatus";
 import CookbookView from "./CookbookView";
 import type { Incoming } from "./CookbookAdd";
 import DailyView from "./DailyView";
+import Welcome from "./Welcome";
 import type { Room } from "./dailyRooms";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
@@ -51,6 +52,8 @@ const DEFAULT_SETTINGS: Settings = {
   metadata_fill: false,
   typography: false,
   popup_notes: false,
+  // True until the file is read, so the welcome never flashes on a settled install.
+  welcome_seen: true,
 };
 
 /** Link files and saved pages become articles (web-article design); everything else is a book. */
@@ -123,6 +126,10 @@ function Deckle() {
   const [notice, setNotice] = useState<string | null>(null);
   const [autoExport, setAutoExport] = useState<string | null>(null);
   const [tab, setTab] = useState<"books" | "daily" | "cookbook" | "kindle">("books");
+  /** The welcome (welcome design §4): open on a first launch, or again from Settings → About. */
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  /** Bumped when the welcome closes: the Daily tab mounts afresh, since the welcome may have set the paper up. */
+  const [dailyEpoch, setDailyEpoch] = useState(0);
   /** The Cookbook tab: a counter that sends focus to Add's link box, and what was pasted or dropped on the tab. */
   const [focusAdd, setFocusAdd] = useState(0);
   const focusTaken = useRef(0);
@@ -252,7 +259,13 @@ function Deckle() {
     api.appVersion().then(setVersion).catch(() => setVersion("dev"));
     checkForUpdate().then(setUpdate);
     api.startTab().then(setTab).catch(() => {});
-    api.getSettings().then(setSettings).catch(() => {});
+    api
+      .getSettings()
+      .then((s) => {
+        setSettings(s);
+        if (!s.welcome_seen) setWelcomeOpen(true);
+      })
+      .catch(() => {});
     api.previewerStatus().then(setPreviewer).catch(() => {});
     api.libraryStatus().then(setLibrary).catch(() => {});
     refreshDevices();
@@ -514,6 +527,12 @@ function Deckle() {
   settingsOpen.current = settingsPage !== null;
 
   const openSettings = (page: SettingsPage = lastPage.current) => setSettingsPage(page);
+  const finishWelcome = (goDaily: boolean) => {
+    setWelcomeOpen(false);
+    if (!settings.welcome_seen) saveSettings({ ...settings, welcome_seen: true });
+    setDailyEpoch((n) => n + 1);
+    if (goDaily) setTab("daily");
+  };
   const pickPage = (page: SettingsPage) => {
     lastPage.current = page;
     setSettingsPage(page);
@@ -572,6 +591,10 @@ function Deckle() {
             update={update}
             onUpdateState={setUpdate}
             busy={busy}
+            onWelcome={() => {
+              setSettingsPage(null);
+              setWelcomeOpen(true);
+            }}
             onPickPreviewer={pickPreviewer}
             library={library}
             onLibrary={setLibraryOptions}
@@ -646,7 +669,7 @@ function Deckle() {
           </button>
         </header>
 
-        {tab === "daily" && <DailyView onNotice={setNotice} initialRoom={dailyRoom} onRoomTaken={() => setDailyRoom(null)} />}
+        {tab === "daily" && <DailyView key={dailyEpoch} onNotice={setNotice} initialRoom={dailyRoom} onRoomTaken={() => setDailyRoom(null)} />}
         {tab === "cookbook" && (
           <CookbookView
             onNotice={setNotice}
@@ -785,6 +808,7 @@ function Deckle() {
         {!settingsPage && noticeBar}
 
       </div>
+      {welcomeOpen && <Welcome onDone={finishWelcome} onNotice={setNotice} />}
     </div>
   );
 }
