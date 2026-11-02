@@ -179,7 +179,12 @@ fn outbox(home: &Path) -> PathBuf {
     let cache = if cfg!(target_os = "macos") {
         home.join("Library/Caches")
     } else {
-        home.join("cache")
+        // Windows: `%LOCALAPPDATA%\deckle`, and the tests set LOCALAPPDATA to the home.
+        if cfg!(target_os = "windows") {
+            home.to_path_buf()
+        } else {
+            home.join("cache")
+        }
     };
     cache.join("deckle/outbox-remarkable")
 }
