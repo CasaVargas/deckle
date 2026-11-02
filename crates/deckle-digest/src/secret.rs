@@ -270,6 +270,72 @@ pub fn forget_site(sub: &SubscriptionConfig, keys: &dyn Keyring) -> Result<bool,
         .map_err(|e| site_keyring_error(sub, e))
 }
 
+// ---- the reMarkable's SSH password (fixed-layout spec §12.5) --------------------------------
+
+/// The keychain service for a reMarkable's SSH password.
+pub const REMARKABLE_SERVICE: &str = "com.casavargas.deckle.remarkable";
+
+/// The headless fallback for the reMarkable's SSH password, read only without a keychain.
+pub const REMARKABLE_ENV: &str = "DECKLE_REMARKABLE_PASSWORD";
+
+/// `root@<host>`: a new host is a new entry.
+pub fn remarkable_account(host: &str) -> String {
+    format!("root@{}", host.trim())
+}
+
+/// The tablet's SSH password: the keychain's, or `DECKLE_REMARKABLE_PASSWORD` (through
+/// `env`) only when there is no keychain at all.
+pub fn remarkable_password(
+    host: &str,
+    keys: &dyn Keyring,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> Result<(Zeroizing<String>, Source), SecretError> {
+    let account = remarkable_account(host);
+    match keys.get(REMARKABLE_SERVICE, &account) {
+        Ok(Some(pw)) => Ok((pw, Source::Keychain)),
+        Ok(None) => Err(SecretError::NotSet {
+            account,
+            hint: "deckle digest remarkable password",
+            site: String::new(),
+        }),
+        Err(KeyringError::Unavailable(why)) => match env(REMARKABLE_ENV).map(Zeroizing::new) {
+            Some(pw) if !pw.is_empty() => Ok((pw, Source::Env)),
+            _ => Err(SecretError::NoSiteKeychain {
+                why,
+                env: REMARKABLE_ENV.to_owned(),
+            }),
+        },
+        Err(KeyringError::Failed(why)) => Err(SecretError::Keychain(why)),
+    }
+}
+
+/// Saves the tablet's SSH password for `host`.
+pub fn set_remarkable(host: &str, keys: &dyn Keyring, password: &str) -> Result<(), SecretError> {
+    if password.is_empty() {
+        return Err(SecretError::Empty);
+    }
+    keys.set(REMARKABLE_SERVICE, &remarkable_account(host), password)
+        .map_err(|e| match e {
+            KeyringError::Unavailable(why) => SecretError::NoSiteKeychain {
+                why,
+                env: REMARKABLE_ENV.to_owned(),
+            },
+            KeyringError::Failed(why) => SecretError::Keychain(why),
+        })
+}
+
+/// Deletes the tablet's entry; `false` when there was none.
+pub fn forget_remarkable(host: &str, keys: &dyn Keyring) -> Result<bool, SecretError> {
+    keys.delete(REMARKABLE_SERVICE, &remarkable_account(host))
+        .map_err(|e| match e {
+            KeyringError::Unavailable(why) => SecretError::NoSiteKeychain {
+                why,
+                env: REMARKABLE_ENV.to_owned(),
+            },
+            KeyringError::Failed(why) => SecretError::Keychain(why),
+        })
+}
+
 /// The OS keychain: macOS Keychain, Windows Credential Manager, Linux Secret Service.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemKeyring;

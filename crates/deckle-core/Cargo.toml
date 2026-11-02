@@ -35,6 +35,9 @@ image.workspace = true
 csv.workspace = true
 tempfile.workspace = true
 uuid.workspace = true
+# A reMarkable over SSH (fixed-layout spec §12.5): pure Rust, on `ring`, which is in the tree.
+russh = { version = "0.65", default-features = false, features = ["ring", "flate2", "rsa"] }
+tokio = { version = "1", features = ["rt", "net", "time", "io-util"] }
 deunicode.workspace = true
 regex.workspace = true
 base64.workspace = true
@@ -42,3 +45,7 @@ ureq.workspace = true
 rusqlite.workspace = true
 
 [dev-dependencies]
+
+[features]
+# The stand-in SSH tablet of `remarkable_ssh::fake`, for other crates' tests.
+fake-tablet = []

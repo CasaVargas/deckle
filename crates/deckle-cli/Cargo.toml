@@ -42,6 +42,7 @@ libc = "0.2"
 [dev-dependencies]
 sha2.workspace = true
 deckle-mobi.workspace = true
+deckle-core = { workspace = true, features = ["fake-tablet"] }
 zip.workspace = true
 rusqlite.workspace = true
 assert_cmd.workspace = true

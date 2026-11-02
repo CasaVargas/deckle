@@ -416,18 +416,33 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             let devices = detect_mass_storage();
             let mtp = deckle_transport::usb::detect();
             // A reMarkable whose web interface answers (fixed-layout spec §12.4): a second's
-            // wait at most when none does.
-            let remarkable = deckle_core::remarkable::detect_with(cfg.remarkable.address());
+            // wait at most when none does. Over SSH (§12.5): one connection, for its host key.
+            let ssh = cfg.remarkable.transport == deckle_digest::config::RemarkableTransport::Ssh;
+            let remarkable = (!ssh)
+                .then(|| deckle_core::remarkable::detect_with(cfg.remarkable.address()))
+                .flatten();
+            let over_ssh = ssh
+                .then(|| {
+                    remarkable_ssh_connect_with(
+                        &cfg.remarkable,
+                        &deckle_digest::config::default_path(),
+                    )
+                    .map(|(_, fingerprint)| fingerprint)
+                })
+                .transpose()?;
             #[derive(serde::Serialize)]
             struct All<'a> {
                 mass_storage: &'a [deckle_core::deliver::Device],
                 mtp: &'a [deckle_transport::usb::MtpInfo],
                 remarkable: Option<&'a deckle_core::remarkable::Remarkable>,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                remarkable_ssh: Option<&'a str>,
             }
             let all = All {
                 mass_storage: &devices,
                 mtp: &mtp,
                 remarkable: remarkable.as_ref(),
+                remarkable_ssh: over_ssh.as_deref(),
             };
             emit(json, &all, || {
                 let mut lines: Vec<String> = devices
@@ -464,6 +479,16 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
                         r.base,
                         r.id()
                     ));
+                }
+                if let Some(fp) = &over_ssh {
+                    lines.push(format!(
+                        "reMarkable over SSH at {}:{}  host key {fp}  sync id \"remarkable/ssh\"",
+                        cfg.remarkable.ssh_host(),
+                        cfg.remarkable.ssh_port()
+                    ));
+                    if cfg.remarkable.is_paper_pro() {
+                        lines.push(PAPER_PRO_NOTE.to_owned());
+                    }
                 }
                 if lines.is_empty() {
                     "no Kindle connected, and no reMarkable answered".to_owned()
@@ -3391,9 +3416,7 @@ fn digest(
                     .map_err(|e| format!("reading queue: {e}"))?;
             }
             // A reMarkable plugged in now takes the PDF at once.
-            let remarkable = rm_queued
-                .then(|| push_remarkable(&cfg.remarkable))
-                .flatten();
+            let remarkable = rm_queued.then(|| push_remarkable(&cfg, &path)).flatten();
             // A Kobo or a PocketBook plugged in now takes its copy at once.
             let device = detect_reader().filter(|_| folder.is_none() && epub_queued);
             let reader = match push_reader(&kobo_queue, std::slice::from_ref(&cfg), device.as_ref())
@@ -3662,6 +3685,10 @@ fn digest(
             let cfg = load_digest_config(&path)?.email;
             digest_email(json, &cfg, action)
         }
+        cli::DigestCommand::Remarkable { action } => {
+            let cfg = load_digest_config(&path)?.remarkable;
+            digest_remarkable(json, &cfg, &path, action)
+        }
         cli::DigestCommand::Push { to } => {
             let papers = all_papers(&path)?;
             let queue = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
@@ -3677,7 +3704,7 @@ fn digest(
             };
             // A reMarkable that answers takes its outbox too (other readers design §9).
             let remarkable = match to.as_str() {
-                "device" => push_remarkable(&papers[0].remarkable),
+                "device" => push_remarkable(&papers[0], &path),
                 _ => None,
             };
             if target.is_none()
@@ -3874,7 +3901,13 @@ fn digest(
                         Err(e) => eprintln!("error: {e}"),
                     }
                 }
-                {
+                if cfg.remarkable.transport == deckle_digest::config::RemarkableTransport::Ssh {
+                    // Over SSH there's no cheap "is it there": a push is tried whenever
+                    // something waits, or a restart is owed (fixed-layout spec §12.5).
+                    if let Some(p) = push_remarkable(&cfg, &path) {
+                        emit(json, &p, || remarkable_lines(&p))?;
+                    }
+                } else {
                     let pending = rm_queue.pending();
                     // Asked only while something waits (the paper's, or books from `run --to
                     // remarkable`): an absent tablet costs a second a tick.
@@ -4003,6 +4036,12 @@ fn remarkable_lines(p: &deckle_core::sync::RemarkablePush) -> String {
             .iter()
             .map(|f| format!("      reMarkable already has {f}")),
     );
+    lines.extend(
+        p.pruned
+            .iter()
+            .map(|f| format!("      reMarkable: {f} marked deleted")),
+    );
+    lines.extend(p.notes.iter().map(|n| format!("      reMarkable: {n}")));
     lines.extend(p.errors.iter().map(|e| format!("      reMarkable: {e}")));
     lines.join("\n")
 }
@@ -4746,18 +4785,213 @@ fn with_direction(
         .collect()
 }
 
-/// Uploads the reMarkable outbox when something waits in it and the tablet answers.
+/// Uploads the reMarkable outbox when something waits in it and the tablet answers, over
+/// the USB web interface or SSH as `[remarkable] transport` says; over SSH the paper's old
+/// editions are pruned too (fixed-layout spec §12.5).
 fn push_remarkable(
-    rm: &deckle_digest::config::RemarkableConfig,
+    cfg: &deckle_digest::Config,
+    path: &Path,
 ) -> Option<deckle_core::sync::RemarkablePush> {
-    // Whatever waits goes, `[remarkable] enabled` or not: that key says the paper goes there;
-    // `run --to remarkable` queues books without it (fixed-layout spec §12.1).
+    let prune = digest_prune(cfg);
+    push_remarkable_with(&cfg.remarkable, path, Some(&prune))
+}
+
+/// [`push_remarkable`], pruning only when `prune` is given (books from `run --to remarkable`
+/// prune nothing). Whatever waits goes, `[remarkable] enabled` or not: that key says the
+/// paper goes there (fixed-layout spec §12.1).
+fn push_remarkable_with(
+    rm: &deckle_digest::config::RemarkableConfig,
+    path: &Path,
+    prune: Option<&deckle_core::queue::Prune>,
+) -> Option<deckle_core::sync::RemarkablePush> {
+    use deckle_core::remarkable_ssh;
     let queue = remarkable_queue();
-    if queue.pending().is_empty() {
-        return None;
+    match rm.transport {
+        deckle_digest::config::RemarkableTransport::Usb => {
+            if queue.pending().is_empty() {
+                return None;
+            }
+            let r = deckle_core::remarkable::detect_with(rm.address())?;
+            Some(deckle_core::sync::run_remarkable(&queue, &r))
+        }
+        deckle_digest::config::RemarkableTransport::Ssh => {
+            let owed = queue.dir.join(remarkable_ssh::RESTART_OWED).exists();
+            if queue.pending().is_empty() && !owed {
+                return None;
+            }
+            let mut shell = match remarkable_ssh_connect(rm, path) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Some(deckle_core::sync::RemarkablePush {
+                        errors: vec![e],
+                        ..Default::default()
+                    });
+                }
+            };
+            let prune = prune.map(|p| (p.prefix.as_str(), p.keep, p.exempt.as_slice()));
+            Some(remarkable_ssh::push(
+                &queue,
+                &mut shell,
+                rm.ssh_folder(),
+                prune,
+            ))
+        }
     }
-    let r = deckle_core::remarkable::detect_with(rm.address())?;
-    Some(deckle_core::sync::run_remarkable(&queue, &r))
+}
+
+/// The reMarkable's pinned SSH host key: `remarkable-hostkey.json` beside `digest.toml`.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct HostKeyPin {
+    host: String,
+    fingerprint: String,
+}
+
+fn hostkey_path(config: &Path) -> PathBuf {
+    config
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("remarkable-hostkey.json")
+}
+
+/// Connects to the reMarkable over SSH as `[remarkable]` says, with the password from the
+/// keychain (or `DECKLE_REMARKABLE_PASSWORD` without one) and the host key trusted on first
+/// use, then pinned (fixed-layout spec §12.5). The fingerprint comes back with the shell.
+fn remarkable_ssh_connect_with(
+    rm: &deckle_digest::config::RemarkableConfig,
+    config: &Path,
+) -> Result<(deckle_core::remarkable_ssh::SshShell, String), String> {
+    use deckle_digest::secret::{self, SystemKeyring};
+    let host = rm.ssh_host();
+    let (password, _) =
+        secret::remarkable_password(host, &SystemKeyring, &|k| std::env::var(k).ok())
+            .map_err(|e| e.to_string())?;
+    let pin_file = hostkey_path(config);
+    let pinned: Option<HostKeyPin> = std::fs::read(&pin_file)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .filter(|p: &HostKeyPin| p.host == host);
+    let c = deckle_core::remarkable_ssh::connect(
+        host,
+        rm.ssh_port(),
+        &password,
+        pinned.as_ref().map(|p| p.fingerprint.as_str()),
+        std::time::Duration::from_secs(5),
+    )
+    .map_err(|e| e.to_string())?;
+    if pinned.is_none() {
+        let pin = HostKeyPin {
+            host: host.to_owned(),
+            fingerprint: c.fingerprint.clone(),
+        };
+        std::fs::write(
+            &pin_file,
+            serde_json::to_vec_pretty(&pin).expect("two strings"),
+        )
+        .map_err(|e| format!("couldn't pin the host key at {}: {e}", pin_file.display()))?;
+    }
+    Ok((c.shell, c.fingerprint))
+}
+
+fn remarkable_ssh_connect(
+    rm: &deckle_digest::config::RemarkableConfig,
+    config: &Path,
+) -> Result<deckle_core::remarkable_ssh::SshShell, String> {
+    remarkable_ssh_connect_with(rm, config).map(|(s, _)| s)
+}
+
+/// The one thing to say about SSH on a Paper Pro: it's reMarkable's Developer Mode, which
+/// the owner turns on themself (a factory reset); Deckle never does.
+const PAPER_PRO_NOTE: &str = "SSH on a Paper Pro is reMarkable's Developer Mode, which \
+    factory-resets the tablet: your own doing on the tablet, never Deckle's";
+
+/// `digest remarkable password|test|forget` (fixed-layout spec §12.5).
+fn digest_remarkable(
+    json: bool,
+    rm: &deckle_digest::config::RemarkableConfig,
+    path: &Path,
+    action: cli::RemarkableCommand,
+) -> Result<ExitCode, String> {
+    use deckle_digest::secret::{self, SystemKeyring};
+    use deckle_digest::zeroize::Zeroizing;
+    let host = rm.ssh_host();
+    let account = secret::remarkable_account(host);
+    match action {
+        cli::RemarkableCommand::Password { stdin } => {
+            if daemon_install() {
+                return Err(no_keychain(secret::REMARKABLE_ENV));
+            }
+            let password = Zeroizing::new(if stdin {
+                let mut line = String::new();
+                std::io::stdin()
+                    .read_line(&mut line)
+                    .map_err(|e| format!("stdin: {e}"))?;
+                let pw = line.trim_end_matches(['\r', '\n']).to_owned();
+                deckle_digest::zeroize::Zeroize::zeroize(&mut line);
+                pw
+            } else {
+                rpassword::prompt_password(format!(
+                    "The reMarkable's SSH password (Settings → Help → About → Copyrights \
+                     and licenses) for {account}: "
+                ))
+                .map_err(|e| format!("couldn't read the password: {e}"))?
+            });
+            secret::set_remarkable(host, &SystemKeyring, &password).map_err(|e| e.to_string())?;
+            emit(json, &account, || {
+                let mut s = format!(
+                    "saved in the system keychain ({}, {account})",
+                    secret::REMARKABLE_SERVICE
+                );
+                if rm.is_paper_pro() {
+                    s.push_str(&format!("\n{PAPER_PRO_NOTE}"));
+                }
+                s
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::RemarkableCommand::Test => {
+            #[derive(serde::Serialize)]
+            struct Seen<'a> {
+                host: &'a str,
+                port: u16,
+                fingerprint: String,
+                folder: &'a str,
+            }
+            let (_shell, fingerprint) = remarkable_ssh_connect_with(rm, path)?;
+            let seen = Seen {
+                host,
+                port: rm.ssh_port(),
+                fingerprint,
+                folder: rm.ssh_folder(),
+            };
+            emit(json, &seen, || {
+                let mut s = format!(
+                    "reMarkable over SSH at {}:{}  host key {} (pinned in {})  folder {}",
+                    seen.host,
+                    seen.port,
+                    seen.fingerprint,
+                    hostkey_path(path).display(),
+                    seen.folder
+                );
+                if rm.is_paper_pro() {
+                    s.push_str(&format!("\n{PAPER_PRO_NOTE}"));
+                }
+                s
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+        cli::RemarkableCommand::Forget => {
+            let had = secret::forget_remarkable(host, &SystemKeyring).map_err(|e| e.to_string())?;
+            let pin = hostkey_path(path);
+            let pinned = std::fs::remove_file(&pin).is_ok();
+            emit(json, &(had, pinned), || match (had, pinned) {
+                (true, true) => format!("forgot the password for {account} and the host key"),
+                (true, false) => format!("forgot the password for {account}"),
+                (false, true) => "forgot the host key; there was no password".to_owned(),
+                (false, false) => format!("nothing saved for {account}"),
+            })?;
+            Ok(ExitCode::SUCCESS)
+        }
+    }
 }
 
 /// What waits for a Kobo or a PocketBook: EPUBs, made KEPUBs for a Kobo as they go over.
@@ -5081,9 +5315,8 @@ fn send_to_remarkable(
         .collect();
     let any_queued = books.iter().any(|b| b.queued.is_some());
     let remarkable = any_queued
-        .then(|| deckle_core::remarkable::detect_with(rm.address()))
-        .flatten()
-        .map(|r| deckle_core::sync::run_remarkable(&queue, &r));
+        .then(|| push_remarkable_with(rm, &deckle_digest::config::default_path(), None))
+        .flatten();
     let failed = books.iter().filter(|b| b.error.is_some()).count();
     let report = Report { books, remarkable };
     emit(json, &report, || {

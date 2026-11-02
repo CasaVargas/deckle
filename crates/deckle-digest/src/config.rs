@@ -1250,9 +1250,65 @@ pub struct RemarkableConfig {
     /// interface put on the home network (fixed-layout spec §12.4). Unset for USB.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub address: Option<String>,
+    /// How the files get there: the USB web interface, or SSH (fixed-layout spec §12.5).
+    pub transport: RemarkableTransport,
+    /// SSH: the tablet's host, `10.11.99.1` on the USB link or its Wi-Fi address.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub ssh_host: String,
+    /// SSH: the port; 22 when 0.
+    #[serde(skip_serializing_if = "is_zero_u16")]
+    pub ssh_port: u16,
+    /// SSH: the folder on the tablet Deckle's documents go in; `Deckle` when empty.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub ssh_folder: String,
+}
+
+fn is_zero_u16(n: &u16) -> bool {
+    *n == 0
+}
+
+/// How Deckle reaches a reMarkable.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RemarkableTransport {
+    /// Its USB web interface (`POST /upload`): no setup on the tablet beyond the toggle.
+    #[default]
+    Usb,
+    /// SSH into xochitl's document folder: Wi-Fi, a Deckle folder and pruning, but a restart
+    /// of the tablet's reader to show new files (fixed-layout spec §12.5).
+    Ssh,
 }
 
 impl RemarkableConfig {
+    /// SSH: the host to connect to.
+    pub fn ssh_host(&self) -> &str {
+        let h = self.ssh_host.trim();
+        if h.is_empty() { "10.11.99.1" } else { h }
+    }
+
+    /// SSH: the port.
+    pub fn ssh_port(&self) -> u16 {
+        if self.ssh_port == 0 {
+            22
+        } else {
+            self.ssh_port
+        }
+    }
+
+    /// SSH: the folder on the tablet.
+    pub fn ssh_folder(&self) -> &str {
+        let f = self.ssh_folder.trim();
+        if f.is_empty() { "Deckle" } else { f }
+    }
+
+    /// Whether the screen is a Paper Pro, where SSH means reMarkable's Developer Mode.
+    pub fn is_paper_pro(&self) -> bool {
+        matches!(
+            self.screen,
+            crate::pdf::Screen::RemarkablePaperPro | crate::pdf::Screen::RemarkablePaperProMove
+        )
+    }
+
     /// The address to ask: `address` when set and not blank, else the USB link's.
     pub fn address(&self) -> Option<&str> {
         self.address
@@ -1552,6 +1608,15 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # books = false                   # also the long reads, as EPUBs
 # address = "http://10.11.99.1"   # or the tablet's address on your Wi-Fi, when its web
 #                                 # interface is reachable there
+# transport = "usb"               # or "ssh": straight into the tablet's document folder,
+#                                 # over Wi-Fi too, in a Deckle folder, with old papers
+#                                 # pruned; the tablet's reader restarts to show new files.
+#                                 # Needs the tablet's SSH password, from Settings → Help →
+#                                 # About → Copyrights and licenses:
+#                                 # `deckle digest remarkable password`
+# ssh_host = "10.11.99.1"         # or its Wi-Fi address (SSH over Wi-Fi is a setting on
+#                                 # the tablet you turn on yourself)
+# ssh_folder = "Deckle"
 
 # KOReader on any reader can browse your papers (an OPDS catalog) and sync its reading
 # progress here, over the home network. Set the password with `deckle reader-server password`.

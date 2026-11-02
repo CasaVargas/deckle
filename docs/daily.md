@@ -976,6 +976,28 @@ Screens: `remarkable-2` (the default), `remarkable-paper-pro`, `remarkable-paper
 - **Books too:** `deckle run --to remarkable book.epub manga.cbz`, or **Send to reMarkable** on
   the app's Inbox. A comic goes as an image-only PDF fitted to the screen; anything else as an
   EPUB. They wait in the same outbox and go with the next push.
+- **Over SSH** (`transport = "ssh"`): instead of the web interface, Deckle writes the paper
+  straight into the tablet's document folder, in a **Deckle** folder, over Wi-Fi as well as
+  the cable, and **prunes** old papers there (`keep`), which the web interface can't. Every
+  reMarkable has an SSH login; the password is on the tablet under *Settings → Help → About →
+  Copyrights and licenses* (the "GPLv3 Compliance" lines). Save it once with
+  `deckle digest remarkable password`, check with `deckle digest remarkable test`, and set
+  `ssh_host` to `10.11.99.1` (the cable) or the tablet's Wi-Fi address. The tablet's host key
+  is trusted the first time and pinned in `remarkable-hostkey.json` beside `digest.toml`; a
+  key that changes stops the send until you delete that file.
+  - **What it costs:** the tablet's reader (xochitl) only notices new files when it's
+    restarted, which takes a few seconds and closes whatever you were writing. Deckle restarts
+    it only when nothing on the tablet has changed for ten minutes; otherwise the paper is on
+    the tablet, shows after the next restart, and Deckle tries again on its next push.
+  - **Wi-Fi:** SSH answers only on the cable out of the box on a Paper Pro and on a
+    reMarkable 2 past OS 3.20; reMarkable's own `rm-ssh-over-wlan on`, run once over the cable,
+    opens it on your network. That's a setting you change on the tablet; Deckle never runs it.
+  - **Paper Pro, Paper Pro Move, Paper Pure:** on these, SSH exists only after reMarkable's
+    **Developer Mode, which factory-resets the tablet and ends warranty support.** That is
+    your decision, made on the tablet; Deckle never turns it on, never asks you to, and doesn't
+    recommend it. The USB web interface works on every model without it.
+  - Deckle runs nothing else on the tablet: it reads and writes document files, marks its
+    own old papers deleted, and restarts the reader. No account, no cloud.
 - **Without the tablet's cloud:** Deckle never signs in to reMarkable's cloud. If you'd rather
   pull than push, an export folder in Dropbox, Google Drive or OneDrive (`[[export]]`,
   `format = "pdf"`, `screen = "remarkable-2"`) shows up in the tablet's own integration for that
