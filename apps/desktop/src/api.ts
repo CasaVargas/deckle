@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke, listen } from "./transport";
 import { platform } from "./platform";
-import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, LlmCheck, LlmPullEvent, LlmRecommendation, MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzlePreview, PuzzleProgress, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, ShelvesConfig, ShelvesView, WirelessView } from "./types";
+import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, LlmCheck, LlmPullEvent, LlmRecommendation, MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzlePreview, PuzzleProgress, PuzzleSources, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, ShelvesConfig, ShelvesView, WirelessView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -116,6 +116,7 @@ export const api = {
   onLlmPull: (cb: (e: LlmPullEvent) => void): Promise<() => void> => listen<LlmPullEvent>("llm-pull", cb),
   // The Puzzles tab (Puzzles tab design §3)
   puzzlesKinds: () => invoke<PuzzleKind[]>("puzzles_kinds"),
+  puzzlesSources: () => invoke<PuzzleSources>("puzzles_sources"),
   puzzlesPreview: (request: PuzzleBookRequest) => invoke<PuzzlePreview>("puzzles_preview", { request }),
   /** Makes the book into ~/Deckle/Puzzles; progress comes as `puzzles-progress` events. */
   puzzlesMake: (request: PuzzleBookRequest) => invoke<MadePuzzleBook>("puzzles_make", { request }),

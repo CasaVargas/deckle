@@ -1177,3 +1177,13 @@ input[type=checkbox] { padding: 0; }
 .pz-punct { align-self: flex-end; font-size: 11px; width: 8px; }
 .puzzles-books { overflow: hidden; }
 .puzzles-book-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.puzzles-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); font-size: 13px; color: var(--fg); min-height: 34px; }
+.chip.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.chip:disabled { opacity: .5; }
+.tag.ai { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.puzzles-interests { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--bg); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; align-self: flex-start; }
+.seg button { background: var(--panel); border: 0; padding: 0 12px; height: 34px; font-size: 13px; color: var(--fg); }
+.seg button.on { background: var(--fg); color: var(--bg); }
+.seg button:disabled { opacity: .5; }

@@ -29,7 +29,15 @@
   follows the making, and every book is kept in `~/Deckle/Puzzles` with the options that made
   it, so **Make again** gives the same book and **Send** copies it to the plugged-in Kindle or
   **Save a copy** to a folder. The same four kinds on the command line: `deckle puzzles
-  ladder|cryptogram|nonogram|maze`. Design: `docs/superpowers/specs/2026-11-02-puzzles-tab-design.md`.
+  ladder|cryptogram|nonogram|maze`.
+- **Crosswords and word searches about what you follow.** A theme for the book: your interest
+  sections (pick which) or the whole week's paper, with the words from the headlines the Daily's
+  puzzle store keeps and the headline as the clue; the words you looked up on the Kindle, clued
+  with the definition you tapped; your cookbook's dishes and ingredients; or a subject the AI
+  writes about, words and clues both. With the AI on (Settings → AI), any crossword's clues can
+  be rewritten as trivia, cryptic, or for a kid, one request a puzzle, every clue checked so it
+  never names its answer. `deckle puzzles crossword --theme interests --interest Rust --clues
+  cryptic` does the same. Design: `docs/superpowers/specs/2026-11-02-puzzles-tab-design.md`.
 - **The welcome shows the back pages.** A fourth page in the first-launch tour: the Mini with
   yesterday's headlines as its answers, the word search, the word ladder, the almanac, the
   horoscope and On this day, how a Kindle's notes mark the answers, the puzzle books to write

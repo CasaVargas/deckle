@@ -1,6 +1,7 @@
 # The Puzzles tab: puzzle books from the app, themed on what you read — design
 
-**Status:** increment 1 built (the tab with seven kinds, own lists, no theme), 2026-11-02 ·
+**Status:** increments 1–3 built (the tab with seven kinds; themes from interests, the week,
+looked-up words and the cookbook; the AI's subject and clue styles), 2026-11-02 ·
 **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-11-01-puzzle-books-design.md` (§3.5 themes, §6 increment 5 "the app's
 Puzzle Books screen"), `2026-10-22-puzzle-page-design.md`, `2026-10-31-word-search-design.md`,
@@ -80,5 +81,10 @@ means everyone gets the same grid. A reader's own interests make their own book.
    `make_with` reports progress.) *Built 2026-11-02.* As built, the preview makes puzzle 1
    alone with the whole book's seed, so it is the same puzzle 1 the book gets.
 2. Interests, This week's paper and Words you looked up; the preview; progress events.
-3. The book you're reading and Your cookbook; the AI's clues and styles.
+   *Built 2026-11-02:* `puzzle::book::theme` resolves each source from the Daily's puzzle store
+   (its per-day headline words), the shelf store and the cookbook store; `puzzle::book::plan`
+   is the shared layer the app and the CLI call before and after `make`.
+3. Your cookbook; the AI's clues and styles. *Built 2026-11-02*, except **The book you're
+   reading**, which waits: it needs the X-Ray entities of the open book cut at the reader's
+   position, a lookup the shelf doesn't keep yet.
 4. Every Sunday, and the solved count from the Kindle's notes.

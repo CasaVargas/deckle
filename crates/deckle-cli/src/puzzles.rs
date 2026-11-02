@@ -11,7 +11,12 @@ use deckle_digest::puzzle::book::{self, BookOptions, Difficulty, Kind};
 use deckle_digest::puzzle::words::Words;
 use serde::Serialize;
 
-use super::cli::{BookArgs, DifficultyArg, PuzzlesCommand};
+use deckle_digest::editor::AppAi;
+use deckle_digest::puzzle::ai::Style;
+use deckle_digest::puzzle::book::plan::{self, Plan, Theme};
+use deckle_digest::puzzle::book::theme::Source;
+
+use super::cli::{BookArgs, DifficultyArg, PuzzlesCommand, ThemeArgs};
 use super::{emit, resolve_target};
 
 #[derive(Serialize)]
@@ -30,17 +35,25 @@ pub fn run(json: bool, action: PuzzlesCommand) -> Result<ExitCode, String> {
             size,
             difficulty,
             words,
+            theme,
             book,
-        } => make(json, Kind::Search, size, difficulty, words, book),
+        } => make(json, Kind::Search, size, difficulty, words, theme, book),
         PuzzlesCommand::Crossword {
             size,
             difficulty,
             words,
+            theme,
             book,
-        } => make(json, Kind::Crossword, size, difficulty, words, book),
-        PuzzlesCommand::Sudoku { difficulty, book } => {
-            make(json, Kind::Sudoku, 9, difficulty, None, book)
-        }
+        } => make(json, Kind::Crossword, size, difficulty, words, theme, book),
+        PuzzlesCommand::Sudoku { difficulty, book } => make(
+            json,
+            Kind::Sudoku,
+            9,
+            difficulty,
+            None,
+            ThemeArgs::default(),
+            book,
+        ),
         PuzzlesCommand::Ladder { difficulty, book } => {
             make_more(json, Kind::Ladder, 4, difficulty, None, None, book)
         }
@@ -105,12 +118,48 @@ fn base_options(
     ))
 }
 
+/// The plan `--theme`, `--interest`, `--subject` and `--clues` ask for.
+fn plan_of(t: &ThemeArgs, own: bool) -> Result<Plan, String> {
+    let style = Style::parse(&t.clues).ok_or_else(|| {
+        format!(
+            "--clues must be plain, trivia, cryptic or kid, not {}",
+            t.clues
+        )
+    })?;
+    let theme = match t.theme.as_deref().map(str::trim) {
+        None | Some("") => {
+            if own {
+                Theme::Own
+            } else {
+                Theme::None
+            }
+        }
+        Some("interests") => Theme::Source(Source::Interests {
+            names: t.interest.clone(),
+            days: 30,
+        }),
+        Some("week") => Theme::Source(Source::Week { days: 7 }),
+        Some("vocab") => Theme::Source(Source::Vocab),
+        Some("cookbook") => Theme::Source(Source::Cookbook),
+        Some("subject") => Theme::Subject {
+            text: t.subject.clone().unwrap_or_default(),
+        },
+        Some(other) => {
+            return Err(format!(
+                "--theme must be interests, week, vocab, cookbook or subject, not {other}"
+            ));
+        }
+    };
+    Ok(Plan { theme, style })
+}
+
 fn make(
     json: bool,
     kind: Kind,
     size: usize,
     difficulty: DifficultyArg,
     words: Option<PathBuf>,
+    theme: ThemeArgs,
     args: BookArgs,
 ) -> Result<ExitCode, String> {
     let text = match &words {
@@ -136,11 +185,48 @@ fn make(
     let (mut opts, page) = base_options(kind, size, difficulty, &args)?;
     opts.words = own;
     opts.clued = clued;
-    let extra = match &words {
+    let mut extra = match &words {
         Some(w) => format!(" --words {}", quote(&w.to_string_lossy())),
         None => String::new(),
     };
-    make_book(json, opts, page, &args, warnings, &extra)
+    let plan = plan_of(&theme, words.is_some())?;
+    let ai = AppAi::read().ai_config();
+    let main = deckle_digest::config::default_path();
+    let date = opts.date;
+    let found = plan::prepare(
+        &mut opts,
+        &plan,
+        &main,
+        date,
+        ai.as_ref(),
+        &mut deckle_xray::llm::http_post,
+    )
+    .map_err(|e| format!("{e} (deckle llm check)"))?;
+    if !found.note.is_empty() {
+        warnings.insert(0, found.note.clone());
+    }
+    warnings.extend(found.warnings.iter().cloned());
+    if let Some(t) = &theme.theme {
+        extra += &format!(" --theme {t}");
+        for i in &theme.interest {
+            extra += &format!(" --interest {}", quote(i));
+        }
+        if let Some(s) = &theme.subject {
+            extra += &format!(" --subject {}", quote(s));
+        }
+    }
+    if plan.style != Style::Plain {
+        extra += &format!(" --clues {}", plan.style.name());
+    }
+    make_book(
+        json,
+        opts,
+        page,
+        &args,
+        warnings,
+        &extra,
+        Some((plan, found.about, ai)),
+    )
 }
 
 /// `make` for the kinds that take quotes or a picture rather than words.
@@ -178,11 +264,13 @@ fn make_more(
         opts.picture = Some((bytes, name));
         extra += &format!(" --picture {}", quote(&p.to_string_lossy()));
     }
-    make_book(json, opts, page, &args, warnings, &extra)
+    make_book(json, opts, page, &args, warnings, &extra, None)
 }
 
 /// Makes the book, writes or sends it, and prints the report with the command that remakes
-/// it; `extra` is that command's kind-specific flags.
+/// it; `extra` is that command's kind-specific flags, `styled` the plan whose clues to
+/// rewrite once the book is made.
+#[allow(clippy::type_complexity)]
 fn make_book(
     json: bool,
     opts: BookOptions,
@@ -190,9 +278,19 @@ fn make_book(
     args: &BookArgs,
     mut warnings: Vec<String>,
     extra: &str,
+    styled: Option<(Plan, String, Option<deckle_digest::puzzle::ai::AiConfig>)>,
 ) -> Result<ExitCode, String> {
     let kind = opts.kind;
     let mut b = book::make(&opts, Words::embedded()).map_err(|e| e.to_string())?;
+    if let Some((plan, about, ai)) = &styled {
+        plan::restyle(
+            &mut b,
+            plan,
+            about,
+            ai.as_ref(),
+            &mut deckle_xray::llm::http_post,
+        );
+    }
     warnings.append(&mut b.warnings);
     b.warnings = warnings;
     let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;

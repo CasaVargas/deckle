@@ -223,6 +223,7 @@ commands! { ctx;
         crate::puzzles::puzzles_preview(request),
     puzzles_send { path: String, target: RunTarget, replace: bool } =>
         crate::puzzles::puzzles_send(path, target, replace),
+    puzzles_sources {} => Ok(crate::puzzles::puzzles_sources()),
     reader_server_set_password { password: String } =>
         crate::reader_server::reader_server_set_password(password),
     reader_server_status {} => Ok(crate::reader_server::reader_server_status()),

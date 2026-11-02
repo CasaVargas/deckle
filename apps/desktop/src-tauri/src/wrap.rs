@@ -799,7 +799,19 @@ pub fn llm_pull_stop() {
     deckle_app::llm::llm_pull_stop()
 }
 
-use deckle_app::puzzles::{BookRequest, KindInfo, MadeBook, PreviewDto as PuzzlePreviewDto};
+use deckle_app::puzzles::{
+    BookRequest, KindInfo, MadeBook, PreviewDto as PuzzlePreviewDto, SourcesDto,
+};
+
+#[tauri::command]
+pub async fn puzzles_sources() -> SourcesDto {
+    tauri::async_runtime::spawn_blocking(deckle_app::puzzles::puzzles_sources)
+        .await
+        .unwrap_or_else(|_| SourcesDto {
+            sources: Default::default(),
+            ai: None,
+        })
+}
 
 #[tauri::command]
 pub fn puzzles_kinds() -> Vec<KindInfo> {

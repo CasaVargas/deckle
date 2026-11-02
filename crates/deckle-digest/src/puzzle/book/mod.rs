@@ -4,6 +4,8 @@
 //! a Kindle Scribe. The grids are always Deckle's own; a book's words can be your own.
 
 pub mod pdf;
+pub mod plan;
+pub mod theme;
 
 use std::collections::HashSet;
 use std::fmt;

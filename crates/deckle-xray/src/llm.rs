@@ -328,6 +328,18 @@ fn ollama_body(
     body
 }
 
+/// Finds the first JSON object in a possibly chatty / fenced answer.
+pub fn extract_json_object(raw: &str) -> Option<serde_json::Value> {
+    let start = raw.find('{')?;
+    let end = raw.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    serde_json::from_str::<serde_json::Value>(&raw[start..=end])
+        .ok()
+        .filter(serde_json::Value::is_object)
+}
+
 /// Finds the first JSON array in a possibly chatty / fenced answer.
 pub fn extract_json_array(raw: &str) -> Option<Vec<serde_json::Value>> {
     let start = raw.find('[')?;

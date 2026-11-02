@@ -83,6 +83,7 @@ pub fn run() {
             wrap::puzzles_make,
             wrap::puzzles_list,
             wrap::puzzles_send,
+            wrap::puzzles_sources,
             wrap::daily_state,
             wrap::papers_list,
             wrap::masthead_missing,

@@ -699,7 +699,7 @@ function Deckle() {
             }}
           />
         )}
-        {tab === "puzzles" && <PuzzlesView onNotice={setNotice} device={device ?? null} deviceTarget={deviceTarget} />}
+        {tab === "puzzles" && <PuzzlesView onNotice={setNotice} device={device ?? null} deviceTarget={deviceTarget} onOpenSettings={openSettings} />}
         {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
         {tab === "books" && articleOpen && (
           <ArticleField

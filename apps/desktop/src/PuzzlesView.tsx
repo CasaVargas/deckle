@@ -6,21 +6,25 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { platform } from "./platform";
 import PuzzlePreview from "./PuzzlePreview";
-import { DIFFICULTIES, SCREENS, bookLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices } from "./puzzleBooks";
-import type { DeviceRow, MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzlePreview as Preview, PuzzleProgress, RunTarget } from "./types";
+import { CLUE_STYLES, DIFFICULTIES, SCREENS, bookLine, clueLine, interestRows, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices, themeChips } from "./puzzleBooks";
+import type { SettingsPage } from "./settingsIndex";
+import type { DeviceRow, MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzlePreview as Preview, PuzzleProgress, PuzzleSources, RunTarget } from "./types";
 
 interface Props {
   onNotice: (m: string) => void;
   /** The connected Kindle, when one is, and the target that sends to it. */
   device: DeviceRow | null;
   deviceTarget: RunTarget | null;
+  /** Opens a Settings page (the AI clues point at Settings → AI). */
+  onOpenSettings?: (page: SettingsPage) => void;
 }
 
 /** How long typing in the options waits before the preview is remade. */
 const PREVIEW_DELAY = 500;
 
-export default function PuzzlesView({ onNotice, device, deviceTarget }: Props) {
+export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSettings }: Props) {
   const [kinds, setKinds] = useState<PuzzleKind[]>([]);
+  const [sources, setSources] = useState<PuzzleSources | null>(null);
   const [request, setRequest] = useState<PuzzleBookRequest | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -44,6 +48,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget }: Props) {
         setRequest((r) => r ?? requestFor(ks[0]));
       })
       .catch((e) => onNotice(String(e)));
+    api.puzzlesSources().then(setSources).catch(() => setSources(null));
     loadBooks();
   }, [loadBooks, onNotice]);
 
@@ -134,7 +139,15 @@ export default function PuzzlesView({ onNotice, device, deviceTarget }: Props) {
   };
 
   const own = kind ? ownListPrompt(kind) : null;
+  const chips = kind ? themeChips(kind, sources) : [];
+  const wordKind = chips.length > 0;
+  const showOwn = own && (!wordKind || request?.theme === "own");
   const deviceName = device ? device.name || device.model_hint : null;
+  const toAi = onOpenSettings ? (
+    <button className="link-action inline" onClick={() => onOpenSettings("ai")}>
+      Settings → AI
+    </button>
+  ) : null;
 
   return (
     <div className="daily-view">
@@ -163,12 +176,87 @@ export default function PuzzlesView({ onNotice, device, deviceTarget }: Props) {
 
             {request && kind && (
               <>
-                {(own || kind.takes === "picture") && (
+                {wordKind && (
+                  <section className="set-card set-pad" aria-label="Theme">
+                    <div className="set-card-head">
+                      <h3 className="set-card-title">Theme</h3>
+                      <span className="muted small">Where the words come from. Deckle's list fills the rest of each grid.</span>
+                    </div>
+                    <div className="puzzles-chips" role="radiogroup" aria-label="Theme">
+                      {chips.map((c) => (
+                        <button key={c.key} className={`chip ${request.theme === c.key ? "on" : ""}`} role="radio" aria-checked={request.theme === c.key} disabled={!!c.off} title={c.off ?? undefined} onClick={() => patch({ theme: c.key })}>
+                          {c.label}
+                          {c.tag && <span className={`tag ${c.tag === "AI" ? "ai" : ""}`}>{c.tag}</span>}
+                        </button>
+                      ))}
+                    </div>
+                    {request.theme === "interests" && (
+                      <div className="puzzles-interests">
+                        {interestRows(sources).map((r) => {
+                          const on = request.interests.length === 0 || request.interests.includes(r.name);
+                          return (
+                            <label key={r.name} className="tick-row">
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                onChange={(e) => {
+                                  const all = interestRows(sources).map((x) => x.name);
+                                  const now = request.interests.length === 0 ? all : request.interests;
+                                  const next = e.target.checked ? [...now, r.name] : now.filter((n) => n !== r.name);
+                                  patch({ interests: next.length === all.length ? [] : next });
+                                }}
+                              />
+                              <span>
+                                <strong>{r.label}</strong> <span className="muted small">{r.words ? `${r.words} words in the last 30 days` : "no headlines yet"}</span>
+                              </span>
+                            </label>
+                          );
+                        })}
+                        <p className="muted small">Words from those sections' headlines in the Morgue, clued from the headline: "Cargo ____: the Rust package registry (Rust, Monday)".</p>
+                      </div>
+                    )}
+                    {request.theme === "week" && <p className="muted small">The last seven days of every news section, clued from the headlines.</p>}
+                    {request.theme === "vocab" && <p className="muted small">The words you looked up on the Kindle, clued with the definition you tapped.</p>}
+                    {request.theme === "cookbook" && <p className="muted small">Dishes and ingredients from the recipes you saved.</p>}
+                    {request.theme === "subject" && (
+                      <label className="puzzles-own">
+                        <span className="tk-label">What the AI writes about</span>
+                        <input type="text" value={request.subject} placeholder="The Roman Empire, 80s synth-pop, the Carolina Panthers…" onChange={(e) => patch({ subject: e.target.value })} />
+                        <span className="muted small">The AI picks the words and writes the clues{sources?.ai ? `, on ${sources.ai}` : ""}. Every word is checked to fit the grid.</span>
+                      </label>
+                    )}
+                    {showOwn && own && (
+                      <label className="puzzles-own">
+                        <span className="tk-label">{own.label}</span>
+                        <textarea rows={4} value={request.words} placeholder={own.placeholder} spellCheck={false} onChange={(e) => patch({ words: e.target.value })} />
+                        <span className="muted small">{own.help}</span>
+                      </label>
+                    )}
+                    {kind.takes === "clued" && (
+                      <div className="puzzles-own">
+                        <span className="tk-label">
+                          Clues <span className="tag ai">AI</span>
+                        </span>
+                        <div className="seg" role="radiogroup" aria-label="Clue style">
+                          {CLUE_STYLES.map((s) => (
+                            <button key={s.key} role="radio" aria-checked={request.clue_style === s.key} className={request.clue_style === s.key ? "on" : ""} disabled={s.ai && !!sources && !sources.ai} onClick={() => patch({ clue_style: s.key })}>
+                              {s.label}
+                            </button>
+                          ))}
+                        </div>
+                        <span className="muted small">
+                          {clueLine(request.clue_style, sources?.ai ?? null)} {toAi}
+                        </span>
+                      </div>
+                    )}
+                  </section>
+                )}
+                {!wordKind && (own || kind.takes === "picture") && (
                   <section className="set-card set-pad" aria-label="Theme">
                     {own && (
                       <label className="puzzles-own">
                         <span className="tk-label">{own.label}</span>
-                        <textarea rows={4} value={kind.takes === "quotes" ? request.quotes : request.words} placeholder={own.placeholder} spellCheck={false} onChange={(e) => patch(kind.takes === "quotes" ? { quotes: e.target.value } : { words: e.target.value })} />
+                        <textarea rows={4} value={request.quotes} placeholder={own.placeholder} spellCheck={false} onChange={(e) => patch({ quotes: e.target.value })} />
                         <span className="muted small">{own.help}</span>
                       </label>
                     )}

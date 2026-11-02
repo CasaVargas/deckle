@@ -43,3 +43,32 @@ describe("the Puzzles tab", () => {
     expect(sendLine(null)).toMatch(/Plug a Kindle in/);
   });
 });
+
+import { CLUE_STYLES, clueLine, interestRows, themeChips } from "./puzzleBooks";
+import type { PuzzleSources } from "./types";
+
+describe("themes and clues", () => {
+  const sources: PuzzleSources = { sources: { interests: [["The Gazette", "Rust", 41], ["The Gazette", "Panthers", 9]], week: 120, vocab: 0, cookbook: 23 }, ai: "Ollama on this computer" };
+  it("offers the chips a kind can use, with counts and reasons", () => {
+    const chips = themeChips(cross, sources);
+    expect(chips.map((c) => c.key)).toEqual(["none", "own", "interests", "week", "vocab", "cookbook", "subject"]);
+    expect(chips[2].tag).toBe("50 words");
+    expect(chips[4].off).toBe("no Kindle has shared its vocabulary yet");
+    expect(chips[6]).toEqual({ key: "subject", label: "A subject", off: null, tag: "AI" });
+    expect(themeChips(cross, { ...sources, ai: null })[6].off).toBe("needs the AI: Settings → AI");
+    expect(themeChips(sudoku, sources)).toEqual([]);
+    expect(themeChips(cross, null)[2].off).toBeNull();
+  });
+  it("lists interests, naming the paper only when there are several", () => {
+    expect(interestRows(sources).map((r) => r.label)).toEqual(["Rust", "Panthers"]);
+    const two = { ...sources, sources: { ...sources.sources, interests: [["A", "Rust", 1], ["B", "Dinos", 2]] as [string, string, number][] } };
+    expect(interestRows(two).map((r) => r.label)).toEqual(["Rust (A)", "Dinos (B)"]);
+    expect(interestRows(null)).toEqual([]);
+  });
+  it("explains the clue styles", () => {
+    expect(CLUE_STYLES.filter((s) => s.ai).map((s) => s.key)).toEqual(["trivia", "cryptic", "kid"]);
+    expect(clueLine("plain", null)).toMatch(/Wiktionary/);
+    expect(clueLine("cryptic", null)).toMatch(/Settings → AI/);
+    expect(clueLine("kid", "Ollama on this computer")).toMatch(/on Ollama on this computer/);
+  });
+});

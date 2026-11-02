@@ -423,6 +423,8 @@ pub enum PuzzlesCommand {
         #[arg(long)]
         words: Option<PathBuf>,
         #[command(flatten)]
+        theme: ThemeArgs,
+        #[command(flatten)]
         book: BookArgs,
     },
     /// A book of 9×9 sudoku.
@@ -441,6 +443,8 @@ pub enum PuzzlesCommand {
         /// Your own words with clues, `word: clue` a line (`#` lines skipped): the book's theme.
         #[arg(long)]
         words: Option<PathBuf>,
+        #[command(flatten)]
+        theme: ThemeArgs,
         /// easy: everyday words; hard: rarer ones mixed in.
         #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
         difficulty: DifficultyArg,
@@ -493,6 +497,27 @@ pub enum DifficultyArg {
     Easy,
     Medium,
     Hard,
+}
+
+/// Where a crossword's or a word search's theme words come from, and how the clues read
+/// (Puzzles tab design §2).
+#[derive(Args, Debug, Default)]
+pub struct ThemeArgs {
+    /// `interests` (your papers' interest sections, last 30 days), `week` (every section,
+    /// last 7 days), `vocab` (words you looked up on the Kindle), `cookbook`, or `subject`
+    /// (the AI writes the words and clues for --subject).
+    #[arg(long, conflicts_with = "words")]
+    pub theme: Option<String>,
+    /// With `--theme interests`: only these interests (repeat for several; default all).
+    #[arg(long)]
+    pub interest: Vec<String>,
+    /// With `--theme subject`: what the AI writes about.
+    #[arg(long)]
+    pub subject: Option<String>,
+    /// How the clues read: `plain`, or with the AI `trivia`, `cryptic`, `kid`. The AI is
+    /// the app's Settings → AI (`deckle llm check`).
+    #[arg(long, default_value = "plain")]
+    pub clues: String,
 }
 
 /// What every puzzle book takes.

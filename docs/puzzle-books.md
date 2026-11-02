@@ -11,8 +11,9 @@ after you close and reopen the book.
 Seven kinds: word searches, crosswords, sudoku, word ladders, cryptograms, nonograms and mazes.
 The app's **Puzzles** tab makes the same books with a preview of the first page, keeps them in
 `~/Deckle/Puzzles` with the options that made them (**Make again** gives the same book), and
-sends them to a Kindle or saves a copy for a reMarkable or an iPad. LLM-written themes come
-next.
+sends them to a Kindle or saves a copy for a reMarkable or an iPad. A crossword's or word
+search's **theme** can come from your own paper, your Kindle, your cookbook, or the AI
+([Themes](#themes)).
 
 ## Commands
 
@@ -84,6 +85,30 @@ kinds. There's no `--size` and no `--words`.
 - **Pages:** one big grid per page, with squares of at least 40 pt (14 mm), so there's room
   for pencil marks. Givens are bold.
 - **Answers:** six per page, with the givens in bold.
+
+## Themes
+
+A crossword or a word search takes its theme words from one of these, and Deckle's list fills
+the rest of each grid. On the tab they're the chips under **Theme**; on the command line
+`--theme`:
+
+| Theme | `--theme` | Words | Clues |
+|---|---|---|---|
+| Your interests | `interests`, with `--interest NAME` to pick some | The headline words of your papers' interest sections over the last 30 days, from the Daily's puzzle store | The headline with the word blanked: "____ build gets faster (Rust, Monday)" |
+| This week's paper | `week` | Every news section's headline words, last 7 days | The same |
+| Words you looked up | `vocab` | The Kindle's vocabulary builder, every Kindle that shares it, newest first | The definition the Kindle kept, else the sentence it was looked up in |
+| Your cookbook | `cookbook` | Each recipe title's words and each ingredient's last word | "In the title of a recipe you saved", "Goes into Thursday soup" |
+| A subject | `subject`, with `--subject TEXT` | The AI picks 12 to 60 words about it, sized for the grid | The AI's, in the clue style |
+| Your own list | `--words FILE` | As before | As before |
+
+The AI (Settings → AI, or `deckle llm check`) can also **rewrite the clues** of any crossword in
+a style, `--clues trivia|cryptic|kid`: one request a puzzle, every word checked so a clue never
+names its answer, and a puzzle whose request fails keeps its plain clues with a warning. A
+subject and styled clues both need the AI; the other themes don't. A theme with fewer than 8
+words that fit a word search, or 3 that fit a crossword, falls back to the list with a warning.
+
+The book's title defaults to the theme ("Rust & Panthers, November"), and the title page's
+report says where the words came from.
 
 ## Word ladders
 

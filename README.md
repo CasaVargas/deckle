@@ -175,12 +175,14 @@ in, press **Send**.
   (`--to remarkable`) an image-only PDF fitted to its screen, since its EPUB reader reflows. No
   X-Ray, Word Wise or page numbers.
 - **Puzzle books to write on.** The **Puzzles** tab (and `deckle puzzles`) makes a book of
-  crosswords (5×5 to 15×15, your own words and clues if you like), word searches, sudoku, word
-  ladders, cryptograms (your own quotes, or public-domain ones), nonograms (your own photo as
-  the first) or mazes, as a PDF that takes pen ink on a Kindle Scribe, sized for a Scribe, a
-  reMarkable, an iPad or A5 paper, with the first page previewed before you make it and every
-  book kept so **Make again** gives the same one. See
-  [docs/puzzle-books.md](docs/puzzle-books.md).
+  crosswords (5×5 to 15×15), word searches, sudoku, word ladders, cryptograms, nonograms (your
+  own photo as the first) or mazes, as a PDF that takes pen ink on a Kindle Scribe, sized for a
+  Scribe, a reMarkable, an iPad or A5 paper. A crossword or word search is **themed on what you
+  follow**: the headline words of your interest sections or the whole week's paper, clued from
+  the headlines; the words you looked up on the Kindle; your cookbook; your own list; or a
+  subject the AI writes about. With the AI on, the clues can be rewritten as trivia, cryptic,
+  or for a kid. The first page is previewed before you make it, and every book is kept so
+  **Make again** gives the same one. See [docs/puzzle-books.md](docs/puzzle-books.md).
 - **A PDF as it is.** `deckle send` copies a PDF, TXT, AZW3 or MOBI to a Kindle or a folder
   untouched, which is how a document that takes ink gets onto a Scribe.
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.

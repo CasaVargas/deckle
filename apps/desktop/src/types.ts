@@ -1096,6 +1096,26 @@ export interface PuzzleBookRequest {
   picture: string | null;
   seed: number | null;
   date: string;
+  /** Where the theme words come from (Puzzles tab design §2). */
+  theme: PuzzleTheme;
+  /** The interests picked, for `interests`; empty means all. */
+  interests: string[];
+  /** What the AI writes about, for `subject`. */
+  subject: string;
+  clue_style: ClueStyle;
+}
+export type PuzzleTheme = "none" | "own" | "interests" | "week" | "vocab" | "cookbook" | "subject";
+export type ClueStyle = "plain" | "trivia" | "cryptic" | "kid";
+export interface PuzzleSources {
+  sources: {
+    /** `[paper title, interest name, words in the last 30 days]` */
+    interests: [string, string, number][];
+    week: number;
+    vocab: number;
+    cookbook: number;
+  };
+  /** Where the AI runs, as Settings → AI names it; null when off. */
+  ai: string | null;
 }
 export type PuzzleDto =
   | { kind: "search"; rows: string[]; words: [string, boolean][] }

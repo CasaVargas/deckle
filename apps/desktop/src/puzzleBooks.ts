@@ -31,6 +31,10 @@ export function requestFor(kind: PuzzleKind, prev?: PuzzleBookRequest | null): P
     picture: null,
     seed: null,
     date: "",
+    theme: "none",
+    interests: [],
+    subject: "",
+    clue_style: "plain",
   };
 }
 
@@ -65,6 +69,7 @@ export function problem(r: PuzzleBookRequest, kind: PuzzleKind): string | null {
   if (!(r.count >= 1 && r.count <= 200)) return "Puzzles must be from 1 to 200.";
   if (kind.sizes && (r.size < kind.sizes[0] || r.size > kind.sizes[1])) return `Size must be from ${kind.sizes[0]} to ${kind.sizes[1]}.`;
   if (r.date.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(r.date.trim())) return "The date must be YYYY-MM-DD.";
+  if (r.theme === "subject" && !r.subject.trim()) return "Name a subject for the AI to write about.";
   return null;
 }
 
@@ -89,4 +94,54 @@ export function makingLine(kind: PuzzleKindKey, made: number, of: number): strin
 /** The line under Send: where the book goes. */
 export function sendLine(deviceName: string | null): string {
   return deviceName ? `Copies it to ${deviceName}, into Documents.` : "Plug a Kindle in to send it there, or save a copy to a folder for a reMarkable or an iPad.";
+}
+
+// ---- Themes and clues (Puzzles tab design §2) ----
+import type { ClueStyle, PuzzleSources, PuzzleTheme } from "./types";
+
+export interface ThemeChip {
+  key: PuzzleTheme;
+  label: string;
+  /** Why it can't be picked, when it can't. */
+  off: string | null;
+  /** "41 words", "AI" */
+  tag: string | null;
+}
+
+/** The theme chips for a kind that takes words, with what each has to offer right now. */
+export function themeChips(kind: PuzzleKind, sources: PuzzleSources | null): ThemeChip[] {
+  if (kind.takes !== "words" && kind.takes !== "clued") return [];
+  const s = sources?.sources;
+  const interests = s ? s.interests.reduce((n, [, , c]) => n + c, 0) : 0;
+  const count = (n: number) => (n ? `${n} words` : null);
+  return [
+    { key: "none", label: "No theme", off: null, tag: null },
+    { key: "own", label: "Your own list", off: null, tag: null },
+    { key: "interests", label: "Your interests", off: s && s.interests.length === 0 ? "no interests in your papers yet" : s && interests === 0 ? "no headlines kept yet" : null, tag: count(interests) },
+    { key: "week", label: "This week's paper", off: s && s.week === 0 ? "no headlines kept yet" : null, tag: count(s?.week ?? 0) },
+    { key: "vocab", label: "Words you looked up", off: s && s.vocab === 0 ? "no Kindle has shared its vocabulary yet" : null, tag: count(s?.vocab ?? 0) },
+    { key: "cookbook", label: "Your cookbook", off: s && s.cookbook === 0 ? "no recipes saved yet" : null, tag: count(s?.cookbook ?? 0) },
+    { key: "subject", label: "A subject", off: sources && !sources.ai ? "needs the AI: Settings → AI" : null, tag: "AI" },
+  ];
+}
+
+/** The interests to tick, grouped by paper only when there is more than one paper. */
+export function interestRows(sources: PuzzleSources | null): { name: string; label: string; words: number }[] {
+  const rows = sources?.sources.interests ?? [];
+  const papers = new Set(rows.map(([p]) => p));
+  return rows.map(([paper, name, words]) => ({ name, label: papers.size > 1 ? `${name} (${paper})` : name, words }));
+}
+
+export const CLUE_STYLES: { key: ClueStyle; label: string; ai: boolean }[] = [
+  { key: "plain", label: "Plain", ai: false },
+  { key: "trivia", label: "Trivia", ai: true },
+  { key: "cryptic", label: "Cryptic", ai: true },
+  { key: "kid", label: "For a kid", ai: true },
+];
+
+/** The line under the clue styles. */
+export function clueLine(style: ClueStyle, ai: string | null): string {
+  if (style === "plain") return "Clues from the headlines, your list, or Wiktionary. With the AI on, it can rewrite them in a style.";
+  if (!ai) return "Styled clues need the AI. Choose where it runs in Settings → AI.";
+  return `The AI rewrites every clue, on ${ai}. A puzzle it can't reach keeps its plain clues.`;
 }

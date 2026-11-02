@@ -8,7 +8,11 @@ use std::sync::Arc;
 
 use deckle_core::deliver::{Conn, DeliverOptions, Target, deliver_named_on};
 use deckle_digest::chrono::{Local, NaiveDate};
+use deckle_digest::editor::AppAi;
+use deckle_digest::puzzle::ai::{AiConfig, Style};
 use deckle_digest::puzzle::book::pdf::{self, PageSize};
+use deckle_digest::puzzle::book::plan::{self, Plan, Theme};
+use deckle_digest::puzzle::book::theme::{self, Source};
 use deckle_digest::puzzle::book::{self, Book, BookOptions, Difficulty, Kind, Puzzles};
 use deckle_digest::puzzle::cryptogram;
 use deckle_digest::puzzle::words::Words;
@@ -128,6 +132,15 @@ pub struct BookRequest {
     pub seed: Option<u64>,
     /// YYYY-MM-DD; empty is today.
     pub date: String,
+    /// Where the theme words come from: `none`, `own`, `interests`, `week`, `vocab`,
+    /// `cookbook` or `subject` (Puzzles tab design §2).
+    pub theme: String,
+    /// The interests picked, for `interests`; empty means all of them.
+    pub interests: Vec<String>,
+    /// What the AI writes about, for `subject`.
+    pub subject: String,
+    /// How the clues read: `plain`, or with the AI `trivia`, `cryptic`, `kid`.
+    pub clue_style: String,
 }
 
 impl Default for BookRequest {
@@ -144,8 +157,97 @@ impl Default for BookRequest {
             picture: None,
             seed: None,
             date: String::new(),
+            theme: "none".into(),
+            interests: Vec::new(),
+            subject: String::new(),
+            clue_style: "plain".into(),
         }
     }
+}
+
+impl BookRequest {
+    /// The plan the request asks for.
+    pub fn plan(&self) -> Result<Plan, String> {
+        let style = Style::parse(&self.clue_style)
+            .ok_or_else(|| format!("no clue style {}", self.clue_style))?;
+        let theme = match self.theme.trim() {
+            "" | "none" => Theme::None,
+            "own" => Theme::Own,
+            "interests" => Theme::Source(Source::Interests {
+                names: self.interests.clone(),
+                days: 30,
+            }),
+            "week" => Theme::Source(Source::Week { days: 7 }),
+            "vocab" => Theme::Source(Source::Vocab),
+            "cookbook" => Theme::Source(Source::Cookbook),
+            "subject" => Theme::Subject {
+                text: self.subject.clone(),
+            },
+            other => return Err(format!("no theme {other}")),
+        };
+        Ok(Plan { theme, style })
+    }
+}
+
+/// What the tab can offer as a theme, and whether the AI is on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourcesDto {
+    pub sources: theme::Sources,
+    /// Where the AI runs, as Settings → AI names it; `None` when it's off.
+    pub ai: Option<String>,
+}
+
+pub fn puzzles_sources() -> SourcesDto {
+    let main = deckle_digest::config::default_path();
+    SourcesDto {
+        sources: theme::sources(&main, Local::now().date_naive()),
+        ai: ai_where(),
+    }
+}
+
+/// "Ollama on this computer", "Anthropic": the AI setting in a word, or `None` when off.
+fn ai_where() -> Option<String> {
+    match AppAi::read() {
+        AppAi::On {
+            provider, endpoint, ..
+        } => Some(match provider {
+            deckle_xray::llm::Provider::Ollama
+                if endpoint.trim().is_empty()
+                    || endpoint.contains("localhost")
+                    || endpoint.contains("127.0.0.1") =>
+            {
+                "Ollama on this computer".into()
+            }
+            deckle_xray::llm::Provider::Ollama => "Ollama on your network".into(),
+            deckle_xray::llm::Provider::Anthropic => "Anthropic".into(),
+            deckle_xray::llm::Provider::OpenAi => "an OpenAI-compatible service".into(),
+        }),
+        _ => None,
+    }
+}
+
+fn ai_config() -> Option<AiConfig> {
+    AppAi::read().ai_config()
+}
+
+/// The options with the plan applied: the theme's words in place, and what was found.
+fn prepared(
+    r: &BookRequest,
+) -> Result<(BookOptions, PageSize, Vec<String>, Plan, plan::Prepared), String> {
+    let (mut o, page, mut warnings) = options(r)?;
+    let plan = r.plan()?;
+    let ai = ai_config();
+    let date = o.date;
+    let found = plan::prepare(
+        &mut o,
+        &plan,
+        &deckle_digest::config::default_path(),
+        date,
+        ai.as_ref(),
+        &mut deckle_xray::llm::http_post,
+    )?;
+    warnings.extend(found.warnings.iter().cloned());
+    Ok((o, page, warnings, plan, found))
 }
 
 fn kind_of(key: &str) -> Result<Kind, String> {
@@ -345,14 +447,24 @@ pub struct PreviewDto {
 /// The first puzzle of the book `r` asks for: made alone, with the seed the whole book would
 /// have, so it's the same puzzle 1 as **Make** gives.
 pub fn puzzles_preview(r: BookRequest) -> Result<PreviewDto, String> {
-    let (full, page, mut warnings) = options(&r)?;
+    let (full, page, mut warnings, plan, found) = prepared(&r)?;
     let seed = full.seed.unwrap_or_else(|| book::default_seed(&full));
     let one = BookOptions {
         count: 1,
         seed: Some(seed),
         ..full.clone()
     };
-    let b = book::make(&one, Words::embedded()).map_err(|e| e.to_string())?;
+    let mut b = book::make(&one, Words::embedded()).map_err(|e| e.to_string())?;
+    plan::restyle(
+        &mut b,
+        &plan,
+        &found.about,
+        ai_config().as_ref(),
+        &mut deckle_xray::llm::http_post,
+    );
+    if !found.note.is_empty() {
+        warnings.insert(0, found.note.clone());
+    }
     // pages as the whole book will have them: the title, each puzzle, the answers
     let per_puzzle = pdf::pages(&b, page).saturating_sub(2).max(1);
     let answers = full.count.div_ceil(match full.kind {
@@ -410,7 +522,7 @@ pub struct MadeBook {
 /// Makes the book, telling `puzzles-progress` as it goes, and keeps it in [`folder`] with its
 /// request beside it.
 pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook, String> {
-    let (o, page, mut warnings) = options(&r)?;
+    let (o, page, mut warnings, plan, found) = prepared(&r)?;
     let mut b = book::make_with(&o, Words::embedded(), &mut |made, of| {
         events.emit(
             "puzzles-progress",
@@ -418,6 +530,16 @@ pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook,
         );
     })
     .map_err(|e| e.to_string())?;
+    plan::restyle(
+        &mut b,
+        &plan,
+        &found.about,
+        ai_config().as_ref(),
+        &mut deckle_xray::llm::http_post,
+    );
+    if !found.note.is_empty() {
+        warnings.insert(0, found.note.clone());
+    }
     warnings.append(&mut b.warnings);
     b.warnings = warnings;
     let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
@@ -515,6 +637,55 @@ mod tests {
             date: "2026-11-02".into(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_request_becomes_a_plan() {
+        let r = BookRequest {
+            theme: "interests".into(),
+            interests: vec!["Rust".into()],
+            clue_style: "cryptic".into(),
+            ..Default::default()
+        };
+        let p = r.plan().unwrap();
+        assert_eq!(
+            p.theme,
+            Theme::Source(Source::Interests {
+                names: vec!["Rust".into()],
+                days: 30
+            })
+        );
+        assert_eq!(p.style, Style::Cryptic);
+        assert_eq!(BookRequest::default().plan().unwrap(), Plan::default());
+        assert!(
+            BookRequest {
+                theme: "moon".into(),
+                ..Default::default()
+            }
+            .plan()
+            .is_err()
+        );
+        assert!(
+            BookRequest {
+                clue_style: "loud".into(),
+                ..Default::default()
+            }
+            .plan()
+            .is_err()
+        );
+        let s = BookRequest {
+            theme: "subject".into(),
+            subject: "Rome".into(),
+            ..Default::default()
+        }
+        .plan()
+        .unwrap();
+        assert_eq!(
+            s.theme,
+            Theme::Subject {
+                text: "Rome".into()
+            }
+        );
     }
 
     #[test]
