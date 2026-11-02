@@ -1073,7 +1073,8 @@ export interface LlmPullEvent {
 
 export interface DailyEditorConfig {
   enabled: boolean;
-  provider: "openai" | "anthropic" | "ollama";
+  /** `null` with an empty model and endpoint: the paper follows Settings → AI. */
+  provider: "openai" | "anthropic" | "ollama" | null;
   model: string;
   endpoint: string;
 }

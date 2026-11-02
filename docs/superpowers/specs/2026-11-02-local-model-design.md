@@ -1,6 +1,6 @@
 # A model on this computer, without the setup — design
 
-**Status:** increments 1 and 2 (§6) built, 2026-11-02 · **Owner:** Jonathan (CasaVargas LLC)
+**Status:** built (all three increments of §6), 2026-11-02 · **Owner:** Jonathan (CasaVargas LLC)
 **Builds on:** `2026-10-18-deckle-design.md` (§7 LLM policy), `2026-10-24-daily-llm-editor-design.md`,
 `2026-11-01-ai-extras-design.md` (§1, why no bundled model)
 
@@ -99,9 +99,13 @@ the 80-story or 160 KB limit falls back as today, but the runner note names the 
 paper is too long for one request") instead of the generic line.
 
 **Config.** `Settings.llm_provider` gains `"ollama"`; `llm_model` empty means the recommended
-model. The digest's `[llm]` table gains `provider = "ollama"`; absent, the Daily editor reads the
-desktop setting (the app writes it into the paper's config on save, as it does for other shared
-settings), so the "Use Books provider" button goes.
+model. The digest's `[llm]` table gains `provider = "ollama"`. As built, the inheritance is
+resolved at build time rather than written into each paper: a `[llm]` table that names no
+provider, model or endpoint follows the app's `settings.json` (beside `devices.json`, which
+`digest push` already reads), with the key saved there when the environment has none; one that
+names any of them is the paper's own; Off in the app turns a following paper's editor off; no
+settings file keeps the old default. The "Use Books provider" button went; the paper's sheet
+shows where the editor runs and offers "a service just for this paper" under Advanced.
 
 **Docker.** `docs/docker.md` gets a compose example with an `ollama` service and
 `endpoint = "http://ollama:11434"`; `deckle llm pull` runs in the container's setup.

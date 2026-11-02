@@ -246,7 +246,9 @@ Mount your old Morgue under `/data/Deckle` if you want the history.
 
 The Daily's optional editor (`[llm]` in `digest.toml`; see the README) can run on a model in
 a second container, so nothing leaves your server. Add an `ollama` service (the commented
-block in `compose.example.yml`), point Deckle at it and download the model once:
+block in `compose.example.yml`), then in the web app choose **Settings → AI → On the server**
+and put `http://ollama:11434` under Advanced → Address (every paper with the editor on follows
+it), or name it in the paper's own table:
 
 ```toml
 [llm]

@@ -19,8 +19,13 @@
   **Try it**, then a line on what to expect. Advanced holds every model Ollama has and an
   address for Ollama on another computer. The service card keeps the provider, model and key
   fields with a price table beside them. Reading aids and Online & privacy point there, and
-  Online & privacy says "nowhere online" when the model runs on this Mac. Design:
-  `docs/superpowers/specs/2026-11-02-local-model-design.md`.
+  Online & privacy says "nowhere online" when the model runs on this Mac.
+- **One setting for the paper too.** A paper's AI editor now runs where Settings → AI says,
+  with the key saved there when the environment has none, so there's nothing to copy between
+  Books and the Daily. A `[llm]` table that names a provider, model or endpoint stays that
+  paper's own (the command line's and Docker's way, and **Advanced** on the paper's sheet);
+  one from before this, with only an endpoint, keeps meaning an OpenAI-compatible server.
+  Design: `docs/superpowers/specs/2026-11-02-local-model-design.md`.
 
 ## 0.11.0 — every reader, comics, puzzle books and KOReader
 

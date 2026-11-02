@@ -469,15 +469,15 @@ the [preset design](docs/superpowers/specs/2026-10-24-book-style-presets-design.
 <summary>The Daily's AI editor</summary>
 
 In **Daily → The paper → AI editor**, turn on cross-feed duplicate removal, short news-section
-briefs, AI-written horoscopes and interest scoring. It's off by default. **Use Books provider**
-copies your X-Ray provider, model and server address; the Daily reads credentials from
-`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the environment running Deckle, including scheduled
-builds. It doesn't copy saved Books API keys.
+briefs, AI-written horoscopes and interest scoring. It's off by default. The editor runs where
+**Settings → AI** says, the same choice as X-Ray and chapter recaps, with the key saved there
+(or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the environment running Deckle, which wins). A
+paper that should use a different service names it under **Advanced**, which is this table:
 
 ```toml
 [llm]
-enabled = true
-provider = "ollama"             # on this computer; or "anthropic" / "openai"
+enabled = true                  # on its own, the paper follows Settings → AI
+provider = "ollama"             # naming one makes it this paper's own: "ollama" / "anthropic" / "openai"
 model = ""                      # blank uses the provider default (Ollama: qwen3:4b, or 8b with 16 GB)
 endpoint = ""                   # Ollama elsewhere, or an OpenAI-compatible API base URL
 ```

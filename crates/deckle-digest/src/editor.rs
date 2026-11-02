@@ -6,27 +6,148 @@ use deckle_xray::llm::{self, Post, Provider};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct EditorConfig {
     pub enabled: bool,
-    pub provider: Provider,
+    /// `None` with an empty model and endpoint: the paper follows the app's AI setting
+    /// (local-model design §4). Anything named here is this paper's own.
+    pub provider: Option<Provider>,
     pub model: String,
     pub endpoint: String,
 }
-impl Default for EditorConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            provider: Provider::OpenAi,
-            model: String::new(),
-            endpoint: String::new(),
+
+/// What the app's AI setting says (Settings → AI), read from its `settings.json` at build
+/// time so one choice serves the books and every paper.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AppAi {
+    /// No settings file, or one from before the setting existed: the paper is on its own.
+    Unknown,
+    Off,
+    On {
+        provider: Provider,
+        model: String,
+        endpoint: String,
+        /// The key saved in the app; the environment's wins when set.
+        api_key: String,
+    },
+}
+
+impl AppAi {
+    /// The app's `settings.json` beside `devices.json`, which `digest push` reads the same way.
+    pub fn path() -> std::path::PathBuf {
+        deckle_core::devices::default_registry_file().with_file_name("settings.json")
+    }
+
+    pub fn read() -> AppAi {
+        Self::from_file(&Self::path())
+    }
+
+    pub fn from_file(path: &std::path::Path) -> AppAi {
+        std::fs::read_to_string(path)
+            .ok()
+            .map(|s| Self::parse(&s))
+            .unwrap_or(AppAi::Unknown)
+    }
+
+    /// The `llm_*` keys of the app's settings; anything else in the file is left alone.
+    pub fn parse(json: &str) -> AppAi {
+        #[derive(Deserialize, Default)]
+        #[serde(default)]
+        struct Keys {
+            llm_provider: Option<String>,
+            llm_model: String,
+            llm_endpoint: String,
+            llm_api_key: String,
+        }
+        let Ok(k) = serde_json::from_str::<Keys>(json) else {
+            return AppAi::Unknown;
+        };
+        let provider = match k.llm_provider.as_deref() {
+            None => return AppAi::Unknown,
+            Some("anthropic") => Provider::Anthropic,
+            Some("openai") => Provider::OpenAi,
+            Some("ollama") => Provider::Ollama,
+            Some(_) => return AppAi::Off,
+        };
+        AppAi::On {
+            provider,
+            model: k.llm_model.trim().to_owned(),
+            endpoint: k.llm_endpoint.trim().to_owned(),
+            api_key: k.llm_api_key.trim().to_owned(),
         }
     }
 }
+
 impl EditorConfig {
     pub fn is_default(&self) -> bool {
         self == &Self::default()
+    }
+
+    /// Whether the table names its own provider, model or endpoint rather than following the
+    /// app's AI setting.
+    pub fn is_own(&self) -> bool {
+        self.provider.is_some() || !self.model.trim().is_empty() || !self.endpoint.trim().is_empty()
+    }
+
+    /// The provider as the editor runs it: a table from before the app setting existed named
+    /// none and meant an OpenAI-compatible server.
+    pub fn provider(&self) -> Provider {
+        self.provider.unwrap_or(Provider::OpenAi)
+    }
+
+    /// The config a build edits with, and its key: this table when it is its own (key from
+    /// the environment), else the app's AI setting (its saved key when the environment has
+    /// none), else the old default. An app setting of Off turns the editor off.
+    pub fn resolved(&self, app: AppAi) -> (EditorConfig, String) {
+        let env_key = |p: Provider| std::env::var(p.env_key()).unwrap_or_default();
+        if !self.enabled {
+            return (self.clone(), String::new());
+        }
+        if self.is_own() {
+            let key = env_key(self.provider());
+            return (
+                EditorConfig {
+                    provider: Some(self.provider()),
+                    ..self.clone()
+                },
+                key,
+            );
+        }
+        match app {
+            AppAi::On {
+                provider,
+                model,
+                endpoint,
+                api_key,
+            } => {
+                let env = env_key(provider);
+                let key = if env.is_empty() { api_key } else { env };
+                (
+                    EditorConfig {
+                        enabled: true,
+                        provider: Some(provider),
+                        model,
+                        endpoint,
+                    },
+                    key,
+                )
+            }
+            AppAi::Off => (
+                EditorConfig {
+                    enabled: false,
+                    ..self.clone()
+                },
+                String::new(),
+            ),
+            AppAi::Unknown => (
+                EditorConfig {
+                    provider: Some(Provider::OpenAi),
+                    ..self.clone()
+                },
+                env_key(Provider::OpenAi),
+            ),
+        }
     }
     pub fn validate(&self) -> Result<(), String> {
         if !self.endpoint.is_empty() {
@@ -203,7 +324,8 @@ fn try_edit(
     naming: &[NamingCandidate],
 ) -> Result<(), Why> {
     cfg.validate().map_err(|_| Why::Other)?;
-    let local = llm::is_local(cfg.provider, &cfg.endpoint);
+    let provider = cfg.provider();
+    let local = llm::is_local(provider, &cfg.endpoint);
     let excerpt_chars = if local {
         LOCAL_EXCERPT_CHARS
     } else {
@@ -285,7 +407,7 @@ fn try_edit(
         return Err(Why::TooLong);
     }
     let model = if cfg.model.trim().is_empty() {
-        cfg.provider.default_model()
+        provider.default_model()
     } else {
         &cfg.model
     };
@@ -294,7 +416,7 @@ fn try_edit(
         schema: Some(plan_schema()),
     };
     let raw = llm::complete_with(
-        cfg.provider,
+        provider,
         model,
         key,
         &cfg.endpoint,

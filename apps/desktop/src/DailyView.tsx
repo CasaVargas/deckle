@@ -3,6 +3,7 @@
 // far, when it goes to press, a link box and the week), Sections, Reading, Editions and Delivery,
 // all backed by digest.toml and the CLI. The paper switcher picks which paper they work on.
 import { useCapabilities } from "./capabilities";
+import type { SettingsPage } from "./settingsIndex";
 import Unavailable from "./web/Unavailable";
 import { SMTP_ENV, passwordReason } from "./web/gates";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -75,11 +76,14 @@ export default function DailyView({
   onNotice,
   initialRoom,
   onRoomTaken,
+  onOpenSettings,
 }: {
   onNotice: (m: string) => void;
   /** A room to open on (the Cookbook's Delivery note links to Delivery); `onRoomTaken` says it was used. */
   initialRoom?: Room | null;
   onRoomTaken?: () => void;
+  /** Opens a Settings page (the paper's AI editor points at Settings → AI). */
+  onOpenSettings?: (page: SettingsPage) => void;
 }) {
   const caps = useCapabilities();
   const [state, setState] = useState<DailyState | null>(null);
@@ -757,6 +761,7 @@ export default function DailyView({
           edit={edit}
           flush={typing.flush}
           onClose={closeSheet}
+          onOpenSettings={onOpenSettings}
         />
       )}
     </div>

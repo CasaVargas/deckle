@@ -416,10 +416,16 @@ pub fn gather_with(
     net: &dyn Net,
     opts: &GatherOptions,
 ) -> Gathered {
-    let key = std::env::var(cfg.llm.provider.env_key()).unwrap_or_default();
+    // The editor follows the app's AI setting unless the paper's [llm] is its own.
+    let (llm, key) = cfg.llm.resolved(editor::AppAi::read());
     let key = zeroize::Zeroizing::new(key);
+    let cfg = if llm == cfg.llm {
+        std::borrow::Cow::Borrowed(cfg)
+    } else {
+        std::borrow::Cow::Owned(Config { llm, ..cfg.clone() })
+    };
     gather_with_editor(
-        cfg,
+        &cfg,
         date,
         now,
         net,

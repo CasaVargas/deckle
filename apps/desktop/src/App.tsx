@@ -676,7 +676,7 @@ function Deckle() {
           </button>
         </header>
 
-        {tab === "daily" && <DailyView key={dailyEpoch} onNotice={setNotice} initialRoom={dailyRoom} onRoomTaken={() => setDailyRoom(null)} />}
+        {tab === "daily" && <DailyView key={dailyEpoch} onNotice={setNotice} initialRoom={dailyRoom} onRoomTaken={() => setDailyRoom(null)} onOpenSettings={openSettings} />}
         {tab === "cookbook" && (
           <CookbookView
             onNotice={setNotice}
