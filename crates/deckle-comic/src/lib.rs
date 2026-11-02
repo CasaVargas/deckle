@@ -12,6 +12,7 @@ mod cbr;
 mod comicinfo;
 mod order;
 pub mod pages;
+pub mod pdf;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};

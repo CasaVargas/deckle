@@ -1148,7 +1148,9 @@ dependencies = [
 name = "deckle-comic"
 version = "0.10.0"
 dependencies = [
+ "flate2",
  "image",
+ "pdf-writer",
  "roxmltree",
  "sha2 0.11.1",
  "tempfile",

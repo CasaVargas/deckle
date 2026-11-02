@@ -93,7 +93,7 @@ delivered as `.azw3`, not KFX.
 | Kindle | `.azw3`: Previewer's MOBI, KF8 half only, with EXTH 501 and 113/504 stamped | CDE type follows the cover rule; X-Ray, Word Wise and page list are skipped |
 | Kobo | the fixed-layout EPUB **without KEPUB markup**, still named `.kepub.epub` | `kepub::convert` only adds text spans and wrapper divs, which do nothing on image pages but risk the layout. The `.kepub.epub` name stays because a Kobo opens plain `.epub` in Adobe's renderer, which handles fixed layout poorly, and `.kepub.epub` in its own (changed in 3b; the spike confirms). Phase 3 spike: whether Kobo honours `page-progression-direction` |
 | PocketBook, Boox, folder with `Epub` | the fixed-layout EPUB as `.epub` | PocketBook also reads CBZ; EPUB keeps direction and metadata |
-| reMarkable, folder with `Pdf` | an image-only PDF, one page per image, sized to the screen | reMarkable's EPUB reader reflows; PDF is the only reliable fixed page there. **Deferred:** Deckle sends only the paper and its long reads to a reMarkable today, so there's no book send to hang a comic PDF on; it comes with book sends to the reMarkable |
+| reMarkable, folder with `Pdf` | an image-only PDF, one page per image, sized to the screen | reMarkable's EPUB reader reflows; PDF is the only reliable fixed page there. Built in §12 (#279) on `deckle run --to remarkable`, which is also the first book send to a reMarkable |
 
 A publisher's fixed-layout EPUB goes through **without content changes**. `normalize` makes no
 typography, pop-up note, preset or cover changes to it, and phase 3's image step doesn't
@@ -312,3 +312,55 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
     for a reflowable book;
   - `import::import` routes a `.cbz`;
   - `reader::book_epub` on a CBZ keeps `pre-paginated` and every page through normalize.
+
+## 12. Build notes: comics to a reMarkable (#279)
+
+The reMarkable row of §5 was deferred because nothing but the paper went to a reMarkable.
+This phase adds the book send and the comic PDF together, since the send alone is small.
+
+### 12.1 `deckle run --to remarkable`
+
+- A new `--to` word beside `device` and a folder path. The books go into the reMarkable's
+  outbox (`outbox-remarkable/`, the paper's) and are delivered by the same push the paper
+  uses (`sync::run_remarkable`): right away when the tablet answers at `10.11.99.1`, else by
+  the next `digest push` or `watch` that finds it. `--kindle` with it is refused as before.
+- **A text book** goes as an EPUB, made by `reader::book_epub` (import, normalize, recaps and
+  Who's who as asked): the same file the paper's long reads are, and what `[remarkable]
+  books` sends. reMarkable's reader reflows it itself.
+- **A comic** (CBZ, CBR, page folder, or a scanned PDF the import turns into one) goes as an
+  image-only PDF (§12.2), named `<stem>.pdf`.
+- **A publisher's fixed-layout EPUB** is refused with a message: its pages are XHTML that
+  would need rendering, and reMarkable's EPUB reader would reflow them. Deckle's own comic is
+  told from a publisher's by its `urn:deckle:comic:` identifier, as `Reader::prepare` does.
+- The outbox is pushed whenever something waits in it, whether or not `[remarkable] enabled`
+  is set: `enabled` says the *paper* goes there. The watcher's cost is unchanged (it only asks
+  the tablet while the outbox is non-empty).
+- No Kindle Previewer is needed. The books aren't added to the library (as for a Kobo).
+
+### 12.2 The image PDF (`deckle_comic::pdf`)
+
+- `pdf::from_epub(epub, screen, page)` reads Deckle's comic EPUB in spine order (the OPF's
+  `itemref`s, each page's one `<img>`), fits each image with `pages::fit` for `screen`, and
+  writes one PDF page per image with `pdf-writer`.
+- **Page size** is the tablet's screen in points (`digest::pdf::Screen::page`: pixels at the
+  model's dpi), the same page the paper uses, so a comic and the paper read alike. The image
+  is centred on the page at the screen's pixel-to-point scale; a page smaller than the screen
+  (never scaled up) sits in white margins.
+- **Encoding:** a JPEG goes in as it is (`DCTDecode`, grey or RGB); a PNG or GIF is decoded
+  to raw samples and deflated (`FlateDecode`), so line art stays lossless. A page that won't
+  decode is skipped, counted, and reported as a warning, like `fit_epub`.
+- **Colour** follows `[remarkable] photos` (the screen's own choice when unset): grey on a
+  reMarkable 2, colour on a Paper Pro.
+- **Direction:** the spine already reads in page order (a right-to-left comic's spread halves
+  were cut right half first at import), so the PDF's pages are the spine's; nothing more.
+- The title and author from the OPF go in the PDF's Info dictionary.
+
+### 12.3 Tests
+
+- `deckle-comic`: a three-page comic (JPEG, PNG, oversized page) becomes a three-page PDF,
+  pages the screen's size, JPEG passed through and PNG deflated, the big page fitted; a
+  broken page is counted and skipped; the right-to-left spread order holds.
+- `deckle-cli` (`tests/it/remarkable.rs`, the stand-in tablet): `run --to remarkable` with a
+  CBZ uploads `<stem>.pdf` holding `%PDF-`; with an EPUB uploads `<stem>.epub`; with a
+  publisher's fixed-layout EPUB fails with the refusal; with no tablet, the books wait and
+  `digest push` sends them without `[remarkable] enabled`.
