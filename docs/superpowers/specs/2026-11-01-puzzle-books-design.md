@@ -146,7 +146,11 @@ at sizes 6–15). The settings below are what the measurements supported.*
     48 that fit.
   - It counts search steps, never time, so a busy machine makes the same puzzle: up to 20k
     placements per pattern, and up to 24 patterns.
-  - Theme words (increment 4) will be placed first.
+  - **Theme words are placed first** (§3.5): each puzzle shuffles them from its seed and puts
+    as many as fit into slots of their length whose crossings still have words, then fills
+    the rest, each in the slot that leaves its crossings most room. If a pattern won't fill
+    around them, the next ones seed one fewer every third pattern, so a puzzle keeps as many
+    as will fill.
 - **Words and clues:** a new embedded list, `words-long.tsv.gz`, built with
   `deckle-wordwise-build crossword`. It has 45,271 entries of 3–15 letters, 826 KB gzipped, each
   with its zipf and a clue.
@@ -208,10 +212,22 @@ Theme words come from these sources, in order:
 
 | Source | Option | Needs |
 |---|---|---|
-| Your own list | `--words <file>` (one word per line; `#` comments) | nothing |
+| Your own list | `--words <file>` (one word per line; `#` comments). For a crossword, each line is `word: clue` (a tab works too) *(builder's call)* | nothing |
 | The LLM | `--theme "<text>"` | Deckle's LLM setting (Anthropic, OpenAI, or an OpenAI-compatible server such as Ollama) |
 | Recent headlines | `--theme current-events` | the Daily's stored headlines; the LLM is optional |
 
+- **Your own crossword words** (built 2026-11-01, ahead of the LLM):
+  - Words fold to a–z as for word searches. The clue is used as written.
+  - A word without a clue, shorter than 3 letters or longer than the patterns' longest entry
+    (6) is skipped, and the book warns which ones.
+  - A crossword needs at least 3 usable words.
+  - Each puzzle seeds up to 8 of them *(builder's call)*. The book warns about a puzzle that
+    took fewer than 3.
+  - **Measured:** with 27 Apple-history words, 10 seeds per size, a puzzle took 3–6 of them,
+    as many as 8 and as few as 1 or 2 (2 of 40). That's about 1.5 s a puzzle in release. Rare
+    letters (J, X, V, W) are what crowd a grid.
+  - Your words are marked as theme answers in the puzzle data.
+  - Repeats across puzzles are fine; within one puzzle, a word appears at most once.
 - **LLM (increment 4).**
   - Deckle makes one request per book, through `deckle_xray::llm::complete` with the user's
     existing provider, model and key (#29: no new key field).

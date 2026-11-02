@@ -255,3 +255,44 @@ fn puzzles_sudoku_writes_a_pdf() {
     let sized = puzzles(&["sudoku", "--size", "9", "-o", dir.path().to_str().unwrap()]);
     assert!(!sized.status.success());
 }
+
+#[test]
+fn crossword_words_file_with_clues() {
+    let dir = tempfile::tempdir().unwrap();
+    let words = dir.path().join("apple.txt");
+    std::fs::write(
+        &words,
+        "Jobs: Co-founder who returned in 1997\nWoz: The other Steve\nLisa: 1983 computer\nNewton: Early handheld\niPod: A thousand songs\nSiri: Voice assistant\nPixar: Studio he ran\nSwift: Language of 2014\nMacintosh: The 1984 computer\nWWDC\n",
+    )
+    .unwrap();
+    let out = puzzles(&[
+        "crossword",
+        "--count",
+        "1",
+        "--size",
+        "11",
+        "--words",
+        words.to_str().unwrap(),
+        "--title",
+        "Apple History Crossword",
+        "--seed",
+        "3",
+        "--date",
+        "2026-11-01",
+        "-o",
+        dir.path().join("out").to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let warnings = v["warnings"].to_string();
+    assert!(warnings.contains("MACINTOSH"), "{warnings}");
+    assert!(
+        warnings.contains("WWDC") && warnings.contains("no clue"),
+        "{warnings}"
+    );
+}
