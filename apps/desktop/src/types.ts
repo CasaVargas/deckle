@@ -464,6 +464,12 @@ export interface RemarkableConfig {
   books: boolean;
   /** The tablet's address when its web interface is reached over Wi-Fi; absent for USB. */
   address?: string;
+  /** `usb` (the web interface, the default) or `ssh` (fixed-layout spec §12.5). Set in
+   * digest.toml for now; the card keeps it as it is. */
+  transport?: "usb" | "ssh";
+  ssh_host?: string;
+  ssh_port?: number;
+  ssh_folder?: string;
 }
 
 export interface PressSetupStatus {

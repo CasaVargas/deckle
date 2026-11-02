@@ -2,6 +2,7 @@
 //! A reMarkable (other readers design §9): the paper as a PDF over its USB web interface, here a
 //! stand-in on 127.0.0.1 through `DECKLE_REMARKABLE_URL`, with no Kindle Previewer.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -171,6 +172,184 @@ fn the_configured_address_stands_in_for_the_usb_link_and_devices_lists_the_table
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out}");
     assert!(out.contains("no reMarkable answered"), "{out}");
+}
+
+/// The reMarkable outbox under the test home's cache dir.
+fn outbox(home: &Path) -> PathBuf {
+    let cache = if cfg!(target_os = "macos") {
+        home.join("Library/Caches")
+    } else {
+        // Windows: `%LOCALAPPDATA%\deckle`, and the tests set LOCALAPPDATA to the home.
+        if cfg!(target_os = "windows") {
+            home.to_path_buf()
+        } else {
+            home.join("cache")
+        }
+    };
+    cache.join("deckle/outbox-remarkable")
+}
+
+/// A stand-in tablet over SSH (fixed-layout spec §12.5): the in-process server from
+/// `deckle_core::remarkable_ssh::fake` with a file map standing in for xochitl's folder and
+/// the few commands Deckle runs. Returns its port, the files, and how often it "restarted".
+/// The stand-in tablet's document folder.
+type Files = Arc<Mutex<BTreeMap<String, Vec<u8>>>>;
+
+fn ssh_tablet() -> (u16, Files, Arc<Mutex<usize>>) {
+    const DIR: &str = deckle_core::remarkable_ssh::DIR;
+    let files: Files = Default::default();
+    let restarts = Arc::new(Mutex::new(0usize));
+    let (f, r) = (files.clone(), restarts.clone());
+    let (_host, port, _fp) = deckle_core::remarkable_ssh::fake::dropbear(move |cmd, stdin| {
+        let prefix = format!("{DIR}/");
+        let mut files = f.lock().unwrap();
+        if cmd == "date +%s" {
+            return (b"1700000000".to_vec(), 0);
+        }
+        if cmd.starts_with("cd ") && cmd.contains("*.metadata") {
+            let mut out = Vec::new();
+            for (name, bytes) in files.iter() {
+                if name.ends_with(".metadata") {
+                    out.extend_from_slice(format!("== {name}\n").as_bytes());
+                    out.extend_from_slice(bytes);
+                    out.push(b'\n');
+                }
+            }
+            return (out, 0);
+        }
+        if let Some(rest) = cmd.strip_prefix("mkdir -p ") {
+            let write = rest.split_once(" && ").unwrap().1;
+            let file = write
+                .strip_prefix("cat > ")
+                .unwrap()
+                .strip_prefix(&prefix)
+                .unwrap();
+            files.insert(file.to_owned(), stdin.to_vec());
+            return (Vec::new(), 0);
+        }
+        if let Some(file) = cmd.strip_prefix("cat > ") {
+            files.insert(
+                file.strip_prefix(&prefix).unwrap().to_owned(),
+                stdin.to_vec(),
+            );
+            return (Vec::new(), 0);
+        }
+        if let Some(file) = cmd.strip_prefix("cat ") {
+            return match files.get(file.strip_prefix(&prefix).unwrap()) {
+                Some(b) => (b.clone(), 0),
+                None => (b"No such file".to_vec(), 1),
+            };
+        }
+        if cmd.starts_with("systemctl reset-failed xochitl.service; systemctl restart") {
+            *r.lock().unwrap() += 1;
+            return (Vec::new(), 0);
+        }
+        (format!("unknown: {cmd}").into_bytes(), 127)
+    });
+    (port, files, restarts)
+}
+
+/// The paper over SSH: into a Deckle folder on the tablet, the host key pinned on first use,
+/// xochitl restarted once, and not sent twice. The password comes from the environment, as
+/// in a container (no keychain).
+#[test]
+fn the_paper_goes_over_ssh_into_a_deckle_folder_and_the_host_key_is_pinned() {
+    let (port, files, restarts) = ssh_tablet();
+    let (tmp, home) = setup(&format!(
+        "transport = \"ssh\"\nssh_host = \"127.0.0.1\"\nssh_port = {port}\n"
+    ));
+    let run = |args: &[&str]| {
+        deckle(&home, "")
+            .env("DECKLE_DAEMON", "1")
+            .env("DECKLE_REMARKABLE_PASSWORD", "pw")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+    let o = run(&["digest", "run", "--date", "2026-10-23"]);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        o.status.success(),
+        "{out}\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(
+        out.contains("reMarkable -> deckle-daily-2026-10-23.pdf"),
+        "{out}"
+    );
+    assert!(out.contains("xochitl restarted"), "{out}");
+    {
+        let files = files.lock().unwrap();
+        let folder = files
+            .iter()
+            .find(|(n, b)| {
+                n.ends_with(".metadata") && b.windows(14).any(|w| w == b"CollectionType")
+            })
+            .map(|(n, _)| n.trim_end_matches(".metadata").to_owned())
+            .expect("a Deckle folder");
+        let folder_meta: serde_json::Value =
+            serde_json::from_slice(&files[&format!("{folder}.metadata")]).unwrap();
+        assert_eq!(folder_meta["visibleName"], "Deckle");
+        let (pdf_name, pdf) = files
+            .iter()
+            .find(|(n, _)| n.ends_with(".pdf"))
+            .expect("the PDF");
+        assert!(pdf.starts_with(b"%PDF-"));
+        let uuid = pdf_name.trim_end_matches(".pdf");
+        let meta: serde_json::Value =
+            serde_json::from_slice(&files[&format!("{uuid}.metadata")]).unwrap();
+        assert_eq!(meta["visibleName"], "deckle-daily-2026-10-23");
+        assert_eq!(meta["parent"], folder);
+        assert_eq!(
+            files[&format!("{uuid}.content")],
+            b"{\"fileType\": \"pdf\"}"
+        );
+    }
+    assert_eq!(*restarts.lock().unwrap(), 1);
+    // The host key is pinned beside digest.toml.
+    let pin = std::fs::read_to_string(tmp.path().join(if cfg!(target_os = "macos") {
+        "home/Library/Application Support/deckle/remarkable-hostkey.json"
+    } else {
+        "home/deckle/remarkable-hostkey.json"
+    }))
+    .expect("the pin file");
+    assert!(pin.contains("\"fingerprint\": \"SHA256:"), "{pin}");
+    // The same edition again: already there, no second copy, no second restart.
+    std::fs::write(
+        outbox(&home).join("deckle-daily-2026-10-23.pdf"),
+        b"%PDF-again",
+    )
+    .unwrap();
+    let o = run(&["digest", "push"]);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        o.status.success(),
+        "{out}\n{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert!(
+        out.contains("reMarkable already has deckle-daily-2026-10-23.pdf"),
+        "{out}"
+    );
+    assert_eq!(
+        files
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|b| b.starts_with(b"%PDF-"))
+            .count(),
+        1
+    );
+    assert_eq!(*restarts.lock().unwrap(), 1);
+    // `devices` names the tablet by its host key.
+    let o = run(&["devices"]);
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        out.contains(&format!(
+            "reMarkable over SSH at 127.0.0.1:{port}  host key SHA256:"
+        )),
+        "{out}"
+    );
 }
 
 /// A one-page CBZ at `<dir>/<name>`.

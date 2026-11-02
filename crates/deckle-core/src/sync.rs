@@ -412,6 +412,12 @@ pub struct RemarkablePush {
     pub already: Vec<String>,
     /// `<file>: <why>` for those that failed; they stay queued.
     pub errors: Vec<String>,
+    /// Papers marked deleted on the tablet (SSH only; the USB web interface can't delete).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pruned: Vec<String>,
+    /// What else happened: whether xochitl was restarted (SSH only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 /// Uploads what waits in `queue` to the reMarkable `r`, each once: a file whose name the

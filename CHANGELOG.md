@@ -8,6 +8,14 @@
   photos are colour; any other book as an EPUB. They wait in the reMarkable's outbox until it
   answers, then `deckle digest push` or `watch` sends them, with or without the paper set up.
   A publisher's fixed-layout EPUB is refused for now, since the tablet's reader would reflow it.
+- **A reMarkable over SSH.** `[remarkable] transport = "ssh"` writes the paper and books
+  straight into the tablet's document folder, over Wi-Fi as well as the cable, in a Deckle
+  folder, and prunes old papers there, which the web interface can't do. The password (from
+  the tablet's Settings → Help → About) is kept in the system keychain by `deckle digest
+  remarkable password`; the host key is pinned on first use. The tablet's reader has to
+  restart to show new files, so Deckle restarts it only when the tablet has been idle for ten
+  minutes, and says so otherwise. Deckle never changes a tablet setting: SSH over Wi-Fi, and
+  Developer Mode on a Paper Pro (a factory reset), are yours to turn on, and the docs say so.
 - **A reMarkable that's easier to reach.** **Send to reMarkable** on the app's Inbox does what
   `run --to remarkable` does. `[remarkable] address` (**Address** on the card) points Deckle at
   a tablet whose web interface you've put on your Wi-Fi, instead of the USB link. `deckle

@@ -372,6 +372,49 @@ This phase adds the book send and the comic PDF together, since the send alone i
   whether it answers over Wi-Fi with the toggle alone. SSH delivery (prune, model detection,
   a Deckle folder) stays a research issue.
 
+### 12.5 Over SSH (research 2026-11-02, built without a tablet)
+
+**What the research found.** Every reMarkable runs dropbear with a root login; the password
+is under *Settings → Help → About → Copyrights and licenses → GPLv3 Compliance*. On a
+reMarkable 1 or 2 that's all. On a **Paper Pro, Paper Pro Move or Paper Pure, SSH exists
+only after reMarkable's own Developer Mode, which factory-resets the tablet and ends
+warranty support** — the owner's decision, made on the tablet; Deckle never enables it,
+never asks for it, and the docs say so. SSH over Wi-Fi is off by default on the Paper Pro
+family and on a reMarkable 2 past OS 3.20; the owner turns it on once over USB with
+reMarkable's `rm-ssh-over-wlan on`, which Deckle also never runs. **Deckle only ever
+connects to an SSH that already answers.** Documents live in
+`/home/root/.local/share/remarkable/xochitl/` as `<uuid>.pdf|epub`, `<uuid>.metadata`
+(`type`, `visibleName`, `parent`, `lastModified` in epoch ms, `deleted`, `pinned`,
+`version`) and `<uuid>.content` (`fileType`). xochitl notices new files only on
+`systemctl restart xochitl` (with `reset-failed` first, or repeated restarts trip systemd's
+start limit and reboot the tablet); the restart kicks the owner out of whatever they're
+writing for a few seconds. A folder is a `CollectionType` entry; a document is removed by
+`deleted: true`. Dropbear has no SFTP; `scp` rides the exec channel. Old dropbear offers
+only `ssh-rsa` host keys.
+
+**What Deckle does** (`deckle_core::remarkable_ssh`, `[remarkable] transport = "ssh"`):
+
+- Connects with `russh` (pure Rust, `ring`), user `root`, password from the system keychain
+  (`deckle digest remarkable password`; `DECKLE_REMARKABLE_PASSWORD` only without a
+  keychain), to `ssh_host` (default `10.11.99.1`) port `ssh_port` (22). The host key is
+  trusted on first use and pinned in `remarkable-hostkey.json` beside `digest.toml`; a key
+  that changes refuses with a message naming the file to delete.
+- Uses only the exec channel: `cat > file` with the bytes on stdin, `cat`, `mkdir -p`,
+  `date +%s`, and the one `systemctl reset-failed xochitl.service; systemctl restart
+  xochitl.service`. Nothing else is ever run on the tablet.
+- Keeps Deckle's documents in a **`Deckle` folder** (`ssh_folder`), made on first push.
+- The outbox and the push are the USB path's: a file whose name the folder already shows is
+  taken as delivered; the rest go up. **Prune works here**: with `keep`, older
+  `deckle-daily-*` papers in the folder are marked deleted, as on a Kindle.
+- **The restart (ruling b):** after uploading or pruning, Deckle restarts xochitl only when
+  the tablet looks idle — no document's `lastModified` within the last 10 minutes by the
+  tablet's own clock. Otherwise the push says the books are on the tablet and will show
+  after its next restart, leaves a `.restart-owed` marker in the outbox, and the next push
+  or watch tick tries again. Never more than one restart per push.
+- A Paper Pro screen with `transport = "ssh"` gets one note in the output that SSH on that
+  model is reMarkable's Developer Mode, the owner's own doing; Deckle neither refuses nor
+  enables anything.
+
 ### 12.3 Tests
 
 - `deckle-comic`: a three-page comic (JPEG, PNG, oversized page) becomes a three-page PDF,

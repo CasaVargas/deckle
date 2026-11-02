@@ -887,6 +887,11 @@ pub enum DigestCommand {
         #[command(subcommand)]
         action: EmailCommand,
     },
+    /// A reMarkable over SSH (`[remarkable] transport = "ssh"`): the tablet's password.
+    Remarkable {
+        #[command(subcommand)]
+        action: RemarkableCommand,
+    },
     /// Papers you subscribe to: sign Deckle in with your own account.
     Subscribe {
         /// The paper's site, e.g. gazette.example. Alone: list every subscription and its state.
@@ -1139,6 +1144,21 @@ pub enum EmailCommand {
     /// Send a one-page test EPUB to the Kindle address and show the SMTP result.
     Test,
     /// Delete the SMTP password from the system keychain.
+    Forget,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum RemarkableCommand {
+    /// Save the tablet's SSH password (Settings → Help → About → Copyrights and licenses) in
+    /// the system keychain, asked for without echo.
+    Password {
+        /// Read one line from stdin instead, for scripts.
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Connect once and say what answered: the host key's fingerprint, pinned from now on.
+    Test,
+    /// Delete the tablet's password from the system keychain, and forget its host key.
     Forget,
 }
 
