@@ -22,6 +22,9 @@
   devices` lists the tablet when it answers. And `docs/daily.md` says how to pull the paper
   from Dropbox, Google Drive or OneDrive with the tablet's own integration, no cloud account
   with Deckle.
+- **The Paper Pro Move gets colour.** `[remarkable] screen = "remarkable-paper-pro-move"` now
+  sends the paper's photos and a comic's pages in colour, as the Paper Pro does; it had been
+  treated as a grey screen (#297).
 - **A welcome on first launch.** Four pages: your paper and its morning schedule, the
   bookmarklets, and where things are. The Save to paper page watches for your first save and
   says when it landed. **Settings → About** shows it again.
