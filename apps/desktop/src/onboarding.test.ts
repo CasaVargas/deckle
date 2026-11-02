@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
-import { STEPS, clock, firstSave, mainAt, saveLine, scheduleLine } from "./onboarding";
+import { STEPS, clock, dateline, firstSave, mainAt, saveLine, scheduleLine } from "./onboarding";
 import type { ReadingEntry, ScheduleStatus } from "./types";
 
 const entry = (p: Partial<ReadingEntry>): ReadingEntry => ({
@@ -52,4 +52,8 @@ test("the check line names the page once it landed", () => {
   expect(saveLine(null)).toMatch(/^Try it/);
   expect(saveLine(entry({}))).toBe('"A story" is in tomorrow\'s paper.');
   expect(saveLine(entry({ title: " " }))).toBe('"https://ex.com/a" is in tomorrow\'s paper.');
+});
+
+test("the dateline reads like a paper's", () => {
+  expect(dateline(new Date(2026, 10, 3, 9))).toBe("Tuesday, 3 November 2026");
 });

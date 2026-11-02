@@ -146,6 +146,20 @@ to paper* into *"<title>" is in tomorrow's paper.* Save recipe lands in the cook
 reading queue, so the check watches the paper one only *(builder's call: one check, the one
 whose result the page can read; a cookbook save shows on the Cookbook tab)*.
 
+### 4.4 The miniature (added 2026-11-02)
+
+The card is two panels: the pages on the right, and on the left tomorrow's front page in
+miniature, on a tinted desk, tilted a little and cropped at the card's edge. The miniature is
+paper-coloured in both themes (it's paper). Its real parts are the paper's name in its masthead
+face (the Daily tab's choice; *Your paper* in the default face until there is a paper), the
+day's date, and the press time, which follows the time field on page 2 and the installed job
+after. Everything else is grey bars standing for stories, a photo and the weather box. On page 3
+a dashed clipping says *The story you save goes here*; when the first save lands it fills with
+the story's title and drops onto the page. Page marks (four dots, the current one a short bar)
+replace the step titles. One entrance: the card rises and the masthead's ink comes in; a page
+change fades. All of it is still under `prefers-reduced-motion`. The miniature is `aria-hidden`;
+the marks carry the page names for a screen reader.
+
 ## 5. Constraints
 
 - Nothing new goes online. The install page is a local file; the links point at the listener as

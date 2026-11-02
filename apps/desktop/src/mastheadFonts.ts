@@ -17,15 +17,18 @@ const FILES: Record<FaceKey, string> = {
   sans: new URL("../../../crates/deckle-digest/fonts/Inter-Bold.ttf", import.meta.url).href,
 };
 
-let loaded = false;
+const loaded = new Set<FaceKey>();
+
+/** Adds one face to the document once; the text shows its fallback until it loads. */
+export function loadMastheadFont(key: FaceKey) {
+  if (loaded.has(key) || typeof FontFace === "undefined") return;
+  loaded.add(key);
+  const face = new FontFace(faceFamily(key).replace(/"/g, ""), `url(${FILES[key]})`);
+  document.fonts.add(face);
+  face.load().catch(() => {});
+}
 
 /** Adds the ten faces to the document once; the cards show their fallback until each loads. */
 export function loadMastheadFonts() {
-  if (loaded || typeof FontFace === "undefined") return;
-  loaded = true;
-  for (const [key, url] of Object.entries(FILES) as [FaceKey, string][]) {
-    const face = new FontFace(faceFamily(key).replace(/"/g, ""), `url(${url})`);
-    document.fonts.add(face);
-    face.load().catch(() => {});
-  }
+  for (const key of Object.keys(FILES) as FaceKey[]) loadMastheadFont(key);
 }

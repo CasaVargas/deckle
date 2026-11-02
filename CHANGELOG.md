@@ -27,7 +27,9 @@
   treated as a grey screen (#297).
 - **A welcome on first launch.** Four pages: your paper and its morning schedule, the
   bookmarklets, and where things are. The Save to paper page watches for your first save and
-  says when it landed. **Settings → About** shows it again.
+  says when it landed. **Settings → About** shows it again. Beside the pages sits tomorrow's
+  front page in miniature, in your paper's name and masthead face, with the day's date and the
+  press time as you set it; the first story you save lands on it as a clipping.
 - **Bookmarklets you drag, not paste.** *Open the install page* (on the Reading room, the
   Cookbook's Add page and the welcome) opens a page in your browser with **Save to paper** and
   **Save recipe** as buttons to drag to the bookmarks bar, and how to show the bar in each
