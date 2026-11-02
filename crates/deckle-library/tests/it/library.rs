@@ -703,3 +703,46 @@ fn a_fixed_layout_kindle_book_reads_its_own_header() {
     assert_eq!(info.creators[0].name, "A. Painter");
     assert!(info.fixed_layout);
 }
+
+/// A one-page CBZ with no `ComicInfo.xml`: it reads left to right by itself.
+fn cbz(path: &Path) -> PathBuf {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbImage::new(4, 6)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    let mut zw = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+    zw.start_file("1.png", zip::write::SimpleFileOptions::default())
+        .unwrap();
+    zw.write_all(png.get_ref()).unwrap();
+    zw.finish().unwrap();
+    path.to_path_buf()
+}
+
+#[test]
+fn a_kept_comic_remembers_its_reading_order_through_a_re_add() {
+    use deckle_comic::Direction;
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::new(tmp.path().join("Library"));
+    let source = cbz(&tmp.path().join("Night Train.cbz"));
+    let mut book = lib.add(&source).unwrap().book;
+    let kept = book.source_path();
+    assert_eq!(deckle_library::kept_direction(&kept), None);
+
+    lib.remember_direction(&mut book, Direction::RightToLeft)
+        .unwrap();
+    assert_eq!(
+        deckle_library::kept_direction(&kept),
+        Some(Direction::RightToLeft)
+    );
+    // Only the library's own copy: the original outside it says nothing.
+    assert_eq!(deckle_library::kept_direction(&source), None);
+
+    // Sending the comic again re-adds it in place; the order stays.
+    lib.add(&source).unwrap();
+    assert_eq!(
+        deckle_library::kept_direction(&kept),
+        Some(Direction::RightToLeft)
+    );
+    let json = std::fs::read_to_string(book.sidecar_path()).unwrap();
+    assert!(json.contains(r#""direction": "rtl""#), "{json}");
+}

@@ -128,6 +128,25 @@ pub enum Direction {
     RightToLeft,
 }
 
+impl Direction {
+    /// `ltr` | `rtl`, as the app's settings and the library's sidecar keep it.
+    pub fn code(self) -> &'static str {
+        match self {
+            Direction::LeftToRight => "ltr",
+            Direction::RightToLeft => "rtl",
+        }
+    }
+
+    /// The direction a [`Direction::code`] names; anything else is none.
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "ltr" => Some(Direction::LeftToRight),
+            "rtl" => Some(Direction::RightToLeft),
+            _ => None,
+        }
+    }
+}
+
 /// [`convert`], reading in `direction` when given, whatever `ComicInfo.xml` says (fixed-layout
 /// spec §3: the owner's choice comes first).
 pub fn convert_with(

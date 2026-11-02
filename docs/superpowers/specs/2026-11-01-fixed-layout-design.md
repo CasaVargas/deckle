@@ -276,7 +276,10 @@ Each phase is its own PR with its own tests, and each is useful when it lands.
      - **Reading direction:** `deckle run --direction rtl|ltr` sets it for comics (CBZ, CBR,
        page folders) through `deckle_comic::convert_with`. The CLI makes the EPUB itself, so
        `RunOptions` doesn't change. A publisher's fixed-layout EPUB keeps its own direction.
-       The app's per-book toggle is left for a UI pass.
+       In the app (#280), "Reads right to left" in a comic's row menu sets it per book, kept in
+       the settings' `book_directions` by path; the send makes the comic's EPUB the same way.
+       A comic the library keeps remembers it: a CBZ or CBR as `"direction"` in its
+       `deckle.json`, a page folder as the EPUB made in that order.
 
 ## 10. Calls made without the owner
 

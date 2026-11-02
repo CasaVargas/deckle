@@ -709,6 +709,33 @@ pub fn record_run(
     Ok(Some(book))
 }
 
+/// The reading direction the library remembers for the comic kept at `source` (#280): none for
+/// a file outside the library, or a comic whose owner never set one.
+pub fn kept_direction(source: &Path) -> Option<deckle_comic::Direction> {
+    let dir = source.parent()?;
+    let sidecar = read_sidecar(&dir.join(FILE_NAME)).ok()?;
+    if dir.join(&sidecar.source) != source {
+        return None;
+    }
+    sidecar.direction()
+}
+
+impl Library {
+    /// Remembers the owner's reading direction on a kept comic, so a send from the library
+    /// reads the same way (#280).
+    pub fn remember_direction(
+        &self,
+        book: &mut Book,
+        direction: deckle_comic::Direction,
+    ) -> Result<(), String> {
+        if book.sidecar.direction() == Some(direction) {
+            return Ok(());
+        }
+        book.sidecar.set_direction(direction);
+        self.save(book)
+    }
+}
+
 /// A note for the run's warnings when adding to the library failed (the send still worked).
 pub fn auto_add_warning(e: &str) -> String {
     format!("not added to the library: {e}")
