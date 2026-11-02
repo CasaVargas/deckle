@@ -362,6 +362,9 @@ pub enum PuzzlesCommand {
         /// Squares on a side, 5 to 15.
         #[arg(long, default_value_t = 11)]
         size: usize,
+        /// Your own words with clues, `word: clue` a line (`#` lines skipped): the book's theme.
+        #[arg(long)]
+        words: Option<PathBuf>,
         /// easy: everyday words; hard: rarer ones mixed in.
         #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
         difficulty: DifficultyArg,

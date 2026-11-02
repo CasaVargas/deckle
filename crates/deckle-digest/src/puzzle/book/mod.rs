@@ -27,6 +27,9 @@ pub const CROSS_SIZES: std::ops::RangeInclusive<usize> = 5..=15;
 pub const COUNTS: std::ops::RangeInclusive<usize> = 1..=200;
 /// Words a word search hides at least, whatever its size.
 const MIN_WORDS: usize = 8;
+/// Clued words a crossword book needs, at least, and the theme answers a puzzle should have
+/// before the book warns (puzzle books §3.5).
+const MIN_CLUED: usize = 3;
 /// Fresh seeds tried for one puzzle before the book gives up.
 const RESEEDS: u64 = 8;
 
@@ -122,6 +125,9 @@ pub struct BookOptions {
     pub difficulty: Difficulty,
     /// Your own words (`--words`), already through [`words_from_file`].
     pub words: Option<Vec<String>>,
+    /// A crossword's own words, each with its clue (`--words` for a crossword), already
+    /// through [`clued_words_from_file`].
+    pub clued: Option<Vec<(String, String)>>,
     pub title: Option<String>,
     pub seed: Option<u64>,
     /// Printed on the title page, and part of the default seed.
@@ -214,6 +220,8 @@ pub enum BookError {
     Count,
     /// Your words that fit the grid, fewer than a word search needs.
     TooFewWords(usize),
+    /// Your clued words that fit a crossword, fewer than one needs.
+    TooFewClued(usize),
     /// `--words` for a kind that takes none: a crossword (until LLM clues) or a sudoku.
     NoWords(Kind),
     /// A grid too fine to write in on this screen, and the largest that fits.
@@ -253,6 +261,12 @@ impl fmt::Display for BookError {
                 f,
                 "--words has {n} usable words; a word search needs at least {MIN_WORDS} \
                  (3 letters or more, and no longer than the grid)"
+            ),
+            BookError::TooFewClued(n) => write!(
+                f,
+                "--words has {n} usable words; a crossword needs at least {MIN_CLUED} (3 to {} \
+                 letters, each with a clue after a colon or a tab)",
+                cross::LONGEST
             ),
             BookError::NoWords(Kind::Sudoku) => write!(f, "--words isn't for sudoku"),
             BookError::NoWords(_) => write!(
@@ -306,6 +320,45 @@ pub fn words_from_file(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// A crossword's `--words` file: `word: clue` lines (a tab instead of the colon works too),
+/// `#` lines skipped. Words fold as in [`words_from_file`]; each is kept once, its first clue.
+/// Also the words that had no clue, folded, for a warning.
+pub fn clued_words_from_file(text: &str) -> (Vec<(String, String)>, Vec<String>) {
+    let fold = |w: &str| -> String {
+        deunicode::deunicode(w)
+            .chars()
+            .filter(char::is_ascii_alphabetic)
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    };
+    let mut seen = HashSet::new();
+    let (mut words, mut skipped) = (Vec::new(), Vec::new());
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let split = line
+            .find(['\t', ':'])
+            .map(|i| (&line[..i], line[i + 1..].trim()));
+        match split {
+            Some((w, clue)) if !clue.is_empty() => {
+                let w = fold(w);
+                if !w.is_empty() && seen.insert(w.clone()) {
+                    words.push((w, clue.to_owned()));
+                }
+            }
+            _ => {
+                let w = fold(line.split(['\t', ':']).next().unwrap_or(""));
+                if !w.is_empty() {
+                    skipped.push(w);
+                }
+            }
+        }
+    }
+    (words, skipped)
+}
+
 /// FNV-1a, 64-bit: stable across machines and Rust versions, unlike `DefaultHasher`.
 fn fnv(text: &str) -> u64 {
     text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| {
@@ -317,8 +370,8 @@ fn fnv(text: &str) -> u64 {
 /// the same book and the next day's a new one (puzzle books §5.2).
 pub fn default_seed(o: &BookOptions) -> u64 {
     fnv(&format!(
-        "{:?}|{}|{}|{:?}|{:?}|{:?}|{}",
-        o.kind, o.count, o.size, o.difficulty, o.words, o.title, o.date
+        "{:?}|{}|{}|{:?}|{:?}|{:?}|{:?}|{}",
+        o.kind, o.count, o.size, o.difficulty, o.words, o.clued, o.title, o.date
     ))
 }
 
@@ -406,16 +459,46 @@ fn make_crossword(o: &BookOptions, lex: &Lexicon) -> Result<Book, BookError> {
         return Err(BookError::NoWords(Kind::Crossword));
     }
     let seed = o.seed.unwrap_or_else(|| default_seed(o));
-    let mut puzzles = Vec::with_capacity(o.count);
     let mut warnings = Vec::new();
+    // your words that fit the grids, ahead of the list's
+    let longest = cross::LONGEST.min(o.size);
+    let (fit, long): (Vec<_>, Vec<_>) = o
+        .clued
+        .iter()
+        .flatten()
+        .cloned()
+        .partition(|(w, _)| (3..=longest).contains(&w.len()));
+    if o.clued.is_some() && fit.len() < MIN_CLUED {
+        return Err(BookError::TooFewClued(fit.len()));
+    }
+    if !long.is_empty() {
+        let names: Vec<String> = long.iter().map(|(w, _)| w.to_uppercase()).collect();
+        warnings.push(format!(
+            "skipped, not 3 to {longest} letters: {}",
+            names.join(", ")
+        ));
+    }
+    let merged;
+    let lex = if fit.is_empty() {
+        lex
+    } else {
+        merged = lex.with(&fit);
+        &merged
+    };
+    let seeds: Vec<String> = fit.into_iter().map(|(w, _)| w).collect();
+    let mut puzzles = Vec::with_capacity(o.count);
     for i in 0..o.count {
         let mut again = 0u64;
         let (spread, x) = first_fill(o.difficulty, |spread| {
             let mut rng = StdRng::seed_from_u64(seed ^ ((i as u64) << 20) ^ (again << 40));
             again += 1;
-            cross::fill(lex, o.size, spread, &mut rng)
+            cross::fill_themed(lex, o.size, spread, &seeds, &mut rng)
         })
         .ok_or(BookError::Unfilled(i + 1))?;
+        let mine = x.clues.iter().filter(|c| c.theme).count();
+        if !seeds.is_empty() && mine < MIN_CLUED {
+            warnings.push(format!("puzzle {} has {mine} of your words", i + 1));
+        }
         if spread != o.difficulty.spread() {
             warnings.push(format!(
                 "puzzle {} has rarer words than {} asks: it wouldn't fill otherwise",
@@ -513,6 +596,7 @@ mod tests {
             size,
             difficulty: Difficulty::Medium,
             words: None,
+            clued: None,
             title: None,
             seed: None,
             date: NaiveDate::from_ymd_opt(2026, 11, 1).unwrap(),
@@ -814,6 +898,72 @@ mod tests {
             .to_string(),
             "a sudoku's squares would be too small to write in on this screen"
         );
+    }
+
+    #[test]
+    fn clued_words_from_file_takes_a_colon_or_a_tab() {
+        let (words, skipped) = clued_words_from_file(
+            "Jobs: Co-founder who came back\nWi-Fi\tWireless networking\nnoclue\n# note\n\nMacintosh: The 1984 computer\njobs: again\n",
+        );
+        assert_eq!(
+            words,
+            [
+                ("jobs".to_owned(), "Co-founder who came back".to_owned()),
+                ("wifi".to_owned(), "Wireless networking".to_owned()),
+                ("macintosh".to_owned(), "The 1984 computer".to_owned()),
+            ]
+        );
+        assert_eq!(skipped, ["noclue"]);
+    }
+
+    fn apple() -> Vec<(String, String)> {
+        [
+            ("jobs", "Co-founder who returned in 1997"),
+            ("woz", "The other Steve, for short"),
+            ("lisa", "1983 computer named for a daughter"),
+            ("newton", "Apple's early handheld"),
+            ("imac", "1998's candy-coloured desktop"),
+            ("ipod", "A thousand songs in your pocket"),
+            ("pixar", "Studio its co-founder ran"),
+            ("siri", "Voice assistant since 2011"),
+            ("swift", "Language of 2014"),
+            ("safari", "Apple's web browser"),
+            ("finder", "The Mac's file manager"),
+            ("macintosh", "The 1984 computer"),
+            ("sculley", "CEO from Pepsi"),
+        ]
+        .map(|(w, c)| (w.to_owned(), c.to_owned()))
+        .into()
+    }
+
+    /// Your words with your clues go into each puzzle first; ones too long for the grids are
+    /// named in a warning.
+    #[test]
+    fn own_crossword_words_go_in_with_their_clues() {
+        let mut o = crossword(2, 11, Difficulty::Medium);
+        o.clued = Some(apple());
+        let b = make(&o, Words::embedded()).unwrap();
+        for x in b.crosswords() {
+            let mine: Vec<_> = x.clues.iter().filter(|c| c.theme).collect();
+            assert!(mine.len() >= 2, "{mine:?}");
+            for c in mine {
+                assert!(
+                    apple()
+                        .iter()
+                        .any(|(w, clue)| *w == c.answer && *clue == c.clue)
+                );
+            }
+        }
+        assert!(
+            b.warnings
+                .iter()
+                .any(|w| w.contains("MACINTOSH") && w.contains("SCULLEY")),
+            "{:?}",
+            b.warnings
+        );
+        assert_eq!(make(&o, Words::embedded()), Ok(b));
+        o.clued = Some(apple()[..2].to_vec());
+        assert_eq!(make(&o, Words::embedded()), Err(BookError::TooFewClued(2)));
     }
 
     #[test]

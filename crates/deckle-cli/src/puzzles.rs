@@ -35,8 +35,9 @@ pub fn run(json: bool, action: PuzzlesCommand) -> Result<ExitCode, String> {
         PuzzlesCommand::Crossword {
             size,
             difficulty,
+            words,
             book,
-        } => make(json, Kind::Crossword, size, difficulty, None, book),
+        } => make(json, Kind::Crossword, size, difficulty, words, book),
         PuzzlesCommand::Sudoku { difficulty, book } => {
             make(json, Kind::Sudoku, 9, difficulty, None, book)
         }
@@ -51,11 +52,22 @@ fn make(
     words: Option<PathBuf>,
     args: BookArgs,
 ) -> Result<ExitCode, String> {
-    let own = match &words {
-        Some(p) => Some(book::words_from_file(
-            &std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?,
-        )),
+    let text = match &words {
+        Some(p) => Some(
+            std::fs::read_to_string(p).map_err(|e| format!("cannot read {}: {e}", p.display()))?,
+        ),
         None => None,
+    };
+    // a crossword's words come with clues; a word search's are bare
+    let mut unclued = Vec::new();
+    let (own, clued) = match (&text, kind) {
+        (Some(t), Kind::Crossword) => {
+            let (clued, skipped) = book::clued_words_from_file(t);
+            unclued = skipped;
+            (None, Some(clued))
+        }
+        (Some(t), _) => (Some(book::words_from_file(t)), None),
+        (None, _) => (None, None),
     };
     let date = match &args.date {
         Some(d) => NaiveDate::parse_from_str(d, "%Y-%m-%d")
@@ -74,11 +86,17 @@ fn make(
         size,
         difficulty,
         words: own,
+        clued,
         title: args.title.clone(),
         seed: args.seed,
         date,
     };
-    let b = book::make(&opts, Words::embedded()).map_err(|e| e.to_string())?;
+    let mut b = book::make(&opts, Words::embedded()).map_err(|e| e.to_string())?;
+    if !unclued.is_empty() {
+        let names: Vec<String> = unclued.iter().map(|w| w.to_uppercase()).collect();
+        b.warnings
+            .insert(0, format!("skipped, no clue: {}", names.join(", ")));
+    }
     let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
     let name = book::file_name(&b);
     let path = deliver(&bytes, &name, &args)?;

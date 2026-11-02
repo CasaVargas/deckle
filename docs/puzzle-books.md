@@ -23,8 +23,8 @@ Add `--json` for machine-readable output: `{path, pages, puzzles, seed, date, wa
 
 ### Options
 
-These are the word-search options. Crosswords take the same ones, except `--words`, with
-different sizes and difficulties (see [Crosswords](#crosswords)).
+These are the word-search options. Crosswords take the same ones, with different sizes and
+difficulties, and a `--words` file that has clues (see [Crosswords](#crosswords)).
 
 | Option | Default | |
 |---|---|---|
@@ -56,8 +56,13 @@ After each run, Deckle prints the command that makes that book again, with its s
 - **Pages:** the numbered grid is at the top and the clues sit below in two columns. Clues
   that don't fit continue on the next page as "No. N (continued)". A 15×15 takes three pages.
   The answers are filled grids, four per page.
-- **Not yet:** `--words`, because your own words would need clues. That arrives with LLM
-  themes.
+- **Your own words:** `--words FILE` with one `word: clue` per line (a tab instead of the
+  colon works too). Each puzzle puts in as many of your words as it can before filling the
+  rest from the list, and marks them as theme answers. A long list usually gives 3 to 6 per
+  puzzle.
+  - Words have to be 3 to 6 letters to fit the grids. Longer ones, and lines with no clue, are
+    skipped, and the book warns which ones.
+  - You need at least 3 usable words. The book warns about any puzzle that gets fewer than 3.
 
 ## Sudoku
 

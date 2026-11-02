@@ -175,7 +175,7 @@ pub fn slots<S: AsRef<str>>(rows: &[S]) -> Vec<Slot> {
 /// entries rarely fill from a list of everyday words.
 const DENSITY: f64 = 0.20;
 /// Longest entry a pattern keeps.
-const LONGEST: usize = 6;
+pub const LONGEST: usize = 6;
 
 /// Whether `rows` (`true` black) keeps every white square in an across and a down entry of 3
 /// or more, and every white square joined to every other.
