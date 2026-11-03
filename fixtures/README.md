@@ -117,3 +117,9 @@ KFX; use it locally for size and perf checks:
 The MOBI's KF8 header sits at record 18. Its `first_resc` (11) is where the shared resources (KF7
 records 6–10: three GIF pages, RESC, the JPEG thumbnail) belong in a KF8-only file
 (fixed-layout spec §4).
+
+## `puzzles/`
+
+| File | What | How it was made |
+|---|---|---|
+| `deckle-puzzles-sampler-2026-11-03-9f3a.decklepuzzles/` | A puzzle book bundle with one puzzle of every kind (`book.json`, an empty `cover.jpg`), for the writer's and the reader's tests. A real book has one kind; the sampler's `book.kind` is `crossword`. | Written by hand against `docs/formats/puzzle-book.schema.json` (design: `docs/superpowers/specs/2026-11-03-puzzle-book-bundle-design.md`); validated with `jsonschema` Draft 2020-12 and its format checker. |
