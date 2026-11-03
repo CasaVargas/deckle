@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed: the AI on this Mac asked for a model it hadn't installed.** With Settings → AI on
+  **On this Mac** and no model named, the checklist installed the model for this machine's
+  memory (`qwen3:8b` on 16 GB or more) while X-Ray, recaps, the editor and puzzle clues asked
+  Ollama for the smallest one, `qwen3:4b`, and got "model not found"; X-Ray fell back to basic
+  descriptions with only a warning. Every request now resolves an empty model the way the
+  checklist and `deckle llm pull` do. (#308)
+
 ## 0.12.0 — a local model that sets itself up, and the Puzzles tab
 
 Everything since 0.11.0 was tagged: an AI that runs on your own computer with nothing to

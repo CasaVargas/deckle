@@ -73,11 +73,7 @@ pub struct PullEvent {
 /// `llm-pull` ([`PullEvent`]) as it goes and once more when it's over. Returns when it's over;
 /// one download at a time. `llm_pull_stop` ends it.
 pub fn llm_pull(events: Arc<dyn Events>, endpoint: String, model: String) -> Result<(), String> {
-    let model = if model.trim().is_empty() {
-        recommended_model(total_memory()).name.to_owned()
-    } else {
-        model.trim().to_owned()
-    };
+    let model = llm::resolve_model(llm::Provider::Ollama, &model);
     if PULLING.swap(true, Ordering::SeqCst) {
         return Err("A download is already running".into());
     }

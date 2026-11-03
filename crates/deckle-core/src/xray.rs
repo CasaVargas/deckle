@@ -200,11 +200,7 @@ pub fn entities_with(
         .collect();
     let mut source = "basic";
     if let Some(cfg) = &opts.llm {
-        let model = if cfg.model.is_empty() {
-            cfg.provider.default_model()
-        } else {
-            &cfg.model
-        };
+        let model = llm::resolve_model(cfg.provider, &cfg.model);
         let key = if cfg.api_key.is_empty() {
             std::env::var(cfg.provider.env_key()).unwrap_or_default()
         } else {
@@ -212,7 +208,7 @@ pub fn entities_with(
         };
         let answer = llm::describe_all(
             cfg.provider,
-            model,
+            &model,
             &key,
             &cfg.endpoint,
             title,

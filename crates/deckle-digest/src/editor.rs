@@ -406,18 +406,14 @@ fn try_edit(
     if user.len() > 160_000 {
         return Err(Why::TooLong);
     }
-    let model = if cfg.model.trim().is_empty() {
-        provider.default_model()
-    } else {
-        &cfg.model
-    };
+    let model = llm::resolve_model(provider, &cfg.model);
     let opts = llm::Options {
         num_ctx: Some(OLLAMA_EDITOR_CONTEXT),
         schema: Some(plan_schema()),
     };
     let raw = llm::complete_with(
         provider,
-        model,
+        &model,
         key,
         &cfg.endpoint,
         SYSTEM,

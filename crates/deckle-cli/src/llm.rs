@@ -30,9 +30,8 @@ pub(crate) fn run(json: bool, action: LlmCommand) -> Result<ExitCode, String> {
             })
         }
         LlmCommand::Pull { model, endpoint } => {
-            let model = model
-                .filter(|m| !m.trim().is_empty())
-                .unwrap_or_else(|| recommended_model(llm::total_memory()).name.to_owned());
+            let model =
+                llm::resolve_model(llm::Provider::Ollama, model.as_deref().unwrap_or_default());
             let endpoint = endpoint.unwrap_or_default();
             let mut last = String::new();
             let mut progress = |p: &Progress| {

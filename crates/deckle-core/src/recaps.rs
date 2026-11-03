@@ -583,11 +583,7 @@ impl<'a, 'p> Writer<'a, 'p> {
         cache_dir: Option<&std::path::Path>,
         post: &'a mut Post<'p>,
     ) -> Self {
-        let model = if cfg.model.is_empty() {
-            cfg.provider.default_model().to_owned()
-        } else {
-            cfg.model.clone()
-        };
+        let model = llm::resolve_model(cfg.provider, &cfg.model);
         let key = if cfg.api_key.is_empty() {
             std::env::var(cfg.provider.env_key()).unwrap_or_default()
         } else {

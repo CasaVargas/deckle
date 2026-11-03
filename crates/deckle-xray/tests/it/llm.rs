@@ -624,3 +624,39 @@ fn a_blank_ollama_address_follows_the_environment() {
         std::env::remove_var("OLLAMA_HOST");
     }
 }
+
+#[test]
+fn an_empty_model_resolves_the_same_way_everywhere() {
+    use deckle_xray::llm::{recommended_model, resolve_model_for};
+    let gib: u64 = 1 << 30;
+    // Ollama: the recommended model for this machine's memory, the tier the AI checklist
+    // installs, never the pinned smallest one.
+    for mem in [None, Some(8 * gib), Some(16 * gib), Some(64 * gib)] {
+        assert_eq!(
+            resolve_model_for(Provider::Ollama, "", mem),
+            recommended_model(mem).name
+        );
+    }
+    assert_eq!(
+        resolve_model_for(Provider::Ollama, "", Some(16 * gib)),
+        "qwen3:8b"
+    );
+    // The cloud providers: their static default.
+    assert_eq!(
+        resolve_model_for(Provider::Anthropic, "", Some(16 * gib)),
+        "claude-sonnet-5-5"
+    );
+    assert_eq!(
+        resolve_model_for(Provider::OpenAi, "  ", None),
+        "gpt-5-mini"
+    );
+    // A configured model wins, trimmed.
+    assert_eq!(
+        resolve_model_for(Provider::Ollama, " llama3.1:8b ", Some(64 * gib)),
+        "llama3.1:8b"
+    );
+    assert_eq!(
+        resolve_model_for(Provider::Anthropic, "claude-opus-5-5", None),
+        "claude-opus-5-5"
+    );
+}
