@@ -236,6 +236,16 @@ jobs:
           cat "$RUNNER_TEMP/icon-partial.plist"
           xcrun --sdk macosx assetutil --info liquid-glass/Assets.car
           echo "ICON_ARGS= --config src-tauri/icon.macos.conf.json" >> "$GITHUB_ENV"
+      # The draft's description is the tag's CHANGELOG.md section plus the install footer
+      # (tools/release-notes.sh), so the notes are written once, in the changelog.
+      - name: Release notes from the changelog
+        if: github.event.inputs.dry_run != 'true'
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          tools/release-notes.sh "$TAG" > "$RUNNER_TEMP/release-notes.md"
+          { echo 'body<<RELEASE_NOTES_EOF'; cat "$RUNNER_TEMP/release-notes.md"; echo 'RELEASE_NOTES_EOF'; } >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@v0
         if: github.event.inputs.dry_run != 'true'
         env:
@@ -252,12 +262,7 @@ jobs:
           args: --target ${{ matrix.target }}${{ env.WINDOWS_SIGN_ARGS }}${{ env.PDFIUM_ARGS }}${{ env.ICON_ARGS }}
           tagName: ${{ env.TAG }}
           releaseName: ${{ env.TAG && format('Deckle {0}', env.TAG) || '' }}
-          releaseBody: |
-            See CHANGELOG.md for what changed and README.md for install notes.
-            Updating from 0.2.x? Install this version once by hand; later versions update from inside Deckle (Settings → About). Windows: if you used the .msi, uninstall it first.
-            macOS: signed with a Developer ID and notarized by Apple.
-            Windows: code-signed by Casa Vargas LLC (Azure Artifact Signing).
-            Requires Kindle Previewer 4 (free, from Amazon).
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
           prerelease: false
       - name: Build (dry run, no release)
