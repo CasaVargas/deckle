@@ -138,6 +138,66 @@ fn backup(kobo: &Kobo, now: &str) -> Result<PathBuf, String> {
     Ok(to)
 }
 
+/// Writes a sideloaded book's new details into the Kobo's library, so it shows them without
+/// re-reading the file: `Title`, `Attribution` (the authors) and, where this firmware has them,
+/// `Series` and `SeriesNumber`, on the book's `content` row (`file:///mnt/onboard/<path>`).
+/// The database is copied aside first, as for shelves. `Ok(false)`: the Kobo has no row for it
+/// yet (it reads the file's own details when it next imports it).
+pub fn set_book(
+    kobo: &Kobo,
+    path: &str,
+    title: &str,
+    authors: &[String],
+    series: Option<(&str, Option<f32>)>,
+    now: &str,
+) -> Result<bool, String> {
+    backup(kobo, now)?;
+    let mut conn = rusqlite::Connection::open(db_path(kobo)).map_err(|e| e.to_string())?;
+    let cols = columns(&conn, "content");
+    for need in ["ContentID", "ContentType", "Title", "Attribution"] {
+        if !cols.iter().any(|c| c == need) {
+            return Err(format!("this Kobo's database has no content.{need} column"));
+        }
+    }
+    let tx = conn
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(|e| {
+            format!(
+                "the Kobo's database is busy ({e}); eject it from the Kobo's screen and try again"
+            )
+        })?;
+    let id = format!("{ONBOARD}{path}");
+    let attribution = authors.join(", ");
+    let n = tx
+        .execute(
+            "UPDATE content SET Title = ?1, Attribution = ?2 WHERE ContentID = ?3 AND ContentType = 6",
+            rusqlite::params![title, attribution, id],
+        )
+        .map_err(|e| e.to_string())?;
+    if n > 0 && cols.iter().any(|c| c == "Series") && cols.iter().any(|c| c == "SeriesNumber") {
+        let (name, number) = match series {
+            Some((name, index)) => (
+                Some(name.to_owned()),
+                index.map(|i| {
+                    if i.fract() == 0.0 {
+                        format!("{}", i as i64)
+                    } else {
+                        i.to_string()
+                    }
+                }),
+            ),
+            None => (None, None),
+        };
+        tx.execute(
+            "UPDATE content SET Series = ?1, SeriesNumber = ?2 WHERE ContentID = ?3 AND ContentType = 6",
+            rusqlite::params![name, number, id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
 /// Writes `d` to the Kobo: shelves made and books added as the firmware does, books taken off
 /// and shelves deleted by marking them `_IsDeleted`, all unsynced. `now` is ISO 8601.
 pub fn apply(kobo: &Kobo, d: &Diff, now: &str) -> Result<PathBuf, String> {
@@ -250,6 +310,57 @@ mod tests {
          CREATE TABLE ShelfContent (ShelfName TEXT, ContentId TEXT, DateModified TEXT, _IsDeleted BOOL, _IsSynced BOOL);
          INSERT INTO Shelf (Name, InternalName, _IsDeleted, _IsVisible, _IsSynced) VALUES ('Mine', 'Mine', 'false', 'true', 'true');
          INSERT INTO ShelfContent VALUES ('Mine', 'file:///mnt/onboard/Books/Emma.epub', '', 'false', 'true');";
+
+    #[test]
+    fn a_books_details_are_written_to_its_row_after_a_backup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let k = fake_kobo(
+            tmp.path(),
+            "INSERT INTO content VALUES ('file:///mnt/onboard/Books/Dune.epub', '6', 'dune', 'F H', 0, NULL, 0, NULL);",
+        );
+        let authors = vec!["Frank Herbert".to_owned()];
+        assert!(
+            set_book(
+                &k,
+                "Books/Dune.epub",
+                "Dune",
+                &authors,
+                None,
+                "2026-11-03T12:00:00Z"
+            )
+            .unwrap()
+        );
+        assert!(
+            !set_book(
+                &k,
+                "Books/Missing.epub",
+                "X",
+                &authors,
+                None,
+                "2026-11-03T12:00:01Z"
+            )
+            .unwrap()
+        );
+        let conn = rusqlite::Connection::open(db_path(&k)).unwrap();
+        let (t, a): (String, String) = conn
+            .query_row(
+                "SELECT Title, Attribution FROM content WHERE ContentID = 'file:///mnt/onboard/Books/Dune.epub'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!((t.as_str(), a.as_str()), ("Dune", "Frank Herbert"));
+        let backups = std::fs::read_dir(tmp.path().join(".kobo"))
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .starts_with("KoboReader.sqlite.deckle-")
+            })
+            .count();
+        assert_eq!(backups, 2);
+    }
 
     #[test]
     fn shelves_are_written_as_the_firmware_does_after_a_backup() {

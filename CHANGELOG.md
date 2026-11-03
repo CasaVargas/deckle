@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- **Edit a book's details anywhere it is.** Title, authors and series:
+  - **Before it's sent:** **Change title & author for this send…** on a queued book's menu
+    writes them into a copy of the book for that send (a DOCX, TXT or other import is made an
+    EPUB first); the file you added is never changed, and the library keeps the edited copy.
+    `RunRequest.details` (`BookEdit`).
+  - **On a Kindle:** **Edit details…** in a book's drawer finds what it can be rebuilt from
+    (`device_edit_source`): the library's copy (fixed for good first), its original in
+    calibre or a folder (never changed), or the Kindle's own DRM-free AZW3/MOBI made an EPUB.
+    It goes on the Books tab as an upgrade, replacing the Kindle's copy on send; the old copy
+    and its notes are kept, and **Put back** undoes it. The new copy starts without a reading
+    position or highlights on the Kindle (written out first when a highlights folder is set).
+    Store books, DRM and KFX with no original say why they can't be changed.
+  - **On a Kobo or PocketBook:** **Edit details…** on the Devices tab rewrites an EPUB's or
+    KEPUB's own details in place (written beside it, then swapped), and on a Kobo its library
+    entry (`Title`, `Attribution`, and `Series`/`SeriesNumber` where the firmware has them), the
+    database copied aside first (`kobo_shelves::set_book`). **On a reMarkable over SSH:**
+    **Rename…** sets the document's name.
+- **Removing a book Amazon delivered says what happens.** Removing a book bought from the
+  Kindle Store or sent to Kindle by email takes only the download: Amazon keeps it in the
+  account and the Kindle can still list it under All. The Kindle drawer's and This Kindle's
+  confirmations now say so and point to Remove from library or Manage Your Content and
+  Devices.
 - **The Devices tab: Kobo, PocketBook and reMarkable libraries.** The Kindle tab is now
   **Devices**, with a chip for each Kindle and each other reader connected: a Kobo or
   PocketBook as a USB drive, a reMarkable over its USB web interface or SSH. Each gets a page

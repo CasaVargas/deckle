@@ -7,13 +7,15 @@ import { api } from "./api";
 import Highlights from "./Highlights";
 import Icon from "./Icon";
 import KindleDrawer from "./KindleDrawer";
+import EditDetails from "./EditDetails";
+import { editLabel } from "./editDetails";
 import Unplugged from "./Unplugged";
 import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
 import type { KindleRoom, ShelfFrom, ShelfShow, ShelfSort } from "./kindleRooms";
 import ThisKindle from "./ThisKindle";
 import Upgrades from "./Upgrades";
 import WordsAnki from "./WordsAnki";
-import type { DeviceBookRow, DeviceRow, DeviceShelf, RunTarget, UpgradeClass, UpgradeOf } from "./types";
+import type { BookEdit, DeviceBookRow, EditSource, DeviceRow, DeviceShelf, RunTarget, UpgradeClass, UpgradeOf } from "./types";
 
 interface Props {
   /** The Kindle picked in the footer; null when none is connected. */
@@ -24,7 +26,7 @@ interface Props {
   busy: boolean;
   /** Put library copies on the Books tab for this Kindle, each with its mode; `what` opens
    * the notice. */
-  onResend: (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf }[], what: string) => void;
+  onResend: (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf; details?: BookEdit | null }[], what: string) => void;
   onNotice: (msg: string | null) => void;
   /** After the Kindle was named. */
   onRenamed: () => Promise<void>;
@@ -88,6 +90,9 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
   const [readAt, setReadAt] = useState<Date | null>(null);
   /** The book whose drawer is open, by file. */
   const [openFile, setOpenFile] = useState<string | null>(null);
+  /** The book whose details are being changed: where it rebuilds from, once read. */
+  const [editing, setEditing] = useState<EditSource | null>(null);
+  const [finding, setFinding] = useState<string | null>(null);
   // The Upgrades room reads every book once over MTP: it waits until it's opened, then stays.
   const [upgradesOpened, setUpgradesOpened] = useState(false);
   const [upgradesCount, setUpgradesCount] = useState<number | null>(null);
@@ -119,6 +124,39 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
     setUpgradesOpened(false);
     setUpgradesCount(null);
   }, [targetKey]);
+
+  // Edit details on a Kindle: find what it can be rebuilt from, then the form.
+  const startEdit = async (file: string) => {
+    if (!target) return;
+    setFinding(file);
+    try {
+      const src = await api.deviceEditSource(target, file);
+      if (src.error || !src.source) onNotice(src.error ?? "Deckle has nothing to rebuild this book from.");
+      else setEditing(src);
+    } catch (e) {
+      onNotice(String(e));
+    } finally {
+      setFinding(null);
+    }
+  };
+  const saveEdit = async (src: EditSource, edit: BookEdit) => {
+    if (!src.source || !targetKey) return;
+    const upgradeOf: UpgradeOf = { device: targetKey, file: src.file, title: edit.title, origin: src.origin };
+    try {
+      if (src.library_dir) {
+        // a library book: its copy is fixed for good, then sent in place of the Kindle's
+        const d = await api.libraryReadDetails(src.library_dir);
+        await api.libraryFixDetails(src.library_dir, { ...d, title: edit.title, authors: edit.authors, series: edit.series });
+        onResend([{ source: src.source, cde: null, upgradeOf }], `${editLabel(edit)} is saved in your library and ready to replace the Kindle's copy.`);
+      } else {
+        onResend([{ source: src.source, cde: null, upgradeOf, details: edit }], `${editLabel(edit)} is ready to replace the Kindle's copy.`);
+      }
+      setEditing(null);
+      setOpenFile(null);
+    } catch (e) {
+      onNotice(String(e));
+    }
+  };
 
   const remove = async (file: string) => {
     if (!target) return;
@@ -275,11 +313,23 @@ export default function KindleView({ target, targetKey, device, busy, onResend, 
             await remove(opened.file);
             setOpenFile(null);
           }}
+          finding={finding === opened.file}
+          onEdit={() => startEdit(opened.file)}
           onRoom={(r) => {
             setOpenFile(null);
             open(r);
           }}
           onClose={closeDrawer}
+        />
+      )}
+      {editing && (
+        <EditDetails
+          heading="Edit details"
+          initial={{ title: editing.title, authors: editing.authors, series: null }}
+          note={`Deckle rebuilds it from ${editing.library_dir ? "your library's copy (saved with these details too)" : editing.origin === "kindle-copy" ? "the Kindle's own copy" : editing.origin === "calibre" ? "its original in calibre (calibre isn't changed)" : "its original on this computer (the file isn't changed)"} and replaces the copy on the Kindle when you send it. The old copy, with its highlights and reading position, is kept on this computer, and Put back (Upgrades) brings it back. The new copy starts without a reading position or highlights on the Kindle; with a highlights folder set, they're written out first.`}
+          action="Rebuild with these"
+          onCancel={() => setEditing(null)}
+          onSave={(edit) => saveEdit(editing, edit)}
         />
       )}
     </div>

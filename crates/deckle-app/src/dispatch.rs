@@ -121,6 +121,8 @@ commands! { ctx;
     daily_state { paper: Option<String> } => Ok(daily::daily_state(paper)),
     device_backup { target: RunTarget, into: Option<String> } => kindle::device_backup(target, into),
     device_books { target: RunTarget } => kindle::device_books(target),
+    device_edit_source { target: RunTarget, file: String } =>
+        upgrades::device_edit_source(target, file),
     device_put_back { target: RunTarget, file: String } => upgrades::device_put_back(target, file),
     device_rebuild { target: RunTarget, files: Vec<String> } => upgrades::device_rebuild(target, files),
     device_remove { target: RunTarget, file: String } => kindle::device_remove(target, file),
@@ -232,6 +234,8 @@ commands! { ctx;
         crate::reader_server::reader_server_set_password(password),
     reader_server_status {} => Ok(crate::reader_server::reader_server_status()),
     readers_backup { key: String, into: Option<String> } => crate::readers::readers_backup(key, into),
+    readers_edit { key: String, id: String, edit: crate::commands::BookEdit } =>
+        crate::readers::readers_edit(key, id, edit),
     readers_last_backup { key: String } => Ok(crate::readers::readers_last_backup(key)),
     readers_library { key: String } => crate::readers::readers_library(key),
     readers_list {} => Ok(crate::readers::readers_list()),

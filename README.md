@@ -215,6 +215,10 @@ on a Kindle it could now build better.
 - **Make room, back up, restore.** Space split by why: finished books, second copies, old papers.
   Copy every DRM-free book with its highlights and reading position to your computer, and put a
   backup on any Kindle later.
+- **Fix a book's title and author anywhere.** Before it's sent (for that send only), on a
+  Kindle (rebuilt from your library copy, its original or the Kindle's own DRM-free copy, and
+  swapped in, with **Put back** to undo), in an EPUB on a Kobo or PocketBook, or a reMarkable
+  document's name over SSH.
 - **Kobo, PocketBook and reMarkable too.** The tab is **Devices**: a Kobo or PocketBook plugged
   in, or a reMarkable answering over its USB web interface (or SSH), gets its own page with every
   book, how far you've read it and when, the space left, **Remove** for the ones you choose, and

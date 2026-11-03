@@ -430,7 +430,7 @@ pub fn rewrite_opf(opf: &str, d: &Details) -> Option<String> {
 
 /// The EPUB at `path` with its OPF rewritten: every other entry is copied as it is, the
 /// `mimetype` first and stored.
-fn rewrite_epub(path: &Path, d: &Details) -> Result<Vec<u8>, String> {
+pub fn rewrite_epub(path: &Path, d: &Details) -> Result<Vec<u8>, String> {
     let opf_path = deckle_core::epub::EpubReader::open(path)
         .map_err(|e| e.to_string())?
         .opf_path;
@@ -465,6 +465,19 @@ fn rewrite_epub(path: &Path, d: &Details) -> Result<Vec<u8>, String> {
     }
     zout.finish().map_err(zerr)?;
     Ok(out.into_inner())
+}
+
+/// A copy of the EPUB (or KEPUB) at `src` with `d` written into its OPF, at `dir/<its name>`:
+/// a book's details changed for one send, the original left as it is.
+pub fn edited_copy(src: &Path, d: &Details, dir: &Path) -> Result<std::path::PathBuf, String> {
+    check(d)?;
+    let bytes = rewrite_epub(src, d)?;
+    let name = src
+        .file_name()
+        .ok_or_else(|| format!("{}: no file name", src.display()))?;
+    let out = dir.join(name);
+    std::fs::write(&out, bytes).map_err(|e| format!("{}: {e}", out.display()))?;
+    Ok(out)
 }
 
 /// Writes `d` into the library book in `dir`: its EPUB's OPF, then its sidecar.

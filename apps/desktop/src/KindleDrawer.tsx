@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import Icon from "./Icon";
 import { better, coverLine, highlightsOf, onKindle, progressLine, sentMode, size, titleOf } from "./kindleRooms";
 import type { KindleRoom } from "./kindleRooms";
+import { amazonRemoveNote } from "./editDetails";
 import type { DeviceBookRow, HighlightRow } from "./types";
 
 type Tab = "reading" | "highlights" | "details";
@@ -14,6 +15,10 @@ interface Props {
   /** Update, Send again and Send as a Kindle book: the library copy goes on the Books tab. */
   onResend: (cde: "pdoc" | "ebok" | null, what: string) => void;
   onRemove: () => Promise<void>;
+  /** Edit details…: rebuild it with a new title, authors or series. */
+  onEdit?: () => void;
+  /** Looking for what it can be rebuilt from. */
+  finding?: boolean;
   /** Upgrade… and Open Highlights go to their tab. */
   onRoom: (room: KindleRoom) => void;
   onClose: () => void;
@@ -23,7 +28,7 @@ interface Props {
  * A book on the Kindle (Kindle tab redesign §4): how far in and what Deckle can do better,
  * its highlights, and its file; Send again and Remove at the foot.
  */
-export default function KindleDrawer({ book, highlights, busy, onResend, onRemove, onRoom, onClose }: Props) {
+export default function KindleDrawer({ book, highlights, busy, onResend, onRemove, onEdit, finding, onRoom, onClose }: Props) {
   const [tab, setTab] = useState<Tab>("reading");
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -156,7 +161,10 @@ export default function KindleDrawer({ book, highlights, busy, onResend, onRemov
       <div className="drawer-foot">
         {confirming ? (
           <>
-            <span className="foot-note">Remove {title} from this Kindle? Its reading position goes too.</span>
+            <span className="foot-note">
+              Remove {title} from this Kindle? Its reading position goes too.
+              {amazonRemoveNote(book) && <> {amazonRemoveNote(book)}</>}
+            </span>
             <button className="ghost" disabled={removing} onClick={() => setConfirming(false)}>
               Keep
             </button>
@@ -177,6 +185,11 @@ export default function KindleDrawer({ book, highlights, busy, onResend, onRemov
             <button className="ghost" disabled={busy || !book.library_source} title={book.library_source ? undefined : "Not in your library, so Deckle has no copy to send"} onClick={() => onResend(null, `${title} is ready to send again.`)}>
               Send again
             </button>
+            {onEdit && (
+              <button className="ghost" disabled={busy || finding} onClick={onEdit}>
+                {finding ? "Reading the Kindle…" : "Edit details…"}
+              </button>
+            )}
             <span className="spacer" />
             <button className="quiet danger" disabled={busy} onClick={() => setConfirming(true)}>
               Remove from Kindle…

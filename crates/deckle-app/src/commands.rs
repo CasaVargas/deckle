@@ -180,6 +180,57 @@ pub struct RunRequest {
     /// The cover picked for it (Books and Kindle design §8); none: the book's own.
     #[serde(default)]
     pub cover: Option<CoverChoice>,
+    /// Its title, authors and series changed for this send: written into a copy of the book
+    /// (the original is never changed), so the Kindle's copy and the library's carry them.
+    #[serde(default)]
+    pub details: Option<BookEdit>,
+}
+
+/// A book's title, authors and series as the owner changed them (details editing).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BookEdit {
+    pub title: String,
+    pub authors: Vec<String>,
+    pub series: Option<deckle_library::SeriesRef>,
+}
+
+impl BookEdit {
+    /// As library details: only these three change, everything else stays the book's own.
+    pub fn details(&self) -> deckle_library::details::Details {
+        deckle_library::details::Details {
+            title: self.title.trim().to_owned(),
+            authors: self
+                .authors
+                .iter()
+                .map(|a| a.trim().to_owned())
+                .filter(|a| !a.is_empty())
+                .collect(),
+            series: self.series.clone().filter(|s| !s.name.trim().is_empty()),
+            ..Default::default()
+        }
+    }
+}
+
+/// `source` (an EPUB, or anything Deckle imports into one) as an EPUB with `edit` written in,
+/// in a folder of its own that lives as long as the returned guard.
+pub fn edited_source(
+    source: &Path,
+    edit: &BookEdit,
+) -> Result<(tempfile::TempDir, PathBuf), String> {
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let stem = source
+        .file_stem()
+        .map_or_else(|| "book".into(), |n| n.to_string_lossy().into_owned());
+    let epub = match deckle_core::import::import(source, dir.path(), &format!("{stem}.epub")) {
+        Some(Ok(imported)) => imported.epub,
+        Some(Err(e)) => return Err(e),
+        None => source.to_path_buf(),
+    };
+    let out = dir.path().join("edited");
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+    let edited = deckle_library::details::edited_copy(&epub, &edit.details(), &out)?;
+    Ok((dir, edited))
 }
 
 /// A cover picked on the Books tab.
@@ -1132,6 +1183,23 @@ pub fn run_books_with(
             }
         };
         let run_path = comic.as_ref().map_or(source, |(_, epub)| epub.as_path());
+        // Details changed in the app: a copy of the book carries them.
+        let edited = match b
+            .details
+            .as_ref()
+            .map(|d| edited_source(run_path, d))
+            .transpose()
+        {
+            Ok(e) => e,
+            Err(e) => {
+                emit(failed(
+                    &b.id,
+                    format!("its new details couldn't be written: {e}"),
+                ));
+                continue;
+            }
+        };
+        let run_path = edited.as_ref().map_or(run_path, |(_, epub)| epub.as_path());
         let report = run_with_progress(run_path, &opts, &mut |stage| {
             emit(ProgressEvent {
                 id: id.clone(),
@@ -1157,8 +1225,10 @@ pub fn run_books_with(
         // Every book sent goes into the library, when there is one (library design §3). A page
         // folder is kept as its EPUB, so as the one made in the owner's order; a CBZ or CBR is
         // kept as it is, with its order remembered beside it.
-        let to_keep = match &comic {
-            Some((_, epub)) if deckle_comic::is_image_folder(source) => epub.as_path(),
+        let to_keep = match (&edited, &comic) {
+            // the library keeps the book with the details it was sent with
+            (Some((_, epub)), _) => epub.as_path(),
+            (None, Some((_, epub))) if deckle_comic::is_image_folder(source) => epub.as_path(),
             _ => source,
         };
         match deckle_library::auto_add(&library, to_keep, &report, &target) {
@@ -1534,6 +1604,33 @@ pub fn reveal(path: String) -> Result<(), String> {
 mod tests {
     use super::*;
     use deckle_transport::usb::MtpInfo;
+
+    #[test]
+    fn an_edit_is_written_into_a_copy_and_the_original_stays() {
+        let src = deckle_kfx::fixtures::path("deckle-mini.epub");
+        let before = std::fs::read(&src).unwrap();
+        let edit = BookEdit {
+            title: " The Right Title ".into(),
+            authors: vec!["Ann Author".into(), " ".into()],
+            series: Some(deckle_library::SeriesRef {
+                name: "Saga".into(),
+                index: Some(2.0),
+            }),
+        };
+        let (_dir, edited) = edited_source(&src, &edit).unwrap();
+        let got = deckle_library::details::read_book(&edited).unwrap();
+        assert_eq!(got.title, "The Right Title");
+        assert_eq!(got.authors, ["Ann Author"]);
+        assert_eq!(got.series.unwrap().name, "Saga");
+        assert_eq!(
+            std::fs::read(&src).unwrap(),
+            before,
+            "the original is untouched"
+        );
+        // an empty title is refused before anything is sent
+        let bad = BookEdit::default();
+        assert!(edited_source(&src, &bad).is_err());
+    }
 
     #[test]
     fn unrelated_writer_cannot_restore_requests_after_disable() {
@@ -2146,6 +2243,7 @@ mod tests {
                 asin: None,
                 upgrade_of: None,
                 cover: None,
+                details: None,
             }],
             &RunTarget::Folder {
                 path: out.path().to_string_lossy().into_owned(),
@@ -2261,6 +2359,7 @@ mod tests {
                 asin: None,
                 upgrade_of: None,
                 cover: None,
+                details: None,
             }],
             &RunTarget::Folder {
                 path: out.path().to_string_lossy().into_owned(),
@@ -2301,6 +2400,7 @@ mod tests {
                 asin: None,
                 upgrade_of: None,
                 cover: None,
+                details: None,
             }],
             &RunTarget::Folder {
                 path: tmp.path().to_string_lossy().into_owned(),
@@ -2338,6 +2438,7 @@ mod tests {
                 asin: None,
                 upgrade_of: None,
                 cover: None,
+                details: None,
             }],
             &target,
             &settings,
@@ -2418,6 +2519,7 @@ mod tests {
                 asin: None,
                 upgrade_of: None,
                 cover: None,
+                details: None,
             }],
             RunTarget::Folder {
                 path: out.to_string_lossy().into_owned(),
@@ -2497,6 +2599,7 @@ mod remarkable_tests {
             asin: None,
             upgrade_of: None,
             cover: None,
+            details: None,
         }
     }
 

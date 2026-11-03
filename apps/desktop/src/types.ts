@@ -43,6 +43,8 @@ export interface BookState extends BookRow {
   replaced: string[];
   /** The Kindle's own copy this send upgrades: replaced, and kept for Put back. */
   upgradeOf: UpgradeOf | null;
+  /** Its title, authors and series changed for this send; null: the book's own. */
+  edit?: BookEdit | null;
   /** The cover picked in Before you send; null: the book's own. */
   coverPick: CoverChoice | null;
 }
@@ -1574,4 +1576,30 @@ export interface ReaderBackup {
   dir: string;
   copied: string[];
   failed: [string, string][];
+}
+
+/** A book's title, authors and series as the owner changed them. */
+export interface BookEdit {
+  title: string;
+  authors: string[];
+  series: { name: string; index: number | null } | null;
+}
+
+/** Where a book on a Kindle can be rebuilt from to change its details. */
+export interface EditSource {
+  file: string;
+  title: string;
+  authors: string[];
+  /** The book to rebuild from; null with `error` when there's none. */
+  source: string | null;
+  /** Its original's origin; null for the library (whose copy is fixed first). */
+  origin: Origin | null;
+  library_dir: string | null;
+  error: string | null;
+}
+
+/** What changing a book on a Kobo, PocketBook or reMarkable did. */
+export interface ReaderEdited {
+  id: string;
+  note: string | null;
 }

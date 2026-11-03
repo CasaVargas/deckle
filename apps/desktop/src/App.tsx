@@ -24,6 +24,8 @@ import type { Room } from "./dailyRooms";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
 import ReaderView from "./ReaderView";
+import EditDetails from "./EditDetails";
+import { authorsText, editLabel } from "./editDetails";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import { refreshCapabilities, useCapabilities } from "./capabilities";
 import { onSessionLost, restartEvents } from "./transport/web";
@@ -31,7 +33,7 @@ import { readsRtl, withDirection } from "./comicDirection";
 import Login from "./web/Login";
 import Unavailable from "./web/Unavailable";
 import { NO_DEVICE_REASON, PREVIEWER_REASON } from "./web/gates";
-import type { BookRow, BookState, CatalogView, CoverChoice, DeviceRow, LibraryStatus, ReaderRow, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
+import type { BookRow, BookState, CatalogView, CoverChoice, BookEdit, DeviceRow, LibraryStatus, ReaderRow, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
   book_presets: {},
@@ -111,6 +113,8 @@ function Deckle() {
   // instead of the Kindle; null shows the Kindle.
   const [readers, setReaders] = useState<ReaderRow[]>([]);
   const [readerKey, setReaderKey] = useState<string | null>(null);
+  // The queued book whose title and author are being changed for its send.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [targetKey, setTargetKey] = useState<string | null>(null);
   const [plans, setPlans] = useState<Record<string, PlanRow>>({});
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -442,17 +446,18 @@ function Deckle() {
 
   // Re-send, Upgrade and Update from the Kindle tab: the library copies go on the Books tab
   // for review, each with its chosen mode.
-  const resendFromLibrary = async (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf }[], what: string) => {
+  const resendFromLibrary = async (items: { source: string; cde: "pdoc" | "ebok" | null; upgradeOf?: UpgradeOf; details?: BookEdit | null }[], what: string) => {
     const rows = await api.inspectBooks(items.map((i) => i.source));
     const cdeFor = new Map(items.map((i) => [i.source, i.cde]));
     const upgradeFor = new Map(items.map((i) => [i.source, i.upgradeOf ?? null]));
+    const editFor = new Map(items.map((i) => [i.source, i.details ?? null]));
     if (rows.length === 0) {
       setNotice("The app can't send these; send them with `deckle run`.");
       return;
     }
     setBooks((prev) => {
       const ids = new Set(rows.map((r) => r.id));
-      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cdeFor.get(r.path) ?? null, upgradeOf: upgradeFor.get(r.path) ?? null }))];
+      return [...prev.filter((b) => !ids.has(b.id)), ...rows.map((r) => ({ ...toState(r), cdeOverride: cdeFor.get(r.path) ?? null, upgradeOf: upgradeFor.get(r.path) ?? null, edit: editFor.get(r.path) ?? null }))];
     });
     setTab("books");
     const skipped = items.length - rows.length;
@@ -513,7 +518,7 @@ function Deckle() {
     );
     try {
       await api.runBooks(
-        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin, upgrade_of: b.upgradeOf, cover: coverRequest(b.coverPick) })),
+        runnable.map((b) => ({ id: b.id, path: b.path, cde: b.cdeOverride, asin: b.asin, upgrade_of: b.upgradeOf, cover: coverRequest(b.coverPick), details: b.edit ?? null })),
         target,
       );
     } catch (e) {
@@ -728,6 +733,26 @@ function Deckle() {
           />
         )}
         {tab === "puzzles" && <PuzzlesView onNotice={setNotice} device={device ?? null} deviceTarget={deviceTarget} onOpenSettings={openSettings} />}
+        {editingId &&
+          (() => {
+            const b = books.find((x) => x.id === editingId);
+            if (!b) return null;
+            const inLibrary = catalog?.entries.some((e) => e.path === b.path) ?? false;
+            return (
+              <EditDetails
+                heading="Change title & author for this send"
+                initial={b.edit ?? { title: b.title, authors: b.authors ? [b.authors] : [], series: null }}
+                note={`Written into the copy that's sent${library?.root ? " and kept in your library" : ""}; the file you added isn't changed.${inLibrary ? " To change the library's copy for good, use Edit details… from the library." : ""}`}
+                action="Use these"
+                onCancel={() => setEditingId(null)}
+                onSave={(edit) => {
+                  setBooks((p) => p.map((x) => (x.id === editingId ? { ...x, edit } : x)));
+                  setEditingId(null);
+                  setNotice(`${editLabel(edit)}: sent with these details.`);
+                }}
+              />
+            );
+          })()}
         {tab === "kindle" && readers.length > 0 && (
           <div className="device-picker" role="tablist" aria-label="Devices">
             {devices.map((d) => (
@@ -816,7 +841,8 @@ function Deckle() {
               {books.map((b) => (
                 <BookRowView
                   key={b.id}
-                  book={b}
+                  book={b.edit ? { ...b, title: b.edit.title, authors: authorsText(b.edit.authors) } : b}
+                  onEditSend={(id) => setEditingId(id)}
                   busy={busy}
                   plan={plans[b.id]}
                   settings={presetSettings(settings, b.path)}
