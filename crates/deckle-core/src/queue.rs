@@ -99,6 +99,9 @@ pub struct Finishing {
     /// Where the Word Wise database is found (each book has its own level). A push never
     /// downloads it.
     pub word_wise: WordWiseOptions,
+    /// This Kindle takes the paper as a PDF: of an edition queued both as `<stem>.kfx` and as
+    /// `<stem>.pdf`, the PDF goes and the KFX is dropped (else the other way round).
+    pub paper_pdf: bool,
 }
 
 /// `(entry number from 1, entries, queue name)`, called before each entry is delivered.
@@ -471,6 +474,19 @@ impl Queue {
                 _ => pending.push(entry),
             }
         }
+        // An edition queued as both a Kindle book and a PDF goes as the one this Kindle takes;
+        // the other is dropped once it has gone.
+        let names: Vec<String> = pending.iter().map(|e| queue_name(e)).collect();
+        let (pending, twins): (Vec<PathBuf>, Vec<PathBuf>) =
+            pending.into_iter().partition(|entry| {
+                let name = queue_name(entry);
+                let (stem, other) = match (name.strip_suffix(".kfx"), name.strip_suffix(".pdf")) {
+                    (Some(stem), _) if !is_prepared(entry) && finishing.paper_pdf => (stem, "pdf"),
+                    (_, Some(stem)) if !finishing.paper_pdf => (stem, "kfx"),
+                    _ => return true,
+                };
+                !names.contains(&format!("{stem}.{other}"))
+            });
         for (i, entry) in pending.iter().enumerate() {
             let io = |source| DeliverError::Io {
                 path: entry.clone(),
@@ -490,6 +506,12 @@ impl Queue {
             };
             report.delivered.push(path);
             remove_entry(entry).map_err(io)?;
+        }
+        for twin in &twins {
+            remove_entry(twin).map_err(|source| DeliverError::Io {
+                path: twin.clone(),
+                source,
+            })?;
         }
         if let Some(p) = prune {
             report.pruned = prune_named_on_except(conn, &p.prefix, p.keep, &p.exempt)?;
@@ -677,6 +699,56 @@ mod tests {
         assert!(q.pending().is_empty());
         assert!(kindle.join("deckle-daily-2026-10-20.kfx").exists());
         assert!(kindle.join("other.kfx").exists());
+    }
+
+    #[test]
+    fn an_edition_queued_as_both_goes_as_the_one_the_kindle_takes() {
+        for pdf in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            let src = tmp.path().join("p");
+            std::fs::write(&src, b"PAPER").unwrap();
+            q.add(&src, "deckle-daily-2026-11-03.kfx", Some("deckle-daily-"))
+                .unwrap();
+            q.add_keeping(
+                &src,
+                "deckle-daily-2026-11-03.pdf",
+                Some("deckle-daily-"),
+                &["deckle-daily-2026-11-03.kfx".to_owned()],
+            )
+            .unwrap();
+            // a PDF that's not an edition's twin goes either way
+            q.add(&src, "notes.pdf", None).unwrap();
+            assert_eq!(q.pending().len(), 3);
+            let kindle = tmp.path().join("kindle");
+            std::fs::create_dir_all(&kindle).unwrap();
+            std::fs::write(kindle.join("deckle-daily-2026-11-01.kfx"), b"OLD").unwrap();
+            std::fs::write(kindle.join("deckle-daily-2026-11-02.pdf"), b"OLD").unwrap();
+            let finishing = Finishing {
+                paper_pdf: pdf,
+                ..Default::default()
+            };
+            let prune = Prune {
+                prefix: "deckle-daily-".into(),
+                keep: 2,
+                ..Default::default()
+            };
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&Target::Folder(kindle.clone())),
+                    Some(&prune),
+                    &finishing,
+                    &mut |_, _, _| {},
+                )
+                .unwrap();
+            assert_eq!(r.delivered.len(), 2, "{pdf}");
+            assert!(q.pending().is_empty(), "the twin left too");
+            assert_eq!(kindle.join("deckle-daily-2026-11-03.pdf").exists(), pdf);
+            assert_eq!(kindle.join("deckle-daily-2026-11-03.kfx").exists(), !pdf);
+            assert!(kindle.join("notes.pdf").exists());
+            // old papers of either kind count toward `keep`
+            assert_eq!(r.pruned, ["deckle-daily-2026-11-01.kfx"]);
+        }
     }
 
     #[test]
@@ -1002,6 +1074,7 @@ mod tests {
                     database: None,
                     cache_dir: dir.join("empty-cache"),
                 },
+                paper_pdf: false,
             }
         }
 
@@ -1140,6 +1213,7 @@ mod tests {
                     database: Some(lexicon(tmp.path())),
                     cache_dir: tmp.path().join("cache"),
                 },
+                paper_pdf: false,
             };
             let prune = Prune {
                 prefix: "deckle-daily-".into(),

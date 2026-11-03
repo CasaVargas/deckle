@@ -264,6 +264,8 @@ commands! { ctx;
     } else {
         commands::set_illustrations_key(&ctx.state, key)
     },
+    set_kindle_paper { sync_id: String, paper: deckle_digest::config::PaperFormat } =>
+        commands::set_kindle_paper(sync_id, paper),
     set_settings { settings: Settings } => if ctx.web {
         commands::set_settings_masked(&ctx.state, settings)
     } else {

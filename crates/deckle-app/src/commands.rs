@@ -285,6 +285,9 @@ pub struct DeviceRow {
     pub sync_id: String,
     /// The name the owner gave it (`[sync.devices."<id>"] name`), if any.
     pub name: Option<String>,
+    /// How the paper goes to it: the Kindle book, or a PDF its pen writes on
+    /// (`[sync.devices."<id>"] paper`).
+    pub paper: deckle_digest::config::PaperFormat,
 }
 
 fn compat_messages(p: &DeviceProfile) -> Vec<String> {
@@ -307,6 +310,7 @@ pub fn device_rows(registry_file: &Path) -> Vec<DeviceRow> {
         let sync_id = deckle_core::sync::device_id(&Target::MassStorage(d.clone()));
         rows.push(DeviceRow {
             name: names.device_name(&sync_id),
+            paper: names.for_device(&sync_id).paper,
             sync_id,
             compat,
             firmware: p.firmware,
@@ -327,6 +331,7 @@ pub fn device_rows(registry_file: &Path) -> Vec<DeviceRow> {
         let sync_id = deckle_core::sync::device_id(&Target::Mtp(m.clone()));
         rows.push(DeviceRow {
             name: names.device_name(&sync_id),
+            paper: names.for_device(&sync_id).paper,
             sync_id,
             compat,
             firmware: p.firmware,
@@ -1311,6 +1316,30 @@ fn name_kindle_with(
 
 pub fn name_kindle(sync_id: String, name: String) -> Result<(), String> {
     name_kindle_at(&deckle_digest::config::default_path(), &sync_id, &name)
+}
+
+/// Sets how the paper goes to the Kindle `sync_id` in the Daily's config at `path`: the Kindle
+/// book, or a PDF laid out for a Kindle Scribe (from the next edition on).
+pub fn set_kindle_paper_at(
+    path: &Path,
+    sync_id: &str,
+    paper: deckle_digest::config::PaperFormat,
+) -> Result<(), String> {
+    let _lock = crate::config_write()?;
+    let mut cfg = match deckle_digest::Config::load(path) {
+        Ok(c) => c,
+        Err(_) if !path.exists() => deckle_digest::Config::default(),
+        Err(e) => return Err(e.to_string()),
+    };
+    cfg.sync.set_device_paper(sync_id, paper);
+    deckle_digest::config::save(path, &cfg)
+}
+
+pub fn set_kindle_paper(
+    sync_id: String,
+    paper: deckle_digest::config::PaperFormat,
+) -> Result<(), String> {
+    set_kindle_paper_at(&deckle_digest::config::default_path(), &sync_id, paper)
 }
 
 pub fn set_device_options(

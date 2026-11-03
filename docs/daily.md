@@ -357,10 +357,12 @@ in the EPUB (`images/s<n>-mini.png`, `-search.png`, …): a Kindle sets any HTML
 full-width box with a zoom button, which stretched the squares into wide rows. The
 PDF edition still draws the grid itself, in vector.
 
-- **Writing on it with a Scribe's pen.** The paper is a reflowable Kindle book, so the pen opens
-  an Active Canvas box or a sticky note (the ✓ and ✗ save or discard it); a Kindle only
-  takes ink straight on the page in a PDF. For puzzles you solve in ink, make a puzzle book
-  (`deckle puzzles`, a PDF; see [Puzzle books](puzzle-books.md)).
+- **Writing on it with a Scribe's pen.** The Kindle book reflows, so the pen opens an Active
+  Canvas box or a sticky note (the ✓ and ✗ save or discard it); a Kindle only takes ink
+  straight on the page in a PDF copied over USB. To write on the whole paper, crossword
+  included, send it to that Kindle as a PDF ([The paper as a PDF on a Kindle
+  Scribe](#the-paper-as-a-pdf-on-a-kindle-scribe)). For more puzzles in ink, make a puzzle
+  book (`deckle puzzles`; see [Puzzle books](puzzle-books.md)).
 
 - **Check your answers on a Kindle that keeps notes.** Highlight a clue, add a note with your
   answer (case, spaces and punctuation don't matter; for the ladder, highlight its line and write
@@ -952,6 +954,28 @@ like the Kobo, it hasn't been checked on a real one (`docs/devices.md`).
 Deckle remembers every Kobo and PocketBook it has seen in `readers.json` beside the app's
 `devices.json`; while that names one, `digest run` queues the paper for it, plugged in or not.
 
+## The paper as a PDF on a Kindle Scribe
+
+Each Kindle takes the paper as the Kindle book (the default) or as a PDF laid out for a Kindle
+Scribe's screen (1860 × 2480), the one kind of file its pen writes straight onto. The PDF is the
+[PDF edition](#the-pdf-edition-and-a-remarkable): fixed pages, the paper's fonts, the crossword
+grid in its place, gray photos.
+
+- **Choose it per Kindle:** on the Kindle tab, **Send the paper as → PDF to write on** (beside
+  its Name), or `deckle devices paper pdf` with it plugged in (`--kindle <name or sync id>`
+  for one that isn't, or with several connected; `book` goes back). It's saved as
+  `paper = "pdf"` under `[sync.devices."<id>"]` in `digest.toml`, and starts with the next
+  edition.
+- **How it goes:** while any Kindle asks for it, each run also makes the Scribe PDF and queues
+  `deckle-daily-<date>.pdf` beside the Kindle book. A Kindle set to PDF gets the PDF, any other
+  the book, and the one not sent is dropped when the other goes. Over USB only (mass storage
+  or MTP), and only on a computer with Kindle Previewer, like the book; email still sends the
+  book.
+- **Pruning** counts the PDFs with the books toward `keep`, and removes an old PDF with its
+  `.sdr` folder, which is where the Scribe keeps its ink.
+- **What you give up:** text size, Word Wise and X-Ray, and the puzzle check (it reads notes
+  on highlighted clues, which a PDF's ink isn't).
+
 ## The PDF edition and a reMarkable
 
 The paper can also be a PDF laid out for one screen: the page is the screen's size, so nothing is
@@ -961,7 +985,7 @@ section. The text is the paper's own fonts, so it can be searched and copied.
 (`docs/superpowers/specs/2026-10-23-pdf-edition-design.md`)
 
 Screens: `remarkable-2` (the default), `remarkable-paper-pro`, `remarkable-paper-pro-move`,
-`ipad`, `a5`.
+`ipad`, `a5`, `kindle-scribe`.
 
 - **In an export folder:** `format = "pdf"` and `screen = "…"` in an `[[export]]` block, or **As:
   PDF** on the Daily tab's Delivery → Export folders. Pruning counts `deckle-daily-*.pdf` there.

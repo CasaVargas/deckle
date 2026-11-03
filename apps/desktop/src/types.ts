@@ -185,7 +185,12 @@ export interface DeviceRow {
   sync_id: string;
   /** The name its owner gave it, if any. */
   name: string | null;
+  /** How the paper goes to it: the Kindle book, or a PDF its pen writes on. */
+  paper: PaperFormat;
 }
+
+/** How the paper goes to a Kindle (`paper` under `[sync.devices."<id>"]`). */
+export type PaperFormat = "book" | "pdf";
 
 export interface PlanRow {
   id: string;

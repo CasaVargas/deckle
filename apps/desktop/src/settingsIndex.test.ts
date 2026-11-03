@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { INDEX, PAGES, onlineLine, onlineOn, pageNotes, pageSummary, searchSettings, setupChecks, setupHeading } from "./settingsIndex";
 import type { DeviceRow, Settings } from "./types";
 
-const kindle = { key: "k", kind: "mass_storage", root: "/V", bus: 0, address: 0, model_hint: "Kindle Paperwhite", thumbnails_writable: true, cde_override: null, verified_real_asin: false, firmware: null, compat: [], sync_id: "s", name: "Paperwhite" } as DeviceRow;
+const kindle = { key: "k", kind: "mass_storage", root: "/V", bus: 0, address: 0, model_hint: "Kindle Paperwhite", thumbnails_writable: true, cde_override: null, verified_real_asin: false, firmware: null, compat: [], sync_id: "s", name: "Paperwhite", paper: "book" } as DeviceRow;
 
 describe("Search settings", () => {
   it("finds a setting by the words people type", () => {

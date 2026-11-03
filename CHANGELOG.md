@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The paper as a PDF on a Kindle Scribe.** Each Kindle can take the paper as the Kindle book
+  or as a PDF laid out for a Scribe's screen, which its pen writes straight onto: **Send the
+  paper as** on the Kindle tab, `deckle devices paper pdf|book [--kindle …]`, or
+  `paper = "pdf"` under `[sync.devices."<id>"]`. While any Kindle asks for it, the build also
+  makes a `kindle-scribe` PDF edition and queues it beside the Kindle book; each push sends the
+  one that Kindle takes and drops the other. Pruning counts `.pdf` papers with `.kfx` ones.
 - **The puzzle page no longer looks like tables on a Kindle.** The mini's grid and the word
   search, and yesterday's answers to both, are drawn as square PNG pictures in the EPUB instead
   of HTML tables, which a Kindle (Enhanced Typesetting) stretched to the column's width with a
