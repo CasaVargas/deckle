@@ -54,6 +54,7 @@ pub fn run() {
             wrap::list_devices,
             wrap::set_device_options,
             wrap::name_kindle,
+            wrap::set_kindle_paper,
             wrap::plan_books,
             wrap::previewer_status,
             wrap::get_settings,

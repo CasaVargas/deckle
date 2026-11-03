@@ -858,6 +858,21 @@ pub struct DeviceSync {
     /// What From Your Shelf calls this Kindle ("Mom's Kindle"); else the model.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// How the paper goes to this Kindle: the Kindle book (the default) or a PDF laid out for
+    /// a Kindle Scribe, the one kind of file its pen writes straight onto.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paper: Option<PaperFormat>,
+}
+
+/// How the paper goes to a Kindle (`paper` under `[sync.devices."<id>"]`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PaperFormat {
+    /// The Kindle book: reflowable, Word Wise, notes the puzzle page reads.
+    #[default]
+    Book,
+    /// A PDF for a Kindle Scribe's screen: fixed pages the pen writes on.
+    Pdf,
 }
 
 /// The actions settled for one device.
@@ -869,6 +884,8 @@ pub struct SyncActions {
     pub readership: bool,
     pub shelf: bool,
     pub cookbook: bool,
+    /// The paper goes to this Kindle as a PDF instead of the Kindle book.
+    pub paper: PaperFormat,
 }
 
 fn is_true(b: &bool) -> bool {
@@ -894,6 +911,7 @@ impl SyncConfig {
             shelf: exact.shelf.or(older.shelf),
             cookbook: exact.cookbook.or(older.cookbook),
             name: exact.name.or_else(|| older.name.clone()),
+            paper: exact.paper.or(older.paper),
         }
     }
 
@@ -911,6 +929,23 @@ impl SyncConfig {
             readership: d.readership.unwrap_or(self.readership),
             shelf: d.shelf.unwrap_or(self.shelf),
             cookbook: d.cookbook.unwrap_or(self.cookbook),
+            paper: d.paper.unwrap_or_default(),
+        }
+    }
+
+    /// Whether any Kindle takes the paper as a PDF, so the build makes the Scribe's.
+    pub fn any_pdf_paper(&self) -> bool {
+        self.devices
+            .values()
+            .any(|d| d.paper == Some(PaperFormat::Pdf))
+    }
+
+    /// Sets how the paper goes to the Kindle `id`; the Kindle book clears the setting.
+    pub fn set_device_paper(&mut self, id: &str, paper: PaperFormat) {
+        let entry = self.devices.entry(id.to_owned()).or_default();
+        entry.paper = (paper == PaperFormat::Pdf).then_some(paper);
+        if entry == &DeviceSync::default() {
+            self.devices.remove(id);
         }
     }
 
@@ -1130,6 +1165,10 @@ pub struct EmailConfig {
     pub username: String,
     /// Also queue the paper for USB when the email went out.
     pub usb_too: bool,
+    /// Attach the paper as a PDF laid out for a Kindle Scribe (its pen writes on it) instead
+    /// of the EPUB Amazon converts into a Kindle book.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pdf: bool,
 }
 
 impl Default for EmailConfig {
@@ -1142,6 +1181,7 @@ impl Default for EmailConfig {
             smtp_port: 587,
             username: String::new(),
             usb_too: false,
+            pdf: false,
         }
     }
 }
@@ -1611,6 +1651,7 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # smtp_port = 587            # 587 = STARTTLS, 465 = implicit TLS; anything else is refused
 # username = "you@example.com"
 # usb_too = false            # also queue the paper for USB when the email succeeds
+# pdf = false                # attach a PDF a Kindle Scribe's pen writes on, not the EPUB
 
 # A newspaper you subscribe to: the paper signs in as you to read its full articles. The
 # password is not stored here; it goes in the system keychain. One block per site.
@@ -2019,8 +2060,12 @@ impl Config {
         out
     }
 
-    /// The PDF editions the build makes: one per screen and photos an export folder or the
-    /// reMarkable asks for.
+    /// The PDF a Kindle that takes the paper as a PDF gets: a Scribe's screen, gray photos.
+    pub const KINDLE_PDF: (crate::pdf::Screen, Photos) =
+        (crate::pdf::Screen::KindleScribe, Photos::Gray);
+
+    /// The PDF editions the build makes: one per screen and photos an export folder, the
+    /// reMarkable or a Kindle taking the paper as a PDF asks for.
     pub fn pdfs_wanted(&self) -> Vec<(crate::pdf::Screen, Photos)> {
         let mut out: Vec<_> = self
             .export
@@ -2030,6 +2075,9 @@ impl Config {
             .collect();
         if self.remarkable.enabled {
             out.push((self.remarkable.screen, self.remarkable.photos()));
+        }
+        if self.sync.any_pdf_paper() || (self.email.enabled && self.email.pdf) {
+            out.push(Self::KINDLE_PDF);
         }
         out.sort_by_key(|(s, p)| (format!("{s:?}"), *p == Photos::Color));
         out.dedup();
@@ -2546,6 +2594,40 @@ mod tests {
     }
 
     #[test]
+    fn a_kindle_can_take_the_paper_as_a_pdf() {
+        let mut c = Config::default();
+        assert!(!c.sync.any_pdf_paper());
+        assert!(!c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        c.sync.set_device_paper("G000AAAA", PaperFormat::Pdf);
+        assert_eq!(c.sync.for_device("G000AAAA").paper, PaperFormat::Pdf);
+        // the same Kindle by its pre-serial id, and another Kindle keeps the book
+        assert_eq!(
+            c.sync.for_device("Kindle/Kindle#G000BBBB").paper,
+            PaperFormat::Book
+        );
+        assert!(c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        let text = toml::to_string(&c.sync).unwrap();
+        assert!(text.contains("paper = \"pdf\""), "{text}");
+        let back: SyncConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back.for_device("G000AAAA").paper, PaperFormat::Pdf);
+        // back to the book clears the entry it made
+        c.sync.set_device_paper("G000AAAA", PaperFormat::Book);
+        assert!(c.sync.devices.is_empty());
+        // an emailed PDF wants it too, while the email is on
+        c.email.pdf = true;
+        assert!(!c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        c.email.enabled = true;
+        assert!(c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        let text = toml::to_string(&c.email).unwrap();
+        assert!(text.contains("pdf = true"), "{text}");
+        assert!(
+            !toml::to_string(&EmailConfig::default())
+                .unwrap()
+                .contains("pdf")
+        );
+    }
+
+    #[test]
     fn sync_defaults_push_and_prune_for_any_device() {
         let c = Config::parse("").unwrap();
         let want = SyncActions {
@@ -2555,6 +2637,7 @@ mod tests {
             readership: true,
             shelf: true,
             cookbook: true,
+            paper: PaperFormat::Book,
         };
         assert_eq!(c.sync.for_device("G000"), want);
         assert_eq!(
@@ -2577,6 +2660,7 @@ mod tests {
             readership: true,
             shelf: true,
             cookbook: true,
+            paper: PaperFormat::Book,
         };
         assert_eq!(c.sync.for_device("G000"), actions(false, true, false));
         assert_eq!(

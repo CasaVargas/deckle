@@ -404,6 +404,9 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
         cli::Command::Devices {
             action: Some(cli::DevicesCommand::Name { name, kindle }),
         } => name_kindle(json, &name, kindle.as_deref()),
+        cli::Command::Devices {
+            action: Some(cli::DevicesCommand::Paper { format, kindle }),
+        } => paper_kindle(json, &format, kindle.as_deref()),
         cli::Command::Devices { action: None } => {
             let cfg = deckle_digest::Config::load(&deckle_digest::config::default_path())
                 .unwrap_or_default();
@@ -838,6 +841,57 @@ fn name_kindle(json: bool, name: &str, kindle: Option<&str>) -> Result<ExitCode,
     emit(json, &Named { id: &id, name }, || match name {
         "" => format!("{id}: name cleared"),
         n => format!("{id} is now \"{n}\""),
+    })?;
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `devices paper`: whether the paper goes to a Kindle (`kindle`, or the one connected) as the
+/// Kindle book or as a PDF for a Kindle Scribe.
+fn paper_kindle(json: bool, format: &str, kindle: Option<&str>) -> Result<ExitCode, String> {
+    use deckle_digest::config::PaperFormat;
+    let paper = match format {
+        "pdf" => PaperFormat::Pdf,
+        _ => PaperFormat::Book,
+    };
+    let path = deckle_digest::config::default_path();
+    let mut cfg = deckle_digest::Config::load(&path).unwrap_or_default();
+    let connected = connected_kindles();
+    let (id, label) = match kindle {
+        Some(k) => {
+            let c = choose_kindle(k, &cfg.sync, connected)?;
+            (c.id, c.label)
+        }
+        None => match connected.len() {
+            0 => {
+                return Err(
+                    "no Kindle connected; plug it in, or choose one with --kindle <name or sync id>"
+                        .into(),
+                );
+            }
+            1 => {
+                let id = deckle_core::sync::device_id(&connected[0]);
+                let label = cfg.sync.device_name(&id).unwrap_or_else(|| id.clone());
+                (id, label)
+            }
+            n => {
+                return Err(format!(
+                    "{n} Kindles are connected; choose one with --kindle <name or sync id> (`deckle devices` lists them)"
+                ));
+            }
+        },
+    };
+    cfg.sync.set_device_paper(&id, paper);
+    deckle_digest::config::save(&path, &cfg)?;
+    #[derive(serde::Serialize)]
+    struct Paper<'a> {
+        id: &'a str,
+        paper: PaperFormat,
+    }
+    emit(json, &Paper { id: &id, paper }, || match paper {
+        PaperFormat::Pdf => format!(
+            "{label} gets the paper as a PDF from the next edition on (a Kindle Scribe's pen writes on it)"
+        ),
+        PaperFormat::Book => format!("{label} gets the paper as the Kindle book"),
     })?;
     Ok(ExitCode::SUCCESS)
 }
@@ -3343,6 +3397,22 @@ fn digest(
                 };
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
             // design §7). A paper that went out by email skips the outbox unless `usb_too`.
+            // `[email] pdf`: the Scribe's PDF, which its pen writes on, instead of the EPUB
+            let attach = match cfg.email.pdf {
+                true => {
+                    let (screen, photos) = deckle_digest::Config::KINDLE_PDF;
+                    match built.pdf(screen, photos) {
+                        Some(p) => p.to_path_buf(),
+                        None => {
+                            built.notes.push(
+                                "the Kindle's PDF wasn't built; the email carries the EPUB".into(),
+                            );
+                            built.epub.clone()
+                        }
+                    }
+                }
+                false => built.epub.clone(),
+            };
             let (email, to_usb) = match &folder {
                 Some(_) => (None, true),
                 None => email_paper(
@@ -3350,7 +3420,7 @@ fn digest(
                     cfg.paper.as_ref().map(|_| cfg.title.as_str()),
                     &deckle_digest::edition_stem(&cfg, date),
                     date,
-                    &built.epub,
+                    &attach,
                     &deckle_digest::secret::SystemKeyring,
                     &|k| std::env::var(k).ok(),
                     |pw| deckle_digest::mail::SmtpMailer::new(&cfg.email, pw),
@@ -3426,6 +3496,18 @@ fn digest(
                             &exempt,
                             bound.as_deref(),
                         )?;
+                        // A Kindle that takes the paper as a PDF gets this twin instead.
+                        if let Some(note) = queue_kindle_pdf(
+                            &queue,
+                            &cfg,
+                            &built,
+                            date,
+                            &name,
+                            &exempt,
+                            bound.as_deref(),
+                        ) {
+                            built.notes.push(note);
+                        }
                         outcome = push_queued(&path, &queue, &all_papers(&path)?, detect_kindle())?;
                     }
                 }
@@ -4549,6 +4631,41 @@ fn queue_edition(
     Ok(())
 }
 
+/// Puts the paper's Kindle Scribe PDF in `queue` beside the Kindle book `book` (same stem), for
+/// the Kindles that take the paper as a PDF (`paper = "pdf"`): each push sends one of the two.
+/// Nothing when no Kindle asks for it; a note when it should have been built and wasn't.
+fn queue_kindle_pdf(
+    queue: &deckle_core::queue::Queue,
+    cfg: &deckle_digest::Config,
+    built: &deckle_digest::BuildReport,
+    date: deckle_digest::chrono::NaiveDate,
+    book: &str,
+    exempt: &[String],
+    owner: Option<&str>,
+) -> Option<String> {
+    if !cfg.sync.any_pdf_paper() {
+        return None;
+    }
+    let (screen, photos) = deckle_digest::Config::KINDLE_PDF;
+    let Some(pdf) = built.pdf(screen, photos) else {
+        return Some("the Kindle's PDF of the paper wasn't built".into());
+    };
+    let name = format!("{}.pdf", deckle_digest::edition_stem(cfg, date));
+    // today's Kindle book stays queued: only yesterday's undelivered files are superseded
+    let mut keep = exempt.to_vec();
+    keep.push(book.to_owned());
+    queue
+        .add_keeping_for(
+            pdf,
+            &name,
+            Some(&deckle_digest::edition_prefix(cfg)),
+            &keep,
+            owner,
+        )
+        .err()
+        .map(|e| format!("the Kindle's PDF of the paper wasn't queued: {e}"))
+}
+
 /// The paper's build: into `converted`, always PDOC, because the cover is the front page and
 /// must always show (design §5).
 fn paper_options(previewer: Option<PathBuf>, keep_work_dir: bool, converted: &Path) -> RunOptions {
@@ -5598,6 +5715,7 @@ fn sync_to(
         deckle_core::devices::DeviceRegistry::load(&deckle_core::devices::default_registry_file());
     let finishing = deckle_core::queue::Finishing {
         profile: deckle_core::devices::profile_for(target, &registry),
+        paper_pdf: cfg.sync.for_device(&id).paper == deckle_digest::config::PaperFormat::Pdf,
         ..Default::default()
     };
     // Each paper keeps its own readership (many papers §4): every paper's stems are read in
@@ -6763,6 +6881,7 @@ mod email_tests {
             smtp_port: 465,
             username: "me@example.com".into(),
             usb_too,
+            pdf: false,
         }
     }
 

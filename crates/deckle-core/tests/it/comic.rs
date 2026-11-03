@@ -509,6 +509,7 @@ fn a_queued_comic_flushes_as_azw3_and_so_does_its_fallback() {
             database: None,
             cache_dir: dir.path().join("cache"),
         },
+        paper_pdf: false,
     };
     let q = Queue::new(dir.path().join("outbox"));
     let flush = |kindle: &Path| {

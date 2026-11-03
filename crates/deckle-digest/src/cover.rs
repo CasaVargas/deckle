@@ -39,7 +39,7 @@ pub(crate) struct Canvas {
     img: GrayImage,
 }
 
-fn width_of(font: &FontRef, size: f32, text: &str) -> f32 {
+pub(crate) fn width_of(font: &FontRef, size: f32, text: &str) -> f32 {
     let f = font.as_scaled(PxScale::from(size));
     let mut w = 0.0;
     let mut prev = None;
@@ -93,7 +93,7 @@ fn wrap(font: &FontRef, size: f32, text: &str, max_width: f32, max_lines: usize)
 
 impl Canvas {
     /// Draws `text` in `ink` with its baseline at `y`, starting at `x`.
-    fn text(&mut self, font: &FontRef, size: f32, x: f32, y: f32, text: &str, ink: u8) {
+    pub(crate) fn text(&mut self, font: &FontRef, size: f32, x: f32, y: f32, text: &str, ink: u8) {
         let scale = PxScale::from(size);
         let f = font.as_scaled(scale);
         let mut caret = x;
@@ -145,7 +145,7 @@ impl Canvas {
         self.text(font, size, x, y, text, BLACK);
     }
 
-    fn fill(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, ink: u8) {
+    pub(crate) fn fill(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, ink: u8) {
         let (w, h) = self.img.dimensions();
         for y in y0.max(0.0) as u32..(y1 as u32).min(h) {
             for x in x0.max(0.0) as u32..(x1 as u32).min(w) {
@@ -223,6 +223,15 @@ fn fonts(masthead: Masthead) -> Result<Fonts<'static>, String> {
         bold: font(SERIF_BOLD)?,
         italic: font(SERIF_ITALIC)?,
     })
+}
+
+/// The canvas as a grayscale PNG: lossless, so thin rules stay crisp on e-ink.
+pub(crate) fn png(c: Canvas) -> Vec<u8> {
+    let mut out = Vec::new();
+    c.img
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+        .expect("a PNG encodes into memory");
+    out
 }
 
 fn jpeg(c: Canvas) -> Result<Vec<u8>, String> {

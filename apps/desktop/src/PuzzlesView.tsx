@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { platform } from "./platform";
 import PuzzlePreview from "./PuzzlePreview";
-import { CLUE_STYLES, DIFFICULTIES, SCREENS, SUNDAY_DEFAULT, bookLine, clueLine, interestRows, ipadLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices, solvedLine, sundayLine, themeChips } from "./puzzleBooks";
+import { CLUE_STYLES, DIFFICULTIES, SCREENS, SUNDAY_DEFAULT, bookLine, clueLine, elapsed, interestRows, ipadLine, makingShare, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices, solvedLine, stageLine, sundayLine, themeChips } from "./puzzleBooks";
 import type { SettingsPage } from "./settingsIndex";
 import type { DeviceRow, MadePuzzleBook, PuzzleBookRequest, PuzzleBundleTarget, PuzzleKind, PuzzlePreview as Preview, PuzzleProgress, PuzzleSources, PuzzlesConfig, RunTarget } from "./types";
 
@@ -30,6 +30,14 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
   const [previewing, setPreviewing] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [making, setMaking] = useState<PuzzleProgress | null>(null);
+  // when the make began, for the elapsed time beside the progress
+  const [started, setStarted] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (started === null) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [started]);
   const [books, setBooks] = useState<MadePuzzleBook[]>([]);
   const [sending, setSending] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -106,7 +114,9 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
   const make = async () => {
     if (!request) return;
     setNote(null);
-    setMaking({ made: 0, of: request.count });
+    setMaking({ stage: "words", made: 0, of: 0 });
+    setStarted(Date.now());
+    setNow(Date.now());
     try {
       const made = await api.puzzlesMake(request);
       setNote(`${made.name}: ${made.pages} pages${made.warnings.length ? `. ${made.warnings.join(". ")}` : ""}`);
@@ -115,6 +125,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
       onNotice(String(e));
     } finally {
       setMaking(null);
+      setStarted(null);
     }
   };
   const send = async (book: MadePuzzleBook, target: RunTarget, replace = false, asBundle = false) => {
@@ -163,6 +174,8 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
   };
 
   const own = kind ? ownListPrompt(kind) : null;
+  // the AI's clue step only runs for a crossword with styled clues
+  const styled = request?.kind === "crossword" && request.clue_style !== "plain";
   const chips = kind ? themeChips(kind, sources) : [];
   const wordKind = chips.length > 0;
   const showOwn = own && (!wordKind || request?.theme === "own");
@@ -214,6 +227,17 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                         </button>
                       ))}
                     </div>
+                    {chips.some((c) => c.off) && (
+                      <ul className="puzzles-off muted small" aria-label="Why some themes are off">
+                        {chips
+                          .filter((c) => c.off)
+                          .map((c) => (
+                            <li key={c.key}>
+                              <strong>{c.label}</strong>: {c.off}
+                            </li>
+                          ))}
+                      </ul>
+                    )}
                     {request.theme === "interests" && (
                       <div className="puzzles-interests">
                         {interestRows(sources).map((r) => {
@@ -356,13 +380,17 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
 
                 <div className="puzzles-actions">
                   <button className="primary" onClick={make} disabled={!!wrong || !!making}>
-                    {making ? makingLine(request.kind, making.made, making.of) : "Make the book"}
+                    {making ? "Making the book…" : "Make the book"}
                   </button>
                   {making && (
-                    <div className="progress" aria-label="Making the book">
+                    <div className="progress puzzles-progress" aria-label="Making the book" role="status">
                       <div className="progress-track">
-                        <div className="progress-fill" style={{ width: `${making.of ? (making.made * 100) / making.of : 0}%` }} />
+                        <div className="progress-fill" style={{ width: `${Math.round(makingShare(making, styled) * 100)}%` }} />
                       </div>
+                      <span className="small">
+                        {stageLine(request.kind, making, styled)}
+                        <span className="muted"> · {Math.round(makingShare(making, styled) * 100)}% · {elapsed(started === null ? 0 : (now - started) / 1000)}</span>
+                      </span>
                     </div>
                   )}
                   <span className="muted small">Kept in ~/Deckle/Puzzles. Then send it, or save a copy, from Your books below.</span>

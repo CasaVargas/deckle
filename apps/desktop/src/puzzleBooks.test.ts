@@ -61,7 +61,7 @@ describe("the Puzzles tab", () => {
   });
 });
 
-import { CLUE_STYLES, clueLine, interestRows, themeChips } from "./puzzleBooks";
+import { CLUE_STYLES, clueLine, elapsed, interestRows, makingShare, stageLine, themeChips } from "./puzzleBooks";
 import type { PuzzleSources } from "./types";
 
 describe("themes and clues", () => {
@@ -70,11 +70,17 @@ describe("themes and clues", () => {
     const chips = themeChips(cross, sources);
     expect(chips.map((c) => c.key)).toEqual(["none", "own", "interests", "week", "vocab", "cookbook", "subject"]);
     expect(chips[2].tag).toBe("50 words");
-    expect(chips[4].off).toBe("no Kindle has shared its vocabulary yet");
+    expect(chips[4].off).toBe("no Kindle has shared the words it looked up yet (a Kindle Scribe 2024 doesn't over USB)");
     expect(chips[6]).toEqual({ key: "subject", label: "A subject", off: null, tag: "AI" });
     expect(themeChips(cross, { ...sources, ai: null })[6].off).toBe("needs the AI: Settings → AI");
     expect(themeChips(sudoku, sources)).toEqual([]);
     expect(themeChips(cross, null)[2].off).toBeNull();
+    // with nothing kept, the reason says where the words would come from
+    const none = { ...sources, sources: { ...sources.sources, interests: [["The Gazette", "Rust", 0]] as [string, string, number][], week: 0 } };
+    expect(themeChips(cross, none)[3].off).toMatch(/last 7 days/);
+    const noPage = { ...none, sources: { ...none.sources, puzzle_page: false } };
+    expect(themeChips(cross, noPage)[2].off).toMatch(/no Puzzle page/);
+    expect(themeChips(cross, noPage)[3].off).toMatch(/no Puzzle page/);
   });
   it("lists interests, naming the paper only when there are several", () => {
     expect(interestRows(sources).map((r) => r.label)).toEqual(["Rust", "Panthers"]);
@@ -87,5 +93,20 @@ describe("themes and clues", () => {
     expect(clueLine("plain", null)).toMatch(/Wiktionary/);
     expect(clueLine("cryptic", null)).toMatch(/Settings → AI/);
     expect(clueLine("kid", "Ollama on this computer")).toMatch(/on Ollama on this computer/);
+  });
+});
+
+describe("making progress", () => {
+  it("says the step and how far the whole make is", () => {
+    expect(stageLine("crossword", { stage: "words", made: 0, of: 0 }, false)).toBe("Step 1 of 3 · Gathering the words…");
+    expect(stageLine("crossword", { stage: "puzzles", made: 3, of: 10 }, false)).toBe("Step 2 of 3 · Making puzzle 4 of 10…");
+    expect(stageLine("crossword", { stage: "clues", made: 0, of: 10 }, true)).toBe("Step 3 of 4 · The AI is rewriting the clues, puzzle 1 of 10…");
+    expect(stageLine("crossword", { stage: "pages", made: 0, of: 0 }, true)).toBe("Step 4 of 4 · Laying out the pages…");
+    expect(makingShare({ stage: "words", made: 0, of: 0 }, false)).toBe(0);
+    expect(makingShare({ stage: "puzzles", made: 5, of: 10 }, false)).toBeCloseTo(0.475);
+    expect(makingShare({ stage: "pages", made: 0, of: 0 }, false)).toBeCloseTo(0.9);
+    expect(makingShare({ stage: "clues", made: 5, of: 10 }, true)).toBeCloseTo(0.75);
+    expect(elapsed(42)).toBe("0:42");
+    expect(elapsed(125)).toBe("2:05");
   });
 });

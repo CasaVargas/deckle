@@ -499,11 +499,26 @@ pub fn puzzles_preview(r: BookRequest) -> Result<PreviewDto, String> {
     })
 }
 
-/// One `puzzles-progress` event.
+/// One `puzzles-progress` event: where the make is, and how far through that step.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProgressEvent {
+    /// `words` (the theme's words, maybe from the AI), `puzzles` (one by one), `clues` (the AI
+    /// restyling them, puzzle by puzzle), `pages` (the PDF laid out and saved).
+    pub stage: String,
     pub made: usize,
     pub of: usize,
+}
+
+fn progress(events: &dyn Events, stage: &str, made: usize, of: usize) {
+    events.emit(
+        "puzzles-progress",
+        serde_json::to_value(ProgressEvent {
+            stage: stage.to_owned(),
+            made,
+            of,
+        })
+        .unwrap_or(serde_json::Value::Null),
+    );
 }
 
 /// A book in the folder, with the request that made it.
@@ -542,20 +557,19 @@ struct Made {
 /// Makes the book `r` asks for, telling `puzzles-progress` as it goes: one `make` call, so
 /// the PDF and a bundle of the same request, seed and date are the same book.
 fn make_book(events: &dyn Events, r: &BookRequest) -> Result<Made, String> {
+    progress(events, "words", 0, 0);
     let (o, page, mut warnings, plan, found) = prepared(r)?;
     let mut b = book::make_with(&o, Words::embedded(), &mut |made, of| {
-        events.emit(
-            "puzzles-progress",
-            serde_json::to_value(ProgressEvent { made, of }).unwrap_or(serde_json::Value::Null),
-        );
+        progress(events, "puzzles", made, of);
     })
     .map_err(|e| e.to_string())?;
-    plan::restyle(
+    plan::restyle_with(
         &mut b,
         &plan,
         &found.about,
         ai_config().as_ref(),
         &mut deckle_xray::llm::http_post,
+        &mut |made, of| progress(events, "clues", made, of),
     );
     if !found.note.is_empty() {
         warnings.insert(0, found.note.clone());
@@ -579,6 +593,7 @@ pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook,
         page,
         ..
     } = make_book(events.as_ref(), &r)?;
+    progress(events.as_ref(), "pages", 0, 0);
     let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
     let dir = folder();
     std::fs::create_dir_all(&dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;

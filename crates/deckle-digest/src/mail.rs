@@ -117,6 +117,19 @@ pub fn paper_message(
     date: NaiveDate,
     epub: Vec<u8>,
 ) -> Outgoing {
+    paper_message_as(cfg, title, stem, date, epub, "epub")
+}
+
+/// [`paper_message`] with the attachment `<stem>.<ext>`: `pdf` for the Scribe's PDF. The
+/// subject never says "convert", so Amazon keeps a PDF a PDF.
+pub fn paper_message_as(
+    cfg: &EmailConfig,
+    title: Option<&str>,
+    stem: &str,
+    date: NaiveDate,
+    bytes: Vec<u8>,
+    ext: &str,
+) -> Outgoing {
     Outgoing {
         to: cfg.to.trim().to_owned(),
         from: cfg.from.trim().to_owned(),
@@ -127,7 +140,7 @@ pub fn paper_message(
         ),
         body: "Today's Deckle Daily is attached; Send-to-Kindle puts it in your Kindle's Docs."
             .into(),
-        attachment: (format!("{stem}.epub"), epub),
+        attachment: (format!("{stem}.{ext}"), bytes),
     }
 }
 
@@ -146,7 +159,7 @@ pub fn email_edition<M: Mailer>(
 }
 
 /// [`email_edition`] for one paper (many papers §4): its own `to`, on the account `cfg`
-/// carries; `title` `None` for the main paper.
+/// carries; `title` `None` for the main paper. A `.pdf` at `epub` goes as a PDF (`[email] pdf`).
 #[allow(clippy::too_many_arguments)]
 pub fn email_paper<M: Mailer>(
     cfg: &EmailConfig,
@@ -161,8 +174,12 @@ pub fn email_paper<M: Mailer>(
     if !cfg.enabled {
         return None;
     }
+    let ext = match epub.extension().is_some_and(|x| x == "pdf") {
+        true => "pdf",
+        false => "epub",
+    };
     let sent = send_file(cfg, epub, keys, env, connect, |bytes| {
-        paper_message(cfg, title, stem, date, bytes)
+        paper_message_as(cfg, title, stem, date, bytes, ext)
     });
     Some(match sent {
         Ok(src) => EmailReport {
@@ -315,7 +332,11 @@ impl Mailer for SmtpMailer {
             a.parse::<lettre::message::Mailbox>()
                 .map_err(|e| MailError::Config(format!("[email] {what} = {a:?}: {e}")))
         };
-        let epub = ContentType::parse("application/epub+zip").expect("a valid MIME type");
+        let kind = match msg.attachment.0.ends_with(".pdf") {
+            true => "application/pdf",
+            false => "application/epub+zip",
+        };
+        let epub = ContentType::parse(kind).expect("a valid MIME type");
         let email = lettre::Message::builder()
             .from(address("from", &msg.from)?)
             .to(address("to", &msg.to)?)
@@ -373,6 +394,7 @@ mod tests {
             smtp_port: 587,
             username: "me@example.com".into(),
             usb_too: false,
+            pdf: false,
         }
     }
 
@@ -428,6 +450,31 @@ mod tests {
         let p = dir.join("deckle-daily-2026-10-21.epub");
         std::fs::write(&p, b"PK fake epub").unwrap();
         p
+    }
+
+    #[test]
+    fn a_pdf_paper_goes_out_as_a_pdf() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("deckle-daily-2026-10-21.pdf");
+        std::fs::write(&p, b"%PDF-1.7 fake").unwrap();
+        let rec = Recording::default();
+        let r = email_paper(
+            &cfg(),
+            None,
+            "deckle-daily-2026-10-21",
+            date(),
+            &p,
+            &keys(),
+            &no_env,
+            |_| &rec,
+        )
+        .unwrap();
+        assert_eq!(r.email_error, None);
+        let sent = rec.sent.borrow();
+        assert_eq!(sent[0].attachment.0, "deckle-daily-2026-10-21.pdf");
+        assert_eq!(sent[0].attachment.1, b"%PDF-1.7 fake");
+        // "convert" in the subject would make Amazon turn it into a Kindle book
+        assert!(!sent[0].subject.to_lowercase().contains("convert"));
     }
 
     #[test]

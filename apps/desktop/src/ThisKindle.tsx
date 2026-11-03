@@ -3,7 +3,7 @@ import { platform } from "./platform";
 import { useEffect, useState } from "react";
 import { api } from "./api";
 import { connectedBy, defaultSpare, freesLine, size, spaceSlices, spareGroups, spareLine } from "./kindleRooms";
-import type { BackupReport, DeviceRow, DeviceShelf, RunTarget } from "./types";
+import type { BackupReport, DeviceRow, DeviceShelf, PaperFormat, RunTarget } from "./types";
 
 interface Props {
   target: RunTarget;
@@ -39,6 +39,25 @@ export default function ThisKindle({ target, device, shelf, busy, onChanged, onN
       onNotice(String(e));
     } finally {
       setNaming(false);
+    }
+  };
+  const [paper, setPaper] = useState<PaperFormat>(device?.paper ?? "book");
+  useEffect(() => setPaper(device?.paper ?? "book"), [device?.sync_id, device?.paper]);
+  const savePaper = async (next: PaperFormat) => {
+    if (!device) return;
+    const before = paper;
+    setPaper(next);
+    try {
+      await api.setKindlePaper(device.sync_id, next);
+      await onRenamed();
+      onNotice(
+        next === "pdf"
+          ? "The paper comes to this Kindle as a PDF from the next edition on. On a Scribe, the pen writes straight on it."
+          : "The paper comes to this Kindle as the Kindle book from the next edition on.",
+      );
+    } catch (e) {
+      setPaper(before);
+      onNotice(String(e));
     }
   };
   const [ticked, setTicked] = useState<Set<string>>(() => defaultSpare(shelf.spare));
@@ -219,6 +238,23 @@ export default function ThisKindle({ target, device, shelf, busy, onChanged, onN
             </div>
             <p className="muted small">
               {device.model_hint} · {connectedBy(device.kind)}. A name tells it apart from others in the house; books sent to it by name wait until it's plugged in.
+            </p>
+          </section>
+        )}
+
+        {device && (
+          <section className="tk-card" aria-label="The paper">
+            <label className="tk-label" htmlFor="kindle-paper">
+              Send the paper as
+            </label>
+            <select id="kindle-paper" value={paper} disabled={busy} onChange={(e) => savePaper(e.target.value as PaperFormat)}>
+              <option value="book">Kindle book</option>
+              <option value="pdf">PDF to write on</option>
+            </select>
+            <p className="muted small">
+              {paper === "pdf"
+                ? "Pages laid out for a Kindle Scribe's screen. The pen writes straight on them, the crossword included. No Word Wise, and the text size is fixed."
+                : "Text you can resize, with Word Wise. On a Scribe the pen opens a note instead of writing on the page."}
             </p>
           </section>
         )}

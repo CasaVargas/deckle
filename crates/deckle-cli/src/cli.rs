@@ -850,6 +850,15 @@ pub enum DevicesCommand {
         #[arg(long)]
         kindle: Option<String>,
     },
+    /// How the paper goes to a Kindle: `book` (the Kindle book, the default) or `pdf`, laid out
+    /// for a Kindle Scribe, which its pen writes straight onto.
+    Paper {
+        #[arg(value_parser = ["book", "pdf"])]
+        format: String,
+        /// The Kindle, by its name or sync id; else the one connected.
+        #[arg(long)]
+        kindle: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
