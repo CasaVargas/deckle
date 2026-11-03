@@ -4,7 +4,13 @@
 //! `.deckle-returns/<reader-id>/<edition date>.json`. Versions 1.0 to 1.2 are read; 1.2
 //! (puzzle book bundle design §4.1) adds the daily word search's found words. A file this
 //! Deckle can't read is skipped, never an error for the morning.
+//!
+//! Puzzle books have their own returns (puzzle book bundle design §4,
+//! `docs/formats/deckle-puzzle-returns.schema.json`): one file per book and reader under
+//! `.deckle-returns/<reader-id>/puzzles/<book-id>.json`, read by [`read_books`] and merged
+//! across readers by the latest `last` per puzzle.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -129,6 +135,156 @@ pub fn search_of(returns: &[Returns]) -> Option<SearchReturn> {
         })
         .max_by_key(|(at, _)| *at)
         .map(|(_, s)| s.clone())
+}
+
+/// The puzzle book returns format (puzzle book bundle design §4).
+pub const PUZZLES_FORMAT: &str = "deckle-puzzle-returns";
+/// The versions of it this reads.
+pub const PUZZLES_VERSIONS: [&str; 1] = ["1.0"];
+/// The folder under a reader's, where its book returns go.
+pub const PUZZLES_DIR: &str = "puzzles";
+
+/// What one reader wrote about one puzzle book.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PuzzleBookReturns {
+    pub format: String,
+    pub version: String,
+    pub reader: Reader,
+    /// The book's id (`book.json`'s `book.id`).
+    pub book: Uuid,
+    pub updated_at: DateTime<Utc>,
+    pub puzzles: Vec<PuzzleState>,
+}
+
+/// One puzzle's state (§4): `done` is the reader's check, sticky once true; the rest is the
+/// reader's own ink, per kind, kept so a reader can be restored and shown but not read here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PuzzleState {
+    /// 1-based, the book's `n`.
+    pub n: usize,
+    pub done: bool,
+    #[serde(default)]
+    pub seconds: f64,
+    pub last: DateTime<Utc>,
+    /// A crossword's letters, `#` blacks, a space empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<Vec<String>>,
+    /// A word search's words found.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found: Option<Vec<String>>,
+    /// A sudoku's squares, `.` empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cells: Option<Vec<String>>,
+    /// A ladder's blank rungs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rungs: Option<Vec<String>>,
+    /// A cryptogram's key: 26 characters, the plaintext guessed for each cipher letter A–Z,
+    /// `.` unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// A nonogram's marks: `#` shaded, `x` marked clear, `.` untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marks: Option<Vec<String>>,
+}
+
+/// A puzzle book returns file's contents, when its format is ours and its version one this
+/// reads.
+pub fn parse_book(bytes: &[u8]) -> Result<PuzzleBookReturns, String> {
+    let r: PuzzleBookReturns = serde_json::from_slice(bytes).map_err(|e| e.to_string())?;
+    if r.format != PUZZLES_FORMAT {
+        return Err(format!("format {:?} isn't {PUZZLES_FORMAT}", r.format));
+    }
+    if !PUZZLES_VERSIONS.contains(&r.version.as_str()) {
+        return Err(format!(
+            "version {} isn't one of {}",
+            r.version,
+            PUZZLES_VERSIONS.join(", ")
+        ));
+    }
+    Ok(r)
+}
+
+/// Every reader's puzzle book returns under `root` (the export folder), by reader id then
+/// book. A file that doesn't parse is noted on stderr and skipped; a book Deckle no longer
+/// has is for the caller to ignore.
+pub fn read_books(root: &Path) -> Vec<PuzzleBookReturns> {
+    let dir = root.join(DIR);
+    let Ok(readers) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut readers: Vec<_> = readers.flatten().map(|e| e.path()).collect();
+    readers.sort();
+    let mut out = Vec::new();
+    for reader in readers.into_iter().filter(|p| p.is_dir()) {
+        let Ok(files) = std::fs::read_dir(reader.join(PUZZLES_DIR)) else {
+            continue;
+        };
+        let mut files: Vec<_> = files
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        files.sort();
+        for file in files {
+            let Ok(bytes) = std::fs::read(&file) else {
+                continue;
+            };
+            match parse_book(&bytes) {
+                Ok(r) => out.push(r),
+                Err(e) => eprintln!("returns: skipping {}: {e}", file.display()),
+            }
+        }
+    }
+    out
+}
+
+/// The book's puzzles across readers, by `n`: for each puzzle, the state with the latest
+/// `last` wins, as edition returns are merged by the latest reader (§12), except that `done`
+/// is sticky: once any reader checked it, it's solved.
+pub fn merge_book(returns: &[PuzzleBookReturns], book: Uuid) -> BTreeMap<usize, PuzzleState> {
+    let mut out: BTreeMap<usize, PuzzleState> = BTreeMap::new();
+    for state in returns
+        .iter()
+        .filter(|r| r.book == book)
+        .flat_map(|r| r.puzzles.iter())
+    {
+        match out.get_mut(&state.n) {
+            Some(have) => {
+                let done = have.done || state.done;
+                if state.last > have.last {
+                    *have = state.clone();
+                }
+                have.done = done;
+            }
+            None => {
+                out.insert(state.n, state.clone());
+            }
+        }
+    }
+    out
+}
+
+/// How far the book got on its readers: solved puzzles, the book's count, and the seconds
+/// spent, from every reader's returns in `roots` (export folders). `None` when no reader has
+/// written about it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Solved {
+    pub done: usize,
+    pub of: usize,
+    pub seconds: f64,
+}
+
+/// [`Solved`] for `book` (of `of` puzzles) from `returns`.
+pub fn solved(returns: &[PuzzleBookReturns], book: Uuid, of: usize) -> Option<Solved> {
+    if !returns.iter().any(|r| r.book == book) {
+        return None;
+    }
+    let merged = merge_book(returns, book);
+    Some(Solved {
+        done: merged.values().filter(|p| p.done).count(),
+        of,
+        seconds: merged.values().map(|p| p.seconds).sum(),
+    })
 }
 
 #[cfg(test)]

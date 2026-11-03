@@ -2163,3 +2163,100 @@ fn a_bundle_whose_yesterday_had_no_search_validates() {
         puzzle["yesterday"]
     );
 }
+
+// --- Sunday's book beside the edition (puzzle book bundle design §5, §6) ---
+
+#[test]
+fn sundays_book_is_written_beside_the_edition_and_never_pruned_or_replaced() {
+    use deckle_digest::puzzle::book::sunday;
+    let out = tempfile::tempdir().unwrap();
+    let ipad = out.path().join("ipad");
+    std::fs::create_dir(&ipad).unwrap();
+    let mut c = config();
+    bundle_export(&mut c, &ipad, false);
+    c.paper_id = Some("0f0e0d0c-0b0a-5908-8706-050403020100".parse().unwrap());
+    c.puzzles = deckle_digest::config::PuzzlesConfig {
+        sunday: true,
+        kind: "maze".into(),
+        count: 2,
+        size: 8,
+        theme: "none".into(),
+        ..Default::default()
+    };
+    assert!(
+        !sunday::is_due(&c, date()),
+        "2026-10-20 is a Tuesday: the morning run asks is_due first"
+    );
+    let built = out.path().join("build");
+    let r = build(&c, date(), now(), &built, &fake).unwrap();
+    let exports = deckle_digest::export::export_all(&c.export, date(), &r);
+    assert_eq!(exports[0].error, None);
+    let edition = ipad.join("deckle-daily-2026-10-20.deckle");
+    assert!(edition.is_dir(), "the edition first");
+    let mut post =
+        |_: &str, _: &[(String, String)], _: &str| Err::<String, String>("offline".into());
+    let books = sunday::write_beside(&c, &built, date(), now(), &exports, None, &mut post);
+    assert_eq!(books.len(), 1);
+    assert_eq!(books[0].error, None, "{:?}", books[0]);
+    assert!(!books[0].kept);
+    let book = books[0].path.clone().unwrap();
+    assert_eq!(book.parent().unwrap(), ipad);
+    assert_eq!(
+        book.file_name().unwrap().to_string_lossy(),
+        format!("deckle-puzzles-mazes-2026-10-20-{:04x}.decklepuzzles", {
+            let json = deckle_digest::puzzle::book::bundle::read(&book).unwrap();
+            u64::from_str_radix(&json.book.seed, 16).unwrap() >> 48
+        })
+    );
+    deckle_digest::puzzle::book::bundle::verify(&book).unwrap();
+    let json = deckle_digest::puzzle::book::bundle::read(&book).unwrap();
+    assert_eq!(json.book.sunday_of, Some(date()));
+    assert_eq!(json.book.paper_id, c.paper_id);
+    assert_eq!(json.puzzles.len(), 2);
+    // the same morning run again: the book is left as it is (its ink may be on it)
+    let again = sunday::write_beside(&c, &built, date(), now(), &exports, None, &mut post);
+    assert!(again[0].kept && again[0].path.as_deref() == Some(book.as_path()));
+    assert!(sunday::lines(&again).contains("already there"));
+    // keep = 2 prunes editions, never books
+    for d in ["2026-10-17", "2026-10-18"] {
+        std::fs::create_dir(ipad.join(format!("deckle-daily-{d}.deckle"))).unwrap();
+    }
+    let exports = deckle_digest::export::export_all(&c.export, date(), &r);
+    assert_eq!(exports[0].pruned.len(), 1);
+    assert!(book.is_dir());
+    // a run whose export failed writes no book there
+    let failed = vec![deckle_digest::export::ExportReport {
+        name: "iPad app".into(),
+        dir: ipad.clone(),
+        error: Some("no such folder".into()),
+        ..Default::default()
+    }];
+    assert!(sunday::write_beside(&c, &built, date(), now(), &failed, None, &mut post).is_empty());
+}
+
+#[test]
+fn yesterdays_returns_from_a_bundle_export_tick_the_word_search() {
+    let out = tempfile::tempdir().unwrap();
+    let ipad = out.path().join("ipad");
+    std::fs::create_dir(&ipad).unwrap();
+    let mut c = config();
+    bundle_export(&mut c, &ipad, false);
+    let yesterday = date() - chrono::Days::new(1);
+    // yesterday's paper, so the store has its word search
+    gather(&c, yesterday, now() - chrono::Days::new(1), &fake);
+    let store = deckle_digest::puzzle::store::Store::load(c.puzzle_path.as_ref().unwrap());
+    assert!(store.days.contains_key(&yesterday));
+    assert_eq!(store.days[&yesterday].search_found, None);
+    // the iPad found two words in it
+    let mut r: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../fixtures/press/returns-1.2.json")).unwrap();
+    r["edition"] = yesterday.to_string().into();
+    let dir = ipad.join(deckle_digest::returns::DIR).join("ipad-a");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{yesterday}.json")), r.to_string()).unwrap();
+    gather(&c, date(), now(), &fake);
+    let store = deckle_digest::puzzle::store::Store::load(c.puzzle_path.as_ref().unwrap());
+    let found = store.days[&yesterday].search_found.clone().unwrap();
+    assert_eq!(found.found, ["COURT", "MILL"]);
+    assert!(!found.done);
+}

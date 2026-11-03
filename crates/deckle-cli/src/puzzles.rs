@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! `deckle puzzles` (puzzle books §5.2): a write-on puzzle book, made and delivered as a PDF.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use deckle_core::deliver::{Conn, DeliverOptions, Target, deliver_named_on};
@@ -10,6 +10,7 @@ use deckle_digest::puzzle::book::bundle::{self, Extras};
 use deckle_digest::puzzle::book::pdf::{self, PageSize};
 use deckle_digest::puzzle::book::{self, BookOptions, Difficulty, Kind};
 use deckle_digest::puzzle::words::Words;
+use deckle_digest::returns;
 use serde::Serialize;
 
 use deckle_digest::editor::AppAi;
@@ -89,7 +90,64 @@ pub fn run(json: bool, action: PuzzlesCommand) -> Result<ExitCode, String> {
             None,
             book,
         ),
+        PuzzlesCommand::Solved { path } => solved(json, &path),
     }
+}
+
+/// `deckle puzzles solved <bundle>`: the book's solved count from every reader's returns in
+/// the folder the bundle sits in.
+fn solved(json: bool, path: &Path) -> Result<ExitCode, String> {
+    let b = bundle::read(path)?;
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent().map(Path::to_path_buf).unwrap_or_default()
+    };
+    let root = dir.parent().map(Path::to_path_buf).unwrap_or_default();
+    let all = returns::read_books(&root);
+    let mut readers: Vec<String> = all
+        .iter()
+        .filter(|r| r.book == b.book.id)
+        .map(|r| r.reader.name.clone())
+        .collect();
+    readers.sort();
+    readers.dedup();
+    let s = returns::solved(&all, b.book.id, b.puzzles.len());
+    #[derive(serde::Serialize)]
+    struct Out<'a> {
+        book: String,
+        title: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        done: Option<usize>,
+        of: usize,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        seconds: Option<f64>,
+        readers: &'a [String],
+    }
+    let out = Out {
+        book: b.book.id.to_string(),
+        title: &b.book.title,
+        done: s.map(|s| s.done),
+        of: b.puzzles.len(),
+        seconds: s.map(|s| s.seconds),
+        readers: &readers,
+    };
+    emit(json, &out, || match s {
+        None => format!(
+            "{}: no returns yet in {}",
+            b.book.title,
+            root.join(returns::DIR).display()
+        ),
+        Some(s) => format!(
+            "{}: {} of {} solved on {} ({} min)",
+            b.book.title,
+            s.done,
+            s.of,
+            readers.join(", "),
+            (s.seconds / 60.0).round() as u64
+        ),
+    })?;
+    Ok(ExitCode::SUCCESS)
 }
 
 /// The options every kind shares, from the command line.

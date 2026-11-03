@@ -366,6 +366,8 @@ export interface DailyConfig {
   export?: ExportConfig[];
   /** `[remarkable]`: the paper as a PDF to a reMarkable (other readers design §9). Absent while untouched. */
   remarkable?: RemarkableConfig;
+  /** `[puzzles]`: Sunday's puzzle book beside the edition (puzzle book bundle design §5). Absent while untouched. */
+  puzzles?: PuzzlesConfig;
   /** `[reader_server]`: the OPDS catalog and KOReader sync (KOReader hub design §A). Absent while untouched. */
   reader_server?: ReaderServerConfig;
   /** `[wireless]`: calibre's wireless connection for KOReader (calibre bridge design §4). Absent while untouched. */
@@ -1151,6 +1153,26 @@ export interface MadePuzzleBook {
   bytes: number;
   warnings: string[];
   request: PuzzleBookRequest;
+  /** The `.decklepuzzles` bundles Send to an iPad folder wrote (puzzle book bundle design §5). */
+  bundles: string[];
+  /** Solved on the iPad, `[n, of]`, from the returns beside those bundles; absent until a reader wrote. */
+  solved_ipad?: [number, number] | null;
+}
+/** An export folder that takes bundles: where Send to <name> puts a book. */
+export interface PuzzleBundleTarget {
+  name: string;
+  dir: string;
+}
+/** `[puzzles]`: Sunday's puzzle book beside the edition (puzzle book bundle design §5). */
+export interface PuzzlesConfig {
+  sunday: boolean;
+  kind: PuzzleKindKey;
+  count: number;
+  /** 0 is the kind's default. */
+  size: number;
+  difficulty: "easy" | "medium" | "hard";
+  theme: "none" | "interests" | "week" | "vocab" | "cookbook";
+  clues: ClueStyle;
 }
 
 export interface DailyEditorConfig {

@@ -377,3 +377,73 @@ fn as_bundle_writes_a_decklepuzzles_folder_and_never_over_one() {
         "{err}"
     );
 }
+
+#[test]
+fn puzzles_solved_reads_the_returns_beside_a_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap().to_owned();
+    let out = puzzles(&[
+        "maze",
+        "--count",
+        "2",
+        "--size",
+        "8",
+        "--seed",
+        "7",
+        "--date",
+        "2026-11-01",
+        "--as",
+        "bundle",
+        "-o",
+        &d,
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let bundle = std::path::PathBuf::from(v["path"].as_str().unwrap());
+    let book: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(bundle.join("book.json")).unwrap()).unwrap();
+    let id = book["book"]["id"].as_str().unwrap().to_owned();
+    // no returns yet
+    let out = puzzles(&["solved", bundle.to_str().unwrap(), "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["of"], 2);
+    assert!(v.get("done").is_none(), "{v}");
+    // the iPad solved one
+    let returns = dir.path().join(".deckle-returns/ipad-1/puzzles");
+    std::fs::create_dir_all(&returns).unwrap();
+    std::fs::write(
+        returns.join(format!("{id}.json")),
+        serde_json::json!({
+            "format": "deckle-puzzle-returns", "version": "1.0",
+            "reader": { "id": "ipad-1", "name": "Jon's iPad", "app": "Deckle Reader" },
+            "book": id, "updated_at": "2026-11-01T20:00:00Z",
+            "puzzles": [
+                { "n": 1, "done": true, "seconds": 90, "last": "2026-11-01T20:00:00Z" },
+                { "n": 2, "done": false, "seconds": 30, "last": "2026-11-01T20:01:00Z" }
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let out = puzzles(&["solved", bundle.join("book.json").to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("1 of 2 solved on Jon's iPad (2 min)"),
+        "{text}"
+    );
+}

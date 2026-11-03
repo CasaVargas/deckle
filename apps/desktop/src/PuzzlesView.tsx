@@ -6,9 +6,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { platform } from "./platform";
 import PuzzlePreview from "./PuzzlePreview";
-import { CLUE_STYLES, DIFFICULTIES, SCREENS, bookLine, clueLine, interestRows, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices, themeChips } from "./puzzleBooks";
+import { CLUE_STYLES, DIFFICULTIES, SCREENS, SUNDAY_DEFAULT, bookLine, clueLine, interestRows, ipadLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices, solvedLine, sundayLine, themeChips } from "./puzzleBooks";
 import type { SettingsPage } from "./settingsIndex";
-import type { DeviceRow, MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzlePreview as Preview, PuzzleProgress, PuzzleSources, RunTarget } from "./types";
+import type { DeviceRow, MadePuzzleBook, PuzzleBookRequest, PuzzleBundleTarget, PuzzleKind, PuzzlePreview as Preview, PuzzleProgress, PuzzleSources, PuzzlesConfig, RunTarget } from "./types";
 
 interface Props {
   onNotice: (m: string) => void;
@@ -33,6 +33,11 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
   const [books, setBooks] = useState<MadePuzzleBook[]>([]);
   const [sending, setSending] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** Export folders that take bundles: where Send to <name> puts a book for the iPad. */
+  const [targets, setTargets] = useState<PuzzleBundleTarget[]>([]);
+  /** The main paper's `[puzzles]` table: Sunday's switch and recipe; null until read. */
+  const [sunday, setSunday] = useState<PuzzlesConfig | null>(null);
+  const [sundaySaving, setSundaySaving] = useState(false);
   const latest = useRef<PuzzleBookRequest | null>(null);
   latest.current = request;
 
@@ -49,6 +54,8 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
       })
       .catch((e) => onNotice(String(e)));
     api.puzzlesSources().then(setSources).catch(() => setSources(null));
+    api.puzzlesBundleTargets().then(setTargets).catch(() => setTargets([]));
+    api.puzzlesSundayGet().then(setSunday).catch(() => setSunday(null));
     loadBooks();
   }, [loadBooks, onNotice]);
 
@@ -110,20 +117,37 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
       setMaking(null);
     }
   };
-  const send = async (book: MadePuzzleBook, target: RunTarget, replace = false) => {
+  const send = async (book: MadePuzzleBook, target: RunTarget, replace = false, asBundle = false) => {
     setSending(book.path);
     try {
-      const where = await api.puzzlesSend(book.path, target, replace);
+      const where = await api.puzzlesSend(book.path, target, replace, asBundle);
       setNote(`Sent ${book.title} to ${where}`);
+      if (asBundle) loadBooks();
     } catch (e) {
       const msg = String(e);
-      if (!replace && /already there/.test(msg) && window.confirm(`${book.name} is already there. Replace it? Ink on the old one may stay.`)) {
-        await send(book, target, true);
+      if (!replace && /already there/.test(msg) && window.confirm(`${book.title} is already there${asBundle ? ", for the iPad" : ""}. Replace it? Ink on the old one may stay.`)) {
+        await send(book, target, true, asBundle);
         return;
       }
       onNotice(msg);
     } finally {
       setSending(null);
+    }
+  };
+  /** Send to <iPad folder>: the book as a bundle the iPad's reader solves (puzzle book bundle design §5). */
+  const sendBundle = (book: MadePuzzleBook, t: PuzzleBundleTarget) => send(book, { kind: "folder", path: t.dir }, false, true);
+  /** Saves a change to Sunday's recipe as it's made; the backend checks it first. */
+  const patchSunday = async (p: Partial<PuzzlesConfig>) => {
+    const next = { ...(sunday ?? SUNDAY_DEFAULT), ...p };
+    setSunday(next);
+    setSundaySaving(true);
+    try {
+      setSunday(await api.puzzlesSundaySet(next));
+    } catch (e) {
+      onNotice(String(e));
+      api.puzzlesSundayGet().then(setSunday).catch(() => undefined);
+    } finally {
+      setSundaySaving(false);
     }
   };
   const saveCopy = async (book: MadePuzzleBook) => {
@@ -392,6 +416,12 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                   <p className="muted">
                     {bookLine(b)} · {mb(b.bytes)}
                   </p>
+                  {ipadLine(b, targets) && (
+                    <p className="muted small">
+                      {ipadLine(b, targets)}
+                      {solvedLine(b) ? ` · ${solvedLine(b)}` : ""}
+                    </p>
+                  )}
                   <span className="muted small">{sendLine(deviceName)}</span>
                 </div>
                 <div className="puzzles-book-actions">
@@ -401,6 +431,11 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                   <button className="ghost" onClick={() => saveCopy(b)} disabled={sending === b.path}>
                     Save a copy…
                   </button>
+                  {targets.map((t) => (
+                    <button key={t.dir} className={deviceTarget ? "ghost" : "primary"} onClick={() => sendBundle(b, t)} disabled={sending === b.path} title={`As a bundle the iPad solves, into ${t.dir}`}>
+                      {sending === b.path ? "Sending…" : `Send to ${t.name}`}
+                    </button>
+                  ))}
                   {deviceTarget && (
                     <button className="primary" onClick={() => send(b, deviceTarget)} disabled={sending === b.path}>
                       {sending === b.path ? "Sending…" : `Send to ${deviceName}`}
@@ -409,6 +444,71 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                 </div>
               </div>
             ))
+          )}
+        </section>
+
+        <section className="set-card set-pad puzzles-sunday" aria-label="Every Sunday">
+          <div className="set-card-head">
+            <h3 className="set-card-title">Every Sunday, with the paper</h3>
+            <input className="switch" type="checkbox" aria-label="Sunday's puzzle book on" checked={sunday?.sunday ?? false} disabled={!sunday || sundaySaving} onChange={(e) => patchSunday({ sunday: e.target.checked })} />
+          </div>
+          <p className="muted small">
+            {sunday ? sundayLine(sunday, kinds) : "Reading the paper's settings…"}
+            {targets.length === 0 ? " It rides along with Sunday's edition into an iPad folder: add an export folder with the bundle format in Daily → Delivery first." : ` It goes beside the edition into ${targets.map((t) => t.name).join(" and ")}.`}
+          </p>
+          {sunday?.sunday && (
+            <div className="ai-fields">
+              <label>
+                <span className="tk-label">Kind</span>
+                <select value={sunday.kind} disabled={sundaySaving} onChange={(e) => patchSunday({ kind: e.target.value as PuzzlesConfig["kind"], size: 0 })}>
+                  {kinds.map((k) => (
+                    <option key={k.key} value={k.key}>
+                      {k.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className="tk-label">{sunday.kind === "ladder" ? "Pages" : "Puzzles"}</span>
+                <input key={sunday.count} type="number" min={1} max={200} defaultValue={sunday.count} disabled={sundaySaving} onBlur={(e) => Number(e.target.value) !== sunday.count && patchSunday({ count: Number(e.target.value) })} />
+              </label>
+              {kinds.find((k) => k.key === sunday.kind)?.graded && (
+                <label>
+                  <span className="tk-label">Difficulty</span>
+                  <select value={sunday.difficulty} disabled={sundaySaving} onChange={(e) => patchSunday({ difficulty: e.target.value as PuzzlesConfig["difficulty"] })}>
+                    {DIFFICULTIES.map((d) => (
+                      <option key={d} value={d}>
+                        {d[0].toUpperCase() + d.slice(1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {(sunday.kind === "crossword" || sunday.kind === "search") && (
+                <label>
+                  <span className="tk-label">Theme</span>
+                  <select value={sunday.theme} disabled={sundaySaving} onChange={(e) => patchSunday({ theme: e.target.value as PuzzlesConfig["theme"] })}>
+                    <option value="week">This week's paper</option>
+                    <option value="interests">Your interests</option>
+                    <option value="vocab">Words you looked up</option>
+                    <option value="cookbook">Your cookbook</option>
+                    <option value="none">No theme</option>
+                  </select>
+                </label>
+              )}
+              {sunday.kind === "crossword" && (
+                <label>
+                  <span className="tk-label">Clues</span>
+                  <select value={sunday.clues} disabled={sundaySaving} onChange={(e) => patchSunday({ clues: e.target.value as PuzzlesConfig["clues"] })}>
+                    {CLUE_STYLES.map((c) => (
+                      <option key={c.key} value={c.key} disabled={c.ai && !!sources && !sources.ai}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
           )}
         </section>
       </div>

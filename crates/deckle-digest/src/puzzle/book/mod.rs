@@ -6,6 +6,7 @@
 pub mod bundle;
 pub mod pdf;
 pub mod plan;
+pub mod sunday;
 pub mod theme;
 
 use std::collections::HashSet;

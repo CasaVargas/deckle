@@ -182,7 +182,10 @@ in, press **Send**.
   the headlines; the words you looked up on the Kindle; your cookbook; your own list; or a
   subject the AI writes about. With the AI on, the clues can be rewritten as trivia, cryptic,
   or for a kid. The first page is previewed before you make it, and every book is kept so
-  **Make again** gives the same one. See [docs/puzzle-books.md](docs/puzzle-books.md).
+  **Make again** gives the same one. For an iPad, **Send to <folder>** (or `--as bundle`) writes
+  the same book as data into an export folder its reader watches, Sunday's book rides along with
+  Sunday's paper, and what was solved there comes back to the tab. See
+  [docs/puzzle-books.md](docs/puzzle-books.md).
 - **A PDF as it is.** `deckle send` copies a PDF, TXT, AZW3 or MOBI to a Kindle or a folder
   untouched, which is how a document that takes ink gets onto a Scribe.
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
@@ -265,7 +268,7 @@ reads from it, serves it and manages it, and calibre stays your library of recor
 | X-Ray and Word Wise | yes | – | with a real ASIN | Who's who page | Who's who page | Who's who page | – | – |
 | AI recaps, Summary, Previously | yes | – | yes | yes | yes | yes | – | yes |
 | Comics, manga, scans | AZW3, fitted per model | – | AZW3, checked on device | fixed-layout EPUB | fixed-layout EPUB | image PDF, colour on a Paper Pro | – | AZW3 |
-| Puzzle books | PDF, no ink | – | PDF, write on it | – | – | PDF, sized for it | – | PDF |
+| Puzzle books | PDF, no ink | – | PDF, write on it | – | – | PDF, sized for it | – | PDF, or a bundle the iPad solves, with the solved count back |
 | calibre connection, reading data back, shelves | with KOReader | – | with KOReader | yes | with KOReader | – | yes | – |
 | The Kitchen Book | yes | – | yes | – | – | – | – | EPUB |
 

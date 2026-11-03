@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { bookLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices } from "./puzzleBooks";
+import { SUNDAY_DEFAULT, bookLine, ipadLine, makingLine, mb, ownListPrompt, problem, requestFor, sendLine, sizeChoices, solvedLine, sundayLine } from "./puzzleBooks";
 import type { MadePuzzleBook, PuzzleKind } from "./types";
 
 const cross: PuzzleKind = { key: "crossword", name: "crossword", title: "Crossword", blurb: "", sizes: [5, 15], default_size: 11, takes: "clued", graded: true, difficulties: ["a", "b", "c"] };
-const sudoku: PuzzleKind = { ...cross, key: "sudoku", sizes: null, default_size: 9, takes: "none" };
+const sudoku: PuzzleKind = { ...cross, key: "sudoku", name: "sudoku", sizes: null, default_size: 9, takes: "none" };
 
 describe("the Puzzles tab", () => {
   it("starts a kind from its defaults, keeping what carries over", () => {
@@ -41,6 +41,23 @@ describe("the Puzzles tab", () => {
     expect(makingLine("ladder", 0, 0)).toBe("Starting…");
     expect(sendLine("Scribe")).toBe("Copies it to Scribe, into Documents.");
     expect(sendLine(null)).toMatch(/Plug a Kindle in/);
+  });
+  it("says where a book went for the iPad, and how much was solved there", () => {
+    const targets = [{ name: "iPad", dir: "/Users/jon/Library/Mobile Documents/Deckle" }];
+    const none = { bundles: [] } as unknown as MadePuzzleBook;
+    expect(ipadLine(none, targets)).toBeNull();
+    expect(solvedLine(none)).toBeNull();
+    const sent = { bundles: ["/Users/jon/Library/Mobile Documents/Deckle/deckle-puzzles-mazes-2026-11-02-9f3a.decklepuzzles"], solved_ipad: [2, 10] } as unknown as MadePuzzleBook;
+    expect(ipadLine(sent, targets)).toBe("On iPad's folder, for the iPad");
+    expect(solvedLine(sent)).toBe("2 of 10 solved on the iPad");
+    const elsewhere = { bundles: ["/Volumes/Share/deckle-puzzles-x.decklepuzzles", ...sent.bundles] } as unknown as MadePuzzleBook;
+    expect(ipadLine(elsewhere, targets)).toBe("On /Volumes/Share and iPad's folders, for the iPad");
+    expect(ipadLine({ bundles: ["C:\\iPad\\book.decklepuzzles"] } as unknown as MadePuzzleBook, [{ name: "Mia", dir: "C:\\iPad" }])).toBe("On Mia's folder, for the iPad");
+  });
+  it("tells Sunday's recipe", () => {
+    expect(sundayLine(SUNDAY_DEFAULT, [cross])).toBe("10 crosswords from the week's paper, beside Sunday's paper");
+    expect(sundayLine({ ...SUNDAY_DEFAULT, kind: "sudoku", count: 1, theme: "vocab" }, [cross, sudoku])).toBe("1 sudoku, beside Sunday's paper");
+    expect(sundayLine({ ...SUNDAY_DEFAULT, kind: "ladder", count: 3 }, [cross])).toBe("3 pages of word ladders, beside Sunday's paper");
   });
 });
 

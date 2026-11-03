@@ -40,6 +40,7 @@ difficulties, and a `--words` file that has clues (see [Crosswords](#crosswords)
 | `--title TEXT` | Word Search | The title shown on the title page and in the Kindle's library. |
 | `--seed N`, `--date YYYY-MM-DD` | today | The same options, seed and date make the same book, byte for byte. |
 | `--screen` | `kindle-scribe` | The page size. The others are `remarkable-2`, `remarkable-paper-pro`, `remarkable-paper-pro-move`, `ipad` and `a5`. |
+| `--as` | `pdf` | `bundle` writes the book as data for the iPad's reader instead of a PDF (see [The iPad](#the-ipad)). |
 | `--replace` | | Overwrite a book with the same name (see below). |
 
 After each run, Deckle prints the command that makes that book again, with its seed and date.
@@ -166,6 +167,34 @@ it unless you pass `--replace`, and even then your old ink may still show on the
 Puzzle pages are black on white, with no grays and no links, so a pen stroke can't jump away
 mid-solve. To get around, use the Kindle's table of contents: Title, No. 1, No. 2 and so on, then
 Answers.
+
+## The iPad
+
+An iPad can't take ink on a PDF the way a Scribe does, and its reader has no PDF view. So for the
+iPad a book is written as **data**, the way an edition is: a
+`deckle-puzzles-<title>-<date>-<code>.decklepuzzles` folder with `book.json` (every puzzle in
+page order with its full solution, so the reader's Check and Reveal work offline) and a cover,
+written through a hidden folder renamed into place, the manifest last. It's the same book as
+the PDF: one generator, two writers. The format: `docs/superpowers/specs/2026-11-03-puzzle-book-bundle-design.md`,
+with an MIT schema in `docs/formats/puzzle-book.schema.json`.
+
+- **Send to iPad.** In **Your books**, every export folder whose format is `bundle` (Daily →
+  Delivery; an iCloud Drive folder the reader watches) gets a **Send to <name>** button. The
+  book is made again from its saved options, seed and date and written there as a bundle; the
+  row then says where it went. A bundle already there asks before it's replaced, since the
+  reader may hold ink on it. On the command line: `deckle puzzles crossword --as bundle --to
+  <folder>` (or `-o <folder>`); a Kindle can't take one.
+- **Every Sunday.** With the paper's `[puzzles] sunday = true` (the switch at the foot of the
+  tab, with the recipe: `kind`, `count`, `size`, `difficulty`, `theme`, `clues`), the Sunday
+  morning run makes the book after the edition is in place and writes it beside the edition in
+  every bundle export, marked with the paper and the Sunday it belongs to. `keep` prunes
+  editions, never books; a run again on the same Sunday leaves the book as it is.
+- **What was solved comes back.** The reader writes `.deckle-returns/<reader>/puzzles/<book-id>.json`
+  (`docs/formats/deckle-puzzle-returns.schema.json`, MIT): per puzzle, whether it's done, the
+  seconds spent, and the reader's own ink by kind. Your books shows "n of N solved on the iPad"
+  beside the Kindle's count, merged across readers by the latest per puzzle; `deckle puzzles
+  solved <bundle>` prints it. A return for a book Deckle no longer has is ignored; one it can't
+  read is skipped with a line on stderr.
 
 ## Not yet
 

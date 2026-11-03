@@ -490,6 +490,12 @@ pub enum PuzzlesCommand {
         #[command(flatten)]
         book: BookArgs,
     },
+    /// How many puzzles of a bundled book the iPad has solved, from the returns its reader
+    /// wrote beside it (puzzle book bundle design §4).
+    Solved {
+        /// A `.decklepuzzles` folder, or its `book.json`.
+        path: PathBuf,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]

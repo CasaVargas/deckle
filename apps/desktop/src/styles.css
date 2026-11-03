@@ -1187,3 +1187,5 @@ input[type=checkbox] { padding: 0; }
 .seg button { background: var(--panel); border: 0; padding: 0 12px; height: 34px; font-size: 13px; color: var(--fg); }
 .seg button.on { background: var(--fg); color: var(--bg); }
 .seg button:disabled { opacity: .5; }
+.puzzles-sunday .set-card-head { justify-content: space-between; }
+.puzzles-sunday .ai-fields { margin-top: 10px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
