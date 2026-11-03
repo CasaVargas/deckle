@@ -250,6 +250,29 @@ pub fn mark_deleted(sh: &mut dyn Shell, uuid: &str) -> Result<(), String> {
     )
 }
 
+/// Renames the document `uuid` (its `visibleName`), as the tablet's own Rename does.
+pub fn rename(sh: &mut dyn Shell, uuid: &str, name: &str) -> Result<(), String> {
+    let file = format!("{uuid}.metadata");
+    let out = sh
+        .run(&format!("cat {DIR}/{file}"), b"")?
+        .ok(&format!("reading {file}"))?;
+    let mut v: serde_json::Value = serde_json::from_slice(&out)
+        .map_err(|e| format!("{file}: the metadata didn't parse: {e}"))?;
+    let Some(obj) = v.as_object_mut() else {
+        return Err(format!("{file}: not a JSON object"));
+    };
+    obj.insert("visibleName".into(), serde_json::Value::from(name));
+    obj.insert("metadatamodified".into(), serde_json::Value::Bool(true));
+    obj.insert("synced".into(), serde_json::Value::Bool(false));
+    let version = obj.get("version").and_then(|n| n.as_u64()).unwrap_or(0) + 1;
+    obj.insert("version".into(), serde_json::Value::from(version));
+    write(
+        sh,
+        &file,
+        serde_json::to_string_pretty(&v).expect("json").as_bytes(),
+    )
+}
+
 /// Whether the tablet looks idle: nothing changed for `quiet_secs` by its own clock.
 pub fn idle(sh: &mut dyn Shell, docs: &[Doc], quiet_secs: u64) -> Result<bool, String> {
     let newest = docs

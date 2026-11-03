@@ -242,6 +242,120 @@ pub fn device_rebuild(target: RunTarget, files: Vec<String>) -> Result<Vec<Rebui
     })
 }
 
+/// Where a book on the Kindle can be rebuilt from to change its details (details editing):
+/// its library copy, its original on this computer, or the Kindle's own copy made an EPUB.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct EditSource {
+    pub file: String,
+    /// Its details as the Kindle has them, to start the form from.
+    pub title: String,
+    pub authors: Vec<String>,
+    /// The EPUB (or other book) to rebuild from; `None` with `error` when there's none.
+    pub source: Option<String>,
+    /// Where it came from: `None` for the library (whose copy is fixed first).
+    pub origin: Option<Origin>,
+    /// The library book's folder, when it's in the library.
+    pub library_dir: Option<String>,
+    /// Why it can't be changed here.
+    pub error: Option<String>,
+}
+
+/// Why a book of `class` can't be rebuilt with new details, for the owner.
+fn edit_refusal(class: Class, format: &str) -> String {
+    match class {
+        Class::AmazonOwn => {
+            "Bought from the Kindle Store or sent to Kindle by email: Amazon's copy \
+                             is locked and stays as Amazon has it."
+                .into()
+        }
+        Class::Locked => {
+            "Locked by DRM (a loan, another shop, or a document Send to Kindle locked), \
+                          and its original isn't on this computer."
+                .into()
+        }
+        Class::NoSource => {
+            "A Kindle book (KFX) whose original isn't on this computer: add its EPUB \
+                            to your library, or a folder Deckle reads (Settings → Library), then \
+                            edit it again."
+                .into()
+        }
+        Class::OldMobi => "An old MOBI with no KF8 part: it can't be rebuilt.".into(),
+        Class::FixedLayout => {
+            "A fixed-layout book (a comic or picture book): its details can only \
+                               be changed in its original."
+                .into()
+        }
+        Class::Pdf => "A PDF keeps the details it was made with.".into(),
+        _ => format!("A {format} file Deckle can't rebuild."),
+    }
+}
+
+/// [`EditSource`] for `file` on the connection's Kindle. Reading the shelf takes a few seconds
+/// over MTP; a Kindle copy is made into an EPUB under `kindle-rebuilt/`.
+pub fn edit_source_on(
+    conn: &mut Conn<'_>,
+    config: &Path,
+    cache: Option<&Path>,
+    home: Option<&Path>,
+    file: &str,
+) -> Result<EditSource, String> {
+    let device = deckle_library::device_ref(conn.target);
+    let (inv, _) =
+        deckle_core::inventory::list_detailed(conn, cache, deckle_digest::EDITION_PREFIX)
+            .map_err(|e| e.to_string())?;
+    let library = Library::configured(config).map(|(l, _)| l);
+    let current = deckle_library::freshness::Current::now(&Default::default());
+    let shelf = deckle_library::shelf::shelve(inv.books, library.as_ref(), &device.key, &current);
+    let shelved = shelf
+        .into_iter()
+        .find(|s| s.book.file == file)
+        .ok_or_else(|| format!("{file} isn't on this Kindle any more"))?;
+    let mut out = EditSource {
+        file: file.to_owned(),
+        title: shelved.book.title.clone().unwrap_or_default(),
+        authors: shelved.book.authors.clone(),
+        ..Default::default()
+    };
+    if shelved.book.file.starts_with(deckle_digest::EDITION_PREFIX) {
+        out.error = Some("A Deckle Daily edition: its name comes from the paper.".into());
+        return Ok(out);
+    }
+    if let Some(book) = &shelved.library {
+        out.source = Some(book.source_path().to_string_lossy().into_owned());
+        out.library_dir = Some(book.dir.to_string_lossy().into_owned());
+        return Ok(out);
+    }
+    let sources = Sources::gather(&LibraryConfig::load(config), home);
+    let source = sources.find(&shelved.book).cloned();
+    let class = deckle_library::upgrade::classify(&shelved, source.as_ref());
+    if let Some(src) = source.filter(|_| class != Class::AmazonOwn) {
+        out.source = Some(src.path.to_string_lossy().into_owned());
+        out.origin = Some(src.origin);
+        return Ok(out);
+    }
+    if class == Class::KindleCopy
+        || (shelved.book.from_deckle && !shelved.book.drm && shelved.book.format != "kfx")
+    {
+        match deckle_library::upgrade::rebuild_from_kindle(conn, config, file) {
+            Ok(p) => {
+                out.source = Some(p.to_string_lossy().into_owned());
+                out.origin = Some(Origin::KindleCopy);
+            }
+            Err(e) => out.error = Some(format!("The Kindle's copy couldn't be rebuilt: {e}")),
+        }
+        return Ok(out);
+    }
+    out.error = Some(edit_refusal(class, &shelved.book.format));
+    Ok(out)
+}
+
+pub fn device_edit_source(target: RunTarget, file: String) -> Result<EditSource, String> {
+    crate::kindle::with_target(target, move |conn, config| {
+        let cache = deckle_core::wordwise::default_cache_dir().join("inventory");
+        edit_source_on(conn, config, Some(&cache), home().as_deref(), &file)
+    })
+}
+
 pub fn device_put_back(target: RunTarget, file: String) -> Result<PutBack, String> {
     crate::kindle::with_target(target, move |conn, config| put_back(conn, config, &file))
 }

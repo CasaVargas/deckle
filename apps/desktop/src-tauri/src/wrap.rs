@@ -458,6 +458,23 @@ pub async fn device_rebuild(target: RunTarget, files: Vec<String>) -> Result<Vec
 }
 
 #[tauri::command]
+pub async fn device_edit_source(
+    target: RunTarget,
+    file: String,
+) -> Result<deckle_app::upgrades::EditSource, String> {
+    blocking(move || deckle_app::upgrades::device_edit_source(target, file)).await
+}
+
+#[tauri::command]
+pub async fn readers_edit(
+    key: String,
+    id: String,
+    edit: deckle_app::commands::BookEdit,
+) -> Result<deckle_app::readers::Edited, String> {
+    blocking(move || deckle_app::readers::readers_edit(key, id, edit)).await
+}
+
+#[tauri::command]
 pub async fn device_put_back(target: RunTarget, file: String) -> Result<PutBack, String> {
     blocking(move || deckle_app::upgrades::device_put_back(target, file)).await
 }

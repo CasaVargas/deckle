@@ -2,6 +2,7 @@
 import { platform } from "./platform";
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { amazonRemoveNote } from "./editDetails";
 import { connectedBy, defaultSpare, freesLine, size, spaceSlices, spareGroups, spareLine } from "./kindleRooms";
 import type { BackupReport, DeviceRow, DeviceShelf, PaperFormat, RunTarget } from "./types";
 
@@ -68,6 +69,11 @@ export default function ThisKindle({ target, device, shelf, busy, onChanged, onN
 
   const chosen = shelf.spare.filter((s) => ticked.has(s.file));
   const freed = chosen.reduce((n, s) => n + s.size, 0);
+  // books Amazon delivered stay in the owner's account: removing takes only the download
+  const fromAmazon = chosen.filter((s) => {
+    const b = shelf.books.find((x) => x.file === s.file);
+    return b && amazonRemoveNote(b);
+  }).length;
   const toggle = (file: string, on: boolean) =>
     setTicked((t) => {
       const next = new Set(t);
@@ -202,7 +208,11 @@ export default function ThisKindle({ target, device, shelf, busy, onChanged, onN
               <div className="spare-foot">
                 {confirming ? (
                   <>
-                    <span>Remove {plural(chosen.length, "book")} and their reading data from this Kindle?</span>
+                    <span>
+                      Remove {plural(chosen.length, "book")} and their reading data from this Kindle?
+                      {fromAmazon > 0 &&
+                        ` ${fromAmazon === chosen.length ? "They" : `${fromAmazon} of them`} came from Amazon (bought, or sent by email): Amazon keeps ${fromAmazon === 1 ? "it" : "them"} in your account and the Kindle can still list ${fromAmazon === 1 ? "it" : "them"} under All. To remove ${fromAmazon === 1 ? "it" : "them"} for good, use Remove from library on the Kindle, or Manage Your Content and Devices.`}
+                    </span>
                     <button className="ghost" disabled={!idle} onClick={() => setConfirming(false)}>
                       Keep
                     </button>

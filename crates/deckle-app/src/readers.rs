@@ -161,6 +161,99 @@ pub fn readers_remove(key: String, ids: Vec<String>) -> Result<Removed, String> 
     })
 }
 
+/// What [`readers_edit`] did, for the notice.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Edited {
+    pub id: String,
+    /// What else the owner should know (the Kobo shows it after ejecting, …).
+    pub note: Option<String>,
+}
+
+/// Writes a file atomically beside itself: a half-written book never replaces the old one.
+fn write_beside(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = path.with_file_name(format!(".{name}.deckle-tmp"));
+    std::fs::write(&tmp, bytes).map_err(|e| format!("{}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("{}: {e}", path.display())
+    })
+}
+
+/// Changes the title, authors and series of `id` on the reader `key`: an EPUB or KEPUB's own
+/// details on a Kobo or PocketBook (and the Kobo's library entry), or a reMarkable document's
+/// name over SSH.
+pub fn readers_edit(
+    key: String,
+    id: String,
+    edit: crate::commands::BookEdit,
+) -> Result<Edited, String> {
+    let details = edit.details();
+    deckle_library::details::check(&details)?;
+    match find(&key)? {
+        Found::Drive(r) => {
+            let path = reader_library::book_path(r.root(), &id)?;
+            let lower = id.to_ascii_lowercase();
+            if !lower.ends_with(".epub") {
+                return Err(
+                    "only an EPUB's details can be changed on the reader; a PDF or other file \
+                     keeps the details it was made with"
+                        .into(),
+                );
+            }
+            let bytes = deckle_library::details::rewrite_epub(&path, &details)?;
+            write_beside(&path, &bytes)?;
+            let mut note = None;
+            if let Reader::Kobo(k) = &r {
+                let now = deckle_digest::chrono::Utc::now().to_rfc3339();
+                let series = details.series.as_ref().map(|s| (s.name.as_str(), s.index));
+                match deckle_core::kobo_shelves::set_book(
+                    k,
+                    &id,
+                    &details.title,
+                    &details.authors,
+                    series,
+                    &now,
+                ) {
+                    Ok(true) => {
+                        note = Some("The Kobo shows it once you eject it.".into());
+                    }
+                    Ok(false) => {
+                        note = Some(
+                            "The Kobo hasn't added this book to its library yet; it reads the new \
+                             details when it does."
+                                .into(),
+                        )
+                    }
+                    Err(e) => {
+                        note = Some(format!(
+                            "The book's file has the new details, but the Kobo's library entry \
+                             couldn't be changed ({e}); it may show the old ones until the book \
+                             is added again."
+                        ))
+                    }
+                }
+            }
+            Ok(Edited { id, note })
+        }
+        Found::Web(_) => Err(
+            "the reMarkable's USB web interface can't rename documents: rename it on the tablet, \
+             or set up SSH"
+                .into(),
+        ),
+        Found::Ssh(mut sh) => {
+            reader_library::rename_remarkable_ssh(&mut sh, &id, &details.title)?;
+            Ok(Edited {
+                id,
+                note: Some("The tablet restarted its reader to show the new name.".into()),
+            })
+        }
+    }
+}
+
 /// Backs up everything on the reader `key` into `into` (else its folder under
 /// [`backups_root`]), in a dated folder.
 pub fn readers_backup(key: String, into: Option<String>) -> Result<Backup, String> {

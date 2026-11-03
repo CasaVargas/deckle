@@ -327,7 +327,7 @@ fn space(root: &Path) -> Option<(u64, u64)> {
 
 /// `id` as a file on the drive at `root`, refused unless it's a book file inside the drive,
 /// under no hidden folder.
-fn book_path(root: &Path, id: &str) -> Result<PathBuf, String> {
+pub fn book_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     let parts: Vec<&str> = id.split('/').collect();
     let safe = !id.is_empty()
         && !id.starts_with('/')
@@ -656,8 +656,21 @@ pub fn on_remarkable_ssh(sh: &mut dyn Shell) -> Library {
 }
 
 /// A reMarkable document id: letters, digits and dashes only, so it's safe in a command.
-fn is_uuid(id: &str) -> bool {
+pub fn is_uuid(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Renames the document `id` on the tablet, then restarts its reader to show it.
+pub fn rename_remarkable_ssh(sh: &mut dyn Shell, id: &str, name: &str) -> Result<(), String> {
+    if !is_uuid(id) {
+        return Err("not a document on the tablet".into());
+    }
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("a document needs a name".into());
+    }
+    remarkable_ssh::rename(sh, id, name)?;
+    remarkable_ssh::restart(sh)
 }
 
 /// Moves the documents `ids` to the tablet's trash (as its own Delete does), then restarts

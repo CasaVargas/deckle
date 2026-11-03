@@ -26,6 +26,8 @@ interface Props {
   onReveal?: (path: string) => void;
   /** Opens the book's drawer (Books tab redesign §5) on a tab. */
   onOpen?: (id: string, tab: DrawerTab) => void;
+  /** Change the title, authors and series this book is sent with. */
+  onEditSend?: (id: string) => void;
 }
 
 const MARK: Record<Chip["tone"], string> = { plain: "", ok: "✓", warn: "!", fail: "!" };
@@ -45,7 +47,7 @@ function Line({ chips, children }: { chips: Chip[]; children?: React.ReactNode }
 
 const SOURCE = { llm: "AI model", wikipedia: "Wikipedia", basic: "basic" } as const;
 
-export default function BookRowView({ book, busy, plan, settings, preset, onPreset, rtl, onDirection, onOverride, onToggleReport, onRemove, onReveal, onOpen }: Props) {
+export default function BookRowView({ book, busy, plan, settings, preset, onPreset, rtl, onDirection, onOverride, onToggleReport, onRemove, onReveal, onOpen, onEditSend }: Props) {
   const [menuOpen, setMenuOpen] = useState(false);
   const effectiveCde = book.cdeOverride ?? plan?.cde ?? "pdoc";
   const before = beforeChip(book, plan, settings);
@@ -191,6 +193,11 @@ export default function BookRowView({ book, busy, plan, settings, preset, onPres
             {onOpen && (
               <button onClick={() => { onOpen(book.id, "details"); setMenuOpen(false); }}>
                 Edit details…
+              </button>
+            )}
+            {onEditSend && (
+              <button onClick={() => { onEditSend(book.id); setMenuOpen(false); }} disabled={book.mode === "error" || book.mode === "ready"}>
+                Change title &amp; author for this send…
               </button>
             )}
             <button onClick={() => { onToggleReport(book.id); setMenuOpen(false); }}>

@@ -4,7 +4,9 @@ import { api } from "./api";
 import { platform } from "./platform";
 import { size } from "./kindleRooms";
 import { backupLine, lastReadLabel, progressLabel, readerBooks, readerLine, removeConfirm, type ReaderSort } from "./readerRooms";
-import type { ReaderLibrary, ReaderRow } from "./types";
+import EditDetails from "./EditDetails";
+import { editLabel } from "./editDetails";
+import type { BookEdit, ReaderBook, ReaderLibrary, ReaderRow } from "./types";
 
 interface Props {
   reader: ReaderRow;
@@ -26,6 +28,24 @@ export default function ReaderView({ reader, onNotice }: Props) {
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [working, setWorking] = useState<"removing" | "backing-up" | null>(null);
   const [last, setLast] = useState<string | null>(null);
+  const [editing, setEditing] = useState<ReaderBook | null>(null);
+  const [saving, setSaving] = useState(false);
+  // What can be changed here: an EPUB's own details on a drive, a document's name over SSH.
+  const editable = (b: ReaderBook) =>
+    reader.kind === "remarkable" ? reader.key === "remarkable/ssh" : b.removable && b.id.toLowerCase().endsWith(".epub");
+  const saveEdit = async (b: ReaderBook, edit: BookEdit) => {
+    setSaving(true);
+    try {
+      const r = await api.readersEdit(reader.key, b.id, edit);
+      onNotice(`${reader.kind === "remarkable" ? `Renamed to ${edit.title}` : `${editLabel(edit)} saved on the ${reader.name}`}.${r.note ? ` ${r.note}` : ""}`);
+      setEditing(null);
+      await load();
+    } catch (e) {
+      onNotice(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -155,6 +175,11 @@ export default function ReaderView({ reader, onNotice }: Props) {
                       {[b.authors.join(", "), b.folder, b.format.toUpperCase(), b.bytes != null ? size(b.bytes) : ""].filter(Boolean).join(" · ")}
                     </span>
                     {b.note && <span className="muted small">{b.note}</span>}
+                    {editable(b) && (
+                      <button className="link-action inline small" disabled={!idle} onClick={() => setEditing(b)}>
+                        {reader.kind === "remarkable" ? "Rename…" : "Edit details…"}
+                      </button>
+                    )}
                   </div>
                   <div className="reader-progress">
                     {b.percent != null && (
@@ -207,6 +232,24 @@ export default function ReaderView({ reader, onNotice }: Props) {
           </div>
         </section>
       </div>
+      {editing && (
+        <EditDetails
+          heading={reader.kind === "remarkable" ? "Rename on the reMarkable" : "Edit details"}
+          titleOnly={reader.kind === "remarkable"}
+          initial={{ title: editing.title, authors: editing.authors, series: null }}
+          note={
+            reader.kind === "remarkable"
+              ? "The tablet restarts its reader for a few seconds to show the new name."
+              : reader.kind === "kobo"
+                ? "Written into the book's file on the Kobo and into its library (its database is copied aside first). The Kobo shows it once you eject it."
+                : "Written into the book's file on the PocketBook; it shows the new details the next time it reads its library."
+          }
+          action="Save"
+          busy={saving}
+          onCancel={() => setEditing(null)}
+          onSave={(edit) => saveEdit(editing, edit)}
+        />
+      )}
     </div>
   );
 }
