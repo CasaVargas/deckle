@@ -1122,6 +1122,10 @@ export interface PuzzleSources {
     week: number;
     vocab: number;
     cookbook: number;
+    /** The main paper prints the puzzle page, which keeps each day's headline words. */
+    puzzle_page?: boolean;
+    /** Why nothing could be read (the paper's settings didn't load). */
+    error?: string;
   };
   /** Where the AI runs, as Settings → AI names it; null when off. */
   ai: string | null;
@@ -1144,6 +1148,8 @@ export interface PuzzlePreview {
   first: PuzzleDto | null;
 }
 export interface PuzzleProgress {
+  /** words: the theme's words; puzzles: made one by one; clues: the AI restyling them; pages: the PDF. */
+  stage: "words" | "puzzles" | "clues" | "pages";
   made: number;
   of: number;
 }

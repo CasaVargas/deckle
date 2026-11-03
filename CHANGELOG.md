@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Puzzles tab, easier to read.** A theme that's greyed out now says why under the chips, not
+  only on hover, with more exact reasons (the paper has no Puzzle page to keep headline words,
+  none kept in the last 7 days, no interests followed, the Scribe not sharing looked-up words
+  over USB, the paper's settings not loading). Making a book reports each step (gathering the
+  words, making each puzzle, the AI's clues, laying out the pages) with a whole-book bar, a
+  percentage and the time so far (`puzzles-progress` now carries `stage`). The preview stays
+  beside the form and scrolls on its own, so a long crossword's clues no longer push Your
+  books off the page. The Daily, Puzzles and other wide tabs use up to 1480 px instead of
+  1120 px on big screens.
 - **The paper as a PDF on a Kindle Scribe.** Each Kindle can take the paper as the Kindle book
   or as a PDF laid out for a Scribe's screen, which its pen writes straight onto: **Send the
   paper as** on the Kindle tab, `deckle devices paper pdf|book [--kindle …]`, or
