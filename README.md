@@ -552,6 +552,20 @@ Kindle Previewer is Amazon's and is never bundled. Kindle is a trademark of Amaz
 Kobo, PocketBook, reMarkable and Boox belong to their makers. Deckle is not affiliated with any of
 them.
 
+## Made by Casa Vargas
+
+Deckle is free and stays free. It's made by one developer at [Casa Vargas](https://casavargas.app/),
+an indie studio in North Carolina. If you like it, the paid apps are what keep it that way; each is a
+one-time purchase, never a subscription:
+
+- **[Beltr](https://beltr.app/)** · $19.99 once · Karaoke from the music you already own. Every phone
+  in the room becomes a mic. Mac, Windows, Linux; five songs free to try.
+- **[OneScribe Pro](https://getonescribe.app/)** · $9.99 once · A document scanner that reads what it
+  scans, with the AI on your device. iPhone and iPad; free to scan.
+
+Everything else, including what's in the workshop, is at [casavargas.app](https://casavargas.app/).
+The same card is in the app under **Settings → About**.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE).
