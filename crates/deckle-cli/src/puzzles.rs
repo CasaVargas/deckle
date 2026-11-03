@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use deckle_core::deliver::{Conn, DeliverOptions, Target, deliver_named_on};
-use deckle_digest::chrono::{Local, NaiveDate};
+use deckle_digest::chrono::{Local, NaiveDate, Utc};
+use deckle_digest::puzzle::book::bundle::{self, Extras};
 use deckle_digest::puzzle::book::pdf::{self, PageSize};
 use deckle_digest::puzzle::book::{self, BookOptions, Difficulty, Kind};
 use deckle_digest::puzzle::words::Words;
@@ -16,13 +17,17 @@ use deckle_digest::puzzle::ai::Style;
 use deckle_digest::puzzle::book::plan::{self, Plan, Theme};
 use deckle_digest::puzzle::book::theme::Source;
 
-use super::cli::{BookArgs, DifficultyArg, PuzzlesCommand, ThemeArgs};
+use super::cli::{AsArg, BookArgs, DifficultyArg, PuzzlesCommand, ThemeArgs};
 use super::{emit, resolve_target};
 
 #[derive(Serialize)]
 struct Report {
     path: PathBuf,
-    pages: usize,
+    /// `pdf` or `bundle`.
+    format: &'static str,
+    /// The PDF's pages; a bundle has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pages: Option<usize>,
     puzzles: usize,
     seed: u64,
     date: String,
@@ -293,9 +298,25 @@ fn make_book(
     }
     warnings.append(&mut b.warnings);
     b.warnings = warnings;
-    let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
-    let name = book::file_name(&b);
-    let path = deliver(&bytes, &name, args)?;
+    let (path, pages) = match args.r#as {
+        AsArg::Pdf => {
+            let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
+            let name = book::file_name(&b);
+            (deliver(&bytes, &name, args)?, Some(pdf::pages(&b, page)))
+        }
+        AsArg::Bundle => {
+            let mut extras = Extras::new(&opts, Utc::now());
+            if let Some((plan, _, _)) = &styled {
+                extras.theme = plan.theme.clone();
+                extras.style = plan.style;
+            }
+            extras.replace = args.replace;
+            (
+                bundle::write_with(&b, &opts, &extras, &bundle_dir(args)?)?,
+                None,
+            )
+        }
+    };
 
     let mut again = format!("deckle puzzles {} --count {}", kind.key(), b.puzzles.len());
     if kind.sized() {
@@ -312,6 +333,9 @@ fn make_book(
         again += &format!(" --screen {}", args.screen);
     }
     again += &format!(" --seed {} --date {}", b.seed, b.date);
+    if args.r#as == AsArg::Bundle {
+        again += " --as bundle";
+    }
     match (&args.out, &args.to) {
         (Some(dir), _) => again += &format!(" -o {}", quote(&dir.to_string_lossy())),
         (None, Some(to)) => again += &format!(" --to {}", quote(to)),
@@ -319,7 +343,11 @@ fn make_book(
     }
     let report = Report {
         path,
-        pages: pdf::pages(&b, page),
+        format: match args.r#as {
+            AsArg::Pdf => "pdf",
+            AsArg::Bundle => "bundle",
+        },
+        pages,
         puzzles: b.puzzles.len(),
         seed: b.seed,
         date: b.date.to_string(),
@@ -331,10 +359,13 @@ fn make_book(
         } else {
             "puzzles"
         };
+        let pages = report
+            .pages
+            .map(|n| format!("{n} pages, "))
+            .unwrap_or_default();
         let mut text = format!(
-            "wrote {} ({} pages, {} {plural}, seed {})\nremake it with: {again}",
+            "wrote {} ({pages}{} {plural}, seed {})\nremake it with: {again}",
             report.path.display(),
-            report.pages,
             report.puzzles,
             report.seed,
         );
@@ -344,6 +375,25 @@ fn make_book(
         text
     })?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// The folder a bundle goes in: `-o`, or `--to <folder>`; a Kindle can't take one.
+fn bundle_dir(args: &BookArgs) -> Result<PathBuf, String> {
+    let dir = match (&args.out, &args.to) {
+        (Some(dir), _) => dir.clone(),
+        (None, Some(to)) if to == "device" => {
+            return Err(
+                "a bundle is for the iPad, not a Kindle: pass --to <folder> (an iCloud \
+                        Drive folder its reader watches) or -o <folder>, or --as pdf for the \
+                        Kindle"
+                    .into(),
+            );
+        }
+        (None, Some(to)) => PathBuf::from(to),
+        (None, None) => return Err("pass -o <folder> or --to <folder>".into()),
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    Ok(dir)
 }
 
 /// The book to `-o` or `--to`, under `name`; never over a book already there unless

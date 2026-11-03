@@ -50,6 +50,7 @@ fn setup(digest: &str) -> (tempfile::TempDir, Store) {
             puzzle,
             headlines: Vec::new(),
             solve: None,
+            search_found: None,
         },
     );
     store.save(&dir.join("puzzles.json")).unwrap();

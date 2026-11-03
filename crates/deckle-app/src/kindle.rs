@@ -888,6 +888,7 @@ mod tests {
                 puzzle,
                 headlines: Vec::new(),
                 solve: None,
+                search_found: None,
             },
         );
         store.save(&store_path).unwrap();

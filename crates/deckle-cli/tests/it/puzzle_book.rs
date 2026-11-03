@@ -296,3 +296,84 @@ fn crossword_words_file_with_clues() {
         "{warnings}"
     );
 }
+
+const BUNDLE: &str = "deckle-puzzles-word-search-2026-11-01-0000.decklepuzzles";
+
+#[test]
+fn as_bundle_writes_a_decklepuzzles_folder_and_never_over_one() {
+    let dir = tempfile::tempdir().unwrap();
+    fn args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
+        [
+            &[
+                "search",
+                "--count",
+                "2",
+                "--seed",
+                "7",
+                "--date",
+                "2026-11-01",
+                "--as",
+                "bundle",
+            ][..],
+            extra,
+        ]
+        .concat()
+    }
+    let d = dir.path().to_str().unwrap().to_owned();
+    let out = puzzles(&args(&["-o", &d, "--json"]));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let path = dir.path().join(BUNDLE);
+    assert_eq!(v["path"], path.to_str().unwrap());
+    assert_eq!(v["format"], "bundle");
+    assert_eq!(v["puzzles"], 2);
+    assert!(v.get("pages").is_none(), "a bundle has no pages: {v}");
+    let book: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path.join("book.json")).unwrap()).unwrap();
+    assert_eq!(book["format"], "deckle-puzzles");
+    assert_eq!(book["book"]["kind"], "search");
+    assert_eq!(book["book"]["seed"], "0000000000000007");
+    assert_eq!(book["puzzles"].as_array().unwrap().len(), 2);
+    let cover = std::fs::read(path.join("cover.jpg")).unwrap();
+    assert!(cover.starts_with(&[0xff, 0xd8]), "a JPEG");
+    assert!(!dir.path().join(format!(".{BUNDLE}.tmp")).exists());
+    assert!(!dir.path().join(BOOK).exists(), "no PDF beside it");
+
+    // the same bundle again is refused, then replaced
+    let again = puzzles(&args(&["-o", &d]));
+    assert!(!again.status.success());
+    let err = String::from_utf8_lossy(&again.stderr);
+    assert!(
+        err.contains("is already there") && err.contains("--replace"),
+        "{err}"
+    );
+    let replaced = puzzles(&args(&["--replace", "--to", &d]));
+    assert!(
+        replaced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replaced.stderr)
+    );
+    let text = String::from_utf8_lossy(&replaced.stdout);
+    assert!(text.contains("(2 puzzles, seed 7)"), "{text}");
+    let remake = text
+        .lines()
+        .find(|l| l.starts_with("remake it with: "))
+        .unwrap();
+    assert!(
+        remake.contains("--seed 7 --date 2026-11-01 --as bundle --to "),
+        "{text}"
+    );
+
+    // a Kindle can't take a bundle
+    let device = puzzles(&args(&["--to", "device"]));
+    assert!(!device.status.success());
+    let err = String::from_utf8_lossy(&device.stderr);
+    assert!(
+        err.contains("not a Kindle") && err.contains("--to <folder>"),
+        "{err}"
+    );
+}

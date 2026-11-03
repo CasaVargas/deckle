@@ -25,6 +25,7 @@ mod press_protocol;
 mod press_setup;
 mod puzzle;
 mod puzzle_book;
+mod puzzle_bundle;
 mod reading;
 mod seasons;
 mod sections;

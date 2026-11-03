@@ -7,13 +7,15 @@
 //! `edition.json` is its last file, listing every other file with its size and SHA-256: a
 //! bundle that iCloud Drive has only partly delivered is never read as whole.
 
+pub mod package;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use chrono::NaiveDate;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
+use self::package::{Existing, FileEntry, Files};
 use crate::config::Units;
 use crate::print::PrintPlan;
 use crate::sources::feeds::photo_token;
@@ -285,36 +287,6 @@ struct YesterdayJson {
     search: Option<SearchJson>,
 }
 
-#[derive(Serialize)]
-struct FileEntry {
-    path: String,
-    size: u64,
-    sha256: String,
-}
-
-/// The files a bundle holds, by their path inside it, before they're written.
-#[derive(Default)]
-struct Files {
-    by_path: BTreeMap<String, Vec<u8>>,
-}
-
-impl Files {
-    /// Adds `bytes` as `media/<12 hex digits of its SHA-256>.<ext>`, once however often it's
-    /// added, and returns that path.
-    fn media(&mut self, bytes: &[u8], ext: &str) -> String {
-        let hash = hex(&Sha256::digest(bytes));
-        let path = format!("media/{}.{ext}", &hash[..12]);
-        self.by_path
-            .entry(path.clone())
-            .or_insert_with(|| bytes.to_vec());
-        path
-    }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
 fn kind_name(key: &str) -> &'static str {
     let head = key.split(':').next().unwrap_or(key);
     match head {
@@ -441,9 +413,9 @@ fn dominant_color(img: &image::DynamicImage) -> String {
     format!("#{:02x}{:02x}{:02x}", sum[0] / n, sum[1] / n, sum[2] / n)
 }
 
-/// `[row, column, number]` for each numbered square of a 5×5 grid, numbered as crosswords are:
-/// a square starts a word across or down.
-fn numbers(rows: &[String]) -> Vec<[u32; 3]> {
+/// `[row, column, number]` for each numbered square of a square grid, numbered as crosswords
+/// are: a square starts a word across or down.
+pub(crate) fn numbers(rows: &[String]) -> Vec<[u32; 3]> {
     let cell = |r: usize, c: usize| {
         rows.get(r)
             .and_then(|row| row.as_bytes().get(c))
@@ -544,7 +516,7 @@ fn write_inner(
     let mut files = Files::default();
 
     let cover = crate::cover::render(gathered).map_err(|err| format!("cover: {err}"))?;
-    files.by_path.insert("cover.jpg".into(), cover);
+    files.insert("cover.jpg", cover);
 
     // The edition's pictures (the weather icons), by their EPUB href.
     let assets: BTreeMap<&str, String> = e
@@ -558,7 +530,7 @@ fn write_inner(
         "epub/{}",
         built.epub.file_name().unwrap_or_default().to_string_lossy()
     );
-    files.by_path.insert(
+    files.insert(
         epub_name,
         std::fs::read(&built.epub).map_err(|err| format!("{}: {err}", built.epub.display()))?,
     );
@@ -569,7 +541,7 @@ fn write_inner(
                 "epub/{}",
                 p.file_name().unwrap_or_default().to_string_lossy()
             );
-            files.by_path.insert(
+            files.insert(
                 path.clone(),
                 std::fs::read(p).map_err(|err| format!("{}: {err}", p.display()))?,
             );
@@ -733,15 +705,7 @@ fn write_inner(
         });
     }
 
-    let entries: Vec<FileEntry> = files
-        .by_path
-        .iter()
-        .map(|(path, bytes)| FileEntry {
-            path: path.clone(),
-            size: bytes.len() as u64,
-            sha256: hex(&Sha256::digest(bytes)),
-        })
-        .collect();
+    let entries: Vec<FileEntry> = files.entries();
     let json = EditionJson {
         format: FORMAT,
         version: if identity.is_some() { "1.4" } else { VERSION },
@@ -779,30 +743,15 @@ fn write_inner(
     };
     let json = serde_json::to_vec_pretty(&json).map_err(|err| err.to_string())?;
 
-    // Into a hidden folder, `edition.json` last, then renamed into place.
-    std::fs::create_dir_all(dir).map_err(|err| format!("{}: {err}", dir.display()))?;
-    let tmp = dir.join(format!(".{name}.tmp"));
-    if identity.is_some() {
-        // Exclusive creation refuses stale staging and symlinks; a fresh attempt owns it.
-        std::fs::create_dir(&tmp).map_err(|err| format!("{}: {err}", tmp.display()))?;
+    // Into a hidden folder, `edition.json` last, then renamed into place. A fresh bundle's
+    // staging is created exclusively: that refuses stale staging and symlinks, and a fresh
+    // attempt owns it.
+    let existing = if identity.is_some() {
+        Existing::Exclusive
     } else {
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-    let io = |p: &Path, err: std::io::Error| format!("{}: {err}", p.display());
-    for (path, bytes) in &files.by_path {
-        let to = tmp.join(path);
-        if let Some(parent) = to.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| io(parent, err))?;
-        }
-        std::fs::write(&to, bytes).map_err(|err| io(&to, err))?;
-    }
-    let edition = tmp.join("edition.json");
-    std::fs::write(&edition, json).map_err(|err| io(&edition, err))?;
-    if identity.is_none() && dest.exists() {
-        std::fs::remove_dir_all(&dest).map_err(|err| io(&dest, err))?;
-    }
-    std::fs::rename(&tmp, &dest).map_err(|err| io(&dest, err))?;
-    Ok(dest)
+        Existing::Replace
+    };
+    package::write_package(dir, &name, &files, "edition.json", &json, existing)
 }
 
 /// Whether the bundle at `dir` is whole: `edition.json` parses and every file it lists is
@@ -892,18 +841,6 @@ mod tests {
             "Fish & chips at six"
         );
         assert_eq!(words("<p>Fish &amp; chips</p>"), 3);
-    }
-
-    #[test]
-    fn media_is_stored_once_by_content() {
-        let mut f = Files::default();
-        let a = f.media(b"photo", "jpg");
-        let b = f.media(b"photo", "jpg");
-        let c = f.media(b"other", "jpg");
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        assert_eq!(f.by_path.len(), 2);
-        assert!(a.starts_with("media/") && a.len() == "media/".len() + 12 + 4);
     }
 
     #[test]

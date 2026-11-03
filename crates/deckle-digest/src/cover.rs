@@ -329,6 +329,50 @@ pub fn render_cookbook(
     jpeg(c)
 }
 
+/// A puzzle book's cover (puzzle book bundle design §2), 600 x 800 for the reader's shelf:
+/// the title page's text in the bundled faces, with the kind over a rule at the head and
+/// "Made with Deckle" at the foot, as the PDF's title page has it.
+pub fn render_puzzle_book(
+    kind: &str,
+    title: &str,
+    subtitle: &str,
+    date: &str,
+) -> Result<Vec<u8>, String> {
+    const W: u32 = 600;
+    const H: u32 = 800;
+    const SIDE: f32 = 48.0;
+    let f = fonts(Masthead::default())?;
+    let inner = W as f32 - 2.0 * SIDE;
+    let mut c = Canvas::new(W, H);
+    c.fill(SIDE, 60.0, W as f32 - SIDE, 63.0, BLACK);
+    c.centered(&f.bold, 22.0, 98.0, &kind.to_uppercase(), BLACK);
+    c.fill(SIDE, 112.0, W as f32 - SIDE, 113.0, BLACK);
+    let size = 64.0;
+    let lines = wrap(&f.bold, size, title, inner, 4);
+    let lead = size * 1.15;
+    // the last line sits where a one-line title would, as on the PDF's title page
+    let mut y = H as f32 * 0.42 - lead * (lines.len().saturating_sub(1)) as f32;
+    for line in &lines {
+        let s = fit(&f.bold, size, line, inner);
+        c.centered(&f.bold, s, y, line, BLACK);
+        y += lead;
+    }
+    y = H as f32 * 0.42 + 48.0;
+    let s = fit(&f.italic, 26.0, subtitle, inner);
+    c.centered(&f.italic, s, y, subtitle, BLACK);
+    y += 40.0;
+    c.centered(&f.serif, 22.0, y, date, BLACK);
+    c.fill(
+        SIDE,
+        H as f32 - 70.0,
+        W as f32 - SIDE,
+        H as f32 - 69.0,
+        BLACK,
+    );
+    c.centered(&f.serif, 18.0, H as f32 - 40.0, "Made with Deckle", BLACK);
+    jpeg(c)
+}
+
 /// The outlet in a story's meta line ("By Sentinel Staff · Sandhills Sentinel · Oct 20"):
 /// the first part that isn't a byline.
 fn outlet_of(meta: &str) -> Option<&str> {

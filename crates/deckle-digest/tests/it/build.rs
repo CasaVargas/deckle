@@ -2136,6 +2136,7 @@ fn a_bundle_whose_yesterday_had_no_search_validates() {
             puzzle,
             headlines: Vec::new(),
             solve: None,
+            search_found: None,
         },
     );
     store.save(&c.puzzle_store()).unwrap();
