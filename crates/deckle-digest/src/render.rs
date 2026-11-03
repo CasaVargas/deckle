@@ -75,6 +75,9 @@ table.grid span.n { display: block; font-size: 0.5em; font-weight: normal; text-
 div.mini { text-align: center; margin: 0.6em 0 0.8em 0; }
 div.mini img { width: 75%; }
 div.mini.small img { width: 40%; }
+div.mini.search img { width: 85%; }
+div.mini.search.small img { width: 50%; }
+p.words { text-align: center; line-height: 1.6; }
 table.grid.small td { width: 1.1em; height: 1.1em; font-size: 0.85em; vertical-align: middle; }
 table.grid.search td { width: 1.6em; height: 1.6em; text-align: center; vertical-align: middle; font-weight: bold; }
 table.grid.search.small td { width: 1.1em; height: 1.1em; font-weight: normal; }
@@ -431,7 +434,7 @@ fn section_page(
             print.pulls.get(&(i, j)),
         );
         for g in grids {
-            story = story.replace(&g.table, &g.html());
+            story = story.replace(&g.table, &g.html);
         }
         body.push_str(&with_photos(&story, i, j, a.photos.len()));
         body.push('\n');
@@ -557,11 +560,12 @@ fn opf(e: &Edition, uid: &str, grids: &[Vec<GridPicture>]) -> Vec<u8> {
             esc(href)
         ));
     }
-    for (n, p) in grids.iter().flatten().enumerate() {
+    let images = grids.iter().flatten().filter_map(|p| p.image.as_ref());
+    for (n, (href, _)) in images.enumerate() {
         manifest.push_str(&format!(
             "<item id=\"g{}\" href=\"{}\" media-type=\"image/png\"/>\n",
             n + 1,
-            esc(&p.href)
+            esc(href)
         ));
     }
     for i in 0..e.sections.len() {
@@ -647,8 +651,8 @@ pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
     for (href, png) in &e.assets {
         files.push((format!("OEBPS/{href}"), png.clone()));
     }
-    for p in grids.iter().flatten() {
-        files.push((format!("OEBPS/{}", p.href), p.png.clone()));
+    for (href, png) in grids.iter().flatten().filter_map(|p| p.image.as_ref()) {
+        files.push((format!("OEBPS/{href}"), png.clone()));
     }
     for (i, pictures) in grids.iter().enumerate() {
         files.push((

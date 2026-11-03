@@ -2,10 +2,12 @@
 
 ## Unreleased
 
-- **The mini no longer looks like a table on a Kindle.** The paper's crossword grid, and
-  yesterday's answers, are drawn as square PNG pictures in the EPUB instead of an HTML table,
-  which a Kindle (Enhanced Typesetting) stretched to the column's width with a zoom button
-  under it. The PDF edition and the iPad bundle are unchanged.
+- **The puzzle page no longer looks like tables on a Kindle.** The mini's grid and the word
+  search, and yesterday's answers to both, are drawn as square PNG pictures in the EPUB instead
+  of HTML tables, which a Kindle (Enhanced Typesetting) stretched to the column's width with a
+  zoom button under them. Yesterday's word search loops each word in gray. The search's words
+  print as one line-wrapped paragraph, theme words in bold. The PDF edition and the iPad
+  bundle are unchanged.
 - **Puzzle books for the iPad, as data.** A puzzle book can be written as a bundle the way an
   edition is: a `deckle-puzzles-<title>-<date>-<seed>.decklepuzzles` folder with `book.json`
   (every puzzle of every kind with its full solution, so Check and Reveal work offline) and a

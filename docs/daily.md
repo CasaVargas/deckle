@@ -352,8 +352,9 @@ from yesterday's headlines, clued as the headline with the word blanked: "Leaf _
 ridge this weekend (Local, yesterday)". The rest are clued from a short dictionary definition.
 The next paper prints **Yesterday's answers**: the filled grid and the ladder.
 
-The grids are printed as pictures in the EPUB (`images/s<n>-mini.png`): a Kindle sets any HTML
-table as a full-width box with a zoom button, which stretched the squares into wide rows. The
+The grids (the mini, the word search and yesterday's answers to both) are printed as pictures
+in the EPUB (`images/s<n>-mini.png`, `-search.png`, …): a Kindle sets any HTML table as a
+full-width box with a zoom button, which stretched the squares into wide rows. The
 PDF edition still draws the grid itself, in vector.
 
 - **Writing on it with a Scribe's pen.** The paper is a reflowable Kindle book, so the pen opens

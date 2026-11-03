@@ -338,6 +338,10 @@ fn golden_page() {
     }
     assert!(!got.contains("<table class=\"grid\">"), "{got}");
     assert!(!got.contains("<table class=\"grid small\">"), "{got}");
+    // nor the word search: its grids are pictures and its words one paragraph
+    assert!(!got.contains("<table"), "{got}");
+    assert!(got.contains("<div class=\"mini search\"><img src=\"images/s1-search.png\""));
+    assert!(got.contains("<p class=\"words\">"));
 }
 
 #[test]
