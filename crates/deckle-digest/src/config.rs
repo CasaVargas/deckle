@@ -1165,6 +1165,10 @@ pub struct EmailConfig {
     pub username: String,
     /// Also queue the paper for USB when the email went out.
     pub usb_too: bool,
+    /// Attach the paper as a PDF laid out for a Kindle Scribe (its pen writes on it) instead
+    /// of the EPUB Amazon converts into a Kindle book.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub pdf: bool,
 }
 
 impl Default for EmailConfig {
@@ -1177,6 +1181,7 @@ impl Default for EmailConfig {
             smtp_port: 587,
             username: String::new(),
             usb_too: false,
+            pdf: false,
         }
     }
 }
@@ -1646,6 +1651,7 @@ shelf = true                      # From Your Shelf reads this Kindle (Daily tab
 # smtp_port = 587            # 587 = STARTTLS, 465 = implicit TLS; anything else is refused
 # username = "you@example.com"
 # usb_too = false            # also queue the paper for USB when the email succeeds
+# pdf = false                # attach a PDF a Kindle Scribe's pen writes on, not the EPUB
 
 # A newspaper you subscribe to: the paper signs in as you to read its full articles. The
 # password is not stored here; it goes in the system keychain. One block per site.
@@ -2070,7 +2076,7 @@ impl Config {
         if self.remarkable.enabled {
             out.push((self.remarkable.screen, self.remarkable.photos()));
         }
-        if self.sync.any_pdf_paper() {
+        if self.sync.any_pdf_paper() || (self.email.enabled && self.email.pdf) {
             out.push(Self::KINDLE_PDF);
         }
         out.sort_by_key(|(s, p)| (format!("{s:?}"), *p == Photos::Color));
@@ -2607,6 +2613,18 @@ mod tests {
         // back to the book clears the entry it made
         c.sync.set_device_paper("G000AAAA", PaperFormat::Book);
         assert!(c.sync.devices.is_empty());
+        // an emailed PDF wants it too, while the email is on
+        c.email.pdf = true;
+        assert!(!c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        c.email.enabled = true;
+        assert!(c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        let text = toml::to_string(&c.email).unwrap();
+        assert!(text.contains("pdf = true"), "{text}");
+        assert!(
+            !toml::to_string(&EmailConfig::default())
+                .unwrap()
+                .contains("pdf")
+        );
     }
 
     #[test]

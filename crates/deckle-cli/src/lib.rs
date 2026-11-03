@@ -3397,6 +3397,22 @@ fn digest(
                 };
             // Email belongs to the morning run to the Kindle, not to `--to <folder>` (email
             // design §7). A paper that went out by email skips the outbox unless `usb_too`.
+            // `[email] pdf`: the Scribe's PDF, which its pen writes on, instead of the EPUB
+            let attach = match cfg.email.pdf {
+                true => {
+                    let (screen, photos) = deckle_digest::Config::KINDLE_PDF;
+                    match built.pdf(screen, photos) {
+                        Some(p) => p.to_path_buf(),
+                        None => {
+                            built.notes.push(
+                                "the Kindle's PDF wasn't built; the email carries the EPUB".into(),
+                            );
+                            built.epub.clone()
+                        }
+                    }
+                }
+                false => built.epub.clone(),
+            };
             let (email, to_usb) = match &folder {
                 Some(_) => (None, true),
                 None => email_paper(
@@ -3404,7 +3420,7 @@ fn digest(
                     cfg.paper.as_ref().map(|_| cfg.title.as_str()),
                     &deckle_digest::edition_stem(&cfg, date),
                     date,
-                    &built.epub,
+                    &attach,
                     &deckle_digest::secret::SystemKeyring,
                     &|k| std::env::var(k).ok(),
                     |pw| deckle_digest::mail::SmtpMailer::new(&cfg.email, pw),
@@ -6865,6 +6881,7 @@ mod email_tests {
             smtp_port: 465,
             username: "me@example.com".into(),
             usb_too,
+            pdf: false,
         }
     }
 

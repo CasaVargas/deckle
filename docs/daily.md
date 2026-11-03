@@ -595,6 +595,13 @@ deckle digest email test                 # a one-page test EPUB to your Kindle
 deckle digest email forget               # delete the keychain entry
 ```
 
+- **As a PDF to write on** (`pdf = true`, or **Send it as a PDF to write on** on the card): the
+  email carries the Kindle Scribe PDF ([below](#the-paper-as-a-pdf-on-a-kindle-scribe))
+  instead of the EPUB, so Amazon delivers it as a PDF the pen writes straight onto rather than
+  converting it into a Kindle book. Every Kindle on that address gets the PDF. The 45 MB cap
+  still applies; photos are gray. Not yet checked on a device: email one paper and draw on it
+  before relying on it.
+
 When the email goes out, the paper skips the USB outbox (`usb_too = true` sends both, so two
 copies). When it fails (no password, login refused, no network, over 45 MB), the paper is queued
 for USB as before and the run's report says why. `--to <folder>` and `digest push` never email.
@@ -968,9 +975,10 @@ grid in its place, gray photos.
   edition.
 - **How it goes:** while any Kindle asks for it, each run also makes the Scribe PDF and queues
   `deckle-daily-<date>.pdf` beside the Kindle book. A Kindle set to PDF gets the PDF, any other
-  the book, and the one not sent is dropped when the other goes. Over USB only (mass storage
-  or MTP), and only on a computer with Kindle Previewer, like the book; email still sends the
-  book.
+  the book, and the one not sent is dropped when the other goes. Over USB (mass storage or
+  MTP) on a computer with Kindle Previewer, like the book.
+- **By email instead:** `pdf = true` under `[email]` attaches the PDF instead of the EPUB, for
+  every Kindle on that address ([Email to Kindle](#email-to-kindle-opt-in)).
 - **Pruning** counts the PDFs with the books toward `keep`, and removes an old PDF with its
   `.sdr` folder, which is where the Scribe keeps its ink.
 - **What you give up:** text size, Word Wise and X-Ray, and the puzzle check (it reads notes

@@ -8,6 +8,9 @@
   `paper = "pdf"` under `[sync.devices."<id>"]`. While any Kindle asks for it, the build also
   makes a `kindle-scribe` PDF edition and queues it beside the Kindle book; each push sends the
   one that Kindle takes and drops the other. Pruning counts `.pdf` papers with `.kfx` ones.
+  `[email] pdf = true` (**Send it as a PDF to write on** on the email card) emails the same PDF
+  instead of the EPUB, as `application/pdf` and never with "convert" in the subject, so
+  Amazon keeps it a PDF.
 - **The puzzle page no longer looks like tables on a Kindle.** The mini's grid and the word
   search, and yesterday's answers to both, are drawn as square PNG pictures in the EPUB instead
   of HTML tables, which a Kindle (Enhanced Typesetting) stretched to the column's width with a

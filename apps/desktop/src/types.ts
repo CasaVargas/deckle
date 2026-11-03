@@ -545,6 +545,8 @@ export interface EmailConfig {
   smtp_port: number;
   username: string;
   usb_too: boolean;
+  /** Attach a PDF a Kindle Scribe's pen writes on instead of the EPUB. */
+  pdf?: boolean;
 }
 
 export const DEFAULT_EMAIL: EmailConfig = {

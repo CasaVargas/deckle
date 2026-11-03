@@ -529,6 +529,10 @@ export default function DailyView({
         <input type="checkbox" checked={!!draft.email?.usb_too} onChange={(e) => editEmail((m) => (m.usb_too = e.target.checked), "now")} />
         Also send it over USB when the email goes out (two copies on the Kindle)
       </label>
+      <label className="check">
+        <input type="checkbox" checked={!!draft.email?.pdf} onChange={(e) => editEmail((m) => (m.pdf = e.target.checked), "now")} />
+        Send it as a PDF to write on (a Kindle Scribe's pen writes straight on the pages; no Word Wise, fixed text size)
+      </label>
       <div className="paper-actions">
         <button className="ghost" disabled={testing || !emailStatus?.configured || !emailStatus?.has_password} onClick={sendTest}>
           {testing ? "Sending…" : "Send a test"}
