@@ -19,12 +19,8 @@ pub struct AiConfig {
 }
 
 impl AiConfig {
-    fn model(&self) -> &str {
-        if self.model.trim().is_empty() {
-            self.provider.default_model()
-        } else {
-            self.model.trim()
-        }
+    fn model(&self) -> String {
+        llm::resolve_model(self.provider, &self.model)
     }
 }
 
@@ -141,7 +137,7 @@ fn ask(cfg: &AiConfig, user: &str, n: usize, post: &mut Post<'_>) -> Result<Vec<
     };
     let raw = llm::complete_with(
         cfg.provider,
-        cfg.model(),
+        &cfg.model(),
         &cfg.api_key,
         &cfg.endpoint,
         SYSTEM,

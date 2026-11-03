@@ -1267,8 +1267,9 @@ fn ollama_is_a_local_server_asked_through_its_own_api() {
     let summary = summary.unwrap();
     assert_eq!(summary.recapped, 1);
     assert_eq!(
-        summary.model, "qwen3:4b",
-        "the recommended model when none is set"
+        summary.model,
+        deckle_xray::llm::recommended_model(deckle_xray::llm::total_memory()).name,
+        "the recommended model for this machine when none is set, the one the checklist installs"
     );
     // local: 2,000-word parts, then a merge, on an 8k context without thinking
     assert!(

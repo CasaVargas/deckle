@@ -25,6 +25,9 @@ pub enum Provider {
 }
 
 impl Provider {
+    /// The provider's static default. For Ollama this is the smallest recommended tier; a
+    /// request should go through [`resolve_model`] instead, which picks the tier for this
+    /// machine, the one the AI checklist installs.
     pub fn default_model(self) -> &'static str {
         match self {
             Provider::Anthropic => "claude-sonnet-5-5",
@@ -102,6 +105,30 @@ pub fn recommended_model(total_memory: Option<u64>) -> Recommended {
         .find(|m| mem >= m.min_memory)
         .copied()
         .unwrap_or(RECOMMENDED_MODELS[0])
+}
+
+/// The model a request uses: `configured` when it names one (trimmed); otherwise, for Ollama,
+/// the one recommended for this machine, so a request asks for the same model the AI
+/// checklist installed and `deckle llm pull` downloaded; for a service, its default. Every
+/// path that sends a request resolves an empty model here and nowhere else.
+pub fn resolve_model(provider: Provider, configured: &str) -> String {
+    resolve_model_for(provider, configured, total_memory())
+}
+
+/// [`resolve_model`] for a machine with `total_memory` bytes.
+pub fn resolve_model_for(
+    provider: Provider,
+    configured: &str,
+    total_memory: Option<u64>,
+) -> String {
+    let configured = configured.trim();
+    if !configured.is_empty() {
+        return configured.to_owned();
+    }
+    match provider {
+        Provider::Ollama => recommended_model(total_memory).name.to_owned(),
+        _ => provider.default_model().to_owned(),
+    }
 }
 
 /// This machine's memory, when the OS says. Linux reads `/proc/meminfo`; macOS asks `sysctl`;
@@ -789,11 +816,7 @@ impl Check {
 /// Runs the three checks against the Ollama at `endpoint` with `model` (empty: the recommended
 /// one for this machine).
 pub fn check(endpoint: &str, model: &str, get: &mut Get<'_>, post: &mut Post<'_>) -> Check {
-    let model = if model.trim().is_empty() {
-        recommended_model(total_memory()).name.to_owned()
-    } else {
-        model.trim().to_owned()
-    };
+    let model = resolve_model(Provider::Ollama, model);
     let endpoint = ollama_base(endpoint);
     let server = probe(&endpoint, get);
     let installed = server.as_ref().ok().map(|s| s.has(&model));
