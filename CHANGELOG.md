@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.1 — the AI on this Mac asks for the model it installed
 
 - **Fixed: the AI on this Mac asked for a model it hadn't installed.** With Settings → AI on
   **On this Mac** and no model named, the checklist installed the model for this machine's
