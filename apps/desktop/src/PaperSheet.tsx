@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { platform } from "./platform";
 import { api } from "./api";
 import DailyEditor from "./DailyEditor";
+import type { SettingsPage } from "./settingsIndex";
 import Icon from "./Icon";
 import { loadMastheadFonts } from "./mastheadFonts";
 import { FACES, faceFamily, fontFileName, mastheadChoice, mastheadValue } from "./mastheadView";
@@ -22,6 +23,7 @@ export default function PaperSheet({
   edit,
   flush,
   onClose,
+  onOpenSettings,
 }: {
   draft: DailyConfig;
   kindles: KnownKindle[];
@@ -30,6 +32,8 @@ export default function PaperSheet({
   /** Saves typing that's waiting for a pause, as a field is left. */
   flush: () => void;
   onClose: () => void;
+  /** Opens a Settings page (the AI editor points at Settings → AI). */
+  onOpenSettings?: (page: SettingsPage) => void;
 }) {
   const caps = useCapabilities();
   const [missing, setMissing] = useState<string[]>([]);
@@ -166,7 +170,7 @@ export default function PaperSheet({
         </div>
 
         <div className="sheet-group">
-          <DailyEditor value={draft.llm} onChange={(value) => edit((c) => void (c.llm = value), "now")} />
+          <DailyEditor value={draft.llm} onChange={(value) => edit((c) => void (c.llm = value), "now")} onOpenSettings={onOpenSettings} />
         </div>
 
         <div className="sheet-group">

@@ -62,6 +62,8 @@ pub enum LlmArg {
     Off,
     Anthropic,
     Openai,
+    /// Ollama on this computer: nothing leaves it, no key. `deckle llm check` sets it up.
+    Ollama,
 }
 
 impl LlmArg {
@@ -75,6 +77,7 @@ impl LlmArg {
             LlmArg::Off => return None,
             LlmArg::Anthropic => Provider::Anthropic,
             LlmArg::Openai => Provider::OpenAi,
+            LlmArg::Ollama => Provider::Ollama,
         };
         Some(deckle_core::xray::LlmConfig {
             provider,
@@ -215,13 +218,16 @@ pub enum Command {
         /// X-Ray sidecar for EBOK books: `auto` (default) or `off`.
         #[arg(long, value_enum)]
         xray: Option<XRayArg>,
-        /// LLM for X-Ray descriptions (key from ANTHROPIC_API_KEY / OPENAI_API_KEY).
+        /// LLM for X-Ray descriptions: `ollama` on this computer (no key), or `anthropic` /
+        /// `openai` with the key from ANTHROPIC_API_KEY / OPENAI_API_KEY.
         #[arg(long, value_enum, default_value_t = LlmArg::Off)]
         llm: LlmArg,
-        /// Model name for `--llm` (provider default when omitted).
+        /// Model name for `--llm` (provider default when omitted; for `ollama`, the model
+        /// `deckle llm check` recommends for this machine).
         #[arg(long)]
         llm_model: Option<String>,
-        /// Base URL for `--llm openai` (OpenAI-compatible servers, e.g. http://localhost:11434/v1).
+        /// Base URL for `--llm openai` (OpenAI-compatible servers, e.g. http://localhost:1234/v1
+        /// for LM Studio) or `--llm ollama` (default http://localhost:11434).
         #[arg(long)]
         llm_endpoint: Option<String>,
         /// Wikipedia summaries for X-Ray terms (network).
@@ -374,6 +380,33 @@ pub enum Command {
         #[command(subcommand)]
         action: PuzzlesCommand,
     },
+    /// An AI model on this computer, through Ollama: check it's ready, download the model.
+    Llm {
+        #[command(subcommand)]
+        action: LlmCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum LlmCommand {
+    /// Whether Ollama answers, the model is installed and a test prompt comes back; what to
+    /// do about whichever isn't.
+    Check {
+        /// Ollama's address (default http://localhost:11434).
+        #[arg(long)]
+        endpoint: Option<String>,
+        /// The model (default: the one Deckle recommends for this machine's memory).
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Download a model into Ollama, with progress.
+    Pull {
+        /// The model (default: the one Deckle recommends for this machine's memory).
+        model: Option<String>,
+        /// Ollama's address (default http://localhost:11434).
+        #[arg(long)]
+        endpoint: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -389,6 +422,8 @@ pub enum PuzzlesCommand {
         /// Your own words, one a line (`#` lines skipped): the book's theme.
         #[arg(long)]
         words: Option<PathBuf>,
+        #[command(flatten)]
+        theme: ThemeArgs,
         #[command(flatten)]
         book: BookArgs,
     },
@@ -408,9 +443,50 @@ pub enum PuzzlesCommand {
         /// Your own words with clues, `word: clue` a line (`#` lines skipped): the book's theme.
         #[arg(long)]
         words: Option<PathBuf>,
+        #[command(flatten)]
+        theme: ThemeArgs,
         /// easy: everyday words; hard: rarer ones mixed in.
         #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
         difficulty: DifficultyArg,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+    /// A book of word ladders: three a page, one word into another a letter a rung.
+    Ladder {
+        /// easy: 3 rungs; medium: 4; hard: 5 or 6.
+        #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
+        difficulty: DifficultyArg,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+    /// A book of cryptograms: a sentence enciphered letter for letter, with a key to work in.
+    Cryptogram {
+        /// easy: short quotes, 3 letters given; medium: 1 given; hard: none.
+        #[arg(long, value_enum, default_value_t = DifficultyArg::Medium)]
+        difficulty: DifficultyArg,
+        /// Your own quotes, one a line as `quote — who said it` (`#` lines skipped).
+        #[arg(long)]
+        quotes: Option<PathBuf>,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+    /// A book of nonograms: shade the squares the row and column counts describe.
+    Nonogram {
+        /// Squares on a side, 5 to 25.
+        #[arg(long, default_value_t = 15)]
+        size: usize,
+        /// A picture (PNG, JPEG, GIF, WebP) as the first puzzle, thresholded; the rest are
+        /// Deckle's.
+        #[arg(long)]
+        picture: Option<PathBuf>,
+        #[command(flatten)]
+        book: BookArgs,
+    },
+    /// A book of mazes, in at the top left and out at the bottom right.
+    Maze {
+        /// Squares on a side, 6 to 40 (10 for a child, 30 for an evening).
+        #[arg(long, default_value_t = 20)]
+        size: usize,
         #[command(flatten)]
         book: BookArgs,
     },
@@ -421,6 +497,27 @@ pub enum DifficultyArg {
     Easy,
     Medium,
     Hard,
+}
+
+/// Where a crossword's or a word search's theme words come from, and how the clues read
+/// (Puzzles tab design §2).
+#[derive(Args, Debug, Default)]
+pub struct ThemeArgs {
+    /// `interests` (your papers' interest sections, last 30 days), `week` (every section,
+    /// last 7 days), `vocab` (words you looked up on the Kindle), `cookbook`, or `subject`
+    /// (the AI writes the words and clues for --subject).
+    #[arg(long, conflicts_with = "words")]
+    pub theme: Option<String>,
+    /// With `--theme interests`: only these interests (repeat for several; default all).
+    #[arg(long)]
+    pub interest: Vec<String>,
+    /// With `--theme subject`: what the AI writes about.
+    #[arg(long)]
+    pub subject: Option<String>,
+    /// How the clues read: `plain`, or with the AI `trivia`, `cryptic`, `kid`. The AI is
+    /// the app's Settings → AI (`deckle llm check`).
+    #[arg(long, default_value = "plain")]
+    pub clues: String,
 }
 
 /// What every puzzle book takes.

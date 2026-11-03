@@ -88,7 +88,7 @@ always looked like, so the paper reads the same way throughout.
 
 ## 4. The welcome
 
-A full-window overlay on the app's first launch: a centered card, four pages, a step indicator,
+A full-window overlay on the app's first launch: a centered card, five pages, a step indicator,
 **Skip** at every page, **Next** and **Back**. It shows when the settings file's `welcome_seen` is
 false, and sets it true on Finish or Skip. **Settings → About** gets *Show the welcome again*.
 
@@ -111,9 +111,15 @@ one Skip to dismiss)*.
 3. **Save to paper.** What the two bookmarklets do, then the install (§4.2), then a live check
    (§4.3). If the schedule is off on the desktop, a line says the bookmarklets work while it's
    on, with *Back* to page 2.
-4. **Where things are.** The Daily tab for the town, feeds, sections and delivery (USB, email,
-   Kobo, reMarkable, a folder); the Books tab for EPUBs and documents; the Cookbook. *Finish*
-   lands on the Daily tab.
+4. **The back pages** *(added 2026-11-02)*. What every paper ends with: the Mini with yesterday's
+   headlines as its theme answers, the word search, the word ladder, the almanac, the horoscope
+   and On this day, and that a Kindle's notes mark the answers; the puzzle books to write on
+   (`deckle puzzles`); From Your Shelf; and the AI model, off by default, on this Mac for free
+   through Ollama or at a service, with a link that closes the welcome on Settings → AI. The
+   miniature shows a crossword grid in place of the weather box on this page.
+5. **Where things are.** The Daily tab for the town, feeds, sections and delivery (USB, email,
+   Kobo, reMarkable, a folder); the Books tab for EPUBs and documents; the Cookbook; the Kindle
+   tab; Settings → AI. *Finish* lands on the Daily tab.
 
 ### 4.2 Installing the bookmarklets
 

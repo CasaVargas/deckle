@@ -779,6 +779,7 @@ pub fn llm_config(settings: &Settings) -> Option<LlmConfig> {
     let provider = match settings.llm_provider.as_str() {
         "anthropic" => Provider::Anthropic,
         "openai" => Provider::OpenAi,
+        "ollama" => Provider::Ollama,
         _ => return None,
     };
     Some(LlmConfig {

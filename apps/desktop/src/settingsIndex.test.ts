@@ -72,7 +72,8 @@ describe("Overview", () => {
   });
 
   it("names what goes online", () => {
-    expect(onlineOn({ metadata_fill: true, amazon_match: false, wikipedia: true, llm_provider: "anthropic" })).toEqual(["Open Library details", "Wikipedia summaries", "the AI model (Anthropic)"]);
+    expect(onlineOn({ metadata_fill: true, amazon_match: false, wikipedia: true, llm_provider: "anthropic", llm_endpoint: "" })).toEqual(["Open Library details", "Wikipedia summaries", "the AI model (Anthropic)"]);
+    expect(onlineOn({ metadata_fill: false, amazon_match: false, wikipedia: false, llm_provider: "ollama", llm_endpoint: "" })).toEqual([]);
     expect(onlineLine(["Open Library details", "Wikipedia summaries", "the AI model (Anthropic)"])).toBe(
       "3 features go online: Open Library details, Wikipedia summaries and the AI model (Anthropic). Everything else stays on this Mac.",
     );
@@ -88,9 +89,9 @@ describe("page cards", () => {
     expect(pageSummary("library", s, { root: "/b", auto_add: true, books: 2 }, [], "0.7.0")).toBe("2 books · adds every book you send");
     expect(pageSummary("library", s, { root: null, auto_add: false, books: 0 }, [], "0.7.0")).toBe("Off: books you send aren't kept");
     expect(pageSummary("books", s, null, [], "0.7.0")).toBe("Page numbers, tidy typography and covers when missing");
-    expect(pageSummary("reading", s, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia");
+    expect(pageSummary("reading", s, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with the AI model and Wikipedia");
     expect(pageSummary("reading", { ...s, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("All off");
-    expect(pageSummary("reading", { ...s, chapter_recaps: true }, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with an AI model and Wikipedia · Chapter recaps");
+    expect(pageSummary("reading", { ...s, chapter_recaps: true }, null, [], "0.7.0")).toBe("Word Wise, 3 of 5 · X-Ray with the AI model and Wikipedia · Chapter recaps");
     expect(pageSummary("reading", { ...s, chapter_recaps: true, llm_provider: "off", word_wise: false, xray: false }, null, [], "0.7.0")).toBe("All off");
     expect(pageSummary("reading", { ...s, book_summary: true, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("A summary");
     expect(pageSummary("reading", { ...s, chapter_recaps: true, book_summary: true, series_recap: true, word_wise: false, xray: false }, null, [], "0.7.0")).toBe("Chapter recaps, a summary and a series recap");

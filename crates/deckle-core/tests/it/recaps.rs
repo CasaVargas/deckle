@@ -1239,3 +1239,48 @@ fn a_comment_before_a_heading_keeps_the_recap_out_of_it() {
         .count();
     assert_eq!(asides, 2, "both recaps are elements, not comment text");
 }
+
+#[test]
+fn ollama_is_a_local_server_asked_through_its_own_api() {
+    let cfg = LlmConfig {
+        provider: Provider::Ollama,
+        model: String::new(),
+        endpoint: String::new(),
+        api_key: String::new(),
+    };
+    let opts = RecapOptions {
+        llm: cfg,
+        cache_dir: None,
+        chapters: true,
+        summary: false,
+        series: false,
+    };
+    let mut bodies = Vec::new();
+    let mut post = |url: &str, headers: &[(String, String)], body: &str| {
+        assert_eq!(url, "http://localhost:11434/api/chat");
+        assert!(!headers.iter().any(|(k, _)| k == "authorization"));
+        bodies.push(body.to_owned());
+        Ok(serde_json::json!({"message": {"content": format!("Part {}.", bodies.len())}, "done_reason": "stop"})
+            .to_string())
+    };
+    let (bytes, summary) = add_with(&epub(&[("One", &words(5_000, 0))]), &opts, &mut post).unwrap();
+    let summary = summary.unwrap();
+    assert_eq!(summary.recapped, 1);
+    assert_eq!(
+        summary.model, "qwen3:4b",
+        "the recommended model when none is set"
+    );
+    // local: 2,000-word parts, then a merge, on an 8k context without thinking
+    assert!(
+        bodies.len() >= 3,
+        "parts and a merge, not one request: {}",
+        bodies.len()
+    );
+    for b in &bodies {
+        let v: serde_json::Value = serde_json::from_str(b).unwrap();
+        assert_eq!(v["think"], false);
+        assert_eq!(v["options"]["num_ctx"], 8192);
+        assert!(v.get("format").is_none(), "recaps are prose");
+    }
+    assert!(chapter(&bytes, 0).contains("class=\"deckle-recap\""));
+}

@@ -187,6 +187,14 @@ commands! { ctx;
     library_watch_scan {} => books::library_watch_scan(),
     library_watch_set { dir: Option<String> } => books::library_watch_set(dir),
     list_devices {} => Ok(commands::list_devices(&ctx.state)),
+    llm_check { endpoint: String, model: String } => Ok(crate::llm::llm_check(endpoint, model)),
+    llm_pull { endpoint: String, model: String } =>
+        crate::llm::llm_pull(ctx.events.clone(), endpoint, model),
+    llm_pull_stop {} => {
+        crate::llm::llm_pull_stop();
+        Ok(())
+    },
+    llm_recommended {} => Ok(crate::llm::llm_recommended()),
     masthead_missing { title: String } => Ok(daily::masthead_missing(title)),
     morgue_month { year: i32, month: u32 } => morgue::morgue_month(year, month),
     morgue_open { date: String } => if ctx.web {
@@ -207,6 +215,15 @@ commands! { ctx;
         press::press_setup(paper, export_index, enabled, expected, &ctx.exe),
     press_stop { on: bool, paper: Option<String> } => next::press_stop(on, paper),
     previewer_status {} => Ok(commands::previewer_status(&ctx.state)),
+    puzzles_kinds {} => Ok(crate::puzzles::puzzles_kinds()),
+    puzzles_list {} => Ok(crate::puzzles::puzzles_list()),
+    puzzles_make { request: crate::puzzles::BookRequest } =>
+        crate::puzzles::puzzles_make(ctx.events.clone(), request),
+    puzzles_preview { request: crate::puzzles::BookRequest } =>
+        crate::puzzles::puzzles_preview(request),
+    puzzles_send { path: String, target: RunTarget, replace: bool } =>
+        crate::puzzles::puzzles_send(path, target, replace),
+    puzzles_sources {} => Ok(crate::puzzles::puzzles_sources()),
     reader_server_set_password { password: String } =>
         crate::reader_server::reader_server_set_password(password),
     reader_server_status {} => Ok(crate::reader_server::reader_server_status()),

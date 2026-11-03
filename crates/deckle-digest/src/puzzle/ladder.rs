@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The word ladder: one 4-letter word into another, a letter a rung (puzzle design §4).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
+use rand::Rng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -174,6 +175,72 @@ pub fn today(words: &Words, rng: &mut StdRng, recent: &[(String, String)]) -> Op
             path,
         })
     })
+}
+
+/// A ladder of `rungs` rungs between two 4-letter words picked by `rng`, neither pair in
+/// `used`: a breadth-first search from a random word finds every word that far away, and one
+/// of those is the other end. `None` when a dozen starts find nothing.
+pub fn random(
+    words: &Words,
+    rungs: &std::ops::RangeInclusive<usize>,
+    rng: &mut StdRng,
+    used: &HashSet<(String, String)>,
+) -> Option<Ladder> {
+    let four = words.of_len(4);
+    if four.is_empty() {
+        return None;
+    }
+    let mut buckets: HashMap<String, Vec<&str>> = HashMap::new();
+    for w in four {
+        for i in 0..4 {
+            buckets.entry(wildcard(w, i)).or_default().push(w);
+        }
+    }
+    for _ in 0..12 {
+        let from = &four[rng.random_range(0..four.len())];
+        // distances from `from`, as `shortest` walks them
+        let mut dist: HashMap<&str, usize> = HashMap::from([(from.as_str(), 0)]);
+        let mut prev: HashMap<&str, &str> = HashMap::new();
+        let mut queue = VecDeque::from([from.as_str()]);
+        while let Some(w) = queue.pop_front() {
+            let d = dist[w];
+            if d >= *rungs.end() {
+                continue;
+            }
+            for i in 0..4 {
+                for &n in buckets.get(&wildcard(w, i)).into_iter().flatten() {
+                    if !dist.contains_key(n) {
+                        dist.insert(n, d + 1);
+                        prev.insert(n, w);
+                        queue.push_back(n);
+                    }
+                }
+            }
+        }
+        let mut ends: Vec<&str> = dist
+            .iter()
+            .filter(|(w, d)| rungs.contains(d) && !used.contains(&(from.clone(), (**w).to_owned())))
+            .map(|(w, _)| *w)
+            .collect();
+        if ends.is_empty() {
+            continue;
+        }
+        ends.sort_unstable();
+        let to = ends[rng.random_range(0..ends.len())];
+        let mut path = vec![to.to_owned()];
+        let mut at = to;
+        while at != from {
+            at = prev[at];
+            path.push(at.to_owned());
+        }
+        path.reverse();
+        return Some(Ladder {
+            from: from.clone(),
+            to: to.to_owned(),
+            path,
+        });
+    }
+    None
 }
 
 #[cfg(test)]

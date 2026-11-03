@@ -123,8 +123,8 @@ in, press **Send**.
   KFX a Kindle reads, with approximate page numbers.
 - **Covers that stick.** On Kindles where it can, Deckle writes its own cover thumbnail and puts it
   back on every send.
-- **X-Ray.** The people and terms in the book. Optionally a model (Anthropic, or any
-  OpenAI-compatible endpoint including a local Ollama) writes spoiler-free descriptions, and
+- **X-Ray.** The people and terms in the book. Optionally a model (Ollama on this computer,
+  Anthropic, or any OpenAI-compatible endpoint) writes spoiler-free descriptions, and
   Wikipedia adds summaries. A Kobo or PocketBook gets the same people and terms as a Who's who
   page at the back, with each name's first mention in a chapter linked to it.
 - **Word Wise.** Hints from a Wiktionary-derived English lexicon, pointed at the Kindle's own
@@ -174,10 +174,15 @@ in, press **Send**.
   sets it for a comic that doesn't say. A Kobo or PocketBook gets a fixed-layout EPUB; a reMarkable
   (`--to remarkable`) an image-only PDF fitted to its screen, since its EPUB reader reflows. No
   X-Ray, Word Wise or page numbers.
-- **Puzzle books to write on.** `deckle puzzles search|crossword|sudoku` makes a book of word
-  searches, crosswords (5×5 to 15×15, your own words and clues if you like) or sudoku as a PDF
-  that takes pen ink on a Kindle Scribe, sized for a Scribe, a reMarkable, an iPad or A5 paper.
-  See [docs/puzzle-books.md](docs/puzzle-books.md).
+- **Puzzle books to write on.** The **Puzzles** tab (and `deckle puzzles`) makes a book of
+  crosswords (5×5 to 15×15), word searches, sudoku, word ladders, cryptograms, nonograms (your
+  own photo as the first) or mazes, as a PDF that takes pen ink on a Kindle Scribe, sized for a
+  Scribe, a reMarkable, an iPad or A5 paper. A crossword or word search is **themed on what you
+  follow**: the headline words of your interest sections or the whole week's paper, clued from
+  the headlines; the words you looked up on the Kindle; your cookbook; your own list; or a
+  subject the AI writes about. With the AI on, the clues can be rewritten as trivia, cryptic,
+  or for a kid. The first page is previewed before you make it, and every book is kept so
+  **Make again** gives the same one. See [docs/puzzle-books.md](docs/puzzle-books.md).
 - **A PDF as it is.** `deckle send` copies a PDF, TXT, AZW3 or MOBI to a Kindle or a folder
   untouched, which is how a document that takes ink gets onto a Scribe.
 - **Web articles.** A URL, a `.webloc`/`.url` link or a saved `.html` page.
@@ -469,20 +474,27 @@ the [preset design](docs/superpowers/specs/2026-10-24-book-style-presets-design.
 <summary>The Daily's AI editor</summary>
 
 In **Daily → The paper → AI editor**, turn on cross-feed duplicate removal, short news-section
-briefs, AI-written horoscopes and interest scoring. It's off by default. **Use Books provider**
-copies your X-Ray provider, model and server address; the Daily reads credentials from
-`OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in the environment running Deckle, including scheduled
-builds. It doesn't copy saved Books API keys.
+briefs, AI-written horoscopes and interest scoring. It's off by default. The editor runs where
+**Settings → AI** says, the same choice as X-Ray and chapter recaps, with the key saved there
+(or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the environment running Deckle, which wins). A
+paper that should use a different service names it under **Advanced**, which is this table:
 
 ```toml
 [llm]
-enabled = true
-provider = "openai"             # or "anthropic"
-model = ""                      # blank uses the provider default
-endpoint = ""                   # or a local OpenAI-compatible API base URL
+enabled = true                  # on its own, the paper follows Settings → AI
+provider = "ollama"             # naming one makes it this paper's own: "ollama" / "anthropic" / "openai"
+model = ""                      # blank uses the provider default (Ollama: qwen3:4b, or 8b with 16 GB)
+endpoint = ""                   # Ollama elsewhere, or an OpenAI-compatible API base URL
 ```
 
-Local OpenAI-compatible servers can run without a key. API keys don't belong in this file.
+**Ollama** keeps everything on this computer and needs no key. In the app, **Settings → AI →
+On this Mac** sets it up: it says whether Ollama is running (with a Get Ollama button), downloads
+the model with a progress bar and tries a prompt. On the command line, install Ollama from
+[ollama.com/download](https://ollama.com/download), then `deckle llm check` says whether it's
+running, whether the model is there (`deckle llm pull` downloads it, with progress) and how
+fast it answers. Deckle talks to Ollama's own API, so it sets the context the paper needs
+itself. Other local OpenAI-compatible servers (LM Studio) also run without a key. API keys
+don't belong in this file.
 Feed and local-news titles and bounded excerpts, the date and horoscope signs go to the provider;
 saved reading, calendars, highlights, photos and source URLs never do. AI output is labeled and
 can be wrong. The editor keeps the first story in each duplicate group and leaves news text

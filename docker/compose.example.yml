@@ -16,6 +16,7 @@ services:
       PGID: "100"               # (Unraid: nobody:users)
       DECKLE_WEB_PASSWORD: ""   # the web UI's login (12+ characters); blank keeps it off
       DECKLE_SMTP_PASSWORD: ""  # for [email]: send the paper to your Kindle
+      DECKLE_OLLAMA_URL: "http://ollama:11434"  # where Settings → AI → On the server looks (the ai profile)
     volumes:
       - ./config:/config        # digest.toml, papers, state
       - ./data:/data            # Morgue, library, Inbox, export folders
@@ -31,3 +32,16 @@ services:
       # broadcast through Docker's network: type the server's address on the reader, or use
       # network_mode: host instead of ports.
       # - "9090:9090"
+
+  # An AI model beside Deckle, nothing leaving your server: the Daily's editor, and X-Ray and
+  # recaps for books sent from the web app. Start it with `docker compose --profile ai up -d`,
+  # then in the web app choose Settings → AI → On the server and Download (or run
+  # `docker compose exec deckle deckle llm pull` once). The address is already set below.
+  # A GPU: add Ollama's `deploy.resources.reservations.devices` block from its image notes.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    profiles: ["ai"]
+    volumes:
+      - ./ollama:/root/.ollama   # the downloaded model, kept across updates

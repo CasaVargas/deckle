@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+import { providerName } from "../aiView";
+import type { SettingsPage } from "../settingsIndex";
 import type { Settings } from "../types";
 import { Switch } from "./Row";
-import { useCapabilities } from "../capabilities";
 
 interface Props {
   settings: Settings;
   set: <K extends keyof Settings>(k: K, v: Settings[K]) => void;
+  onPage: (page: SettingsPage) => void;
 }
 
 /** Word Wise's example: two hard words, hinted when the level reaches them (Deckle's own sentence). */
@@ -23,12 +25,12 @@ function Example({ level, on }: { level: number; on: boolean }) {
 
 /** The chapter recaps toggle's help (AI extras design §8). */
 const RECAPS_HELP =
-  "Adds a short AI-written recap at the end of each chapter. Uses your LLM setting: with a hosted provider the book's text is sent to it and billed to your key; with a local server (Ollama, LM Studio) nothing leaves this computer.";
+  "Adds a short AI-written recap at the end of each chapter. Uses the AI setting: with a service online the book's text is sent to it and billed to your key; on this Mac nothing leaves it.";
 
 /** Reading aids (Settings redesign §6): Word Wise, X-Ray and chapter recaps, help that appears while you read. */
-export default function ReadingAids({ settings, set }: Props) {
-  const caps = useCapabilities();
+export default function ReadingAids({ settings, set, onPage }: Props) {
   const ai = settings.llm_provider !== "off";
+  const where = providerName(settings);
   const recaps = settings.chapter_recaps || settings.book_summary || settings.series_recap;
   return (
     <div className="set-stack">
@@ -62,52 +64,19 @@ export default function ReadingAids({ settings, set }: Props) {
           <Switch label="X-Ray" checked={settings.xray} onChange={(on) => set("xray", on)} />
         </div>
         <p className="muted">Who's who and what's what: tap a name in the book to see where it comes up.</p>
-        <fieldset className="mode-cards">
-          <legend>Who finds the people and places</legend>
-          <div className="mode-grid">
-            <label className={`mode-card ${!ai ? "on" : ""}`}>
-              <span className="mode-head">
-                <input type="radio" name="xray-by" checked={!ai} disabled={!settings.xray && !recaps} onChange={() => set("llm_provider", "off")} />
-                <strong>Deckle, on this Mac</strong>
-              </span>
-              <span className="muted">Good lists of names; nothing goes online.</span>
-            </label>
-            <label className={`mode-card ${ai ? "on" : ""}`}>
-              <span className="mode-head">
-                <input type="radio" name="xray-by" checked={ai} disabled={!settings.xray && !recaps} onChange={() => set("llm_provider", "anthropic")} />
-                <strong>An AI model</strong>
-                <span className="tag">Online</span>
-              </span>
-              <span className="muted">Better character lists. Sends text from the book to the provider you pick.</span>
-            </label>
-          </div>
-        </fieldset>
-        {ai && (
-          <div className="ai-fields">
-            <label>
-              <span className="tk-label">Provider</span>
-              <select value={settings.llm_provider} onChange={(e) => set("llm_provider", e.target.value as Settings["llm_provider"])}>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI-compatible (Ollama, LM Studio…)</option>
-              </select>
-            </label>
-            <label>
-              <span className="tk-label">Model</span>
-              <input type="text" value={settings.llm_model} onChange={(e) => set("llm_model", e.target.value)} placeholder="claude-sonnet-5-5" />
-            </label>
-            {settings.llm_provider === "openai" && (
-              <label>
-                <span className="tk-label">Endpoint</span>
-                <input type="text" value={settings.llm_endpoint} onChange={(e) => set("llm_endpoint", e.target.value)} placeholder="http://localhost:11434/v1" />
-              </label>
-            )}
-            <label>
-              <span className="tk-label">API key</span>
-              <input type="password" value={settings.llm_api_key} onChange={(e) => set("llm_api_key", e.target.value)} placeholder="Optional" autoComplete="off" />
-              <span className="muted small">Stored on {caps.web ? "the server" : "this computer"}. Empty uses ANTHROPIC_API_KEY / OPENAI_API_KEY.</span>
-            </label>
-          </div>
-        )}
+        <p className="muted">
+          <strong>Who finds the people and places:</strong>{" "}
+          {ai ? (
+            <>
+              the AI model, {where}. Better character lists.
+            </>
+          ) : (
+            <>Deckle's own lists of names; nothing goes online. An AI model writes better ones.</>
+          )}{" "}
+          <button className="link-action inline" onClick={() => onPage("ai")}>
+            {ai ? "Change it under AI →" : "Choose one under AI →"}
+          </button>
+        </p>
         <label className="tick-row">
           <input type="checkbox" checked={settings.wikipedia} disabled={!settings.xray} onChange={(e) => set("wikipedia", e.target.checked)} />
           <span>
@@ -136,7 +105,14 @@ export default function ReadingAids({ settings, set }: Props) {
             <strong>Recap the series so far</strong> <span className="muted">on a page before chapter 1 of a later book, from the earlier books Deckle recapped.</span>
           </span>
         </label>
-        {recaps && !ai && <p className="muted small">Needs an AI model: choose "An AI model" under X-Ray above.</p>}
+        {recaps && !ai && (
+          <p className="muted small">
+            Needs an AI model: none is chosen yet.{" "}
+            <button className="link-action inline" onClick={() => onPage("ai")}>
+              Choose one under AI →
+            </button>
+          </p>
+        )}
       </section>
     </div>
   );

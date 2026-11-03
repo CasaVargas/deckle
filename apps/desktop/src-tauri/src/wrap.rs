@@ -779,6 +779,71 @@ pub fn cookbook_illustrate_stop() {
     deckle_app::cookbook::cookbook_illustrate_stop()
 }
 
+#[tauri::command]
+pub fn llm_recommended() -> deckle_app::llm::Recommendation {
+    deckle_app::llm::llm_recommended()
+}
+
+#[tauri::command]
+pub async fn llm_check(endpoint: String, model: String) -> Result<deckle_app::llm::Check, String> {
+    blocking(move || Ok(deckle_app::llm::llm_check(endpoint, model))).await
+}
+
+#[tauri::command]
+pub async fn llm_pull(app: AppHandle, endpoint: String, model: String) -> Result<(), String> {
+    blocking(move || deckle_app::llm::llm_pull(Arc::new(TauriEvents(app)), endpoint, model)).await
+}
+
+#[tauri::command]
+pub fn llm_pull_stop() {
+    deckle_app::llm::llm_pull_stop()
+}
+
+use deckle_app::puzzles::{
+    BookRequest, KindInfo, MadeBook, PreviewDto as PuzzlePreviewDto, SourcesDto,
+};
+
+#[tauri::command]
+pub async fn puzzles_sources() -> SourcesDto {
+    tauri::async_runtime::spawn_blocking(deckle_app::puzzles::puzzles_sources)
+        .await
+        .unwrap_or_else(|_| SourcesDto {
+            sources: Default::default(),
+            ai: None,
+        })
+}
+
+#[tauri::command]
+pub fn puzzles_kinds() -> Vec<KindInfo> {
+    deckle_app::puzzles::puzzles_kinds()
+}
+
+#[tauri::command]
+pub async fn puzzles_preview(request: BookRequest) -> Result<PuzzlePreviewDto, String> {
+    blocking(move || deckle_app::puzzles::puzzles_preview(request)).await
+}
+
+#[tauri::command]
+pub async fn puzzles_make(app: AppHandle, request: BookRequest) -> Result<MadeBook, String> {
+    blocking(move || deckle_app::puzzles::puzzles_make(Arc::new(TauriEvents(app)), request)).await
+}
+
+#[tauri::command]
+pub async fn puzzles_list() -> Vec<MadeBook> {
+    tauri::async_runtime::spawn_blocking(deckle_app::puzzles::puzzles_list)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn puzzles_send(
+    path: String,
+    target: RunTarget,
+    replace: bool,
+) -> Result<String, String> {
+    blocking(move || deckle_app::puzzles::puzzles_send(path, target, replace)).await
+}
+
 use deckle_app::koreader::{KoreaderPreview, KoreaderView};
 
 #[tauri::command]

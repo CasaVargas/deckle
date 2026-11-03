@@ -2,11 +2,15 @@
 //! The puzzle page (docs/superpowers/specs/2026-10-22-puzzle-page-design.md): a 5×5 mini
 //! themed on yesterday's headlines, a word ladder, and yesterday's answers.
 
+pub mod ai;
 pub mod book;
 pub mod check;
 pub mod cross;
+pub mod cryptogram;
 pub mod grid;
 pub mod ladder;
+pub mod maze;
+pub mod nonogram;
 pub mod search;
 pub mod store;
 pub mod sudoku;

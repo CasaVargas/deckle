@@ -8,7 +8,12 @@ a title page, one puzzle per page, and the answers at the back. Design:
 AZW3 books don't, whichever way they're sent. Ink on a PDF stays after you turn the page and
 after you close and reopen the book.
 
-Word searches, crosswords and sudoku are available now. LLM-written themes come next.
+Seven kinds: word searches, crosswords, sudoku, word ladders, cryptograms, nonograms and mazes.
+The app's **Puzzles** tab makes the same books with a preview of the first page, keeps them in
+`~/Deckle/Puzzles` with the options that made them (**Make again** gives the same book), and
+sends them to a Kindle or saves a copy for a reMarkable or an iPad. A crossword's or word
+search's **theme** can come from your own paper, your Kindle, your cookbook, or the AI
+([Themes](#themes)).
 
 ## Commands
 
@@ -81,6 +86,63 @@ kinds. There's no `--size` and no `--words`.
   for pencil marks. Givens are bold.
 - **Answers:** six per page, with the givens in bold.
 
+## Themes
+
+A crossword or a word search takes its theme words from one of these, and Deckle's list fills
+the rest of each grid. On the tab they're the chips under **Theme**; on the command line
+`--theme`:
+
+| Theme | `--theme` | Words | Clues |
+|---|---|---|---|
+| Your interests | `interests`, with `--interest NAME` to pick some | The headline words of your papers' interest sections over the last 30 days, from the Daily's puzzle store | The headline with the word blanked: "____ build gets faster (Rust, Monday)" |
+| This week's paper | `week` | Every news section's headline words, last 7 days | The same |
+| Words you looked up | `vocab` | The Kindle's vocabulary builder, every Kindle that shares it, newest first | The definition the Kindle kept, else the sentence it was looked up in |
+| Your cookbook | `cookbook` | Each recipe title's words and each ingredient's last word | "In the title of a recipe you saved", "Goes into Thursday soup" |
+| A subject | `subject`, with `--subject TEXT` | The AI picks 12 to 60 words about it, sized for the grid | The AI's, in the clue style |
+| Your own list | `--words FILE` | As before | As before |
+
+The AI (Settings → AI, or `deckle llm check`) can also **rewrite the clues** of any crossword in
+a style, `--clues trivia|cryptic|kid`: one request a puzzle, every word checked so a clue never
+names its answer, and a puzzle whose request fails keeps its plain clues with a warning. A
+subject and styled clues both need the AI; the other themes don't. A theme with fewer than 8
+words that fit a word search, or 3 that fit a crossword, falls back to the list with a warning.
+
+The book's title defaults to the theme ("Rust & Panthers, November"), and the title page's
+report says where the words came from.
+
+## Word ladders
+
+`deckle puzzles ladder` makes pages of three ladders each: a 4-letter word at the top, another
+at the bottom, and blank rungs between them to climb, changing one letter a rung, every rung a
+word. `--difficulty` sets the rungs: `easy` 3, `medium` 4, `hard` 5 or 6. The pairs are Deckle's
+opposites and near-pairs first ("cold" to "warm"), then any two words that far apart; no pair
+twice in a book. `--count` is pages. The answers list each ladder's words.
+
+## Cryptograms
+
+`deckle puzzles cryptogram` enciphers a sentence letter for letter, the same way throughout,
+with a blank above each letter to write the real one in and a key, A to Z, to work in.
+`--difficulty`: `easy` picks short quotes and gives 3 letters away, `medium` gives 1, `hard`
+none. The quotes are public domain (Austen, Dickens, Thoreau, Twain, Wilde…), or yours with
+`--quotes FILE`: one a line as `quote — who said it` (a tab or ` | ` works too), 24 to 120
+letters each; the answers name who said it. Quotes go round the book and repeat with a new
+key only once all are used.
+
+## Nonograms
+
+`deckle puzzles nonogram` makes picture-logic grids: shade the squares so each row and column
+has runs of the lengths given, in order, and a picture appears. `--size` is 5 to 25 (default
+15). The pictures are Deckle's own (a cat, a boat, a star…) and random shapes, every one
+checked to solve by row-and-column logic alone. `--picture FILE` makes your own photo the
+first puzzle: the darker half of its squares are shaded, and the book warns if that one needs
+a guess. The answers show the filled grids, each with its name.
+
+## Mazes
+
+`deckle puzzles maze` makes mazes with one way through, in at the top left and out at the
+bottom right. `--size` is 6 to 40 squares a side (default 20): 10 for a child, 30 for an
+evening. The answers draw the path.
+
 ## Names and ink
 
 The Kindle keeps a PDF's ink in a `.sdr` folder named after the PDF. So every book gets its own
@@ -109,5 +171,4 @@ Answers.
 
 - `--theme "technology"` written by your LLM, and `--theme current-events` from the Daily's
   headlines.
-- A Puzzle Books screen in the app.
 - Checking whether the Scribe's eraser removes one letter at a time.

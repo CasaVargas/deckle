@@ -267,7 +267,7 @@ fn anthropic_and_local_compatible_servers_share_the_transport() {
     for provider in [Provider::Anthropic, Provider::OpenAi] {
         let mut g = original();
         let cfg = EditorConfig {
-            provider,
+            provider: Some(provider),
             endpoint: if provider == Provider::OpenAi {
                 "http://localhost:11434/v1".into()
             } else {
@@ -680,4 +680,209 @@ fn the_prompt_tells_the_editor_briefs_cover_only_scored_stories() {
         |body| assert!(body.contains("scored 1 or 2"), "{body}"),
         answer_with_interest(json!([])),
     );
+}
+
+#[test]
+fn ollama_needs_no_key_and_gets_a_schema_a_wide_context_and_shorter_excerpts() {
+    let mut g = original();
+    let long: String = "word ".repeat(400); // 2,000 chars of body
+    g.edition.sections[0].articles[0].body = format!("<p>{long}</p>");
+    let cfg = EditorConfig {
+        provider: Some(Provider::Ollama),
+        ..on()
+    };
+    let mut calls = 0;
+    edit(
+        &mut g,
+        &cfg,
+        "",
+        &mut |url, headers, body| {
+            calls += 1;
+            assert_eq!(url, "http://localhost:11434/api/chat");
+            assert!(!headers.iter().any(|(k, _)| k == "authorization"));
+            let b: Value = serde_json::from_str(body).unwrap();
+            assert_eq!(b["think"], false);
+            assert_eq!(
+                b["options"]["num_ctx"], 32_768,
+                "the whole paper in one request"
+            );
+            assert_eq!(b["options"]["num_predict"], 8192);
+            assert_eq!(b["format"]["type"], "object", "held to the plan's schema");
+            assert_eq!(b["format"]["required"][0], "duplicate_groups");
+            let user: Value =
+                serde_json::from_str(b["messages"][1]["content"].as_str().unwrap()).unwrap();
+            let excerpt = user["news"][0]["stories"][0]["excerpt"].as_str().unwrap();
+            assert_eq!(
+                excerpt.chars().count(),
+                600,
+                "a local model gets a third of the excerpt"
+            );
+            Ok(
+                json!({"message":{"content":answer().to_string()},"done_reason":"stop"})
+                    .to_string(),
+            )
+        },
+        &[],
+        &[],
+    );
+    assert_eq!(calls, 1);
+    assert!(g.notes.is_empty(), "{:?}", g.notes);
+    assert_eq!(
+        g.edition.sections[1].articles.len(),
+        0,
+        "the duplicate was removed"
+    );
+}
+
+#[test]
+fn a_paper_too_long_for_one_request_says_so() {
+    let mut g = original();
+    g.edition.sections[0].articles = vec![g.edition.sections[0].articles[0].clone(); 81];
+    edit(
+        &mut g,
+        &on(),
+        "secret",
+        &mut |_, _, _| panic!("not sent"),
+        &[],
+        &[],
+    );
+    assert_eq!(
+        g.notes,
+        [
+            "AI editor unavailable: today's paper is too long for one request; using the original edition."
+        ]
+    );
+}
+
+// ---- following the app's AI setting (local-model design §4) ----
+
+#[test]
+fn a_bare_enabled_table_follows_the_apps_ai_setting_and_its_own_stays_its_own() {
+    use deckle_digest::editor::AppAi;
+    let app = AppAi::On {
+        provider: Provider::Ollama,
+        model: "qwen3:8b".into(),
+        endpoint: "http://nas.local:11434".into(),
+        api_key: String::new(),
+    };
+    // bare: enabled and nothing else
+    let bare = on();
+    assert!(!bare.is_own());
+    let (r, key) = bare.resolved(app.clone());
+    assert_eq!(
+        (
+            r.enabled,
+            r.provider,
+            r.model.as_str(),
+            r.endpoint.as_str(),
+            key.as_str()
+        ),
+        (
+            true,
+            Some(Provider::Ollama),
+            "qwen3:8b",
+            "http://nas.local:11434",
+            ""
+        )
+    );
+    // the app says off: no editor
+    assert!(!bare.resolved(AppAi::Off).0.enabled);
+    // no app setting: the old default, an OpenAI-compatible server
+    assert_eq!(
+        bare.resolved(AppAi::Unknown).0.provider,
+        Some(Provider::OpenAi)
+    );
+    // a table naming a provider, or only an endpoint, is its own
+    let own = EditorConfig {
+        provider: Some(Provider::Anthropic),
+        ..on()
+    };
+    assert!(own.is_own());
+    assert_eq!(
+        own.resolved(app.clone()).0.provider,
+        Some(Provider::Anthropic)
+    );
+    let legacy = EditorConfig {
+        endpoint: "http://localhost:11434/v1".into(),
+        ..on()
+    };
+    assert!(legacy.is_own());
+    let (r, _) = legacy.resolved(app);
+    assert_eq!(
+        (r.provider, r.endpoint.as_str()),
+        (Some(Provider::OpenAi), "http://localhost:11434/v1")
+    );
+    // disabled stays disabled whatever the app says
+    assert!(
+        !EditorConfig::default()
+            .resolved(AppAi::On {
+                provider: Provider::Ollama,
+                model: String::new(),
+                endpoint: String::new(),
+                api_key: String::new()
+            })
+            .0
+            .enabled
+    );
+}
+
+#[test]
+fn the_apps_setting_is_read_from_its_settings_file() {
+    use deckle_digest::editor::AppAi;
+    assert_eq!(
+        AppAi::parse(r#"{"llm_provider":"off","llm_model":""}"#),
+        AppAi::Off
+    );
+    assert_eq!(
+        AppAi::parse(r#"{"cde":"auto"}"#),
+        AppAi::Unknown,
+        "a file from before the setting"
+    );
+    assert_eq!(AppAi::parse("not json"), AppAi::Unknown);
+    assert_eq!(
+        AppAi::parse(
+            r#"{"llm_provider":"anthropic","llm_model":" claude-haiku-5-5 ","llm_endpoint":"","llm_api_key":"sk-x"}"#
+        ),
+        AppAi::On {
+            provider: Provider::Anthropic,
+            model: "claude-haiku-5-5".into(),
+            endpoint: String::new(),
+            api_key: "sk-x".into()
+        }
+    );
+    let tmp = tempfile::tempdir().unwrap();
+    assert_eq!(
+        AppAi::from_file(&tmp.path().join("settings.json")),
+        AppAi::Unknown
+    );
+    std::fs::write(
+        tmp.path().join("settings.json"),
+        r#"{"llm_provider":"ollama"}"#,
+    )
+    .unwrap();
+    assert!(matches!(
+        AppAi::from_file(&tmp.path().join("settings.json")),
+        AppAi::On {
+            provider: Provider::Ollama,
+            ..
+        }
+    ));
+    assert!(AppAi::path().ends_with("settings.json"));
+}
+
+#[test]
+fn a_bare_table_saves_without_a_provider_and_loads_the_same() {
+    let tmp = tempfile::tempdir().unwrap();
+    let file = tmp.path().join("digest.toml");
+    let mut c = config();
+    c.llm = on();
+    deckle_digest::config::save(&file, &c).unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("llm = { enabled = true") && !text.contains("provider"),
+        "{text}"
+    );
+    assert_eq!(Config::load(&file).unwrap().llm, on());
+    let old = Config::parse("[llm]\nenabled = true\nprovider = \"openai\"\n").unwrap();
+    assert_eq!(old.llm.provider, Some(Provider::OpenAi));
 }

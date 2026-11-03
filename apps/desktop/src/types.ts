@@ -201,7 +201,7 @@ export interface Settings {
   previewer_path: string | null;
   cde: "auto" | "pdoc" | "ebok";
   pages_auto: boolean;
-  llm_provider: "off" | "anthropic" | "openai";
+  llm_provider: "off" | "anthropic" | "openai" | "ollama";
   llm_model: string;
   llm_endpoint: string;
   llm_api_key: string;
@@ -1040,9 +1040,123 @@ export interface BookSearchReport {
 export type StylePreset = "academic" | "novel" | "manual";
 export type ReadingDirection = "ltr" | "rtl";
 
+// The AI page's "On this computer" checklist (local-model design §3). Mirrors deckle_xray::llm.
+export interface LlmInstalledModel {
+  name: string;
+  size: number;
+}
+export interface LlmServer {
+  version: string;
+  models: LlmInstalledModel[];
+}
+export interface LlmCheck {
+  endpoint: string;
+  model: string;
+  server: { Ok: LlmServer } | { Err: string };
+  installed: boolean | null;
+  answered: { Ok: number } | { Err: string } | null;
+}
+export interface LlmRecommendation {
+  model: string;
+  download: number;
+  memory: number | null;
+  ollama_url: string;
+}
+export interface LlmPullEvent {
+  model: string;
+  status: string;
+  completed: number;
+  total: number;
+  done: boolean;
+  error: string | null;
+}
+
+// The Puzzles tab (Puzzles tab design). These mirror the DTOs in deckle-app/src/puzzles.rs.
+export type PuzzleKindKey = "crossword" | "search" | "sudoku" | "ladder" | "cryptogram" | "nonogram" | "maze";
+export interface PuzzleKind {
+  key: PuzzleKindKey;
+  name: string;
+  title: string;
+  blurb: string;
+  sizes: [number, number] | null;
+  default_size: number;
+  takes: "words" | "clued" | "quotes" | "picture" | "none";
+  graded: boolean;
+  difficulties: [string, string, string];
+}
+export interface PuzzleBookRequest {
+  kind: PuzzleKindKey;
+  count: number;
+  size: number;
+  difficulty: "easy" | "medium" | "hard";
+  title: string;
+  screen: string;
+  words: string;
+  quotes: string;
+  picture: string | null;
+  seed: number | null;
+  date: string;
+  /** Where the theme words come from (Puzzles tab design §2). */
+  theme: PuzzleTheme;
+  /** The interests picked, for `interests`; empty means all. */
+  interests: string[];
+  /** What the AI writes about, for `subject`. */
+  subject: string;
+  clue_style: ClueStyle;
+}
+export type PuzzleTheme = "none" | "own" | "interests" | "week" | "vocab" | "cookbook" | "subject";
+export type ClueStyle = "plain" | "trivia" | "cryptic" | "kid";
+export interface PuzzleSources {
+  sources: {
+    /** `[paper title, interest name, words in the last 30 days]` */
+    interests: [string, string, number][];
+    week: number;
+    vocab: number;
+    cookbook: number;
+  };
+  /** Where the AI runs, as Settings → AI names it; null when off. */
+  ai: string | null;
+}
+export type PuzzleDto =
+  | { kind: "search"; rows: string[]; words: [string, boolean][] }
+  | { kind: "crossword"; rows: string[]; clues: [number, "across" | "down", string, boolean][] }
+  | { kind: "sudoku"; givens: number[] }
+  | { kind: "ladder"; ladders: [string, string, number][] }
+  | { kind: "cryptogram"; words: string[]; given: [string, string][] }
+  | { kind: "nonogram"; size: number; rows: number[][]; cols: number[][] }
+  | { kind: "maze"; size: number; walls: number[] };
+export interface PuzzlePreview {
+  title: string;
+  subtitle: string;
+  seed: number;
+  date: string;
+  pages: number;
+  warnings: string[];
+  first: PuzzleDto | null;
+}
+export interface PuzzleProgress {
+  made: number;
+  of: number;
+}
+export interface MadePuzzleBook {
+  path: string;
+  name: string;
+  kind: PuzzleKindKey;
+  title: string;
+  subtitle: string;
+  date: string;
+  seed: number;
+  pages: number;
+  puzzles: number;
+  bytes: number;
+  warnings: string[];
+  request: PuzzleBookRequest;
+}
+
 export interface DailyEditorConfig {
   enabled: boolean;
-  provider: "openai" | "anthropic";
+  /** `null` with an empty model and endpoint: the paper follows Settings → AI. */
+  provider: "openai" | "anthropic" | "ollama" | null;
   model: string;
   endpoint: string;
 }

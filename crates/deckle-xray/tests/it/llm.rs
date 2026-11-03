@@ -336,3 +336,291 @@ fn the_prompt_names_the_author_and_leaves_the_kind_to_the_model() {
             .contains("Author:")
     );
 }
+
+// ---- Ollama, on its native API (local-model design §4) ----
+
+#[test]
+fn local_servers_are_told_apart_from_hosted_ones() {
+    use deckle_xray::llm::is_local;
+    assert!(is_local(Provider::Ollama, ""));
+    assert!(is_local(Provider::Ollama, "http://nas.local:11434"));
+    assert!(is_local(Provider::OpenAi, "http://localhost:1234/v1"));
+    assert!(!is_local(Provider::OpenAi, ""));
+    assert!(!is_local(Provider::OpenAi, "https://api.openai.com/v1/"));
+    assert!(!is_local(Provider::Anthropic, "http://localhost:11434"));
+}
+
+#[test]
+fn the_recommended_model_follows_the_machines_memory() {
+    use deckle_xray::llm::{RECOMMENDED_MODELS, recommended_model};
+    let gib = 1u64 << 30;
+    assert_eq!(recommended_model(None).name, "qwen3:4b");
+    assert_eq!(recommended_model(Some(8 * gib)).name, "qwen3:4b");
+    assert_eq!(recommended_model(Some(16 * gib)).name, "qwen3:8b");
+    assert_eq!(recommended_model(Some(64 * gib)).name, "qwen3:8b");
+    assert_eq!(Provider::Ollama.default_model(), RECOMMENDED_MODELS[0].name);
+    assert!(
+        RECOMMENDED_MODELS
+            .windows(2)
+            .all(|w| w[0].min_memory < w[1].min_memory)
+    );
+}
+
+#[test]
+fn ollama_requests_use_the_native_api_with_context_schema_and_no_thinking() {
+    let body = request_body(Provider::Ollama, "qwen3:4b", "T", "", &cands(), "en");
+    assert_eq!(body["stream"], false);
+    assert_eq!(
+        body["think"], false,
+        "thinking doubles a local model's output"
+    );
+    assert_eq!(
+        body["options"]["num_ctx"], 8192,
+        "Ollama's own default is 4k"
+    );
+    assert!(body["options"]["num_predict"].as_u64().unwrap() >= 1024);
+    assert_eq!(body["format"]["type"], "array", "held to the entity schema");
+    assert_eq!(
+        body["format"]["items"]["properties"]["kind"]["enum"][0],
+        "person"
+    );
+    assert_eq!(body["messages"][0]["role"], "system");
+    assert!(body.get("max_tokens").is_none());
+    let canned = r#"{"model":"qwen3:4b","message":{"role":"assistant","content":"[{\"name\":\"Elizabeth\",\"kind\":\"person\",\"description\":\"The second Bennet sister.\",\"aliases\":[]}]"},"done":true,"done_reason":"stop"}"#;
+    let out = describe(
+        Provider::Ollama,
+        "qwen3:4b",
+        "",
+        "",
+        "T",
+        "",
+        &cands(),
+        "en",
+        &mut |url, headers, body| {
+            assert_eq!(url, "http://localhost:11434/api/chat", "default endpoint");
+            assert!(!headers.iter().any(|(k, _)| k == "authorization"));
+            let b: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(b["keep_alive"], "10m");
+            Ok(canned.to_owned())
+        },
+    )
+    .unwrap();
+    assert_eq!(out[0].kind, Some(EntityKind::Person));
+}
+
+#[test]
+fn ollama_answers_report_truncation_and_errors() {
+    use deckle_xray::llm::{LlmError, Options, complete_with};
+    let cut = r#"{"message":{"content":"[{\"name\":\"A\""},"done_reason":"length"}"#;
+    let err = describe(
+        Provider::Ollama,
+        "qwen3:4b",
+        "",
+        "http://nas.local:11434/",
+        "T",
+        "",
+        &cands(),
+        "en",
+        &mut |url, _, _| {
+            assert_eq!(url, "http://nas.local:11434/api/chat");
+            Ok(cut.to_owned())
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(err, LlmError::Truncated), "{err}");
+    // a 200 with an error body (no such model) is an HTTP-class failure, not "no content"
+    let err = complete_with(
+        Provider::Ollama,
+        "nope:1b",
+        "",
+        "",
+        "s",
+        "u",
+        64,
+        &Options {
+            num_ctx: Some(32_768),
+            schema: None,
+        },
+        &mut |_, _, body| {
+            let b: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(b["options"]["num_ctx"], 32_768);
+            assert!(b.get("format").is_none());
+            Ok(r#"{"error":"model 'nope:1b' not found"}"#.to_owned())
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&err, LlmError::Http(e) if e.contains("not found")),
+        "{err}"
+    );
+}
+
+#[test]
+fn probe_reads_the_version_and_installed_models() {
+    use deckle_xray::llm::probe;
+    let server = probe("", &mut |url| match url {
+        "http://localhost:11434/api/version" => Ok(r#"{"version":"0.12.3"}"#.into()),
+        "http://localhost:11434/api/tags" => Ok(
+            r#"{"models":[{"name":"qwen3:4b","size":2600000000,"digest":"x"},{"name":"llama3.2:latest","size":2000000000}]}"#.into(),
+        ),
+        other => panic!("{other}"),
+    })
+    .unwrap();
+    assert_eq!(server.version, "0.12.3");
+    assert_eq!(server.models.len(), 2);
+    assert!(server.has("qwen3:4b") && server.has("llama3.2") && server.has("llama3.2:latest"));
+    assert!(!server.has("qwen3:8b"));
+    let down = probe("http://localhost:11434", &mut |_| {
+        Err("connection refused".into())
+    })
+    .unwrap_err();
+    assert!(
+        down.starts_with("Ollama isn't answering at http://localhost:11434"),
+        "{down}"
+    );
+    let other = probe("", &mut |_| Ok("<html>".into())).unwrap_err();
+    assert!(other.contains("not like Ollama"), "{other}");
+}
+
+#[test]
+fn pull_streams_progress_and_ends_on_success_or_error() {
+    use deckle_xray::llm::{Progress, pull};
+    let mut seen = Vec::new();
+    pull(
+        "",
+        "qwen3:4b",
+        &mut |url, body, line| {
+            assert_eq!(url, "http://localhost:11434/api/pull");
+            let b: serde_json::Value = serde_json::from_str(body).unwrap();
+            assert_eq!(b["model"], "qwen3:4b");
+            assert_eq!(b["stream"], true);
+            line(r#"{"status":"pulling manifest"}"#);
+            line(r#"{"status":"pulling abc","digest":"abc","total":1000,"completed":250}"#);
+            line(r#"{"status":"pulling abc","digest":"abc","total":1000,"completed":1000}"#);
+            line(r#"{"status":"success"}"#);
+            Ok(())
+        },
+        &mut |p: &Progress| {
+            seen.push(p.clone());
+            true
+        },
+    )
+    .unwrap();
+    assert_eq!(seen.len(), 4);
+    assert_eq!((seen[1].completed, seen[1].total), (250, 1000));
+    assert_eq!(seen[3].status, "success");
+
+    let err = pull(
+        "",
+        "nope:1b",
+        &mut |_, _, line| {
+            line(r#"{"status":"pulling manifest"}"#);
+            line(r#"{"error":"pull model manifest: file does not exist"}"#);
+            Ok(())
+        },
+        &mut |_| true,
+    )
+    .unwrap_err();
+    assert!(err.contains("couldn't download nope:1b"), "{err}");
+    let err = pull("", "m", &mut |_, _, _| Ok(()), &mut |_| true).unwrap_err();
+    assert!(err.contains("ended early"), "{err}");
+    let err = pull("", "m", &mut |_, _, _| Err("refused".into()), &mut |_| true).unwrap_err();
+    assert!(err.contains("refused"), "{err}");
+    // stopping: the stream is left as soon as progress says so
+    let mut fed = 0;
+    let err = pull(
+        "",
+        "m",
+        &mut |_, _, line| {
+            for l in [
+                r#"{"status":"pulling a","total":10,"completed":1}"#,
+                r#"{"status":"pulling a","total":10,"completed":2}"#,
+                r#"{"status":"success"}"#,
+            ] {
+                fed += 1;
+                if !line(l) {
+                    break;
+                }
+            }
+            Ok(())
+        },
+        &mut |p| p.completed < 2,
+    )
+    .unwrap_err();
+    assert_eq!(err, deckle_xray::llm::PULL_CANCELLED);
+    assert_eq!(fed, 2, "the stream is dropped at the stop");
+}
+
+#[test]
+fn check_runs_the_three_steps_and_stops_at_the_first_that_fails() {
+    use deckle_xray::llm::check;
+    let tags = r#"{"models":[{"name":"qwen3:4b","size":1}]}"#;
+    let version = r#"{"version":"0.12.3"}"#;
+    let mut get = |url: &str| -> Result<String, String> {
+        Ok(if url.ends_with("/api/version") {
+            version
+        } else {
+            tags
+        }
+        .into())
+    };
+    // ready
+    let mut posted = 0;
+    let c = check("", "qwen3:4b", &mut get, &mut |_, _, body| {
+        posted += 1;
+        let b: serde_json::Value = serde_json::from_str(body).unwrap();
+        assert_eq!(b["options"]["num_ctx"], 2048, "a tiny test prompt");
+        Ok(r#"{"message":{"content":"OK"},"done_reason":"stop"}"#.into())
+    });
+    assert_eq!(posted, 1);
+    assert!(c.ok());
+    assert_eq!(c.installed, Some(true));
+    assert_eq!(c.endpoint, "http://localhost:11434");
+    // not installed: no prompt is sent
+    let c = check("", "qwen3:8b", &mut get, &mut |_, _, _| {
+        panic!("no prompt without the model")
+    });
+    assert!(!c.ok());
+    assert_eq!(c.installed, Some(false));
+    assert_eq!(c.answered, None);
+    // not running: nothing else is tried
+    let c = check(
+        "http://nas.local:11434",
+        "qwen3:4b",
+        &mut |_| Err("refused".into()),
+        &mut |_, _, _| panic!("no prompt without a server"),
+    );
+    assert!(c.server.is_err() && c.installed.is_none() && c.answered.is_none());
+    // an empty model is the recommended one
+    let c = check("", "", &mut get, &mut |_, _, _| {
+        Ok(r#"{"message":{"content":"OK"}}"#.into())
+    });
+    assert!(c.model.starts_with("qwen3:"), "{}", c.model);
+}
+
+#[test]
+fn a_blank_ollama_address_follows_the_environment() {
+    use deckle_xray::llm::default_ollama_endpoint;
+    // Other tests don't set these, so the process-wide variable is ours to try.
+    // SAFETY: this test's process; nothing else reads the environment concurrently here.
+    unsafe {
+        std::env::set_var("DECKLE_OLLAMA_URL", "http://ollama:11434/");
+    }
+    assert_eq!(default_ollama_endpoint(), "http://ollama:11434");
+    unsafe {
+        std::env::remove_var("DECKLE_OLLAMA_URL");
+        std::env::set_var("OLLAMA_HOST", "0.0.0.0:11434");
+    }
+    assert_eq!(
+        default_ollama_endpoint(),
+        "http://localhost:11434",
+        "not a URL: ignored"
+    );
+    unsafe {
+        std::env::set_var("OLLAMA_HOST", "http://nas.local:11434");
+    }
+    assert_eq!(default_ollama_endpoint(), "http://nas.local:11434");
+    unsafe {
+        std::env::remove_var("OLLAMA_HOST");
+    }
+}

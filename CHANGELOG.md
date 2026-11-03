@@ -1,5 +1,55 @@
 # Changelog
 
+## Unreleased
+
+- **Ollama, on this computer, as its own choice.** `--llm ollama`, `[llm] provider = "ollama"`
+  and "Ollama, on this computer" in the app talk to Ollama's own API instead of its
+  OpenAI-compatible shim, so Deckle sets the context size itself (the Daily editor's one
+  request no longer silently overflows Ollama's 4k default), turns thinking off, holds the
+  model to a JSON schema for X-Ray and the editor, and needs no key. The default model is
+  `qwen3:4b`, or `qwen3:8b` on a machine with 16 GB or more. New: `deckle llm check` (is
+  Ollama running, is the model installed, does it answer, and what to do about whichever
+  isn't) and `deckle llm pull` (download the model, with progress). A local model gets
+  shorter story excerpts in the editor's request, and a paper too long for one request says
+  so in its note.
+- **Settings → AI.** One page for where the AI runs, for X-Ray, chapter recaps and the Daily
+  editor alike: **Off**, **On this Mac** or **A service online**. On this Mac is a checklist
+  that fills itself in: Ollama running (with **Get Ollama**, and a check every few seconds
+  until it answers), the model installed (**Download**, with a progress bar and a Stop) and
+  **Try it**, then a line on what to expect. Advanced holds every model Ollama has and an
+  address for Ollama on another computer. The service card keeps the provider, model and key
+  fields with a price table beside them. Reading aids and Online & privacy point there, and
+  Online & privacy says "nowhere online" when the model runs on this Mac.
+- **The Puzzles tab, and four new kinds of book.** A fifth tab makes a write-on puzzle book:
+  crossword, word search, sudoku, and now word ladders (three a page, the rungs by
+  difficulty), cryptograms (public-domain quotes or your own, letters given by difficulty, a
+  key to work in), nonograms (Deckle's pictures and shapes, every one solvable by line logic,
+  or your own photo as puzzle 1) and mazes (6 to 40 a side, the path drawn in the answers).
+  The first page is previewed as it will print while you change the options, a progress bar
+  follows the making, and every book is kept in `~/Deckle/Puzzles` with the options that made
+  it, so **Make again** gives the same book and **Send** copies it to the plugged-in Kindle or
+  **Save a copy** to a folder. The same four kinds on the command line: `deckle puzzles
+  ladder|cryptogram|nonogram|maze`.
+- **Crosswords and word searches about what you follow.** A theme for the book: your interest
+  sections (pick which) or the whole week's paper, with the words from the headlines the Daily's
+  puzzle store keeps and the headline as the clue; the words you looked up on the Kindle, clued
+  with the definition you tapped; your cookbook's dishes and ingredients; or a subject the AI
+  writes about, words and clues both. With the AI on (Settings → AI), any crossword's clues can
+  be rewritten as trivia, cryptic, or for a kid, one request a puzzle, every clue checked so it
+  never names its answer. `deckle puzzles crossword --theme interests --interest Rust --clues
+  cryptic` does the same. Design: `docs/superpowers/specs/2026-11-02-puzzles-tab-design.md`.
+- **The welcome shows the back pages.** A fourth page in the first-launch tour: the Mini with
+  yesterday's headlines as its answers, the word search, the word ladder, the almanac, the
+  horoscope and On this day, how a Kindle's notes mark the answers, the puzzle books to write
+  on, From Your Shelf, and the AI model with a link straight to Settings → AI. The miniature
+  paper beside it shows a crossword grid on that page.
+- **One setting for the paper too.** A paper's AI editor now runs where Settings → AI says,
+  with the key saved there when the environment has none, so there's nothing to copy between
+  Books and the Daily. A `[llm]` table that names a provider, model or endpoint stays that
+  paper's own (the command line's and Docker's way, and **Advanced** on the paper's sheet);
+  one from before this, with only an endpoint, keeps meaning an OpenAI-compatible server.
+  Design: `docs/superpowers/specs/2026-11-02-local-model-design.md`.
+
 ## 0.11.0 — every reader, comics, puzzle books and KOReader
 
 About sixty pull requests since 0.10.0, in ten themes.

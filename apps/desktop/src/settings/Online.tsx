@@ -2,6 +2,7 @@
 import type { SettingsPage } from "../settingsIndex";
 import type { Settings } from "../types";
 import { Switch } from "./Row";
+import { aiChoice, providerName } from "../aiView";
 
 interface Props {
   settings: Settings;
@@ -15,7 +16,8 @@ interface Props {
  */
 export default function Online({ settings, set, onPage }: Props) {
   const ai = settings.llm_provider !== "off";
-  const provider = settings.llm_provider === "anthropic" ? "Anthropic" : "the provider you set";
+  const local = aiChoice(settings) === "local";
+  const provider = ai ? providerName(settings) : "the service you pick";
   const rows: { title: string; sends: string; to: string; why: string; on: boolean; toggle: (on: boolean) => void; page: SettingsPage; where: string }[] = [
     { title: "Fill missing details", sends: "a book's title, author or ISBN", to: "Open Library", why: "Fills in and suggests what a book leaves empty, and finds covers.", on: settings.metadata_fill, toggle: (on) => set("metadata_fill", on), page: "books", where: "Books" },
     { title: "Match the store cover", sends: "a book's title, author or ISBN", to: "Open Library", why: "Finds the Amazon edition, so a Kindle book keeps its store cover.", on: settings.amazon_match, toggle: (on) => set("amazon_match", on), page: "books", where: "Books" },
@@ -23,18 +25,18 @@ export default function Online({ settings, set, onPage }: Props) {
     {
       title: "AI model for X-Ray",
       sends: "text from the book",
-      to: ai ? provider : "the provider you pick",
-      why: "Better character lists. Turning it on picks Anthropic; change it under Reading aids.",
+      to: local ? `${provider}, so nowhere online` : provider,
+      why: local ? "Better character lists, written on this Mac." : "Better character lists. Turning it on picks Anthropic; choose a service or this Mac under AI.",
       on: ai,
       toggle: (on) => set("llm_provider", on ? "anthropic" : "off"),
-      page: "reading",
-      where: "Reading aids",
+      page: "ai",
+      where: "AI",
     },
     {
       title: "Chapter recaps",
       sends: "each chapter's text",
-      to: ai ? provider : "the AI model's provider",
-      why: "A short recap at the end of each chapter. Needs the AI model; a local server keeps it on this computer.",
+      to: local ? `${provider}, so nowhere online` : ai ? provider : "the AI model's service",
+      why: "A short recap at the end of each chapter. Needs the AI model.",
       on: settings.chapter_recaps,
       toggle: (on) => set("chapter_recaps", on),
       page: "reading",
@@ -43,7 +45,7 @@ export default function Online({ settings, set, onPage }: Props) {
     {
       title: "Book summary",
       sends: "each chapter's text",
-      to: ai ? provider : "the AI model's provider",
+      to: local ? `${provider}, so nowhere online` : ai ? provider : "the AI model's service",
       why: "A summary of the whole book on a page after the last chapter, made by recapping each chapter first. Needs the AI model.",
       on: settings.book_summary,
       toggle: (on) => set("book_summary", on),
@@ -53,7 +55,7 @@ export default function Online({ settings, set, onPage }: Props) {
     {
       title: "Series recap",
       sends: "each chapter's text, and recaps of the earlier books in the series,",
-      to: ai ? provider : "the AI model's provider",
+      to: local ? `${provider}, so nowhere online` : ai ? provider : "the AI model's service",
       why: "A page before chapter 1 of a later book saying what happened so far. Needs the AI model.",
       on: settings.series_recap,
       toggle: (on) => set("series_recap", on),
