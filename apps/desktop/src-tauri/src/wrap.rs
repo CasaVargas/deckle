@@ -582,6 +582,37 @@ pub fn email_set_password(password: String) -> Result<EmailStatus, String> {
 }
 
 #[tauri::command]
+pub async fn readers_list() -> Result<Vec<deckle_app::readers::ReaderRow>, String> {
+    blocking(|| Ok(deckle_app::readers::readers_list())).await
+}
+
+#[tauri::command]
+pub async fn readers_library(key: String) -> Result<deckle_app::readers::Library, String> {
+    blocking(move || deckle_app::readers::readers_library(key)).await
+}
+
+#[tauri::command]
+pub async fn readers_remove(
+    key: String,
+    ids: Vec<String>,
+) -> Result<deckle_app::readers::Removed, String> {
+    blocking(move || deckle_app::readers::readers_remove(key, ids)).await
+}
+
+#[tauri::command]
+pub async fn readers_backup(
+    key: String,
+    into: Option<String>,
+) -> Result<deckle_app::readers::Backup, String> {
+    blocking(move || deckle_app::readers::readers_backup(key, into)).await
+}
+
+#[tauri::command]
+pub fn readers_last_backup(key: String) -> Option<String> {
+    deckle_app::readers::readers_last_backup(key)
+}
+
+#[tauri::command]
 pub fn reader_server_status() -> deckle_app::reader_server::ReaderServerStatus {
     deckle_app::reader_server::reader_server_status()
 }

@@ -215,6 +215,13 @@ on a Kindle it could now build better.
 - **Make room, back up, restore.** Space split by why: finished books, second copies, old papers.
   Copy every DRM-free book with its highlights and reading position to your computer, and put a
   backup on any Kindle later.
+- **Kobo, PocketBook and reMarkable too.** The tab is **Devices**: a Kobo or PocketBook plugged
+  in, or a reMarkable answering over its USB web interface (or SSH), gets its own page with every
+  book, how far you've read it and when, the space left, **Remove** for the ones you choose, and
+  **Back up** to your computer (book files with KOReader's notes, a Kobo's database, a
+  reMarkable's documents as PDFs with handwriting, or over SSH as the tablet keeps them). A Kobo's
+  database is copied aside before anything is removed; books bought from Kobo are listed, never
+  deleted; the reMarkable's web interface can't delete, so removing there needs SSH.
 - **Highlights out.** Highlights and notes from `My Clippings.txt`, one Markdown file per book in a
   folder you choose (a notes vault, iCloud Drive). It covers sideloaded books, which Amazon's own
   export leaves out, and later exports only add what's new. The 2024 Scribe doesn't keep that file

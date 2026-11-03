@@ -32,7 +32,14 @@ use store::{Clue, Day, Puzzle, Store};
 use words::Words;
 
 /// How long one template's fill may search (spec §3: the whole puzzle in under a second).
-pub const FILL_CAP: Duration = Duration::from_millis(500);
+/// An unoptimized build (the tests) gets ten times as long, as the grid's own tests do: the
+/// cap decides which template fills, so a slow or busy machine hitting it would print another
+/// puzzle than the same day's on any other machine.
+pub const FILL_CAP: Duration = if cfg!(debug_assertions) {
+    Duration::from_millis(5000)
+} else {
+    Duration::from_millis(500)
+};
 
 /// Theme answers placed in a mini.
 const THEME_WORDS: usize = 2;

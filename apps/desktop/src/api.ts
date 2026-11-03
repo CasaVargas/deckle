@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { invoke, listen } from "./transport";
 import { platform } from "./platform";
-import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, PaperFormat, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, LlmCheck, LlmPullEvent, LlmRecommendation, MadePuzzleBook, PuzzleBookRequest, PuzzleBundleTarget, PuzzleKind, PuzzlePreview, PuzzleProgress, PuzzleSources, PuzzlesConfig, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, ShelvesConfig, ShelvesView, WirelessView } from "./types";
+import type { Capabilities, PressSetupStatus, ExportConfig, CookbookBook, CookbookConfig, CookbookDelivery, CookbookIllustrated, CookbookIllustrateEvent, CookbookPatch, CookbookPicture, CookbookSaved, CookbookSend, RecipePreview, BookSearchReport, BackupReport, BookDetails, CatalogView, CoverChoice, CoverOffer, PreflightView, RestoreReport, Watched, BookRow, DailyConfig, DailyState, DayConfig, DayPreview, DeviceRow, DeviceShelf, PaperFormat, ReaderBackup, ReaderLibrary, ReaderRemoved, ReaderRow, EditionPreview, EmailStatus, KoreaderPreview, KoreaderView, LlmCheck, LlmPullEvent, LlmRecommendation, MadePuzzleBook, PuzzleBookRequest, PuzzleBundleTarget, PuzzleKind, PuzzlePreview, PuzzleProgress, PuzzleSources, PuzzlesConfig, StoreFound, StorePick, StoreUpdate, ReaderServerStatus, SessionState, SiteStatus, HighlightsReport, HighlightsStatus, LibraryStatus, NextPaper, PapersView, PlaceRow, PlanRow, PreviewerStatus, ProgressEvent, MorgueDetail, MorgueHit, MorgueMonth, PutBack, ReadershipView, Rebuild, ReadingEntry, RunResult, RunTarget, ScheduleStatus, SentKindle, Settings, Suggestions, ShelfStatus, SourcesStatus, UpgradeOf, UpgradesView, WritebackPatch, WritebackStatus, ShelvesConfig, ShelvesView, WirelessView } from "./types";
 
 export interface RunRequest {
   id: string;
@@ -74,6 +74,13 @@ export const api = {
   setDeviceOptions: (key: string, cdeOverride: "pdoc" | "ebok" | null, verifiedRealAsin: boolean) =>
     invoke<void>("set_device_options", { key, cdeOverride, verifiedRealAsin }),
   reveal: (path: string) => invoke<void>("reveal", { path }),
+  /** Connected Kobos, PocketBooks and the reMarkable (the Devices tab). */
+  readersList: () => invoke<ReaderRow[]>("readers_list"),
+  readersLibrary: (key: string) => invoke<ReaderLibrary>("readers_library", { key }),
+  readersRemove: (key: string, ids: string[]) => invoke<ReaderRemoved>("readers_remove", { key, ids }),
+  /** Everything on the reader, into `into` or its folder under reader-backups/. */
+  readersBackup: (key: string, into: string | null) => invoke<ReaderBackup>("readers_backup", { key, into }),
+  readersLastBackup: (key: string) => invoke<string | null>("readers_last_backup", { key }),
 
   // The library and the Kindle tab
   libraryStatus: () => invoke<LibraryStatus>("library_status"),

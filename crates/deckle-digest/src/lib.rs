@@ -35,6 +35,7 @@ pub mod print;
 pub mod publisher;
 pub mod puzzle;
 pub mod reading;
+pub mod remarkable_login;
 pub mod render;
 pub mod returns;
 pub mod schedule;

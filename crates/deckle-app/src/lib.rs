@@ -19,6 +19,7 @@ pub mod next;
 pub mod press;
 pub mod puzzles;
 pub mod reader_server;
+pub mod readers;
 pub mod readership;
 pub mod shelf;
 pub mod shelves;

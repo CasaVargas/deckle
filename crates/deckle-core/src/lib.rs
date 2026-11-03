@@ -34,6 +34,7 @@ pub mod previewer;
 pub mod queue;
 pub mod quiet;
 pub mod reader;
+pub mod reader_library;
 pub mod reading;
 pub mod recaps;
 pub mod remarkable;

@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- **The Devices tab: Kobo, PocketBook and reMarkable libraries.** The Kindle tab is now
+  **Devices**, with a chip for each Kindle and each other reader connected: a Kobo or
+  PocketBook as a USB drive, a reMarkable over its USB web interface or SSH. Each gets a page
+  with every book (title, author, folder, format, size), how far it's read and when (a Kobo's
+  database and KOReader's sidecars; the reMarkable's own page count), the space left, search
+  and sort, **Remove** for the ones you tick, and **Back up** (now, or to a folder) with the
+  last backup's date.
+  - A Kobo's `KoboReader.sqlite` is read from a copy and copied aside into
+    `reader-backups/<reader>/databases/` before anything is removed; the Kobo drops a removed
+    book from its library when it's next ejected. Books bought from Kobo are listed and never
+    removed. KOReader's `.sdr` notes go with a removed book and come along in a backup.
+  - A reMarkable over its web interface backs up each document as a PDF with its handwriting,
+    and can't delete. Over SSH, a removed document goes to the tablet's trash (and the tablet's
+    reader restarts to show it), and a backup keeps each document as a `.tar` of the tablet's
+    own files, handwriting included.
+  - Backups go to `reader-backups/<reader>/<time>/` beside `digest.toml`, with a
+    `backup.json`. New commands `readers_list`, `readers_library`, `readers_remove`,
+    `readers_backup` and `readers_last_backup` (also in the web app); the logic is
+    `deckle_core::reader_library`. Signing in to a reMarkable over SSH moved to
+    `deckle_digest::remarkable_login`, shared by the command line and the app.
 - **Puzzles tab, easier to read.** A theme that's greyed out now says why under the chips, not
   only on hover, with more exact reasons (the paper has no Puzzle page to keep headline words,
   none kept in the last 7 days, no interests followed, the Scribe not sharing looked-up words
