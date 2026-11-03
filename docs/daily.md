@@ -352,6 +352,15 @@ from yesterday's headlines, clued as the headline with the word blanked: "Leaf _
 ridge this weekend (Local, yesterday)". The rest are clued from a short dictionary definition.
 The next paper prints **Yesterday's answers**: the filled grid and the ladder.
 
+The grids are printed as pictures in the EPUB (`images/s<n>-mini.png`): a Kindle sets any HTML
+table as a full-width box with a zoom button, which stretched the squares into wide rows. The
+PDF edition still draws the grid itself, in vector.
+
+- **Writing on it with a Scribe's pen.** The paper is a reflowable Kindle book, so the pen opens
+  an Active Canvas box or a sticky note (the ✓ and ✗ save or discard it); a Kindle only
+  takes ink straight on the page in a PDF. For puzzles you solve in ink, make a puzzle book
+  (`deckle puzzles`, a PDF; see [Puzzle books](puzzle-books.md)).
+
 - **Check your answers on a Kindle that keeps notes.** Highlight a clue, add a note with your
   answer (case, spaces and punctuation don't matter; for the ladder, highlight its line and write
   the whole path). The next time that Kindle connects (`watch`, `push`, or the Kindle tab), Deckle

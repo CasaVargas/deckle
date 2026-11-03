@@ -240,6 +240,14 @@ fn page_cfg() -> Config {
 }
 
 fn xhtml(s: Section) -> String {
+    let (_, bytes) = epub_files(s)
+        .into_iter()
+        .find(|(p, _)| p == "OEBPS/s1.xhtml")
+        .unwrap();
+    String::from_utf8(bytes).unwrap()
+}
+
+fn epub_files(s: Section) -> Vec<(String, Vec<u8>)> {
     let g = Gathered {
         edition: Edition {
             large_print: false,
@@ -258,11 +266,7 @@ fn xhtml(s: Section) -> String {
         notes: Vec::new(),
         names: Vec::new(),
     };
-    let (_, bytes) = render::render(&g, Vec::new())
-        .into_iter()
-        .find(|(p, _)| p == "OEBPS/s1.xhtml")
-        .unwrap();
-    String::from_utf8(bytes).unwrap()
+    render::render(&g, Vec::new())
 }
 
 /// Yesterday made from the fixture list, solved 4 of its clues, with "leaf" in its headlines.
@@ -290,6 +294,20 @@ fn golden_page() {
     let mut store = solved_yesterday(&words);
     let s = section(date(), &page_cfg(), &mut store, &words);
     assert!(s.unavailable.is_none());
+    // The section keeps its grids as tables: the PDF edition draws them from these.
+    let html: String = s.articles.iter().map(|a| a.body.as_str()).collect();
+    for want in [
+        "<table class=\"grid\">",
+        "<table class=\"grid small\">",
+        "<td class=\"b\"></td>",
+        "<span class=\"n\">1</span>",
+    ] {
+        assert!(html.contains(want), "section missing {want:?}");
+    }
+    // yesterday's small grid is letters only: numbers would crowd its cells out of square
+    let small = html.split("<table class=\"grid small\">").nth(1).unwrap();
+    let small = small.split("</table>").next().unwrap();
+    assert!(!small.contains("class=\"n\""), "{small}");
     let got = xhtml(s);
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -300,10 +318,6 @@ fn golden_page() {
     }
     assert_eq!(got, std::fs::read_to_string(path).unwrap());
     roxmltree::Document::parse(&got).expect("well-formed XHTML");
-    // yesterday's small grid is letters only: numbers would crowd its cells out of square
-    let small = got.split("<table class=\"grid small\">").nth(1).unwrap();
-    let small = small.split("</table>").next().unwrap();
-    assert!(!small.contains("class=\"n\""), "{small}");
     let of = store.days[&yesterday()].puzzle.clues.len();
     for want in [
         "Answers in tomorrow&#39;s paper",
@@ -314,15 +328,41 @@ fn golden_page() {
         &format!("You solved 4 of {of}"),
         "Words and definitions from Wiktionary and wordfreq (CC BY-SA 4.0)",
         "(Local, yesterday)",
-        "<table class=\"grid\">",
-        "<table class=\"grid small\">",
-        "<td class=\"b\"></td>",
-        "<span class=\"n\">1</span>",
+        // the EPUB prints both grids as pictures: a Kindle sets a table as a stretched box
+        "<div class=\"mini\"><img src=\"images/s1-mini.png\"",
+        "<div class=\"mini small\"><img src=\"images/s1-mini-answers.png\"",
         "<h3 class=\"subhead\">Across</h3>",
         "<h3 class=\"subhead\">Down</h3>",
     ] {
         assert!(got.contains(want), "missing {want:?}");
     }
+    assert!(!got.contains("<table class=\"grid\">"), "{got}");
+    assert!(!got.contains("<table class=\"grid small\">"), "{got}");
+}
+
+#[test]
+fn the_epub_carries_the_grid_pictures() {
+    let words = fixture_words();
+    let mut store = solved_yesterday(&words);
+    let s = section(date(), &page_cfg(), &mut store, &words);
+    let files = epub_files(s);
+    let file = |name: &str| {
+        files
+            .iter()
+            .find(|(p, _)| p == name)
+            .map(|(_, b)| b.clone())
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+    for name in [
+        "OEBPS/images/s1-mini.png",
+        "OEBPS/images/s1-mini-answers.png",
+    ] {
+        let img = image::load_from_memory(&file(name)).unwrap();
+        assert_eq!(img.width(), img.height(), "{name}");
+    }
+    let opf = String::from_utf8(file("OEBPS/content.opf")).unwrap();
+    assert!(opf.contains("href=\"images/s1-mini.png\" media-type=\"image/png\""));
+    assert!(opf.contains("href=\"images/s1-mini-answers.png\" media-type=\"image/png\""));
 }
 
 #[test]
