@@ -50,7 +50,7 @@ impl Remarkable {
 }
 
 /// One document or folder in the tablet's top folder.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct Entry {
     #[serde(rename = "ID", default)]
     pub id: String,
@@ -58,6 +58,33 @@ pub struct Entry {
     pub name: String,
     #[serde(rename = "Type", default)]
     pub kind: String,
+    /// `pdf`, `epub` or `notebook`, when the tablet says.
+    #[serde(rename = "fileType", default)]
+    pub file_type: Option<String>,
+    #[serde(rename = "ModifiedClient", default)]
+    pub modified: Option<String>,
+    #[serde(rename = "CurrentPage", default)]
+    pub current_page: Option<u64>,
+    #[serde(rename = "pageCount", default)]
+    pub page_count: Option<u64>,
+    /// The tablet sends it as a string of digits.
+    #[serde(rename = "sizeInBytes", default)]
+    pub size_in_bytes: Option<serde_json::Value>,
+}
+
+impl Entry {
+    pub fn is_folder(&self) -> bool {
+        self.kind == "CollectionType"
+    }
+
+    pub fn size(&self) -> Option<u64> {
+        match self.size_in_bytes.as_ref()? {
+            serde_json::Value::String(s) => s.trim().parse().ok(),
+            serde_json::Value::Number(n) => n.as_u64(),
+            _ => None,
+        }
+        .filter(|n| *n > 0)
+    }
 }
 
 fn agent(timeout: Duration) -> ureq::Agent {
@@ -97,6 +124,41 @@ pub fn list(r: &Remarkable) -> Result<Vec<Entry>, String> {
         .read_to_vec()
         .map_err(|e| format!("reMarkable: {e}"))?;
     serde_json::from_slice(&body).map_err(|e| format!("reMarkable: the list didn't read: {e}"))
+}
+
+/// What's in the folder `id` (empty: the top folder).
+pub fn list_in(r: &Remarkable, id: &str) -> Result<Vec<Entry>, String> {
+    if id.is_empty() {
+        return list(r);
+    }
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(format!("reMarkable: {id:?} isn't a folder id"));
+    }
+    let mut resp = agent(Duration::from_secs(10))
+        .get(format!("{}/documents/{id}", r.base))
+        .call()
+        .map_err(|e| format!("reMarkable: {e}"))?;
+    let body = resp
+        .body_mut()
+        .read_to_vec()
+        .map_err(|e| format!("reMarkable: {e}"))?;
+    serde_json::from_slice(&body).map_err(|e| format!("reMarkable: the list didn't read: {e}"))
+}
+
+/// The document `id` as the tablet hands it back: a PDF with its handwriting drawn in.
+pub fn download(r: &Remarkable, id: &str) -> Result<Vec<u8>, String> {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') || id.is_empty() {
+        return Err(format!("reMarkable: {id:?} isn't a document id"));
+    }
+    let mut resp = agent(Duration::from_secs(120))
+        .get(format!("{}/download/{id}/placeholder", r.base))
+        .call()
+        .map_err(|e| format!("reMarkable: {e}"))?;
+    resp.body_mut()
+        .with_config()
+        .limit(1024 * 1024 * 1024)
+        .read_to_vec()
+        .map_err(|e| format!("reMarkable: {e}"))
 }
 
 /// Uploads `bytes` as `name` (`.pdf` or `.epub`; the tablet names the document after it).
@@ -252,7 +314,8 @@ pub mod tests {
             [Entry {
                 id: "a1".into(),
                 name: "deckle-daily-2026-10-22".into(),
-                kind: "DocumentType".into()
+                kind: "DocumentType".into(),
+                ..Default::default()
             }]
         );
     }

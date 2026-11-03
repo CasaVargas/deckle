@@ -23,6 +23,7 @@ import Welcome from "./Welcome";
 import type { Room } from "./dailyRooms";
 import Icon from "./Icon";
 import KindleView from "./KindleView";
+import ReaderView from "./ReaderView";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import { refreshCapabilities, useCapabilities } from "./capabilities";
 import { onSessionLost, restartEvents } from "./transport/web";
@@ -30,7 +31,7 @@ import { readsRtl, withDirection } from "./comicDirection";
 import Login from "./web/Login";
 import Unavailable from "./web/Unavailable";
 import { NO_DEVICE_REASON, PREVIEWER_REASON } from "./web/gates";
-import type { BookRow, BookState, CatalogView, CoverChoice, DeviceRow, LibraryStatus, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
+import type { BookRow, BookState, CatalogView, CoverChoice, DeviceRow, LibraryStatus, ReaderRow, PlanRow, PreviewerStatus, RunTarget, Settings, UpgradeOf } from "./types";
 
 const DEFAULT_SETTINGS: Settings = {
   book_presets: {},
@@ -106,6 +107,10 @@ function Deckle() {
   const [version, setVersion] = useState("");
   const [books, setBooks] = useState<BookState[]>([]);
   const [devices, setDevices] = useState<DeviceRow[]>([]);
+  // The other readers on the Devices tab (a Kobo, a PocketBook, a reMarkable), and the one shown
+  // instead of the Kindle; null shows the Kindle.
+  const [readers, setReaders] = useState<ReaderRow[]>([]);
+  const [readerKey, setReaderKey] = useState<string | null>(null);
   const [targetKey, setTargetKey] = useState<string | null>(null);
   const [plans, setPlans] = useState<Record<string, PlanRow>>({});
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
@@ -193,6 +198,29 @@ function Deckle() {
     setDevices(d);
     setTargetKey((cur) => (cur && d.some((x) => x.key === cur) ? cur : d[0]?.key ?? null));
   }, []);
+
+  // Readers are looked for only while the Devices tab is open: a reMarkable is asked over
+  // HTTP, which costs a second when it isn't there.
+  useEffect(() => {
+    if (tab !== "kindle") return;
+    let live = true;
+    const look = () =>
+      api
+        .readersList()
+        .then((r) => {
+          if (!live) return;
+          setReaders(r);
+          setReaderKey((cur) => (cur && r.some((x) => x.key === cur) ? cur : null));
+        })
+        .catch(() => {});
+    look();
+    const timer = setInterval(look, 6000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [tab]);
+  const reader = readers.find((r) => r.key === readerKey) ?? null;
 
   const loadCatalog = useCallback(async () => {
     try {
@@ -627,7 +655,7 @@ function Deckle() {
               Puzzles
             </button>
             <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
-              Kindle
+              Devices
             </button>
           </div>
           {!previewer?.found && previewer && !caps.web && (
@@ -648,7 +676,7 @@ function Deckle() {
               <kbd aria-hidden="true">⌘F</kbd>
             </label>
           )}
-          {tab === "kindle" && device && (
+          {tab === "kindle" && device && !reader && (
             <label className="top-search">
               <span className="visually-hidden">Search this Kindle</span>
               <input type="search" placeholder="Search this Kindle" value={kindleQuery} onChange={(e) => setKindleQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setKindleQuery("")} />
@@ -700,7 +728,37 @@ function Deckle() {
           />
         )}
         {tab === "puzzles" && <PuzzlesView onNotice={setNotice} device={device ?? null} deviceTarget={deviceTarget} onOpenSettings={openSettings} />}
-        {tab === "kindle" && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
+        {tab === "kindle" && readers.length > 0 && (
+          <div className="device-picker" role="tablist" aria-label="Devices">
+            {devices.map((d) => (
+              <button
+                key={d.key}
+                role="tab"
+                aria-selected={!reader && d.key === targetKey}
+                className={`chip ${!reader && d.key === targetKey ? "on" : ""}`}
+                onClick={() => {
+                  setReaderKey(null);
+                  setTargetKey(d.key);
+                }}
+              >
+                {deviceLabel(d)}
+              </button>
+            ))}
+            {devices.length === 0 && (
+              <button role="tab" aria-selected={!reader} className={`chip ${!reader ? "on" : ""}`} onClick={() => setReaderKey(null)}>
+                Kindle
+              </button>
+            )}
+            {readers.map((r) => (
+              <button key={r.key} role="tab" aria-selected={reader?.key === r.key} className={`chip ${reader?.key === r.key ? "on" : ""}`} onClick={() => setReaderKey(r.key)}>
+                {r.name}
+                <span className="tag">{r.kind === "remarkable" ? (r.key.endsWith("/ssh") ? "SSH" : "USB") : "USB"}</span>
+              </button>
+            ))}
+          </div>
+        )}
+        {tab === "kindle" && reader && <ReaderView key={reader.key} reader={reader} onNotice={setNotice} />}
+        {tab === "kindle" && !reader && <KindleView target={deviceTarget} targetKey={targetKey} device={device ?? null} busy={busy} onResend={resendFromLibrary} onNotice={setNotice} onRenamed={refreshDevices} query={kindleQuery} onFree={setKindleFree} />}
         {tab === "books" && articleOpen && (
           <ArticleField
             ref={articleInput}

@@ -231,6 +231,11 @@ commands! { ctx;
     reader_server_set_password { password: String } =>
         crate::reader_server::reader_server_set_password(password),
     reader_server_status {} => Ok(crate::reader_server::reader_server_status()),
+    readers_backup { key: String, into: Option<String> } => crate::readers::readers_backup(key, into),
+    readers_last_backup { key: String } => Ok(crate::readers::readers_last_backup(key)),
+    readers_library { key: String } => crate::readers::readers_library(key),
+    readers_list {} => Ok(crate::readers::readers_list()),
+    readers_remove { key: String, ids: Vec<String> } => crate::readers::readers_remove(key, ids),
     readership_apply { id: String, paper: Option<String> } => readership::readership_apply(id, paper),
     readership_dismiss { id: String, paper: Option<String> } => readership::readership_dismiss(id, paper),
     readership_report { paper: Option<String> } => readership::readership_report(paper),

@@ -1514,3 +1514,51 @@ export interface ShelvesView {
   sets: [string, number][];
   error: string | null;
 }
+
+/** A connected reader that isn't a Kindle: a Kobo or PocketBook drive, or a reMarkable. */
+export interface ReaderRow {
+  /** `kobo/<serial>`, `pocketbook/<volume>`, `remarkable/usb` or `remarkable/ssh`. */
+  key: string;
+  kind: "kobo" | "pocketbook" | "remarkable";
+  name: string;
+  /** "USB drive", "USB web interface", "SSH to 10.11.99.1". */
+  connection: string;
+  detail: string | null;
+  can_remove: boolean;
+  remove_note: string | null;
+}
+
+/** One book or document on a reader. */
+export interface ReaderBook {
+  /** Its path on the drive, a Kobo store book's id, or a reMarkable document's id. */
+  id: string;
+  title: string;
+  authors: string[];
+  folder: string;
+  format: string;
+  bytes: number | null;
+  percent: number | null;
+  finished: boolean;
+  last_read: string | null;
+  removable: boolean;
+  note: string | null;
+}
+
+export interface ReaderLibrary {
+  books: ReaderBook[];
+  warnings: string[];
+  total: number | null;
+  free: number | null;
+}
+
+export interface ReaderRemoved {
+  removed: string[];
+  failed: [string, string][];
+  database_backup: string | null;
+}
+
+export interface ReaderBackup {
+  dir: string;
+  copied: string[];
+  failed: [string, string][];
+}

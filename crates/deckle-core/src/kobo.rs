@@ -244,7 +244,7 @@ fn books(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<Book>> {
 }
 
 /// `Attribution` names the authors, comma-separated.
-fn authors(attribution: &str) -> Vec<String> {
+pub(crate) fn authors(attribution: &str) -> Vec<String> {
     attribution
         .split(',')
         .map(str::trim)
@@ -254,7 +254,7 @@ fn authors(attribution: &str) -> Vec<String> {
 }
 
 /// Kobo's `2026-10-20T21:15:03.000` (or with a `Z`, or a space) as `2026-10-20T21:15:03Z`.
-fn iso_utc(raw: &str) -> Option<String> {
+pub(crate) fn iso_utc(raw: &str) -> Option<String> {
     let raw = raw.trim();
     let date = raw.get(..10)?;
     let time = raw.get(11..19)?;
