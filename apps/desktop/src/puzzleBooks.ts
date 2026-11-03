@@ -3,7 +3,7 @@
 // its options mean, and the lines of copy worked out from a book. Beside the tab, as
 // cookbookRooms.ts is beside the Cookbook. (Not puzzlesView.ts: on a Mac or Windows that name
 // is the same file as PuzzlesView.tsx.)
-import type { MadePuzzleBook, PuzzleBookRequest, PuzzleBundleTarget, PuzzleKind, PuzzleKindKey, PuzzlesConfig } from "./types";
+import type { MadePuzzleBook, PuzzleBookRequest, PuzzleBundleTarget, PuzzleKind, PuzzleKindKey, PuzzleProgress, PuzzlesConfig } from "./types";
 
 /** The screens a book can be laid out for, as `--screen` names them. */
 export const SCREENS: { key: string; name: string }[] = [
@@ -91,6 +91,45 @@ export function makingLine(kind: PuzzleKindKey, made: number, of: number): strin
   return `Making ${noun} ${Math.min(made + 1, of)} of ${of}…`;
 }
 
+/** The steps a make goes through: the AI's clue step only for a styled crossword. */
+export function makingSteps(styled: boolean): PuzzleProgress["stage"][] {
+  return styled ? ["words", "puzzles", "clues", "pages"] : ["words", "puzzles", "pages"];
+}
+
+/** "Step 2 of 3 · Making puzzle 4 of 10…": what the make is doing now. */
+export function stageLine(kind: PuzzleKindKey, p: PuzzleProgress, styled: boolean): string {
+  const steps = makingSteps(styled);
+  const at = Math.max(0, steps.indexOf(p.stage));
+  const what =
+    p.stage === "words"
+      ? "Gathering the words…"
+      : p.stage === "puzzles"
+        ? makingLine(kind, p.made, p.of)
+        : p.stage === "clues"
+          ? `The AI is rewriting the clues, puzzle ${Math.min(p.made + 1, p.of)} of ${p.of}…`
+          : "Laying out the pages…";
+  return `Step ${at + 1} of ${steps.length} · ${what}`;
+}
+
+/** How far the whole make is, 0 to 1: making the puzzles is most of it, the AI's clues a share. */
+export function makingShare(p: PuzzleProgress, styled: boolean): number {
+  const weights: Record<PuzzleProgress["stage"], number> = styled
+    ? { words: 0.05, puzzles: 0.5, clues: 0.4, pages: 0.05 }
+    : { words: 0.05, puzzles: 0.85, clues: 0, pages: 0.1 };
+  let done = 0;
+  for (const s of makingSteps(styled)) {
+    if (s === p.stage) return done + weights[s] * (p.of ? Math.min(p.made, p.of) / p.of : 0);
+    done += weights[s];
+  }
+  return done;
+}
+
+/** "0:42" */
+export function elapsed(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
 /** "On iPad's folder, for the iPad": where a book went as a bundle, by the export's name when one still
  *  points at that folder, else the folder itself; null when it hasn't. */
 export function ipadLine(b: MadePuzzleBook, targets: PuzzleBundleTarget[]): string | null {
@@ -146,12 +185,14 @@ export function themeChips(kind: PuzzleKind, sources: PuzzleSources | null): The
   const s = sources?.sources;
   const interests = s ? s.interests.reduce((n, [, , c]) => n + c, 0) : 0;
   const count = (n: number) => (n ? `${n} words` : null);
+  // The headline themes draw on the words each day's puzzle page keeps.
+  const headlines = !s ? null : s.error ? `your paper's settings didn't load (${s.error})` : s.puzzle_page === false ? "your paper has no Puzzle page, which is what keeps each day's headline words: add it on the Daily tab" : null;
   return [
     { key: "none", label: "No theme", off: null, tag: null },
     { key: "own", label: "Your own list", off: null, tag: null },
-    { key: "interests", label: "Your interests", off: s && s.interests.length === 0 ? "no interests in your papers yet" : s && interests === 0 ? "no headlines kept yet" : null, tag: count(interests) },
-    { key: "week", label: "This week's paper", off: s && s.week === 0 ? "no headlines kept yet" : null, tag: count(s?.week ?? 0) },
-    { key: "vocab", label: "Words you looked up", off: s && s.vocab === 0 ? "no Kindle has shared its vocabulary yet" : null, tag: count(s?.vocab ?? 0) },
+    { key: "interests", label: "Your interests", off: s && s.interests.length === 0 ? "none of your papers follows an interest yet (Daily tab → Sections)" : s && interests === 0 ? headlines ?? "no headline words kept for them in the last 30 days" : null, tag: count(interests) },
+    { key: "week", label: "This week's paper", off: s && s.week === 0 ? headlines ?? "no headline words kept in the last 7 days: they come with each morning's paper" : null, tag: count(s?.week ?? 0) },
+    { key: "vocab", label: "Words you looked up", off: s && s.vocab === 0 ? "no Kindle has shared the words it looked up yet (a Kindle Scribe 2024 doesn't over USB)" : null, tag: count(s?.vocab ?? 0) },
     { key: "cookbook", label: "Your cookbook", off: s && s.cookbook === 0 ? "no recipes saved yet" : null, tag: count(s?.cookbook ?? 0) },
     { key: "subject", label: "A subject", off: sources && !sources.ai ? "needs the AI: Settings → AI" : null, tag: "AI" },
   ];

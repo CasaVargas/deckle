@@ -410,6 +410,7 @@ deckle digest subscribe                           # sign in to a paper you pay f
 # Books
 deckle devices                                    # connected Kindles (mass storage and MTP)
 deckle devices name "Mom's Kindle"                # name the connected Kindle
+deckle devices paper pdf                          # send it the paper as a PDF its pen writes on (Scribe)
 deckle run book.epub --kindle "Mom's Kindle"      # to that Kindle; queued until it connects
 deckle run book.epub --to device                  # convert, enrich, send
 deckle run book.epub --to ./out --cde pdoc        # export to a folder, cover-first

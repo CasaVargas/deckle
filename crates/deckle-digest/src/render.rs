@@ -4,6 +4,7 @@
 use crate::config::Photos;
 use crate::front::FrontPlan;
 use crate::print::{FRONT_LABEL, PrintPlan};
+use crate::puzzle::picture::GridPicture;
 use crate::{Edition, Gathered, esc, long_date};
 
 /// `(path inside the EPUB, bytes)`. `mimetype` and `META-INF/container.xml` included.
@@ -71,6 +72,12 @@ table.grid td { width: 2em; height: 2em; border: 1px solid black; padding: 0; ve
 table.grid td.b { background-color: black; }
 table.grid span.n { display: block; font-size: 0.5em; font-weight: normal; text-align: left;
   line-height: 1; padding: 0.1em 0 0 0.15em; }
+div.mini { text-align: center; margin: 0.6em 0 0.8em 0; }
+div.mini img { width: 75%; }
+div.mini.small img { width: 40%; }
+div.mini.search img { width: 85%; }
+div.mini.search.small img { width: 50%; }
+p.words { text-align: center; line-height: 1.6; }
 table.grid.small td { width: 1.1em; height: 1.1em; font-size: 0.85em; vertical-align: middle; }
 table.grid.search td { width: 1.6em; height: 1.6em; text-align: center; vertical-align: middle; font-weight: bold; }
 table.grid.search.small td { width: 1.1em; height: 1.1em; font-weight: normal; }
@@ -349,6 +356,7 @@ fn section_page(
     plan: &FrontPlan,
     print: &PrintPlan,
     labels: &[Option<String>],
+    grids: &[GridPicture],
 ) -> Vec<u8> {
     let s = &e.sections[i];
     let mut body = String::new();
@@ -421,10 +429,13 @@ fn section_page(
         if let Some(m) = &a.meta {
             body.push_str(&format!("<p class=\"meta\">{}</p>\n", esc(m)));
         }
-        let story = with_pull(
+        let mut story = with_pull(
             jump.map_or(a.body.as_str(), |x| x.rest.as_str()),
             print.pulls.get(&(i, j)),
         );
+        for g in grids {
+            story = story.replace(&g.table, &g.html);
+        }
         body.push_str(&with_photos(&story, i, j, a.photos.len()));
         body.push('\n');
         // a nudge's page has one link, the tap that accepts it (interests design §7)
@@ -520,7 +531,7 @@ fn ncx(e: &Edition, uid: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-fn opf(e: &Edition, uid: &str) -> Vec<u8> {
+fn opf(e: &Edition, uid: &str, grids: &[Vec<GridPicture>]) -> Vec<u8> {
     let mut manifest = String::from(
         "<item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" properties=\"nav\"/>\n\
          <item id=\"ncx\" href=\"toc.ncx\" media-type=\"application/x-dtbncx+xml\"/>\n\
@@ -545,6 +556,14 @@ fn opf(e: &Edition, uid: &str) -> Vec<u8> {
     for (n, (href, _)) in e.assets.iter().enumerate() {
         manifest.push_str(&format!(
             "<item id=\"x{}\" href=\"{}\" media-type=\"image/png\"/>\n",
+            n + 1,
+            esc(href)
+        ));
+    }
+    let images = grids.iter().flatten().filter_map(|p| p.image.as_ref());
+    for (n, (href, _)) in images.enumerate() {
+        manifest.push_str(&format!(
+            "<item id=\"g{}\" href=\"{}\" media-type=\"image/png\"/>\n",
             n + 1,
             esc(href)
         ));
@@ -599,6 +618,18 @@ pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
     let plan = crate::front::front_plan(g);
     let print = crate::print::print_plan(g, &plan);
     let labels = crate::print::epub_labels(&print.book);
+    // the mini's grids as pictures: a Kindle sets a table as a stretched, zoomable box
+    let grids: Vec<Vec<GridPicture>> = e
+        .sections
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            s.puzzle
+                .as_ref()
+                .map(|p| crate::puzzle::picture::pictures(p, i))
+                .unwrap_or_default()
+        })
+        .collect();
     let uid = format!("urn:deckle:digest:{}", e.date);
     let mut files: Files = vec![
         ("mimetype".into(), b"application/epub+zip".to_vec()),
@@ -610,7 +641,7 @@ pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
               </rootfiles></container>\n"
                 .to_vec(),
         ),
-        ("OEBPS/content.opf".into(), opf(e, &uid)),
+        ("OEBPS/content.opf".into(), opf(e, &uid, &grids)),
         ("OEBPS/toc.ncx".into(), ncx(e, &uid)),
         ("OEBPS/nav.xhtml".into(), nav(e)),
         ("OEBPS/style.css".into(), stylesheet(e.large_print).into_bytes()),
@@ -620,10 +651,13 @@ pub fn render_as(g: &Gathered, cover: Vec<u8>, photos: Photos) -> Files {
     for (href, png) in &e.assets {
         files.push((format!("OEBPS/{href}"), png.clone()));
     }
-    for i in 0..e.sections.len() {
+    for (href, png) in grids.iter().flatten().filter_map(|p| p.image.as_ref()) {
+        files.push((format!("OEBPS/{href}"), png.clone()));
+    }
+    for (i, pictures) in grids.iter().enumerate() {
         files.push((
             format!("OEBPS/{}", section_file(i)),
-            section_page(e, i, &plan, &print, &labels),
+            section_page(e, i, &plan, &print, &labels, pictures),
         ));
         for (j, a) in e.sections[i].articles.iter().enumerate() {
             for (n, jpeg) in a.photos.iter().enumerate() {

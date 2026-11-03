@@ -1264,6 +1264,7 @@ fn every_screen_lays_the_paper_out() {
         Screen::RemarkablePaperProMove,
         Screen::Ipad,
         Screen::A5,
+        Screen::KindleScribe,
     ] {
         let bytes = render(&g, screen, Photos::Color);
         let doc = deckle_pdf::engine::pdfium()

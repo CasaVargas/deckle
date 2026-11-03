@@ -490,6 +490,11 @@ pub fn prunable<I: IntoIterator<Item = String>>(
     prunable_except(names, prefix, keep, &[])
 }
 
+/// A paper's file on a Kindle: the Kindle book, or the PDF a Kindle Scribe writes on.
+fn is_paper_file(name: &str) -> bool {
+    name.ends_with(".kfx") || name.ends_with(".pdf")
+}
+
 /// [`prunable`], leaving `exempt` names alone: they don't count toward `keep` either (an
 /// edition sent again must not push a newer one out).
 pub fn prunable_except<I: IntoIterator<Item = String>>(
@@ -500,7 +505,7 @@ pub fn prunable_except<I: IntoIterator<Item = String>>(
 ) -> Vec<String> {
     let mut matching: Vec<String> = names
         .into_iter()
-        .filter(|n| is_dated(n, prefix) && n.ends_with(".kfx") && !exempt.contains(n))
+        .filter(|n| is_dated(n, prefix) && is_paper_file(n) && !exempt.contains(n))
         .collect();
     matching.sort_unstable_by(|a, b| b.cmp(a));
     matching.into_iter().skip(keep).collect()

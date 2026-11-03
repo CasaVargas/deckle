@@ -22,6 +22,30 @@
     `readers_backup` and `readers_last_backup` (also in the web app); the logic is
     `deckle_core::reader_library`. Signing in to a reMarkable over SSH moved to
     `deckle_digest::remarkable_login`, shared by the command line and the app.
+- **Puzzles tab, easier to read.** A theme that's greyed out now says why under the chips, not
+  only on hover, with more exact reasons (the paper has no Puzzle page to keep headline words,
+  none kept in the last 7 days, no interests followed, the Scribe not sharing looked-up words
+  over USB, the paper's settings not loading). Making a book reports each step (gathering the
+  words, making each puzzle, the AI's clues, laying out the pages) with a whole-book bar, a
+  percentage and the time so far (`puzzles-progress` now carries `stage`). The preview stays
+  beside the form and scrolls on its own, so a long crossword's clues no longer push Your
+  books off the page. The Daily, Puzzles and other wide tabs use up to 1480 px instead of
+  1120 px on big screens.
+- **The paper as a PDF on a Kindle Scribe.** Each Kindle can take the paper as the Kindle book
+  or as a PDF laid out for a Scribe's screen, which its pen writes straight onto: **Send the
+  paper as** on the Kindle tab, `deckle devices paper pdf|book [--kindle …]`, or
+  `paper = "pdf"` under `[sync.devices."<id>"]`. While any Kindle asks for it, the build also
+  makes a `kindle-scribe` PDF edition and queues it beside the Kindle book; each push sends the
+  one that Kindle takes and drops the other. Pruning counts `.pdf` papers with `.kfx` ones.
+  `[email] pdf = true` (**Send it as a PDF to write on** on the email card) emails the same PDF
+  instead of the EPUB, as `application/pdf` and never with "convert" in the subject, so
+  Amazon keeps it a PDF.
+- **The puzzle page no longer looks like tables on a Kindle.** The mini's grid and the word
+  search, and yesterday's answers to both, are drawn as square PNG pictures in the EPUB instead
+  of HTML tables, which a Kindle (Enhanced Typesetting) stretched to the column's width with a
+  zoom button under them. Yesterday's word search loops each word in gray. The search's words
+  print as one line-wrapped paragraph, theme words in bold. The PDF edition and the iPad
+  bundle are unchanged.
 - **Puzzle books for the iPad, as data.** A puzzle book can be written as a bundle the way an
   edition is: a `deckle-puzzles-<title>-<date>-<seed>.decklepuzzles` folder with `book.json`
   (every puzzle of every kind with its full solution, so Check and Reveal work offline) and a

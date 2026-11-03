@@ -225,6 +225,14 @@ pub fn name_kindle(sync_id: String, name: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn set_kindle_paper(
+    sync_id: String,
+    paper: deckle_digest::config::PaperFormat,
+) -> Result<(), String> {
+    deckle_app::commands::set_kindle_paper(sync_id, paper)
+}
+
+#[tauri::command]
 pub fn set_device_options(
     state: State<'_, AppState>,
     key: String,

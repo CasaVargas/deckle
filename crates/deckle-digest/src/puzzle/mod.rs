@@ -11,6 +11,7 @@ pub mod grid;
 pub mod ladder;
 pub mod maze;
 pub mod nonogram;
+pub(crate) mod picture;
 pub mod search;
 pub mod store;
 pub mod sudoku;
@@ -256,24 +257,7 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
     if let Some(ws) = &p.search {
         let mut body = search_table(ws, "grid search", false);
         body.push_str(&format!("<p class=\"small\">{}</p>\n", esc(SEARCH_HOW)));
-        let listed: Vec<String> = ws
-            .words
-            .iter()
-            .map(|h| {
-                let suffix = if h.theme { FROM_HEADLINES } else { "" };
-                format!(
-                    "<p class=\"clue\">{}{}</p>",
-                    h.word.to_uppercase(),
-                    esc(suffix)
-                )
-            })
-            .collect();
-        let (left, right) = listed.split_at(listed.len().div_ceil(2));
-        body.push_str(&format!(
-            "<table class=\"cols\"><tr><td>{}</td><td>{}</td></tr></table>\n",
-            left.concat(),
-            right.concat()
-        ));
+        body.push_str(&word_columns(ws));
         articles.push(Article {
             title: format!("Word search · No. {}", p.number),
             body,
@@ -363,6 +347,27 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
                 .map(|y| y.puzzle.clone()),
         }),
     }
+}
+
+/// The word search's words in two columns, a theme word marked as from yesterday's paper.
+fn word_columns(ws: &search::Search) -> String {
+    let listed: Vec<String> = ws.words.iter().map(word_line).collect();
+    let (left, right) = listed.split_at(listed.len().div_ceil(2));
+    format!(
+        "<table class=\"cols\"><tr><td>{}</td><td>{}</td></tr></table>\n",
+        left.concat(),
+        right.concat()
+    )
+}
+
+/// One of the word search's words as a clue line.
+fn word_line(h: &search::Hidden) -> String {
+    let suffix = if h.theme { FROM_HEADLINES } else { "" };
+    format!(
+        "<p class=\"clue\">{}{}</p>",
+        h.word.to_uppercase(),
+        esc(suffix)
+    )
 }
 
 /// The word search as a table of letters; with `mask`, only the hidden words' letters, the

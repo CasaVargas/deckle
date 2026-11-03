@@ -50,6 +50,13 @@ pub struct Sources {
     pub week: usize,
     pub vocab: usize,
     pub cookbook: usize,
+    /// The main paper prints the puzzle page, which is what keeps each day's headline words
+    /// (the interests and the week draw on them).
+    #[serde(default)]
+    pub puzzle_page: bool,
+    /// Why nothing could be read: the main paper's config didn't load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 const INTEREST_DAYS: u32 = 30;
@@ -205,9 +212,14 @@ fn blank_word(text: &str, word: &str) -> String {
 /// their word counts, the week, the shelf and the cookbook.
 pub fn sources(main: &Path, today: NaiveDate) -> Sources {
     let mut out = Sources::default();
-    let Ok(cfg) = Config::load(main) else {
-        return out;
+    let cfg = match Config::load(main) {
+        Ok(c) => c,
+        Err(e) => {
+            out.error = Some(format!("{}: {e}", main.display()));
+            return out;
+        }
     };
+    out.puzzle_page = cfg.sections.contains(&crate::config::SectionKind::Puzzle);
     let puzzles = Puzzles::load(&cfg.puzzle_store());
     if let Ok(loaded) = papers::load_all(main) {
         for p in &loaded.papers {

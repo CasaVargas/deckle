@@ -38,6 +38,8 @@ pub enum Screen {
     RemarkablePaperProMove,
     Ipad,
     A5,
+    /// A Kindle Scribe (2022, 2024): the paper as a PDF its pen writes on.
+    KindleScribe,
 }
 
 impl Screen {
@@ -50,6 +52,7 @@ impl Screen {
             Screen::RemarkablePaperProMove => px(954.0, 1696.0, 264.0),
             Screen::Ipad => px(1640.0, 2360.0, 264.0),
             Screen::A5 => (420.0, 595.0),
+            Screen::KindleScribe => px(1860.0, 2480.0, 300.0),
         }
     }
 
@@ -62,6 +65,7 @@ impl Screen {
             Screen::RemarkablePaperProMove => (954, 1696),
             Screen::Ipad => (1640, 2360),
             Screen::A5 => (1240, 1754),
+            Screen::KindleScribe => (1860, 2480),
         }
     }
 
@@ -71,7 +75,7 @@ impl Screen {
             Screen::RemarkablePaperPro | Screen::RemarkablePaperProMove | Screen::Ipad => {
                 Photos::Color
             }
-            Screen::Remarkable2 | Screen::A5 => Photos::Gray,
+            Screen::Remarkable2 | Screen::A5 | Screen::KindleScribe => Photos::Gray,
         }
     }
 }

@@ -170,6 +170,19 @@ pub fn prepare(
 /// Rewrites a crossword book's clues in the plan's style, one request a puzzle; a puzzle
 /// whose request fails keeps its clues and adds a warning. Other kinds are left alone.
 pub fn restyle(b: &mut Book, plan: &Plan, about: &str, ai: Option<&AiConfig>, post: &mut Post<'_>) {
+    restyle_with(b, plan, about, ai, post, &mut |_, _| {});
+}
+
+/// [`restyle`], calling `progress(done, of)` before each puzzle's clues go to the AI and once
+/// when the last are back.
+pub fn restyle_with(
+    b: &mut Book,
+    plan: &Plan,
+    about: &str,
+    ai: Option<&AiConfig>,
+    post: &mut Post<'_>,
+    progress: &mut dyn FnMut(usize, usize),
+) {
     if plan.style == Style::Plain {
         return;
     }
@@ -181,7 +194,9 @@ pub fn restyle(b: &mut Book, plan: &Plan, about: &str, ai: Option<&AiConfig>, po
     let Puzzles::Crossword(xs) = &mut b.puzzles else {
         return;
     };
+    let of = xs.len();
     for (i, x) in xs.iter_mut().enumerate() {
+        progress(i, of);
         let entries: Vec<(String, String)> = x
             .clues
             .iter()
@@ -198,6 +213,7 @@ pub fn restyle(b: &mut Book, plan: &Plan, about: &str, ai: Option<&AiConfig>, po
                 .push(format!("puzzle {}: the clues stayed plain ({e})", i + 1)),
         }
     }
+    progress(of, of);
     b.subtitle = format!("{} · {} clues", b.subtitle, plan.style.name());
 }
 
