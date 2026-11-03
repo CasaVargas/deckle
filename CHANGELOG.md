@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 — a local model that sets itself up, and the Puzzles tab
+
+Everything since 0.11.0 was tagged: an AI that runs on your own computer with nothing to
+configure, one setting for it across the books and every paper, and a fifth tab that makes
+puzzle books to solve in ink, themed on what you read.
 
 - **Ollama, on this computer, as its own choice.** `--llm ollama`, `[llm] provider = "ollama"`
   and "Ollama, on this computer" in the app talk to Ollama's own API instead of its
