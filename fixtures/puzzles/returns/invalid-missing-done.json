@@ -1,0 +1,10 @@
+{
+  "format": "deckle-puzzle-returns",
+  "version": "1.0",
+  "reader": { "id": "ipad-7F3A2C", "name": "Jon's iPad", "app": "Deckle Reader 1.4" },
+  "book": "6c1e3b0a-2f4d-5a8b-9c1e-0d2f3a4b5c6d",
+  "updated_at": "2026-11-03T21:40:00Z",
+  "puzzles": [
+    { "n": 7, "seconds": 300, "last": "2026-11-03T19:20:00Z" }
+  ]
+}

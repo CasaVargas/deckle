@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CasaVargas/deckle/docs/formats/deckle-puzzle-returns.schema.json",
+  "title": "Deckle puzzle book returns version 1.0",
+  "description": "SPDX-License-Identifier: MIT. What a reader wrote back about one puzzle book (puzzle book bundle design §4): one file per book and reader at .deckle-returns/<reader-id>/puzzles/<book-id>.json. Each puzzle carries the reader's check (done, sticky once true), the seconds spent, when it was last touched, and its own ink by kind: grid (crossword), found (word search), cells (sudoku), rungs (word ladder), key (cryptogram), marks (nonogram); a maze has done only.",
+  "type": "object",
+  "required": [
+    "format",
+    "version",
+    "reader",
+    "book",
+    "updated_at",
+    "puzzles"
+  ],
+  "properties": {
+    "format": {
+      "const": "deckle-puzzle-returns"
+    },
+    "version": {
+      "enum": [
+        "1.0"
+      ]
+    },
+    "reader": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "app"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string"
+        },
+        "app": {
+          "type": "string"
+        }
+      }
+    },
+    "book": {
+      "description": "The book's id: book.json's book.id.",
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "puzzles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "n",
+          "done",
+          "seconds",
+          "last"
+        ],
+        "properties": {
+          "n": {
+            "description": "1-based, the puzzle's n in book.json.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "done": {
+            "description": "The reader's check: every answer matches. Sticky once true.",
+            "type": "boolean"
+          },
+          "seconds": {
+            "type": "number",
+            "minimum": 0
+          },
+          "last": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "grid": {
+            "description": "A crossword: the letters as entered, row by row, # a black square, a space an empty one.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "found": {
+            "description": "A word search: the words found, upper-case.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[A-Z]+$"
+            }
+          },
+          "cells": {
+            "description": "A sudoku: nine rows of nine, digits as entered, . an empty square.",
+            "type": "array",
+            "minItems": 9,
+            "maxItems": 9,
+            "items": {
+              "type": "string",
+              "pattern": "^[1-9.]{9}$"
+            }
+          },
+          "rungs": {
+            "description": "A word ladder: the blank rungs only, as entered, in order.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "key": {
+            "description": "A cryptogram: 26 characters, the plaintext letter guessed for each cipher letter A to Z, . unknown.",
+            "type": "string",
+            "pattern": "^[A-Z.]{26}$"
+          },
+          "marks": {
+            "description": "A nonogram: row by row, # shaded, x marked clear, . untouched.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[#x.]*$"
+            }
+          }
+        }
+      }
+    }
+  }
+}

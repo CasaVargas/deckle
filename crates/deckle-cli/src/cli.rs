@@ -490,6 +490,12 @@ pub enum PuzzlesCommand {
         #[command(flatten)]
         book: BookArgs,
     },
+    /// How many puzzles of a bundled book the iPad has solved, from the returns its reader
+    /// wrote beside it (puzzle book bundle design §4).
+    Solved {
+        /// A `.decklepuzzles` folder, or its `book.json`.
+        path: PathBuf,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
@@ -497,6 +503,16 @@ pub enum DifficultyArg {
     Easy,
     Medium,
     Hard,
+}
+
+/// What a puzzle book is written as (puzzle book bundle design §5).
+#[derive(ValueEnum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum AsArg {
+    /// A PDF to solve in ink on a Kindle.
+    #[default]
+    Pdf,
+    /// A `.decklepuzzles` folder the iPad's reader solves natively.
+    Bundle,
 }
 
 /// Where a crossword's or a word search's theme words come from, and how the clues read
@@ -549,6 +565,11 @@ pub struct BookArgs {
     /// A folder path, or `device` for the first connected Kindle.
     #[arg(long)]
     pub to: Option<String>,
+    /// Write a `pdf` for a Kindle (the default), or a `bundle` for the iPad: a
+    /// `.decklepuzzles` folder in `-o` or `--to <folder>` (an iCloud Drive folder the reader
+    /// watches). A bundle can't go `--to device`.
+    #[arg(long = "as", value_enum, default_value_t = AsArg::Pdf)]
+    pub r#as: AsArg,
     /// Overwrite a book of the same name. Ink on the old one may stay.
     #[arg(long)]
     pub replace: bool,

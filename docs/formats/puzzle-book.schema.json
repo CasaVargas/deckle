@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/CasaVargas/deckle/docs/formats/puzzle-book.schema.json",
+  "title": "Deckle puzzle book bundle, book.json, version 1.x",
+  "description": "A puzzle book as data for native readers (docs/superpowers/specs/2026-11-03-puzzle-book-bundle-design.md). This schema is offered under the MIT license, beside the repository's GPL-3.0. Readers ignore fields they don't know; a minor version only adds.",
+  "type": "object",
+  "required": ["format", "version", "generator", "book", "puzzles", "files"],
+  "properties": {
+    "format": { "const": "deckle-puzzles" },
+    "version": { "type": "string", "pattern": "^1\\.[0-9]+$" },
+    "generator": { "type": "string" },
+    "book": {
+      "type": "object",
+      "required": ["id", "title", "subtitle", "kind", "date", "seed", "difficulty", "built_at", "cover", "warnings"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "title": { "type": "string", "minLength": 1 },
+        "subtitle": { "type": "string" },
+        "kind": { "$ref": "#/$defs/kind" },
+        "date": { "$ref": "#/$defs/date" },
+        "seed": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "difficulty": { "enum": ["easy", "medium", "hard"] },
+        "size": { "type": "integer", "minimum": 0, "description": "The grid size the book was made with; absent for kinds without one." },
+        "theme": {
+          "type": "object",
+          "required": ["kind", "label"],
+          "properties": {
+            "kind": { "enum": ["none", "own", "interests", "week", "vocab", "cookbook", "subject"] },
+            "label": { "type": "string" },
+            "text": { "type": "string" }
+          }
+        },
+        "clue_style": { "enum": ["plain", "trivia", "cryptic", "kid"] },
+        "built_at": { "type": "string", "format": "date-time" },
+        "cover": { "$ref": "#/$defs/path" },
+        "paper_id": { "type": ["string", "null"], "format": "uuid" },
+        "sunday_of": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/date" }] },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "puzzles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/crossword" },
+          { "$ref": "#/$defs/search" },
+          { "$ref": "#/$defs/sudoku" },
+          { "$ref": "#/$defs/ladder" },
+          { "$ref": "#/$defs/cryptogram" },
+          { "$ref": "#/$defs/nonogram" },
+          { "$ref": "#/$defs/maze" }
+        ]
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "size", "sha256"],
+        "properties": {
+          "path": { "$ref": "#/$defs/path" },
+          "size": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "kind": { "enum": ["crossword", "search", "sudoku", "ladder", "cryptogram", "nonogram", "maze"] },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "path": { "type": "string", "pattern": "^[^/\\\\][^\\\\]*$", "description": "Relative to the bundle folder, forward slashes, no leading slash, no '..' segment." },
+    "n": { "type": "integer", "minimum": 1 },
+    "letterGrid": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^[A-Z#]+$" } },
+    "crossword": {
+      "type": "object",
+      "required": ["n", "kind", "size", "grid", "numbers", "clues"],
+      "properties": {
+        "n": { "$ref": "#/$defs/n" },
+        "kind": { "const": "crossword" },
+        "size": { "type": "integer", "minimum": 5, "maximum": 15 },
+        "grid": { "$ref": "#/$defs/letterGrid" },
+        "numbers": {
+          "type": "array",
+          "items": { "type": "array", "minItems": 3, "maxItems": 3, "items": { "type": "integer", "minimum": 0 } },
+          "description": "[row, column, number] for each numbered square."
+        },
+        "clues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["number", "dir", "clue", "answer", "theme"],
+            "properties": {
+              "number": { "type": "integer", "minimum": 1 },
+              "dir": { "enum": ["across", "down"] },
+              "clue": { "type": "string" },
+              "answer": { "type": "string", "pattern": "^[A-Z]+$" },
+              "theme": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "search": {
+      "type": "object",
+      "required": ["n", "kind", "size", "grid", "words"],
+      "properties": {
+        "n": { "$ref": "#/$defs/n" },
+        "kind": { "const": "search" },
+        "size": { "type": "integer", "minimum": 8, "maximum": 20 },
+        "grid": { "type": "array", "minItems": 8, "items": { "type": "string", "pattern": "^[A-Z]+$" } },
+        "words": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["word", "row", "col", "dir", "theme"],
+            "properties": {
+              "word": { "type": "string", "pattern": "^[A-Z]+$" },
+              "row": { "type": "integer", "minimum": 0 },
+              "col": { "type": "integer", "minimum": 0 },
+              "dir": { "enum": ["across", "down", "down-right", "up-right", "left", "up", "up-left", "down-left"], "description": "The word reads forward from row, col in this direction." },
+              "theme": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "sudoku": {
+      "type": "object",
+      "required": ["n", "kind", "givens", "solution", "grade"],
+      "properties": {
+        "n": { "$ref": "#/$defs/n" },
+        "kind": { "const": "sudoku" },
+        "givens": { "type": "array", "minItems": 9, "maxItems": 9, "items": { "type": "string", "pattern": "^[1-9.]{9}$" } },
+        "solution": { "type": "array", "minItems": 9, "maxItems": 9, "items": { "type": "string", "pattern": "^[1-9]{9}$" } },
+        "grade": { "enum": ["easy", "medium", "hard"] }
+      }
+    },
+    "ladder": {
+      "type": "object",
+      "required": ["n", "kind", "from", "to", "steps", "answer"],
+      "properties": {
+        "n": { "$ref": "#/$defs/n" },
+        "kind": { "const": "ladder" },
+        "from": { "type": "string", "pattern": "^[A-Z]+$" },
+        "to": { "type": "string", "pattern": "^[A-Z]+$" },
+        "steps": { "type": "integer", "minimum": 1, "description": "The blank rungs between from and to; answer holds steps + 2 words." },
+        "answer": { "type": "array", "minItems": 3, "items": { "type": "string", "pattern": "^[A-Z]+$" } }
+      }
+    },
+    "cryptogram": {
+      "type": "object",
+      "required": ["n", "kind", "cipher", "plain", "given", "source"],
+      "properties": {
+        "n": { "$ref": "#/$defs/n" },
+        "kind": { "const": "cryptogram" },
+        "cipher": { "type": "string", "minLength": 1 },
+        "plain": { "type": "string", "minLength": 1, "description": "The same length as cipher, with the same non-letters in the same places." },
+        "given": { "type": "array", "items": { "type": "string", "pattern": "^[A-Z]$" }, "description": "Plaintext letters the page prints as solved." },
+        "source": { "type": "string" }
+      }
+    },
+    "nonogram": {
+      "type": "object",
+      "required": ["n", "kind", "size", "title", "rows", "cols", "solution", "picture"],
+      "properties": {
+        "n": { "$ref": "#/$defs/n" },
+        "kind": { "const": "nonogram" },
+        "size": { "type": "integer", "minimum": 5, "maximum": 25 },
+        "title": { "type": "string" },
+        "rows": { "$ref": "#/$defs/runs" },
+        "cols": { "$ref": "#/$defs/runs" },
+        "solution": { "type": "array", "minItems": 5, "items": { "type": "string", "pattern": "^[#.]+$" } },
+        "picture": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/path" }] }
+      }
+    },
+    "runs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "array", "items": { "type": "integer", "minimum": 1 }, "description": "The clue runs for one line; an empty array is a blank line." }
+    },
+    "maze": {
+      "type": "object",
+      "required": ["n", "kind", "size", "walls", "start", "end", "solution"],
+      "properties": {
+        "n": { "$ref": "#/$defs/n" },
+        "kind": { "const": "maze" },
+        "size": { "type": "integer", "minimum": 6, "maximum": 40 },
+        "walls": { "type": "array", "minItems": 36, "items": { "type": "integer", "minimum": 0, "maximum": 15 }, "description": "Row-major, one integer per square: standing walls as bits N=1, E=2, S=4, W=8." },
+        "start": { "$ref": "#/$defs/cell" },
+        "end": { "$ref": "#/$defs/cell" },
+        "solution": { "type": "array", "minItems": 2, "items": { "$ref": "#/$defs/cell" }, "description": "The path from start to end, one square per step." }
+      }
+    },
+    "cell": { "type": "array", "minItems": 2, "maxItems": 2, "items": { "type": "integer", "minimum": 0 } }
+  }
+}

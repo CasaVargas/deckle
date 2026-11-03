@@ -800,8 +800,9 @@ pub fn llm_pull_stop() {
 }
 
 use deckle_app::puzzles::{
-    BookRequest, KindInfo, MadeBook, PreviewDto as PuzzlePreviewDto, SourcesDto,
+    BookRequest, BundleTarget, KindInfo, MadeBook, PreviewDto as PuzzlePreviewDto, SourcesDto,
 };
+use deckle_digest::config::PuzzlesConfig;
 
 #[tauri::command]
 pub async fn puzzles_sources() -> SourcesDto {
@@ -840,8 +841,32 @@ pub async fn puzzles_send(
     path: String,
     target: RunTarget,
     replace: bool,
+    as_bundle: Option<bool>,
 ) -> Result<String, String> {
-    blocking(move || deckle_app::puzzles::puzzles_send(path, target, replace)).await
+    blocking(move || {
+        deckle_app::puzzles::puzzles_send(path, target, replace, as_bundle.unwrap_or(false))
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn puzzles_bundle_targets() -> Vec<BundleTarget> {
+    tauri::async_runtime::spawn_blocking(deckle_app::puzzles::puzzles_bundle_targets)
+        .await
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+pub async fn puzzles_sunday_get(paper: Option<String>) -> Result<PuzzlesConfig, String> {
+    blocking(move || deckle_app::puzzles::puzzles_sunday_get(paper)).await
+}
+
+#[tauri::command]
+pub async fn puzzles_sunday_set(
+    paper: Option<String>,
+    config: PuzzlesConfig,
+) -> Result<PuzzlesConfig, String> {
+    blocking(move || deckle_app::puzzles::puzzles_sunday_set(paper, config)).await
 }
 
 use deckle_app::koreader::{KoreaderPreview, KoreaderView};

@@ -189,6 +189,7 @@ pub fn today<'s>(
                 puzzle,
                 headlines: Vec::new(),
                 solve: None,
+                search_found: None,
             },
         );
     }
@@ -305,7 +306,24 @@ pub fn section(date: NaiveDate, cfg: &Config, store: &mut Store, words: &Words) 
         }
         if let Some(ws) = &y.puzzle.search {
             body.push_str(&search_table(ws, "grid search small", true));
-            let list: Vec<String> = ws.words.iter().map(|h| h.word.to_uppercase()).collect();
+            // a word the iPad found is ticked (returns 1.2)
+            let found = y
+                .search_found
+                .as_ref()
+                .map(|s| &s.found[..])
+                .unwrap_or_default();
+            let list: Vec<String> = ws
+                .words
+                .iter()
+                .map(|h| {
+                    let w = h.word.to_uppercase();
+                    if found.contains(&w) {
+                        format!("{w} ✓")
+                    } else {
+                        w
+                    }
+                })
+                .collect();
             body.push_str(&format!(
                 "<p>{}</p>\n",
                 esc(&format!("Word search: {}", list.join(", ")))

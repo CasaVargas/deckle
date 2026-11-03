@@ -56,6 +56,10 @@ pub struct Day {
     pub headlines: Vec<ThemeWord>,
     #[serde(default)]
     pub solve: Option<Solve>,
+    /// What an iPad's returns said about the word search (returns 1.2, puzzle book bundle
+    /// design §4.1): the words found, upper-case, and whether it was finished.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_found: Option<crate::returns::SearchReturn>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -85,6 +89,15 @@ impl Store {
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
         std::fs::rename(&tmp, path)
+    }
+
+    /// Records what `returns` (every reader's, for `date`) said about that day's word
+    /// search; nothing said leaves the day as it was.
+    pub fn mark_search(&mut self, date: NaiveDate, returns: &[crate::returns::Returns]) {
+        if let (Some(day), Some(s)) = (self.days.get_mut(&date), crate::returns::search_of(returns))
+        {
+            day.search_found = Some(s);
+        }
     }
 
     /// Keeps the last [`KEEP_DAYS`] days up to `today`.

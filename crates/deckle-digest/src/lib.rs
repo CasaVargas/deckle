@@ -36,6 +36,7 @@ pub mod publisher;
 pub mod puzzle;
 pub mod reading;
 pub mod render;
+pub mod returns;
 pub mod schedule;
 pub mod seasons;
 pub mod secret;
@@ -49,7 +50,7 @@ pub mod web_book;
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Days, NaiveDate, Utc};
 use serde::Serialize;
 
 pub use chrono;
@@ -593,8 +594,23 @@ pub fn gather_with_editor(
             SectionKind::Lottery => edition.sections.push(sources::lottery::section(cfg, net)),
             SectionKind::Horoscope => edition.sections.push(horoscope::section(cfg, date)),
             SectionKind::Puzzle => {
-                let store =
-                    puzzles.get_or_insert_with(|| puzzle::store::Store::load(&cfg.puzzle_store()));
+                let store = puzzles.get_or_insert_with(|| {
+                    let mut store = puzzle::store::Store::load(&cfg.puzzle_store());
+                    // What the iPad found in yesterday's word search (returns 1.2), from every
+                    // bundle export's returns, so yesterday's answers tick the words.
+                    let yesterday = date - Days::new(1);
+                    let mut found = Vec::new();
+                    for e in cfg
+                        .export
+                        .iter()
+                        .filter(|e| e.format == config::ExportFormat::Bundle)
+                    {
+                        let root = inbox::expand_home(e.dir.trim());
+                        found.extend(returns::read_dir(&root, yesterday));
+                    }
+                    store.mark_search(yesterday, &found);
+                    store
+                });
                 edition.sections.push(puzzle::section(
                     date,
                     cfg,

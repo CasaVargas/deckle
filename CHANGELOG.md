@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+- **Puzzle books for the iPad, as data.** A puzzle book can be written as a bundle the way an
+  edition is: a `deckle-puzzles-<title>-<date>-<seed>.decklepuzzles` folder with `book.json`
+  (every puzzle of every kind with its full solution, so Check and Reveal work offline) and a
+  cover, written through the same hidden-folder-then-rename staging as the edition bundle, the
+  manifest last. The same options, seed and date give the same book as the PDF: one `make`, two
+  writers. `deckle puzzles <kind> … --as bundle` writes one to `-o` or `--to <folder>`; a bundle
+  already there is never overwritten without `--replace`. The format is documented in
+  `docs/superpowers/specs/2026-11-03-puzzle-book-bundle-design.md` with an MIT schema,
+  `docs/formats/puzzle-book.schema.json`, and a sampler of every kind under `fixtures/puzzles/`.
+- **Send to iPad.** The Puzzles tab's **Your books** gets **Send to <name>** for every export
+  folder whose format is bundle (an iCloud Drive folder the iPad's reader watches), beside Send
+  to the Kindle and Save a copy. The book goes as a bundle, made again from its saved request
+  with the same seed and date; a bundle already there asks before it's replaced, since the
+  reader may hold ink on it. The row says where it went.
+- **Every Sunday, with the paper.** A paper's new `[puzzles]` table (`sunday = true` and the
+  recipe: kind, count, size, difficulty, theme, clues; a switch and the recipe at the foot of
+  the Puzzles tab) has the Sunday morning run make the book after the edition is in place and
+  write it beside the edition in every bundle export, marked with the paper and the Sunday it
+  belongs to, so the reader shelves them together. `keep` prunes editions, never books, and a
+  Sunday run again leaves the book as it is.
+- **What the iPad solved comes back.** The reader writes a return per book under
+  `.deckle-returns/<reader>/puzzles/<book-id>.json` (`docs/formats/deckle-puzzle-returns.schema.json`,
+  MIT, with a fixture): per puzzle, done, seconds and its own ink by kind. Your books shows
+  "n of N solved on the iPad" beside the Kindle's count, merged across readers by the latest
+  per puzzle; `deckle puzzles solved <bundle>` prints it. The daily word search's found words
+  come back too (returns 1.2, `puzzle.search`), and tomorrow's "yesterday's answers" ticks them.
+
 ## 0.12.1 — the AI on this Mac asks for the model it installed
 
 - **Fixed: the AI on this Mac asked for a model it hadn't installed.** With Settings → AI on

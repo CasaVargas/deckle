@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/CasaVargas/deckle/docs/formats/deckle-returns.schema.json",
-  "title": "Deckle returns versions 1.0 and 1.1",
-  "description": "SPDX-License-Identifier: MIT. Returns are client-owned reading state. Version 1.1 adds fresh edition identity and retains the edition date.",
+  "title": "Deckle returns versions 1.0, 1.1 and 1.2",
+  "description": "SPDX-License-Identifier: MIT. Returns are client-owned reading state. Version 1.1 adds fresh edition identity and retains the edition date. Version 1.2 adds the daily word search's state as puzzle.search (optional, additive).",
   "type": "object",
   "required": [
     "format",
@@ -21,7 +21,8 @@
     "version": {
       "enum": [
         "1.0",
-        "1.1"
+        "1.1",
+        "1.2"
       ]
     },
     "reader": {
@@ -119,6 +120,26 @@
               "items": {
                 "type": "string"
               }
+            },
+            "search": {
+              "description": "1.2: the daily word search, as the reader left it.",
+              "type": "object",
+              "required": [
+                "found",
+                "done"
+              ],
+              "properties": {
+                "found": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^[A-Z]+$"
+                  }
+                },
+                "done": {
+                  "type": "boolean"
+                }
+              }
             }
           }
         }
@@ -157,7 +178,10 @@
       "if": {
         "properties": {
           "version": {
-            "const": "1.1"
+            "enum": [
+              "1.1",
+              "1.2"
+            ]
           }
         }
       },

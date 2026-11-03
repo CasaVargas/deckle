@@ -32,6 +32,7 @@ fn store_with_yesterday(headlines: Vec<ThemeWord>) -> Store {
         puzzle: make(yesterday(), &cfg, Words::embedded(), &store),
         headlines,
         solve: None,
+        search_found: None,
     };
     store.days.insert(yesterday(), day);
     store
@@ -272,6 +273,7 @@ fn solved_yesterday(words: &Words) -> Store {
         puzzle: make(yesterday(), &cfg, words, &store),
         headlines: vec![leaf()],
         solve: None,
+        search_found: None,
     };
     day.solve = Some(Solve {
         solved: 4,
@@ -511,6 +513,7 @@ fn record_scores_recent_days_and_marks_readable() {
             puzzle: checked_puzzle(),
             headlines: Vec::new(),
             solve: None,
+            search_found: None,
         },
     );
     record(
@@ -547,6 +550,7 @@ fn record_scores_recent_days_and_marks_readable() {
             puzzle: checked_puzzle(),
             headlines: Vec::new(),
             solve: None,
+            search_found: None,
         },
     );
     record(
@@ -710,6 +714,7 @@ fn a_grid_is_never_yesterdays_again() {
             puzzle: make(oct25 - Days::new(1), &cfg, Words::embedded(), &store),
             headlines: headlines.clone(),
             solve: None,
+            search_found: None,
         },
     );
     let yesterday = make(oct25, &cfg, Words::embedded(), &store);
@@ -719,6 +724,7 @@ fn a_grid_is_never_yesterdays_again() {
             puzzle: yesterday.clone(),
             headlines,
             solve: None,
+            search_found: None,
         },
     );
     let today = make(oct26, &cfg, Words::embedded(), &store);
@@ -795,6 +801,7 @@ fn a_search_is_never_a_recent_one() {
             puzzle: yesterday_puzzle,
             headlines: Vec::new(),
             solve: None,
+            search_found: None,
         },
     );
     let again = make(date(), &cfg, Words::embedded(), &store);
@@ -954,6 +961,7 @@ fn a_day_stored_before_the_search_prints_without_it() {
             puzzle: today_puzzle,
             headlines: Vec::new(),
             solve: None,
+            search_found: None,
         },
     );
     let s = section(date(), &page_cfg(), &mut store, words);
@@ -990,4 +998,38 @@ fn a_stored_search_of_another_size_still_prints() {
     let table = &body[start..start + body[start..].find("</table>").unwrap()];
     assert_eq!(table.matches("<tr>").count(), 8);
     assert!(body.contains("Word search: EFGH"));
+}
+
+#[test]
+fn an_ipads_found_words_are_ticked_in_yesterdays_answers() {
+    let words = Words::embedded();
+    let mut store = store_for_search();
+    let y = store.days[&yesterday()]
+        .puzzle
+        .search
+        .clone()
+        .expect("yesterday's search");
+    let first = y.words[0].word.to_uppercase();
+    let second = y.words[1].word.to_uppercase();
+    // a 1.2 return from the iPad names the first word found
+    let mut v: serde_json::Value =
+        serde_json::from_str(include_str!("../../../../fixtures/press/returns-1.2.json")).unwrap();
+    v["puzzle"]["search"]["found"] = serde_json::json!([first]);
+    let r = deckle_digest::returns::parse(v.to_string().as_bytes()).unwrap();
+    store.mark_search(yesterday(), &[r]);
+    assert_eq!(
+        store.days[&yesterday()]
+            .search_found
+            .as_ref()
+            .map(|s| s.found.clone()),
+        Some(vec![first.clone()])
+    );
+    let s = section(date(), &page_cfg(), &mut store, words);
+    let body = &article(&s, "Yesterday's answers").unwrap().body;
+    assert!(body.contains(&format!("{first} ✓")), "{body}");
+    assert!(!body.contains(&format!("{second} ✓")), "{body}");
+    // a day with no returns, or returns without a search, is left alone
+    let mut other = store_for_search();
+    other.mark_search(yesterday(), &[]);
+    assert!(other.days[&yesterday()].search_found.is_none());
 }

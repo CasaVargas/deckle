@@ -309,6 +309,7 @@ mod tests {
                 })
                 .collect(),
             solve: None,
+            search_found: None,
         }
     }
 

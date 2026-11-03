@@ -3,7 +3,7 @@
 // its options mean, and the lines of copy worked out from a book. Beside the tab, as
 // cookbookRooms.ts is beside the Cookbook. (Not puzzlesView.ts: on a Mac or Windows that name
 // is the same file as PuzzlesView.tsx.)
-import type { MadePuzzleBook, PuzzleBookRequest, PuzzleKind, PuzzleKindKey } from "./types";
+import type { MadePuzzleBook, PuzzleBookRequest, PuzzleBundleTarget, PuzzleKind, PuzzleKindKey, PuzzlesConfig } from "./types";
 
 /** The screens a book can be laid out for, as `--screen` names them. */
 export const SCREENS: { key: string; name: string }[] = [
@@ -89,6 +89,38 @@ export function makingLine(kind: PuzzleKindKey, made: number, of: number): strin
   if (of === 0) return "Starting…";
   const noun = kind === "ladder" ? "page" : "puzzle";
   return `Making ${noun} ${Math.min(made + 1, of)} of ${of}…`;
+}
+
+/** "On iPad's folder, for the iPad": where a book went as a bundle, by the export's name when one still
+ *  points at that folder, else the folder itself; null when it hasn't. */
+export function ipadLine(b: MadePuzzleBook, targets: PuzzleBundleTarget[]): string | null {
+  if (!b.bundles?.length) return null;
+  const names = b.bundles.map((path) => {
+    const dir = path.replace(/[\\/][^\\/]+$/, "");
+    return targets.find((t) => t.dir === dir)?.name ?? dir;
+  });
+  const uniq = names.filter((n, i) => names.indexOf(n) === i);
+  const list = uniq.length <= 1 ? uniq.join("") : `${uniq.slice(0, -1).join(", ")} and ${uniq[uniq.length - 1]}`;
+  return `On ${list}'s ${uniq.length === 1 ? "folder" : "folders"}, for the iPad`;
+}
+
+/** "2 of 10 solved on the iPad", or null before a reader wrote. */
+export function solvedLine(b: MadePuzzleBook): string | null {
+  const s = b.solved_ipad;
+  if (!s) return null;
+  return `${s[0]} of ${s[1]} solved on the iPad`;
+}
+
+/** A paper's Sunday recipe as the card starts it: the backend's defaults. */
+export const SUNDAY_DEFAULT: PuzzlesConfig = { sunday: false, kind: "crossword", count: 10, size: 0, difficulty: "medium", theme: "week", clues: "plain" };
+
+/** "10 crosswords from the week's paper, beside Sunday's paper": the recipe in a line. */
+export function sundayLine(p: PuzzlesConfig, kinds: PuzzleKind[]): string {
+  const kind = kinds.find((k) => k.key === p.kind);
+  const noun = p.count === 1 ? (kind?.name ?? p.kind) : p.kind === "ladder" ? "pages of word ladders" : `${kind?.name ?? p.kind}s`;
+  const theme: Record<PuzzlesConfig["theme"], string> = { none: "", interests: " from your interests", week: " from the week's paper", vocab: " from the words you looked up", cookbook: " from your cookbook" };
+  const themed = p.kind === "crossword" || p.kind === "search" ? theme[p.theme] : "";
+  return `${p.count} ${noun}${themed}, beside Sunday's paper`;
 }
 
 /** The line under Send: where the book goes. */

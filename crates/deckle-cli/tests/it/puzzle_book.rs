@@ -296,3 +296,154 @@ fn crossword_words_file_with_clues() {
         "{warnings}"
     );
 }
+
+const BUNDLE: &str = "deckle-puzzles-word-search-2026-11-01-0000.decklepuzzles";
+
+#[test]
+fn as_bundle_writes_a_decklepuzzles_folder_and_never_over_one() {
+    let dir = tempfile::tempdir().unwrap();
+    fn args<'a>(extra: &[&'a str]) -> Vec<&'a str> {
+        [
+            &[
+                "search",
+                "--count",
+                "2",
+                "--seed",
+                "7",
+                "--date",
+                "2026-11-01",
+                "--as",
+                "bundle",
+            ][..],
+            extra,
+        ]
+        .concat()
+    }
+    let d = dir.path().to_str().unwrap().to_owned();
+    let out = puzzles(&args(&["-o", &d, "--json"]));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let path = dir.path().join(BUNDLE);
+    assert_eq!(v["path"], path.to_str().unwrap());
+    assert_eq!(v["format"], "bundle");
+    assert_eq!(v["puzzles"], 2);
+    assert!(v.get("pages").is_none(), "a bundle has no pages: {v}");
+    let book: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(path.join("book.json")).unwrap()).unwrap();
+    assert_eq!(book["format"], "deckle-puzzles");
+    assert_eq!(book["book"]["kind"], "search");
+    assert_eq!(book["book"]["seed"], "0000000000000007");
+    assert_eq!(book["puzzles"].as_array().unwrap().len(), 2);
+    let cover = std::fs::read(path.join("cover.jpg")).unwrap();
+    assert!(cover.starts_with(&[0xff, 0xd8]), "a JPEG");
+    assert!(!dir.path().join(format!(".{BUNDLE}.tmp")).exists());
+    assert!(!dir.path().join(BOOK).exists(), "no PDF beside it");
+
+    // the same bundle again is refused, then replaced
+    let again = puzzles(&args(&["-o", &d]));
+    assert!(!again.status.success());
+    let err = String::from_utf8_lossy(&again.stderr);
+    assert!(
+        err.contains("is already there") && err.contains("--replace"),
+        "{err}"
+    );
+    let replaced = puzzles(&args(&["--replace", "--to", &d]));
+    assert!(
+        replaced.status.success(),
+        "{}",
+        String::from_utf8_lossy(&replaced.stderr)
+    );
+    let text = String::from_utf8_lossy(&replaced.stdout);
+    assert!(text.contains("(2 puzzles, seed 7)"), "{text}");
+    let remake = text
+        .lines()
+        .find(|l| l.starts_with("remake it with: "))
+        .unwrap();
+    assert!(
+        remake.contains("--seed 7 --date 2026-11-01 --as bundle --to "),
+        "{text}"
+    );
+
+    // a Kindle can't take a bundle
+    let device = puzzles(&args(&["--to", "device"]));
+    assert!(!device.status.success());
+    let err = String::from_utf8_lossy(&device.stderr);
+    assert!(
+        err.contains("not a Kindle") && err.contains("--to <folder>"),
+        "{err}"
+    );
+}
+
+#[test]
+fn puzzles_solved_reads_the_returns_beside_a_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    let d = dir.path().to_str().unwrap().to_owned();
+    let out = puzzles(&[
+        "maze",
+        "--count",
+        "2",
+        "--size",
+        "8",
+        "--seed",
+        "7",
+        "--date",
+        "2026-11-01",
+        "--as",
+        "bundle",
+        "-o",
+        &d,
+        "--json",
+    ]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let bundle = std::path::PathBuf::from(v["path"].as_str().unwrap());
+    let book: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(bundle.join("book.json")).unwrap()).unwrap();
+    let id = book["book"]["id"].as_str().unwrap().to_owned();
+    // no returns yet
+    let out = puzzles(&["solved", bundle.to_str().unwrap(), "--json"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["of"], 2);
+    assert!(v.get("done").is_none(), "{v}");
+    // the iPad solved one
+    let returns = dir.path().join(".deckle-returns/ipad-1/puzzles");
+    std::fs::create_dir_all(&returns).unwrap();
+    std::fs::write(
+        returns.join(format!("{id}.json")),
+        serde_json::json!({
+            "format": "deckle-puzzle-returns", "version": "1.0",
+            "reader": { "id": "ipad-1", "name": "Jon's iPad", "app": "Deckle Reader" },
+            "book": id, "updated_at": "2026-11-01T20:00:00Z",
+            "puzzles": [
+                { "n": 1, "done": true, "seconds": 90, "last": "2026-11-01T20:00:00Z" },
+                { "n": 2, "done": false, "seconds": 30, "last": "2026-11-01T20:01:00Z" }
+            ]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let out = puzzles(&["solved", bundle.join("book.json").to_str().unwrap()]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("1 of 2 solved on Jon's iPad (2 min)"),
+        "{text}"
+    );
+}

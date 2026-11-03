@@ -150,6 +150,10 @@ pub struct Config {
     /// `[remarkable]`: the paper as a PDF to a reMarkable (other readers design §9).
     #[serde(skip_serializing_if = "RemarkableConfig::is_default")]
     pub remarkable: RemarkableConfig,
+    /// `[puzzles]`: Sunday's puzzle book beside the edition (puzzle book bundle design §5).
+    /// Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "PuzzlesConfig::is_default")]
+    pub puzzles: PuzzlesConfig,
     /// `[reader_server]`: the OPDS catalog and KOReader sync on the home network (KOReader hub
     /// design §A). A household setting. Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "ReaderServerConfig::is_default")]
@@ -299,6 +303,7 @@ impl Default for Config {
             morgue: MorgueConfig::default(),
             export: Vec::new(),
             remarkable: RemarkableConfig::default(),
+            puzzles: PuzzlesConfig::default(),
             reader_server: ReaderServerConfig::default(),
             wireless: WirelessConfig::default(),
             almanac_path: None,
@@ -1232,6 +1237,49 @@ pub enum ExportFormat {
     Kepub,
     Pdf,
     Bundle,
+}
+
+/// `[puzzles]`: every Sunday, a puzzle book with the paper (Puzzles tab design §1, puzzle book
+/// bundle design §5). With `sunday = true`, the morning run of a Sunday edition makes the book
+/// this recipe asks for and writes it as a bundle beside the edition in every export folder
+/// whose `format = "bundle"`. Left out of a save while it's untouched.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct PuzzlesConfig {
+    pub sunday: bool,
+    /// `crossword`, `search`, `sudoku`, `ladder`, `cryptogram`, `nonogram` or `maze`.
+    pub kind: String,
+    /// Puzzles in the book, 1 to 200.
+    pub count: usize,
+    /// Squares on a side; 0 is the kind's default.
+    pub size: usize,
+    /// `easy`, `medium` or `hard`.
+    pub difficulty: String,
+    /// Where a crossword's or word search's words come from: `none`, `interests`, `week`,
+    /// `vocab` or `cookbook` (Puzzles tab design §2).
+    pub theme: String,
+    /// How a crossword's clues read: `plain`, or with the AI `trivia`, `cryptic`, `kid`.
+    pub clues: String,
+}
+
+impl Default for PuzzlesConfig {
+    fn default() -> Self {
+        PuzzlesConfig {
+            sunday: false,
+            kind: "crossword".into(),
+            count: 10,
+            size: 0,
+            difficulty: "medium".into(),
+            theme: "week".into(),
+            clues: "plain".into(),
+        }
+    }
+}
+
+impl PuzzlesConfig {
+    pub fn is_default(&self) -> bool {
+        *self == PuzzlesConfig::default()
+    }
 }
 
 /// `[remarkable]`: the paper as a PDF to a reMarkable over its USB web interface (other readers

@@ -1,0 +1,22 @@
+{
+  "format": "deckle-puzzle-returns",
+  "version": "1.0",
+  "reader": { "id": "ipad-7F3A2C", "name": "Jon's iPad", "app": "Deckle Reader 1.4" },
+  "book": "6c1e3b0a-2f4d-5a8b-9c1e-0d2f3a4b5c6d",
+  "updated_at": "2026-11-03T21:40:00Z",
+  "puzzles": [
+    { "n": 1, "done": true, "seconds": 412, "last": "2026-11-03T21:40:00Z",
+      "grid": ["#BAN#", "ERROR", "EERIE", "LEAST", "#DYE#"] },
+    { "n": 2, "done": false, "seconds": 90, "last": "2026-11-03T20:10:00Z",
+      "found": ["COURT", "MILL"] },
+    { "n": 3, "done": false, "seconds": 0, "last": "2026-11-03T20:00:00Z",
+      "cells": ["53..7....", "6..195...", ".98....6.", "8...6...3", "4..8.3..1", "7...2...6", ".6....28.", "...419..5", "....8..79"] },
+    { "n": 4, "done": true, "seconds": 30, "last": "2026-11-03T19:50:00Z",
+      "rungs": ["CORD", "CARD", "WARD"] },
+    { "n": 5, "done": false, "seconds": 12, "last": "2026-11-03T19:40:00Z",
+      "key": "..E..T...................." },
+    { "n": 6, "done": false, "seconds": 0, "last": "2026-11-03T19:30:00Z",
+      "marks": [".#...", "x#..#", ".....", ".....", "....."] },
+    { "n": 7, "done": true, "seconds": 300, "last": "2026-11-03T19:20:00Z" }
+  ]
+}

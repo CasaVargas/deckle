@@ -3,23 +3,27 @@
 //! kept in `~/Deckle/Puzzles` beside the Morgue with the options that made it, and sent to a
 //! Kindle or a folder.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use deckle_core::deliver::{Conn, DeliverOptions, Target, deliver_named_on};
-use deckle_digest::chrono::{Local, NaiveDate};
+use deckle_digest::chrono::{Local, NaiveDate, Utc};
+use deckle_digest::config::{ExportFormat, PuzzlesConfig};
 use deckle_digest::editor::AppAi;
 use deckle_digest::puzzle::ai::{AiConfig, Style};
+use deckle_digest::puzzle::book::bundle::{self, Extras};
 use deckle_digest::puzzle::book::pdf::{self, PageSize};
 use deckle_digest::puzzle::book::plan::{self, Plan, Theme};
 use deckle_digest::puzzle::book::theme::{self, Source};
-use deckle_digest::puzzle::book::{self, Book, BookOptions, Difficulty, Kind, Puzzles};
+use deckle_digest::puzzle::book::{self, Book, BookOptions, Difficulty, Kind, Puzzles, sunday};
 use deckle_digest::puzzle::cryptogram;
 use deckle_digest::puzzle::words::Words;
+use deckle_digest::returns;
 use serde::{Deserialize, Serialize};
 
 use crate::commands::{RunTarget, resolve_run_target};
-use crate::events::Events;
+use crate::events::{Events, NoEvents};
 
 /// Where the books go: beside the Morgue and the Inbox.
 pub fn folder() -> PathBuf {
@@ -517,12 +521,28 @@ pub struct MadeBook {
     pub bytes: u64,
     pub warnings: Vec<String>,
     pub request: BookRequest,
+    /// The bundles written for the iPad (puzzle book bundle design §5): each
+    /// `.decklepuzzles` folder **Send to <iPad folder>** put it in.
+    #[serde(default)]
+    pub bundles: Vec<String>,
+    /// Solved on the iPad, `(n, of)`, from the returns beside those bundles; `None` until a
+    /// reader has written about it. Filled by [`puzzles_list`], never saved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solved_ipad: Option<(usize, usize)>,
 }
 
-/// Makes the book, telling `puzzles-progress` as it goes, and keeps it in [`folder`] with its
-/// request beside it.
-pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook, String> {
-    let (o, page, mut warnings, plan, found) = prepared(&r)?;
+/// A book as the engine made it, with what made it.
+struct Made {
+    book: Book,
+    options: BookOptions,
+    page: PageSize,
+    plan: Plan,
+}
+
+/// Makes the book `r` asks for, telling `puzzles-progress` as it goes: one `make` call, so
+/// the PDF and a bundle of the same request, seed and date are the same book.
+fn make_book(events: &dyn Events, r: &BookRequest) -> Result<Made, String> {
+    let (o, page, mut warnings, plan, found) = prepared(r)?;
     let mut b = book::make_with(&o, Words::embedded(), &mut |made, of| {
         events.emit(
             "puzzles-progress",
@@ -542,6 +562,23 @@ pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook,
     }
     warnings.append(&mut b.warnings);
     b.warnings = warnings;
+    Ok(Made {
+        book: b,
+        options: o,
+        page,
+        plan,
+    })
+}
+
+/// Makes the book, telling `puzzles-progress` as it goes, and keeps it in [`folder`] with its
+/// request beside it.
+pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook, String> {
+    let Made {
+        book: b,
+        options: o,
+        page,
+        ..
+    } = make_book(events.as_ref(), &r)?;
     let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
     let dir = folder();
     std::fs::create_dir_all(&dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
@@ -565,12 +602,25 @@ pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook,
             date: b.date.to_string(),
             ..r
         },
+        bundles: Vec::new(),
+        solved_ipad: None,
     };
-    let sidecar = path.with_extension("json");
-    let json = serde_json::to_vec_pretty(&made).map_err(|e| e.to_string())?;
-    std::fs::write(&sidecar, json)
-        .map_err(|e| format!("can't write {}: {e}", sidecar.display()))?;
+    write_sidecar(&path, &made)?;
     Ok(made)
+}
+
+/// The book's sidecar, `<book>.json` beside the PDF.
+fn write_sidecar(pdf: &Path, made: &MadeBook) -> Result<(), String> {
+    let sidecar = pdf.with_extension("json");
+    let json = serde_json::to_vec_pretty(made).map_err(|e| e.to_string())?;
+    std::fs::write(&sidecar, json).map_err(|e| format!("can't write {}: {e}", sidecar.display()))
+}
+
+fn read_sidecar(pdf: &Path) -> Result<MadeBook, String> {
+    let sidecar = pdf.with_extension("json");
+    let text =
+        std::fs::read(&sidecar).map_err(|e| format!("can't read {}: {e}", sidecar.display()))?;
+    serde_json::from_slice(&text).map_err(|e| format!("{}: {e}", sidecar.display()))
 }
 
 /// The books in [`folder`], newest first: every PDF with its sidecar.
@@ -596,12 +646,89 @@ pub fn list_in(dir: &Path) -> Vec<MadeBook> {
         })
         .collect();
     out.sort_by_key(|a| std::cmp::Reverse(a.0));
+    // Each export folder's returns read once, for every book sent there.
+    let mut read: HashMap<PathBuf, Vec<returns::PuzzleBookReturns>> = HashMap::new();
+    for (_, made) in &mut out {
+        made.solved_ipad = solved_on_ipad(&made.bundles, &mut read);
+    }
     out.into_iter().map(|(_, m)| m).collect()
 }
 
+/// `(solved, of)` for a book from the returns beside each bundle it was sent as (puzzle book
+/// bundle design §4): a bundle no longer there says nothing.
+fn solved_on_ipad(
+    bundles: &[String],
+    read: &mut HashMap<PathBuf, Vec<returns::PuzzleBookReturns>>,
+) -> Option<(usize, usize)> {
+    let mut all = Vec::new();
+    let mut id = None;
+    for b in bundles {
+        let path = Path::new(b);
+        let Ok(json) = bundle::read(path) else {
+            continue;
+        };
+        id = Some((json.book.id, json.puzzles.len()));
+        let root = path.parent()?.to_path_buf();
+        let r = read
+            .entry(root.clone())
+            .or_insert_with(|| returns::read_books(&root));
+        all.extend(r.iter().cloned());
+    }
+    let (id, of) = id?;
+    returns::solved(&all, id, of).map(|s| (s.done, s.of))
+}
+
+/// An export folder that takes bundles, where **Send to <name>** puts a book.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BundleTarget {
+    /// The export's `name`: "iPad", "Mia's iPad".
+    pub name: String,
+    pub dir: String,
+}
+
+/// Every `format = "bundle"` export of every paper, each folder once.
+pub fn puzzles_bundle_targets() -> Vec<BundleTarget> {
+    bundle_targets_in(&deckle_digest::config::default_path())
+}
+
+pub fn bundle_targets_in(main: &Path) -> Vec<BundleTarget> {
+    let Ok(loaded) = deckle_digest::papers::load_all(main) else {
+        return Vec::new();
+    };
+    let mut out: Vec<BundleTarget> = Vec::new();
+    for e in loaded
+        .papers
+        .iter()
+        .flat_map(|p| p.export.iter())
+        .filter(|e| e.format == ExportFormat::Bundle)
+    {
+        let dir = deckle_digest::inbox::expand_home(e.dir.trim())
+            .to_string_lossy()
+            .into_owned();
+        if !out.iter().any(|t| t.dir == dir) {
+            out.push(BundleTarget {
+                name: e.name.clone(),
+                dir,
+            });
+        }
+    }
+    out
+}
+
 /// Copies the book at `path` to `target`, under its own name; a book already there is left
-/// alone (its ink may be on it) unless `replace`.
-pub fn puzzles_send(path: String, target: RunTarget, replace: bool) -> Result<String, String> {
+/// alone (its ink may be on it) unless `replace`. With `as_bundle`, the target is an iPad's
+/// folder and the book goes as a `.decklepuzzles` bundle instead (puzzle book bundle design
+/// §5), made again from its saved request with the same seed and date, so it's the PDF's
+/// book.
+pub fn puzzles_send(
+    path: String,
+    target: RunTarget,
+    replace: bool,
+    as_bundle: bool,
+) -> Result<String, String> {
+    if as_bundle {
+        return send_bundle(Path::new(&path), &target, replace);
+    }
     let bytes = std::fs::read(&path).map_err(|e| format!("can't read the book: {e}"))?;
     let name = Path::new(&path)
         .file_name()
@@ -622,6 +749,73 @@ pub fn puzzles_send(path: String, target: RunTarget, replace: bool) -> Result<St
     deliver_named_on(&bytes, &name, &mut conn, &DeliverOptions::default())
         .map(|p| p.to_string_lossy().into_owned())
         .map_err(|e| e.to_string())
+}
+
+fn send_bundle(pdf: &Path, target: &RunTarget, replace: bool) -> Result<String, String> {
+    let RunTarget::Folder { path: dir } = target else {
+        return Err("a bundle is for the iPad: send it to a folder its reader watches".into());
+    };
+    let dir = deckle_digest::inbox::expand_home(dir.trim());
+    let mut made = read_sidecar(pdf)?;
+    let Made {
+        book: b,
+        options: o,
+        plan,
+        ..
+    } = make_book(&NoEvents, &made.request)?;
+    if b.seed != made.seed || b.date.to_string() != made.date {
+        return Err("the book didn't come out as it was made; Make again and send that".into());
+    }
+    let name = bundle::bundle_name(&b);
+    if !replace && dir.join(&name).exists() {
+        return Err(format!(
+            "{name} is already there; send again to replace it (its ink may stay)"
+        ));
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
+    let extras = Extras {
+        theme: plan.theme,
+        style: plan.style,
+        paper_id: None,
+        sunday_of: None,
+        built_at: Utc::now(),
+        replace,
+    };
+    let written = bundle::write_with(&b, &o, &extras, &dir)?;
+    let written = written.to_string_lossy().into_owned();
+    if !made.bundles.contains(&written) {
+        made.bundles.push(written.clone());
+    }
+    write_sidecar(pdf, &made)?;
+    Ok(written)
+}
+
+/// The paper's `[puzzles]` table: Sunday's switch and recipe (`None`: the main paper).
+pub fn puzzles_sunday_get(paper: Option<String>) -> Result<PuzzlesConfig, String> {
+    let main = deckle_digest::config::default_path();
+    Ok(crate::daily::paper_config_at(&main, paper.as_deref())?.puzzles)
+}
+
+/// Saves the paper's `[puzzles]` table, checked first: a kind, difficulty, theme or clue
+/// style the engine doesn't know is refused.
+pub fn puzzles_sunday_set(
+    paper: Option<String>,
+    config: PuzzlesConfig,
+) -> Result<PuzzlesConfig, String> {
+    let main = deckle_digest::config::default_path();
+    sunday_set_at(&main, paper.as_deref(), config)
+}
+
+pub fn sunday_set_at(
+    main: &Path,
+    paper: Option<&str>,
+    config: PuzzlesConfig,
+) -> Result<PuzzlesConfig, String> {
+    sunday::options(&config, Local::now().date_naive())?;
+    let mut cfg = crate::daily::paper_config_at(main, paper)?;
+    cfg.puzzles = config.clone();
+    crate::daily::save_paper_at(main, paper, cfg)?;
+    Ok(config)
 }
 
 #[cfg(test)]
@@ -761,13 +955,160 @@ mod tests {
         let target = RunTarget::Folder {
             path: out.to_string_lossy().into_owned(),
         };
-        puzzles_send(made.path.clone(), target.clone(), false).unwrap();
+        puzzles_send(made.path.clone(), target.clone(), false, false).unwrap();
         assert!(out.join(&made.name).exists());
         assert!(
-            puzzles_send(made.path.clone(), target.clone(), false)
+            puzzles_send(made.path.clone(), target.clone(), false, false)
                 .unwrap_err()
                 .contains("already there")
         );
-        puzzles_send(made.path, target, true).unwrap();
+        puzzles_send(made.path, target, true, false).unwrap();
+    }
+
+    #[test]
+    fn sent_as_a_bundle_the_book_is_the_pdfs_and_the_ipads_returns_count_as_solved() {
+        let tmp = tempfile::tempdir().unwrap();
+        // SAFETY: this test's process; the folder follows HOME
+        unsafe { std::env::set_var("HOME", tmp.path()) };
+        let mut r = req("maze");
+        r.title = "Mazes for Mia".into();
+        r.size = 8;
+        let made = puzzles_make(Arc::new(NoEvents), r).unwrap();
+        assert!(made.bundles.is_empty() && made.solved_ipad.is_none());
+        let ipad = tmp.path().join("iPad");
+        let target = RunTarget::Folder {
+            path: ipad.to_string_lossy().into_owned(),
+        };
+        // a Kindle can't take one
+        let e = puzzles_send(
+            made.path.clone(),
+            RunTarget::Device {
+                root: "/Volumes/Kindle".into(),
+            },
+            false,
+            true,
+        )
+        .unwrap_err();
+        assert!(e.contains("folder"), "{e}");
+        let written = puzzles_send(made.path.clone(), target.clone(), false, true).unwrap();
+        let bundle_dir = PathBuf::from(&written);
+        assert_eq!(bundle_dir.parent().unwrap(), ipad);
+        assert_eq!(
+            bundle_dir.file_name().unwrap().to_string_lossy(),
+            format!(
+                "deckle-puzzles-mazes-for-mia-2026-11-02-{:04x}.decklepuzzles",
+                made.seed >> 48
+            )
+        );
+        bundle::verify(&bundle_dir).unwrap();
+        let json = bundle::read(&bundle_dir).unwrap();
+        assert_eq!(json.book.seed, format!("{:016x}", made.seed));
+        assert_eq!(json.puzzles.len(), made.puzzles);
+        assert_eq!(json.book.sunday_of, None);
+        // the sidecar remembers where it went, and the list shows it
+        let listed = list_in(&folder());
+        assert_eq!(listed[0].bundles, std::slice::from_ref(&written));
+        assert_eq!(listed[0].solved_ipad, None, "no returns yet");
+        // never over one already there, unless replace
+        let e = puzzles_send(made.path.clone(), target.clone(), false, true).unwrap_err();
+        assert!(e.contains("already there"), "{e}");
+        puzzles_send(made.path.clone(), target.clone(), true, true).unwrap();
+        assert_eq!(
+            list_in(&folder())[0].bundles.len(),
+            1,
+            "sent twice, listed once"
+        );
+        // the iPad solved one of three
+        let returns = ipad.join(".deckle-returns/ipad-1/puzzles");
+        std::fs::create_dir_all(&returns).unwrap();
+        std::fs::write(
+            returns.join(format!("{}.json", json.book.id)),
+            serde_json::json!({
+                "format": "deckle-puzzle-returns", "version": "1.0",
+                "reader": { "id": "ipad-1", "name": "Mia's iPad", "app": "Deckle Reader" },
+                "book": json.book.id, "updated_at": "2026-11-02T20:00:00Z",
+                "puzzles": [
+                    { "n": 1, "done": true, "seconds": 90, "last": "2026-11-02T20:00:00Z" },
+                    { "n": 3, "done": false, "seconds": 30, "last": "2026-11-02T20:01:00Z" }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(list_in(&folder())[0].solved_ipad, Some((1, 3)));
+        // the bundle gone from the iPad: nothing to say
+        std::fs::remove_dir_all(&bundle_dir).unwrap();
+        assert_eq!(list_in(&folder())[0].solved_ipad, None);
+    }
+
+    #[test]
+    fn bundle_targets_are_every_papers_bundle_exports_each_folder_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("digest.toml");
+        let ipad = tmp.path().join("iPad");
+        let kid = tmp.path().join("Kid");
+        std::fs::write(
+            &main,
+            format!(
+                "title = \"T\"\nsections = [\"weather\"]\n\n[[export]]\nname = \"Kobo\"\ndir = \"/tmp/kobo\"\nformat = \"kepub\"\n\n[[export]]\nname = \"iPad\"\ndir = {:?}\nformat = \"bundle\"\n",
+                ipad.display().to_string()
+            ),
+        )
+        .unwrap();
+        std::fs::create_dir_all(tmp.path().join("papers")).unwrap();
+        std::fs::write(
+            tmp.path().join("papers/kid.toml"),
+            format!(
+                "title = \"Kid\"\nsections = [\"weather\"]\n\n[[export]]\nname = \"Mia's iPad\"\ndir = {:?}\nformat = \"bundle\"\n\n[[export]]\nname = \"iPad again\"\ndir = {:?}\nformat = \"bundle\"\n",
+                kid.display().to_string(),
+                ipad.display().to_string()
+            ),
+        )
+        .unwrap();
+        let targets = bundle_targets_in(&main);
+        assert_eq!(
+            targets,
+            [
+                BundleTarget {
+                    name: "iPad".into(),
+                    dir: ipad.to_string_lossy().into_owned()
+                },
+                BundleTarget {
+                    name: "Mia's iPad".into(),
+                    dir: kid.to_string_lossy().into_owned()
+                }
+            ]
+        );
+        assert!(bundle_targets_in(&tmp.path().join("none.toml")).is_empty());
+    }
+
+    #[test]
+    fn sundays_recipe_is_saved_to_the_paper_and_checked_first() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("digest.toml");
+        std::fs::write(&main, "title = \"T\"\nsections = [\"weather\"]\n").unwrap();
+        let mut p = PuzzlesConfig {
+            sunday: true,
+            kind: "search".into(),
+            count: 6,
+            ..Default::default()
+        };
+        assert_eq!(sunday_set_at(&main, None, p.clone()).unwrap(), p);
+        let saved = crate::daily::paper_config_at(&main, None).unwrap();
+        assert_eq!(saved.puzzles, p);
+        let text = std::fs::read_to_string(&main).unwrap();
+        assert!(
+            text.contains("puzzles") && text.contains("sunday = true"),
+            "{text}"
+        );
+        p.kind = "riddle".into();
+        assert!(sunday_set_at(&main, None, p).unwrap_err().contains("kind"));
+        assert_eq!(
+            crate::daily::paper_config_at(&main, None)
+                .unwrap()
+                .puzzles
+                .kind,
+            "search"
+        );
     }
 }

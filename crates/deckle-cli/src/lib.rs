@@ -3310,6 +3310,23 @@ fn digest(
                 _ => Vec::new(),
             };
             let exported = exports.iter().any(|x| x.error.is_none());
+            // Sunday's book, beside the edition in each bundle export, after the edition is
+            // in place (puzzle book bundle design §5).
+            let sunday_books = match (&folder, &bound) {
+                (None, None) if deckle_digest::puzzle::book::sunday::is_due(&cfg, date) => {
+                    let ai = deckle_digest::editor::AppAi::read().ai_config();
+                    deckle_digest::puzzle::book::sunday::write_beside(
+                        &cfg,
+                        &path,
+                        date,
+                        now,
+                        &exports,
+                        ai.as_ref(),
+                        &mut deckle_xray::llm::http_post,
+                    )
+                }
+                _ => Vec::new(),
+            };
             reader_server::remember(exports.iter().flat_map(|x| x.written.iter()));
             // The EPUB outbox, for a Kobo or a PocketBook: when one has been seen, or there is
             // no Previewer.
@@ -3439,6 +3456,9 @@ fn digest(
                 email: &'a EmailRun,
                 #[serde(skip_serializing_if = "<[_]>::is_empty")]
                 exports: &'a [deckle_digest::export::ExportReport],
+                /// Sunday's puzzle book, beside the edition in each bundle export.
+                #[serde(skip_serializing_if = "<[_]>::is_empty")]
+                sunday_books: &'a [deckle_digest::puzzle::book::sunday::SundayReport],
                 /// The paper queued for a Kobo or a PocketBook (`outbox-epub`).
                 #[serde(skip_serializing_if = "std::ops::Not::not")]
                 epub_queued: bool,
@@ -3458,6 +3478,7 @@ fn digest(
                 outcome: &outcome,
                 email: &email,
                 exports: &exports,
+                sunday_books: &sunday_books,
                 epub_queued,
                 reader: reader.as_ref(),
                 remarkable_queued: rm_queued,
@@ -3471,6 +3492,7 @@ fn digest(
                 };
                 let mut text = format!("{head}\n{}", section_lines(&built));
                 let exported = deckle_digest::export::lines(&exports);
+                let sunday = deckle_digest::puzzle::book::sunday::lines(&sunday_books);
                 let usb = match located {
                     Some(_) => outcome.describe(&queue),
                     None => String::new(),
@@ -3491,7 +3513,7 @@ fn digest(
                         .to_owned(),
                     None => String::new(),
                 };
-                for part in [email.lines(), exported, usb, reader_lines, rm_lines] {
+                for part in [email.lines(), exported, sunday, usb, reader_lines, rm_lines] {
                     if !part.is_empty() {
                         text.push_str(&format!("\n{part}"));
                     }
