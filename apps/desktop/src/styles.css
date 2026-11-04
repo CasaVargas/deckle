@@ -1,10 +1,10 @@
 :root {
-  --bg: #f6f3ee;
-  --panel: #fffdf9;
-  --fg: #1f1b16;
-  --muted: #7a7169;
-  --line: #d9d2c7;
-  --accent: #b5533c;
+  --bg: #f7f3e8;
+  --panel: #fcfaf4;
+  --fg: #24221e;
+  --muted: #625c51;
+  --line: #d4cec1;
+  --accent: #854532;
   --accent-fg: #fff;
   --ok: #2f7d4f;
   --warn: #a8701a;
@@ -15,12 +15,12 @@
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #171411;
-    --panel: #1f1b17;
-    --fg: #f1ece5;
-    --muted: #9a9087;
-    --line: #322c26;
-    --accent: #d9735a;
+    --bg: #191b1d;
+    --panel: #202225;
+    --fg: #eee8da;
+    --muted: #bdb5a7;
+    --line: #3b3b39;
+    --accent: #db9c82;
     --ok: #5fb882;
     --warn: #d9a441;
     --fail: #e0665a;
@@ -33,10 +33,29 @@ button:disabled { cursor: default; opacity: 0.45; }
 /* An unclassed button gets Deckle's secondary look, never the system's (Books tab redesign §3). */
 button:not([class]) { -webkit-appearance: none; appearance: none; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
 button:not([class]):hover:not(:disabled) { border-color: color-mix(in srgb, var(--fg) 25%, var(--line)); }
-.app { height: 100%; display: flex; flex-direction: column; position: relative; }
+.app { height: 100%; display: flex; flex-direction: column; position: relative; background: var(--bg); }
 
-.topbar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.pressroom-shell { flex: 1; min-height: 0; display: flex; }
+.workspace { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
+.app-sidebar { width: 208px; flex: none; display: flex; flex-direction: column; gap: 22px; padding: 22px 14px 14px; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 82%, var(--bg)); }
+.sidebar-brand { padding: 0 10px; }
+.sidebar-brand .brand { font-size: 25px; letter-spacing: -0.035em; }
+.sidebar-brand > span { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
 .brand { font-family: ui-serif, Georgia, serif; font-weight: 700; font-size: 18px; }
+.app-nav { display: flex; flex-direction: column; gap: 3px; }
+.app-nav button, .sidebar-settings { width: 100%; display: flex; align-items: center; gap: 11px; min-height: 38px; padding: 8px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); text-align: left; font-size: 13px; }
+.app-nav button:hover:not(.on), .sidebar-settings:hover { color: var(--fg); background: color-mix(in srgb, var(--line) 48%, transparent); }
+.app-nav button.on { color: var(--fg); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); box-shadow: inset 2px 0 var(--accent); font-weight: 650; }
+.app-nav button.on svg { color: var(--accent); }
+.sidebar-context { margin-top: auto; padding: 12px 10px 14px; border-top: 1px solid var(--line); }
+.sidebar-context > span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+.sidebar-context strong { display: block; font-family: ui-serif, Georgia, serif; font-size: 16px; }
+.sidebar-context p { margin: 4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.sidebar-settings { flex: none; }
+.topbar { min-height: 58px; display: flex; align-items: center; gap: 8px; padding: 9px 16px 9px 20px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 76%, transparent); }
+.topbar-context { display: flex; flex-direction: column; min-width: 144px; }
+.topbar-context > span { font-family: ui-serif, Georgia, serif; font-size: 17px; font-weight: 650; line-height: 1.1; }
+.topbar-context small { margin-top: 3px; color: var(--muted); font-size: 10.5px; line-height: 1.2; }
 .spacer { flex: 1; }
 .ghost { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
 .ghost:hover:not(:disabled) { border-color: color-mix(in srgb, var(--fg) 25%, var(--line)); }
@@ -115,10 +134,12 @@ h1 { font-family: ui-serif, Georgia, serif; font-size: 28px; margin: 8px 0 6px; 
 .device-compat li + li { margin-top: 4px; }
 
 /* Books | Daily switch */
-.tabs { display: inline-flex; gap: 2px; margin-left: 14px; padding: 3px; border-radius: 9px; background: color-mix(in srgb, var(--line) 60%, var(--bg)); }
+.tabs { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; background: color-mix(in srgb, var(--line) 60%, var(--bg)); }
 .tabs button { background: transparent; border: 0; border-radius: 7px; padding: 4px 14px; font-size: 13px; color: var(--muted); }
 .tabs button:hover:not(.on) { color: var(--fg); }
 .tabs button.on { background: var(--panel); color: var(--fg); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.compact-tabs { display: none; }
+.compact-settings { display: none; }
 
 /* The Daily tab */
 .daily { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; max-width: 1480px; width: 100%; margin: 0 auto; }
@@ -448,6 +469,15 @@ input[type=checkbox] { padding: 0; }
 .article-error { color: var(--fail); font-size: 12px; margin-top: 6px; }
 .app-main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .app-main[hidden] { display: none; }
+
+@media (max-width: 860px) {
+  .app-sidebar { display: none; }
+  .topbar { min-height: auto; flex-wrap: wrap; padding: 9px 12px; }
+  .topbar-context { display: none; }
+  .compact-tabs { display: inline-flex; order: -1; max-width: 100%; overflow-x: auto; }
+  .compact-tabs button { padding-inline: 10px; white-space: nowrap; }
+  .compact-settings { display: inline-grid; }
+}
 
 /* Highlights on the Kindle tab (highlights export design §6) */
 .highlights { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 16px; margin: 18px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }

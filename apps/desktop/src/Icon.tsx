@@ -1,13 +1,36 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Outline paths from Tabler Icons (MIT, https://tabler.io/icons).
 
-export type IconName = "settings" | "plus" | "dots" | "chevron-down" | "chevron-right" | "x" | "arrow-left" | "arrow-up" | "arrow-down" | "check" | "link" | "download" | "refresh";
+export type IconName =
+  | "settings"
+  | "book"
+  | "newspaper"
+  | "chef"
+  | "puzzle"
+  | "devices"
+  | "plus"
+  | "dots"
+  | "chevron-down"
+  | "chevron-right"
+  | "x"
+  | "arrow-left"
+  | "arrow-up"
+  | "arrow-down"
+  | "check"
+  | "link"
+  | "download"
+  | "refresh";
 
 const PATHS: Record<IconName, string[]> = {
   settings: [
     "M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z",
     "M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0",
   ],
+  book: ["M4 19.5A2.5 2.5 0 0 1 6.5 17H20", "M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"],
+  newspaper: ["M4 4h16v16H4z", "M8 8h8", "M8 12h4", "M8 16h3", "M14 12h2v4h-2z"],
+  chef: ["M6 10a4 4 0 0 1 1-7.87A5 5 0 0 1 17 4a3 3 0 0 1 1 5.83V13H6z", "M6 17h12", "M7 21h10"],
+  puzzle: ["M8 3h4v3a2 2 0 1 0 4 0V3h5v5h-3a2 2 0 1 0 0 4h3v5h-5v3a2 2 0 1 1-4 0v-3H3v-5h3a2 2 0 1 0 0-4H3V3z"],
+  devices: ["M4 5h12v9H4z", "M8 18h4", "M10 14v4", "M18 8h3v11h-5v-3", "M18.5 16.5h0"],
   plus: ["M12 5l0 14", "M5 12l14 0"],
   dots: ["M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0", "M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0", "M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"],
   "chevron-down": ["M6 9l6 6l6 -6"],

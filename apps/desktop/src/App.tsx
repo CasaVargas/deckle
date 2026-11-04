@@ -609,6 +609,15 @@ function Deckle() {
     </div>
   );
 
+  const workspaceCopy = {
+    books: { title: "Books", note: "Prepare and send the books you own.", icon: "book" as const },
+    daily: { title: "Daily", note: "Compose tomorrow’s paper.", icon: "newspaper" as const },
+    cookbook: { title: "Cookbook", note: "Gather recipes into a kitchen book.", icon: "chef" as const },
+    puzzles: { title: "Puzzles", note: "Make books designed for ink.", icon: "puzzle" as const },
+    kindle: { title: "Devices", note: "See what is on each reader.", icon: "devices" as const },
+  };
+  const activeWorkspace = workspaceCopy[tab];
+
   // Settings cover the tabs without unmounting them, so a running Daily send or an unsaved
   // edit is still there on Back.
   return (
@@ -644,9 +653,40 @@ function Deckle() {
         </>
       )}
       <div className="app-main" hidden={settingsPage !== null}>
-        <header className="topbar">
-          <div className="brand">Deckle</div>
-          <div className="tabs" role="tablist">
+        <div className="pressroom-shell">
+          <aside className="app-sidebar" aria-label="Deckle workspaces">
+            <div className="sidebar-brand">
+              <div className="brand">Deckle</div>
+              <span>The pressroom</span>
+            </div>
+            <nav className="app-nav" role="tablist" aria-label="Workspaces">
+              {(Object.keys(workspaceCopy) as Array<keyof typeof workspaceCopy>).map((key) => {
+                const item = workspaceCopy[key];
+                return (
+                  <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? "on" : ""} onClick={() => setTab(key)}>
+                    <Icon name={item.icon} size={18} />
+                    <span>{item.title}</span>
+                  </button>
+                );
+              })}
+            </nav>
+            <div className="sidebar-context" aria-live="polite">
+              <span>Now in the pressroom</span>
+              <strong>{activeWorkspace.title}</strong>
+              <p>{activeWorkspace.note}</p>
+            </div>
+            <button className="sidebar-settings" onClick={() => openSettings()}>
+              <Icon name="settings" size={17} />
+              <span>Settings</span>
+            </button>
+          </aside>
+          <section className="workspace">
+            <header className="topbar">
+              <div className="topbar-context">
+                <span>{activeWorkspace.title}</span>
+                <small>{activeWorkspace.note}</small>
+              </div>
+              <div className="tabs compact-tabs" role="tablist" aria-label="Workspaces">
             <button role="tab" aria-selected={tab === "books"} className={tab === "books" ? "on" : ""} onClick={() => setTab("books")}>
               Books
             </button>
@@ -662,7 +702,7 @@ function Deckle() {
             <button role="tab" aria-selected={tab === "kindle"} className={tab === "kindle" ? "on" : ""} onClick={() => setTab("kindle")}>
               Devices
             </button>
-          </div>
+              </div>
           {!previewer?.found && previewer && !caps.web && (
             <button className="pill warn" onClick={() => openSettings("sending")}>
               Kindle Previewer not found
@@ -708,12 +748,12 @@ function Deckle() {
               )}
             </div>
           )}
-          <button className="icon" aria-label="Settings" onClick={() => openSettings()}>
+          <button className="icon compact-settings" aria-label="Settings" title="Settings" onClick={() => openSettings()}>
             <Icon name="settings" size={18} />
           </button>
-        </header>
+            </header>
 
-        {tab === "daily" && <DailyView key={dailyEpoch} onNotice={setNotice} initialRoom={dailyRoom} onRoomTaken={() => setDailyRoom(null)} onOpenSettings={openSettings} />}
+            {tab === "daily" && <DailyView key={dailyEpoch} onNotice={setNotice} initialRoom={dailyRoom} onRoomTaken={() => setDailyRoom(null)} onOpenSettings={openSettings} />}
         {tab === "cookbook" && (
           <CookbookView
             onNotice={setNotice}
@@ -798,23 +838,23 @@ function Deckle() {
           <BindPanel books={parts} busy={binding || busy} onBind={bindBooks} onCancel={() => setBindOpen(false)} />
         )}
         {tab === "books" && (
-        <div className={docked ? "books-split" : "books-whole"}>
-        {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} query={query} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} onEdit={(path, cover) => setDrawer({ path, tab: "details", cover })} />}
-        <main className={`tray ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
-          <div className="tray-scroll">
-          {(docked || books.length > 0) && (
-            <div className="tray-head">
-              <h2>To send</h2>
-              {books.length > 0 && <span className="muted">{books.length === 1 ? "1 book" : `${books.length} books`}</span>}
-              <div className="spacer" />
-              {doneCount > 0 && !busy && (
-                <button className="quiet" onClick={clearDone}>
-                  Clear done
-                </button>
-              )}
-            </div>
-          )}
-          {books.length === 0 && docked ? (
+          <div className={docked ? "books-split" : "books-whole"}>
+            {catalog && <Library catalog={catalog} hasKindle={!!device} queued={new Set(books.map((b) => b.path))} query={query} busy={busy} onAdd={(paths) => addPaths(paths).catch((e) => setNotice(String(e)))} onEdit={(path, cover) => setDrawer({ path, tab: "details", cover })} />}
+            <main className={`tray ${docked ? "queue-dock" : ""} ${books.length === 0 ? "empty" : ""}`} aria-label="To send">
+              <div className="tray-scroll">
+                {(docked || books.length > 0) && (
+                  <div className="tray-head">
+                    <h2>To send</h2>
+                    {books.length > 0 && <span className="muted">{books.length === 1 ? "1 book" : `${books.length} books`}</span>}
+                    <div className="spacer" />
+                    {doneCount > 0 && !busy && (
+                      <button className="quiet" onClick={clearDone}>
+                        Clear done
+                      </button>
+                    )}
+                  </div>
+                )}
+                {books.length === 0 && docked ? (
             <div className="dock-empty muted">
               <p>Nothing to send yet.</p>
               <p className="small">Pick books from your library, or drop EPUBs, PDFs and Word documents here.</p>
@@ -871,9 +911,9 @@ function Deckle() {
                 />
               ))}
             </ul>
-          )}
-          </div>
-          <div className="send-foot">
+                )}
+              </div>
+              <div className="send-foot">
             {caps.web && previewer && !previewer.found && <Unavailable reason={PREVIEWER_REASON} />}
             {deviceControl}
             <button className="primary send" onClick={sendToKindle} disabled={busy || !device || runnable.length === 0}>
@@ -897,29 +937,30 @@ function Deckle() {
                 Bind into one book…
               </button>
             </div>
+              </div>
+              {dragging && <div className="drop-overlay">Drop to add</div>}
+            </main>
+            {drawer && (drawerBook || drawerEntry) && (
+              <BookDrawer
+                key={drawer.path}
+                book={drawerBook}
+                entry={drawerEntry}
+                plan={drawerBook ? plans[drawerBook.id] : undefined}
+                settings={settings}
+                cover={drawerBook?.cover ?? drawer.cover ?? null}
+                initialTab={drawer.tab}
+                onCover={setCoverPick}
+                onAsin={setAsin}
+                onFixed={(book) => (book ? refreshRow(book) : loadCatalog())}
+                onClose={() => setDrawer(null)}
+              />
+            )}
           </div>
-          {dragging && <div className="drop-overlay">Drop to add</div>}
-        </main>
-        {drawer && (drawerBook || drawerEntry) && (
-          <BookDrawer
-            key={drawer.path}
-            book={drawerBook}
-            entry={drawerEntry}
-            plan={drawerBook ? plans[drawerBook.id] : undefined}
-            settings={settings}
-            cover={drawerBook?.cover ?? drawer.cover ?? null}
-            initialTab={drawer.tab}
-            onCover={setCoverPick}
-            onAsin={setAsin}
-            onFixed={(book) => (book ? refreshRow(book) : loadCatalog())}
-            onClose={() => setDrawer(null)}
-          />
-        )}
-        </div>
         )}
 
         {!settingsPage && noticeBar}
-
+          </section>
+        </div>
       </div>
       {welcomeOpen && <Welcome onDone={finishWelcome} onNotice={setNotice} onSettings={openSettings} />}
     </div>
