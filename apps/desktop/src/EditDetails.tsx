@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useRef, useState } from "react";
-import { authorsText, editFrom, editProblem } from "./editDetails";
+import { authorsText, editFrom, editProblem } from "./bookEdit";
 import type { BookEdit } from "./types";
 
 interface Props {

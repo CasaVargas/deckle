@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Icon from "./Icon";
 import { better, coverLine, highlightsOf, onKindle, progressLine, sentMode, size, titleOf } from "./kindleRooms";
 import type { KindleRoom } from "./kindleRooms";
-import { amazonRemoveNote } from "./editDetails";
+import { amazonRemoveNote } from "./bookEdit";
 import type { DeviceBookRow, HighlightRow } from "./types";
 
 type Tab = "reading" | "highlights" | "details";

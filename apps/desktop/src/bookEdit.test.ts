@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { amazonRemoveNote, authorsFromText, authorsText, editFrom, editLabel, editProblem } from "./editDetails";
+import { amazonRemoveNote, authorsFromText, authorsText, editFrom, editLabel, editProblem } from "./bookEdit";
 
 describe("editing a book's details", () => {
   it("reads authors however they're typed", () => {

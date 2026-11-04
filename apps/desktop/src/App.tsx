@@ -25,7 +25,7 @@ import Icon from "./Icon";
 import KindleView from "./KindleView";
 import ReaderView from "./ReaderView";
 import EditDetails from "./EditDetails";
-import { authorsText, editLabel } from "./editDetails";
+import { authorsText, editLabel } from "./bookEdit";
 import { checkForUpdate, hasUpdate, type UpdateState } from "./updates";
 import { refreshCapabilities, useCapabilities } from "./capabilities";
 import { onSessionLost, restartEvents } from "./transport/web";
