@@ -1156,8 +1156,14 @@ input[type=checkbox] { padding: 0; }
 .puzzles-kinds .mode-card { padding: 11px 12px; gap: 5px; }
 .puzzles-own { display: flex; flex-direction: column; gap: 6px; }
 .puzzles-own textarea { font: inherit; font-size: 13px; line-height: 1.45; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; min-height: 72px; }
-.puzzles-options .ai-fields { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-.puzzles-options .puzzles-title { grid-column: 1 / -1; }
+/* One row of fields that wraps: the count stays narrow, the difficulty gets room for its words. No inner box. */
+.puzzles-options .ai-fields { display: flex; flex-wrap: wrap; padding: 0; background: none; }
+.puzzles-options .ai-fields > label { flex: 1 1 130px; }
+.puzzles-options .ai-fields > .puzzles-difficulty { flex: 2 1 210px; }
+.puzzles-options .ai-fields > .puzzles-count { flex: 0 1 90px; min-width: 76px; }
+.puzzles-options .ai-fields > .puzzles-title { flex-basis: 100%; }
+/* The tab scrolls as a whole; its cards must not shrink to fit it (the books list was clipped). */
+.puzzles > * { flex-shrink: 0; }
 .puzzles-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .puzzles-side { position: sticky; top: 12px; max-height: calc(100vh - 140px); overflow-y: auto; overscroll-behavior: contain; }
 .puzzles-making { display: flex; flex-direction: column; gap: 10px; }

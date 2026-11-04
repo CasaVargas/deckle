@@ -345,7 +345,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                       </label>
                     )}
                     {kind.graded && (
-                      <label>
+                      <label className="puzzles-difficulty">
                         <span className="tk-label">Difficulty</span>
                         <select value={request.difficulty} onChange={(e) => patch({ difficulty: e.target.value as PuzzleBookRequest["difficulty"] })}>
                           {DIFFICULTIES.map((d, i) => (
@@ -356,7 +356,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                         </select>
                       </label>
                     )}
-                    <label>
+                    <label className="puzzles-count">
                       <span className="tk-label">{kind.key === "ladder" ? "Pages" : "Puzzles"}</span>
                       <input type="number" min={1} max={200} value={request.count} onChange={(e) => patch({ count: Number(e.target.value) })} />
                     </label>
@@ -489,7 +489,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
             <input className="switch" type="checkbox" aria-label="Sunday's puzzle book on" checked={sunday?.sunday ?? false} disabled={!sunday || sundaySaving} onChange={(e) => patchSunday({ sunday: e.target.checked })} />
           </div>
           <p className="muted small">
-            {sunday ? sundayLine(sunday, kinds) : "Reading the paper's settings…"}
+            {sunday ? `${sundayLine(sunday, kinds)}.` : "Reading the paper's settings…"}
             {targets.length === 0 ? " It rides along with Sunday's edition into an iPad folder: add an export folder with the bundle format in Daily → Delivery first." : ` It goes beside the edition into ${targets.map((t) => t.name).join(" and ")}.`}
           </p>
           {sunday?.sunday && (
