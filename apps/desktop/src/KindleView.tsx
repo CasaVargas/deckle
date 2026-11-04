@@ -8,7 +8,7 @@ import Highlights from "./Highlights";
 import Icon from "./Icon";
 import KindleDrawer from "./KindleDrawer";
 import EditDetails from "./EditDetails";
-import { editLabel } from "./editDetails";
+import { editLabel } from "./bookEdit";
 import Unplugged from "./Unplugged";
 import { KINDLE_ROOMS, SHELF_FROMS, SHELF_SHOWS, SHELF_SORTS, canBeBetter, continueReading, coverLine, progressLine, shelfBooks, showCounts, tabCounts, titleOf, updatable, worthALook } from "./kindleRooms";
 import type { KindleRoom, ShelfFrom, ShelfShow, ShelfSort } from "./kindleRooms";

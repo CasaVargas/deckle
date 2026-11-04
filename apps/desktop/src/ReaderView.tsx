@@ -5,7 +5,7 @@ import { platform } from "./platform";
 import { size } from "./kindleRooms";
 import { backupLine, lastReadLabel, progressLabel, readerBooks, readerLine, removeConfirm, type ReaderSort } from "./readerRooms";
 import EditDetails from "./EditDetails";
-import { editLabel } from "./editDetails";
+import { editLabel } from "./bookEdit";
 import type { BookEdit, ReaderBook, ReaderLibrary, ReaderRow } from "./types";
 
 interface Props {

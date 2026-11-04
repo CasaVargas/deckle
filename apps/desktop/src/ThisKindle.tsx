@@ -2,7 +2,7 @@
 import { platform } from "./platform";
 import { useEffect, useState } from "react";
 import { api } from "./api";
-import { amazonRemoveNote } from "./editDetails";
+import { amazonRemoveNote } from "./bookEdit";
 import { connectedBy, defaultSpare, freesLine, size, spaceSlices, spareGroups, spareLine } from "./kindleRooms";
 import type { BackupReport, DeviceRow, DeviceShelf, PaperFormat, RunTarget } from "./types";
 
