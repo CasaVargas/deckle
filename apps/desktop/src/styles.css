@@ -1156,12 +1156,30 @@ input[type=checkbox] { padding: 0; }
 .puzzles-kinds .mode-card { padding: 11px 12px; gap: 5px; }
 .puzzles-own { display: flex; flex-direction: column; gap: 6px; }
 .puzzles-own textarea { font: inherit; font-size: 13px; line-height: 1.45; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; resize: vertical; min-height: 72px; }
-.puzzles-options .ai-fields { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-.puzzles-options .puzzles-title { grid-column: 1 / -1; }
+/* One row of fields that wraps: the count stays narrow, the difficulty gets room for its words. No inner box. */
+.puzzles-options .ai-fields { display: flex; flex-wrap: wrap; padding: 0; background: none; }
+.puzzles-options .ai-fields > label { flex: 1 1 130px; }
+.puzzles-options .ai-fields > .puzzles-difficulty { flex: 2 1 210px; }
+.puzzles-options .ai-fields > .puzzles-count { flex: 0 1 90px; min-width: 76px; }
+.puzzles-options .ai-fields > .puzzles-title { flex-basis: 100%; }
+/* The tab scrolls as a whole; its cards must not shrink to fit it (the books list was clipped). */
+.puzzles > * { flex-shrink: 0; }
 .puzzles-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
-.puzzles-actions .progress { flex: 1 1 160px; margin: 0; }
 .puzzles-side { position: sticky; top: 12px; max-height: calc(100vh - 140px); overflow-y: auto; overscroll-behavior: contain; }
-.puzzles-progress { display: flex; flex-direction: column; gap: 4px; }
+.puzzles-making { display: flex; flex-direction: column; gap: 10px; }
+.puzzles-making-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.puzzles-making-stage { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+.puzzles-making-time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.puzzles-making-track { position: relative; height: 6px; border-radius: 999px; overflow: hidden; background: color-mix(in srgb, var(--fg) 12%, var(--panel)); }
+.puzzles-making-fill { height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s ease; }
+.puzzles-making-track.busy::after { content: ""; position: absolute; inset: 0; width: 35%; background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 70%, transparent), transparent); animation: puzzles-shimmer 1.4s ease-in-out infinite; }
+@keyframes puzzles-shimmer { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.spinner { width: 12px; height: 12px; flex: none; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .puzzles-making-track.busy::after { animation: none; transform: none; width: 100%; opacity: .35; }
+  .spinner { animation-duration: 2.4s; }
+}
 .puzzles-off { margin: 8px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
 .warn { color: var(--warn); }
 .pz-preview { display: flex; flex-direction: column; gap: 10px; }

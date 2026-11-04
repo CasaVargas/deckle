@@ -345,7 +345,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                       </label>
                     )}
                     {kind.graded && (
-                      <label>
+                      <label className="puzzles-difficulty">
                         <span className="tk-label">Difficulty</span>
                         <select value={request.difficulty} onChange={(e) => patch({ difficulty: e.target.value as PuzzleBookRequest["difficulty"] })}>
                           {DIFFICULTIES.map((d, i) => (
@@ -356,7 +356,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                         </select>
                       </label>
                     )}
-                    <label>
+                    <label className="puzzles-count">
                       <span className="tk-label">{kind.key === "ladder" ? "Pages" : "Puzzles"}</span>
                       <input type="number" min={1} max={200} value={request.count} onChange={(e) => patch({ count: Number(e.target.value) })} />
                     </label>
@@ -378,23 +378,31 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                   {wrong && <p className="muted small warn">{wrong}</p>}
                 </section>
 
-                <div className="puzzles-actions">
-                  <button className="primary" onClick={make} disabled={!!wrong || !!making}>
-                    {making ? "Making the book…" : "Make the book"}
-                  </button>
-                  {making && (
-                    <div className="progress puzzles-progress" aria-label="Making the book" role="status">
-                      <div className="progress-track">
-                        <div className="progress-fill" style={{ width: `${Math.round(makingShare(making, styled) * 100)}%` }} />
-                      </div>
-                      <span className="small">
+                {making ? (
+                  <section className="set-card set-pad puzzles-making" aria-label="Making the book" role="status">
+                    <div className="puzzles-making-line">
+                      <span className="puzzles-making-stage">
+                        <span className="spinner" aria-hidden="true" />
                         {stageLine(request.kind, making, styled)}
-                        <span className="muted"> · {Math.round(makingShare(making, styled) * 100)}% · {elapsed(started === null ? 0 : (now - started) / 1000)}</span>
+                      </span>
+                      <span className="muted small puzzles-making-time">
+                        {Math.round(makingShare(making, styled) * 100)}% · {elapsed(started === null ? 0 : (now - started) / 1000)}
                       </span>
                     </div>
-                  )}
-                  <span className="muted small">Kept in ~/Deckle/Puzzles. Then send it, or save a copy, from Your books below.</span>
-                </div>
+                    {/* Gathering the words and laying out the pages have no count to show, so the bar shimmers then. */}
+                    <div className={`puzzles-making-track${making.of > 0 && (making.stage === "puzzles" || making.stage === "clues") ? "" : " busy"}`}>
+                      <div className="puzzles-making-fill" style={{ width: `${Math.round(makingShare(making, styled) * 100)}%` }} />
+                    </div>
+                    <span className="muted small">Kept in ~/Deckle/Puzzles. Then send it, or save a copy, from Your books below.</span>
+                  </section>
+                ) : (
+                  <div className="puzzles-actions">
+                    <button className="primary" onClick={make} disabled={!!wrong}>
+                      Make the book
+                    </button>
+                    <span className="muted small">Kept in ~/Deckle/Puzzles. Then send it, or save a copy, from Your books below.</span>
+                  </div>
+                )}
                 {note && (
                   <p className="muted small" role="status">
                     {note}
@@ -481,7 +489,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
             <input className="switch" type="checkbox" aria-label="Sunday's puzzle book on" checked={sunday?.sunday ?? false} disabled={!sunday || sundaySaving} onChange={(e) => patchSunday({ sunday: e.target.checked })} />
           </div>
           <p className="muted small">
-            {sunday ? sundayLine(sunday, kinds) : "Reading the paper's settings…"}
+            {sunday ? `${sundayLine(sunday, kinds)}.` : "Reading the paper's settings…"}
             {targets.length === 0 ? " It rides along with Sunday's edition into an iPad folder: add an export folder with the bundle format in Daily → Delivery first." : ` It goes beside the edition into ${targets.map((t) => t.name).join(" and ")}.`}
           </p>
           {sunday?.sunday && (
