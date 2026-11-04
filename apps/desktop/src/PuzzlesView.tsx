@@ -378,23 +378,31 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
                   {wrong && <p className="muted small warn">{wrong}</p>}
                 </section>
 
-                <div className="puzzles-actions">
-                  <button className="primary" onClick={make} disabled={!!wrong || !!making}>
-                    {making ? "Making the book…" : "Make the book"}
-                  </button>
-                  {making && (
-                    <div className="progress puzzles-progress" aria-label="Making the book" role="status">
-                      <div className="progress-track">
-                        <div className="progress-fill" style={{ width: `${Math.round(makingShare(making, styled) * 100)}%` }} />
-                      </div>
-                      <span className="small">
+                {making ? (
+                  <section className="set-card set-pad puzzles-making" aria-label="Making the book" role="status">
+                    <div className="puzzles-making-line">
+                      <span className="puzzles-making-stage">
+                        <span className="spinner" aria-hidden="true" />
                         {stageLine(request.kind, making, styled)}
-                        <span className="muted"> · {Math.round(makingShare(making, styled) * 100)}% · {elapsed(started === null ? 0 : (now - started) / 1000)}</span>
+                      </span>
+                      <span className="muted small puzzles-making-time">
+                        {Math.round(makingShare(making, styled) * 100)}% · {elapsed(started === null ? 0 : (now - started) / 1000)}
                       </span>
                     </div>
-                  )}
-                  <span className="muted small">Kept in ~/Deckle/Puzzles. Then send it, or save a copy, from Your books below.</span>
-                </div>
+                    {/* Gathering the words and laying out the pages have no count to show, so the bar shimmers then. */}
+                    <div className={`puzzles-making-track${making.of > 0 && (making.stage === "puzzles" || making.stage === "clues") ? "" : " busy"}`}>
+                      <div className="puzzles-making-fill" style={{ width: `${Math.round(makingShare(making, styled) * 100)}%` }} />
+                    </div>
+                    <span className="muted small">Kept in ~/Deckle/Puzzles. Then send it, or save a copy, from Your books below.</span>
+                  </section>
+                ) : (
+                  <div className="puzzles-actions">
+                    <button className="primary" onClick={make} disabled={!!wrong}>
+                      Make the book
+                    </button>
+                    <span className="muted small">Kept in ~/Deckle/Puzzles. Then send it, or save a copy, from Your books below.</span>
+                  </div>
+                )}
                 {note && (
                   <p className="muted small" role="status">
                     {note}
