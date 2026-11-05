@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { expect, test } from "vitest";
 import { STEPS, clock, dateline, firstSave, mainAt, saveLine, scheduleLine } from "./onboarding";
+import { translate, type Key, type Vars } from "./i18n";
 import type { ReadingEntry, ScheduleStatus } from "./types";
+
+const t = (k: Key, v?: Vars) => translate("en", k, v);
+const tFr = (k: Key, v?: Vars) => translate("fr", k, v);
 
 const entry = (p: Partial<ReadingEntry>): ReadingEntry => ({
   id: "x",
@@ -29,14 +33,14 @@ test("the clock drops a leading zero and leaves anything else alone", () => {
 
 test("the schedule line follows the main paper's job and the watcher", () => {
   const off: ScheduleStatus = { at: null, watch: false, exe: null, papers: [] };
-  expect(scheduleLine(null, false)).toMatch(/^Off\./);
-  expect(scheduleLine(off, false)).toMatch(/^Off\./);
+  expect(scheduleLine(null, false, t)).toMatch(/^Off\./);
+  expect(scheduleLine(off, false, t)).toMatch(/^Off\./);
   const on: ScheduleStatus = { at: "05:30", watch: true, exe: "/x", papers: [{ slug: "main", at: "06:15", days: [] }] };
   expect(mainAt(on)).toBe("06:15");
-  expect(scheduleLine(on, false)).toBe("Every morning at 6:15. The watcher that delivers it, and takes what you save, runs from login.");
-  expect(scheduleLine({ ...on, watch: false }, false)).toMatch(/watcher isn't installed/);
+  expect(scheduleLine(on, false, t)).toBe("Every morning at 6:15. The watcher that delivers it, and takes what you save, runs from login.");
+  expect(scheduleLine({ ...on, watch: false }, false, t)).toMatch(/watcher isn't installed/);
   // The web app is the container: never a button, always on.
-  expect(scheduleLine(off, true)).toMatch(/container/);
+  expect(scheduleLine(off, true, t)).toMatch(/container/);
 });
 
 test("the first save is a bookmarklet entry since the page opened, newest first", () => {
@@ -49,11 +53,18 @@ test("the first save is a bookmarklet entry since the page opened, newest first"
 });
 
 test("the check line names the page once it landed", () => {
-  expect(saveLine(null)).toMatch(/^Try it/);
-  expect(saveLine(entry({}))).toBe('"A story" is in tomorrow\'s paper.');
-  expect(saveLine(entry({ title: " " }))).toBe('"https://ex.com/a" is in tomorrow\'s paper.');
+  expect(saveLine(null, t)).toMatch(/^Try it/);
+  expect(saveLine(entry({}), t)).toBe('"A story" is in tomorrow\'s paper.');
+  expect(saveLine(entry({ title: " " }), t)).toBe('"https://ex.com/a" is in tomorrow\'s paper.');
 });
 
 test("the dateline reads like a paper's", () => {
   expect(dateline(new Date(2026, 10, 3, 9))).toBe("Tuesday, 3 November 2026");
+});
+
+test("the welcome's lines in French", () => {
+  const on: ScheduleStatus = { at: "05:30", watch: true, exe: "/x", papers: [] };
+  expect(scheduleLine(on, false, tFr)).toMatch(/^Chaque matin à 5:30\./);
+  expect(saveLine(entry({}), tFr)).toBe("« A story » sera dans le journal de demain.");
+  expect(dateline(new Date(2026, 10, 3, 9), "fr-FR")).toBe("mardi 3 novembre 2026");
 });

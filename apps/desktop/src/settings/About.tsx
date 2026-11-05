@@ -6,6 +6,7 @@ import { platform } from "../platform";
 import { install, type UpdateState } from "../updates";
 import CasaVargas from "./CasaVargas";
 import { Link, REPO, Row } from "./Row";
+import { LOCALES, useI18n, type Locale } from "../i18n";
 
 interface Props {
   version: string;
@@ -73,6 +74,22 @@ function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version" | "
   }
 }
 
+/** The Language row (UI translations design §4): each language named in itself, live on change. */
+function LanguageRow() {
+  const { t, locale, setLocale } = useI18n();
+  return (
+    <Row label={t("settings.language.label")} note={t("settings.language.note")}>
+      <select value={locale} aria-label={t("settings.language.label")} onChange={(e) => setLocale(e.target.value as Locale)}>
+        {LOCALES.map((l) => (
+          <option key={l.id} value={l.id} lang={l.id}>
+            {l.name}
+          </option>
+        ))}
+      </select>
+    </Row>
+  );
+}
+
 export default function About({ version, update, onUpdateState, busy, onWelcome }: Props) {
   const caps = useCapabilities();
   return (
@@ -83,6 +100,7 @@ export default function About({ version, update, onUpdateState, busy, onWelcome 
       <div className="set-block">
         {caps.updater ? <UpdateStatus update={update} onUpdateState={onUpdateState} busy={busy} /> : <Unavailable reason={UPDATER_REASON} />}
       </div>
+      <LanguageRow />
       <Row label="The welcome" note="The pages from first launch: your paper, the bookmarklets, where things are.">
         <button className="ghost" onClick={onWelcome}>
           Show it again
