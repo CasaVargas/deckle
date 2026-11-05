@@ -83,16 +83,23 @@ fn cache(dir: &Path, dates: &[&str]) {
 
 #[test]
 fn imports_two_with_one_kfx() {
+    // Today and yesterday: archiving prunes against today's date and drops a KFX past two
+    // weeks (`KFX_DAYS`), so fixed dates lost the KFX once the calendar moved on.
+    let first = chrono::Local::now().date_naive();
+    let second = first.pred_opt().unwrap();
     let tmp = tempfile::tempdir().unwrap();
-    cache(&tmp.path().join("cache"), &["2026-10-21", "2026-10-20"]);
+    cache(
+        &tmp.path().join("cache"),
+        &[&first.to_string(), &second.to_string()],
+    );
     let m = Morgue {
         root: tmp.path().join("Morgue"),
         keep_days: 0,
     };
     let got = import_cache(&m, &tmp.path().join("cache"));
-    assert_eq!(got, [d("2026-10-21"), d("2026-10-20")]);
-    assert_eq!(m.editions(), [d("2026-10-21"), d("2026-10-20")]);
-    for date in [d("2026-10-21"), d("2026-10-20")] {
+    assert_eq!(got, [first, second]);
+    assert_eq!(m.editions(), [first, second]);
+    for date in [first, second] {
         let s = m.sidecar(date).unwrap();
         let titles: Vec<&str> = s
             .sections
@@ -128,14 +135,11 @@ fn imports_two_with_one_kfx() {
         assert!(m.paths(date).0.exists());
     }
     assert_eq!(
-        m.sidecar(d("2026-10-21")).unwrap().files.kfx.as_deref(),
-        Some("2026-10-21.kfx")
+        m.sidecar(first).unwrap().files.kfx.as_deref(),
+        Some(format!("{first}.kfx").as_str())
     );
-    assert!(m.paths(d("2026-10-21")).2.exists());
-    assert!(
-        !m.paths(d("2026-10-20")).2.exists(),
-        "no KFX for the second"
-    );
+    assert!(m.paths(first).2.exists());
+    assert!(!m.paths(second).2.exists(), "no KFX for the second");
 }
 
 #[test]
