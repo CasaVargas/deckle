@@ -28,6 +28,8 @@ fn kindle(root: &Path) {
 }
 
 const STEM: &str = "deckle-daily-2026-10-20";
+/// A learning window long enough to keep the fixtures' October 2026 dates in it.
+const WINDOW_DAYS: u32 = 36_500;
 
 /// A home with one paper and one recorded edition on a fake Kindle that was read: the `.yjf`
 /// is the Scribe's (jumps from 821, 4 and 1015) and the clippings hold one paper highlight.
@@ -36,10 +38,18 @@ fn setup(learning: &str) -> (tempfile::TempDir, PathBuf, PathBuf) {
     let home = tmp.path().join("home");
     let dir = config_dir(&home);
     std::fs::create_dir_all(&dir).unwrap();
+    // The edition is dated 2026-10-20 and the learning window runs back from today's date, so
+    // the window reaches back to it whatever today is: at the default 14 days these hits fell
+    // out of it on 2026-11-04.
+    let learning = if learning.is_empty() {
+        "[learning]\n"
+    } else {
+        learning
+    };
     std::fs::write(
         dir.join("digest.toml"),
         format!(
-            "title = \"The Deckle Daily\"\nsections = [\"horoscope\"]\n\n[sync]\nreadership = true\n\n{learning}"
+            "title = \"The Deckle Daily\"\nsections = [\"horoscope\"]\n\n[sync]\nreadership = true\n\n{learning}window_days = {WINDOW_DAYS}\n"
         ),
     )
     .unwrap();
@@ -148,7 +158,9 @@ fn with_readership_off_highlights_still_count_but_taps_do_not() {
     let dir = config_dir(&home);
     std::fs::write(
         dir.join("digest.toml"),
-        "title = \"The Deckle Daily\"\nsections = [\"horoscope\"]\n\n[sync]\nreadership = false\n",
+        format!(
+            "title = \"The Deckle Daily\"\nsections = [\"horoscope\"]\n\n[sync]\nreadership = false\n\n[learning]\nwindow_days = {WINDOW_DAYS}\n"
+        ),
     )
     .unwrap();
     push(&home, &mount).assert().success();
