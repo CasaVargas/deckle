@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The welcome (welcome design §4): its pages, the morning-schedule line, and the check that the
 // first bookmarklet save landed. Pure, so it's tested without the window.
+import type { Key, T } from "./i18n";
 import type { ReadingEntry, ScheduleStatus } from "./types";
 
 export const STEPS = [
-  { key: "welcome", title: "Welcome" },
-  { key: "paper", title: "Your paper" },
-  { key: "save", title: "Save to paper" },
-  { key: "extras", title: "The back pages" },
-  { key: "where", title: "Where things are" },
-] as const;
+  { key: "welcome", title: "welcome.step.welcome" },
+  { key: "paper", title: "welcome.step.paper" },
+  { key: "save", title: "welcome.step.save" },
+  { key: "extras", title: "welcome.step.extras" },
+  { key: "where", title: "welcome.step.where" },
+] as const satisfies readonly { key: string; title: Key }[];
 export type StepKey = (typeof STEPS)[number]["key"];
 
 /** "05:30" → "5:30"; anything else as it came. */
@@ -25,12 +26,12 @@ export function mainAt(status: ScheduleStatus | null): string | null {
 }
 
 /** What page 2 says under the schedule control (§4.1). */
-export function scheduleLine(status: ScheduleStatus | null, web: boolean): string {
-  if (web) return "The container prints the paper on its schedule, and its watcher is always on.";
+export function scheduleLine(status: ScheduleStatus | null, web: boolean, t: T): string {
+  if (web) return t("schedule.web");
   const at = mainAt(status);
-  if (!at) return "Off. Nothing prints until it's on.";
-  if (!status?.watch) return `Every morning at ${clock(at)}, but the watcher isn't installed. Turn the schedule on again.`;
-  return `Every morning at ${clock(at)}. The watcher that delivers it, and takes what you save, runs from login.`;
+  if (!at) return t("schedule.off");
+  if (!status?.watch) return t("schedule.noWatcher", { time: clock(at) });
+  return t("schedule.on", { time: clock(at) });
 }
 
 /** The first bookmarklet save made at or after `since` (an ISO instant), the newest if several. */
@@ -42,14 +43,14 @@ export function firstSave(entries: ReadingEntry[], since: string): ReadingEntry 
   return landed[0];
 }
 
-/** The miniature paper's dateline: "Tuesday, 3 November 2026". */
-export function dateline(now: Date): string {
-  return now.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+/** The miniature paper's dateline: "Tuesday, 3 November 2026" (en-GB), "mardi 3 novembre 2026" (fr-FR). */
+export function dateline(now: Date, dateLocale = "en-GB"): string {
+  return now.toLocaleDateString(dateLocale, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
 
 /** The check line on page 3 (§4.3). */
-export function saveLine(save: ReadingEntry | null): string {
-  if (!save) return "Try it: open any article in your browser and click Save to paper.";
-  const what = save.title?.trim() || save.url || "That page";
-  return `"${what}" is in tomorrow's paper.`;
+export function saveLine(save: ReadingEntry | null, t: T): string {
+  if (!save) return t("welcome.save.try");
+  const what = save.title?.trim() || save.url || t("welcome.save.thatPage");
+  return t("welcome.save.landed", { title: what });
 }
