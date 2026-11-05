@@ -163,6 +163,12 @@ fn seed_noticed(h: &Home) {
         );
     }
     l.save(&h.config.with_file_name("interests.json")).unwrap();
+    // The hits are dated 2026-10-20 to 10-22 and the learning window runs back from today's
+    // date, so the window reaches back to them whatever today is: at the default 14 days the
+    // first fell out of it on 2026-11-04, leaving two stories, under `min_stories`.
+    let mut config = std::fs::read_to_string(&h.config).unwrap();
+    config.push_str("\n[learning]\nwindow_days = 36500\n");
+    std::fs::write(&h.config, config).unwrap();
 }
 
 #[test]
