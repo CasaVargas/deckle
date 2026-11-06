@@ -1466,6 +1466,7 @@ dependencies = [
  "deckle-core",
  "deckle-highlights",
  "deckle-pdf",
+ "deckle-puzzle",
  "deckle-xray",
  "deunicode",
  "dom_query",
@@ -1645,6 +1646,17 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "zip 9.0.5",
+]
+
+[[package]]
+name = "deckle-puzzle"
+version = "0.12.1"
+dependencies = [
+ "deunicode",
+ "flate2",
+ "image",
+ "rand 0.9.5",
+ "serde",
 ]
 
 [[package]]

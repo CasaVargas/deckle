@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use super::words::{Words, blocklist};
+use crate::words::{Words, blocklist};
 
 /// Squares on a side of the Daily's search.
 pub const SIZE: usize = 9;
@@ -499,7 +499,7 @@ fn spells_blocked(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::puzzle::words::{Words, blocklist};
+    use crate::words::{Words, blocklist};
     use rand::SeedableRng;
     use rand::rngs::StdRng;
     use std::collections::HashSet;

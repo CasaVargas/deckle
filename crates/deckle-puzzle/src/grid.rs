@@ -8,7 +8,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
-use super::words::Words;
+use crate::words::Words;
 
 /// A 5×5 layout: `#` is a black square, `.` a white one.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,7 +143,7 @@ pub fn fill(words: &Words, seeds: &[String], rng: &mut StdRng, cap: Duration) ->
 }
 
 /// One template's fill, or `None` when it can't be done before `deadline`.
-pub(crate) fn fill_template(
+pub fn fill_template(
     words: &Words,
     template: usize,
     seeds: &[String],
@@ -367,7 +367,7 @@ impl<'a> Search<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::puzzle::words::Words;
+    use crate::words::Words;
     use rand::SeedableRng;
     use std::time::Instant;
 

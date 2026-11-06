@@ -6,9 +6,9 @@ use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::sync::OnceLock;
 
-static EMBEDDED: &[u8] = include_bytes!("../../assets/puzzle/words.tsv.gz");
+static EMBEDDED: &[u8] = include_bytes!("../assets/puzzle/words.tsv.gz");
 /// The words the list is built without, also kept out of the word search's filler letters.
-static BLOCKLIST: &str = include_str!("../../../../data/wordwise/puzzle-blocklist.txt");
+static BLOCKLIST: &str = include_str!("../../../data/wordwise/puzzle-blocklist.txt");
 
 /// The puzzle blocklist (lowercase; `#` lines and blanks skipped), parsed once.
 pub fn blocklist() -> &'static HashSet<String> {

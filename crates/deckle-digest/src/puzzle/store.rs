@@ -8,22 +8,13 @@ use std::path::Path;
 use chrono::{Days, NaiveDate};
 use serde::{Deserialize, Serialize};
 
-use super::grid::Dir;
 use super::ladder::Ladder;
 use super::theme::ThemeWord;
 
+pub use deckle_puzzle::Clue;
+
 /// Days kept.
 pub const KEEP_DAYS: u64 = 60;
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct Clue {
-    pub number: u8,
-    pub dir: Dir,
-    pub answer: String,
-    pub clue: String,
-    /// A headline with the answer blanked.
-    pub theme: bool,
-}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Puzzle {

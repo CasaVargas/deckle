@@ -3,20 +3,14 @@
 //! themed on yesterday's headlines, a word ladder, and yesterday's answers.
 
 pub mod ai;
+// The generators are their own crate (deckle-puzzle), so they build for iOS too; these keep
+// every `crate::puzzle::grid` and `deckle_digest::puzzle::grid` path working.
+pub use deckle_puzzle::{cross, cryptogram, grid, ladder, maze, nonogram, search, sudoku, words};
 pub mod book;
 pub mod check;
-pub mod cross;
-pub mod cryptogram;
-pub mod grid;
-pub mod ladder;
-pub mod maze;
-pub mod nonogram;
 pub(crate) mod picture;
-pub mod search;
 pub mod store;
-pub mod sudoku;
 pub mod theme;
-pub mod words;
 
 use std::collections::HashSet;
 use std::time::Duration;

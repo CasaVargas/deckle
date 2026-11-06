@@ -40,6 +40,7 @@ uuid = { workspace = true, features = ["serde"] }
 deckle-highlights.workspace = true
 deckle-core.workspace = true
 deckle-xray.workspace = true
+deckle-puzzle.workspace = true
 # Hyphenation for the PDF edition's columns (print layout design §4.5): English patterns only.
 hypher = { version = "0.1.8", default-features = false, features = ["english", "alloc"] }
 

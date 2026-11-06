@@ -18,13 +18,13 @@ installed apps read their updates from Latest, so publish with
 
 ## The puzzle page's word list
 
-`crates/deckle-digest/assets/puzzle/words.tsv.gz`: `word<TAB>clue` lines, embedded in the app
+`crates/deckle-puzzle/assets/puzzle/words.tsv.gz`: `word<TAB>clue` lines, embedded in the app
 (puzzle design §4). Built from the same two downloads:
 
 ```sh
 cargo run --release -p deckle-wordwise-build -- puzzle kaikki-en.jsonl.gz large_en.msgpack.gz \
     data/wordwise/puzzle-blocklist.txt words.tsv
-gzip -9 -n -c words.tsv > crates/deckle-digest/assets/puzzle/words.tsv.gz
+gzip -9 -n -c words.tsv > crates/deckle-puzzle/assets/puzzle/words.tsv.gz
 ```
 
 Then skim 50 random lines (`shuf -n 50 words.tsv`), add anything objectionable or unguessable
@@ -36,7 +36,7 @@ to `puzzle-blocklist.txt`, and rebuild.
 
 ## The crossword list
 
-`crates/deckle-digest/assets/puzzle/words-long.tsv.gz`: `word<TAB>zipf<TAB>clue` lines for
+`crates/deckle-puzzle/assets/puzzle/words-long.tsv.gz`: `word<TAB>zipf<TAB>clue` lines for
 puzzle books' crosswords (puzzle books design §3.3). The rules are the puzzle list's, except:
 - lengths are 3 to 15;
 - the cutoff is zipf 2.0;
@@ -46,7 +46,7 @@ puzzle books' crosswords (puzzle books design §3.3). The rules are the puzzle l
 ```sh
 cargo run --release -p deckle-wordwise-build -- crossword kaikki-en.jsonl.gz large_en.msgpack.gz \
     data/wordwise/puzzle-blocklist.txt words-long.tsv
-gzip -9 -n -c words-long.tsv > crates/deckle-digest/assets/puzzle/words-long.tsv.gz
+gzip -9 -n -c words-long.tsv > crates/deckle-puzzle/assets/puzzle/words-long.tsv.gz
 ```
 
 | Built | Sources downloaded | Words | 3 / 4 / 5 / 6 / 7 / 8 / 9 / 10+ letters | Gzipped |

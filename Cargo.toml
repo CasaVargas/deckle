@@ -16,6 +16,7 @@ deckle-transport = { path = "crates/deckle-transport" }
 deckle-xray = { path = "crates/deckle-xray" }
 deckle-wordwise = { path = "crates/deckle-wordwise" }
 deckle-digest = { path = "crates/deckle-digest" }
+deckle-puzzle = { path = "crates/deckle-puzzle" }
 deckle-cli = { path = "crates/deckle-cli" }
 deckle-docx = { path = "crates/deckle-docx" }
 deckle-markdown = { path = "crates/deckle-markdown" }

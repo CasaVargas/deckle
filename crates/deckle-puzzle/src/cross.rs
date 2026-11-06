@@ -11,11 +11,11 @@ use rand::rngs::StdRng;
 use rand::seq::{IndexedRandom, SliceRandom};
 use rand::{Rng, SeedableRng};
 
-use super::grid::{Dir, Slot, TEMPLATES};
-use super::store::Clue;
+use crate::Clue;
+use crate::grid::{Dir, Slot, TEMPLATES};
 
 /// `word<TAB>zipf<TAB>clue` lines, 3 to 15 letters, built offline by `data/wordwise`.
-static EMBEDDED: &[u8] = include_bytes!("../../assets/puzzle/words-long.tsv.gz");
+static EMBEDDED: &[u8] = include_bytes!("../assets/puzzle/words-long.tsv.gz");
 
 /// Longest entry a list holds.
 pub const MAX_LEN: usize = 15;
@@ -614,7 +614,7 @@ impl<'a> Search<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::puzzle::grid::{self, TEMPLATES};
+    use crate::grid::{self, TEMPLATES};
     use rand::SeedableRng;
     use std::collections::{HashSet, VecDeque};
 

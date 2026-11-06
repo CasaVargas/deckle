@@ -8,7 +8,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
-use super::words::Words;
+use crate::words::Words;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Ladder {
