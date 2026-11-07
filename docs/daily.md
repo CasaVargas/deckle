@@ -234,7 +234,7 @@ with it.
 
 ### How far you read
 
-Each time a Kindle connects (`watch`, `push`, or the Kindle tab), Deckle reads the reading
+Each time a Kindle connects (`watch`, `push`, or the Devices tab), Deckle reads the reading
 position the Kindle keeps for every edition still on it: the `.yjf` file in the edition's `.sdr`
 folder. It does this first in the connection, before prune removes old editions. When an edition
 is built, Deckle notes where each of its sections starts. Put together, the Daily tab's
@@ -366,7 +366,7 @@ PDF edition still draws the grid itself, in vector.
 
 - **Check your answers on a Kindle that keeps notes.** Highlight a clue, add a note with your
   answer (case, spaces and punctuation don't matter; for the ladder, highlight its line and write
-  the whole path). The next time that Kindle connects (`watch`, `push`, or the Kindle tab), Deckle
+  the whole path). The next time that Kindle connects (`watch`, `push`, or the Devices tab), Deckle
   reads the notes from `My Clippings.txt`, and the next paper says "You solved 4 of 10". This
   runs whenever the puzzle is in `sections`, even with `[sync] clippings = false` (no highlights
   are exported then). A Kindle Scribe (2024) keeps its notes where they can't be read over USB:
@@ -444,7 +444,7 @@ and **Words you looked up this week**.
 
 - **It's as of the last plug-in.** The page says which Kindle and when ("Taken from your Kindle
   (Scribe) when it was last plugged in, Wednesday"). Deckle reads the Kindle when it connects
-  (`watch`, `push`, or the Kindle tab) and keeps one snapshot per Kindle in `shelf.json` next to
+  (`watch`, `push`, or the Devices tab) and keeps one snapshot per Kindle in `shelf.json` next to
   `digest.toml`. A snapshot older than 30 days isn't printed.
 - **KFX, MOBI and AZW3 books, up to three folders down.** A book Deckle can't open (over MTP,
   or a MOBI) shows a title read from its file name, and a percent from the Kindle's own
@@ -968,11 +968,11 @@ Scribe's screen (1860 × 2480), the one kind of file its pen writes straight ont
 [PDF edition](#the-pdf-edition-and-a-remarkable): fixed pages, the paper's fonts, the crossword
 grid in its place, gray photos.
 
-- **Choose it per Kindle:** on the Kindle tab, **Send the paper as → PDF to write on** (beside
-  its Name), or `deckle devices paper pdf` with it plugged in (`--kindle <name or sync id>`
-  for one that isn't, or with several connected; `book` goes back). It's saved as
-  `paper = "pdf"` under `[sync.devices."<id>"]` in `digest.toml`, and starts with the next
-  edition.
+- **Choose it per Kindle:** on its **This Kindle** page in the Devices tab, **Send the paper
+  as → PDF to write on** (beside its Name), or `deckle devices paper pdf` with it plugged in
+  (`--kindle <name or sync id>` for one that isn't, or with several connected; `book` goes
+  back). It's saved as `paper = "pdf"` under `[sync.devices."<id>"]` in `digest.toml`, and
+  starts with the next edition.
 - **How it goes:** while any Kindle asks for it, each run also makes the Scribe PDF and queues
   `deckle-daily-<date>.pdf` beside the Kindle book. A Kindle set to PDF gets the PDF, any other
   the book, and the one not sent is dropped when the other goes. Over USB (mass storage or

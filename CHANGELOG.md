@@ -55,7 +55,7 @@
   1120 px on big screens.
 - **The paper as a PDF on a Kindle Scribe.** Each Kindle can take the paper as the Kindle book
   or as a PDF laid out for a Scribe's screen, which its pen writes straight onto: **Send the
-  paper as** on the Kindle tab, `deckle devices paper pdf|book [--kindle …]`, or
+  paper as** on This Kindle in the Devices tab, `deckle devices paper pdf|book [--kindle …]`, or
   `paper = "pdf"` under `[sync.devices."<id>"]`. While any Kindle asks for it, the build also
   makes a `kindle-scribe` PDF edition and queues it beside the Kindle book; each push sends the
   one that Kindle takes and drops the other. Pruning counts `.pdf` papers with `.kfx` ones.
