@@ -64,7 +64,7 @@ export const INDEX: Entry[] = [
   { label: "The Deckle plugin", page: "koreader", words: "koreader deckle plugin fetch paper wifi automatic" },
   { label: "Send books over Wi-Fi (calibre connection)", page: "koreader", words: "koreader calibre wireless connection send books wifi readers remove queue" },
   { label: "Updates", page: "about", words: "update version restart" },
-  { label: "Language", page: "about", words: "language langue french français translation translate locale" },
+  { label: "Language", page: "about", words: "language langue sprache idioma lingua língua french français german deutsch spanish español italian italiano portuguese português translation translate locale" },
   { label: "The welcome", page: "about", words: "welcome tour onboarding start first launch bookmarklet install again" },
   { label: "What Deckle sends online", page: "online", words: "online privacy network internet send" },
   { label: "Checking for updates", page: "online", words: "update github online privacy" },

@@ -531,6 +531,13 @@ On Linux, the Daily runs headless in a [container](docs/docker.md) (Docker, Unra
 can't be converted there, because Kindle Previewer only runs on Mac and Windows. What's next is on the
 [roadmap](https://github.com/CasaVargas/deckle/issues?q=is%3Aopen+label%3Aroadmap).
 
+## In your language
+
+Deckle's own words come in English, Deutsch, Español, Français, Italiano and Português (Brasil),
+under Settings → About → Language; so far the welcome is translated, and the rest of the app
+follows one area at a time. Each language starts as an AI draft that the people who read it
+correct: [docs/translating.md](docs/translating.md) says how to fix a line or add a language.
+
 ## Build from source
 
 Rust (stable, 1.85+), Node 22, pnpm. Kindle book conversion needs macOS or Windows.
