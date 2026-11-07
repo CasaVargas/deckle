@@ -1,0 +1,45 @@
+name: Translation fix
+description: Something in Deckle reads wrong in your language.
+title: "Translation: "
+labels: ["translation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping. Write in English or in your own language, whichever is easier.
+        To change the line yourself instead, see [Translating Deckle](https://github.com/CasaVargas/deckle/blob/main/docs/translating.md).
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - Deutsch
+        - Español
+        - Français
+        - Italiano
+        - Português (Brasil)
+        - Another language (say which below)
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where you saw it
+      placeholder: "The welcome, page 2"
+  - type: textarea
+    id: now
+    attributes:
+      label: What it says now
+    validations:
+      required: true
+  - type: textarea
+    id: better
+    attributes:
+      label: What it should say
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Anything else
+      description: Why it reads wrong, if that helps (too formal, a word nobody uses, a typo).

@@ -73,5 +73,7 @@
   "bookmarklet.desk.both": "La page d’installation s’ouvre dans votre navigateur ; faites glisser chacun dans la barre de favoris. Cela fonctionne tant que l’impression du matin de Deckle est activée.",
   "bookmarklet.desk.open": "Ouvrir la page d’installation",
   "settings.language.label": "Langue",
-  "settings.language.note": "Les textes de l’application. Le journal et vos livres gardent leur propre langue."
+  "settings.language.note": "Les textes de l’application. Le journal et vos livres gardent leur propre langue.",
+  "settings.language.draft": "Chaque traduction commence par un brouillon d’IA que des lecteurs corrigent.",
+  "settings.language.help": "Aider à traduire"
 }
