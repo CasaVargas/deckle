@@ -39,7 +39,8 @@ real page numbers, X-Ray and Word Wise.
 - **Local.** There's no Deckle server. The paper is fetched, set and kept on your machine. No
   account, no subscription, no telemetry, and [every network call is listed](#what-goes-online).
 - **Any e-ink reader.** Kindle over USB or by email, Kobo as KEPUB, PocketBook as EPUB,
-  reMarkable as a PDF to write on, and any folder for a Boox or an iPad.
+  reMarkable as a PDF to write on, and any folder for a Boox or an iPad. The
+  [Devices](#your-devices) tab shows the books on each Kindle, Kobo, PocketBook and reMarkable.
 - **Open source.** GPL-3.0. A Rust workspace with a Tauri app on top, and a
   [command line](#command-line) that does everything the app does.
 
@@ -72,7 +73,7 @@ finish. Deckle sets one each morning:
   interests, on this machine only.
 - **Papers for the whole house.** A paper per reader, each with its own sections, schedule, days
   and Kindle, and a large-print layout for big type.
-- **Papers you pay for.** Sign in to a BLOX (TownNews) paper you subscribe to,,
+- **Papers you pay for.** Sign in to a BLOX (TownNews) paper you subscribe to,
   and it prints in full as its own section group. The password lives in the keychain.
 - **The Morgue.** Every edition kept as a plain folder for a year: a month of front pages, full-text
   search, how far you read, and any old paper sent back to the reader.
@@ -97,7 +98,7 @@ skips a morning. Only the newest three papers stay on the reader.
 
 | Reader | How the paper gets there |
 |---|---|
-| **Kindle** | Over USB when it's plugged in, or by email over Wi-Fi through your own mail account |
+| **Kindle** | Over USB when it's plugged in, or by email over Wi-Fi through your own mail account. A Kindle Scribe can take it as a PDF its pen writes on: **Send the paper as** on its page in Devices, or **Send it as a PDF to write on** on the email card |
 | **Kobo** | As a KEPUB, in a Deckle folder, the first time it's plugged in. Long reads and Inbox books too |
 | **PocketBook** | The same, as EPUB |
 | **reMarkable 2, Paper Pro, Paper Pro Move** | A PDF laid out for its screen, crossword and all, in colour on a Paper Pro. Over its USB web interface, or over SSH and Wi-Fi into a Deckle folder that Deckle keeps tidy. No account. `deckle run --to remarkable` and **Send to reMarkable** send books too: a comic as an image PDF fitted to its screen, anything else as EPUB |
@@ -147,6 +148,8 @@ in, press **Send**.
       chapter one as a Kindle sets it, <b>Before</b> and <b>After</b>.<br><br>
       The drawer also edits the book's details (title, authors, series, description, tags, ISBN,
       sort names), with Open Library suggesting what's missing, and lets you swap the cover.
+      <b>Change title &amp; author for this send…</b>, on a queued book's menu, changes them in the
+      copy that's sent and leaves the file you added as it is.
     </td>
   </tr>
 </table>
@@ -180,11 +183,12 @@ in, press **Send**.
   Scribe, a reMarkable, an iPad or A5 paper. A crossword or word search is **themed on what you
   follow**: the headline words of your interest sections or the whole week's paper, clued from
   the headlines; the words you looked up on the Kindle; your cookbook; your own list; or a
-  subject the AI writes about. With the AI on, the clues can be rewritten as trivia, cryptic,
-  or for a kid. The first page is previewed before you make it, and every book is kept so
-  **Make again** gives the same one. For an iPad, **Send to <folder>** (or `--as bundle`) writes
-  the same book as data into an export folder its reader watches, Sunday's book rides along with
-  Sunday's paper, and what was solved there comes back to the tab. See
+  subject the AI writes about. A theme you can't use yet says why. With the AI on, the clues can
+  be rewritten as trivia, cryptic, or for a kid. The first page is previewed before you make it,
+  each step of the making is shown as it goes, and **Your books** lists every book you've made,
+  so **Make again** gives the same one. For an iPad, **Send to** its export folder (or
+  `--as bundle`) writes the same book as data its reader solves, Sunday's book can ride along
+  with Sunday's paper, and what was solved there comes back to the tab. See
   [docs/puzzle-books.md](docs/puzzle-books.md).
 - **A PDF as it is.** `deckle send` copies a PDF, TXT, AZW3 or MOBI to a Kindle or a folder
   untouched, which is how a document that takes ink gets onto a Scribe.
@@ -198,10 +202,15 @@ it beside the queue with covers from calibre and the folders you name, groups se
 called out, searches across your library, your Kindles and past sends, and tells you which books
 on a Kindle it could now build better.
 
-## Your Kindle
+<a id="your-kindle"></a>
+
+## Your devices
+
+The **Devices** tab has a page for each Kindle and each other reader that's connected: a Kobo or
+PocketBook plugged in, or a reMarkable over its USB web interface or SSH.
 
 <p align="center">
-  <img src="docs/screenshots/readme/kindle-shelf.jpg" alt="The Kindle tab, Shelf: books in progress with their percentages, and every book on the Kindle with its cover and progress">
+  <img src="docs/screenshots/readme/kindle-shelf.jpg" alt="The Devices tab with a Kindle Paperwhite chosen, on its Shelf: books in progress with their percentages, and every book on the Kindle with its cover and progress">
 </p>
 
 - **A shelf you can read.** Every book on the Kindle with its cover, progress and when you last
@@ -213,19 +222,21 @@ on a Kindle it could now build better.
   copy is kept with its highlights and reading data, so **Put back** undoes it. Store books and
   anything with DRM are left alone.
 - **Make room, back up, restore.** Space split by why: finished books, second copies, old papers.
-  Copy every DRM-free book with its highlights and reading position to your computer, and put a
-  backup on any Kindle later.
-- **Fix a book's title and author anywhere.** Before it's sent (for that send only), on a
-  Kindle (rebuilt from your library copy, its original or the Kindle's own DRM-free copy, and
-  swapped in, with **Put back** to undo), in an EPUB on a Kobo or PocketBook, or a reMarkable
-  document's name over SSH.
-- **Kobo, PocketBook and reMarkable too.** The tab is **Devices**: a Kobo or PocketBook plugged
-  in, or a reMarkable answering over its USB web interface (or SSH), gets its own page with every
-  book, how far you've read it and when, the space left, **Remove** for the ones you choose, and
-  **Back up** to your computer (book files with KOReader's notes, a Kobo's database, a
-  reMarkable's documents as PDFs with handwriting, or over SSH as the tablet keeps them). A Kobo's
-  database is copied aside before anything is removed; books bought from Kobo are listed, never
-  deleted; the reMarkable's web interface can't delete, so removing there needs SSH.
+  Removing a book Amazon delivered (bought, or sent by email) takes only the download, and Deckle
+  says so: Amazon keeps it, and the Kindle can still list it under All. Copy every DRM-free book
+  with its highlights and reading position to your computer, and put a backup on any Kindle later.
+- **Kobo, PocketBook and reMarkable.** Each gets a page with every book, how far you've read it
+  and when, the space left, **Remove** for the ones you tick, and **Back up** to your computer
+  (book files with KOReader's notes, a Kobo's database, a reMarkable's documents as PDFs with
+  handwriting, or over SSH as the tablet keeps them). A Kobo's database is copied aside before
+  anything is removed, and books bought from Kobo are listed but never deleted. The reMarkable's
+  web interface can't delete, so removing there needs SSH.
+- **Edit a book's details where it is.** Title, authors and series. On a Kindle, **Edit
+  details…** rebuilds the book from your library copy, its original or the Kindle's own DRM-free
+  copy and swaps it in, with **Put back** to undo; the new copy starts without its reading
+  position or highlights (saved first, if you keep a highlights folder). On a Kobo or PocketBook
+  it rewrites them inside the EPUB, and in the Kobo's library too. On a reMarkable over SSH,
+  **Rename…** sets a document's name.
 - **Highlights out.** Highlights and notes from `My Clippings.txt`, one Markdown file per book in a
   folder you choose (a notes vault, iCloud Drive). It covers sideloaded books, which Amazon's own
   export leaves out, and later exports only add what's new. The 2024 Scribe doesn't keep that file
@@ -271,7 +282,7 @@ reads from it, serves it and manages it, and calibre stays your library of recor
 
 | | Kindle (USB) | Kindle (email) | Kindle Scribe | Kobo | PocketBook | reMarkable | KOReader (Wi-Fi) | A folder |
 |---|---|---|---|---|---|---|---|---|
-| The paper | KFX | EPUB, Amazon sets it | KFX over MTP | KEPUB | EPUB | PDF, colour on a Paper Pro | EPUB or KEPUB | EPUB, KEPUB, PDF or bundle |
+| The paper | KFX | EPUB, Amazon sets it, or the Scribe PDF | KFX over MTP, or a PDF to write on | KEPUB | EPUB | PDF, colour on a Paper Pro | EPUB or KEPUB | EPUB, KEPUB, PDF or bundle |
 | Crossword and word search | yes, scored from your notes | yes | yes, no score | yes | yes | yes | yes | yes |
 | How far you read | yes | – | yes | with KOReader | with KOReader | – | yes, by sync | – |
 | Highlights read back | yes | – | – ([#99](https://github.com/CasaVargas/deckle/issues/99)) | yes | with KOReader | – | over USB or a synced folder | KOReader's |
@@ -280,6 +291,7 @@ reads from it, serves it and manages it, and calibre stays your library of recor
 | AI recaps, Summary, Previously | yes | – | yes | yes | yes | yes | – | yes |
 | Comics, manga, scans | AZW3, fitted per model | – | AZW3, checked on device | fixed-layout EPUB | fixed-layout EPUB | image PDF, colour on a Paper Pro | – | AZW3 |
 | Puzzle books | PDF, no ink | – | PDF, write on it | – | – | PDF, sized for it | – | PDF, or a bundle the iPad solves, with the solved count back |
+| Its books on the Devices tab: progress, remove, back up | yes | – | yes | yes | yes, progress with KOReader | yes, removing over SSH | – | – |
 | calibre connection, reading data back, shelves | with KOReader | – | with KOReader | yes | with KOReader | – | yes | – |
 | The Kitchen Book | yes | – | yes | – | – | – | – | EPUB |
 
@@ -319,10 +331,12 @@ Converting and sending a book is offline. Deckle goes online only for:
 | Update check (`latest.json` from this repo's Releases); the update itself only when you click Update | each launch | on |
 | Word Wise dictionary (12 MB, from this repo's Releases) | once, the first time a book gets Word Wise | on |
 | The Daily's sources, and optional email delivery through your own SMTP account | each edition | off until you set it up |
-| A model for X-Ray descriptions or the Daily's editor | each book or edition | off |
+| An AI model for X-Ray, chapter recaps, the Daily's editor, or a puzzle book's clues and theme; nowhere online when it runs on this computer | each book, edition or puzzle book that uses it | off |
+| The local model itself, downloaded by Ollama | when you press **Download** in Settings → AI, or run `deckle llm pull` | only when you ask |
 | Wikipedia summaries for X-Ray | each book with features | off |
 | Amazon edition lookup (Open Library) | books for MTP Kindles | off |
 | Metadata fill (Open Library) | each book sent | off |
+| The KOReader plugin store (GitHub) | when you open it, search it or install from it | only when you ask |
 
 <p align="center">
   <img src="docs/screenshots/readme/settings-online.jpg" width="720" alt="Settings, Online and privacy: each optional lookup with what it sends and where, and the two that always run, with what they carry">
@@ -430,7 +444,9 @@ deckle run manga.cbz --to remarkable              # a comic as an image PDF for 
 deckle run manga.cbz --to device --direction rtl  # a comic that doesn't say it reads right to left
 deckle run book.epub --to device --llm anthropic --recaps --book-summary --series-recap  # AI recaps, off unless asked
 deckle send notes.pdf --to device                 # a PDF as it is: on a Scribe, a document you can write on
-deckle puzzles crossword --to device --size 13    # a book of crosswords to solve in ink (also search, sudoku)
+deckle puzzles crossword --to device --size 13    # a book of crosswords to solve in ink (also search, sudoku, ladder, cryptogram, nonogram, maze)
+deckle puzzles crossword --as bundle --to ~/iCloud/Puzzles   # the same book as data, for the iPad's reader
+deckle puzzles solved ~/iCloud/Puzzles/deckle-puzzles-….decklepuzzles  # how many the iPad solved
 deckle bind a.pdf b.docx https://… --title "Pack"  # several files into one book, then `deckle run` it
 deckle inspect book.epub --json                   # metadata, spine, TOC, warnings
 deckle convert book.kpf -o book.kfx               # repackage an existing Previewer KPF
@@ -523,9 +539,11 @@ sections, the original paper ships with one notice.
 Early, and moving fast. The whole pipeline works from the app and the CLI and is tested against
 fixtures and simulated devices. On real hardware it's verified on a **Kindle Scribe (2024)**,
 comics included, and a **Kindle Paperwhite**; KOReader and the calibre connection are partly
-checked on those two. Other Kindles are pending, and Kobo, PocketBook and reMarkable are tested
-only against simulated devices so far. Results per device are in [docs/devices.md](docs/devices.md),
-and bug reports with your model and firmware are very welcome.
+checked on those two. Other Kindles are pending, and Kobo, PocketBook and reMarkable, their pages
+on the Devices tab included, are tested only against simulated devices so far. Newer pieces have no
+device check recorded yet: the paper and puzzle books as PDFs to write on a Scribe, and editing a
+book's details on a reader. Results per device are in [docs/devices.md](docs/devices.md), and bug
+reports with your model and firmware are very welcome.
 
 On Linux, the Daily runs headless in a [container](docs/docker.md) (Docker, Unraid); Kindle books
 can't be converted there, because Kindle Previewer only runs on Mac and Windows. What's next is on the
