@@ -65,7 +65,7 @@ export default function CookbookDelivery({
       {!delivery ? (
         <p className="muted">Looking for your Kindles…</p>
       ) : delivery.kindles.length === 0 ? (
-        !delivery.error && <p className="muted">No Kindle yet. Plug one in and name it on the Kindle tab.</p>
+        !delivery.error && <p className="muted">No Kindle yet. Plug one in and name it on the Devices tab.</p>
       ) : (
         <ul className="sec-list">
           {delivery.kindles.map((k) => {

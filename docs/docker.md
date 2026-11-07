@@ -163,8 +163,8 @@ These stay visible in the app, each with a one-line reason:
 
 - **Kindle book conversion** (Enhanced Typesetting, X-Ray, Word Wise) needs Kindle Previewer,
   which only runs on Mac and Windows.
-- **The Kindle tab's device features** need an e-reader plugged in. Passing a USB device through
-  to the container is best-effort; email the paper instead.
+- **The Devices tab** needs an e-reader plugged in. Passing a USB device through to the
+  container is best-effort; email the paper instead.
 - **Password fields that would use a keychain**: set the environment variables
   ([below](#email-to-kindle-and-passwords)).
 - **Show in folder**: there's no file manager to open. Download the file instead.

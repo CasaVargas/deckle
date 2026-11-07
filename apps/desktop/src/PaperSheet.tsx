@@ -116,7 +116,7 @@ export default function PaperSheet({
               ))}
               {draft.kindle && !kindles.some((k) => k.name === draft.kindle) && <option value={draft.kindle}>{draft.kindle} (not named yet)</option>}
             </select>
-            {kindles.length === 0 && <span className="muted small">Name a Kindle on the Kindle tab to choose it.</span>}
+            {kindles.length === 0 && <span className="muted small">Name a Kindle on the Devices tab to choose it.</span>}
           </label>
           <label>
             <span className="label">Units</span>
