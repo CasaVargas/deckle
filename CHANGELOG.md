@@ -1,17 +1,39 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — the Devices tab, the paper as a PDF on a Scribe, and the app in six languages
 
-- **Deckle in German, Spanish, Italian and Portuguese (Brazil).** Settings → About → Language
-  now offers Deutsch, Español, Italiano and Português (Brasil) beside English and Français, for
-  the parts already translated (the welcome). Like French, each is an AI draft for readers to
-  correct: the Language row says so and links **Help translate** to the new
-  [docs/translating.md](docs/translating.md), and a **Translation fix** issue form takes a
-  correction without touching a file. With no choice made, Deckle follows the browser's list of
-  languages (Mexican Spanish gets Spanish, European Portuguese gets the Brazilian), and the page's
-  `lang` follows the choice so a screen reader speaks the right language. A new language is one
-  file in `apps/desktop/src/locales/`: a half-done one can be merged, and shows up once it's
-  complete and listed.
+- **The Devices tab: Kobo, PocketBook and reMarkable libraries.** The Kindle tab is now
+  **Devices**, with a chip for each Kindle and each other reader connected: a Kobo or
+  PocketBook as a USB drive, a reMarkable over its USB web interface or SSH. Each gets a page
+  with every book (title, author, folder, format, size), how far it's read and when (a Kobo's
+  database and KOReader's sidecars; the reMarkable's own page count), the space left, search
+  and sort, **Remove** for the ones you tick, and **Back up** (now, or to a folder) with the
+  last backup's date.
+  - A Kobo's `KoboReader.sqlite` is read from a copy and copied aside into
+    `reader-backups/<reader>/databases/` before anything is removed; the Kobo drops a removed
+    book from its library when it's next ejected. Books bought from Kobo are listed and never
+    removed. KOReader's `.sdr` notes go with a removed book and come along in a backup.
+  - A reMarkable over its web interface backs up each document as a PDF with its handwriting,
+    and can't delete. Over SSH, a removed document goes to the tablet's trash (and the tablet's
+    reader restarts to show it), and a backup keeps each document as a `.tar` of the tablet's
+    own files, handwriting included.
+  - Backups go to `reader-backups/<reader>/<time>/` beside `digest.toml`, with a
+    `backup.json`. New commands `readers_list`, `readers_library`, `readers_remove`,
+    `readers_backup` and `readers_last_backup` (also in the web app); the logic is
+    `deckle_core::reader_library`. Signing in to a reMarkable over SSH moved to
+    `deckle_digest::remarkable_login`, shared by the command line and the app.
+- **Deckle in six languages, corrected by readers.** A new **Language** row under Settings →
+  About offers English, Deutsch, Español, Français, Italiano and Português (Brasil), each named
+  in itself; switching is live, and the choice is remembered. So far it covers the welcome (with
+  its schedule and bookmarklet lines) and the Language row; the rest of the app is still in
+  English and moves over one area at a time. Each language began as an AI draft for its readers
+  to correct, and a French reader has already corrected the French. The Language row says so
+  and links **Help translate** to [docs/translating.md](docs/translating.md), and a
+  **Translation fix** issue form takes a correction without touching a file. With no choice
+  made, Deckle follows the browser's languages (Mexican Spanish gets Spanish, European
+  Portuguese the Brazilian), and the page's `lang` follows the choice so a screen reader speaks
+  the right language. A new language is one file in `apps/desktop/src/locales/`: a half-done one
+  can be merged, and shows up once it's complete and listed in `LOCALES`.
 - **Edit a book's details anywhere it is.** Title, authors and series:
   - **Before it's sent:** **Change title & author for this send…** on a queued book's menu
     writes them into a copy of the book for that send (a DOCX, TXT or other import is made an
@@ -34,26 +56,6 @@
   account and the Kindle can still list it under All. The Kindle drawer's and This Kindle's
   confirmations now say so and point to Remove from library or Manage Your Content and
   Devices.
-- **The Devices tab: Kobo, PocketBook and reMarkable libraries.** The Kindle tab is now
-  **Devices**, with a chip for each Kindle and each other reader connected: a Kobo or
-  PocketBook as a USB drive, a reMarkable over its USB web interface or SSH. Each gets a page
-  with every book (title, author, folder, format, size), how far it's read and when (a Kobo's
-  database and KOReader's sidecars; the reMarkable's own page count), the space left, search
-  and sort, **Remove** for the ones you tick, and **Back up** (now, or to a folder) with the
-  last backup's date.
-  - A Kobo's `KoboReader.sqlite` is read from a copy and copied aside into
-    `reader-backups/<reader>/databases/` before anything is removed; the Kobo drops a removed
-    book from its library when it's next ejected. Books bought from Kobo are listed and never
-    removed. KOReader's `.sdr` notes go with a removed book and come along in a backup.
-  - A reMarkable over its web interface backs up each document as a PDF with its handwriting,
-    and can't delete. Over SSH, a removed document goes to the tablet's trash (and the tablet's
-    reader restarts to show it), and a backup keeps each document as a `.tar` of the tablet's
-    own files, handwriting included.
-  - Backups go to `reader-backups/<reader>/<time>/` beside `digest.toml`, with a
-    `backup.json`. New commands `readers_list`, `readers_library`, `readers_remove`,
-    `readers_backup` and `readers_last_backup` (also in the web app); the logic is
-    `deckle_core::reader_library`. Signing in to a reMarkable over SSH moved to
-    `deckle_digest::remarkable_login`, shared by the command line and the app.
 - **Puzzles tab, easier to read.** A theme that's greyed out now says why under the chips, not
   only on hover, with more exact reasons (the paper has no Puzzle page to keep headline words,
   none kept in the last 7 days, no interests followed, the Scribe not sharing looked-up words

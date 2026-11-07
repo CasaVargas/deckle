@@ -32,7 +32,7 @@ docker compose logs deckle
 Open `http://<server>:8080` and log in with that password.
 
 The image is `ghcr.io/casavargas/deckle`. `:latest` is the newest published release; `:<version>`
-(for example `:0.12.1`, no leading `v`) pins one.
+(for example `:0.13.0`, no leading `v`) pins one.
 
 | Setting | Default | |
 |---|---|---|
