@@ -73,5 +73,7 @@
   "bookmarklet.desk.both": "The install page opens in your browser; drag each to the bookmarks bar there. They work while Deckle's morning schedule is on.",
   "bookmarklet.desk.open": "Open the install page",
   "settings.language.label": "Language",
-  "settings.language.note": "The app's own words. The paper and your books keep their own language."
+  "settings.language.note": "The app's own words. The paper and your books keep their own language.",
+  "settings.language.draft": "Each translation starts as an AI draft that readers correct.",
+  "settings.language.help": "Help translate"
 }

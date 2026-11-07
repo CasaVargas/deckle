@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Deckle in German, Spanish, Italian and Portuguese (Brazil).** Settings → About → Language
+  now offers Deutsch, Español, Italiano and Português (Brasil) beside English and Français, for
+  the parts already translated (the welcome). Like French, each is an AI draft for readers to
+  correct: the Language row says so and links **Help translate** to the new
+  [docs/translating.md](docs/translating.md), and a **Translation fix** issue form takes a
+  correction without touching a file. With no choice made, Deckle follows the browser's list of
+  languages (Mexican Spanish gets Spanish, European Portuguese gets the Brazilian), and the page's
+  `lang` follows the choice so a screen reader speaks the right language. A new language is one
+  file in `apps/desktop/src/locales/`: a half-done one can be merged, and shows up once it's
+  complete and listed.
 - **Edit a book's details anywhere it is.** Title, authors and series:
   - **Before it's sent:** **Change title & author for this send…** on a queued book's menu
     writes them into a copy of the book for that send (a DOCX, TXT or other import is made an

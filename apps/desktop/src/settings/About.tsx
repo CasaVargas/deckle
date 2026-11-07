@@ -74,11 +74,23 @@ function UpdateStatus({ update, onUpdateState, busy }: Omit<Props, "version" | "
   }
 }
 
-/** The Language row (UI translations design §4): each language named in itself, live on change. */
+/** Where a reader finds how to correct a translation (UI translations design §8). */
+export const TRANSLATING = `${REPO}/blob/main/docs/translating.md`;
+
+/**
+ * The Language row (UI translations design §4): each language named in itself, live on change.
+ * Every language but English says it began as an AI draft, and asks for corrections (§8).
+ */
 function LanguageRow() {
   const { t, locale, setLocale } = useI18n();
+  const note = (
+    <>
+      {t("settings.language.note")} {locale !== "en" && `${t("settings.language.draft")} `}
+      <Link href={TRANSLATING}>{t("settings.language.help")}</Link>
+    </>
+  );
   return (
-    <Row label={t("settings.language.label")} note={t("settings.language.note")}>
+    <Row label={t("settings.language.label")} note={note}>
       <select value={locale} aria-label={t("settings.language.label")} onChange={(e) => setLocale(e.target.value as Locale)}>
         {LOCALES.map((l) => (
           <option key={l.id} value={l.id} lang={l.id}>
