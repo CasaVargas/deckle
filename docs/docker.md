@@ -67,10 +67,16 @@ It changes the owner of the top of `/config` and `/data`, and only when it diffe
 
 ## Unraid
 
-The template is [`docker/unraid/deckle.xml`](../docker/unraid/deckle.xml). It maps `/config` to
+In the **Apps** tab, search for **Deckle** and install it. The template maps `/config` to
 `/mnt/user/appdata/deckle` and `/data` to `/mnt/user/deckle`, sets `PUID` 99 and `PGID` 100, and
 gives the stop timeout. Pick your `TZ`, set the web UI password and, for email, fill in the masked
-email password field. The WebUI menu item opens the app on port 8080.
+email password field. The WebUI menu item opens the app on port 8080. The ports for the
+bookmarklet, KOReader over Wi-Fi and KOReader's calibre connection are under **Show more
+settings**.
+
+The template is edited here, in [`docker/unraid/deckle.xml`](../docker/unraid/deckle.xml), and
+copied to [CasaVargas/deckle-unraid](https://github.com/CasaVargas/deckle-unraid), the repository
+Community Applications reads.
 
 ## First start
 

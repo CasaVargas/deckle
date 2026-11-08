@@ -308,7 +308,7 @@ converted there.
      trigger SmartScreen: **More info → Run anyway**.
    - **Linux**: the command line only, as `deckle-<version>-<target>.tar.gz` for x86_64 or aarch64
      (needs glibc 2.35+ and `libdbus-1-3`), or the [container](docs/docker.md), which serves the
-     app to your browser on port 8080.
+     app to your browser on port 8080. On Unraid, search for **Deckle** in the Apps tab.
 2. **For Kindle books, install [Kindle Previewer 4](https://kdp.amazon.com/en_US/help/topic/G202131170)**
    (free, from Amazon). It's the only thing that produces Enhanced Typesetting. Deckle drives it and
    doesn't bundle it. The paper on a Kobo, PocketBook or reMarkable doesn't need it.
@@ -545,7 +545,7 @@ device check recorded yet: the paper and puzzle books as PDFs to write on a Scri
 book's details on a reader. Results per device are in [docs/devices.md](docs/devices.md), and bug
 reports with your model and firmware are very welcome.
 
-On Linux, the Daily runs headless in a [container](docs/docker.md) (Docker, Unraid); Kindle books
+On Linux, the Daily runs headless in a [container](docs/docker.md) (Docker, or Unraid's Apps tab); Kindle books
 can't be converted there, because Kindle Previewer only runs on Mac and Windows. What's next is on the
 [roadmap](https://github.com/CasaVargas/deckle/issues?q=is%3Aopen+label%3Aroadmap).
 
