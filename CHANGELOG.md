@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **Deckle in Unraid's Apps tab.** The container is listed in Community Applications: search for
+  **Deckle** in the Apps tab. The template now also offers the ports for KOReader over Wi-Fi
+  (47220) and KOReader's calibre connection (9090), and the reader server's address, under
+  **Show more settings**. It's filed under Books and Productivity, with screenshots. It's edited
+  in `docker/unraid/deckle.xml` and copied to
+  [CasaVargas/deckle-unraid](https://github.com/CasaVargas/deckle-unraid), which Community
+  Applications reads.
+
 ## 0.13.0 — the Devices tab, the paper as a PDF on a Scribe, and the app in six languages
 
 - **The Devices tab: Kobo, PocketBook and reMarkable libraries.** The Kindle tab is now
