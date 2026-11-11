@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Two-column PDFs read one column, then the other.** A journal's tight gutter (about 1.3 em,
+  as in *Nature Communications*) is now found, so a left-column line is no longer glued to the
+  right-column line beside it. Citations set as superscripts ("generations⁵³⁻⁵⁵") stay in
+  their sentence instead of breaking it into short paragraphs, a full stop before one still
+  ends the sentence, and an equation's tall bracket no longer shuffles the lines beside it
+  together.
 - **A shorter README.** A section for each of the app's five tabs (the Cookbook and Puzzles had
   none of their own), shorter tables, and the long parts moved to pages of their own:
   [docs/books.md](docs/books.md), [docs/readers.md](docs/readers.md),

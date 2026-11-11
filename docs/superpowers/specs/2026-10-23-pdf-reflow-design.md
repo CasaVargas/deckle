@@ -56,10 +56,22 @@ bindings are global.
 
 Coordinates are points, origin top left. In order:
 
-1. **Lines.** Glyphs go into rows by vertical overlap, then each row is cut into runs at gaps
-   wider than 1.5 em (a gutter or a table cell). A word space is a gap over 0.18 em, or a space
-   the PDF itself has (PDFium's generated spaces have no box, so they ride on the next glyph as
-   `space_before`). Rotated glyphs are dropped.
+1. **Lines.** Glyphs go into rows by vertical overlap: a glyph joins the row its middle falls
+   in, as long as the row stays within 1.5 times the smaller text in it, each glyph's height
+   being its size or its box, whichever is taller (so a tall bracket or a drop cap doesn't take
+   in the lines beside it, and a font with boxes taller than an em still makes lines). Text
+   under 75% of the page's usual size (a superscript, a subscript) is placed last and joins the
+   row it sits in, without stretching it, so a citation's "53–55" stays in its sentence. Each
+   row is then cut into runs at gaps wider than 1.5 em (a gutter or a table cell), and at the
+   page's gutter when it's tight (a journal's can be 1.3 em): a position in the middle 40% where
+   at least four rows, and a third of the rows that reach it, have a gap there between 0.8 and
+   3 em. Wider gaps (a list's labels and values, a short last line) don't count; a gutter that
+   wide is step 6's to find. A row is cut there at a gap over 0.8 em and over 85% of the
+   gutter's narrow end (its tenth narrowest gap, in points), so a quad between two names in a
+   line across it isn't cut. A word space is a gap over 0.18 em, or a space the PDF itself has
+   (PDFium's generated spaces have no box, so they ride on the next glyph as `space_before`). A
+   line's size is the median of its full-size glyphs, so a last line that's mostly a citation
+   keeps its sentence's size. Rotated glyphs are dropped.
 2. **Running heads and folios.** In the top and bottom 10% of a page, a line is removed when
    it's a page number ("12", "- 12 -", "Page 12", "12 of 40", "xiv") or when the same line, with
    its digits blanked, appears in that margin on at least 40% of pages (and at least two).
@@ -73,16 +85,18 @@ Coordinates are points, origin top left. In order:
 5. **Equations.** Runs set mostly in math fonts (Computer Modern math, Symbol, STIX, Cambria
    Math and the like), merged with their neighbours, with at least three characters. Inline math
    in a sentence stays text; a lone footnote star stays text.
-6. **Reading order.** A page has two columns when an empty vertical channel in its middle
-   40% has text on both sides and at most 10% of lines cross it; the gutter is the middle of the
-   widest such channel. Anything spanning the gutter (a title, a wide figure) ends a band; each
-   band reads its left column, then its right. Otherwise the page reads top to bottom.
+6. **Reading order.** A page has two columns when step 1 found a gutter, or when an empty
+   vertical channel in its middle 40% has text on both sides and at most 10% of lines cross it;
+   the gutter is the middle of the widest such channel. Anything spanning the gutter (a title, a
+   wide figure) ends a band; each band reads its left column, then its right. Otherwise the
+   page reads top to bottom. The runs cut from one row keep their order left to right.
 7. **Paragraphs.** Body size is the size most characters are set in. A paragraph ends at a
    gap over 1.4 times the usual line step, a list item (a bullet, "1.", "(a)"), an indented first
    line, a sentence that ends on a line stopping before three quarters of its column, a change of
-   size, or a bold line followed by a plain one. Across a column or a page it runs on unless
-   the sentence ended. A small line of three characters or fewer with no letters (a stray
-   superscript) is dropped.
+   size, or a bold line followed by a plain one. A line ends a sentence when its text does, a
+   citation set small after the full stop ("it.¹²⁻¹⁵") aside; a number set full size ("3.14")
+   doesn't end one. Across a column or a page it runs on unless the sentence ended. A small line
+   of three characters or fewer with no letters (a stray superscript) is dropped.
 8. **Headings.** The three largest sizes at least 15% over the body size are h1–h3; a heading
    set over two lines that overlap side to side is one heading. A short, bold paragraph that
    doesn't end a sentence is an h3.

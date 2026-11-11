@@ -32,10 +32,10 @@ styles.
   footnotes come through.
 - **DRM-free Kindle files** (`.mobi`, `.azw`, `.azw3`, `.prc`) rebuilt as real KFX with page
   numbers, X-Ray and Word Wise. DRM-protected files are refused, never decrypted.
-- **PDFs, reflowed.** Columns read in order, running heads and page numbers dropped, broken words
-  joined; tables, equations and figures kept as pictures. Never as good as a real ebook, and the
-  run says so. A scan, with no text to reflow, goes as its page pictures, the way a comic does
-  (no OCR).
+- **PDFs, reflowed.** Columns read in order, even a journal's narrow gutter, running heads and
+  page numbers dropped, broken words joined, citations kept in their sentence; tables, equations
+  and figures kept as pictures. Never as good as a real ebook, and the run says so. A scan, with
+  no text to reflow, goes as its page pictures, the way a comic does (no OCR).
 - **Markdown and notes folders.** A file or a flat folder of notes becomes one book: headings,
   tables, local images and links between notes, a chapter per file. See [markdown.md](markdown.md).
 - **Comics, manga and picture books** (`.cbz`, `.cbr`, a folder of page images, a fixed-layout
