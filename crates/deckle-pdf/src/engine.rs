@@ -97,7 +97,7 @@ fn math_font(name: &str) -> bool {
     let n = name.to_lowercase();
     [
         "cmmi", "cmsy", "cmex", "msam", "msbm", "math", "symbol", "stix", "euclid", "mt extra",
-        "rsfs", "esint",
+        "rsfs", "esint", "mthsy", "mtsy", "mtmi",
     ]
     .iter()
     .any(|m| n.contains(m))
@@ -345,4 +345,27 @@ fn read_page(page: &PdfPage) -> Result<Page, PdfiumError> {
         images,
         paths,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::math_font;
+
+    #[test]
+    fn math_fonts_by_name() {
+        for name in [
+            "CMMI10",
+            "ABCDEF+AdvMacMthSyN",
+            "MTSY",
+            "MTMI",
+            "MathPi-One",
+            "STIX",
+        ] {
+            assert!(math_font(name), "{name}");
+        }
+        // Computer Modern's typewriter text, Times: not math.
+        for name in ["CMTEX10", "CMTT10", "Times-Roman"] {
+            assert!(!math_font(name), "{name}");
+        }
+    }
 }

@@ -151,7 +151,7 @@ books in, plug the Kindle in, press **Send**.
 | EPUB | Cleaned up and finished like a store book. A finished `.kfx` is sent as it is |
 | Word, OpenDocument, RTF, FictionBook, plain text | Headings become the contents; tables, pictures and footnotes come through |
 | DRM-free Kindle files (`.mobi`, `.azw3`) | Rebuilt as real KFX. DRM-protected files are refused, never decrypted |
-| PDF | Reflowed: columns in order, a journal's narrow ones too; running heads dropped. A scan goes as page pictures. `deckle send` copies one as it is, to write on with a Scribe |
+| PDF | Reflowed: columns in order, a paper's first page included; running heads dropped; equations as pictures. A scan goes as page pictures. `deckle send` copies one as it is, to write on with a Scribe |
 | Markdown, or a folder of notes | One book, a chapter per file |
 | Comics, manga, picture books (`.cbz`, `.cbr`, fixed-layout EPUB) | Pages kept as they are, fitted to the reader's screen, right to left when the book is |
 | A web address or a saved page | The article, as a book |
