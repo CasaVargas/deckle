@@ -5,9 +5,13 @@
 The README is the project's front page, and people decide from it whether to install Deckle.
 Every pull request that changes what someone sees or can do updates it in the same pull request:
 
-- **The section for that area** (The Daily, Books, Your Kindle, KOReader and calibre, What each
-  reader gets, What goes online, Command line, In your language…): a new feature gets its line,
-  a renamed tab, button or setting gets its new name, and something removed comes out.
+- **The section for that area** (The Daily, Books, The Kitchen Book, Puzzle books, Your devices,
+  KOReader and calibre, What each reader gets, What goes online, Command line, In your
+  language…): a new feature gets its line, a renamed tab, button or setting gets its new name,
+  and something removed comes out.
+- **Keep it short.** A feature gets one or two lines in the README and its detail in that area's
+  page under `docs/` (`docs/books.md`, `docs/readers.md`, `docs/cli.md`, …). A new reader or
+  format also goes in the whole table in `docs/readers.md` or the list in `docs/books.md`.
 - **The intro and its bullets**, when the change alters what Deckle is or which readers it
   serves.
 - **Screenshot alt text** under `docs/screenshots/readme/` when what it describes is renamed, and

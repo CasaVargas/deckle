@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **A shorter README.** A section for each of the app's five tabs (the Cookbook and Puzzles had
+  none of their own), shorter tables, and the long parts moved to pages of their own:
+  [docs/books.md](docs/books.md), [docs/readers.md](docs/readers.md),
+  [docs/cli.md](docs/cli.md) and [docs/how-it-works.md](docs/how-it-works.md), with the AI
+  editor's setup in [docs/daily.md](docs/daily.md#the-ai-editor). **What goes online** now lists
+  the Kitchen Book's two: a recipe's page when you save it, and the optional engravings.
 - **Deckle in Unraid's Apps tab.** The container is listed in Community Applications: search for
   **Deckle** in the Apps tab. The template now also offers the ports for KOReader over Wi-Fi
   (47220) and KOReader's calibre connection (9090), and the reader server's address, under

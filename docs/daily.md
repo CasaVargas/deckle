@@ -1266,3 +1266,33 @@ paper on this computer must also be removed or corrected before setup can succee
   from synced folders and disposable caches. Do not copy a producer identity between computers
   or manually edit it. After reinstalling without that state, use the deliberate disconnect
   procedure above before creating a new ownership record.
+
+## The AI editor
+
+In **Daily → The paper → AI editor**, turn on cross-feed duplicate removal, short news-section
+briefs, AI-written horoscopes and interest scoring. It's off by default. The editor runs where
+**Settings → AI** says, the same choice as X-Ray and chapter recaps, with the key saved there
+(or `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` in the environment running Deckle, which wins). A
+paper that should use a different service names it under **Advanced**, which is this table:
+
+```toml
+[llm]
+enabled = true                  # on its own, the paper follows Settings → AI
+provider = "ollama"             # naming one makes it this paper's own: "ollama" / "anthropic" / "openai"
+model = ""                      # blank uses the provider default (Ollama: qwen3:4b, or 8b with 16 GB)
+endpoint = ""                   # Ollama elsewhere, or an OpenAI-compatible API base URL
+```
+
+**Ollama** keeps everything on this computer and needs no key. In the app, **Settings → AI →
+On this Mac** sets it up: it says whether Ollama is running (with a Get Ollama button), downloads
+the model with a progress bar and tries a prompt. On the command line, install Ollama from
+[ollama.com/download](https://ollama.com/download), then `deckle llm check` says whether it's
+running, whether the model is there (`deckle llm pull` downloads it, with progress) and how
+fast it answers. Deckle talks to Ollama's own API, so it sets the context the paper needs
+itself. Other local OpenAI-compatible servers (LM Studio) also run without a key. API keys
+don't belong in this file.
+Feed and local-news titles and bounded excerpts, the date and horoscope signs go to the provider;
+saved reading, calendars, highlights, photos and source URLs never do. AI output is labeled and
+can be wrong. The editor keeps the first story in each duplicate group and leaves news text
+intact. If the provider fails, an answer is invalid, or an edition exceeds 80 stories or 20 news
+sections, the original paper ships with one notice.
