@@ -148,7 +148,7 @@ books in, plug the Kindle in, press **Send**.
 
 | You have | What Deckle does |
 |---|---|
-| EPUB, or a finished `.kfx` | The usual case |
+| EPUB | Cleaned up and finished like a store book. A finished `.kfx` is sent as it is |
 | Word, OpenDocument, RTF, FictionBook, plain text | Headings become the contents; tables, pictures and footnotes come through |
 | DRM-free Kindle files (`.mobi`, `.azw3`) | Rebuilt as real KFX. DRM-protected files are refused, never decrypted |
 | PDF | Reflowed: columns in order, running heads dropped. A scan goes as page pictures. `deckle send` copies one as it is, to write on with a Scribe |
