@@ -315,13 +315,13 @@ pub fn blocks(pages: &[Page]) -> (Vec<Block>, Stats) {
         let mut page_lines = std::mem::take(&mut lines[i]);
         let mut figures = figures_of(page, &mut page_lines, &mut stats);
         figures.extend(tables_of(&mut page_lines, &mut stats));
-        figures.extend(equations_of(&mut page_lines, &mut stats));
-        // The page's gutter: the one the rows showed, else the one the lines show (columns
-        // whose lines don't share rows).
+        // The page's gutter, for equations and reading order: the one the rows showed, else the
+        // one the lines show (columns whose lines don't share rows).
         let column = channels[i].or_else(|| {
             let text: Vec<Rect> = page_lines.iter().map(|l| l.rect).collect();
             gutter(page, &text)
         });
+        figures.extend(equations_of(&mut page_lines, column, &mut stats));
         let (items, cols) = reading_order(page_lines, figures, column);
         stats.columns = stats.columns.max(cols);
         flow.push((i, items));
@@ -403,9 +403,22 @@ fn lines_of(page: usize, p: &Page) -> (Vec<Line>, Option<f32>) {
     for row in &mut rows {
         row.2.sort_by(|a, b| a.x0.total_cmp(&b.x0));
     }
-    let gutter = channel(p, &rows);
+    // Each row's marks, looked up once: a chart's thousands of small paths aren't searched for
+    // every gap.
+    let marks = marks(p);
+    let row_marks: Vec<Vec<Rect>> = rows
+        .iter()
+        .map(|(top, bottom, _)| {
+            marks
+                .iter()
+                .filter(|m| m.y0 < *bottom && m.y1 > *top)
+                .copied()
+                .collect()
+        })
+        .collect();
+    let gutter = channel(p, &rows, &row_marks);
     let mut out = Vec::new();
-    for (row_top, _, row) in rows {
+    for ((row_top, _, row), marks) in rows.into_iter().zip(&row_marks) {
         let mut run: Vec<&Glyph> = Vec::new();
         let mut pending_space = false;
         let mut text = String::new();
@@ -456,7 +469,7 @@ fn lines_of(page: usize, p: &Page) -> (Vec<Line>, Option<f32>) {
                     x1 <= c && g.x0 >= c && gap > least.max(GUTTER_EM * g.size)
                 });
                 let wide = gap > RUN_GAP_EM * g.size || across;
-                if wide {
+                if wide && !holds_mark(marks, x1, g) {
                     flush(&mut run, &mut text, &mut out);
                 } else if pending_space || g.space_before || gap > SPACE_EM * g.size {
                     text.push(' ');
@@ -472,6 +485,48 @@ fn lines_of(page: usize, p: &Page) -> (Vec<Line>, Option<f32>) {
     (out, gutter.map(|(x, _)| x))
 }
 
+/// Small drawings and images the size of a letter: an ORCID or e-mail icon after an author's
+/// name, a checkbox. Text either side of one is the same line.
+fn marks(p: &Page) -> Vec<Rect> {
+    p.images
+        .iter()
+        .chain(&p.paths)
+        .filter(|r| (2.0..=20.0).contains(&r.width()) && (2.0..=20.0).contains(&r.height()))
+        .copied()
+        .collect()
+}
+
+/// Whether the gap from `x1` to glyph `g` is filled by marks on `g`'s line, no bigger than its
+/// text, with no more than a word space's room between them and the text either side: an icon
+/// after a name, not one at the end of a column with the gutter still to cross.
+fn holds_mark(marks: &[Rect], x1: f32, g: &Glyph) -> bool {
+    let most = 2.0 * g.size.max(g.y1 - g.y0);
+    let room = GUTTER_EM * g.size;
+    let mut inside: Vec<&Rect> = marks
+        .iter()
+        .filter(|m| {
+            m.x0 >= x1 - 1.0
+                && m.x1 <= g.x0 + 1.0
+                && m.y0 < g.y1
+                && m.y1 > g.y0
+                && m.width() <= most
+                && m.height() <= most
+        })
+        .collect();
+    if inside.is_empty() {
+        return false;
+    }
+    inside.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+    let mut reach = x1;
+    for m in inside {
+        if m.x0 - reach > room {
+            return false;
+        }
+        reach = reach.max(m.x1);
+    }
+    g.x0 - reach <= room
+}
+
 /// The x of the page's column gutter, found from its rows of glyphs before they are cut into
 /// runs: a position in the middle of the page that most rows with text on both sides of it pass
 /// with a gap wider than a word space. A tight gutter (a journal's 1.3 em) is narrower than
@@ -481,7 +536,11 @@ fn lines_of(page: usize, p: &Page) -> (Vec<Line>, Option<f32>) {
 /// Returns the x and the narrowest gap, in points, that counts as the gutter there: a little
 /// under the gutter's narrow end, so a quad between two names in a line across it isn't cut.
 /// Points, not ems: the gutter is as wide beside small type (references) as beside large.
-fn channel(p: &Page, rows: &[(f32, f32, Vec<&Glyph>)]) -> Option<(f32, f32)> {
+fn channel(
+    p: &Page,
+    rows: &[(f32, f32, Vec<&Glyph>)],
+    row_marks: &[Vec<Rect>],
+) -> Option<(f32, f32)> {
     let (from, to) = (p.width * 0.3, p.width * 0.7);
     if to <= from {
         return None;
@@ -494,13 +553,14 @@ fn channel(p: &Page, rows: &[(f32, f32, Vec<&Glyph>)]) -> Option<(f32, f32)> {
     type Gaps = (f32, f32, Vec<(f32, f32, f32)>);
     let gaps: Vec<Gaps> = rows
         .iter()
-        .filter_map(|(_, _, row)| {
+        .zip(row_marks)
+        .filter_map(|((_, _, row), marks)| {
             // Sorted by x0: gaps from the furthest any glyph reached so far.
             let first = row.first()?;
             let mut reach = first.x1;
             let mut wide = Vec::new();
             for g in &row[1..] {
-                if g.x0 - reach > GUTTER_EM * g.size {
+                if g.x0 - reach > GUTTER_EM * g.size && !holds_mark(marks, reach, g) {
                     wide.push((reach, g.x0, (g.x0 - reach) / g.size));
                 }
                 reach = reach.max(g.x1);
@@ -773,28 +833,107 @@ fn tables_of(lines: &mut Vec<Line>, stats: &mut Stats) -> Vec<(Figure, Rect)> {
 }
 
 /// Runs set mostly in math fonts, merged with their neighbours: a displayed equation.
-fn equations_of(lines: &mut Vec<Line>, stats: &mut Stats) -> Vec<(Figure, Rect)> {
+/// `channel` is the page's column gutter, if it has one.
+fn equations_of(
+    lines: &mut Vec<Line>,
+    channel: Option<f32>,
+    stats: &mut Stats,
+) -> Vec<(Figure, Rect)> {
     let is_math = |l: &Line| {
         l.math >= 0.3
             || (l.math > 0.0
                 && l.text.chars().filter(|c| c.is_alphabetic()).count() * 2
                     < l.text.chars().count())
     };
-    // Each box with its lines and how many characters they hold.
-    let mut boxes: Vec<(Rect, Vec<usize>, usize)> = Vec::new();
+    // Each box with its lines.
+    let mut boxes: Vec<(Rect, Vec<usize>)> = Vec::new();
     for (i, l) in lines.iter().enumerate().filter(|(_, l)| is_math(l)) {
-        let n = l.text.chars().filter(|c| !c.is_whitespace()).count();
         match boxes.iter_mut().find(|b| b.0.near(&l.rect, l.size)) {
             Some(b) => {
                 b.0 = b.0.union(&l.rect);
                 b.1.push(i);
-                b.2 += n;
             }
-            None => boxes.push((l.rect, vec![i], n)),
+            None => boxes.push((l.rect, vec![i])),
         }
     }
-    // A lone symbol (a footnote star, a dagger) stays text.
-    boxes.retain(|b| b.2 >= 3);
+    // The equation's pieces in a text font ("T" with its subscript "day", "heat =") sit on its
+    // own lines, beside its symbols: short runs inside the box's height, in its column.
+    // A displayed equation has nothing else beside it in its column.
+    let same_column = |b: &Rect, r: &Rect| match channel {
+        Some(c) if b.x1 <= c + 1.0 => r.x1 <= c,
+        Some(c) if b.x0 >= c - 1.0 => r.x0 >= c,
+        _ => true,
+    };
+    // The left edge of a box's column, where its body text starts.
+    let col_left = |b: &Rect| {
+        lines
+            .iter()
+            .filter(|l| same_column(b, &l.rect))
+            .map(|l| l.rect.x0)
+            .fold(f32::MAX, f32::min)
+    };
+    loop {
+        let mut grew = false;
+        for b in boxes.iter_mut() {
+            let left = col_left(&b.0);
+            for (i, l) in lines.iter().enumerate() {
+                let r = l.rect;
+                let overlap = r.y1.min(b.0.y1) - r.y0.max(b.0.y0);
+                // Mostly inside the box's height; or half inside and set in from the column's
+                // edge. A line of text at the edge that a tall sign only reaches ("where" under
+                // a sum) stays text.
+                let inside = overlap >= r.height() * 0.75
+                    || (overlap >= r.height() * 0.5 && r.x0 > left + l.size);
+                if b.1.contains(&i)
+                    || is_math(l)
+                    || l.text.chars().count() > 30
+                    || !inside
+                    || !same_column(&b.0, &r)
+                {
+                    continue;
+                }
+                b.0 = b.0.union(&r);
+                b.1.push(i);
+                grew = true;
+            }
+        }
+        // Boxes that now touch are one equation.
+        let mut merged: Vec<(Rect, Vec<usize>)> = Vec::new();
+        for b in boxes.drain(..) {
+            match merged.iter_mut().find(|m| m.0.near(&b.0, 0.0)) {
+                Some(m) => {
+                    m.0 = m.0.union(&b.0);
+                    for i in b.1 {
+                        if !m.1.contains(&i) {
+                            m.1.push(i);
+                        }
+                    }
+                    grew = true;
+                }
+                None => merged.push(b),
+            }
+        }
+        boxes = merged;
+        if !grew {
+            break;
+        }
+    }
+    // A lone symbol (a footnote star, a dagger) stays text, with what it gathered. A box needs
+    // three characters of mathematics: every character of its math runs, and the equals signs
+    // of the text-font pieces it took in, each line counted once.
+    let score = |b: &(Rect, Vec<usize>)| -> usize {
+        b.1.iter()
+            .map(|&i| {
+                let l = &lines[i];
+                if is_math(l) {
+                    l.text.chars().filter(|c| !c.is_whitespace()).count()
+                } else {
+                    l.text.chars().filter(|&c| c == '=').count()
+                }
+            })
+            .sum()
+    };
+    boxes.retain(|b| score(b) >= 3);
     let taken: HashSet<usize> = boxes.iter().flat_map(|b| b.1.iter().copied()).collect();
     let mut i = 0;
     lines.retain(|_| {
@@ -842,21 +981,129 @@ fn reading_order(
     items.sort_by(by_top);
     let mut out = Vec::new();
     let (mut left, mut right): (Vec<Item>, Vec<Item>) = (Vec::new(), Vec::new());
-    for it in items {
-        let r = it.rect();
-        if spans(r) {
-            out.append(&mut left);
-            out.append(&mut right);
-            out.push(it);
-        } else if r.x1 <= gutter {
+    let place = |it: Item, left: &mut Vec<Item>, right: &mut Vec<Item>| {
+        if it.rect().x1 <= gutter {
             left.push(it);
         } else {
             right.push(it);
+        }
+    };
+    let mut spanning: Option<Spanning> = None;
+    for it in items {
+        let r = it.rect();
+        if spans(r) {
+            // The run goes on only if what waited beside it is beside this item too; a label
+            // under a centred title, above the abstract, is not a sidebar.
+            if let Some(s) = spanning.take_if(|s| !s.pending.iter().all(|p| clear(r, p.rect()))) {
+                for rest in s.close(&mut out) {
+                    place(rest, &mut left, &mut right);
+                }
+            }
+            match &mut spanning {
+                Some(s) => s.extend(it),
+                None => {
+                    out.append(&mut left);
+                    out.append(&mut right);
+                    spanning = Some(Spanning::new(it));
+                }
+            }
+        } else if let Some(s) = spanning.as_mut().filter(|s| s.beside(r).is_some()) {
+            s.pending.push(it);
+        } else {
+            if let Some(s) = spanning.take() {
+                for rest in s.close(&mut out) {
+                    place(rest, &mut left, &mut right);
+                }
+            }
+            place(it, &mut left, &mut right);
+        }
+    }
+    if let Some(s) = spanning.take() {
+        for rest in s.close(&mut out) {
+            place(rest, &mut left, &mut right);
         }
     }
     out.append(&mut left);
     out.append(&mut right);
     (out, 2)
+}
+
+/// Whether `b` is clear of `a` side to side.
+fn clear(a: Rect, b: Rect) -> bool {
+    b.x1 < a.x0 || b.x0 > a.x1
+}
+
+/// A run of items across the gutter (a title, an abstract, a wide figure) and the narrow text
+/// set entirely beside it: a sidebar of dates next to a paper's authors and abstract. The
+/// sidebar is read as a column of its own, before the run if it's on the left, after it if on
+/// the right, instead of line by line between its lines.
+struct Spanning {
+    rect: Rect,
+    items: Vec<Item>,
+    left: Vec<Item>,
+    right: Vec<Item>,
+    /// Beside the run so far, waiting to see whether the run goes on past them.
+    pending: Vec<Item>,
+}
+
+impl Spanning {
+    fn new(it: Item) -> Self {
+        Spanning {
+            rect: it.rect(),
+            items: vec![it],
+            left: Vec::new(),
+            right: Vec::new(),
+            pending: Vec::new(),
+        }
+    }
+
+    /// Left (`true`) or right of the run, clear of it side to side.
+    /// Narrow, too: at most half the run's width. A column beside a figure that crosses the
+    /// gutter is as wide as the figure, and is a column, not a sidebar.
+    fn beside(&self, r: Rect) -> Option<bool> {
+        if r.width() > self.rect.width() * 0.5 {
+            None
+        } else if r.x1 < self.rect.x0 {
+            Some(true)
+        } else if r.x0 > self.rect.x1 {
+            Some(false)
+        } else {
+            None
+        }
+    }
+
+    /// The run goes on: what waited beside it is its sidebar.
+    fn extend(&mut self, it: Item) {
+        for p in std::mem::take(&mut self.pending) {
+            self.side(p);
+        }
+        self.rect = self.rect.union(&it.rect());
+        self.items.push(it);
+    }
+
+    fn side(&mut self, it: Item) {
+        match self.beside(it.rect()) {
+            Some(true) => self.left.push(it),
+            _ => self.right.push(it),
+        }
+    }
+
+    /// Writes the run and its sidebar. Items that waited beside it but start below its end
+    /// aren't a sidebar; they come back for the columns.
+    fn close(mut self, out: &mut Vec<Item>) -> Vec<Item> {
+        let mut rest = Vec::new();
+        for p in std::mem::take(&mut self.pending) {
+            if p.rect().y0 < self.rect.y1 {
+                self.side(p);
+            } else {
+                rest.push(p);
+            }
+        }
+        out.append(&mut self.left);
+        out.append(&mut self.items);
+        out.append(&mut self.right);
+        rest
+    }
 }
 
 /// The x of an empty vertical channel in the middle of the page with text on both sides: the
@@ -982,22 +1229,48 @@ struct Opening {
     page: usize,
 }
 
+/// A heading is no longer than this many characters.
+const HEADING_CHARS: usize = 150;
+
 /// Lines into paragraphs and headings. A paragraph ends at a wider gap, an indent, a short line
 /// that ends a sentence, or a change of size; it runs on across columns and pages when the
 /// sentence does.
 fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Block> {
     let known = vocabulary(flow);
-    // Heading sizes, largest first: the three largest sizes above the body's become h1–h3.
-    let mut heading_sizes: Vec<i32> = flow
-        .iter()
-        .flat_map(|(_, items)| items.iter())
-        .filter_map(|i| match i {
+    // Heading sizes, largest first: the three largest sizes above the body's become h1–h3. A
+    // size counts only if some run of lines in it is short enough to be a heading, so an
+    // abstract set large doesn't take a level from the section heads.
+    let mut heading_sizes: HashSet<i32> = HashSet::new();
+    let mut run: Option<(i32, usize)> = None;
+    let mut end_run = |run: &mut Option<(i32, usize)>| {
+        if let Some((key, chars)) = run.take()
+            && chars <= HEADING_CHARS
+        {
+            heading_sizes.insert(key);
+        }
+    };
+    for it in flow.iter().flat_map(|(_, items)| items.iter()) {
+        let key = match it {
             Item::Text(l) if l.size >= body * 1.15 => Some((l.size * 2.0).round() as i32),
             _ => None,
-        })
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
+        };
+        match (key, &mut run) {
+            (Some(k), Some((r, chars))) if *r == k => {
+                if let Item::Text(l) = it {
+                    *chars += l.text.chars().count() + 1;
+                }
+            }
+            (Some(k), _) => {
+                end_run(&mut run);
+                if let Item::Text(l) = it {
+                    run = Some((k, l.text.chars().count()));
+                }
+            }
+            (None, _) => end_run(&mut run),
+        }
+    }
+    end_run(&mut run);
+    let mut heading_sizes: Vec<i32> = heading_sizes.into_iter().collect();
     heading_sizes.sort_by(|a, b| b.cmp(a));
     let level_of = |size: f32| {
         let key = (size * 2.0).round() as i32;
@@ -1056,7 +1329,10 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                 && text.chars().count() < 100
                 && !last.ends_sentence()
                 && !text.contains(". ");
-            match level_of(last.size) {
+            // Large type that runs on (an abstract, a paper's list of authors) is a paragraph
+            // set large, not a heading.
+            let level = level_of(last.size).filter(|_| text.chars().count() <= HEADING_CHARS);
+            match level {
                 Some(level) => out.push(Block::Heading {
                     level,
                     text,
@@ -1136,8 +1412,14 @@ fn paragraphs(flow: &[(usize, Vec<Item>)], body: f32, heights: &[f32]) -> Vec<Bl
                 && l.rect.y0 > prev.rect.y0
                 && (l.rect.x0 - prev.rect.x0).abs() < step * 6.0;
             let gap = l.rect.y0 - prev.rect.y0;
+            // A change of size among the large ones too, heading or not (an author list set
+            // larger than the dates beside it), and any clear change of size: a table's title
+            // doesn't run on into a caption set smaller.
+            let large = |l: &Line| (l.size >= body * 1.15).then(|| (l.size * 2.0).round() as i32);
             let size_change = level_of(prev.size) != level_of(l.size)
-                || (prev.size < body * 0.85) != (l.size < body * 0.85);
+                || large(prev) != large(l)
+                || (prev.size < body * 0.85) != (l.size < body * 0.85)
+                || (prev.size - l.size).abs() >= body * 0.15;
             // A heading set over two lines, centred or not: the lines overlap side to side.
             let heading_run = level_of(l.size).is_some()
                 && !size_change
@@ -1358,6 +1640,153 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_icon_after_a_name_keeps_the_line_whole() {
+        let mut g = Vec::new();
+        text_at(&mut g, 72.0, 100.0, "Ada Lovelace");
+        // An ORCID mark (a small drawing, a point from the text either side) fills a gap wider
+        // than RUN_GAP_EM: "Lovelace" ends at 131.5, the next text starts at 148.
+        text_at(&mut g, 148.0, 100.0, "1,2 & Charles Babbage");
+        let mut p = page(g);
+        p.paths.push(Rect {
+            x0: 133.0,
+            y0: 101.0,
+            x1: 146.5,
+            y1: 109.0,
+        });
+        let (lines, _) = lines_of(0, &p);
+        let t: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(t, ["Ada Lovelace 1,2 & Charles Babbage"]);
+    }
+
+    #[test]
+    fn a_sidebar_beside_the_abstract_is_read_as_its_own_column() {
+        let mut g = Vec::new();
+        // Under the title: dates in a narrow sidebar beside full-width authors and abstract.
+        text_at(&mut g, 40.0, 100.0, "Received: 1 May");
+        text_at(
+            &mut g,
+            200.0,
+            100.0,
+            "Ada Lovelace, Charles Babbage and Mary Somerville",
+        );
+        text_at(&mut g, 40.0, 112.0, "Accepted: 2 June");
+        text_at(
+            &mut g,
+            200.0,
+            124.0,
+            "An abstract across the page, from the sidebar's edge on",
+        );
+        text_at(&mut g, 40.0, 124.0, "Open access");
+        text_at(
+            &mut g,
+            200.0,
+            136.0,
+            "to the right margin of the page, two lines long.",
+        );
+        // Two columns below, the left one reaching nearly to the middle (x 290).
+        for i in 0..6 {
+            let y = 170.0 + i as f32 * 12.0;
+            let filler = "of the body text in this column";
+            text_at(&mut g, 40.0, y, &format!("Left column line {i} {filler} ."));
+            text_at(&mut g, 310.0, y, &format!("Right column line {i} here"));
+        }
+        let (b, _) = blocks(&[page(g)]);
+        let all = texts(&b).join(" | ");
+        let at = |s: &str| all.find(s).unwrap_or_else(|| panic!("{s} in {all}"));
+        assert!(at("Received") < at("Accepted") && at("Accepted") < at("Open access"));
+        assert!(at("Open access") < at("Ada Lovelace"), "{all}");
+        assert!(at("Ada Lovelace") < at("An abstract"), "{all}");
+        assert!(at("two lines long.") < at("Left column line 0"), "{all}");
+        assert!(
+            at("Left column line 5") < at("Right column line 0"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn long_large_type_is_a_paragraph_not_a_heading() {
+        let mut g = Vec::new();
+        styled(&mut g, 72.0, 60.0, "A Title", 20.0, false);
+        let abstract_ = "An abstract set larger than the body, which runs on for a while";
+        for i in 0..3 {
+            styled(&mut g, 72.0, 90.0 + i as f32 * 14.0, abstract_, 12.0, false);
+        }
+        for i in 0..6 {
+            text_at(
+                &mut g,
+                72.0,
+                150.0 + i as f32 * 12.0,
+                "Body text set in the usual size",
+            );
+        }
+        let (b, _) = blocks(&[page(g)]);
+        assert!(matches!(&b[0], Block::Heading { text, .. } if text == "A Title"));
+        assert!(matches!(&b[1], Block::Para { text, .. } if text.starts_with("An abstract")));
+    }
+
+    /// `s` at `(x, y)` in a math font, `h` tall: a sum sign or a big bracket.
+    fn math_at(glyphs: &mut Vec<Glyph>, x: f32, y: f32, s: &str, h: f32) {
+        for (i, c) in s.chars().enumerate() {
+            glyphs.push(Glyph {
+                c,
+                x0: x + i as f32 * 5.0,
+                y0: y,
+                x1: x + i as f32 * 5.0 + 4.0,
+                y1: y + h,
+                size: 10.0,
+                bold: false,
+                italic: false,
+                math: true,
+                soft_hyphen: false,
+                space_before: false,
+            });
+        }
+    }
+
+    #[test]
+    fn an_equation_in_a_text_font_around_math_symbols_is_one_picture() {
+        let mut g = Vec::new();
+        text_at(&mut g, 72.0, 100.0, "The cumulative heat of an event is:");
+        // heat = Σ ( T - Txpct )   (2), with the sum and brackets in a math font, taller than
+        // a line, so each sits on a row of its own.
+        text_at(&mut g, 100.0, 130.0, "heat =");
+        math_at(&mut g, 135.0, 125.0, "∑(", 17.0);
+        text_at(&mut g, 147.0, 130.0, "T");
+        math_at(&mut g, 155.0, 130.0, "−", 10.0);
+        text_at(&mut g, 162.0, 130.0, "Txpct");
+        math_at(&mut g, 190.0, 125.0, ")", 17.0);
+        math_at(&mut g, 270.0, 125.0, "(", 17.0);
+        text_at(&mut g, 276.0, 130.0, "2");
+        math_at(&mut g, 282.0, 125.0, ")", 17.0);
+        text_at(&mut g, 72.0, 160.0, "summed over the days of the heatwave.");
+        let (b, stats) = blocks(&[page(g)]);
+        assert_eq!(stats.equations, 1);
+        assert_eq!(
+            texts(&b),
+            [
+                "The cumulative heat of an event is:",
+                "[Equation]",
+                "summed over the days of the heatwave."
+            ]
+        );
+    }
+
+    #[test]
+    fn a_lone_math_symbol_does_not_take_the_text_beside_it() {
+        let mut g = Vec::new();
+        text_at(&mut g, 72.0, 100.0, "Ada Lovelace");
+        math_at(&mut g, 160.0, 98.0, "†", 14.0);
+        text_at(&mut g, 200.0, 100.0, "Charles Babbage");
+        let (b, stats) = blocks(&[page(g)]);
+        assert_eq!(stats.equations, 0);
+        let all = texts(&b).join(" ");
+        assert!(
+            all.contains("Ada Lovelace") && all.contains("Charles Babbage"),
+            "{all}"
+        );
+    }
+
     /// Eight rows of two columns 12 pt apart (a tight gutter) from `y`: the left column ends at
     /// 226.5, the right starts at 239.
     fn tight_columns(g: &mut Vec<Glyph>, y: f32) {
@@ -1366,6 +1795,71 @@ mod tests {
             text_at(g, 72.0, y, &format!("Left {i} of the first column text"));
             text_at(g, 239.0, y, &format!("Right {i} and more of it"));
         }
+    }
+
+    #[test]
+    fn an_icon_at_a_column_end_does_not_bridge_the_gutter() {
+        let mut g = Vec::new();
+        // The right column starts further off: 20 pt after the icon.
+        for i in 0..8 {
+            let y = 120.0 + i as f32 * 12.0;
+            text_at(
+                &mut g,
+                72.0,
+                y,
+                &format!("Left {i} of the first column text"),
+            );
+            text_at(&mut g, 260.0, y, &format!("Right {i}"));
+        }
+        let mut p = page(g);
+        p.paths.push(Rect {
+            x0: 230.0,
+            y0: 121.0,
+            x1: 238.0,
+            y1: 129.0,
+        });
+        let (lines, _) = lines_of(0, &p);
+        let t: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        assert!(t.contains(&"Left 0 of the first column text"), "{t:?}");
+        assert!(t.contains(&"Right 0"), "{t:?}");
+    }
+
+    #[test]
+    fn a_label_under_a_centred_title_is_not_its_sidebar() {
+        let mut g = Vec::new();
+        styled(&mut g, 200.0, 60.0, "A Centred Title", 18.0, true);
+        text_at(&mut g, 50.0, 90.0, "Abstract");
+        for i in 0..3 {
+            let y = 102.0 + i as f32 * 12.0;
+            // From 50 to 375, across the gutter at 233.
+            let text = format!("Abstract line {i} runs across the page and over the gutter.");
+            text_at(&mut g, 50.0, y, &text);
+        }
+        tight_columns(&mut g, 170.0);
+        let (b, _) = blocks(&[page(g)]);
+        let all = texts(&b).join(" | ");
+        let title = all.find("A Centred Title").expect("title");
+        let label = all.find("Abstract").expect("label");
+        assert!(title < label, "{all}");
+        assert!(
+            all[label..].starts_with("Abstract Abstract line 0"),
+            "{all}"
+        );
+    }
+
+    #[test]
+    fn a_short_equation_in_computer_modern_is_a_picture() {
+        // (x + y)2 with only x and y in the math font, as Computer Modern sets it.
+        let mut g = Vec::new();
+        text_at(&mut g, 72.0, 100.0, "We square the sum:");
+        text_at(&mut g, 150.0, 120.0, "(");
+        math_at(&mut g, 155.0, 120.0, "x", 10.0);
+        text_at(&mut g, 160.0, 120.0, "+");
+        math_at(&mut g, 165.0, 120.0, "y", 10.0);
+        text_at(&mut g, 170.0, 120.0, ")2");
+        text_at(&mut g, 72.0, 140.0, "and expand it.");
+        let (b, stats) = blocks(&[page(g)]);
+        assert_eq!(stats.equations, 1, "{:?}", texts(&b));
     }
 
     #[test]
@@ -1407,6 +1901,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_equation_keeps_to_its_column_without_shared_rows() {
+        let mut g = Vec::new();
+        // Two columns on offset baselines: no row has both, so only the lines show the gutter.
+        for i in 0..8 {
+            let y = 100.0 + i as f32 * 12.0;
+            text_at(&mut g, 72.0, y, "Left column text in a line.");
+            text_at(&mut g, 330.0, y + 6.0, "Right column body text line.");
+        }
+        // A tall equation in the left column, beside a short right-column line.
+        math_at(&mut g, 100.0, 200.0, "∑(x)=", 22.0);
+        text_at(&mut g, 330.0, 206.0, "Results");
+        let (b, stats) = blocks(&[page(g)]);
+        assert_eq!(stats.equations, 1);
+        assert!(
+            texts(&b).iter().any(|t| t.contains("Results")),
+            "{:?}",
+            texts(&b)
+        );
+    }
+
+    #[test]
+    fn a_large_abstract_does_not_take_a_heading_level() {
+        let mut g = Vec::new();
+        styled(&mut g, 72.0, 40.0, "A Title", 20.0, false);
+        let line = "An abstract set larger than the body, which runs on for a while";
+        for i in 0..3 {
+            styled(&mut g, 72.0, 70.0 + i as f32 * 14.0, line, 12.0, false);
+        }
+        styled(&mut g, 72.0, 130.0, "Results", 11.5, false);
+        // More body than abstract, so the body sets the usual size.
+        for i in 0..12 {
+            text_at(
+                &mut g,
+                72.0,
+                150.0 + i as f32 * 12.0,
+                "Body text set in the usual size",
+            );
+        }
+        let (b, _) = blocks(&[page(g)]);
+        assert!(
+            texts(&b).contains(&"h2:Results".to_owned()),
+            "{:?}",
+            texts(&b)
+        );
+    }
+
     /// `s` on baseline `base`, its glyph boxes `em` ems tall, as fonts with a tall ascent and
     /// descent give them.
     fn boxed_at(glyphs: &mut Vec<Glyph>, x: f32, base: f32, s: &str, size: f32, em: f32) {
@@ -1439,6 +1980,37 @@ mod tests {
         let (lines, _) = lines_of(0, &page(g));
         let t: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
         assert_eq!(t, ["Hello world", "The NASA mission flew."]);
+    }
+
+    #[test]
+    fn a_column_beside_a_wide_figure_is_not_a_sidebar() {
+        let mut g = Vec::new();
+        // Two columns, with a figure a little wider than the left one, across the gutter.
+        for i in 0..20 {
+            let y = 80.0 + i as f32 * 12.0;
+            if !(150.0..300.0).contains(&y) {
+                text_at(
+                    &mut g,
+                    72.0,
+                    y,
+                    &format!("L{i} left body text runs on in here ok"),
+                );
+            }
+            text_at(&mut g, 310.0, y, &format!("R{i} right body text in here"));
+        }
+        let mut p = page(g);
+        p.images.push(Rect {
+            x0: 72.0,
+            y0: 150.0,
+            x1: 304.0,
+            y1: 290.0,
+        });
+        let (b, _) = blocks(&[p]);
+        let all = texts(&b).join(" ");
+        let at = |s: &str| all.find(s).unwrap_or_else(|| panic!("{s} in {all}"));
+        // The left column's last line isn't pushed behind the right column's lines beside the
+        // figure.
+        assert!(at("L19 ") < at("R6 "), "{all}");
     }
 
     #[test]
@@ -1477,6 +2049,29 @@ mod tests {
         text_at(&mut g, 72.0, 124.0, "Roughly, and it goes on here.");
         let (b, _) = blocks(&[page(g)]);
         assert_eq!(texts(&b).len(), 1, "{:?}", texts(&b));
+    }
+
+    #[test]
+    fn where_under_a_tall_sum_stays_text() {
+        let mut g = Vec::new();
+        text_at(
+            &mut g,
+            72.0,
+            100.0,
+            "The total over all the days of the event is",
+        );
+        // A centred sum whose box reaches half into the next line.
+        math_at(&mut g, 150.0, 114.0, "∑", 20.0);
+        math_at(&mut g, 160.0, 120.0, "x=y", 10.0);
+        text_at(&mut g, 72.0, 128.0, "where");
+        text_at(&mut g, 105.0, 128.0, "x is the heat of a day.");
+        let (b, stats) = blocks(&[page(g)]);
+        assert_eq!(stats.equations, 1);
+        assert!(
+            texts(&b).iter().any(|t| t.contains("where")),
+            "{:?}",
+            texts(&b)
+        );
     }
 
     #[test]
