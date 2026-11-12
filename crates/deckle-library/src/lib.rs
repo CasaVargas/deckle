@@ -361,14 +361,24 @@ impl Library {
 
     /// Adds `source` (Markdown is snapshotted as EPUB), or updates the book with the same identity in
     /// place: its source when the bytes differ, its metadata, keeping `added` and `sends`.
+    ///
+    /// An identity Deckle derived itself (from title and author, for text, Word, RTF, comics…)
+    /// can be shared by unrelated files, so such a book is updated only when the bytes match or
+    /// `source` is the library's own copy; otherwise it's a new book (#29).
     pub fn add(&self, source: &Path) -> Result<Added, String> {
+        self.add_as(source, false)
+    }
+
+    /// `snapshot`: `source` is the EPUB just made from Markdown or a page folder, which updates
+    /// the book with its identity in place, as before.
+    fn add_as(&self, source: &Path, snapshot: bool) -> Result<Added, String> {
         // Markdown may depend on adjacent notes and images. Keep the self-contained EPUB,
         // so re-sends still work when the original folder moves or disappears.
         if deckle_markdown::is_markdown(source) {
             let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
             let epub = dir.path().join("notes.epub");
             deckle_markdown::convert(source, &epub).map_err(|e| e.to_string())?;
-            return self.add(&epub);
+            return self.add_as(&epub, true);
         }
         // A folder of page images, likewise: the comic's own EPUB, named after the folder.
         if deckle_comic::is_image_folder(source) {
@@ -376,7 +386,7 @@ impl Library {
             let name = source.file_name().unwrap_or_default().to_string_lossy();
             let epub = dir.path().join(format!("{name}.epub"));
             deckle_comic::convert(source, &epub).map_err(|e| e.to_string())?;
-            return self.add(&epub);
+            return self.add_as(&epub, true);
         }
         if !is_source(source) {
             return Err(format!(
@@ -395,7 +405,7 @@ impl Library {
             .to_string_lossy()
             .into_owned();
         let sha = sha256_hex(&bytes);
-        if let Some(mut book) = self.list().into_iter().find(|b| b.sidecar.id == id) {
+        if let Some(mut book) = self.kept_for(source, &info, &sha, snapshot) {
             if book.sidecar.schema > SCHEMA {
                 return Err(format!(
                     "{}: written by a newer Deckle; not updated",
@@ -406,7 +416,9 @@ impl Library {
             let copied = book.sidecar.sha256 != sha || book.sidecar.source != file_name;
             if copied && !same_file(source, &book.dir.join(&file_name)) {
                 write_atomic(&book.dir.join(&file_name), &bytes)?;
-                if book.sidecar.source != file_name {
+                // On a case-insensitive file system `Mini.epub` is `mini.epub`: just written (#83).
+                if book.sidecar.source != file_name && !same_file(&old, &book.dir.join(&file_name))
+                {
                     let _ = std::fs::remove_file(&old);
                 }
             }
@@ -428,6 +440,12 @@ impl Library {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // A different book sharing a derived identity gets its own, so ids stay unique.
+        let id = if is_derived(&info, snapshot) && self.list().iter().any(|b| b.sidecar.id == id) {
+            format!("{id}#{}", &sha[..12])
+        } else {
+            id
+        };
         let dir = self.free_dir(&info, &stem);
         write_atomic(&dir.join(&file_name), &bytes)?;
         let book = Book {
@@ -449,6 +467,24 @@ impl Library {
             book,
             new: true,
             copied: true,
+        })
+    }
+
+    /// The kept book `source` (with `info` and content hash `sha`) updates: the one with its
+    /// identity, or, for a derived identity, the one among those (`<id>` or `<id>#…`) whose bytes
+    /// match or whose own copy `source` is (#29).
+    fn kept_for(&self, source: &Path, info: &BookInfo, sha: &str, snapshot: bool) -> Option<Book> {
+        let id = String::from_utf8_lossy(&asin_seed(info)).into_owned();
+        if !is_derived(info, snapshot) {
+            return self.list().into_iter().find(|b| b.sidecar.id == id);
+        }
+        self.list().into_iter().find(|b| {
+            let ours = b.sidecar.id == id
+                || b.sidecar
+                    .id
+                    .strip_prefix(id.as_str())
+                    .is_some_and(|r| r.starts_with('#'));
+            ours && (b.sidecar.sha256 == sha || same_file(source, &b.source_path()))
         })
     }
 
@@ -590,6 +626,16 @@ impl Library {
     }
 }
 
+/// An identity Deckle made itself (no identifier, or its own `urn:deckle:` one), which
+/// unrelated files can share. A Markdown or page-folder snapshot keeps updating by identity.
+fn is_derived(info: &BookInfo, snapshot: bool) -> bool {
+    !snapshot
+        && info
+            .identifiers
+            .first()
+            .is_none_or(|i| i.starts_with("urn:deckle:"))
+}
+
 fn same_file(a: &Path, b: &Path) -> bool {
     match (a.canonicalize(), b.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
@@ -682,12 +728,13 @@ pub fn previous_copies(config: &Path, source: &Path, target: &Target) -> Vec<Str
     let Ok(info) = book_info(source) else {
         return Vec::new();
     };
-    let id = String::from_utf8_lossy(&asin_seed(&info)).into_owned();
+    let snapshot = deckle_markdown::is_markdown(source) || deckle_comic::is_image_folder(source);
+    let sha = std::fs::read(source)
+        .map(|b| sha256_hex(&b))
+        .unwrap_or_default();
     let device = device_ref(target);
     library
-        .list()
-        .into_iter()
-        .find(|b| b.sidecar.id == id)
+        .kept_for(source, &info, &sha, snapshot)
         .and_then(|b| b.sidecar.send_to(&device.key).map(|s| s.file.clone()))
         .into_iter()
         .collect()

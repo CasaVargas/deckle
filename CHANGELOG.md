@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Adding a book again under a name that differs only in case keeps it.** On a Mac (or any
+  case-insensitive disk), adding `mini.epub` when the library held `Mini.epub` deleted the copy
+  just written, and a library scan then removed the loose file too, leaving no copy of the
+  book. The library now keeps the one file.
+- **Two different files with the same name are two books.** A text, Word, RTF or comic file
+  without its own identifier is known by its title and author, and a text file's title is its
+  name, so adding `home/notes.txt` replaced the book from `work/notes.txt`. Such a file now
+  updates a book only when it's the same file or the library's own copy; anything else is filed
+  as a new book. An EPUB with the publisher's identifier still updates its book in place.
 - **News in your language.** Local, each other place, each interest and each Google News topic
   can read another country's edition of Google News: pick Deutschland, España, France, Italia or
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day

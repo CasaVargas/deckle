@@ -746,3 +746,91 @@ fn a_kept_comic_remembers_its_reading_order_through_a_re_add() {
     let json = std::fs::read_to_string(book.sidecar_path()).unwrap();
     assert!(json.contains(r#""direction": "rtl""#), "{json}");
 }
+
+#[test]
+fn re_adding_under_a_name_that_differs_only_in_case_keeps_the_book() {
+    // #83: on a case-insensitive file system `Mini.epub` and `mini.epub` are one file.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("probe"), b"").unwrap();
+    if !tmp.path().join("PROBE").exists() {
+        eprintln!("skipped: the file system is case-sensitive");
+        return;
+    }
+    let root = tmp.path().join("Library");
+    let lib = Library::new(&root);
+    let first = epub(
+        &tmp.path().join("Mini.epub"),
+        "urn:x:m",
+        "Mini",
+        "Ada Writer",
+    );
+    let book = lib.add(&first).unwrap().book;
+    std::fs::create_dir_all(tmp.path().join("again")).unwrap();
+    let again = epub(
+        &tmp.path().join("again/mini.epub"),
+        "urn:x:m",
+        "Mini",
+        "Ada Writer",
+    );
+    let added = lib.add(&again).unwrap();
+    assert!(!added.new);
+    assert_eq!(added.book.dir, book.dir);
+    assert!(added.book.source_path().is_file(), "the library copy stays");
+
+    // The same through a scan: the loose copy is filed, and one copy is left.
+    epub(&root.join("MINI.epub"), "urn:x:m", "Mini", "Ada Writer");
+    let report = lib.scan();
+    assert!(report.problems.is_empty(), "{:?}", report.problems);
+    let kept = lib.list();
+    assert_eq!(kept.len(), 1);
+    assert!(kept[0].source_path().is_file(), "the library copy stays");
+}
+
+#[test]
+fn two_text_files_with_the_same_name_are_two_books() {
+    // #29: a text file's id comes from its title, which is its file name.
+    let tmp = tempfile::tempdir().unwrap();
+    let lib = Library::new(tmp.path().join("Library"));
+    for dir in ["work", "home"] {
+        std::fs::create_dir_all(tmp.path().join(dir)).unwrap();
+    }
+    let work = tmp.path().join("work/notes.txt");
+    let home = tmp.path().join("home/notes.txt");
+    std::fs::write(&work, "Notes from work.\n").unwrap();
+    std::fs::write(&home, "Notes from home.\n").unwrap();
+    let a = lib.add(&work).unwrap();
+    let b = lib.add(&home).unwrap();
+    assert!(a.new && b.new, "a different book is not an edit");
+    assert_ne!(a.book.dir, b.book.dir);
+    assert_eq!(lib.list().len(), 2);
+    assert_eq!(
+        std::fs::read_to_string(a.book.source_path()).unwrap(),
+        "Notes from work.\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(b.book.source_path()).unwrap(),
+        "Notes from home.\n"
+    );
+    // Each has its own identity, so a scan sees two books and no second copy.
+    assert_ne!(a.book.sidecar.id, b.book.sidecar.id);
+    let report = lib.scan();
+    assert_eq!(report.books, 2);
+    assert!(report.problems.is_empty(), "{:?}", report.problems);
+    // The same file again is the same book; so is an edit of the library's own copy.
+    let again = lib.add(&work).unwrap();
+    assert!(!again.new);
+    assert_eq!(again.book.dir, a.book.dir);
+    let again = lib.add(&home).unwrap();
+    assert!(!again.new);
+    assert_eq!(again.book.dir, b.book.dir);
+    std::fs::write(b.book.source_path(), "Notes from home, edited.\n").unwrap();
+    let edited = lib.add(&b.book.source_path()).unwrap();
+    assert!(!edited.new);
+    assert_eq!(edited.book.dir, b.book.dir);
+    assert_eq!(edited.book.sidecar.id, b.book.sidecar.id);
+    std::fs::write(a.book.source_path(), "Notes from work, edited.\n").unwrap();
+    let edited = lib.add(&a.book.source_path()).unwrap();
+    assert!(!edited.new);
+    assert_eq!(edited.book.dir, a.book.dir);
+    assert_eq!(lib.list().len(), 2);
+}
