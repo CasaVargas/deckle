@@ -399,8 +399,9 @@ mod tests {
         assert!(TEMPLATES.len() >= 4);
         for (i, t) in TEMPLATES.iter().enumerate() {
             let cell = |r: usize, c: usize| t.0[r].as_bytes()[c];
-            for r in 0..5 {
-                assert_eq!(t.0[r].len(), 5, "template {i}");
+            assert_eq!(t.0.len(), 5, "template {i}");
+            for (r, row) in t.0.iter().enumerate() {
+                assert_eq!(row.len(), 5, "template {i}");
                 for c in 0..5 {
                     assert_eq!(cell(r, c), cell(4 - r, 4 - c), "template {i} ({r},{c})");
                 }

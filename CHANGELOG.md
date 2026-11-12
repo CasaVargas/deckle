@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.14.0 — the paper in color on a Colorsoft, and two-column PDFs read in order
 
 - **The paper in color on a Colorsoft.** Once Deckle has seen a Kindle with a color screen (a
   Colorsoft or a Scribe Colorsoft), the paper keeps its photos in color, as the Kindle book and as
