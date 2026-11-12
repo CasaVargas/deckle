@@ -2801,14 +2801,19 @@ fn load_digest_config(path: &Path) -> Result<deckle_digest::Config, String> {
 }
 
 /// The paper `--paper` names (many papers §3): `None` or `main` is digest.toml's.
+/// Its Kindle paper is in color once a color Kindle has been seen (color Kindle design §2).
 fn paper_config(path: &Path, paper: Option<&str>) -> Result<deckle_digest::Config, String> {
-    match paper {
-        None => load_digest_config(path),
+    let mut cfg = match paper {
+        None => load_digest_config(path)?,
         Some(slug) => {
             load_digest_config(path)?;
-            deckle_digest::papers::load_one(path, slug)
+            deckle_digest::papers::load_one(path, slug)?
         }
-    }
+    };
+    cfg.color_kindle = deckle_core::screens::any_color_kindle(
+        &deckle_core::devices::DeviceRegistry::load(&deckle_core::devices::default_registry_file()),
+    );
+    Ok(cfg)
 }
 
 /// Every paper, main first. What was skipped is said on stderr.
@@ -3400,7 +3405,7 @@ fn digest(
             // `[email] pdf`: the Scribe's PDF, which its pen writes on, instead of the EPUB
             let attach = match cfg.email.pdf {
                 true => {
-                    let (screen, photos) = deckle_digest::Config::KINDLE_PDF;
+                    let (screen, photos) = cfg.kindle_pdf();
                     match built.pdf(screen, photos) {
                         Some(p) => p.to_path_buf(),
                         None => {
@@ -4646,7 +4651,7 @@ fn queue_kindle_pdf(
     if !cfg.sync.any_pdf_paper() {
         return None;
     }
-    let (screen, photos) = deckle_digest::Config::KINDLE_PDF;
+    let (screen, photos) = cfg.kindle_pdf();
     let Some(pdf) = built.pdf(screen, photos) else {
         return Some("the Kindle's PDF of the paper wasn't built".into());
     };

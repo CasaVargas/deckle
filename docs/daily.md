@@ -12,7 +12,7 @@ A morning paper built on your machine: weather (Open-Meteo), local news (a Googl
 plus any local feeds), your RSS/Atom feeds, Powerball and Mega Millions, a horoscope Deckle
 writes itself, a puzzle page, and "On this day" from Wikipedia. Its cover is a generated front page, so the
 Kindle library tile is today's paper. Every story comes with its full text and photos (grayscale
-for e-ink), pulled Reader-View style from the publisher, so nothing sends you to a browser; a
+for e-ink, in color once Deckle has seen a [color Kindle](#photos-on-a-color-kindle)), pulled Reader-View style from the publisher, so nothing sends you to a browser; a
 story behind a paywall runs as a brief. No keys or accounts; a source that fails prints
 "unavailable today" and the paper still ships.
 
@@ -94,6 +94,15 @@ them for one device, using the id `deckle devices` shows. Push, prune and clippi
 connection. `clippings = true` writes the Kindle's highlights as Markdown into the highlights
 folder (set it once with `deckle highlights export --to <dir>`, or in **Settings → Kindles**). It
 runs once per plug-in, in the same connection as a push or a prune when there is one.
+
+### Photos on a color Kindle
+
+Once Deckle has seen a Kindle with a color screen (a Colorsoft or a Scribe Colorsoft, by its
+serial or its name, over USB or in the Devices tab), the paper keeps its photos in color: the
+Kindle book, the Scribe PDF, the email and the Morgue's copy. Every Kindle gets the same paper; a
+gray one shows the color photos in gray, as it would have anyway. `photos = "color"` or
+`"gray"` under `[sync]` settles it for every Kindle, for a Colorsoft Deckle doesn't recognize or
+a house without one any more.
 
 ### Tomorrow's paper, so far
 
@@ -599,7 +608,7 @@ deckle digest email forget               # delete the keychain entry
   email carries the Kindle Scribe PDF ([below](#the-paper-as-a-pdf-on-a-kindle-scribe))
   instead of the EPUB, so Amazon delivers it as a PDF the pen writes straight onto rather than
   converting it into a Kindle book. Every Kindle on that address gets the PDF. The 45 MB cap
-  still applies; photos are gray. Not yet checked on a device: email one paper and draw on it
+  still applies; photos are gray unless there's a [color Kindle](#photos-on-a-color-kindle). Not yet checked on a device: email one paper and draw on it
   before relying on it.
 
 When the email goes out, the paper skips the USB outbox (`usb_too = true` sends both, so two
@@ -723,7 +732,8 @@ Mac.
 
 - **Color.** With any `photos = "color"` export, the stories' photos are kept in color and the
   run also writes a color edition beside the paper (`color/` in the build folder). The Kindle's
-  paper, the Morgue and email still get the grayscale one.
+  paper, the Morgue and email still get the grayscale one, unless there's a
+  [color Kindle](#photos-on-a-color-kindle).
 - **No Kindle Previewer needed.** Without Previewer, `digest run` still builds the paper and puts
   it in the export folders, says "no Kindle copy" in its notes, and queues nothing for a Kindle.
   Long reads then print inside the paper, unless an export takes them (`books = true`). With
@@ -966,7 +976,7 @@ Deckle remembers every Kobo and PocketBook it has seen in `readers.json` beside 
 Each Kindle takes the paper as the Kindle book (the default) or as a PDF laid out for a Kindle
 Scribe's screen (1860 × 2480), the one kind of file its pen writes straight onto. The PDF is the
 [PDF edition](#the-pdf-edition-and-a-remarkable): fixed pages, the paper's fonts, the crossword
-grid in its place, gray photos.
+grid in its place, gray photos (in color with a [color Kindle](#photos-on-a-color-kindle)).
 
 - **Choose it per Kindle:** on its **This Kindle** page in the Devices tab, **Send the paper
   as → PDF to write on** (beside its Name), or `deckle devices paper pdf` with it plugged in

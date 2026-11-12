@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The paper in color on a Colorsoft.** Once Deckle has seen a Kindle with a color screen (a
+  Colorsoft or a Scribe Colorsoft), the paper keeps its photos in color, as the Kindle book and as
+  the Scribe PDF; they were always gray before. A gray Kindle gets the same paper and shows them
+  in gray. `photos = "color"` or `"gray"` under `[sync]` settles it by hand
+  ([docs/daily.md](docs/daily.md#photos-on-a-color-kindle)).
 - **Two-column PDFs read one column, then the other.** A journal's tight gutter (about 1.3 em,
   as in *Nature Communications*) is now found, so a left-column line is no longer glued to the
   right-column line beside it. Citations set as superscripts ("generations⁵³⁻⁵⁵") stay in

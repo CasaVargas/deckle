@@ -235,6 +235,22 @@ pub fn for_kindle(name: &str) -> Screen {
     screen
 }
 
+/// The screen of a Kindle the device registry has seen: by its serial, else the end of its
+/// name (an MTP product name ends in the serial), else its name.
+pub fn for_profile(p: &crate::devices::DeviceProfile) -> Screen {
+    p.serial
+        .as_deref()
+        .into_iter()
+        .chain(p.model_hint.split_whitespace().last())
+        .find_map(for_kindle_serial)
+        .unwrap_or_else(|| for_kindle(&p.model_hint))
+}
+
+/// Some Kindle the registry has seen has a color screen (color Kindle design §2).
+pub fn any_color_kindle(registry: &crate::devices::DeviceRegistry) -> bool {
+    registry.profiles.iter().any(|p| for_profile(p).color)
+}
+
 /// The screen to fit pages to on `target`; `None` for a folder, which has no device. The
 /// serial decides when the tables know it, else the name.
 pub fn for_target(target: &Target) -> Option<Screen> {
@@ -414,6 +430,35 @@ mod tests {
         // A 2025 Scribe Colorsoft isn't in the table yet: the Scribe, in colour.
         let scs = for_target(&mtp(Some("G004VX0000000000"), "Kindle Scribe Colorsoft")).unwrap();
         assert_eq!((scs.width, scs.color), (1860, true));
+    }
+
+    #[test]
+    fn a_seen_kindle_is_in_color_by_its_serial_else_its_name() {
+        use crate::devices::{DeviceProfile, DeviceRegistry};
+        let seen = |serial: Option<&str>, name: &str| DeviceProfile {
+            serial: serial.map(str::to_owned),
+            ..DeviceProfile::new("k", name)
+        };
+        // a Colorsoft by its serial, under a name that says nothing
+        assert!(for_profile(&seen(Some("G003H20000000000"), "Kindle")).color);
+        // a Scribe Colorsoft over MTP, its serial not in the tables yet
+        let scs = for_profile(&seen(Some("G004VX0000000000"), "Kindle Scribe Colorsoft"));
+        assert_eq!((scs.width, scs.color), (1860, true));
+        // a Scribe whose serial is only at the end of its product name; a bus address isn't one
+        let scribe = seen(Some("1:2"), "Kindle Scribe G6G3X50000000000");
+        assert_eq!(for_profile(&scribe).width, 1860);
+        assert!(!for_profile(&scribe).color);
+
+        let mut reg = DeviceRegistry::default();
+        assert!(!any_color_kindle(&reg));
+        reg.profiles.push(scribe);
+        assert!(!any_color_kindle(&reg));
+        reg.profiles.push(scs_profile());
+        assert!(any_color_kindle(&reg));
+    }
+
+    fn scs_profile() -> crate::devices::DeviceProfile {
+        crate::devices::DeviceProfile::new("mtp:G004VX0000000000", "Kindle Scribe Colorsoft")
     }
 
     #[test]

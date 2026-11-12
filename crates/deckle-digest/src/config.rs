@@ -175,6 +175,10 @@ pub struct Config {
     /// Keep the photos in color whatever the exports say (`digest build --bundle`).
     #[serde(skip)]
     pub force_color: bool,
+    /// A Kindle with a color screen has been seen (the device registry), so the Kindle's paper
+    /// keeps its photos in color unless `[sync] photos` says otherwise (color Kindle design §2).
+    #[serde(skip)]
+    pub color_kindle: bool,
     /// What the Kindles shared (tests); the default is `shelf.json` beside `digest.toml`.
     #[serde(skip)]
     pub shelf_path: Option<PathBuf>,
@@ -310,6 +314,7 @@ impl Default for Config {
             press_path: None,
             puzzle_path: None,
             force_color: false,
+            color_kindle: false,
             shelf_path: None,
             reader: String::new(),
             kindle: String::new(),
@@ -821,6 +826,10 @@ pub struct SyncConfig {
     /// so it's only written to the file when turned off.
     #[serde(skip_serializing_if = "is_true")]
     pub cookbook: bool,
+    /// The Kindles' paper photos: in color or gray for every Kindle. Unset follows the Kindles
+    /// Deckle has seen: color once one with a color screen has been (color Kindle design §2).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub photos: Option<Photos>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub devices: BTreeMap<String, DeviceSync>,
 }
@@ -834,6 +843,7 @@ impl Default for SyncConfig {
             readership: true,
             shelf: true,
             cookbook: true,
+            photos: None,
             devices: BTreeMap::new(),
         }
     }
@@ -2044,6 +2054,16 @@ impl Config {
                 .iter()
                 .any(|e| e.photos == Photos::Color || e.format == ExportFormat::Bundle)
             || (self.remarkable.enabled && self.remarkable.photos() == Photos::Color)
+            || self.kindle_photos() == Photos::Color
+    }
+
+    /// The photos in the Kindle's paper (the edition's EPUB and the Kindle's PDF): `[sync]
+    /// photos` when set, else color once a color Kindle has been seen.
+    pub fn kindle_photos(&self) -> Photos {
+        self.sync.photos.unwrap_or(match self.color_kindle {
+            true => Photos::Color,
+            false => Photos::Gray,
+        })
     }
 
     /// The edition bundles the build makes: one with the long reads, one without, as the
@@ -2060,9 +2080,11 @@ impl Config {
         out
     }
 
-    /// The PDF a Kindle that takes the paper as a PDF gets: a Scribe's screen, gray photos.
-    pub const KINDLE_PDF: (crate::pdf::Screen, Photos) =
-        (crate::pdf::Screen::KindleScribe, Photos::Gray);
+    /// The PDF a Kindle that takes the paper as a PDF gets: a Scribe's screen, the Kindle's
+    /// photos.
+    pub fn kindle_pdf(&self) -> (crate::pdf::Screen, Photos) {
+        (crate::pdf::Screen::KindleScribe, self.kindle_photos())
+    }
 
     /// The PDF editions the build makes: one per screen and photos an export folder, the
     /// reMarkable or a Kindle taking the paper as a PDF asks for.
@@ -2077,7 +2099,7 @@ impl Config {
             out.push((self.remarkable.screen, self.remarkable.photos()));
         }
         if self.sync.any_pdf_paper() || (self.email.enabled && self.email.pdf) {
-            out.push(Self::KINDLE_PDF);
+            out.push(self.kindle_pdf());
         }
         out.sort_by_key(|(s, p)| (format!("{s:?}"), *p == Photos::Color));
         out.dedup();
@@ -2594,10 +2616,42 @@ mod tests {
     }
 
     #[test]
+    fn a_color_kindle_gets_the_paper_in_color() {
+        let mut c = Config::default();
+        assert_eq!(c.kindle_photos(), Photos::Gray);
+        assert!(!c.wants_color());
+        // a color Kindle seen: the Kindle's paper, its PDF and the fetch keep color
+        c.color_kindle = true;
+        assert_eq!(c.kindle_photos(), Photos::Color);
+        assert!(c.wants_color());
+        c.sync.set_device_paper("G000AAAA", PaperFormat::Pdf);
+        assert_eq!(
+            c.pdfs_wanted(),
+            [(crate::pdf::Screen::KindleScribe, Photos::Color)]
+        );
+        // `[sync] photos` wins either way, and is only written when set
+        c.sync.photos = Some(Photos::Gray);
+        assert_eq!(c.kindle_photos(), Photos::Gray);
+        assert!(!c.wants_color());
+        let text = toml::to_string(&c.sync).unwrap();
+        assert!(text.contains("photos = \"gray\""), "{text}");
+        let back: SyncConfig = toml::from_str(&text).unwrap();
+        assert_eq!(back.photos, Some(Photos::Gray));
+        c.color_kindle = false;
+        c.sync.photos = Some(Photos::Color);
+        assert_eq!(c.kindle_photos(), Photos::Color);
+        assert!(
+            !toml::to_string(&SyncConfig::default())
+                .unwrap()
+                .contains("photos")
+        );
+    }
+
+    #[test]
     fn a_kindle_can_take_the_paper_as_a_pdf() {
         let mut c = Config::default();
         assert!(!c.sync.any_pdf_paper());
-        assert!(!c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        assert!(!c.pdfs_wanted().contains(&c.kindle_pdf()));
         c.sync.set_device_paper("G000AAAA", PaperFormat::Pdf);
         assert_eq!(c.sync.for_device("G000AAAA").paper, PaperFormat::Pdf);
         // the same Kindle by its pre-serial id, and another Kindle keeps the book
@@ -2605,7 +2659,7 @@ mod tests {
             c.sync.for_device("Kindle/Kindle#G000BBBB").paper,
             PaperFormat::Book
         );
-        assert!(c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        assert!(c.pdfs_wanted().contains(&c.kindle_pdf()));
         let text = toml::to_string(&c.sync).unwrap();
         assert!(text.contains("paper = \"pdf\""), "{text}");
         let back: SyncConfig = toml::from_str(&text).unwrap();
@@ -2615,9 +2669,9 @@ mod tests {
         assert!(c.sync.devices.is_empty());
         // an emailed PDF wants it too, while the email is on
         c.email.pdf = true;
-        assert!(!c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        assert!(!c.pdfs_wanted().contains(&c.kindle_pdf()));
         c.email.enabled = true;
-        assert!(c.pdfs_wanted().contains(&Config::KINDLE_PDF));
+        assert!(c.pdfs_wanted().contains(&c.kindle_pdf()));
         let text = toml::to_string(&c.email).unwrap();
         assert!(text.contains("pdf = true"), "{text}");
         assert!(

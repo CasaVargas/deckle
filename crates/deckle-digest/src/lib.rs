@@ -793,11 +793,12 @@ pub fn build_gathered(
     let gathered = gather_with(cfg, date, now, net, opts);
     let stem = edition_stem(cfg, date);
     let path = out_dir.join(format!("{stem}.epub"));
-    write_edition(&gathered, &path)?;
+    // The Kindle's paper: gray for e-ink, in color once a color Kindle has been seen.
+    write_edition_as(&gathered, &path, cfg.kindle_photos())?;
     let mut long_reads = Vec::new();
     for lr in &gathered.long_reads {
         let p = out_dir.join(format!("{}.epub", lr.file_stem));
-        longread::write_long_read(lr, date, &p)?;
+        longread::write_long_read_as(lr, date, &p, cfg.kindle_photos())?;
         long_reads.push(p);
     }
     let mut r = report(&gathered.edition, path);
