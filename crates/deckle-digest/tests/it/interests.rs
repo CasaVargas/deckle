@@ -48,7 +48,7 @@ fn rss(items: &[(&str, &str, u32)]) -> Vec<u8> {
 
 /// The URL the gatherer requests for a search under the default 72-hour window.
 fn search(q: &str) -> String {
-    google_news_url(q, 72)
+    google_news_url(q, 72, None, None, None)
 }
 
 /// `[[interests]] name = "Rust", not = ["Rust Belt"]`, as `Config::parse` normalises it.
@@ -300,7 +300,7 @@ fn a_story_shared_with_local_or_an_earlier_interest_prints_once_and_the_later_re
         plain("Panthers", vec!["Bryce Young".into()]),
         plain("Bryce Young", vec![]),
     ];
-    let local_url = google_news_url("Moore County NC", cfg.local.max_age_hours);
+    let local_url = google_news_url("Moore County NC", cfg.local.max_age_hours, None, None, None);
     let net = Fake::new(vec![
         (
             local_url,

@@ -484,7 +484,7 @@ fn interest_rows_show_the_search_and_filter_the_cache_for_relevance() {
         max_age_hours: 72,
         ..Default::default()
     }];
-    let url = google_news_url("\"Rust\"", 72);
+    let url = google_news_url("\"Rust\"", 72, None, None, None);
     assert!(live_urls(&s.cfg).contains(&url), "{:?}", live_urls(&s.cfg));
     s.live.feeds.insert(
         url,
@@ -702,12 +702,18 @@ fn other_places_have_rows_tiles_and_headlines() {
             google_news: "Asheville NC".into(),
             feeds: Vec::new(),
             max_items: Some(4),
+            hl: None,
+            gl: None,
+            ceid: None,
         },
         PlaceNews {
             name: "Boone".into(),
             google_news: String::new(),
             feeds: vec!["https://boone.example/rss".into()],
             max_items: None,
+            hl: None,
+            gl: None,
+            ceid: None,
         },
     ];
     // each place's sources are fetched, under Local's limits

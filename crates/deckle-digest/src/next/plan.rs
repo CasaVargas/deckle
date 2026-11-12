@@ -149,7 +149,7 @@ fn local_stories(
 ) -> Option<Vec<LiveItem>> {
     let mut urls: Vec<String> = feeds.to_vec();
     if !search.trim().is_empty() {
-        urls.insert(0, google_news_url(search, cfg.local.max_age_hours));
+        urls.insert(0, google_news_url(search, cfg.local.max_age_hours, cfg.local.hl.as_deref(), cfg.local.gl.as_deref(), cfg.local.ceid.as_deref()));
     }
     let got: Vec<&super::live::Fetched> = urls
         .iter()
@@ -316,7 +316,7 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                 let urls: Vec<String> = it
                     .searches()
                     .iter()
-                    .map(|q| google_news_url(q, it.max_age_hours))
+                    .map(|q| google_news_url(q, it.max_age_hours, it.hl.as_deref(), it.gl.as_deref(), it.ceid.as_deref()))
                     .chain(it.feeds.iter().cloned())
                     .collect();
                 let got: Vec<&super::live::Fetched> = urls

@@ -301,6 +301,9 @@ export type SectionKind = "reading" | "weather" | "local" | "interests" | "feeds
 export interface InterestConfig {
   name: string;
   query?: string;
+  hl?: string;
+  gl?: string;
+  ceid?: string;
   also?: string[];
   not?: string[];
   feeds?: string[];
@@ -322,6 +325,9 @@ export interface FeedConfig {
   url: string;
   urls?: string[];
   topic?: string;
+  hl?: string;
+  gl?: string;
+  ceid?: string;
   full_text?: boolean | "lead";
   max_items: number;
 }
@@ -350,7 +356,7 @@ export interface DailyConfig {
   photos: boolean;
   max_photos: number;
   sections: SectionKind[];
-  local: { google_news: string; feeds: string[]; max_items: number; max_age_hours: number; places?: PlaceNews[] };
+  local: { google_news: string; hl?: string; gl?: string; ceid?: string; feeds: string[]; max_items: number; max_age_hours: number; places?: PlaceNews[] };
   /** `[[interests]]`; absent while there are none. */
   interests?: InterestConfig[];
   feeds: FeedConfig[];
@@ -519,6 +525,9 @@ export interface ExportReport {
 export interface PlaceNews {
   name: string;
   google_news: string;
+  hl?: string;
+  gl?: string;
+  ceid?: string;
   feeds: string[];
   /** Stories; `[local] max_items` when absent. */
   max_items?: number;

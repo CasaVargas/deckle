@@ -325,6 +325,15 @@ impl Default for Config {
 pub struct LocalConfig {
     /// A Google News search, e.g. "Moore County NC". Empty: none.
     pub google_news: String,
+    /// Google News language override. None: en-US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hl: Option<String>,
+    /// Google News country override. None: US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gl: Option<String>,
+    /// Google News edition override. None: US:en.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ceid: Option<String>,
     /// Local paper RSS/Atom feeds, merged with the search.
     pub feeds: Vec<String>,
     pub max_items: usize,
@@ -344,6 +353,15 @@ pub struct PlaceNews {
     /// A Google News search. Empty: the name, as typed.
     #[serde(default)]
     pub google_news: String,
+        /// Google News language override. None: en-US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hl: Option<String>,
+    /// Google News country override. None: US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gl: Option<String>,
+    /// Google News edition override. None: US:en.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ceid: Option<String>,
     /// Local paper RSS/Atom feeds, merged with the search.
     #[serde(default)]
     pub feeds: Vec<String>,
@@ -365,6 +383,9 @@ impl Default for LocalConfig {
     fn default() -> Self {
         LocalConfig {
             google_news: String::new(),
+            hl: None,
+            gl: None,
+            ceid: None,
             feeds: Vec::new(),
             max_items: 12,
             max_age_hours: 72,
@@ -511,6 +532,15 @@ pub struct FeedConfig {
     /// A Google News topic, merged in ahead of `url` and `urls`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<Topic>,
+        /// Google News language override. None: en-US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hl: Option<String>,
+    /// Google News country override. None: US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gl: Option<String>,
+    /// Google News edition override. None: US:en.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ceid: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub full_text: Option<FullText>,
     /// 0 means unset: [`Config::parse`] makes it 5 for a topic entry, else 10.
@@ -560,6 +590,15 @@ pub struct InterestConfig {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub query: String,
+        /// Google News language override. None: en-US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hl: Option<String>,
+    /// Google News country override. None: US.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gl: Option<String>,
+    /// Google News edition override. None: US:en.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ceid: Option<String>,
     /// More searches, merged; a story naming one is relevant.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub also: Vec<String>,

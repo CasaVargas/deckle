@@ -82,7 +82,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
     };
     if !cfg.local.google_news.trim().is_empty() {
         push(Source {
-            url: google_news_url(&cfg.local.google_news, cfg.local.max_age_hours),
+            url: google_news_url(&cfg.local.google_news, cfg.local.max_age_hours, cfg.local.hl.as_deref(), cfg.local.gl.as_deref(), cfg.local.ceid.as_deref()),
             max_age_hours: cfg.local.max_age_hours,
             // spares: Local drops what an earlier section printed, then refills
             max_items: cfg.local.max_items.saturating_add(SPARE),
@@ -102,7 +102,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
         let max_items = p.max_items.unwrap_or(cfg.local.max_items);
         if !p.search().is_empty() {
             push(Source {
-                url: google_news_url(p.search(), cfg.local.max_age_hours),
+                url: google_news_url(p.search(), cfg.local.max_age_hours, p.hl.as_deref(), p.gl.as_deref(), p.ceid.as_deref()),
                 max_age_hours: cfg.local.max_age_hours,
                 max_items,
                 briefs: true,
@@ -121,7 +121,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
     for i in &cfg.interests {
         for q in i.searches() {
             push(Source {
-                url: google_news_url(&q, i.max_age_hours),
+                url: google_news_url(&q, i.max_age_hours, i.hl.as_deref(), i.gl.as_deref(), i.ceid.as_deref()),
                 max_age_hours: i.max_age_hours,
                 max_items: i.max_items.saturating_add(SPARE),
                 briefs: true,

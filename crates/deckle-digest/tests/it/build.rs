@@ -439,6 +439,9 @@ fn place(name: &str, search: &str) -> PlaceNews {
         google_news: search.into(),
         feeds: Vec::new(),
         max_items: None,
+        hl: None,
+        gl: None,
+        ceid: None,
     }
 }
 
