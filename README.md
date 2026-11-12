@@ -66,7 +66,7 @@ finish. Deckle sets one each morning:
 - **The front page is the cover.** Masthead, date, weather and the lead headlines, so your
   reader's library tile is today's paper. Ten masthead faces to choose from.
 - **Whole stories, with photos.** Each story is pulled in full, the way Reader View does it, with
-  photos turned grayscale for e-ink. Nothing opens a browser. A paywalled story runs as a brief.
+  photos turned grayscale for e-ink, or kept in color for a Colorsoft. Nothing opens a browser. A paywalled story runs as a brief.
 - **Your town and what you follow.** Weather, local news for your town and any other place, each
   RSS or Atom feed as its own section, today's events from your calendars, and **interests**: a
   topic ("Rust", your team) searched every morning and kept only when a headline names it.

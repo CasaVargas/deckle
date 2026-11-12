@@ -2261,3 +2261,49 @@ fn yesterdays_returns_from_a_bundle_export_tick_the_word_search() {
     assert_eq!(found.found, ["COURT", "MILL"]);
     assert!(!found.done);
 }
+
+/// The JPEG photos in an EPUB, cover left out: whether each is in color.
+fn photos_in_color(epub: &PathBuf) -> Vec<bool> {
+    let mut z = read_zip(epub);
+    let names: Vec<String> = z
+        .file_names()
+        .map(|n| n.unwrap().into_owned())
+        .filter(|n| n.ends_with(".jpg") && !n.contains("cover"))
+        .collect();
+    names
+        .iter()
+        .map(|n| {
+            let mut bytes = Vec::new();
+            z.by_name(n).unwrap().read_to_end(&mut bytes).unwrap();
+            image::load_from_memory(&bytes).unwrap().color() != image::ColorType::L8
+        })
+        .collect()
+}
+
+#[test]
+fn a_color_kindle_gets_the_paper_and_its_pdf_in_color() {
+    let mut c = config();
+    let out = tempfile::tempdir().unwrap();
+    let gray = build(&c, date(), now(), out.path(), &fake_with_articles).unwrap();
+    let photos = photos_in_color(&gray.epub);
+    assert!(!photos.is_empty(), "the paper has photos");
+    assert!(photos.iter().all(|c| !c), "gray for a gray Kindle");
+
+    c.color_kindle = true;
+    c.sync
+        .set_device_paper("G004VX0000000000", deckle_digest::config::PaperFormat::Pdf);
+    let out = tempfile::tempdir().unwrap();
+    let r = build(&c, date(), now(), out.path(), &fake_with_articles).unwrap();
+    assert!(
+        photos_in_color(&r.epub).iter().all(|c| *c),
+        "color for a Colorsoft"
+    );
+    assert!(
+        r.pdf(deckle_digest::pdf::Screen::KindleScribe, Photos::Color)
+            .is_some()
+    );
+    assert!(
+        r.pdf(deckle_digest::pdf::Screen::KindleScribe, Photos::Gray)
+            .is_none()
+    );
+}
