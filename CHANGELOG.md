@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Long older Kindle books in other alphabets import.** A MOBI 6 book with no page breaks,
+  more than about 200 KB of text and letters outside ASCII (Cyrillic, Greek, accented Latin)
+  failed to import; it's now cut into parts between paragraphs as English
+  books are.
 - **News in your language.** Local, each other place, each interest and each Google News topic
   can read another country's edition of Google News: pick Deutschland, España, France, Italia or
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day
