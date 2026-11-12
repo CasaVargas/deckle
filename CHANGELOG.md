@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **A send no longer removes a different book from the Kindle.** Two books can get the same
+  Deckle ASIN, and sending one removed the other, with its notes and highlights. Deckle now
+  removes an older copy only when its title and author match too; another book with the same
+  ASIN stays, and the send says so.
 - **News in your language.** Local, each other place, each interest and each Google News topic
   can read another country's edition of Google News: pick Deutschland, España, France, Italia or
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day
