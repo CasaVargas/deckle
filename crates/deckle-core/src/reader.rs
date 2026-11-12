@@ -232,8 +232,9 @@ pub fn deliver(reader: &Reader, bytes: &[u8], name: &str) -> std::io::Result<Pat
     Ok(to)
 }
 
-/// Removes all but the newest `keep` books in `Deckle/` whose name starts with `prefix` (the
-/// editions, named by date so the name sorts them), sparing `exempt`, each with its KOReader
+/// Removes all but the newest `keep` books in `Deckle/` named `<prefix>YYYY-MM-DD.<ext>` (one
+/// paper's editions, named by date so the name sorts them; another paper's and undated names
+/// are left alone, see [`crate::deliver::is_dated`]), sparing `exempt`, each with its KOReader
 /// sidecar. Returns the names removed.
 pub fn prune(
     reader: &Reader,
@@ -248,7 +249,7 @@ pub fn prune(
     let mut names: Vec<String> = rd
         .flatten()
         .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with(prefix) && n.ends_with(ext))
+        .filter(|n| crate::deliver::is_dated(n, prefix) && n.ends_with(ext))
         // On a PocketBook `.epub` would also match a `.kepub.epub` someone put there.
         .filter(|n| ext == ".kepub.epub" || !n.ends_with(".kepub.epub"))
         .filter(|n| !exempt.iter().any(|x| stem(x) == stem(n)))
@@ -518,6 +519,29 @@ mod tests {
                 .join("Deckle/deckle-daily-2026-10-03.kepub.epub")
                 .is_file()
         );
+    }
+
+    #[test]
+    fn prune_counts_only_this_papers_dated_editions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let k = Reader::Kobo(fake_kobo(tmp.path(), ""));
+        let mut all = Vec::new();
+        for d in ["01", "02", "03", "04"] {
+            all.push(k.file_name(&format!("deckle-daily-2026-10-{d}")));
+        }
+        for d in ["02", "03", "04"] {
+            all.push(k.file_name(&format!("deckle-daily-kid-courier-2026-10-{d}")));
+        }
+        all.push(k.file_name("deckle-daily-email-test"));
+        for n in &all {
+            deliver(&k, b"KEPUB", n).unwrap();
+        }
+        let gone = prune(&k, "deckle-daily-", 3, &[]).unwrap();
+        assert_eq!(gone, ["deckle-daily-2026-10-01.kepub.epub"]);
+        let dir = tmp.path().join(FOLDER);
+        for n in all.iter().filter(|n| !gone.contains(n)) {
+            assert!(dir.join(n).is_file(), "{n} was removed");
+        }
     }
 
     #[test]

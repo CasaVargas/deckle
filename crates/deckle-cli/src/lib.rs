@@ -4756,8 +4756,8 @@ fn digest_prune(cfg: &deckle_digest::Config) -> deckle_core::queue::Prune {
     }
 }
 
-/// One prune per paper that goes to the Kindle `id`: those for any Kindle and those bound to
-/// it, each by its own prefix and `keep` (many papers §4).
+/// One prune per paper that goes to the Kindle (or e-reader) `id`: those for any device and
+/// those bound to it, each by its own prefix and `keep` (many papers §4).
 fn prunes_for(papers: &[deckle_digest::Config], id: &str) -> Vec<deckle_core::queue::Prune> {
     papers
         .iter()
@@ -5160,7 +5160,7 @@ fn reader_sync(
         queue,
         reader,
         plan,
-        &digest_prune(cfg),
+        &prunes_for(papers, &id),
         &mut |i, n, name| eprintln!("push: {i}/{n} {name}"),
     )
     .map_err(|e| e.to_string())?;
