@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **A failed re-send keeps the book already on the reader.** Sending a book again to a Kindle
+  that mounts as a drive, a folder, or putting a kept copy back emptied the old file before
+  writing the new one, so a full drive or a pulled cable left half a book under its name. The
+  new copy is now written beside the old one under a hidden `.part` name and swapped in only
+  when it's whole, as Kobo and PocketBook deliveries already were. A `.part` file a pulled
+  cable leaves is removed on a later delivery once it's an hour old. A re-send needs room for
+  one more copy for that moment (jloutsch/deckle#74).
+- **Re-sending to an MTP Kindle checks the room first.** A book sent again to a Kindle Scribe,
+  Colorsoft or 2024 Paperwhite deleted the copy there and then sent the new one, so a full
+  Kindle ended up with neither. Now a send that won't fit is refused before anything is
+  deleted, and the message says the old copy is as it was. A Kindle that can rename over MTP
+  gets the new copy beside the old one and swapped in; whether any Kindle can is not known
+  yet, so the others still delete first, and a cable pulled mid-send there still loses the old
+  copy (the error now says so) and can leave a partial file under the book's name until the
+  book is sent again. Details in [docs/devices.md](docs/devices.md) (jloutsch/deckle#74).
+- **A download from an MTP Kindle that stops short is an error.** A cable pulled while a book
+  or its reading position was read off the Kindle returned the bytes so far as the whole file,
+  so a kept copy could be cut off. Now it fails and says how much came (jloutsch/deckle#32).
+- **Put back can't leave a Kindle with neither copy.** It removed the upgraded book first and
+  then copied the kept one in, so a failed copy left nothing. Now the kept book goes in first,
+  then the upgraded one comes out, then the kept reading position and notes go in (last,
+  because a `.kfx` and an `.azw3` of one name share a `.sdr` folder). If any step fails, the
+  upgrade stays in the list to try again, and the message says what's on the Kindle (jloutsch/deckle#33).
+- **One bad outbox entry no longer stops the push.** An entry that couldn't be sent (an empty
+  prepared book, a file the Kindle refused) stopped every push at that entry, so nothing after
+  it went, ever. Now the rest go, and the push prints `not sent: <name>: <why>` for it on every
+  push while it waits in the outbox; this holds for Kindles, Kobos and PocketBooks. A reader
+  unplugged mid-push, or one that can't be written to at all, stops it with one message instead
+  of one per entry (one locked book on it costs only that book), and a reader mounted at a fixed folder that's been unplugged gets nothing
+  written into that folder, whether by a push, a send, a put back or a restore. `digest push`
+  fails only when the push stopped, and `digest run` only when its own edition didn't go, so the
+  scheduler no longer prints the paper again all day for another book's sake; the Daily tab
+  lists what wasn't sent under the run's result. A run still counts as failed while any connected
+  reader hasn't got the edition, even if another has, and the scheduler's re-run then sends it
+  again, replacing the copy, to the readers that already have it. A failed prune after the deliveries is a warning beside them, not an error that hid
+  them. A book and a PDF with the same name now both go; only a paper's dated edition queued in
+  both forms sends just one, and if that one fails the other goes in its place. A book whose
+  X-Ray, Word Wise or thumbnail couldn't be written is now counted as delivered with a warning,
+  so `kindle upgrade` and `library reprocess` no longer say the old copy is still there when
+  the new one replaced it (jloutsch/deckle#75).
 - **A second paper no longer deletes the first one's editions on a Kobo or PocketBook.** Its
   files (`deckle-daily-kid-courier-…`) were counted as the main paper's editions and took their
   places, so every one of the main paper's editions was removed, the newest too. Now only a

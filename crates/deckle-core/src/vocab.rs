@@ -30,7 +30,7 @@ pub fn read_vocab_on(conn: &mut Conn<'_>) -> Result<Option<VocabFiles>, DeliverE
             Ok(Some(VocabFiles { db, wal }))
         }
         Target::Mtp(_) => {
-            let mtp_err = |e: deckle_transport::session::MtpError| DeliverError::Mtp(e.to_string());
+            let mtp_err = |e: deckle_transport::session::MtpError| DeliverError::from(e);
             let dev = match conn.mtp() {
                 Some(Ok(dev)) => dev,
                 Some(Err(e)) => return Err(mtp_err(e)),

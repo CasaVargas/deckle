@@ -398,6 +398,13 @@ pub fn restore_on(
         };
         match copy_in(conn, &src, &b.file) {
             Ok(()) => report.restored.push(b.file),
+            // The Kindle is gone: the rest would fail the same way.
+            Err(e) if e.stops_push() => {
+                return Err(format!(
+                    "{e}; {} book(s) were restored before that",
+                    report.restored.len()
+                ));
+            }
             Err(e) => report.failed.push((b.file, e.to_string())),
         }
     }
@@ -500,6 +507,36 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_restore_onto_an_unplugged_kindle_writes_nothing_and_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        let one = tmp.path().join("one");
+        std::fs::create_dir_all(&one).unwrap();
+        std::fs::write(one.join("Side.azw3"), b"side").unwrap();
+        std::fs::write(one.join("Other.azw3"), b"other").unwrap();
+        let done = backup_on(
+            &mut Conn::new(&Target::Folder(one)),
+            &[shelved("Side.azw3", 4), shelved("Other.azw3", 5)],
+            &tmp.path().join("backups"),
+            "Kindle Scribe",
+            "deckle-daily-",
+            "2026-10-23T22:30:00Z",
+        )
+        .unwrap();
+        // A fixed mount point: the folder stays after the Kindle is unplugged.
+        let mount = tmp.path().join("Kindle");
+        std::fs::create_dir_all(&mount).unwrap();
+        let target = Target::MassStorage(deckle_core::deliver::Device {
+            root: mount.clone(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: None,
+        });
+        assert!(restore_on(&mut Conn::new(&target), &done.dir, &[]).is_err());
+        assert!(std::fs::read_dir(&mount).unwrap().next().is_none());
     }
 
     #[test]

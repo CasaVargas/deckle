@@ -34,7 +34,7 @@ pub fn read_on(
         Target::Folder(dir) => Ok(read_dir(dir, stems)),
         Target::MassStorage(dev) => Ok(read_dir(&dev.root.join("documents"), stems)),
         Target::Mtp(_) => {
-            let mtp_err = |e: deckle_transport::session::MtpError| DeliverError::Mtp(e.to_string());
+            let mtp_err = |e: deckle_transport::session::MtpError| DeliverError::from(e);
             let dev = match conn.mtp() {
                 Some(Ok(dev)) => dev,
                 Some(Err(e)) => return Err(mtp_err(e)),
