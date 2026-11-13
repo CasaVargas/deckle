@@ -881,7 +881,16 @@ deckle wireless status           # listening or not, the address, readers seen, 
 - **One reader at a time,** as with calibre. A second one is told Deckle is busy. A session ends
   after 15 minutes with nothing to do, or when the reader disconnects.
 - **The password** is kept as is in `wireless.json` beside `digest.toml`, readable only by you,
-  because calibre's challenge needs it. Only addresses on your home network are answered.
+  because calibre's challenge needs it. Only addresses on your home network are answered. It's
+  optional, but it is what keeps other devices on your network from taking the connection:
+  without one, any of them can connect as a reader and keep yours waiting. Five wrong passwords
+  from one address are free; then that address waits, doubling up to five minutes.
+- **Connecting:** a reader has 10 seconds to finish connecting (and give the password), and
+  until it has, it doesn't hold the connection, so a device that connects and says nothing keeps
+  no one out. Four can be connecting at once, one per address. The same reader reconnecting
+  after a Wi-Fi drop takes over its old session.
+- **Limits:** a reader's book list may name up to 50,000 books, and Deckle remembers the last 32
+  readers it has seen.
 - **If calibre's own wireless server is on,** it already has port 9090 and the broadcast ports:
   give Deckle another port and type the address on the reader, or turn calibre's off.
 - **Who runs it:** the watcher, like the reader server. `deckle wireless serve` runs it in the

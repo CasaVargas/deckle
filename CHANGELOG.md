@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **calibre's wireless connection can't be held by a silent device.** A reader now takes the
+  connection only once it has finished connecting (10 seconds at most), so a device that
+  connects and says nothing no longer keeps every reader out. A wrong password slows that
+  address, the same reader reconnecting after a Wi-Fi drop takes over its old session, and a
+  reader's book list and the readers remembered are capped. A password is still optional; the
+  card now says what it protects ([docs/daily.md](docs/daily.md#calibres-wireless-connection-books-over-wi-fi)).
 - **The web app keeps to its folders.** Every path it sends, and every folder saved in its
   settings, now has to lie in `/config`, `/data` or `DECKLE_WEB_ROOTS`, as the file browser
   always did; before, a signed-in browser could list, copy or delete files elsewhere on the

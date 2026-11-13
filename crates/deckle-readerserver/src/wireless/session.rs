@@ -101,9 +101,18 @@ pub fn password_hash(password: &str, challenge: &str) -> String {
     h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// The most books a reader's listing may name.
+pub const MAX_BOOKS: usize = 50_000;
+/// The most bytes of messages a reader's listing may take, counted as they arrive.
+pub const MAX_LISTING_BYTES: u64 = 64 * 1024 * 1024;
+
 pub struct Session<S> {
     stream: S,
     pub device: Device,
+    /// The longest message taken now: small until the handshake is done.
+    max_frame: usize,
+    /// Bytes of messages read so far.
+    read_bytes: u64,
 }
 
 impl<S: Read + Write> Session<S> {
@@ -111,7 +120,15 @@ impl<S: Read + Write> Session<S> {
         Session {
             stream,
             device: Device::default(),
+            max_frame: frame::MAX_HANDSHAKE_JSON,
+            read_bytes: 0,
         }
+    }
+
+    /// After the handshake: the reader may send what it holds, in messages up to the usual
+    /// size.
+    pub fn trusted(&mut self) {
+        self.max_frame = frame::MAX_JSON;
     }
 
     pub fn stream(&mut self) -> &mut S {
@@ -125,7 +142,8 @@ impl<S: Read + Write> Session<S> {
 
     /// The reader's next answer, which must be OK.
     fn answer(&mut self) -> Result<Value, Error> {
-        let (code, arg) = frame::read(&mut self.stream)?;
+        let (code, arg, len) = frame::read_max(&mut self.stream, self.max_frame)?;
+        self.read_bytes += len as u64;
         match Op::from_code(code) {
             Some(Op::Ok) => Ok(arg),
             Some(Op::Noop) => Err(Error::HungUp),
@@ -274,17 +292,29 @@ impl<S: Read + Write> Session<S> {
                 "canSupportBookFormatSync": true,
             }),
         )?;
-        let count = r["count"].as_u64().unwrap_or(0).min(1_000_000) as usize;
-        let mut ids = Vec::with_capacity(count.min(10_000));
-        for _ in 0..count {
-            ids.push(self.answer()?);
+        let count = r["count"].as_u64().unwrap_or(0);
+        if count > MAX_BOOKS as u64 {
+            return Err(protocol(format!(
+                "the reader says it has {count} books; Deckle reads at most {MAX_BOOKS}"
+            )));
         }
-        let mut books: Vec<OnReader> = ids.iter().map(on_reader).collect();
-        let wanted: Vec<(usize, Value)> = ids
-            .iter()
+        let start = self.read_bytes;
+        let too_long = |s: &Self| s.read_bytes - start > MAX_LISTING_BYTES;
+        // Each entry kept as the little it's needed for, not as the message it came in.
+        let mut books: Vec<OnReader> = Vec::with_capacity((count as usize).min(10_000));
+        let mut keys: Vec<Value> = Vec::with_capacity((count as usize).min(10_000));
+        for _ in 0..count {
+            let id = self.answer()?;
+            if too_long(self) {
+                return Err(protocol("the reader's book list is too long"));
+            }
+            books.push(on_reader(&id));
+            keys.push(id["priKey"].clone());
+        }
+        let wanted: Vec<(usize, Value)> = keys
+            .into_iter()
             .enumerate()
             .filter(|(i, _)| !known(&books[*i]))
-            .map(|(i, id)| (i, id["priKey"].clone()))
             .collect();
         if !wanted.is_empty() {
             frame::send(
@@ -297,6 +327,9 @@ impl<S: Read + Write> Session<S> {
             }
             for (i, _) in &wanted {
                 let full = on_reader(&self.answer()?);
+                if too_long(self) {
+                    return Err(protocol("the reader's book list is too long"));
+                }
                 books[*i] = OnReader {
                     lpath: books[*i].lpath.clone(),
                     ..full

@@ -181,27 +181,27 @@ pub fn serve_on(
             settings.port
         ));
     }
-    let active: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let shared = Arc::new(Shared {
+        active: Mutex::new(None),
+        pending: Mutex::new(Pending::default()),
+        generation: std::sync::atomic::AtomicU64::new(0),
+        limiter: deckle_core::limiter::FailureLimiter::new("calibre wireless"),
+    });
     let mut sessions: Vec<std::thread::JoinHandle<()>> = Vec::new();
     while let Err(std::sync::mpsc::TryRecvError::Empty) = stop.try_recv() {
         match listener.accept() {
-            Ok((mut stream, peer)) => {
+            Ok((stream, peer)) => {
                 if !is_private(peer.ip()) {
                     continue;
                 }
-                let busy = active.lock().map(|a| a.clone()).unwrap_or(None);
-                if let Some(other) = busy {
-                    let _ = stream.set_nonblocking(false);
-                    let _ = session::busy(&mut stream, &other);
+                // A connection is only pending until its handshake: a few at once, one per
+                // address, so a silent one can't keep a reader out.
+                let Some(slot) = Pending::reserve(&shared, peer.ip()) else {
                     continue;
-                }
-                if let Ok(mut a) = active.lock() {
-                    *a = Some("a reader".into());
-                }
-                let (s, active, stopping) = (settings.clone(), active.clone(), stopping.clone());
+                };
+                let (s, shared, stopping) = (settings.clone(), shared.clone(), stopping.clone());
                 sessions.push(std::thread::spawn(move || {
-                    run(stream, &s, &active, &stopping);
-                    free(&active);
+                    run(stream, &s, &shared, slot, &stopping);
                 }));
                 sessions.retain(|h| !h.is_finished());
             }
@@ -225,33 +225,203 @@ fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
 }
 
+/// How long a new connection has for its whole handshake.
+pub const HANDSHAKE_TIME: Duration = Duration::from_secs(10);
+/// Connections whose handshake isn't done yet, at once.
+pub const PENDING_MAX: usize = 4;
+
+/// The reader being served: only one at a time, as calibre does.
+struct Active {
+    name: String,
+    uuid: String,
+    generation: u64,
+    /// To close it when the same reader comes back on a new connection.
+    stream: Option<TcpStream>,
+}
+
+#[derive(Default)]
+struct Pending {
+    total: usize,
+    peers: std::collections::HashMap<IpAddr, usize>,
+}
+
+impl Pending {
+    /// Holds a pending place for `peer`, or `None` when there's none to give.
+    fn reserve(shared: &Arc<Shared>, peer: IpAddr) -> Option<PendingSlot> {
+        let key = deckle_core::limiter::peer_key(peer);
+        let mut p = shared.pending.lock().ok()?;
+        if p.total >= PENDING_MAX || p.peers.get(&key).copied().unwrap_or(0) >= 1 {
+            return None;
+        }
+        p.total += 1;
+        *p.peers.entry(key).or_default() += 1;
+        Some(PendingSlot {
+            shared: shared.clone(),
+            key,
+            held: true,
+        })
+    }
+}
+
+/// A pending place, given back once the handshake is over, however it ended.
+struct PendingSlot {
+    shared: Arc<Shared>,
+    key: IpAddr,
+    held: bool,
+}
+
+impl PendingSlot {
+    fn release(&mut self) {
+        if !std::mem::take(&mut self.held) {
+            return;
+        }
+        if let Ok(mut p) = self.shared.pending.lock() {
+            p.total = p.total.saturating_sub(1);
+            if let Some(n) = p.peers.get_mut(&self.key) {
+                *n -= 1;
+                if *n == 0 {
+                    p.peers.remove(&self.key);
+                }
+            }
+        }
+    }
+}
+
+impl Drop for PendingSlot {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+struct Shared {
+    active: Mutex<Option<Active>>,
+    pending: Mutex<Pending>,
+    generation: std::sync::atomic::AtomicU64,
+    /// Wrong passwords, per address.
+    limiter: deckle_core::limiter::FailureLimiter,
+}
+
+/// A connection with a deadline for the whole handshake: each read gets only what's left.
+pub struct Timed {
+    tcp: TcpStream,
+    deadline: Option<Instant>,
+}
+
+impl Timed {
+    pub fn tcp(&mut self) -> &mut TcpStream {
+        &mut self.tcp
+    }
+}
+
+impl io::Read for Timed {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if let Some(d) = self.deadline {
+            let left = d.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "the handshake took too long",
+                ));
+            }
+            self.tcp.set_read_timeout(Some(left))?;
+        }
+        self.tcp.read(buf)
+    }
+}
+
+impl io::Write for Timed {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.tcp.write(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.tcp.flush()
+    }
+}
+
 /// One reader's session: handshake, what it holds, then its jobs until it goes or goes quiet.
+/// The reader takes the one session only once its handshake (and password) is done.
 fn run(
     stream: TcpStream,
     settings: &Settings,
-    active: &Mutex<Option<String>>,
+    shared: &Shared,
+    mut pending: PendingSlot,
     stopping: &AtomicBool,
 ) {
     let store = settings.store();
     let _ = stream.set_nonblocking(false);
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(60)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(60)));
-    let peer = stream
-        .peer_addr()
-        .map(|a| a.ip().to_string())
-        .unwrap_or_default();
-    let mut s = Session::new(stream);
+    let peer_ip = stream.peer_addr().map(|a| a.ip()).ok();
+    let peer = peer_ip.map(|ip| ip.to_string()).unwrap_or_default();
+    let close = stream.try_clone().ok();
+    let password = settings.password.as_deref().filter(|p| !p.is_empty());
+    // With a password, failing to give it (or to finish in time) counts against the address.
+    let attempt = match (password, peer_ip) {
+        (Some(_), Some(ip)) => match shared.limiter.begin(ip) {
+            Ok(a) => Some(a),
+            Err(_) => {
+                store.log(format!(
+                    "a reader at {peer} was turned away: too many wrong passwords"
+                ));
+                return;
+            }
+        },
+        _ => None,
+    };
+    let mut s = Session::new(Timed {
+        tcp: stream,
+        deadline: Some(Instant::now() + HANDSHAKE_TIME),
+    });
     let t = now();
     let device = match s.handshake(&settings.library, settings.password.as_deref(), &t, &t) {
         Ok(d) => d.clone(),
         Err(e) => {
-            free(active);
+            if let Some(a) = attempt {
+                a.failed();
+            }
             store.log(format!("a reader at {peer} couldn't connect: {e}"));
             return;
         }
     };
-    if let Ok(mut a) = active.lock() {
-        *a = Some(device.name.clone());
+    if let Some(a) = attempt {
+        a.succeeded();
+    }
+    pending.release();
+    s.stream().deadline = None;
+    let _ = s
+        .stream()
+        .tcp()
+        .set_read_timeout(Some(Duration::from_secs(60)));
+    s.trusted();
+
+    let generation = shared
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1;
+    {
+        let Ok(mut active) = shared.active.lock() else {
+            return;
+        };
+        match active.as_mut() {
+            // The same reader back on a new connection (a Wi-Fi drop): its old session ends.
+            Some(old) if old.uuid == device.store_uuid => {
+                if let Some(old_stream) = old.stream.take() {
+                    let _ = old_stream.shutdown(std::net::Shutdown::Both);
+                }
+            }
+            Some(other) => {
+                let other = other.name.clone();
+                drop(active);
+                let _ = session::busy(s.stream(), &other);
+                return;
+            }
+            None => {}
+        }
+        *active = Some(Active {
+            name: device.name.clone(),
+            uuid: device.store_uuid.clone(),
+            generation,
+            stream: close,
+        });
     }
     store.log(format!("{} connected from {peer}", device.name));
     let ended = match session_loop(&mut s, &device, settings, &store, stopping) {
@@ -271,29 +441,32 @@ fn run(
         }
         Err(e) => format!("lost: {e}"),
     };
-    // Another reader may connect from here on; the connection itself closes when `s` goes.
-    free(active);
-    store.update(|r| {
-        if let Some(seen) = r.readers.get_mut(&device.store_uuid) {
-            seen.connected = false;
-            seen.last_seen = now();
+    // Only while this is still the reader's current session: a newer one has taken over.
+    let current = shared.active.lock().is_ok_and(|mut a| {
+        let mine = a.as_ref().is_some_and(|x| x.generation == generation);
+        if mine {
+            *a = None;
         }
+        mine
     });
-    store.log(format!("{} disconnected ({ended})", device.name));
-}
-
-fn free(active: &Mutex<Option<String>>) {
-    if let Ok(mut a) = active.lock() {
-        *a = None;
+    if current {
+        store.update(|r| {
+            if let Some(seen) = r.readers.get_mut(&device.store_uuid) {
+                seen.connected = false;
+                seen.last_seen = now();
+            }
+        });
+        store.log(format!("{} disconnected ({ended})", device.name));
+    } else {
+        store.log(format!(
+            "{} reconnected; the old connection closed",
+            device.name
+        ));
     }
 }
 
 /// Reads what the reader holds and records it.
-fn refresh(
-    s: &mut Session<TcpStream>,
-    device: &Device,
-    store: &Store,
-) -> Result<(), session::Error> {
+fn refresh(s: &mut Session<Timed>, device: &Device, store: &Store) -> Result<(), session::Error> {
     let before = store.readers().readers.get(&device.store_uuid).cloned();
     let known = |b: &OnReader| {
         before.as_ref().is_some_and(|p| {
@@ -334,12 +507,28 @@ fn refresh(
                 ..kept
             },
         );
+        // Any device on the network can call itself a new reader: the longest unseen go.
+        while r.readers.len() > MAX_READERS {
+            let Some(oldest) = r
+                .readers
+                .iter()
+                .filter(|(k, s)| !s.connected && **k != device.store_uuid)
+                .min_by(|a, b| a.1.last_seen.cmp(&b.1.last_seen))
+                .map(|(k, _)| k.clone())
+            else {
+                break;
+            };
+            r.readers.remove(&oldest);
+        }
     });
     Ok(())
 }
 
+/// Readers remembered in `readers.json`.
+pub const MAX_READERS: usize = 32;
+
 fn session_loop(
-    s: &mut Session<TcpStream>,
+    s: &mut Session<Timed>,
     device: &Device,
     settings: &Settings,
     store: &Store,
@@ -380,7 +569,7 @@ fn session_loop(
             last_traffic = Instant::now();
         }
         // The reader speaks unasked only to hang up (a NOOP, then it closes).
-        if hung_up(s.stream(), settings.poll)? {
+        if hung_up(s.stream().tcp(), settings.poll)? {
             return Ok("the reader hung up");
         }
     }
@@ -429,11 +618,7 @@ fn inbox_from(collections: &serde_json::Value, books: &[OnReader]) -> Option<Str
 
 /// calibre's shelves as KOReader collections (calibre bridge design §6.2), when the watcher
 /// has rules and the reader can say what it has.
-fn shelve(
-    s: &mut Session<TcpStream>,
-    device: &Device,
-    store: &Store,
-) -> Result<(), session::Error> {
+fn shelve(s: &mut Session<Timed>, device: &Device, store: &Store) -> Result<(), session::Error> {
     use deckle_core::shelves::{OnDrive, Shelves, diff, wanted};
     let sets = store.shelves();
     let Some(seen) = store.readers().readers.get(&device.store_uuid).cloned() else {
@@ -442,9 +627,11 @@ fn shelve(
     if sets.is_empty() || seen.no_collections {
         return Ok(());
     }
-    s.stream().set_read_timeout(Some(COLLECTIONS_WAIT))?;
+    s.stream().tcp().set_read_timeout(Some(COLLECTIONS_WAIT))?;
     let asked = s.collections();
-    s.stream().set_read_timeout(Some(Duration::from_secs(60)))?;
+    s.stream()
+        .tcp()
+        .set_read_timeout(Some(Duration::from_secs(60)))?;
     let collections = match asked {
         Ok(c) => c,
         Err(session::Error::Io(e))
@@ -587,7 +774,7 @@ fn paper_jobs(device: &Device, store: &Store) -> Vec<Job> {
 }
 
 fn do_jobs(
-    s: &mut Session<TcpStream>,
+    s: &mut Session<Timed>,
     device: &Device,
     store: &Store,
     jobs: &[Job],

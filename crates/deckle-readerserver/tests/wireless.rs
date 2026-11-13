@@ -31,6 +31,8 @@ struct Koreader {
     collections: std::collections::BTreeMap<String, Vec<String>>,
     /// A KOReader too old for collections: it never answers for them.
     old: bool,
+    /// The count it claims for its books, when not how many it has.
+    claimed_count: Option<u64>,
 }
 
 impl Koreader {
@@ -48,6 +50,7 @@ impl Koreader {
             ejected: false,
             collections: Default::default(),
             old: false,
+            claimed_count: None,
         }
     }
 
@@ -130,7 +133,7 @@ impl Koreader {
                 Op::GetBookCount => {
                     Self::ok(
                         &mut s,
-                        json!({"willStream": true, "willScan": true, "count": self.books.len()}),
+                        json!({"willStream": true, "willScan": true, "count": self.claimed_count.unwrap_or(self.books.len() as u64)}),
                     );
                     for (i, b) in self.books.iter().enumerate() {
                         Self::ok(
@@ -253,7 +256,15 @@ impl Drop for Server {
 }
 
 fn server(dir: &Path, password: Option<&str>, idle: Duration) -> Server {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    server_on(
+        TcpListener::bind("127.0.0.1:0").unwrap(),
+        dir,
+        password,
+        idle,
+    )
+}
+
+fn server_on(listener: TcpListener, dir: &Path, password: Option<&str>, idle: Duration) -> Server {
     let addr = listener.local_addr().unwrap();
     let settings = Settings {
         bind: "127.0.0.1".into(),
@@ -716,4 +727,151 @@ fn a_book_to_make_is_imported_and_cleaned_before_it_goes() {
     let bytes = std::fs::read(inbox.join(made)).unwrap();
     assert!(zip::ZipArchive::new(std::io::Cursor::new(bytes)).is_ok());
     assert!(lpaths.iter().any(|l| l.ends_with(".txt")));
+}
+
+/// Finding: one silent connection kept every reader out until it timed out.
+#[test]
+fn a_silent_connection_doesnt_keep_a_reader_out() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Both families on one port, so the silent peer (::1) and the reader (127.0.0.1) are two
+    // addresses, as on a real network.
+    let Ok(listener) = TcpListener::bind("[::]:0") else {
+        return; // no IPv6 here
+    };
+    let port = listener.local_addr().unwrap().port();
+    let _srv = server_on(
+        listener,
+        &tmp.path().join("state"),
+        Some("secret"),
+        Duration::from_secs(30),
+    );
+    // Connects and says nothing.
+    let Ok(_silent) = TcpStream::connect(("::1", port)) else {
+        return;
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    let mut ko = Koreader::new(&tmp.path().join("inbox"));
+    ko.password = Some("secret".into());
+    ko.run(std::net::SocketAddr::from(([127, 0, 0, 1], port)), |k| {
+        k.asked.contains(&(Op::FreeSpace as u64))
+    });
+    assert_eq!(ko.busy, None);
+    assert!(ko.asked.contains(&(Op::GetBookCount as u64)));
+}
+
+#[test]
+fn one_address_gets_one_pending_connection() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = server(&tmp.path().join("state"), None, Duration::from_secs(30));
+    let mut first = TcpStream::connect(srv.addr).unwrap();
+    first
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    // The first is asked to begin the handshake.
+    assert!(frame::read(&mut first).is_ok());
+    // A second from the same address while the first is pending is closed unanswered.
+    let mut second = TcpStream::connect(srv.addr).unwrap();
+    second
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut b = [0u8; 1];
+    assert!(matches!(
+        std::io::Read::read(&mut second, &mut b),
+        Ok(0) | Err(_)
+    ));
+}
+
+#[test]
+fn a_huge_first_message_is_refused_before_it_is_read() {
+    use std::io::Write;
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = server(&tmp.path().join("state"), None, Duration::from_secs(30));
+    let mut s = TcpStream::connect(srv.addr).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    assert!(frame::read(&mut s).is_ok());
+    // Claims a 1 MiB answer; the server gives up at the length.
+    let _ = s.write_all(b"1048576[");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && !srv
+            .store
+            .readers()
+            .log
+            .iter()
+            .any(|l| l.contains("1048576 bytes"))
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        srv.store
+            .readers()
+            .log
+            .iter()
+            .any(|l| l.contains("1048576 bytes")),
+        "{:?}",
+        srv.store.readers().log
+    );
+}
+
+#[test]
+fn a_reader_claiming_a_million_books_is_let_go() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = server(&tmp.path().join("state"), None, Duration::from_secs(30));
+    let mut ko = Koreader::new(&tmp.path().join("inbox"));
+    ko.claimed_count = Some(1_000_000);
+    ko.run(srv.addr, |_| false);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && !srv
+            .store
+            .readers()
+            .log
+            .iter()
+            .any(|l| l.contains("1000000 books"))
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        srv.store
+            .readers()
+            .log
+            .iter()
+            .any(|l| l.contains("1000000 books")),
+        "{:?}",
+        srv.store.readers().log
+    );
+}
+
+#[test]
+fn the_same_reader_reconnecting_replaces_its_old_session() {
+    let tmp = tempfile::tempdir().unwrap();
+    let srv = server(&tmp.path().join("state"), None, Duration::from_secs(30));
+    let addr = srv.addr;
+    let inbox = tmp.path().join("inbox");
+    let first_inbox = inbox.clone();
+    let first = std::thread::spawn(move || {
+        let mut ko = Koreader::new(&first_inbox);
+        ko.store_uuid = Some("same-reader".into());
+        // Never hangs up by itself: only the server closing ends it.
+        ko.run(addr, |_| false);
+        ko
+    });
+    std::thread::sleep(Duration::from_millis(700));
+    let mut again = Koreader::new(&inbox);
+    again.store_uuid = Some("same-reader".into());
+    again.run(addr, |k| k.asked.contains(&(Op::FreeSpace as u64)));
+    assert_eq!(again.busy, None);
+    let first = first.join().unwrap();
+    assert_eq!(first.busy, None);
+    std::thread::sleep(Duration::from_millis(300));
+    // The old session's end didn't mark the reader gone while the new one held it.
+    assert!(
+        srv.store
+            .readers()
+            .log
+            .iter()
+            .any(|l| l.contains("reconnected")),
+        "{:?}",
+        srv.store.readers().log
+    );
 }
