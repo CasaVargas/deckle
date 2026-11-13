@@ -304,10 +304,23 @@ impl Store {
         Ok(out)
     }
 
+    /// The recipe in `path`. Its id is the file's name, whatever the file says inside: the id
+    /// builds the paths it is written back to and its pictures' (#76: an inner id of
+    /// `../../x` wrote outside the cookbook, and a copy's edits went over the original).
     fn read(path: &Path) -> Result<Option<Saved>, String> {
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if !is_id(stem) {
+            return Err(format!("{}: not a recipe file name", path.display()));
+        }
         match std::fs::read_to_string(path) {
-            Ok(text) => serde_json::from_str(&text)
-                .map(Some)
+            Ok(text) => serde_json::from_str::<Saved>(&text)
+                .map(|mut saved| {
+                    saved.id = stem.to_owned();
+                    Some(saved)
+                })
                 .map_err(|e| format!("{}: {e}", path.display())),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(format!("{}: {e}", path.display())),

@@ -116,6 +116,56 @@ pub fn puzzles_kinds() -> Vec<KindInfo> {
         .collect()
 }
 
+/// A seed goes to the page as text: a JavaScript number holds 53 bits, so a `u64` sent as a
+/// number came back changed and "Make again" made a different book (#77). Sidecars written
+/// before hold a number, which still reads.
+mod seed_text {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Seed {
+        Text(String),
+        Number(u64),
+    }
+
+    impl Seed {
+        fn value<E: serde::de::Error>(self) -> Result<u64, E> {
+            match self {
+                Seed::Number(n) => Ok(n),
+                Seed::Text(t) => t
+                    .trim()
+                    .parse()
+                    .map_err(|_| E::custom(format!("not a seed: {t:?}"))),
+            }
+        }
+    }
+
+    pub fn serialize<S: Serializer>(seed: &u64, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&seed.to_string())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
+        Seed::deserialize(d)?.value()
+    }
+
+    pub mod opt {
+        use super::Seed;
+        use serde::{Deserialize, Deserializer, Serializer};
+
+        pub fn serialize<S: Serializer>(seed: &Option<u64>, s: S) -> Result<S::Ok, S::Error> {
+            match seed {
+                Some(n) => s.serialize_some(&n.to_string()),
+                None => s.serialize_none(),
+            }
+        }
+
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+            Option::<Seed>::deserialize(d)?.map(Seed::value).transpose()
+        }
+    }
+}
+
 /// What the tab asks for. Saved beside each book, so it can be made again.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -133,6 +183,7 @@ pub struct BookRequest {
     pub quotes: String,
     /// A picture file for a nonogram's first puzzle.
     pub picture: Option<String>,
+    #[serde(with = "seed_text::opt")]
     pub seed: Option<u64>,
     /// YYYY-MM-DD; empty is today.
     pub date: String,
@@ -440,6 +491,7 @@ fn first_puzzle(b: &Book) -> Option<PuzzleDto> {
 pub struct PreviewDto {
     pub title: String,
     pub subtitle: String,
+    #[serde(with = "seed_text")]
     pub seed: u64,
     pub date: String,
     /// Pages the whole book will have.
@@ -530,6 +582,7 @@ pub struct MadeBook {
     pub title: String,
     pub subtitle: String,
     pub date: String,
+    #[serde(with = "seed_text")]
     pub seed: u64,
     pub pages: usize,
     pub puzzles: usize,
@@ -597,8 +650,10 @@ pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook,
     let bytes = pdf::render(&b, page).map_err(|e| e.to_string())?;
     let dir = folder();
     std::fs::create_dir_all(&dir).map_err(|e| format!("can't create {}: {e}", dir.display()))?;
-    let name = book::file_name(&b);
-    let path = dir.join(&name);
+    // Made again with the same seed and date it's the same book, under the same name, and
+    // keeps the bundles it was sent as; a different book that happens to share the name takes
+    // a free one instead of writing over it (#77).
+    let (name, path, bundles) = place(&dir, &book::file_name(&b), b.seed, &b.date.to_string());
     std::fs::write(&path, &bytes).map_err(|e| format!("can't write {}: {e}", path.display()))?;
     let made = MadeBook {
         path: path.to_string_lossy().into_owned(),
@@ -617,11 +672,35 @@ pub fn puzzles_make(events: Arc<dyn Events>, r: BookRequest) -> Result<MadeBook,
             date: b.date.to_string(),
             ..r
         },
-        bundles: Vec::new(),
+        bundles,
         solved_ipad: None,
     };
     write_sidecar(&path, &made)?;
     Ok(made)
+}
+
+/// Where a book with `seed` and `date` goes in `dir`: `name`, or `<stem> (2).pdf` and on while
+/// that is another book's. A name that holds this same book is taken again, with its bundles.
+fn place(dir: &Path, name: &str, seed: u64, date: &str) -> (String, PathBuf, Vec<String>) {
+    let stem = name.strip_suffix(".pdf").unwrap_or(name);
+    let mut n = 1;
+    loop {
+        let name = match n {
+            1 => format!("{stem}.pdf"),
+            n => format!("{stem} ({n}).pdf"),
+        };
+        let path = dir.join(&name);
+        if !path.exists() && !path.with_extension("json").exists() {
+            return (name, path, Vec::new());
+        }
+        if let Ok(old) = read_sidecar(&path)
+            && old.seed == seed
+            && old.date == date
+        {
+            return (name, path, old.bundles);
+        }
+        n += 1;
+    }
 }
 
 /// The book's sidecar, `<book>.json` beside the PDF.
@@ -835,6 +914,65 @@ pub fn sunday_set_at(
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn a_seed_goes_to_the_page_as_text_and_comes_back_whole() {
+        // #77: as a JSON number it lost its low bits in JavaScript.
+        let r = BookRequest {
+            seed: Some(12133687457270686202),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["seed"], "12133687457270686202");
+        let back: BookRequest = serde_json::from_value(json).unwrap();
+        assert_eq!(back.seed, Some(12133687457270686202));
+        // A sidecar from before holds a number; none is none.
+        let old: BookRequest = serde_json::from_str(r#"{"seed": 5}"#).unwrap();
+        assert_eq!(old.seed, Some(5));
+        let none: BookRequest = serde_json::from_str(r#"{"seed": null}"#).unwrap();
+        assert_eq!(none.seed, None);
+        assert!(serde_json::from_str::<BookRequest>(r#"{"seed": "x"}"#).is_err());
+    }
+
+    #[test]
+    fn a_different_book_never_takes_an_existing_books_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let name = "Mazes 2026-11-12 a863.pdf";
+        let (first, path, _) = place(tmp.path(), name, 7, "2026-11-12");
+        assert_eq!(first, name);
+        std::fs::write(&path, b"%PDF").unwrap();
+        // A file with no sidecar we can read is someone else's: never written over.
+        assert_eq!(
+            place(tmp.path(), name, 7, "2026-11-12").0,
+            "Mazes 2026-11-12 a863 (2).pdf"
+        );
+        let made = MadeBook {
+            path: path.to_string_lossy().into_owned(),
+            name: name.into(),
+            kind: "maze".into(),
+            title: "Mazes".into(),
+            subtitle: String::new(),
+            date: "2026-11-12".into(),
+            seed: 7,
+            pages: 1,
+            puzzles: 1,
+            bytes: 4,
+            warnings: Vec::new(),
+            request: BookRequest::default(),
+            bundles: vec!["/iPad/b.decklepuzzles".into()],
+            solved_ipad: None,
+        };
+        write_sidecar(&path, &made).unwrap();
+        // The same book again: its name, and the bundles it was sent as.
+        let (again, _, bundles) = place(tmp.path(), name, 7, "2026-11-12");
+        assert_eq!(again, name);
+        assert_eq!(bundles, made.bundles);
+        // Another seed that folds to the same name: a name of its own.
+        assert_eq!(
+            place(tmp.path(), name, 8, "2026-11-12").0,
+            "Mazes 2026-11-12 a863 (2).pdf"
+        );
+    }
     use super::*;
     use crate::events::NoEvents;
 

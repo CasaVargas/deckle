@@ -322,3 +322,27 @@ fn total_overflow_is_dropped_not_panicked() {
 fn iso_durations_that_overflow_are_none() {
     assert_eq!(iso_minutes("P1000000000000000W10000000000000000D"), None);
 }
+
+#[test]
+fn a_saved_page_names_a_picture_only_in_its_own_folder() {
+    // #65: a saved page could name any image on the disk as the recipe's picture.
+    let page = |image: &str| {
+        format!(
+            r#"<html><head><script type="application/ld+json">{{"@type":"Recipe","name":"Soup","image":"{image}","recipeIngredient":["water"],"recipeInstructions":["Boil."]}}</script></head><body></body></html>"#
+        )
+    };
+    let base = "file:///home/me/Inbox/Recipes/soup.html";
+    let beside = parse_recipe(&page("soup_files/pic.jpg"), base).unwrap();
+    assert_eq!(
+        beside.image_url.as_deref(),
+        Some("file:///home/me/Inbox/Recipes/soup_files/pic.jpg")
+    );
+    for outside in [
+        "/home/me/Pictures/me.jpg",
+        "../../Pictures/me.jpg",
+        "file:///etc/x.png",
+    ] {
+        let r = parse_recipe(&page(outside), base).unwrap();
+        assert_eq!(r.image_url, None, "{outside}");
+    }
+}
