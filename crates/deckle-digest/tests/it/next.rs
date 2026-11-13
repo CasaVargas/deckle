@@ -484,7 +484,7 @@ fn interest_rows_show_the_search_and_filter_the_cache_for_relevance() {
         max_age_hours: 72,
         ..Default::default()
     }];
-    let url = google_news_url("\"Rust\"", 72);
+    let url = google_news_url("\"Rust\"", 72, None, None, None);
     assert!(live_urls(&s.cfg).contains(&url), "{:?}", live_urls(&s.cfg));
     s.live.feeds.insert(
         url,
@@ -702,12 +702,18 @@ fn other_places_have_rows_tiles_and_headlines() {
             google_news: "Asheville NC".into(),
             feeds: Vec::new(),
             max_items: Some(4),
+            hl: None,
+            gl: None,
+            ceid: None,
         },
         PlaceNews {
             name: "Boone".into(),
             google_news: String::new(),
             feeds: vec!["https://boone.example/rss".into()],
             max_items: None,
+            hl: None,
+            gl: None,
+            ceid: None,
         },
     ];
     // each place's sources are fetched, under Local's limits
@@ -759,6 +765,42 @@ fn other_places_have_rows_tiles_and_headlines() {
     assert!(t.contains(&"Asheville, NC · 4 slots".to_owned()), "{t:?}");
 }
 
+#[test]
+fn another_place_reads_its_own_google_news_edition() {
+    use deckle_digest::config::PlaceNews;
+    let mut s = Setup::new();
+    s.cfg.local.places = vec![PlaceNews {
+        name: "Roma".into(),
+        google_news: "Roma".into(),
+        hl: Some("it".into()),
+        gl: Some("IT".into()),
+        ceid: Some("IT:it".into()),
+        feeds: Vec::new(),
+        max_items: None,
+    }];
+    let url = google_news_url(
+        "Roma",
+        s.cfg.local.max_age_hours,
+        Some("it"),
+        Some("IT"),
+        Some("IT:it"),
+    );
+    assert!(live_urls(&s.cfg).contains(&url), "{:?}", live_urls(&s.cfg));
+    s.live.feeds.insert(
+        url,
+        fetched(&[(
+            "Il Campidoglio approva il bilancio",
+            local(2026, 10, 22, 13, 0),
+        )]),
+    );
+    // the row reads the place's own edition from the cache, not Local's
+    let lead = s.plan().lead.unwrap();
+    assert_eq!(
+        lead.title.as_deref(),
+        Some("Il Campidoglio approva il bilancio")
+    );
+}
+
 // --- topic sections (Task 8) ---
 
 use deckle_digest::config::Topic;
@@ -773,7 +815,7 @@ fn topic_feed_is_fetched_by_its_topic_url() {
         max_items: 5,
         ..Default::default()
     }];
-    let topic_url = Topic::Science.url();
+    let topic_url = Topic::Science.url(None, None, None);
     assert_eq!(live_urls(&c), std::slice::from_ref(&topic_url));
     let mut cache = LiveCache::default();
     assert_eq!(refresh(&c, &mut cache, t0(), &net), 1);

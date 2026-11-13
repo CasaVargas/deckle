@@ -70,6 +70,9 @@ finish. Deckle sets one each morning:
 - **Your town and what you follow.** Weather, local news for your town and any other place, each
   RSS or Atom feed as its own section, today's events from your calendars, and **interests**: a
   topic ("Rust", your team) searched every morning and kept only when a headline names it.
+- **News in your language.** Each Google News search and topic can read another country's
+  edition (Italy in Italian, Brazil in Portuguese, …), and On this day can come from another
+  language's Wikipedia.
 - **The reading you saved.** Save an article with the bookmarklet, a link dropped in the Inbox
   folder or an iPhone Shortcut, and it prints the next morning, whole.
 - **The back pages.** A mini crossword whose theme answers are yesterday's headlines, a word

@@ -21,12 +21,33 @@ struct Event {
     year: Option<i32>,
 }
 
-pub fn url(date: NaiveDate) -> String {
-    format!(
-        "https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/selected/{:02}/{:02}",
+/// A Wikipedia language code as it appears in the API path ("it", "pt", "zh-yue", "simple"):
+/// ASCII letters, then hyphen-separated parts. Anything else would change the path, so it's
+/// refused.
+fn language_code(language: &str) -> Option<&str> {
+    let code = language.trim();
+    let ok = !code.is_empty()
+        && code.len() <= 20
+        && code.starts_with(|c: char| c.is_ascii_alphabetic())
+        && code
+            .split('-')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric()));
+    ok.then_some(code)
+}
+
+pub fn url(date: NaiveDate, language: Option<&str>) -> Result<String, String> {
+    let code = match language.map(str::trim).filter(|s| !s.is_empty()) {
+        None => "en",
+        Some(l) => {
+            language_code(l).ok_or_else(|| format!("\"{l}\" isn't a Wikipedia language code"))?
+        }
+    };
+    Ok(format!(
+        "https://api.wikimedia.org/feed/v1/wikipedia/{}/onthisday/selected/{:02}/{:02}",
+        code,
         date.month(),
         date.day()
-    )
+    ))
 }
 
 pub fn article(json: &[u8], date: NaiveDate) -> Result<Article, String> {
@@ -60,8 +81,11 @@ pub fn article(json: &[u8], date: NaiveDate) -> Result<Article, String> {
     })
 }
 
-pub fn section(date: NaiveDate, net: &dyn Net) -> Section {
-    match net.get(&url(date)).and_then(|b| article(&b, date)) {
+pub fn section(date: NaiveDate, language: Option<&str>, net: &dyn Net) -> Section {
+    match url(date, language)
+        .and_then(|u| net.get(&u))
+        .and_then(|b| article(&b, date))
+    {
         Ok(a) => Section {
             weather: None,
             puzzle: None,
@@ -73,5 +97,40 @@ pub fn section(date: NaiveDate, net: &dyn Net) -> Section {
             unavailable: None,
         },
         Err(e) => super::unavailable(TITLE, e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wikipedia_url() {
+        let date = NaiveDate::from_ymd_opt(2026, 11, 13).unwrap();
+
+        assert_eq!(
+            url(date, None).unwrap(),
+            "https://api.wikimedia.org/feed/v1/wikipedia/en/onthisday/selected/11/13"
+        );
+        assert_eq!(url(date, Some(" ")), url(date, None));
+    }
+
+    #[test]
+    fn wikipedia_url_i18n() {
+        let date = NaiveDate::from_ymd_opt(2026, 11, 13).unwrap();
+
+        assert_eq!(
+            url(date, Some("it")).unwrap(),
+            "https://api.wikimedia.org/feed/v1/wikipedia/it/onthisday/selected/11/13"
+        );
+        assert!(url(date, Some("zh-yue")).is_ok());
+    }
+
+    #[test]
+    fn a_language_that_would_change_the_path_is_refused() {
+        let date = NaiveDate::from_ymd_opt(2026, 11, 13).unwrap();
+        for bad in ["../en", "en/x", "it?x=1", "-it", "it-", "e n"] {
+            assert!(url(date, Some(bad)).is_err(), "{bad}");
+        }
     }
 }

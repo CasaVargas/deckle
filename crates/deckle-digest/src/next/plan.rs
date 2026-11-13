@@ -144,12 +144,17 @@ fn pending(queue: &[Entry], date: NaiveDate) -> Vec<&Entry> {
 fn local_stories(
     search: &str,
     feeds: &[String],
+    edition: [Option<&str>; 3],
     cfg: &Config,
     live: &LiveCache,
 ) -> Option<Vec<LiveItem>> {
+    let [hl, gl, ceid] = edition;
     let mut urls: Vec<String> = feeds.to_vec();
     if !search.trim().is_empty() {
-        urls.insert(0, google_news_url(search, cfg.local.max_age_hours));
+        urls.insert(
+            0,
+            google_news_url(search, cfg.local.max_age_hours, hl, gl, ceid),
+        );
     }
     let got: Vec<&super::live::Fetched> = urls
         .iter()
@@ -290,7 +295,13 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                 "Local",
                 local_detail(&l.google_news, &l.feeds),
                 l.max_items,
-                local_stories(&l.google_news, &l.feeds, cfg, i.live),
+                local_stories(
+                    &l.google_news,
+                    &l.feeds,
+                    [l.hl.as_deref(), l.gl.as_deref(), l.ceid.as_deref()],
+                    cfg,
+                    i.live,
+                ),
             )];
             // then each other place's local news (#102)
             for (n, p) in l.places.iter().enumerate() {
@@ -303,7 +314,13 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                     &p.name,
                     local_detail(p.search(), &p.feeds),
                     max,
-                    local_stories(p.search(), &p.feeds, cfg, i.live),
+                    local_stories(
+                        p.search(),
+                        &p.feeds,
+                        [p.hl.as_deref(), p.gl.as_deref(), p.ceid.as_deref()],
+                        cfg,
+                        i.live,
+                    ),
                 ));
             }
             out
@@ -316,7 +333,15 @@ fn rows<'a>(i: &Inputs<'a>, kind: SectionKind, date: NaiveDate) -> Vec<Row<'a>> 
                 let urls: Vec<String> = it
                     .searches()
                     .iter()
-                    .map(|q| google_news_url(q, it.max_age_hours))
+                    .map(|q| {
+                        google_news_url(
+                            q,
+                            it.max_age_hours,
+                            it.hl.as_deref(),
+                            it.gl.as_deref(),
+                            it.ceid.as_deref(),
+                        )
+                    })
                     .chain(it.feeds.iter().cloned())
                     .collect();
                 let got: Vec<&super::live::Fetched> = urls
