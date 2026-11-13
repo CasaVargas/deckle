@@ -1,0 +1,24 @@
+[package]
+name = "deckle-limits"
+description = "Deckle limits: the size and depth limits for files Deckle opens, and the safe state-file helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# With default features this crate depends on nothing, so every importer can use it.
+[features]
+default = []
+# `parse_xml`, the depth check before `roxmltree` parses.
+xml = ["dep:roxmltree"]
+# `state_file`: load and save state files without silently replacing them.
+state = ["dep:tempfile", "dep:serde", "dep:serde_json"]
+
+[dependencies]
+roxmltree = { workspace = true, optional = true }
+tempfile = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
