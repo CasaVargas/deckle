@@ -6631,9 +6631,10 @@ fn save(
     let queue = ReadingQueue::new(ReadingQueue::default_path());
     if bookmarklet {
         let dir = queue.path.parent().unwrap_or(Path::new("."));
-        let token = deckle_digest::bookmarklet::token(dir).map_err(|e| e.to_string())?;
+        // The listener's token, made if it's new; the bookmarklets don't carry it.
+        deckle_digest::bookmarklet::token(dir).map_err(|e| e.to_string())?;
         if page {
-            println!("{}", deckle_digest::bookmarklet::install_page(&token));
+            println!("{}", deckle_digest::bookmarklet::install_page());
             return Ok(ExitCode::SUCCESS);
         }
         println!(
@@ -6641,8 +6642,8 @@ fn save(
              They work while `deckle digest watch` is running.\n\n\
              Save to paper (an article for tomorrow's Daily):\n{}\n\n\
              Save recipe (a recipe for the cookbook):\n{}",
-            deckle_digest::bookmarklet::javascript(&token),
-            deckle_digest::bookmarklet::recipe_javascript(&token)
+            deckle_digest::bookmarklet::javascript(),
+            deckle_digest::bookmarklet::recipe_javascript()
         );
         return Ok(ExitCode::SUCCESS);
     }

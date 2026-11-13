@@ -434,12 +434,15 @@ fn the_article_scan_makes_the_recipes_folder() {
 #[test]
 fn a_bookmarklet_link_is_added_by_the_next_scan() {
     let (d, q, inbox, store) = recipes_setup();
-    let line = format!(
-        "GET /save?token=t&kind=recipe&url={}&title=Oat%20Cookies HTTP/1.1",
+    // What the confirmation page's Save sends.
+    let body = format!(
+        "token=t&kind=recipe&url={}&title=Oat%20Cookies",
         deckle_digest::fetch::encode(RECIPE_URL)
     );
     let (status, _) = deckle_digest::bookmarklet::handle(
-        &line,
+        "POST /save HTTP/1.1",
+        Some("http://127.0.0.1:47219"),
+        body.as_bytes(),
         "t",
         &q,
         &inbox.join("Recipes"),

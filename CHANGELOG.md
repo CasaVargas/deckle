@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The bookmarklets ask before they save.** Save to paper and Save recipe now open a small
+  Deckle window showing what they'll save, and save when you press **Save**. Before, the
+  bookmarklet carried a key the page you clicked it on could read, and with it any page could
+  add to your reading. Bookmarklets you already have keep working
+  ([docs/daily.md](docs/daily.md)).
 - **calibre's wireless connection can't be held by a silent device.** A reader now takes the
   connection only once it has finished connecting (10 seconds at most), so a device that
   connects and says nothing no longer keeps every reader out. A wrong password slows that

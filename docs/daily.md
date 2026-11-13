@@ -52,7 +52,10 @@ saves from your phone. The queue is a plain file, `reading.jsonl`, next to `dige
 
 `deckle save --bookmarklet` prints two bookmarklets: **Save to paper** (above) and **Save recipe**,
 which sends the page to the cookbook instead (see below). Both send only the page's address and
-title, never its contents, and both need `digest watch` running.
+title, never its contents, and both need `digest watch` running. Each opens a small Deckle window
+that shows what it's about to save; press **Save** there. A page you click a bookmarklet on can
+open that window but can't press its button, so no page can add to your reading by itself.
+Bookmarklets made before this still work and show the same window.
 
 In the app, **Open the install page** (on the Daily tab's Reading room, the Cookbook's Add page,
 and the welcome on first launch) writes `bookmarklets.html` next to `digest.toml` and opens it in
