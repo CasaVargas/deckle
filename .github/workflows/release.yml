@@ -28,8 +28,6 @@ permissions:
 
 jobs:
   bundle:
-    # The signing secrets live in the `release` environment, which waits for an approval.
-    environment: release
     strategy:
       fail-fast: false
       matrix:
