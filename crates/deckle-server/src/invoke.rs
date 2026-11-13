@@ -41,6 +41,12 @@ pub(crate) async fn invoke(
         .await
     {
         Ok(Ok(v)) => Json(v).into_response(),
+        // A path outside the server's folders is forbidden, not malformed.
+        Ok(Err(e))
+            if e.contains(deckle_core::confine::OUTSIDE) || e.contains("settings folder") =>
+        {
+            error(StatusCode::FORBIDDEN, e)
+        }
         Ok(Err(e)) => error(StatusCode::BAD_REQUEST, e),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, format!("{command}: {e}")),
     }

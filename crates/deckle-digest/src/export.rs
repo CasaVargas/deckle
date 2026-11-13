@@ -55,12 +55,17 @@ pub fn export_all(
 
 /// The edition (and with `books`, the long reads) into one export folder, then the prune.
 pub fn export(e: &ExportConfig, date: NaiveDate, built: &BuildReport) -> ExportReport {
+    let refused = crate::inbox::saved_path("[[exports]] dir", &e.dir).err();
     let dir = crate::inbox::expand_home(e.dir.trim());
     let mut report = ExportReport {
         name: e.name.clone(),
         dir: dir.clone(),
         ..Default::default()
     };
+    if let Some(why) = refused {
+        report.error = Some(why);
+        return report;
+    }
     if let Err(why) = ready(&dir) {
         report.error = Some(why);
         return report;

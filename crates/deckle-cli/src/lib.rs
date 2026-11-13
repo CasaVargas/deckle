@@ -2102,7 +2102,7 @@ fn kindle(json: bool, to: &str, action: cli::KindleCommand) -> Result<ExitCode, 
 /// The originals on this computer (Books and Kindle design §4); a calibre library that won't
 /// open is a warning.
 fn originals() -> deckle_library::sources::Sources {
-    let cfg = deckle_library::LibraryConfig::load(&deckle_library::config::default_path());
+    let cfg = deckle_library::LibraryConfig::load(&deckle_library::config::default_path()).usable();
     let found =
         deckle_library::sources::Sources::gather(&cfg, deckle_library::sources::home().as_deref());
     for w in &found.warnings {
@@ -3886,22 +3886,28 @@ fn digest(
                 Ok(Some(token)) => {
                     // Save recipe drops its link file in the Inbox's Recipes folder, where
                     // the scan below adds it to the cookbook.
-                    let recipes = deckle_digest::inbox::expand_home(&cfg.reading.inbox)
-                        .join(deckle_digest::inbox::RECIPES_FOLDER);
-                    std::thread::spawn(move || {
-                        if let Err(e) = deckle_digest::bookmarklet::serve(reading, token, recipes) {
+                    match deckle_digest::inbox::saved_path("[reading] inbox", &cfg.reading.inbox) {
+                        Ok(inbox) => {
+                            let recipes = inbox.join(deckle_digest::inbox::RECIPES_FOLDER);
+                            std::thread::spawn(move || {
+                                if let Err(e) =
+                                    deckle_digest::bookmarklet::serve(reading, token, recipes)
+                                {
+                                    eprintln!(
+                                        "bookmarklet: can't listen on {}:{}: {e}",
+                                        deckle_digest::bookmarklet::bind_address(),
+                                        deckle_digest::bookmarklet::PORT
+                                    );
+                                }
+                            });
                             eprintln!(
-                                "bookmarklet: can't listen on {}:{}: {e}",
+                                "bookmarklet: listening on {}:{}",
                                 deckle_digest::bookmarklet::bind_address(),
                                 deckle_digest::bookmarklet::PORT
                             );
                         }
-                    });
-                    eprintln!(
-                        "bookmarklet: listening on {}:{}",
-                        deckle_digest::bookmarklet::bind_address(),
-                        deckle_digest::bookmarklet::PORT
-                    );
+                        Err(e) => eprintln!("bookmarklet: off: {e}"),
+                    }
                 }
                 Ok(None) => {}
                 Err(e) => eprintln!("bookmarklet: no token: {e}"),
@@ -6522,7 +6528,13 @@ fn reading_queue(cfg: &deckle_digest::Config) -> deckle_digest::reading::Reading
 /// outbox (design §10). Says so when it found anything. Recipes for the cookbook are added
 /// only with `recipes` (the watcher): fetching a backlog of them must not hold up a build.
 fn scan_inbox(cfg: &deckle_digest::Config, recipes: bool) {
-    let dir = deckle_digest::inbox::expand_home(&cfg.reading.inbox);
+    let dir = match deckle_digest::inbox::saved_path("[reading] inbox", &cfg.reading.inbox) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("inbox: {e}");
+            return;
+        }
+    };
     let outbox = deckle_core::queue::Queue::new(deckle_core::queue::Queue::default_dir());
     let kindles: Vec<(String, String)> = cfg
         .sync

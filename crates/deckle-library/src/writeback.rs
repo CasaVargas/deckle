@@ -891,7 +891,7 @@ impl Paths {
         Paths {
             config: config_path(library_json),
             log: log_path(library_json),
-            library: library_root(&crate::LibraryConfig::load(library_json), home),
+            library: library_root(&crate::LibraryConfig::load(library_json).usable(), home),
         }
     }
 }

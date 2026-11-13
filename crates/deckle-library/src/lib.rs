@@ -247,7 +247,7 @@ impl Library {
 
     /// The library `library.json` at `config` points at, when there is one.
     pub fn configured(config: &Path) -> Option<(Library, LibraryConfig)> {
-        let cfg = LibraryConfig::load(config);
+        let cfg = LibraryConfig::load(config).usable();
         let root = cfg.root.clone()?;
         Some((Library::new(root), cfg))
     }

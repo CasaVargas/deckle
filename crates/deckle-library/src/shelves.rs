@@ -182,8 +182,9 @@ pub fn sets(library_json: &Path, home: Option<&Path>) -> Result<Vec<RuleSet>, St
     if cfg.rules.is_empty() {
         return Ok(Vec::new());
     }
-    let lib = crate::writeback::library_root(&crate::LibraryConfig::load(library_json), home)
-        .ok_or("no calibre library found: choose it in Settings → Library")?;
+    let lib =
+        crate::writeback::library_root(&crate::LibraryConfig::load(library_json).usable(), home)
+            .ok_or("no calibre library found: choose it in Settings → Library")?;
     let wb = crate::writeback::Writeback::load(&crate::writeback::config_path(library_json));
     let exe = crate::writeback::find_calibredb(wb.calibredb.as_deref());
     let mut search = |name: &str| -> Option<Vec<i64>> {

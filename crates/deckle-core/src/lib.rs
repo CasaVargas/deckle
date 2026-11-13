@@ -5,6 +5,7 @@ pub mod accessibility;
 pub mod bind;
 pub mod clippings;
 pub mod compat;
+pub mod confine;
 pub mod cover_rule;
 pub mod covers;
 pub mod deliver;

@@ -503,13 +503,14 @@ mod tests {
             .to_string();
 
         assert!(resolve(&base, "Pie_files/pie.jpg").is_some());
+        // Not there (yet): judged by its folder, and loading it later just finds nothing.
+        assert!(resolve(&base, "Pie_files/missing.jpg").is_some());
         let outside = url::Url::from_file_path(&secret).unwrap().to_string();
         for href in [
             outside.as_str(),
             "../private/secret.jpg",
             "Pie_files/../../private/secret.jpg",
             "link.jpg",
-            "Pie_files/missing.jpg",
         ] {
             assert_eq!(resolve(&base, href), None, "{href}");
         }

@@ -36,6 +36,7 @@ pub fn ctx(dir: &Path) -> Arc<Ctx> {
         events: Arc::new(SseEvents),
         exe: PathBuf::from("/opt/deckle/deckle"),
         web: true,
+        roots: Some(vec![dir.to_path_buf()]),
     })
 }
 

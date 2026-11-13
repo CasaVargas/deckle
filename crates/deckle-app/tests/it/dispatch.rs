@@ -23,6 +23,7 @@ fn ctx_in(dir: &Path, web: bool) -> Ctx {
         events: Arc::new(NoEvents),
         exe: PathBuf::from("/opt/deckle/deckle"),
         web,
+        roots: web.then(|| vec![dir.to_path_buf()]),
     }
 }
 

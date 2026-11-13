@@ -205,7 +205,11 @@ These stay visible in the app, each with a one-line reason:
 The file picker shows the server's folders, not your computer's: `/config`, `/data`, and any
 folders in `DECKLE_WEB_ROOTS`, separated by `:` (paths inside the container, so mount them
 first, e.g. `-v /mnt/user/books:/books` and `DECKLE_WEB_ROOTS=/books`). Nothing outside them is
-shown or served.
+shown or served, and nothing the web app does reads, writes or deletes outside them: a book, a
+folder to send to, a backup, the Inbox, the Morgue, an export folder, the library. A folder saved
+before (or typed into a config file) that lies outside stops working in the web app, and the log
+names the setting; the desktop app is unchanged. The web app never writes into Deckle's own
+settings folder, `/config/deckle`.
 
 A file you upload from your computer lands in `/data/Deckle/Uploads/<id>/<name>`, up to 512 MiB
 each. Uploads aren't cleaned up automatically: delete old ones from `/data/Deckle/Uploads` when

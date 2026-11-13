@@ -192,8 +192,11 @@ fn resolve(base: &str, href: &str) -> Option<String> {
 /// a saved page can name its pictures, but not other files on this computer.
 pub(crate) fn beside_saved_page(base: &url::Url, url: &url::Url) -> Option<String> {
     let dir = base.to_file_path().ok()?.parent()?.canonicalize().ok()?;
-    let path = url.to_file_path().ok()?.canonicalize().ok()?;
-    (path.starts_with(&dir) && path.is_file()).then(|| url.to_string())
+    let path = url.to_file_path().ok()?;
+    // A picture that isn't there is judged by the folder it would be in.
+    deckle_core::confine::confine_to(&[dir], &path.to_string_lossy())
+        .ok()
+        .map(|_| url.to_string())
 }
 
 /// The photo's identity for deduplication: scheme, host and path, without the query (CDNs

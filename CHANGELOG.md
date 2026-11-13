@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The web app keeps to its folders.** Every path it sends, and every folder saved in its
+  settings, now has to lie in `/config`, `/data` or `DECKLE_WEB_ROOTS`, as the file browser
+  always did; before, a signed-in browser could list, copy or delete files elsewhere on the
+  server. It also never writes into `/config/deckle`
+  ([docs/docker.md](docs/docker.md#files-uploads-and-downloads)).
 - **A saved page's pictures come only from its own folder.** A recipe or article saved to disk
   could name any file on the computer as its picture; now only files in the page's folder count,
   links followed.

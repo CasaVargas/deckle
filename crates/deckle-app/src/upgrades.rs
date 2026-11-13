@@ -325,7 +325,7 @@ pub fn edit_source_on(
         out.library_dir = Some(book.dir.to_string_lossy().into_owned());
         return Ok(out);
     }
-    let sources = Sources::gather(&LibraryConfig::load(config), home);
+    let sources = Sources::gather(&LibraryConfig::load(config).usable(), home);
     let source = sources.find(&shelved.book).cloned();
     let class = deckle_library::upgrade::classify(&shelved, source.as_ref());
     if let Some(src) = source.filter(|_| class != Class::AmazonOwn) {

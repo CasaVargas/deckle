@@ -7,6 +7,7 @@ pub mod books;
 pub mod calibre;
 pub mod capabilities;
 pub mod commands;
+mod confine_saved;
 pub mod cookbook;
 pub mod daily;
 pub mod dispatch;

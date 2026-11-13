@@ -87,3 +87,37 @@ async fn unknown_api_paths_are_404_not_the_spa() {
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     assert!(!r.body.contains("<html>"));
 }
+
+#[tokio::test]
+async fn a_path_outside_the_roots_is_403_and_nothing_is_touched() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path(), false);
+    let cookie = login(&app).await;
+    let outside = tempfile::tempdir().unwrap();
+    let secret = outside.path().join("secret.epub");
+    std::fs::write(&secret, b"x").unwrap();
+    for (command, body) in [
+        (
+            "device_books",
+            json!({ "target": { "kind": "folder", "path": outside.path() } }),
+        ),
+        (
+            "device_remove",
+            json!({ "target": { "kind": "folder", "path": outside.path() }, "file": "secret.epub" }),
+        ),
+        ("inspect_books", json!({ "paths": [secret] })),
+    ] {
+        let r = send(
+            &app,
+            post(
+                &format!("/api/invoke/{command}"),
+                &body.to_string(),
+                Some(&cookie),
+            ),
+        )
+        .await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{command}: {}", r.body);
+        assert!(r.body.contains("outside the folders"), "{}", r.body);
+    }
+    assert!(secret.exists());
+}

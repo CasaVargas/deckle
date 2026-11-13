@@ -11,7 +11,6 @@ use chrono_tz::Tz;
 use crate::config::{DayConfig, Units};
 use crate::esc;
 use crate::fetch::Net;
-use crate::inbox::expand_home;
 use crate::sources::weather::{Forecast, WET_PERCENT};
 use crate::tz::short_clock;
 
@@ -104,7 +103,8 @@ pub fn read_calendar(spec: &str, net: &dyn Net) -> Result<String, String> {
     };
     let bytes = match url {
         Some(url) => net.get(&url)?,
-        None => std::fs::read(expand_home(spec)).map_err(|e| e.to_string())?,
+        None => std::fs::read(crate::inbox::saved_path("[day] calendars", spec)?)
+            .map_err(|e| e.to_string())?,
     };
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }

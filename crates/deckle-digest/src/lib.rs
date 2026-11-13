@@ -606,7 +606,9 @@ pub fn gather_with_editor(
                         .iter()
                         .filter(|e| e.format == config::ExportFormat::Bundle)
                     {
-                        let root = inbox::expand_home(e.dir.trim());
+                        let Ok(root) = inbox::saved_path("[[exports]] dir", &e.dir) else {
+                            continue;
+                        };
                         found.extend(returns::read_dir(&root, yesterday));
                     }
                     store.mark_search(yesterday, &found);

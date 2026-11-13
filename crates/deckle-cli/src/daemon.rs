@@ -297,7 +297,10 @@ struct Prefixed {
 }
 
 fn spawn(exe: &Path, args: &[String], name: &str) -> std::io::Result<Prefixed> {
-    let mut child = Command::new(exe)
+    let mut cmd = Command::new(exe);
+    // In the web UI's server, the edition keeps to the folders the server may use.
+    deckle_core::confine::child(&mut cmd);
+    let mut child = cmd
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
