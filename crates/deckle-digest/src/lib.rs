@@ -645,9 +645,11 @@ pub fn gather_with_editor(
                     ));
                 }
             }
-            SectionKind::Onthisday => edition
-                .sections
-                .push(sources::onthisday::section(date, net)),
+            SectionKind::Onthisday => edition.sections.push(sources::onthisday::section(
+                date,
+                cfg.onthisday.language.as_deref(),
+                net,
+            )),
             SectionKind::Subscribed => {
                 let mut noted = std::collections::HashSet::new();
                 for group in &cfg.subscribed {

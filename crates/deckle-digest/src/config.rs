@@ -116,6 +116,7 @@ pub struct Config {
     pub learning: LearningConfig,
     pub lottery: LotteryConfig,
     pub horoscope: HoroscopeConfig,
+    pub onthisday: OnThisDayConfig,
     pub reading: ReadingConfig,
     /// What `digest watch` does when a Kindle connects (auto-sync design §3).
     pub sync: SyncConfig,
@@ -292,6 +293,7 @@ impl Default for Config {
             learning: LearningConfig::default(),
             lottery: LotteryConfig::default(),
             horoscope: HoroscopeConfig::default(),
+            onthisday: OnThisDayConfig::default(),
             reading: ReadingConfig::default(),
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
@@ -818,6 +820,14 @@ impl ShelfConfig {
 pub struct HoroscopeConfig {
     /// Lowercase sign names. Empty: all twelve.
     pub signs: Vec<String>,
+}
+
+/// Language settings for Wikipedia's "On This Day" section.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct OnThisDayConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

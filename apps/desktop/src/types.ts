@@ -364,6 +364,7 @@ export interface DailyConfig {
   learning?: LearningConfig;
   lottery: { games: string[] };
   horoscope: { signs: string[] };
+  onthisday?: { language?: string };
   reading: { inbox: string; max_items: number; long_read_words: number };
   /** Absent while it's untouched (the backend leaves the defaults out). */
   email?: EmailConfig;

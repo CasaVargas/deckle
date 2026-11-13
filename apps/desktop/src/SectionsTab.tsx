@@ -176,6 +176,19 @@ export default function SectionsTab({
             <p className="muted small">{draft.horoscope.signs.length === 0 ? "None chosen: all twelve." : "Only these signs."}</p>
           </>
         );
+      case "onthisday":
+        return (
+          <WikipediaLanguage
+            language={draft.onthisday?.language}
+            onChange={(language) =>
+              change((c) => ({
+                ...c,
+                onthisday: { ...c.onthisday, language },
+              }))
+            }
+            onBlur={flush}
+          />
+        );
       default:
         return <p className="muted small">Nothing to set: it's either in the paper or not.</p>;
     }
@@ -401,6 +414,55 @@ const GOOGLE_NEWS_PRESETS: Record<Locale, { hl: string; gl: string; ceid: string
   "pt-BR": { hl: "pt-BR", gl: "BR", ceid: "BR:pt-419" },
 };
 
+function WikipediaLanguage({
+  language,
+  onChange,
+  onBlur,
+}: {
+  language?: string;
+  onChange: (language?: string) => void;
+  onBlur: () => void;
+}) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const selected = language ?? "en";
+  const custom = customOpen || !["en", "de", "es", "fr", "it", "pt"].includes(selected);
+
+  return (
+    <>
+      <label className="sec-field">
+        <span className="label">Wikipedia language</span>
+        <select
+          value={custom ? "custom" : selected}
+          onChange={(e) => {
+            const value = e.target.value;
+            setCustomOpen(value === "custom");
+            if (value !== "custom") onChange(value === "en" ? undefined : value);
+          }}
+        >
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Português</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      {custom && (
+        <label className="sec-field">
+          <span className="label">Language code</span>
+          <input
+            value={language ?? ""}
+            placeholder="e.g. nl"
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            spellCheck={false}
+          />
+        </label>
+      )}
+    </>
+  );
+}
 
 function GoogleNewsI18nParams({
   hl,
