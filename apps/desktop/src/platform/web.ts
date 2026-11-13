@@ -26,6 +26,7 @@ export const web: Platform = {
   async openUrl(url) {
     window.open(url, "_blank", "noopener");
   },
+  confirm: async (message) => window.confirm(message),
   homeDir: async () => "/data",
   async onFileDrop(h) {
     // Enter and leave fire for every child crossed; a count says when the page itself is left.
