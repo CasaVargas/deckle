@@ -3,7 +3,7 @@
 //! no story teasers, so an imported sidecar has them unset; the weather line and the lead are
 //! read back from the front page, and the rest from the section pages.
 
-use std::io::{self, Read};
+use std::io;
 use std::path::Path;
 
 use chrono::NaiveDate;
@@ -47,9 +47,8 @@ fn section_of_href(href: &str) -> Option<usize> {
 }
 
 fn read_entry(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
-    let mut s = String::new();
-    zip.by_name(name).ok()?.read_to_string(&mut s).ok()?;
-    Some(s)
+    let f = zip.by_name(name).ok()?;
+    String::from_utf8(deckle_limits::read_capped(f, deckle_limits::MAX_ENTRY_BYTES).ok()?).ok()
 }
 
 fn slug(title: &str) -> String {

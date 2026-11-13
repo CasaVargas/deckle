@@ -47,6 +47,75 @@ fn approximate_pages_match_pages_golden() {
     assert_eq!(add_approximate_pages(&mut book, None).unwrap(), 45);
 }
 
+/// The mini KPF with `pad` bytes of zeros added as a resource: a small file that unpacks large.
+fn padded_kpf(pad: usize) -> tempfile::NamedTempFile {
+    use std::io::{Read, Write};
+    let src = std::fs::File::open(deckle_kfx::fixtures::path("deckle-mini.kpf")).unwrap();
+    let mut zin = zip::ZipArchive::new(src).unwrap();
+    let out = tempfile::NamedTempFile::new().unwrap();
+    let mut zout = zip::ZipWriter::new(std::fs::File::create(out.path()).unwrap());
+    let deflated = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for i in 0..zin.len() {
+        let mut f = zin.by_index(i).unwrap();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+        zout.start_file(f.name().unwrap(), deflated).unwrap();
+        zout.write_all(&data).unwrap();
+    }
+    zout.start_file("resources/padding.bin", deflated).unwrap();
+    zout.write_all(&vec![0u8; pad]).unwrap();
+    zout.finish().unwrap();
+    out
+}
+
+#[test]
+fn padded_resources_do_not_raise_the_position_bound() {
+    use deckle_kfx::ion::Value;
+    // A file of a few hundred kilobytes that unpacks to megabytes of zeros: its resources hold
+    // no positions, so a range of a million positions is still refused.
+    let kpf = padded_kpf(4 << 20);
+    assert!(std::fs::metadata(kpf.path()).unwrap().len() < 1 << 20);
+    let g = read_kfx(
+        &std::fs::read(deckle_kfx::fixtures::path(
+            "deckle-mini-pdoc-nopages.golden.kfx",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut book = Book::from_kpf(read_kpf(kpf.path()).unwrap(), &g.container_id);
+    fix_structural(&mut book).unwrap();
+    let has_text = create_content_fragments(&mut book);
+    fix_navigation(&mut book);
+    create_position_and_location_maps(&mut book, has_text).unwrap();
+    let pm = book.fragments.get_single_mut(&Sym::new("$264")).unwrap();
+    let sect = pm.value.as_list_mut().unwrap()[0].as_struct_mut().unwrap();
+    let eids = sect.get_mut("$181").unwrap().as_list_mut().unwrap();
+    eids.push(Value::List(vec![
+        Value::Int(1_000_000),
+        Value::Int(1_000_000),
+    ]));
+    assert!(add_approximate_pages(&mut book, None).is_err());
+}
+
+#[test]
+fn a_position_range_past_the_books_bytes_is_refused() {
+    use deckle_kfx::ion::Value;
+    // `$264` lists each section's eids, a run as `[start, count]`; a count of five million in
+    // a book of a few hundred kilobytes took 641 MB.
+    let (mut book, _) = prepared("deckle-mini-pdoc-nopages.golden.kfx");
+    let pm = book.fragments.get_single_mut(&Sym::new("$264")).unwrap();
+    let sect = pm.value.as_list_mut().unwrap()[0].as_struct_mut().unwrap();
+    let eids = sect.get_mut("$181").unwrap().as_list_mut().unwrap();
+    eids.push(Value::List(vec![
+        Value::Int(1_000_000),
+        Value::Int(5_000_000_000),
+    ]));
+    let start = std::time::Instant::now();
+    assert!(add_approximate_pages(&mut book, None).is_err());
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+}
+
 #[test]
 fn page_list_entry_landmarks_become_a_page_list() {
     use deckle_kfx::ion::{Struct, Value};

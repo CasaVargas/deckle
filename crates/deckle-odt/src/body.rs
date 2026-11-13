@@ -10,7 +10,7 @@ use roxmltree::Node;
 use crate::styles::{Fmt, Styles, attr, child, local};
 
 /// An image larger than this is skipped with a warning.
-const MAX_IMAGE: usize = 10 * 1024 * 1024;
+const MAX_IMAGE: usize = deckle_limits::MAX_EMBEDDED_IMAGE_BYTES as usize;
 /// A bookmark link's target is written as OPEN id CLOSE and resolved once the chapters exist.
 pub const OPEN: char = '\u{E000}';
 pub const CLOSE: char = '\u{E001}';

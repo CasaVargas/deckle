@@ -530,7 +530,7 @@ pub fn eink_photo(bytes: &[u8]) -> Option<Vec<u8>> {
 
 /// A photo as a JPEG at most 1000 px wide, grayscale or in color. `None` as for [`eink_photo`].
 pub fn photo(bytes: &[u8], photos: Photos) -> Option<Vec<u8>> {
-    let img = image::load_from_memory(bytes).ok()?;
+    let img = deckle_core::image_cap::load(bytes).ok()?;
     if img.width().min(img.height()) < MIN_PHOTO_SIDE {
         return None;
     }
@@ -549,21 +549,27 @@ pub fn photo(bytes: &[u8], photos: Photos) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// `bytes` decoded through [`deckle_core::image_cap::load`] (the pixel limit, and `image`'s own
+/// allocation limit), then turned upright by its EXIF orientation.
+fn decode_upright(bytes: &[u8]) -> image::ImageResult<image::DynamicImage> {
+    use image::ImageDecoder;
+    let orientation = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_decoder()?
+        .orientation()
+        .ok();
+    let mut img = deckle_core::image_cap::load(bytes)?;
+    if let Some(o) = orientation {
+        img.apply_orientation(o);
+    }
+    Ok(img)
+}
+
 /// A photo master for a native reader (Books and Kindle design §9): in color, turned upright,
 /// at most [`MASTER_SIDE`] on its long side and never enlarged, as a JPEG with no metadata.
 /// `None` as for [`photo`].
 pub fn master_photo(bytes: &[u8]) -> Option<Vec<u8>> {
-    use image::ImageDecoder;
-    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .ok()?
-        .into_decoder()
-        .ok()?;
-    let orientation = decoder.orientation().ok();
-    let mut img = image::DynamicImage::from_decoder(decoder).ok()?;
-    if let Some(o) = orientation {
-        img.apply_orientation(o);
-    }
+    let mut img = decode_upright(bytes).ok()?;
     if img.width().min(img.height()) < MIN_PHOTO_SIDE {
         return None;
     }
@@ -593,7 +599,7 @@ pub fn gray_jpeg(jpeg: &[u8]) -> Vec<u8> {
     if gray {
         return jpeg.to_vec();
     }
-    let Ok(img) = image::load_from_memory(jpeg) else {
+    let Ok(img) = deckle_core::image_cap::load(jpeg) else {
         return jpeg.to_vec();
     };
     let mut out = Vec::new();
@@ -608,7 +614,7 @@ pub fn gray_jpeg(jpeg: &[u8]) -> Vec<u8> {
 /// A 64-bit difference hash: the picture's gradient at 9×8. Copies of one photo from a CDN
 /// (other sizes, crops, recompression) land a few bits apart.
 pub fn photo_hash(jpeg: &[u8]) -> Option<u64> {
-    let small = image::load_from_memory(jpeg)
+    let small = deckle_core::image_cap::load(jpeg)
         .ok()?
         .resize_exact(9, 8, image::imageops::FilterType::Triangle)
         .to_luma8();
@@ -722,7 +728,8 @@ pub fn fetch_photos_with(
 /// Whether an e-ink JPEG is big enough to sit inside the text. (Resizing only ever shrinks
 /// wide photos, so a small image's size here is its original size.)
 fn clears_inline_size(jpeg: &[u8]) -> bool {
-    image::load_from_memory(jpeg).is_ok_and(|i| i.width().min(i.height()) >= MIN_INLINE_PHOTO_SIDE)
+    deckle_core::image_cap::load(jpeg)
+        .is_ok_and(|i| i.width().min(i.height()) >= MIN_INLINE_PHOTO_SIDE)
 }
 
 /// Removes `<div class="figure">` wrappers left with nothing in them.
@@ -916,6 +923,38 @@ pub fn pull_quote(text: &str, words: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A PNG claiming `w` × `h` 16-bit RGBA, with a few bytes of picture data.
+    fn png_claiming(w: u32, h: u32) -> Vec<u8> {
+        let chunk = |png: &mut Vec<u8>, kind: &[u8], data: &[u8]| {
+            png.extend((data.len() as u32).to_be_bytes());
+            let mut crc = flate2::Crc::new();
+            crc.update(kind);
+            crc.update(data);
+            png.extend(kind);
+            png.extend(data);
+            png.extend(crc.sum().to_be_bytes());
+        };
+        let mut ihdr = w.to_be_bytes().to_vec();
+        ihdr.extend(h.to_be_bytes());
+        ihdr.extend([16, 6, 0, 0, 0]);
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        std::io::Write::write_all(&mut z, &[0; 64]).unwrap();
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        chunk(&mut png, b"IHDR", &ihdr);
+        chunk(&mut png, b"IDAT", &z.finish().unwrap());
+        chunk(&mut png, b"IEND", &[]);
+        png
+    }
+
+    #[test]
+    fn a_master_photo_is_held_to_images_allocation_limit() {
+        // 81 megapixels, inside the pixel limit, but 16-bit RGBA: 648 MB, past `image`'s
+        // 512 MiB. The decode is refused before that is reserved.
+        let e = decode_upright(&png_claiming(9_000, 9_000)).unwrap_err();
+        assert!(matches!(e, image::ImageError::Limits(_)), "{e}");
+        assert!(master_photo(&png_claiming(9_000, 9_000)).is_none());
+    }
 
     fn page(body: &str) -> String {
         let words = "The council met on Tuesday night to talk about the old rail yard and what it could become for the town. ".repeat(20);

@@ -25,6 +25,10 @@ pub enum InspectError {
     MissingFile(String),
     #[error("I/O error: {0}")]
     Io(std::io::Error),
+    #[error("this book unpacks to {0}")]
+    TooLarge(deckle_limits::TooLarge),
+    #[error("a file in this book unpacks to {0}")]
+    EntryTooLarge(deckle_limits::TooLarge),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

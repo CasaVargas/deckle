@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::MobiError;
 
 /// Larger than any real book; anything bigger is almost certainly not one.
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_IMPORT_BYTES;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportReport {

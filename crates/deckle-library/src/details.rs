@@ -4,7 +4,7 @@
 //! sidecar. Never the original file, and never calibre. The book keeps its identity and ASIN, so
 //! its sends still match it.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 
 use regex::Regex;
@@ -446,14 +446,17 @@ pub fn rewrite_epub(path: &Path, d: &Details) -> Result<Vec<u8>, String> {
     zout.start_file("mimetype", stored).map_err(zerr)?;
     zout.write_all(b"application/epub+zip")
         .map_err(|e| e.to_string())?;
+    // `EpubReader::open` checked the declared sizes; the reads stay inside them too.
+    let mut budget = deckle_limits::Budget::new(deckle_limits::MAX_BOOK_BYTES);
     for i in 0..zin.len() {
         let mut f = zin.by_index(i).map_err(zerr)?;
         let name = f.name().map_err(zerr)?.into_owned();
         if name == "mimetype" || f.is_dir() {
             continue;
         }
-        let mut bytes = Vec::new();
-        f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        let mut bytes = budget
+            .read(&mut f, deckle_limits::MAX_ENTRY_BYTES)
+            .map_err(|e| format!("{name}: {e}"))?;
         if name == opf_path {
             let opf = String::from_utf8(bytes).map_err(|_| "the OPF isn't UTF-8")?;
             bytes = rewrite_opf(&opf, d)
@@ -528,6 +531,45 @@ pub fn fix(lib: &Library, dir: &Path, d: &Details) -> Result<Book, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entries(bytes: &[u8]) -> std::collections::BTreeMap<String, Vec<u8>> {
+        use std::io::Read;
+        let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+        (0..z.len())
+            .map(|i| {
+                let mut f = z.by_index(i).unwrap();
+                let mut v = Vec::new();
+                f.read_to_end(&mut v).unwrap();
+                (f.name().unwrap().into_owned(), v)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_rewritten_book_keeps_every_other_entry_byte_for_byte() {
+        let src = deckle_kfx::fixtures::path("deckle-mini.epub");
+        let before = entries(&std::fs::read(&src).unwrap());
+        let after = entries(&rewrite_epub(&src, &Details::default()).unwrap());
+        assert_eq!(before.len(), after.len());
+        for (name, data) in &before {
+            if !name.ends_with(".opf") {
+                assert_eq!(&after[name], data, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_entry_declaring_more_than_the_entry_limit_is_refused() {
+        // The mini fixture with its last entry's declared size set to 4 GB in the central
+        // directory.
+        let mut bytes = std::fs::read(deckle_kfx::fixtures::path("deckle-mini.epub")).unwrap();
+        let last = bytes.windows(4).rposition(|w| w == b"PK\x01\x02").unwrap();
+        bytes[last + 24..last + 28].copy_from_slice(&u32::MAX.to_le_bytes());
+        let f = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(f.path(), bytes).unwrap();
+        let e = rewrite_epub(f.path(), &Details::default()).unwrap_err();
+        assert_eq!(e, "a file in this book unpacks to more than 256 MB");
+    }
 
     const OPF: &str = r##"<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="id">x</dc:identifier><dc:title id="t">Wrong</dc:title><dc:creator id="c1">Someone</dc:creator><meta refines="#c1" property="role" scheme="marc:relators">aut</meta><meta refines="#t" property="title-type">main</meta><meta name="calibre:series" content="Old"/><meta property="belongs-to-collection" id="s">Old</meta><meta refines="#s" property="group-position">9</meta></metadata><manifest/></package>"##;
 

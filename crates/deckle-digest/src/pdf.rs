@@ -390,7 +390,7 @@ impl Image {
 
     /// Any picture the `image` crate reads, flattened onto white.
     fn decoded(bytes: &[u8]) -> Option<Image> {
-        let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+        let img = deckle_core::image_cap::load(bytes).ok()?.to_rgba8();
         let (w, h) = img.dimensions();
         let mut pixels = Vec::with_capacity((w * h * 3) as usize);
         for p in img.pixels() {

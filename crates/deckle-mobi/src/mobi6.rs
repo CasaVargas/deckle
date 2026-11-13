@@ -444,9 +444,9 @@ pub fn rebuild(
         .unwrap_or_else(|| fallback_title.to_owned());
     let language = get(524).next().unwrap_or_else(|| "en".into());
     let res = if mobi {
-        resources(&db, 0, rec0)
+        resources(&db, 0, rec0)?
     } else {
-        resources(&db, 0, &[])
+        resources(&db, 0, &[])?
     };
     let mut warnings = Vec::new();
 

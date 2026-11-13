@@ -80,6 +80,8 @@ pub struct Huff {
     maxcode: Vec<u64>,
     /// Phrases, and whether each is already decompressed.
     dictionary: Vec<(Vec<u8>, bool)>,
+    /// What the decompressed phrases kept in `dictionary` may add up to.
+    kept: deckle_limits::Budget,
 }
 
 impl Huff {
@@ -132,15 +134,23 @@ impl Huff {
             mincode,
             maxcode,
             dictionary,
+            kept: deckle_limits::Budget::new(deckle_limits::MAX_MOBI_TEXT_BYTES),
         })
     }
 
-    /// One text record, decompressed.
-    pub fn unpack(&mut self, data: &[u8]) -> Result<Vec<u8>, MobiError> {
-        self.unpack_at(data, 0)
+    /// One text record, decompressed, stopping once `limit` bytes are out: the text left
+    /// before the book's declared length, past which nothing is kept.
+    pub fn unpack(&mut self, data: &[u8], limit: usize) -> Result<Vec<u8>, MobiError> {
+        Ok(self.unpack_at(data, 0, limit)?.0)
     }
 
-    fn unpack_at(&mut self, data: &[u8], depth: usize) -> Result<Vec<u8>, MobiError> {
+    /// The bytes, at most `limit`, and whether they are all of `data`.
+    fn unpack_at(
+        &mut self,
+        data: &[u8],
+        depth: usize,
+        limit: usize,
+    ) -> Result<(Vec<u8>, bool), MobiError> {
         if depth > HUFF_DEPTH {
             return Err(MobiError::Corrupt(
                 "HUFF phrases refer to each other too deeply",
@@ -156,6 +166,10 @@ impl Huff {
         let mut n: i64 = 32;
         let mut out = Vec::new();
         loop {
+            if out.len() >= limit {
+                out.truncate(limit);
+                return Ok((out, false));
+            }
             if n <= 0 {
                 pos += 4;
                 if pos + 8 > padded.len() {
@@ -182,13 +196,22 @@ impl Huff {
             let slice = if done {
                 slice
             } else {
-                let unpacked = self.unpack_at(&slice, depth + 1)?;
-                self.dictionary[r] = (unpacked.clone(), true);
+                let (unpacked, whole) = self.unpack_at(&slice, depth + 1, limit - out.len())?;
+                if whole {
+                    self.kept
+                        .add(unpacked.len() as u64)
+                        .map_err(|e| MobiError::TooLarge("this book's HUFF/CDIC phrases are", e))?;
+                    self.dictionary[r] = (unpacked.clone(), true);
+                }
                 unpacked
             };
             out.extend_from_slice(&slice);
         }
-        Ok(out)
+        if out.len() > limit {
+            out.truncate(limit);
+            return Ok((out, false));
+        }
+        Ok((out, true))
     }
 }
 
@@ -201,8 +224,28 @@ mod tests {
         let (huff, cdic) = crate::fixture::huff_tables(&[(0x01, b"\x41\x42", false)]);
         let mut h = Huff::new(&huff, &[&cdic]).unwrap();
         // Byte b decodes to itself, except 0x01, a phrase that is itself compressed ("AB").
-        assert_eq!(h.unpack(b"xy\x01z").unwrap(), b"xyABz");
+        assert_eq!(h.unpack(b"xy\x01z", 100).unwrap(), b"xyABz");
+        assert_eq!(h.unpack(b"xy\x01z", 3).unwrap(), b"xyA");
         assert!(Huff::new(b"nope", &[]).is_err());
+    }
+
+    #[test]
+    fn nested_phrases_stop_at_the_limit() {
+        // Byte 1 is phrase "\x02\x02", byte 2 "\x03\x03", … byte 30 "xx": one byte of input
+        // is 2^30 bytes of text.
+        let phrases: Vec<[u8; 2]> = (2..=30u8).map(|b| [b, b]).chain([[b'x'; 2]]).collect();
+        let overrides: Vec<(u8, &[u8], bool)> = phrases
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i as u8 + 1, p.as_slice(), false))
+            .collect();
+        let (huff, cdic) = crate::fixture::huff_tables(&overrides);
+        let mut h = Huff::new(&huff, &[&cdic]).unwrap();
+        let start = std::time::Instant::now();
+        assert_eq!(h.unpack(b"\x01", 1000).unwrap(), vec![b'x'; 1000]);
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+        // The phrases that came back whole are kept and used again.
+        assert_eq!(h.unpack(b"\x1e\x1e", 100).unwrap(), b"xxxx");
     }
 
     #[test]

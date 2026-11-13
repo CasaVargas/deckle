@@ -577,7 +577,7 @@ pub(crate) fn cover_for(
 /// An image file as a JPEG cover.
 fn picked_cover(path: &Path) -> Result<GeneratedCover, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let img = image::load_from_memory(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    let img = crate::image_cap::load(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(GeneratedCover {
         style: "picked".into(),
         jpeg: crate::normalize::encode_jpeg(&img, 90)?,

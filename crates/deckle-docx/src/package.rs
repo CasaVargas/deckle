@@ -2,7 +2,7 @@
 //! The DOCX zip: parts, relationships and the core properties.
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
 use crate::DocxError;
 
@@ -10,6 +10,8 @@ const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 
 pub struct Package<'a> {
     zip: zip::ZipArchive<Cursor<&'a [u8]>>,
+    /// Most bytes the whole package may unpack to, so the most one part may.
+    limit: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -30,7 +32,13 @@ pub struct Core {
 }
 
 impl<'a> Package<'a> {
+    /// Opens the DOCX in `bytes`, refusing one whose parts declare more than
+    /// [`MAX_DOCX_BYTES`](deckle_limits::MAX_DOCX_BYTES) together.
     pub fn open(bytes: &'a [u8]) -> Result<Self, DocxError> {
+        Self::open_with(bytes, deckle_limits::MAX_DOCX_BYTES)
+    }
+
+    fn open_with(bytes: &'a [u8], limit: u64) -> Result<Self, DocxError> {
         // Word wraps a password-protected .docx in an OLE compound file, the same container a
         // Word 97-2003 .doc uses; the encrypted one has an `EncryptedPackage` stream.
         if bytes.starts_with(&OLE_MAGIC) {
@@ -49,7 +57,14 @@ impl<'a> Package<'a> {
         }
         let zip = zip::ZipArchive::new(Cursor::new(bytes))
             .map_err(|e| DocxError::Corrupt(e.to_string()))?;
-        Ok(Self { zip })
+        // `zip` stops each part at its declared size, so this bounds every read, however
+        // often a part is read.
+        let mut total = deckle_limits::Budget::new(limit);
+        for i in 0..zip.len() {
+            let size = zip.by_index_data(i).map(|e| e.size()).unwrap_or(0);
+            total.add(size).map_err(DocxError::TooLarge)?;
+        }
+        Ok(Self { zip, limit })
     }
 
     pub fn names(&self) -> Vec<String> {
@@ -61,15 +76,18 @@ impl<'a> Package<'a> {
     }
 
     pub fn read(&mut self, name: &str) -> Result<Option<Vec<u8>>, DocxError> {
-        let mut f = match self.zip.by_name(name) {
+        let f = match self.zip.by_name(name) {
             Ok(f) => f,
             Err(zip::result::ZipError::FileNotFound) => return Ok(None),
             Err(e) => return Err(DocxError::Corrupt(format!("{name}: {e}"))),
         };
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf)
-            .map_err(|e| DocxError::Corrupt(format!("{name}: {e}")))?;
-        Ok(Some(buf))
+        match deckle_limits::read_capped(f, self.limit) {
+            Ok(buf) => Ok(Some(buf)),
+            Err(e) => Err(match deckle_limits::TooLarge::in_io(&e) {
+                Some(t) => DocxError::TooLarge(t),
+                None => DocxError::Corrupt(format!("{name}: {e}")),
+            }),
+        }
     }
 
     pub fn read_string(&mut self, name: &str) -> Result<Option<String>, DocxError> {
@@ -186,7 +204,32 @@ fn resolve(dir: &str, target: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve;
+    use super::*;
+
+    #[test]
+    fn a_part_declaring_2_pow_60_bytes_is_refused() {
+        let docx = deckle_kfx::fixtures::stored_zip(&[("word/document.xml", b"<w/>", 1 << 60)]);
+        let e = Package::open(&docx).err().unwrap();
+        assert_eq!(
+            e.to_string(),
+            "this Word document unpacks to more than 50 MB"
+        );
+    }
+
+    #[test]
+    fn the_whole_package_is_held_to_one_total() {
+        let k = vec![b'x'; 600];
+        let docx = deckle_kfx::fixtures::stored_zip(&[("a", &k, 600), ("b", &k, 600)]);
+        assert!(Package::open_with(&docx, 1200).is_ok());
+        assert!(matches!(
+            Package::open_with(&docx, 1000),
+            Err(DocxError::TooLarge(_))
+        ));
+        // A part longer than it declares stops at what it declares.
+        let docx = deckle_kfx::fixtures::stored_zip(&[("a", &k, 10)]);
+        let mut p = Package::open_with(&docx, 1000).unwrap();
+        assert!(p.read("a").is_err());
+    }
 
     #[test]
     fn targets_resolve_against_the_part_folder() {

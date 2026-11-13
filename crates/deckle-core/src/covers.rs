@@ -23,7 +23,7 @@ pub struct Candidate {
 
 /// An image Open Library sent, not its 1×1 "no cover" placeholder.
 fn real_image(bytes: &[u8]) -> bool {
-    image::load_from_memory(bytes).is_ok_and(|i| i.width() > 10 && i.height() > 10)
+    crate::image_cap::load(bytes).is_ok_and(|i| i.width() > 10 && i.height() > 10)
 }
 
 /// The covers of the book's ISBN, then of its editions by title and author, de-duplicated.

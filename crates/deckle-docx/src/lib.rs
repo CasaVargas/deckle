@@ -39,6 +39,8 @@ pub enum DocxError {
     Corrupt(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("this Word document unpacks to {0}")]
+    TooLarge(deckle_limits::TooLarge),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

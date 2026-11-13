@@ -24,7 +24,7 @@ use parse::{CLOSE, Header, OPEN, Walker};
 pub type Files = Vec<(String, Vec<u8>)>;
 
 /// Larger than any real document; anything bigger is almost certainly not one.
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_IMPORT_BYTES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RtfError {

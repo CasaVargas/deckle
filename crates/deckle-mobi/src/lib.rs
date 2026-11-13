@@ -51,6 +51,9 @@ pub enum MobiError {
     BadPart(String, String),
     #[error("this book is DRM-protected, and Deckle never removes DRM; use a DRM-free copy")]
     Drm,
+    /// What went past a size limit ("this book's text is"), and the limit.
+    #[error("{0} {1}")]
+    TooLarge(&'static str, deckle_limits::TooLarge),
 }
 
 /// What record 0 says about a book.
@@ -204,7 +207,10 @@ fn parse_record0(rec0: &[u8]) -> Result<Meta, MobiError> {
     };
     meta.kf8 = be32(rec0, 0x24) == Some(8);
     let full_name = match (be32(rec0, 0x54), be32(rec0, 0x58)) {
-        (Some(at), Some(len)) => rec0.get(at as usize..(at + len) as usize).map(text),
+        (Some(at), Some(len)) => at
+            .checked_add(len)
+            .and_then(|end| rec0.get(at as usize..end as usize))
+            .map(text),
         _ => None,
     };
     let mut title = None;
@@ -243,6 +249,19 @@ fn parse_record0(rec0: &[u8]) -> Result<Meta, MobiError> {
 mod tests {
     use super::*;
     use crate::fixture::{Book, build};
+
+    #[test]
+    fn a_full_name_past_u32_does_not_panic() {
+        let mut bytes = build(&Book {
+            title: "T",
+            no_exth: true,
+            ..Default::default()
+        });
+        let rec0 = u32::from_be_bytes(bytes[78..82].try_into().unwrap()) as usize;
+        bytes[rec0 + 0x54..rec0 + 0x58].copy_from_slice(&0xFFFF_FFF0u32.to_be_bytes());
+        bytes[rec0 + 0x58..rec0 + 0x5C].copy_from_slice(&0x20u32.to_be_bytes());
+        assert!(read_meta(&bytes).is_ok());
+    }
 
     #[test]
     fn metadata_comes_from_the_exth_records() {

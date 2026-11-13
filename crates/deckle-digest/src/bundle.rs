@@ -563,7 +563,7 @@ fn write_inner(
                 // The master in color at full size, when the story has one.
                 let bytes = extra.and_then(|x| x.master.as_deref()).unwrap_or(jpeg);
                 let path = files.media(bytes, "jpg");
-                let img = image::load_from_memory(bytes).ok();
+                let img = deckle_core::image_cap::load(bytes).ok();
                 let (width, height) = img.as_ref().map_or((0, 0), |i| (i.width(), i.height()));
                 let token = photo_token(n);
                 let lead =

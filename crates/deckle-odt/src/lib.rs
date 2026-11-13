@@ -23,7 +23,7 @@ use styles::{Styles, attr, child, local};
 pub type Files = Vec<(String, Vec<u8>)>;
 
 /// Larger than any real document; anything bigger is almost certainly not one.
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_IMPORT_BYTES;
 const TEXT: &str = "application/vnd.oasis.opendocument.text";
 const TEMPLATE: &str = "application/vnd.oasis.opendocument.text-template";
 

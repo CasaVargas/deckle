@@ -108,15 +108,12 @@ pub fn epub_layout(epub: &[u8], sections: &[(String, String)]) -> Result<EpubLay
 
 /// Every spine file's href, as the OPF writes it, linear or not: KOReader counts them all.
 fn spine(epub: &[u8]) -> Result<Vec<String>, String> {
-    use std::io::Read;
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(epub)).map_err(|e| e.to_string())?;
     let mut text = |name: &str| -> Result<String, String> {
-        let mut s = String::new();
-        zip.by_name(name)
-            .map_err(|e| format!("{name}: {e}"))?
-            .read_to_string(&mut s)
+        let f = zip.by_name(name).map_err(|e| format!("{name}: {e}"))?;
+        let bytes = deckle_limits::read_capped(f, deckle_limits::MAX_ENTRY_BYTES)
             .map_err(|e| format!("{name}: {e}"))?;
-        Ok(s)
+        String::from_utf8(bytes).map_err(|e| format!("{name}: {e}"))
     };
     let container = text("META-INF/container.xml")?;
     let doc = roxmltree::Document::parse(&container).map_err(|e| e.to_string())?;

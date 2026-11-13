@@ -9,22 +9,11 @@
 //! inside `pre`, `code`, `script`, `style`, `svg`, `math` and tables is left alone (a table's
 //! layout, the paper's weather strip and puzzle grid among them, doesn't need locating).
 
-use std::io::{Read, Write};
+use std::io::Write;
 
 /// Converts the EPUB `bytes` to a KEPUB. A book that is a KEPUB already comes back unchanged.
 pub fn convert(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
-    let mut files: Vec<(String, Vec<u8>)> = Vec::with_capacity(zip.len());
-    for i in 0..zip.len() {
-        let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
-        if f.is_dir() {
-            continue;
-        }
-        let name = f.name().map_err(|e| e.to_string())?.into_owned();
-        let mut data = Vec::with_capacity(f.size() as usize);
-        f.read_to_end(&mut data).map_err(|e| e.to_string())?;
-        files.push((name, data));
-    }
+    let mut files = crate::whoswho::unzip(bytes)?;
     let text = xhtml_files(&files)?;
     if files
         .iter()
@@ -298,6 +287,14 @@ fn sentences(s: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    #[test]
+    fn an_entry_declaring_2_pow_60_bytes_is_refused() {
+        let epub = deckle_kfx::fixtures::stored_epub(&[("big.bin", b"tiny", 1 << 60)]);
+        let e = convert(&epub).unwrap_err();
+        assert!(e.contains("more than 256 MB"), "{e}");
+    }
 
     const PAGE: &str = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!DOCTYPE html>\n\
         <html xmlns=\"http://www.w3.org/1999/xhtml\"><head><title>T</title>\

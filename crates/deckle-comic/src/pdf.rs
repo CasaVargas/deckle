@@ -4,7 +4,7 @@
 //! page the screen's size. reMarkable's EPUB reader reflows, so this is the only fixed page
 //! there.
 
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
 
 use image::{ColorType, DynamicImage, ImageFormat};
 use pdf_writer::{Content, Filter, Finish, Name, Pdf, Rect, Ref, TextStr};
@@ -25,14 +25,15 @@ pub struct Made {
 /// each image passed through [`fit`] for `screen`, on pages `page` points wide and high (the
 /// screen at its dpi). An image that won't decode is left out and counted.
 pub fn from_epub(epub: &[u8], screen: Screen, page: (f32, f32)) -> Result<Made, String> {
+    use deckle_limits::{MAX_COMIC_BYTES, MAX_COMIC_PAGE_BYTES};
     let mut zip = zip::ZipArchive::new(Cursor::new(epub)).map_err(|e| e.to_string())?;
+    crate::check_declared_sizes(&zip, MAX_COMIC_PAGE_BYTES, MAX_COMIC_BYTES)
+        .map_err(|e| e.to_string())?;
     let mut read = |name: &str| -> Result<Vec<u8>, String> {
-        let mut out = Vec::new();
-        zip.by_name(name)
-            .map_err(|_| format!("{name}: not in the EPUB"))?
-            .read_to_end(&mut out)
-            .map_err(|e| e.to_string())?;
-        Ok(out)
+        let f = zip
+            .by_name(name)
+            .map_err(|_| format!("{name}: not in the EPUB"))?;
+        deckle_limits::read_capped(f, MAX_COMIC_PAGE_BYTES).map_err(|e| format!("{name}: {e}"))
     };
     let container = String::from_utf8_lossy(&read("META-INF/container.xml")?).into_owned();
     let opf_path = roxmltree::Document::parse(&container)
@@ -288,6 +289,7 @@ fn write(book: &Book, images: &[PageImage], screen: Screen, page: (f32, f32)) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
     use std::path::Path;
 
     fn image(w: u32, h: u32, format: ImageFormat) -> Vec<u8> {

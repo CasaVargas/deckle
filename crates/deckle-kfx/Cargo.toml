@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 thiserror.workspace = true
 zip.workspace = true
+deckle-limits.workspace = true
 rusqlite.workspace = true
 tempfile.workspace = true
 serde.workspace = true
@@ -19,3 +20,7 @@ uuid.workspace = true
 rand.workspace = true
 
 [dev-dependencies]
+
+[features]
+# `fixtures::stored_zip` and `stored_epub`, zips built byte by byte for other crates' tests.
+testing = []

@@ -55,6 +55,22 @@ pub const MAX_PDF_PAGE_POINTS: f32 = 14_400.0;
 pub const MAX_TXT_CHAPTERS: usize = 10_000;
 /// KFX: the symbol table's `max_id`.
 pub const MAX_KFX_SYMBOLS: u32 = 1_000_000;
+/// KFX, KPF: Ion values (and annotations, and a unit for every 64 bytes of symbol text copied)
+/// decoded from one file. About 2.5 times the most seen in a real file: up to 466,499 in a real
+/// library, 1,971,808 in a 17 MB KFX generated from a long test book. A decoded value measured
+/// about 320 bytes in memory, so the tree can reach about 1.6 GB at the limit. This bounds what
+/// the decoder builds only: the fix-ups afterwards copy parts of the tree and are not counted
+/// (a `$608` structure cloned per `$146` reference, the whole fragment list cloned for writing,
+/// the text of each eid as a `Vec<char>` for page numbers); jloutsch/deckle#79 tracks those.
+pub const MAX_ION_VALUES: u64 = 5_000_000;
+/// ODT, FB2, RTF, TXT, MOBI and Markdown: the file (ODT: unpacked), read whole.
+pub const MAX_IMPORT_BYTES: u64 = 50 * MB;
+/// PDF: the file.
+pub const MAX_PDF_BYTES: u64 = 200 * MB;
+/// ODT, FB2, RTF: one embedded picture.
+pub const MAX_EMBEDDED_IMAGE_BYTES: u64 = 10 * MB;
+/// A KOReader plugin archive, unpacked.
+pub const MAX_PLUGIN_BYTES: u64 = 20 * MB;
 
 /// Largest reservation made from a size a file declares (rule 1 of the size-limits design):
 /// `Vec::with_capacity(declared.min(MAX_RESERVE))`.

@@ -6,7 +6,9 @@ mod decode;
 mod encode;
 mod value;
 
-pub use decode::{decode_annotated, decode_single};
+pub use decode::{
+    ValueBudget, decode_annotated, decode_annotated_in, decode_single, decode_single_in,
+};
 pub use encode::{encode_single, encode_value};
 pub use value::{Decimal, Struct, Sym, Timestamp, Value};
 
@@ -36,4 +38,6 @@ pub enum IonError {
         expected: String,
         found: Vec<String>,
     },
+    #[error("the book holds more than {limit} Ion values")]
+    TooManyValues { limit: u64 },
 }

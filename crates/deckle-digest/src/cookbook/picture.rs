@@ -8,7 +8,7 @@ use crate::article::eink_photo;
 /// The printed picture for a site photo: the middle 3:2 of it, as [`eink_photo`] makes it
 /// (grayscale JPEG, at most 1000 px wide). `None` for tiny images and bytes that aren't one.
 pub fn site_picture(bytes: &[u8]) -> Option<Vec<u8>> {
-    let img = image::load_from_memory(bytes).ok()?;
+    let img = deckle_core::image_cap::load(bytes).ok()?;
     let (w, h) = (img.width(), img.height());
     // Cross-multiplied, so 3:2 is exact; the odd pixel rounds to the nearest.
     let (cw, ch) = if u64::from(w) * 2 > u64::from(h) * 3 {

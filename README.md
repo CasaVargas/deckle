@@ -165,7 +165,8 @@ shows it beside the queue with covers, groups series with the gaps called out, s
 your library, your Kindles and past sends, and tells you which books on a Kindle it could now
 build better.
 
-Every format, and the book styles, are in [docs/books.md](docs/books.md).
+Every format, and the book styles, are in [docs/books.md](docs/books.md). Files over
+[these sizes](docs/books.md#size-limits) are refused.
 
 ## The Kitchen Book
 

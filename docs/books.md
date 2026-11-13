@@ -69,6 +69,36 @@ styles.
   contents: a course packet, a week of long reads, a report in pieces.
 - A finished `.kfx` is sent as it is.
 
+## Size limits
+
+A file that would make Deckle use more memory than these is refused, with an error that names
+the limit, instead of slowing the computer or crashing. Real books are far inside them.
+
+| What | Limit |
+|---|---|
+| EPUB, KPF, CBZ: one file inside the archive, unpacked | 256 MB |
+| EPUB, KPF: the whole archive, unpacked | 1 GB |
+| CBZ, CBR: the whole archive, unpacked | 4 GB |
+| CBZ, CBR: one page | 256 MB |
+| DOCX: the whole document, unpacked, pictures included | 50 MB |
+| ODT, FB2, RTF, TXT, MOBI, Markdown: the file (ODT unpacked) | 50 MB |
+| ODT, FB2, RTF: one embedded picture | 10 MB |
+| PDF: the file | 200 MB |
+| TXT: chapters (past this, the rest stays in the last one) | 10,000 |
+| MOBI, AZW3: one embedded font, unpacked | 32 MB |
+| MOBI, AZW3: all embedded fonts, unpacked | 256 MB |
+| MOBI, AZW3: the text, unpacked | 256 MB |
+| PDF: page width (wider pages are laid out as 14,400 pt) | 14,400 pt |
+| PDF: a page rendered as a picture (a larger one renders smaller) | 100 megapixels |
+| A picture in a book, a cover or a web photo (not comic pages) | 100 megapixels |
+| KFX, KPF: symbols in the symbol table | 1,000,000 |
+| KFX, KPF: values decoded from the file (paragraphs, styles, positions…), and a value for each 64 bytes of a name repeated in it | 5,000,000 (about 1.6 GB of decoded tree at the limit). This bounds what the decoder builds; copies the conversion makes of parts of it afterwards are not counted yet (jloutsch/deckle#79) |
+| KFX, KPF: positions and page ranges, all together | one a character of the book's text, one an element |
+
+Comic pages have no pixel limit of their own: one page decodes to at most 512 MiB, and fitting
+it to a screen can briefly take about twice that. The numbers are in one place,
+`crates/deckle-limits`.
+
 ## The library
 
 **The library is a plain folder** (`Author/Title/` plus a `deckle.json`), no database. Deckle shows

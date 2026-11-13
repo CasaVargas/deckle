@@ -8,7 +8,7 @@ use base64::Engine;
 use roxmltree::Node;
 
 /// An image larger than this is dropped with a warning.
-const MAX_IMAGE: usize = 10 * 1024 * 1024;
+const MAX_IMAGE: usize = deckle_limits::MAX_EMBEDDED_IMAGE_BYTES as usize;
 /// An internal link's target is written as OPEN id CLOSE and resolved once every page exists.
 const OPEN: char = '\u{E000}';
 const CLOSE: char = '\u{E001}';

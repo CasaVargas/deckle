@@ -16,6 +16,7 @@ roxmltree.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 zip.workspace = true
+deckle-limits.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

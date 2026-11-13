@@ -106,3 +106,28 @@ fn from_kdf_table_keeps_raw_max_id() {
     assert_eq!(t.symbol_of(861), None); // placeholder for an unknown YJ symbol
     assert_eq!(t.symbol_of(863), Some("c0"));
 }
+
+#[test]
+fn an_import_max_id_past_the_limit_is_refused() {
+    // 50 million placeholders took 1.2 GB; u32::MAX was allowed. A negative one wrapped.
+    for max_id in [50_000_000, i64::from(u32::MAX), -1] {
+        let (_, mut table) = golden_table();
+        table
+            .as_struct_mut()
+            .unwrap()
+            .get_mut("imports")
+            .unwrap()
+            .as_list_mut()
+            .unwrap()[0]
+            .as_struct_mut()
+            .unwrap()
+            .insert("max_id", Value::Int(max_id));
+        let start = std::time::Instant::now();
+        assert!(SymbolTable::from_kdf_table(&table).is_err(), "{max_id}");
+        assert!(
+            SymbolTable::from_container_table(&table).is_err(),
+            "{max_id}"
+        );
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+}

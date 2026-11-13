@@ -28,6 +28,7 @@ rusqlite.workspace = true
 regex.workspace = true
 roxmltree.workspace = true
 zip.workspace = true
+deckle-limits.workspace = true
 
 [dev-dependencies]
 image.workspace = true

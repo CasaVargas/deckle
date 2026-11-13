@@ -6,7 +6,7 @@
 //! (#30, [`crate::typography`]) or pop-up notes (#31, [`crate::notes`]) pass is on.
 
 use std::collections::BTreeMap;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
 use std::path::Path;
 
 use regex::Regex;
@@ -174,14 +174,16 @@ pub fn normalize(
     // Load every entry (order preserved).
     let mut order: Vec<String> = Vec::new();
     let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut budget = deckle_limits::Budget::new(epub.book_limit);
     for i in 0..epub.zip.len() {
         let mut f = epub.zip.by_index(i)?;
         if f.is_dir() {
             continue;
         }
         let name = f.name()?.into_owned();
-        let mut data = Vec::with_capacity(f.size() as usize);
-        f.read_to_end(&mut data)?;
+        let data = budget
+            .read(&mut f, epub.entry_limit)
+            .map_err(|e| crate::epub::io_error(e, epub.entry_limit))?;
         order.push(name.clone());
         files.insert(name, data);
     }
@@ -253,7 +255,7 @@ pub fn normalize(
             continue;
         };
         let is_cover = Some(idx) == cover_idx;
-        let Ok(mut img) = image::load_from_memory(&data) else {
+        let Ok(mut img) = crate::image_cap::load(&data) else {
             report
                 .warnings
                 .push(format!("could not decode image {}", item.href));
@@ -802,4 +804,22 @@ pub fn rewrite_references(text: &str, doc_name: &str, renames: &[(String, String
             None => c[0].to_owned(),
         })
         .into_owned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_entry_declaring_2_pow_60_bytes_is_refused() {
+        let src = tempfile::NamedTempFile::new().unwrap();
+        let epub = deckle_kfx::fixtures::stored_epub(&[("big.bin", b"tiny", 1 << 60)]);
+        std::fs::write(src.path(), epub).unwrap();
+        let dst = tempfile::NamedTempFile::new().unwrap();
+        let e = normalize(src.path(), dst.path(), &NormalizeOptions::default()).unwrap_err();
+        assert!(
+            matches!(e, NormalizeError::Inspect(InspectError::EntryTooLarge(_))),
+            "{e}"
+        );
+    }
 }
