@@ -7,7 +7,7 @@ use deckle_digest::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap, HashSet},
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -75,6 +75,7 @@ impl PressSupervisor {
         let thread = thread::spawn(move || {
             let mut engine = Engine::new(options);
             let mut last: Option<(Vec<Config>, u64)> = None;
+            let mut reported = String::new();
             loop {
                 let (papers, rev) = {
                     let (lock, wake) = &*inbox;
@@ -100,7 +101,26 @@ impl PressSupervisor {
                     }
                     last.clone().unwrap()
                 };
-                if let Err(error) = engine.step(&papers, &version, rev) {
+                let stepped = engine.step(&papers, &version, rev);
+                // A folder's policy error does not block other folders and needs no fresh
+                // journal; it is reported when it changes, not on every tick.
+                let report = engine.folder_report();
+                if let Ok(()) = stepped
+                    && report != reported
+                    && (report.is_empty() || tx.try_send(report.clone()).is_ok())
+                {
+                    reported = report.clone();
+                }
+                if let Err(error) = stepped {
+                    // A step error must not hide a folder's own explanation: send both.
+                    let message = if report != reported && !report.is_empty() {
+                        format!("{error}; {report}")
+                    } else {
+                        error.to_string()
+                    };
+                    if tx.try_send(message).is_ok() {
+                        reported = report;
+                    }
                     // Any uncertain snapshot commit requires a fresh locked journal. Stop the
                     // child first, keep run.lock until the next reconciliation or shutdown.
                     let live = engine.running.as_ref().is_some_and(|r| {
@@ -114,7 +134,6 @@ impl PressSupervisor {
                         engine.journal = None;
                         engine.registered.clear();
                     }
-                    let _ = tx.try_send(error.to_string());
                 }
             }
         });
@@ -322,8 +341,33 @@ struct Engine {
     reconciled: HashMap<PathBuf, (String, bool)>,
     running: Option<Running>,
     lock: Option<File>,
+    swept: bool,
+    /// This step's per-folder policy errors. One folder's error never blocks another's.
+    folder_errors: BTreeMap<PathBuf, PressError>,
+    /// Folders whose request history is full, to log entering and leaving once.
+    full: HashSet<PathBuf>,
+    /// Statuses written since the last full flush. Kept here, not in the journal, because a
+    /// flush error drops and reopens the journal.
+    flushed: HashMap<Uuid, PressStatus>,
+    full_flush_at: Option<DateTime<Utc>>,
+    /// Folders whose configured paper could not be registered this step. Their journaled
+    /// statuses and outputs belong to the paper still bound there and are left alone, so a
+    /// blocked move is a folder error, not a step error that reopens the journal.
+    blocked: HashSet<PathBuf>,
+    /// A refused registration and when it may be tried again.
+    held: HashMap<PathBuf, (PressBinding, DateTime<Utc>, PressError)>,
 }
 impl Engine {
+    fn folder_report(&self) -> String {
+        self.folder_errors
+            .iter()
+            .map(|(root, e)| match e.detail {
+                Some(_) => e.to_string(),
+                None => format!("fresh-paper folder {}: {e}", root.display()),
+            })
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
     fn new(options: WorkerOptions) -> Self {
         Self {
             options,
@@ -335,6 +379,13 @@ impl Engine {
             reconciled: HashMap::new(),
             running: None,
             lock: None,
+            swept: false,
+            folder_errors: BTreeMap::new(),
+            full: HashSet::new(),
+            flushed: HashMap::new(),
+            full_flush_at: None,
+            blocked: HashSet::new(),
+            held: HashMap::new(),
         }
     }
     fn stop_child(&mut self) -> Result<(), PressError> {
@@ -344,7 +395,7 @@ impl Engine {
             running.child.wait().map_err(|_| storage())?;
         }
         if let Some(running) = self.running.take() {
-            cleanup_attempt(&running.descriptor)?;
+            cleanup_attempt(&running.descriptor, self.journal.as_ref())?;
         }
         Ok(())
     }
@@ -416,7 +467,12 @@ impl Engine {
         self.producer = Some(press::setup::producer_identity(
             &self.options.root.join("producer.json"),
         )?);
-        self.journal = Some(PressJournal::open(&self.options.root.join("journal"))?);
+        let journal = PressJournal::open(&self.options.root.join("journal"))?;
+        if !self.swept {
+            sweep_jobs(&self.options.root.join("jobs"), &journal);
+            self.swept = true;
+        }
+        self.journal = Some(journal);
         Ok(true)
     }
     fn policies(
@@ -472,15 +528,23 @@ impl Engine {
                         deckle_digest::papers::paper_path(&self.options.config_path, paper.slug())
                     };
                     let mut copy = paper.clone();
-                    press::setup::reconcile_with_watcher(
+                    // A failure is this folder's policy error: it is retried next tick and
+                    // never blocks other folders. Admission below is computed independently.
+                    match press::setup::reconcile_with_watcher(
                         papers,
                         &mut copy,
                         index,
                         producer,
                         &path,
                         || Ok(()),
-                    )?;
-                    self.reconciled.insert(binding.root.clone(), stamp);
+                    ) {
+                        Ok(()) => {
+                            self.reconciled.insert(binding.root.clone(), stamp);
+                        }
+                        Err(e) => {
+                            self.folder_errors.insert(binding.root.clone(), e);
+                        }
+                    }
                 }
                 let path = if paper.slug() == deckle_digest::papers::MAIN {
                     self.options.config_path.clone()
@@ -501,15 +565,44 @@ impl Engine {
                     .with_timezone(&deckle_digest::tz::local_tz())
                     .date_naive();
                 let stopped = press::read_stop(&paper.press_state(), today).is_some();
-                bindings.push((binding.clone(), paper.clone(), index));
                 let policy = (binding.clone(), enabled, stopped);
                 if self.registered.get(&binding.root) != Some(&policy) {
-                    self.journal
-                        .as_mut()
-                        .unwrap()
-                        .register_binding(binding, enabled, stopped)?;
+                    // A folder still bound to another paper (or otherwise refused) is left
+                    // out: its old binding is disabled below, and other folders go on. A
+                    // refused registration is retried once a minute, not on every tick: a
+                    // blocked move re-checks the old paper's editions each time.
+                    // A hold more than a minute away means the clock went back: retry now.
+                    if let Some((held, until, error)) = self.held.get(&binding.root)
+                        && *held == binding
+                        && now < *until
+                        && *until - now <= deckle_digest::chrono::Duration::minutes(1)
+                    {
+                        self.folder_errors
+                            .insert(binding.root.clone(), error.clone());
+                        self.blocked.insert(binding.root.clone());
+                        continue;
+                    }
+                    if let Err(e) = self.journal.as_mut().unwrap().register_binding(
+                        binding.clone(),
+                        enabled,
+                        stopped,
+                    ) {
+                        self.held.insert(
+                            binding.root.clone(),
+                            (
+                                binding.clone(),
+                                now + deckle_digest::chrono::Duration::minutes(1),
+                                e.clone(),
+                            ),
+                        );
+                        self.folder_errors.insert(binding.root.clone(), e);
+                        self.blocked.insert(binding.root.clone());
+                        continue;
+                    }
+                    self.held.remove(&binding.root);
                     self.registered.insert(policy.0.root.clone(), policy);
                 }
+                bindings.push((binding, paper.clone(), index));
             }
         }
         // A removed/invalid mapping may still have durable queued work. Explicitly disable
@@ -531,6 +624,8 @@ impl Engine {
         revision: &AtomicU64,
         rev: u64,
     ) -> Result<(), PressError> {
+        self.folder_errors.clear();
+        self.blocked.clear();
         if !self.initialize(papers)? {
             return Ok(());
         }
@@ -547,51 +642,88 @@ impl Engine {
                 failed?;
             } else if let Some(exit) = running.child.try_wait().map_err(|_| storage())? {
                 let running = self.running.take().unwrap();
-                if exit.success() {
-                    let parent = running.descriptor.parent().unwrap();
-                    let bytes = press::scan::read_control(parent, Path::new("result.json"))?;
-                    let result: WorkerResult =
-                        serde_json::from_slice(&bytes).map_err(|_| build_error())?;
-                    if result.lease != running.lease {
-                        return Err(build_error());
-                    }
-                    if let Some(code) = result.error_code {
-                        if !matches!(
-                            code,
-                            PressErrorCode::SourceFailure
-                                | PressErrorCode::BuildFailed
-                                | PressErrorCode::StorageUnavailable
-                                | PressErrorCode::Unsupported
-                        ) {
+                // Clean up even when recording the result fails; the folder stays until
+                // the journal has recorded the job.
+                let recorded = (|| {
+                    if exit.success() {
+                        let parent = running.descriptor.parent().unwrap();
+                        let bytes = press::scan::read_control(parent, Path::new("result.json"))?;
+                        let result: WorkerResult =
+                            serde_json::from_slice(&bytes).map_err(|_| build_error())?;
+                        if result.lease != running.lease {
                             return Err(build_error());
                         }
-                        self.journal.as_mut().unwrap().fail(
-                            &running.lease,
-                            code,
-                            (self.options.clock)(),
-                        )?;
-                    } else {
-                        let artifact = FreshArtifact {
-                            bundle: parent
-                                .join("attempt")
-                                .join(format!("{}.deckle", running.lease.edition_id)),
-                            manifest_sha256: result.manifest_sha256,
-                        };
-                        press::publish_result(
-                            self.journal.as_mut().unwrap(),
-                            &running.lease,
-                            &artifact,
-                            || (self.options.clock)(),
-                        )?;
+                        if let Some(code) = result.error_code {
+                            if !matches!(
+                                code,
+                                PressErrorCode::SourceFailure
+                                    | PressErrorCode::BuildFailed
+                                    | PressErrorCode::StorageUnavailable
+                                    | PressErrorCode::Unsupported
+                            ) {
+                                return Err(build_error());
+                            }
+                            self.journal.as_mut().unwrap().fail(
+                                &running.lease,
+                                code,
+                                (self.options.clock)(),
+                            )?;
+                        } else {
+                            let artifact = FreshArtifact {
+                                bundle: parent
+                                    .join("attempt")
+                                    .join(format!("{}.deckle", running.lease.edition_id)),
+                                manifest_sha256: result.manifest_sha256,
+                            };
+                            press::publish_result(
+                                self.journal.as_mut().unwrap(),
+                                &running.lease,
+                                &artifact,
+                                || (self.options.clock)(),
+                            )?;
+                        }
                     }
-                }
-                cleanup_attempt(&running.descriptor)?;
+                    Ok(())
+                })();
+                let cleaned = cleanup_attempt(&running.descriptor, self.journal.as_ref());
+                recorded?;
+                cleaned?;
                 // A failed child remains active for bounded recovery below.
             }
         }
         let policy_result = self.policies(papers, now);
         let policy_error = policy_result.as_ref().err().cloned();
         let bindings = policy_result.unwrap_or_default();
+        for (binding, _, _) in &bindings {
+            let full = self.journal.as_ref().unwrap().history_full(binding);
+            if full != self.full.contains(&binding.root) {
+                if full {
+                    eprintln!(
+                        "fresh-paper folder {}: request history full; new requests wait until old ones age out",
+                        binding.root.display()
+                    );
+                    self.full.insert(binding.root.clone());
+                } else {
+                    eprintln!(
+                        "fresh-paper folder {}: request history has room again",
+                        binding.root.display()
+                    );
+                    self.full.remove(&binding.root);
+                }
+            }
+            if full {
+                self.folder_errors.insert(
+                    binding.root.clone(),
+                    PressError::with_detail(
+                        PressErrorCode::Busy,
+                        format!(
+                            "fresh-paper folder {}: request history full",
+                            binding.root.display()
+                        ),
+                    ),
+                );
+            }
+        }
         // One binding per cycle bounds total request candidates globally to 100.
         let selected = if bindings.is_empty() {
             None
@@ -620,11 +752,28 @@ impl Engine {
                 } = event
                 {
                     let journal = self.journal.as_mut().unwrap();
+                    if journal.status(request.request_id).is_none() {
+                        // The status file is the record that the request was answered, so a
+                        // forgotten refusal is never journaled again. A full history leaves
+                        // new requests unanswered.
+                        if press::status_written(binding, request.request_id)
+                            || self.full.contains(&binding.root)
+                        {
+                            continue;
+                        }
+                    }
                     let result = if let Some(code) = rejection {
                         journal.reject_in(binding, request.clone(), &hash, code, now)
                     } else {
                         journal.accept_in(binding, request.clone(), &hash, now)
                     };
+                    if let Ok(status) = &result
+                        && journal.status(request.request_id).is_none()
+                    {
+                        // First seen long after it expired: answered once, not journaled. A
+                        // failed write is retried on the next pass, since no file exists.
+                        let _ = press::write_unjournaled_status(binding, status);
+                    }
                     if let Err(e) = result {
                         match e.code {
                             PressErrorCode::Busy
@@ -745,9 +894,25 @@ impl Engine {
         if self.running.is_none() && self.journal.as_ref().unwrap().active().is_none() {
             self.lock = None;
         }
-        let statuses = press::flush_statuses(self.journal.as_mut().unwrap());
-        let retention =
-            press::prune_results(self.journal.as_mut().unwrap(), (self.options.clock)());
+        // Write only changed statuses, and everything every five minutes so a status file
+        // removed by hand or by a sync tool comes back.
+        if self
+            .full_flush_at
+            .is_none_or(|at| now < at || now - at >= deckle_digest::chrono::Duration::minutes(5))
+        {
+            self.flushed.clear();
+            self.full_flush_at = Some(now);
+        }
+        let statuses = press::flush_changed(
+            self.journal.as_mut().unwrap(),
+            &mut self.flushed,
+            &self.blocked,
+        );
+        let retention = press::prune_results_except(
+            self.journal.as_mut().unwrap(),
+            (self.options.clock)(),
+            &self.blocked,
+        );
         statuses.and(retention)?;
         if let Some(error) = policy_error {
             return Err(error);
@@ -801,16 +966,65 @@ impl Drop for Engine {
 
 /// Only a positively reaped child's unique staging is removable. Neither shared outputs
 /// nor archived results are under this path, and private descriptor reads reject links.
-fn cleanup_attempt(descriptor: &Path) -> Result<(), PressError> {
+/// Once the attempt is gone and the journal has recorded the job's result (the lease is no
+/// longer the live one), the whole `jobs/<id>` folder goes too.
+fn cleanup_attempt(descriptor: &Path, journal: Option<&PressJournal>) -> Result<(), PressError> {
     let job = read_job(descriptor).map_err(|_| storage())?;
     match fs::symlink_metadata(&job.work) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
         Ok(meta)
             if meta.file_type().is_dir()
                 && job.work.canonicalize().ok().as_deref() == Some(job.work.as_path()) =>
         {
-            fs::remove_dir_all(&job.work).map_err(|_| storage())
+            fs::remove_dir_all(&job.work).map_err(|_| storage())?;
+        }
+        _ => return Err(storage()),
+    }
+    if journal.is_some_and(|j| j.active().as_ref() != Some(&job.lease)) {
+        remove_job_folder(descriptor.parent().ok_or_else(storage)?)?;
+    }
+    Ok(())
+}
+fn remove_job_folder(dir: &Path) -> Result<(), PressError> {
+    match fs::symlink_metadata(dir) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Ok(meta)
+            if meta.file_type().is_dir() && dir.canonicalize().ok().as_deref() == Some(dir) =>
+        {
+            fs::remove_dir_all(dir).map_err(|_| storage())
         }
         _ => Err(storage()),
+    }
+}
+/// At start. Job folder names are random, so each `job.json` says which job a folder is for.
+/// A folder older than a day whose job the journal no longer holds, or whose `job.json`
+/// cannot be read, is left from an earlier run and is removed. Folder times are the file
+/// system's, so they are compared with the system clock, not the press clock.
+fn sweep_jobs(jobs: &Path, journal: &PressJournal) {
+    let now = std::time::SystemTime::now();
+    let Ok(entries) = fs::read_dir(jobs) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&dir) else {
+            continue;
+        };
+        let named = entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| Uuid::parse_str(name).is_ok());
+        let old = meta.modified().is_ok_and(|at| {
+            now.duration_since(at)
+                .is_ok_and(|age| age >= std::time::Duration::from_secs(24 * 3600))
+        });
+        if !named || !meta.file_type().is_dir() || !old {
+            continue;
+        }
+        let held =
+            read_job(&dir.join("job.json")).is_ok_and(|job| journal.holds_job(job.lease.job_id));
+        if !held {
+            let _ = remove_job_folder(&dir);
+        }
     }
 }

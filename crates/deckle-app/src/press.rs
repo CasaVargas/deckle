@@ -38,8 +38,10 @@ fn identity(root: &Path) -> Result<Uuid, String> {
     builder
         .create(root)
         .map_err(|_| "Private request storage is unavailable.".to_owned())?;
-    setup::producer_identity(&root.join("producer.json")).map_err(|_| {
-        "Private request identity is unavailable. Restore it before reconnecting.".into()
+    setup::producer_identity(&root.join("producer.json")).map_err(|e| {
+        e.detail.unwrap_or_else(|| {
+            "Private request identity is unavailable. Restore it before reconnecting.".into()
+        })
     })
 }
 
@@ -154,8 +156,10 @@ pub fn guard_save(main: &Path, root: &Path, old: &Config, next: &mut Config) -> 
     if !root.join("producer.json").is_file() {
         return Err("Request identity is unavailable. Restore it before changing folders.".into());
     }
-    let producer = setup::producer_identity(&root.join("producer.json")).map_err(|_| {
-        "Request identity is unavailable. Restore it before changing folders.".to_owned()
+    let producer = setup::producer_identity(&root.join("producer.json")).map_err(|e| {
+        e.detail.unwrap_or_else(|| {
+            "Request identity is unavailable. Restore it before changing folders.".to_owned()
+        })
     })?;
     let configs = deckle_digest::papers::load_all(main)?.papers;
     let mut proposed = configs.clone();

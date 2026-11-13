@@ -1270,6 +1270,11 @@ Deckle never silently takes ownership. To deliberately reconnect an existing fol
 3. On the new producing computer, check the selected paper and folder, then retry setup. Reopen
    or refresh the compatible client's selected folder after the new advertisement syncs.
 
+When the folder moves to a different paper on the same computer, Deckle removes the old paper's
+fresh editions and request statuses from it at once, after the old paper's last request finishes.
+If an edition folder holds a file Deckle did not write (such as `.DS_Store`), Deckle leaves it and
+the watcher log names that folder: remove it by hand and the move completes.
+
 If the old computer is unavailable, first ensure it cannot resume its watcher or write to this
 folder. Do not remove another active producer's record. A duplicate folder mapping to another
 paper on this computer must also be removed or corrected before setup can succeed.
@@ -1293,12 +1298,17 @@ paper on this computer must also be removed or corrected before setup can succee
 - **No response:** check both devices' clocks, the stopped-presses setting, that the same folder
   is selected, and that the cloud provider has uploaded and downloaded hidden control files.
   A visible request file is not proof it reached the producer. Let the client report expiry or
-  offer its explicit retry; do not delete control files to force another build.
+  offer its explicit retry; do not delete control files to force another build. If the watcher
+  log says "request history full", that folder already holds 1,000 finished requests, and new
+  ones wait until older ones age out.
 - **Identity unavailable:** restore this installation's private request state before reconnecting.
   It lives under Deckle's persistent application configuration directory in `press/`, separate
   from synced folders and disposable caches. Do not copy a producer identity between computers
   or manually edit it. After reinstalling without that state, use the deliberate disconnect
-  procedure above before creating a new ownership record.
+  procedure above before creating a new ownership record. If the message says `producer.json` is
+  empty or damaged and this computer has no fresh-paper folders yet, delete that file and start
+  Deckle again. On a disk without hard links (FAT, some network drives), a crash while Deckle
+  first writes that file leaves it empty in this way.
 
 ## The AI editor
 

@@ -37,8 +37,11 @@ fn worker_fixture() {
         count.fetch_add(1,std::sync::atomic::Ordering::SeqCst);
         if url.starts_with("https://example.invalid/selected-") { Ok(format!("<html><head><title>{url}</title></head><body><article><h1>{url}</h1>{}</article></body></html>", "<p>Fictional selected article about a town library and its repaired roof.</p>".repeat(100)).into_bytes()) } else if url=="https://example.invalid/feed" {Ok(br#"<rss version="2.0"><channel><title>Fake wire</title><item><title>Library reopened</title><link>https://example.invalid/story</link><description>Repairs are complete.</description></item></channel></rss>"#.to_vec())}else{Err("fake source unavailable".into())}
     }).unwrap();
+    // Outside the job folder, which the supervisor removes once the result is recorded:
+    // <base>/private/jobs/<id>/job.json -> <base>/source-count.
+    let base = Path::new(&job).ancestors().nth(4).unwrap();
     std::fs::write(
-        Path::new(&job).with_file_name("source-count"),
+        base.join("source-count"),
         count.load(std::sync::atomic::Ordering::SeqCst).to_string(),
     )
     .unwrap();
@@ -233,17 +236,11 @@ fn press_worker_real_child_publishes_and_restart_does_not_refetch() {
     until(&f, &mut w, PressState::Published);
     drop(w);
     let first = status(&f).unwrap();
-    let attempt = std::fs::read_dir(f.root.join("jobs"))
-        .unwrap()
-        .next()
-        .unwrap()
-        .unwrap()
-        .path();
-    assert_eq!(
-        std::fs::read_to_string(attempt.join("source-count")).unwrap(),
-        "1"
-    );
-    let attempts = std::fs::read_dir(f.root.join("jobs")).unwrap().count();
+    let counted = f.root.parent().unwrap().join("source-count");
+    assert_eq!(std::fs::read_to_string(&counted).unwrap(), "1");
+    // A finished job leaves no folder under jobs/.
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 0);
+    std::fs::remove_file(&counted).unwrap();
     let mut w = PressSupervisor::with_options(f.options.clone());
     for _ in 0..10 {
         let _ = w.tick(std::slice::from_ref(&f.cfg), Utc::now());
@@ -251,10 +248,47 @@ fn press_worker_real_child_publishes_and_restart_does_not_refetch() {
     }
     drop(w);
     assert_eq!(status(&f).unwrap(), first);
-    assert_eq!(
-        std::fs::read_dir(f.root.join("jobs")).unwrap().count(),
-        attempts
-    );
+    assert!(!counted.exists(), "restart must not build again");
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 0);
+}
+#[test]
+fn press_worker_removes_stale_job_folders_at_start() {
+    let f = fixture("TEST HANG");
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut w, PressState::Building);
+    drop(w);
+    let jobs = f.root.join("jobs");
+    // The interrupted job is still held by the journal; keep its folder even when old.
+    let held = std::fs::read_dir(&jobs)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let damaged = jobs.join(Uuid::new_v4().to_string());
+    std::fs::create_dir(&damaged).unwrap();
+    std::fs::write(damaged.join("job.json"), b"{").unwrap();
+    let recent = jobs.join(Uuid::new_v4().to_string());
+    std::fs::create_dir(&recent).unwrap();
+    std::fs::write(recent.join("job.json"), b"{").unwrap();
+    let two_days_ago = std::time::SystemTime::now() - Duration::from_secs(2 * 24 * 3600);
+    for dir in [&held, &damaged] {
+        std::fs::File::open(dir)
+            .unwrap()
+            .set_modified(two_days_ago)
+            .unwrap();
+    }
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    // The status still says building from the first run; wait for the sweep itself.
+    let end = Instant::now() + Duration::from_secs(30);
+    while damaged.exists() && Instant::now() < end {
+        let _ = w.tick(std::slice::from_ref(&f.cfg), Utc::now());
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(w);
+    assert!(!damaged.exists(), "an old unreadable job folder is removed");
+    assert!(held.exists(), "a job the journal holds keeps its folder");
+    assert!(recent.exists(), "a folder under a day old is kept");
 }
 #[test]
 fn press_worker_scheduled_lock_does_not_start_deadline_and_opt_out_rejects_queued() {
@@ -574,7 +608,6 @@ fn press_worker_same_paper_two_enabled_folders_and_offline_old_folder() {
     let second_status = published.unwrap_or_else(|| {
         panic!("second root must publish with first offline; last status: {last_status:?}")
     });
-    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 2);
     assert_ne!(first.job_id, second_status.job_id);
     assert_ne!(first.result, second_status.result);
     assert!(
@@ -583,6 +616,8 @@ fn press_worker_same_paper_two_enabled_folders_and_offline_old_folder() {
             .exists()
     );
     drop(w);
+    // The status is written before the finished job's folder is removed.
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 0);
     let j = press::PressJournal::open(&f.root.join("journal")).unwrap();
     assert_eq!(j.binding_for_request(first.request_id).unwrap(), f.binding);
     assert_eq!(
@@ -624,7 +659,9 @@ fn press_worker_old_orphan_attempt_cannot_publish_after_restart() {
         .count();
     assert_eq!(dirs, 1);
     assert!(old.with_file_name("result.json").exists());
-    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 2);
+    // The interrupted attempt's folder stays: its result was never recorded. The
+    // finished attempt's folder is removed.
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 1);
 }
 #[test]
 #[ignore = "requires an explicitly built desktop executable"]
@@ -935,7 +972,6 @@ fn press_worker_protocol_smoke_exchange() {
     assert_eq!(published.job_id, other.job_id);
     assert_eq!(published.result, other.result);
     assert!(queued.revision < building.revision && building.revision < published.revision);
-    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 1);
     assert_eq!(std::fs::read(&legacy).unwrap(), legacy_before);
     assert_eq!(std::fs::read(&marks).unwrap(), marks_before);
     let result = published.result.as_ref().unwrap();
@@ -970,10 +1006,12 @@ fn press_worker_protocol_smoke_exchange() {
         );
     }
     drop(worker);
+    // The status is written before the finished job's folder is removed.
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 0);
     let mut worker = PressSupervisor::with_options(f.options.clone());
     worker.tick(std::slice::from_ref(&f.cfg), now).unwrap();
     assert_eq!(status(&f).unwrap(), published);
-    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 1);
+    assert_eq!(std::fs::read_dir(f.root.join("jobs")).unwrap().count(), 0);
     if let Some(output) = std::env::var_os("DECKLE_PRESS_SMOKE_OUTPUT") {
         let output = Path::new(&output);
         std::fs::create_dir(output).expect("smoke output must not already exist");
@@ -1425,7 +1463,8 @@ fn regression_ancient_expiry_boundary_and_known_request_reconciliation() {
     for (seconds, retained) in [(1, true), (0, false), (-1, false)] {
         let mut request = f.request.clone();
         request.request_id = Uuid::new_v4();
-        request.expires_at = at - deckle_digest::chrono::Duration::days(30)
+        // First seen 48 hours or more after expiry: answered once, never journaled.
+        request.expires_at = at - deckle_digest::chrono::Duration::hours(48)
             + deckle_digest::chrono::Duration::seconds(seconds);
         request.created_at = request.expires_at - deckle_digest::chrono::Duration::hours(24);
         j.reject_in(
@@ -1652,4 +1691,437 @@ fn press_worker_accepts_legacy_descriptor_without_source_input() {
     )
     .unwrap();
     assert!(body.contains("Library reopened"));
+}
+
+type Clock = Arc<std::sync::Mutex<deckle_digest::chrono::DateTime<Utc>>>;
+fn clocked(f: &mut Fixture) -> Clock {
+    let clock = Arc::new(std::sync::Mutex::new(Utc::now()));
+    let c = clock.clone();
+    f.options.clock = Arc::new(move || *c.lock().unwrap());
+    clock
+}
+fn hours(n: i64) -> deckle_digest::chrono::Duration {
+    deckle_digest::chrono::Duration::hours(n)
+}
+fn request_file(f: &Fixture, r: &PressRequest) -> std::path::PathBuf {
+    f.binding.root.join(format!(
+        ".deckle-press/requests/{}/{}.json",
+        r.reader_id, r.request_id
+    ))
+}
+fn write_request(f: &Fixture, r: &PressRequest) {
+    let path = request_file(f, r);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, serde_json::to_vec(r).unwrap()).unwrap();
+}
+fn status_file(f: &Fixture, id: Uuid) -> std::path::PathBuf {
+    f.binding
+        .root
+        .join(format!(".deckle-press/status/{id}.json"))
+}
+fn status_of(f: &Fixture, id: Uuid) -> Option<press::PressStatus> {
+    serde_json::from_slice(&std::fs::read(status_file(f, id)).ok()?).ok()
+}
+fn wait_for_status(f: &Fixture, w: &mut PressSupervisor, id: Uuid) -> press::PressStatus {
+    let end = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < end {
+        let _ = w.tick(std::slice::from_ref(&f.cfg), Utc::now());
+        if let Some(s) = status_of(f, id) {
+            return s;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    panic!("no status for {id}");
+}
+/// Several supervisor steps; each one scans the fixture's only folder.
+fn steps(f: &Fixture, w: &mut PressSupervisor) -> Vec<String> {
+    let mut errors = Vec::new();
+    for _ in 0..10 {
+        if let Err(e) = w.tick(std::slice::from_ref(&f.cfg), Utc::now()) {
+            errors.push(e);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    errors
+}
+#[test]
+fn press_worker_forgotten_refusals_are_not_journaled_again() {
+    let mut f = fixture("Stopped refusals");
+    let clock = clocked(&mut f);
+    press::write_stop(&f.cfg.press_state(), Some(Utc::now().date_naive())).unwrap();
+    let mut mismatch = f.request.clone();
+    mismatch.request_id = Uuid::new_v4();
+    mismatch.expires_at =
+        deckle_digest::chrono::TimeZone::with_ymd_and_hms(&Utc, 9999, 1, 1, 0, 0, 0).unwrap();
+    write_request(&f, &mismatch);
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut w, PressState::Failed);
+    let stopped = status(&f).unwrap();
+    let refused = wait_for_status(&f, &mut w, mismatch.request_id);
+    assert_eq!(
+        refused.error_code,
+        Some(press::PressErrorCode::ClockMismatch)
+    );
+    *clock.lock().unwrap() += hours(73);
+    steps(&f, &mut w);
+    drop(w);
+    let j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    for (request, answer) in [(&f.request, &stopped), (&mismatch, &refused)] {
+        assert!(j.status(request.request_id).is_none(), "forgotten");
+        assert!(
+            request_file(&f, request).exists(),
+            "the reader's request stays"
+        );
+        assert_eq!(&status_of(&f, request.request_id).unwrap(), answer);
+    }
+}
+#[test]
+fn press_worker_request_from_a_clock_ahead_is_never_accepted() {
+    let mut f = fixture("Clock ahead");
+    let clock = clocked(&mut f);
+    std::fs::remove_file(request_file(&f, &f.request)).unwrap();
+    f.options.launch = Arc::new(|_| panic!("a refused request must not be built"));
+    let mut ahead = f.request.clone();
+    ahead.created_at = Utc::now() + hours(60);
+    ahead.expires_at = ahead.created_at + hours(24);
+    write_request(&f, &ahead);
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    let refused = wait_for_status(&f, &mut w, ahead.request_id);
+    assert_eq!(
+        refused.error_code,
+        Some(press::PressErrorCode::ClockMismatch)
+    );
+    for later in [73, 133] {
+        *clock.lock().unwrap() = ahead.created_at - hours(60) + hours(later);
+        steps(&f, &mut w);
+        assert_eq!(status_of(&f, ahead.request_id).unwrap(), refused);
+    }
+}
+#[test]
+fn press_worker_late_request_gets_one_expired_status_and_no_entry() {
+    let f = fixture("Late request");
+    std::fs::remove_file(request_file(&f, &f.request)).unwrap();
+    let mut late = f.request.clone();
+    late.created_at = Utc::now() - hours(4 * 24);
+    late.expires_at = late.created_at + hours(24);
+    write_request(&f, &late);
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    let expired = wait_for_status(&f, &mut w, late.request_id);
+    assert_eq!(expired.state, PressState::Expired);
+    assert_eq!(expired.error_code, Some(press::PressErrorCode::Expired));
+    // Later scans leave the file alone, whatever it now says.
+    let marked = serde_json::to_vec(&press::PressStatus {
+        revision: 9,
+        ..expired
+    })
+    .unwrap();
+    std::fs::write(status_file(&f, late.request_id), &marked).unwrap();
+    steps(&f, &mut w);
+    drop(w);
+    assert_eq!(
+        std::fs::read(status_file(&f, late.request_id)).unwrap(),
+        marked
+    );
+    let j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    assert!(j.status(late.request_id).is_none());
+}
+#[test]
+fn press_worker_status_file_removed_by_hand_is_back_within_five_minutes() {
+    let mut f = fixture("Status rewrite");
+    let clock = clocked(&mut f);
+    press::write_stop(&f.cfg.press_state(), Some(Utc::now().date_naive())).unwrap();
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    until(&f, &mut w, PressState::Failed);
+    let refused = status(&f).unwrap();
+    std::fs::remove_file(status_file(&f, f.request.request_id)).unwrap();
+    steps(&f, &mut w);
+    assert!(
+        status(&f).is_none(),
+        "unchanged statuses are not rewritten every tick"
+    );
+    *clock.lock().unwrap() += deckle_digest::chrono::Duration::minutes(5);
+    assert_eq!(wait_for_status(&f, &mut w, f.request.request_id), refused);
+}
+#[test]
+fn press_worker_full_request_history_leaves_new_requests_unanswered() {
+    use sha2::{Digest, Sha256};
+    let f = fixture("Full history");
+    // A journal holding 1,000 refusals for this folder, built from one real entry.
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    j.register_binding(f.binding.clone(), true, false).unwrap();
+    let mut first = f.request.clone();
+    first.request_id = Uuid::new_v4();
+    j.reject_in(
+        &f.binding,
+        first,
+        "seed",
+        press::PressErrorCode::Busy,
+        Utc::now(),
+    )
+    .unwrap();
+    drop(j);
+    let path = f.root.join("journal/journal.json");
+    let mut snapshot: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut data: serde_json::Value =
+        serde_json::from_str(snapshot["payload"].as_str().unwrap()).unwrap();
+    let seed = data["entries"][0].clone();
+    for _ in 1..1000 {
+        let mut entry = seed.clone();
+        let id = Uuid::new_v4().to_string();
+        entry["request"]["request_id"] = id.clone().into();
+        entry["status"]["request_id"] = id.into();
+        data["entries"].as_array_mut().unwrap().push(entry);
+    }
+    // Their status files, as an earlier run would have left them.
+    std::fs::create_dir_all(f.binding.root.join(".deckle-press/status")).unwrap();
+    for entry in data["entries"].as_array().unwrap() {
+        let id = Uuid::parse_str(entry["status"]["request_id"].as_str().unwrap()).unwrap();
+        std::fs::write(
+            status_file(&f, id),
+            serde_json::to_vec(&entry["status"]).unwrap(),
+        )
+        .unwrap();
+    }
+    let payload = serde_json::to_string(&data).unwrap();
+    snapshot["sha256"] = Sha256::digest(payload.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>()
+        .into();
+    snapshot["payload"] = payload.into();
+    let bytes = serde_json::to_vec(&snapshot).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    std::fs::write(f.root.join("journal/journal.backup.json"), &bytes).unwrap();
+    let mut options = f.options.clone();
+    options.launch = Arc::new(|_| panic!("a full history admits nothing new"));
+    let mut w = PressSupervisor::with_options(options);
+    // Opening and committing a journal this size takes a while in a debug build.
+    let end = Instant::now() + Duration::from_secs(30);
+    let mut errors = Vec::new();
+    while !errors
+        .iter()
+        .any(|e: &String| e.contains("request history full"))
+    {
+        assert!(Instant::now() < end, "{errors:?}");
+        errors.extend(steps(&f, &mut w));
+    }
+    // Reported once, when the folder reached the cap, not on every tick.
+    assert!(steps(&f, &mut w).is_empty());
+    drop(w);
+    assert!(status(&f).is_none(), "a new request is left unanswered");
+    let j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    assert!(j.status(f.request.request_id).is_none());
+    assert_eq!(j.statuses().len(), 1000);
+}
+#[test]
+fn press_worker_one_folder_in_conflict_does_not_block_another_paper() {
+    let f = fixture("Healthy paper");
+    // Another folder the journal binds to paper Z, which still has a request waiting, now
+    // configured for a different paper: registering it is a conflict.
+    let stuck = f.root.parent().unwrap().join("stuck");
+    std::fs::create_dir(&stuck).unwrap();
+    let z = PressBinding {
+        root: stuck.canonicalize().unwrap(),
+        producer_id: f.binding.producer_id,
+        paper_id: Uuid::new_v4(),
+    };
+    press::setup::write_manifest(
+        &z,
+        &ProducerManifest {
+            format: "deckle-press".into(),
+            version: 1,
+            producer_id: z.producer_id,
+            paper_id: z.paper_id,
+            paper_name: "Z".into(),
+            enabled: true,
+            operations: vec![PressOperation::FreshFull],
+            reading_editions: true,
+            updated_at: Utc::now(),
+        },
+    )
+    .unwrap();
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    j.register_binding(z.clone(), true, false).unwrap();
+    let mut waiting = f.request.clone();
+    waiting.request_id = Uuid::new_v4();
+    waiting.paper_id = z.paper_id;
+    j.accept_in(&z, waiting, "z", Utc::now()).unwrap();
+    drop(j);
+    let mut other = f.cfg.clone();
+    other.title = "Other paper".into();
+    other.paper_id = Some(Uuid::new_v4());
+    other.export[0].dir = stuck.display().to_string();
+    let papers = [f.cfg.clone(), other];
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    let end = Instant::now() + Duration::from_secs(30);
+    let mut errors = Vec::new();
+    while !status(&f).is_some_and(|s| s.state == PressState::Published) {
+        assert!(
+            Instant::now() < end,
+            "the healthy paper was blocked: {:?} {errors:?}",
+            status(&f)
+        );
+        if let Err(e) = w.tick(&papers, Utc::now()) {
+            errors.push(e);
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    drop(w);
+    assert!(
+        !errors.is_empty(),
+        "the conflicting folder's error is reported"
+    );
+}
+fn journal_sequence(f: &Fixture) -> u64 {
+    let snapshot: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(f.root.join("journal/journal.json")).unwrap())
+            .unwrap();
+    snapshot["sequence"].as_u64().unwrap()
+}
+/// Status files go to reader plugins: they never carry a local explanation or path.
+fn assert_statuses_carry_no_local_text(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root.join(".deckle-press/status")) else {
+        return;
+    };
+    for entry in entries {
+        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        assert!(!text.contains("fresh-paper folder"), "{text}");
+        assert!(!text.contains(&*root.to_string_lossy()), "{text}");
+    }
+}
+fn shared_manifest(b: &PressBinding, name: &str) -> ProducerManifest {
+    ProducerManifest {
+        format: "deckle-press".into(),
+        version: 1,
+        producer_id: b.producer_id,
+        paper_id: b.paper_id,
+        paper_name: name.into(),
+        enabled: true,
+        operations: vec![PressOperation::FreshFull],
+        reading_editions: true,
+        updated_at: Utc::now(),
+    }
+}
+#[test]
+fn press_worker_blocked_folder_move_is_reported_without_reopening_the_journal() {
+    blocked_folder_move(deckle_digest::chrono::Duration::seconds(61));
+}
+#[test]
+fn press_worker_blocked_folder_move_is_retried_after_the_clock_goes_back() {
+    // A clock set back hours must not hold the folder for those hours.
+    blocked_folder_move(-deckle_digest::chrono::Duration::hours(3));
+}
+/// A move blocked by a stray file, then unblocked; `then` is how the press clock moves
+/// before the move must be retried.
+fn blocked_folder_move(then: deckle_digest::chrono::Duration) {
+    let mut f = fixture("Moving paper");
+    let clock = clocked(&mut f);
+    // Paper A published an edition into the folder; a stray .DS_Store sits in it.
+    let mut j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    let (lease, artifact) = prepare_artifact(&f, &mut j);
+    let published = press::publish_result(&mut j, &lease, &artifact, Utc::now).unwrap();
+    drop(j);
+    let bundle = f.binding.root.join(published.result.unwrap().bundle);
+    let stray = bundle.join(".DS_Store");
+    std::fs::write(&stray, b"finder").unwrap();
+    // The folder is reconnected to paper B; A's statuses are still in the journal.
+    let current: ProducerManifest = serde_json::from_slice(
+        &std::fs::read(f.binding.root.join(".deckle-press/producer.json")).unwrap(),
+    )
+    .unwrap();
+    press::setup::disconnect_manifest(&f.binding.root, &current).unwrap();
+    let b = PressBinding {
+        paper_id: Uuid::new_v4(),
+        ..f.binding.clone()
+    };
+    press::setup::write_manifest(&b, &shared_manifest(&b, "Paper B")).unwrap();
+    f.cfg.paper_id = Some(b.paper_id);
+    deckle_digest::config::save(&f.options.config_path, &f.cfg).unwrap();
+    // A second paper, in its own folder, with a request waiting.
+    let base = f.root.parent().unwrap().to_owned();
+    std::fs::create_dir(base.join("second")).unwrap();
+    let second_binding = PressBinding {
+        root: base.join("second").canonicalize().unwrap(),
+        producer_id: f.binding.producer_id,
+        paper_id: Uuid::new_v4(),
+    };
+    let mut second = f.cfg.clone();
+    second.title = "Second paper".into();
+    second.paper_id = Some(second_binding.paper_id);
+    second.paper = Some(deckle_digest::config::PaperRef {
+        slug: "second".into(),
+        state_dir: base.join("second-state"),
+    });
+    second.export[0].dir = second_binding.root.display().to_string();
+    let second_path = deckle_digest::papers::paper_path(&f.options.config_path, "second");
+    std::fs::create_dir_all(second_path.parent().unwrap()).unwrap();
+    deckle_digest::config::save(&second_path, &second).unwrap();
+    press::setup::write_manifest(&second_binding, &shared_manifest(&second_binding, "Second"))
+        .unwrap();
+    let mut request = f.request.clone();
+    request.request_id = Uuid::new_v4();
+    request.paper_id = second_binding.paper_id;
+    let request_path = second_binding.root.join(format!(
+        ".deckle-press/requests/{}/{}.json",
+        request.reader_id, request.request_id
+    ));
+    std::fs::create_dir_all(request_path.parent().unwrap()).unwrap();
+    std::fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
+    let second_status = second_binding
+        .root
+        .join(format!(".deckle-press/status/{}.json", request.request_id));
+
+    let papers = [f.cfg.clone(), second.clone()];
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    let mut errors = Vec::new();
+    let tick = |w: &mut PressSupervisor, errors: &mut Vec<String>| {
+        if let Err(e) = w.tick(&papers, Utc::now()) {
+            errors.push(e);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    // The other paper is still admitted and built.
+    let end = Instant::now() + Duration::from_secs(30);
+    while !std::fs::read(&second_status).is_ok_and(|bytes| {
+        serde_json::from_slice::<press::PressStatus>(&bytes)
+            .is_ok_and(|s| s.state == PressState::Published)
+    }) {
+        assert!(Instant::now() < end, "second paper blocked: {errors:?}");
+        tick(&mut w, &mut errors);
+    }
+    // The folder's own error, naming the bundle, reaches the report channel.
+    let named = bundle.display().to_string();
+    let end = Instant::now() + Duration::from_secs(10);
+    while !errors.iter().any(|e| e.contains(&named)) {
+        assert!(Instant::now() < end, "no error names {named}: {errors:?}");
+        tick(&mut w, &mut errors);
+    }
+    // Ten more ticks change nothing durable: no reopen, no re-registering, no retry.
+    let before = journal_sequence(&f);
+    for _ in 0..10 {
+        tick(&mut w, &mut errors);
+    }
+    assert_eq!(journal_sequence(&f), before, "{errors:?}");
+    assert_eq!(std::fs::read(&stray).unwrap(), b"finder");
+    assert_statuses_carry_no_local_text(&f.binding.root);
+    assert_statuses_carry_no_local_text(&second_binding.root);
+    // Once the owner removes the stray file, the move is retried within a minute.
+    std::fs::remove_file(&stray).unwrap();
+    // Not before: a refused move is tried at most once a minute (press clock), so the
+    // bundle is checked (hashed) at most once a minute while blocked.
+    for _ in 0..5 {
+        tick(&mut w, &mut errors);
+    }
+    assert!(bundle.exists());
+    *clock.lock().unwrap() += then;
+    let end = Instant::now() + Duration::from_secs(30);
+    while bundle.exists() {
+        assert!(Instant::now() < end, "move not retried: {errors:?}");
+        tick(&mut w, &mut errors);
+    }
+    drop(w);
+    let j = press::PressJournal::open(&f.root.join("journal")).unwrap();
+    assert!(j.bindings().contains(&b));
+    assert!(j.status(f.request.request_id).is_none());
 }

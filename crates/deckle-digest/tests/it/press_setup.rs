@@ -281,6 +281,50 @@ fn press_setup_producer_identity_is_stable_and_corruption_is_not_replaced() {
     assert_eq!(std::fs::read_to_string(path).unwrap(), "invalid");
 }
 
+#[test]
+fn press_setup_producer_identity_created_by_many_processes_at_once_is_one_id() {
+    let dir = tempfile::tempdir().unwrap();
+    // 200 rounds: the old code failed in most rounds, and 1,000 take a minute of file syncs.
+    for round in 0..200 {
+        let path = dir.path().join(format!("producer-{round}.json"));
+        let start = std::sync::Barrier::new(16);
+        let ids: Vec<_> = std::thread::scope(|s| {
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    s.spawn(|| {
+                        start.wait();
+                        producer_identity(&path)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        let first = ids[0].clone().unwrap();
+        assert!(ids.iter().all(|id| id.as_ref() == Ok(&first)), "{ids:?}");
+    }
+    // Only the identity files remain: every temporary file was removed.
+    assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 200);
+}
+
+#[test]
+fn press_setup_empty_or_damaged_identity_says_what_to_do() {
+    let dir = tempfile::tempdir().unwrap();
+    for bytes in [&b""[..], b"{\"producer_id\":", b"not json"] {
+        let path = dir.path().join("producer.json");
+        std::fs::write(&path, bytes).unwrap();
+        let error = producer_identity(&path).unwrap_err();
+        assert_eq!(error.code, PressErrorCode::Unsupported);
+        assert!(
+            error.to_string().contains(
+                "is empty or damaged; if this machine has no press folders yet, \
+                 delete it and start Deckle again"
+            ),
+            "{error}"
+        );
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn press_setup_rejects_symlink_controls_without_touching_target() {
