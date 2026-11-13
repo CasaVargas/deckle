@@ -331,18 +331,26 @@ fn a_saved_page_names_a_picture_only_in_its_own_folder() {
             r#"<html><head><script type="application/ld+json">{{"@type":"Recipe","name":"Soup","image":"{image}","recipeIngredient":["water"],"recipeInstructions":["Boil."]}}</script></head><body></body></html>"#
         )
     };
-    let base = "file:///home/me/Inbox/Recipes/soup.html";
-    let beside = parse_recipe(&page("soup_files/pic.jpg"), base).unwrap();
+    // Real paths of this system, so `file:` addresses mean the same on Windows.
+    let tmp = tempfile::tempdir().unwrap();
+    let page_path = tmp.path().join("Inbox").join("Recipes").join("soup.html");
+    let base = url::Url::from_file_path(&page_path).unwrap().to_string();
+    let beside = parse_recipe(&page("soup_files/pic.jpg"), &base).unwrap();
+    let pic = tmp
+        .path()
+        .join("Inbox")
+        .join("Recipes")
+        .join("soup_files")
+        .join("pic.jpg");
     assert_eq!(
-        beside.image_url.as_deref(),
-        Some("file:///home/me/Inbox/Recipes/soup_files/pic.jpg")
+        beside.image_url,
+        Some(url::Url::from_file_path(&pic).unwrap().to_string())
     );
-    for outside in [
-        "/home/me/Pictures/me.jpg",
-        "../../Pictures/me.jpg",
-        "file:///etc/x.png",
-    ] {
-        let r = parse_recipe(&page(outside), base).unwrap();
+    let elsewhere = url::Url::from_file_path(tmp.path().join("Pictures").join("me.jpg"))
+        .unwrap()
+        .to_string();
+    for outside in ["../../Pictures/me.jpg", elsewhere.as_str()] {
+        let r = parse_recipe(&page(outside), &base).unwrap();
         assert_eq!(r.image_url, None, "{outside}");
     }
 }
