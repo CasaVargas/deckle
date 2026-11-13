@@ -40,4 +40,9 @@ pub enum IonError {
     },
     #[error("the book holds more than {limit} Ion values")]
     TooManyValues { limit: u64 },
+    #[error(
+        "this file is nested more than {} levels deep",
+        deckle_limits::MAX_ION_DEPTH
+    )]
+    TooDeep,
 }

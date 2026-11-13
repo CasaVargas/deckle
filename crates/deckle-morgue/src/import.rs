@@ -87,7 +87,7 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
     // all of it when it's short. A section page's jump head or refer picks it up.
     let mut lead_text: Vec<String> = Vec::new();
     if let Some(front) = read_entry(&mut zip, "OEBPS/front.xhtml")
-        && let Ok(doc) = roxmltree::Document::parse(&front)
+        && let Ok(doc) = deckle_limits::parse_xml(&front, Default::default())
     {
         for n in doc.descendants().filter(|n| n.is_element()) {
             if has_class(n, "weather") && n.has_tag_name("p") {
@@ -146,7 +146,7 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
             break;
         };
         // A page that won't parse costs that page, not the edition.
-        let Ok(doc) = roxmltree::Document::parse(&page) else {
+        let Ok(doc) = deckle_limits::parse_xml(&page, Default::default()) else {
             continue;
         };
         let Some(body) = doc.descendants().find(|n| n.has_tag_name("body")) else {
@@ -205,7 +205,7 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
     // Older editions have no `h2.lead`: their first story link on the front page is the lead.
     if lead.is_none()
         && let Some(front) = read_entry(&mut zip, "OEBPS/front.xhtml")
-        && let Ok(doc) = roxmltree::Document::parse(&front)
+        && let Ok(doc) = deckle_limits::parse_xml(&front, Default::default())
     {
         lead = doc
             .descendants()

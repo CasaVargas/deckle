@@ -114,14 +114,14 @@ pub fn fixed_layout_of(bytes: &[u8]) -> Option<FixedLayout> {
         String::from_utf8(deckle_limits::read_capped(f, deckle_limits::MAX_ENTRY_BYTES).ok()?).ok()
     };
     let container = read("META-INF/container.xml")?;
-    let doc = roxmltree::Document::parse(&container).ok()?;
+    let doc = deckle_limits::parse_xml(&container, Default::default()).ok()?;
     let opf_path = doc
         .descendants()
         .find(|n| n.has_tag_name("rootfile"))?
         .attribute("full-path")?
         .to_owned();
     let opf = read(&opf_path)?;
-    let doc = roxmltree::Document::parse(&opf).ok()?;
+    let doc = deckle_limits::parse_xml(&opf, Default::default()).ok()?;
     let whole = doc.descendants().any(|n| {
         n.has_tag_name("meta")
             && n.attribute("property") == Some("rendition:layout")

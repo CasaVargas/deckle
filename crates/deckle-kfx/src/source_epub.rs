@@ -27,14 +27,14 @@ impl SourceEpub {
             String::from_utf8(budget.read(f, MAX_ENTRY_BYTES).ok()?).ok()
         };
         let container = read("META-INF/container.xml")?;
-        let cdoc = roxmltree::Document::parse(&container).ok()?;
+        let cdoc = deckle_limits::parse_xml(&container, Default::default()).ok()?;
         let opf_path = cdoc
             .descendants()
             .find(|n| n.has_tag_name("rootfile"))
             .and_then(|n| n.attribute("full-path"))?
             .to_owned();
         let opf = read(&opf_path)?;
-        let doc = roxmltree::Document::parse(&opf).ok()?;
+        let doc = deckle_limits::parse_xml(&opf, Default::default()).ok()?;
         let metadata = doc.descendants().find(|n| n.has_tag_name("metadata"))?;
         let mut out = SourceEpub::default();
         let mut seq: Vec<(i64, String)> = Vec::new();

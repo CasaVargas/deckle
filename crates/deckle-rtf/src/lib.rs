@@ -34,6 +34,11 @@ pub enum RtfError {
     Empty,
     #[error("the RTF file is {} MB; the limit is 50 MB", .0 / (1024 * 1024))]
     TooLarge(u64),
+    #[error(
+        "this file is nested more than {} levels deep",
+        deckle_limits::MAX_DEPTH
+    )]
+    TooDeep,
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -135,7 +140,7 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
     if !start.starts_with(b"{\\rtf") {
         return Err(RtfError::NotRtf);
     }
-    let (tree, missing, extra) = lex::parse(start);
+    let (tree, missing, extra) = lex::parse(start).ok_or(RtfError::TooDeep)?;
     let mut warnings = Vec::new();
     if missing > 0 || extra > 0 {
         warnings.push("the RTF's braces don't balance; read as far as it goes".into());
@@ -146,6 +151,9 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
     let header = Header::parse(&rtf);
     let mut walker = Walker::new(&header);
     let blocks = walker.run(&rtf);
+    if walker.too_deep {
+        return Err(RtfError::TooDeep);
+    }
     if !blocks.iter().any(|b| match b {
         Block::Heading { text, .. } => !text.is_empty(),
         Block::Html(_) | Block::Item { .. } => true,

@@ -7,9 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 thiserror.workspace = true
 zip.workspace = true
-deckle-limits.workspace = true
 sha2.workspace = true
 roxmltree.workspace = true
 tempfile.workspace = true

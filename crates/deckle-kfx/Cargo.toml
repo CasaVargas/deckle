@@ -7,9 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 thiserror.workspace = true
 zip.workspace = true
-deckle-limits.workspace = true
 rusqlite.workspace = true
 tempfile.workspace = true
 serde.workspace = true

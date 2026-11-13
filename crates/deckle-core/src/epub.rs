@@ -38,8 +38,16 @@ impl EpubReader {
         check_declared_sizes(&zip, entry_limit, book_limit)
             .map_err(|e| too_large(e, entry_limit))?;
         if let Ok(mut f) = zip.by_name("META-INF/encryption.xml") {
-            let xml = read_capped(&mut f, entry_limit).unwrap_or_default();
-            if encryption_is_drm(&String::from_utf8_lossy(&xml)) {
+            let bytes = read_capped(&mut f, entry_limit).unwrap_or_default();
+            let xml = String::from_utf8_lossy(&bytes);
+            // Refused for its depth or entities, it says so rather than counting as DRM.
+            if let Err(
+                e @ (deckle_limits::XmlError::TooDeep | deckle_limits::XmlError::EntityMarkup),
+            ) = deckle_limits::parse_xml(&xml, Default::default())
+            {
+                return Err(InspectError::Xml(format!("META-INF/encryption.xml: {e}")));
+            }
+            if encryption_is_drm(&xml) {
                 return Err(InspectError::Drm);
             }
         }
@@ -49,8 +57,8 @@ impl EpubReader {
                 .map_err(|_| InspectError::NoContainerXml)?;
             read_text(&mut f, entry_limit)?
         };
-        let doc =
-            roxmltree::Document::parse(&container).map_err(|e| InspectError::Xml(e.to_string()))?;
+        let doc = deckle_limits::parse_xml(&container, Default::default())
+            .map_err(|e| InspectError::Xml(e.to_string()))?;
         let opf_path = doc
             .descendants()
             .find(|n| n.has_tag_name("rootfile"))
@@ -206,7 +214,7 @@ const FONT_EXTENSIONS: [&str; 6] = [".ttf", ".otf", ".woff", ".woff2", ".eot", "
 /// True when `META-INF/encryption.xml` encrypts anything beyond obfuscated fonts (IDPF/Adobe
 /// font mangling is routine in DRM-free books). Unparseable files count as DRM.
 pub fn encryption_is_drm(xml: &str) -> bool {
-    let Ok(doc) = roxmltree::Document::parse(xml) else {
+    let Ok(doc) = deckle_limits::parse_xml(xml, Default::default()) else {
         return true;
     };
     let mut saw_any = false;

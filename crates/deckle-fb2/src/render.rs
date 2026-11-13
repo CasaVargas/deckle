@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use base64::Engine;
+use deckle_limits::MAX_DEPTH;
 use roxmltree::Node;
 
 /// An image larger than this is dropped with a warning.
@@ -92,6 +93,11 @@ pub struct Renderer<'a, 'i> {
     pub pages: Vec<Page>,
     pub contents: Vec<(u8, String)>,
     pub warnings: Vec<String>,
+    /// Elements the walk is inside. The XML parse already refuses documents deeper than
+    /// [`MAX_DEPTH`]; this keeps the walk bounded whatever tree it is given.
+    depth: usize,
+    /// An element lay deeper than [`MAX_DEPTH`] and was not walked; the import is refused.
+    pub too_deep: bool,
 }
 
 impl<'a, 'i> Renderer<'a, 'i> {
@@ -112,6 +118,8 @@ impl<'a, 'i> Renderer<'a, 'i> {
             pages: Vec::new(),
             contents: Vec::new(),
             warnings: Vec::new(),
+            depth: 0,
+            too_deep: false,
         };
         for body in bodies.iter().chain(notes) {
             for d in body.descendants().filter(|d| d.is_element()) {
@@ -219,8 +227,24 @@ impl<'a, 'i> Renderer<'a, 'i> {
         }
     }
 
+    /// Counts the walk's depth on the way into `inner`; past [`MAX_DEPTH`] it stops there.
+    fn deeper<T: Default>(&mut self, inner: impl FnOnce(&mut Self) -> T) -> T {
+        if self.depth == MAX_DEPTH {
+            self.too_deep = true;
+            return T::default();
+        }
+        self.depth += 1;
+        let out = inner(self);
+        self.depth -= 1;
+        out
+    }
+
     /// A section: a new page at the top level, and at the second level when it has a title.
     fn section(&mut self, n: Node<'a, 'i>, depth: usize, level: usize) {
+        self.deeper(|s| s.section_in(n, depth, level))
+    }
+
+    fn section_in(&mut self, n: Node<'a, 'i>, depth: usize, level: usize) {
         let title = child(n, "title");
         if depth == 1 || (depth == 2 && title.is_some()) {
             self.start_page();
@@ -289,6 +313,10 @@ impl<'a, 'i> Renderer<'a, 'i> {
     }
 
     fn block(&mut self, n: Node<'a, 'i>) -> String {
+        self.deeper(|s| s.block_in(n))
+    }
+
+    fn block_in(&mut self, n: Node<'a, 'i>) -> String {
         match name(n) {
             "p" => self.para(n, None),
             "subtitle" => self.para(n, Some("subtitle")),
@@ -419,6 +447,10 @@ impl<'a, 'i> Renderer<'a, 'i> {
     }
 
     fn inline(&mut self, n: Node<'a, 'i>) -> String {
+        self.deeper(|s| s.inline_in(n))
+    }
+
+    fn inline_in(&mut self, n: Node<'a, 'i>) -> String {
         let mut out = String::new();
         for c in n.children() {
             if c.is_text() {
@@ -676,7 +708,36 @@ fn sanitize(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize;
+    use super::{Renderer, sanitize};
+
+    /// `cite` nested `levels` deep in a body, rendered from a tree parsed without the depth
+    /// check: the walk's own count stops it past `MAX_DEPTH`.
+    fn too_deep(levels: usize) -> bool {
+        std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(move || {
+                let xml = format!(
+                    "<FictionBook><body>{}<p>deep</p>{}</body></FictionBook>",
+                    "<cite>".repeat(levels),
+                    "</cite>".repeat(levels)
+                );
+                let doc = roxmltree::Document::parse(&xml).unwrap();
+                let root = doc.root_element();
+                let body = root.first_element_child().unwrap();
+                let mut r = Renderer::new(root, &[body], &[]);
+                r.body(body);
+                r.too_deep
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_walk_stops_at_max_depth_whatever_tree_it_is_given() {
+        assert!(!too_deep(200));
+        assert!(too_deep(300));
+    }
 
     #[test]
     fn ids_become_xml_names() {

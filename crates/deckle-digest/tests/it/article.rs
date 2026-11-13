@@ -4,7 +4,9 @@
 use std::path::Path;
 
 use deckle_digest::Net;
-use deckle_digest::article::{extract, is_google_news, placeholder, resolve_google_news};
+use deckle_digest::article::{
+    extract, extract_with, is_google_news, placeholder, resolve_google_news,
+};
 
 fn fixture(name: &str) -> String {
     std::fs::read_to_string(
@@ -60,6 +62,35 @@ fn wire_story_extracts_with_unique_photos() {
 fn a_stub_page_is_not_a_story() {
     let html = "<html><head><title>Subscribe</title></head><body><p>Subscribe to keep reading.</p></body></html>";
     assert!(extract(html, "https://example.com/a").is_none());
+}
+
+/// A story with emphasis nested 20,000 deep still prints its text (nesting-depth design, jloutsch/deckle#86):
+/// past the limit the writer stops descending and writes the rest flat. The count sits inside
+/// the recursion, so this runs on an 8 MiB stack: the limit, not the stack, must stop it.
+#[test]
+fn a_story_nested_20_000_deep_prints_its_text() {
+    let a = std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(|| {
+            let prose = "The council met on Tuesday to talk about the budget for next year, \
+                         and every member spoke about the roads, the parks and the library. "
+                .repeat(8);
+            let n = 20_000;
+            let html = format!(
+                "<html><head><title>Deep</title></head><body><article><h1>Deep</h1>\
+                 <p>{prose}</p><p>{}Words at the very bottom.{}</p></article></body></html>",
+                "<em>".repeat(n),
+                "</em>".repeat(n)
+            );
+            extract_with(&html, "https://example.com/deep", None)
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+        .expect("extracts");
+    assert!(a.xhtml.contains("every member spoke"), "{}", a.xhtml);
+    assert!(a.xhtml.contains("Words at the very bottom."));
+    assert!(a.xhtml.matches("<em>").count() <= 256);
 }
 
 struct GoogleFake;

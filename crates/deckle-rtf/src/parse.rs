@@ -4,6 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use deckle_limits::MAX_DEPTH;
 use sha2::{Digest, Sha256};
 
 use crate::html::{Block, Fmt, Inline, escape, flatten};
@@ -473,6 +474,11 @@ pub struct Walker<'h> {
     used: HashSet<String>,
     pub title: Option<String>,
     pub warnings: Vec<String>,
+    /// Groups the walk is inside. The lexer already refuses trees deeper than [`MAX_DEPTH`];
+    /// this keeps the walk bounded whatever tree it is given.
+    depth: usize,
+    /// A group lay deeper than [`MAX_DEPTH`] and was not walked; the import is refused.
+    pub too_deep: bool,
 }
 
 fn on(p: Option<i32>) -> bool {
@@ -510,6 +516,8 @@ impl<'h> Walker<'h> {
             used: HashSet::new(),
             title: None,
             warnings: Vec::new(),
+            depth: 0,
+            too_deep: false,
         }
     }
 
@@ -623,7 +631,18 @@ impl<'h> Walker<'h> {
         self.flush_bytes();
     }
 
+    /// Every walk into a group (body, footnote, field result) comes through here and is counted.
     fn group(&mut self, g: &[Node]) {
+        if self.depth == MAX_DEPTH {
+            self.too_deep = true;
+            return;
+        }
+        self.depth += 1;
+        self.group_in(g);
+        self.depth -= 1;
+    }
+
+    fn group_in(&mut self, g: &[Node]) {
         if let Some((dest, star)) = Node::destination(g) {
             match dest {
                 d if SKIP.contains(&d) => return,
@@ -1284,5 +1303,31 @@ mod tests {
             hyperlink_parts("https://x.org"),
             (Some("https://x.org".into()), None)
         );
+    }
+
+    /// A tree deeper than the lexer would build, given to the walker directly, stops at
+    /// `MAX_DEPTH` and marks the import refused.
+    #[test]
+    fn the_walk_stops_at_max_depth_whatever_tree_it_is_given() {
+        use super::{Header, MAX_DEPTH, Node, Walker};
+        let walked = |levels: usize| {
+            std::thread::Builder::new()
+                .stack_size(8 << 20)
+                .spawn(move || {
+                    let mut tree = vec![Node::Text(b"deep".to_vec())];
+                    for _ in 0..levels {
+                        tree = vec![Node::Group(tree)];
+                    }
+                    let header = Header::parse(&tree);
+                    let mut w = Walker::new(&header);
+                    w.run(&tree);
+                    w.too_deep
+                })
+                .unwrap()
+                .join()
+                .unwrap()
+        };
+        assert!(!walked(MAX_DEPTH));
+        assert!(walked(MAX_DEPTH + 1));
     }
 }

@@ -95,7 +95,7 @@ fn isbn_of(text: &str, scheme: Option<&str>) -> Option<String> {
 
 /// A book's details as its OPF has them; every optional field is `Some`, empty when absent.
 pub fn read(opf: &str) -> Result<Details, String> {
-    let doc = roxmltree::Document::parse(opf).map_err(|e| e.to_string())?;
+    let doc = deckle_limits::parse_xml(opf, Default::default()).map_err(|e| e.to_string())?;
     let meta = doc
         .descendants()
         .find(|n| n.tag_name().name() == "metadata")

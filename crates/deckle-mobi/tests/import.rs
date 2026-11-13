@@ -269,6 +269,31 @@ fn drm_fixed_layout_kfx_and_other_files_are_refused() {
     ));
 }
 
+/// `<b>` nested 100,000 deep in a MOBI 6 book is refused by the writer's depth count. The count
+/// sits inside the recursion, so this runs on an 8 MiB stack: the limit, not the stack, stops it.
+#[test]
+fn mobi6_bold_nested_a_hundred_thousand_deep_is_refused() {
+    let err = std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(|| {
+            let n = 100_000;
+            let html = format!("<p>{}deep{}</p>", "<b>".repeat(n), "</b>".repeat(n));
+            refuse(&build_mobi6(&Mobi6 {
+                title: "Deep",
+                html: &html,
+                ..Default::default()
+            }))
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(matches!(err, MobiError::TooDeep), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "this file is nested more than 256 levels deep"
+    );
+}
+
 #[test]
 fn import_is_deterministic() {
     assert_eq!(

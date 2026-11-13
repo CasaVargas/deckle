@@ -175,7 +175,8 @@ impl<'a> Package<'a> {
 }
 
 pub fn parse<'i>(xml: &'i str, name: &str) -> Result<roxmltree::Document<'i>, DocxError> {
-    roxmltree::Document::parse(xml).map_err(|e| DocxError::Corrupt(format!("{name}: {e}")))
+    deckle_limits::parse_xml(xml, Default::default())
+        .map_err(|e| DocxError::Corrupt(format!("{name}: {e}")))
 }
 
 /// An attribute by local name, whatever its namespace (`w:val`, `r:id`, plain `Id`).

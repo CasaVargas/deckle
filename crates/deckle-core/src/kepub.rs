@@ -41,7 +41,8 @@ fn xhtml_files(files: &[(String, Vec<u8>)]) -> Result<Vec<String>, String> {
     let find = |n: &str| files.iter().find(|(f, _)| f == n).map(|(_, d)| d);
     let container = find("META-INF/container.xml").ok_or("no META-INF/container.xml")?;
     let container = String::from_utf8_lossy(container);
-    let doc = roxmltree::Document::parse(&container).map_err(|e| format!("container: {e}"))?;
+    let doc = deckle_limits::parse_xml(&container, Default::default())
+        .map_err(|e| format!("container: {e}"))?;
     let opf_path = doc
         .descendants()
         .find(|n| n.has_tag_name("rootfile"))
@@ -50,7 +51,8 @@ fn xhtml_files(files: &[(String, Vec<u8>)]) -> Result<Vec<String>, String> {
         .to_owned();
     let opf = find(&opf_path).ok_or_else(|| format!("{opf_path} is missing"))?;
     let opf = String::from_utf8_lossy(opf);
-    let doc = roxmltree::Document::parse(&opf).map_err(|e| format!("{opf_path}: {e}"))?;
+    let doc = deckle_limits::parse_xml(&opf, Default::default())
+        .map_err(|e| format!("{opf_path}: {e}"))?;
     let dir = opf_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
     Ok(doc
         .descendants()

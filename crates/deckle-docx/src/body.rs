@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 
+use deckle_limits::MAX_DEPTH;
 use roxmltree::Node;
 
 use crate::package::{Rel, attr};
@@ -207,6 +208,11 @@ pub struct Body<'d, 'i> {
     paragraphs: usize,
     /// Tables the reader is inside; their paragraphs are never headings.
     table_depth: usize,
+    /// Elements the walk is inside. The XML parse already refuses documents deeper than
+    /// [`MAX_DEPTH`]; this keeps the walk bounded whatever tree it is given.
+    depth: usize,
+    /// An element lay deeper than [`MAX_DEPTH`] and was not walked; the import is refused.
+    pub too_deep: bool,
 }
 
 impl<'d, 'i> Body<'d, 'i> {
@@ -230,6 +236,8 @@ impl<'d, 'i> Body<'d, 'i> {
             bold_chars: 0,
             paragraphs: 0,
             table_depth: 0,
+            depth: 0,
+            too_deep: false,
         }
     }
 
@@ -329,7 +337,22 @@ impl<'d, 'i> Body<'d, 'i> {
         }
     }
 
+    /// Counts the walk's depth on the way into `inner`; past [`MAX_DEPTH`] it stops there.
+    fn deeper(&mut self, inner: impl FnOnce(&mut Self)) {
+        if self.depth == MAX_DEPTH {
+            self.too_deep = true;
+            return;
+        }
+        self.depth += 1;
+        inner(self);
+        self.depth -= 1;
+    }
+
     fn block(&mut self, n: Node, part: Part, out: &mut Vec<Block>) {
+        self.deeper(|s| s.block_in(n, part, out));
+    }
+
+    fn block_in(&mut self, n: Node, part: Part, out: &mut Vec<Block>) {
         match n.tag_name().name() {
             "p" => self.paragraph(n, part, out),
             "tbl" => out.push(Block::Html(self.table(n, part))),
@@ -474,6 +497,10 @@ impl<'d, 'i> Body<'d, 'i> {
     }
 
     fn inline(&mut self, n: Node, part: Part, base: Fmt, out: &mut Inline) {
+        self.deeper(|s| s.inline_in(n, part, base, out));
+    }
+
+    fn inline_in(&mut self, n: Node, part: Part, base: Fmt, out: &mut Inline) {
         for c in n.children().filter(Node::is_element) {
             match c.tag_name().name() {
                 "r" => self.run(c, part, base, out),
@@ -531,6 +558,10 @@ impl<'d, 'i> Body<'d, 'i> {
     }
 
     fn run_content(&mut self, r: Node, part: Part, f: Fmt, out: &mut Inline) {
+        self.deeper(|s| s.run_content_in(r, part, f, out));
+    }
+
+    fn run_content_in(&mut self, r: Node, part: Part, f: Fmt, out: &mut Inline) {
         for c in r.children().filter(Node::is_element) {
             match c.tag_name().name() {
                 "t" => out.text(f, c.text().unwrap_or("")),
@@ -884,7 +915,34 @@ pub fn nest(items: &[(u8, bool, u32, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{chapter_title, nest};
+    use super::{Body, Numbering, Styles, chapter_title, nest};
+
+    /// Hyperlinks nested `levels` deep in a paragraph, walked from a tree parsed without the
+    /// depth check: the walk's own count stops it past `MAX_DEPTH`.
+    fn too_deep(levels: usize) -> bool {
+        std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(move || {
+                let xml = format!(
+                    "<body><p>{}<r><t>deep</t></r>{}</p></body>",
+                    "<hyperlink>".repeat(levels),
+                    "</hyperlink>".repeat(levels)
+                );
+                let doc = roxmltree::Document::parse(&xml).unwrap();
+                let mut b = Body::new(Styles::default(), Numbering::default());
+                b.body(doc.root_element());
+                b.too_deep
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_walk_stops_at_max_depth_whatever_tree_it_is_given() {
+        assert!(!too_deep(200));
+        assert!(too_deep(300));
+    }
 
     #[test]
     fn chapter_titles_are_recognised() {

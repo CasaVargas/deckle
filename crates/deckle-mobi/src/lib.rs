@@ -54,6 +54,11 @@ pub enum MobiError {
     /// What went past a size limit ("this book's text is"), and the limit.
     #[error("{0} {1}")]
     TooLarge(&'static str, deckle_limits::TooLarge),
+    #[error(
+        "this file is nested more than {} levels deep",
+        deckle_limits::MAX_DEPTH
+    )]
+    TooDeep,
 }
 
 /// What record 0 says about a book.

@@ -8,6 +8,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::sync::LazyLock;
 
+use deckle_limits::MAX_DEPTH;
 use regex::bytes::Regex;
 
 use crate::MobiError;
@@ -78,6 +79,9 @@ struct Writer<'a> {
     out: String,
     text: String,
     has_image: bool,
+    /// Elements the writer is inside; past [`MAX_DEPTH`] the book is refused.
+    depth: usize,
+    too_deep: bool,
 }
 
 /// Elements written as themselves (or as the given XHTML element).
@@ -168,10 +172,17 @@ impl Writer<'_> {
         Some(self.unique(&sanitize(&raw)))
     }
 
+    /// Every descent into an element comes through here and is counted.
     fn children(&mut self, node: &dom_query::NodeRef) {
+        if self.depth == MAX_DEPTH {
+            self.too_deep = true;
+            return;
+        }
+        self.depth += 1;
         for c in node.children() {
             self.node(&c);
         }
+        self.depth -= 1;
     }
 
     fn node(&mut self, node: &dom_query::NodeRef) {
@@ -509,6 +520,8 @@ pub fn rebuild(
         out: String::new(),
         text: String::new(),
         has_image: false,
+        depth: 0,
+        too_deep: false,
     };
     // Parts: (file name, first heading or None, body). A piece with nothing to read carries its
     // markup (its anchors) into the next one.
@@ -526,6 +539,9 @@ pub fn rebuild(
             Some(last) => last.push_str(&carry),
             None => bodies.push(carry),
         }
+    }
+    if w.too_deep {
+        return Err(MobiError::TooDeep);
     }
     warnings.append(&mut w.warnings);
     if bodies.is_empty() {
@@ -612,7 +628,7 @@ pub fn rebuild(
     let mut parts = Vec::new();
     for (name, body) in names.iter().zip(&bodies) {
         let doc = document(&title, &language, body);
-        if let Err(e) = roxmltree::Document::parse(&doc) {
+        if let Err(e) = deckle_limits::parse_xml(&doc, Default::default()) {
             return Err(MobiError::BadPart(name.clone(), e.to_string()));
         }
         parts.push((format!("Text/{name}"), doc));

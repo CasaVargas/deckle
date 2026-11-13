@@ -36,7 +36,14 @@ pub fn from_epub(epub: &[u8], screen: Screen, page: (f32, f32)) -> Result<Made, 
         deckle_limits::read_capped(f, MAX_COMIC_PAGE_BYTES).map_err(|e| format!("{name}: {e}"))
     };
     let container = String::from_utf8_lossy(&read("META-INF/container.xml")?).into_owned();
-    let opf_path = roxmltree::Document::parse(&container)
+    let container = match deckle_limits::parse_xml(&container, Default::default()) {
+        // Refused for its depth or entities, it says so rather than "no OPF named".
+        Err(e @ (deckle_limits::XmlError::TooDeep | deckle_limits::XmlError::EntityMarkup)) => {
+            return Err(format!("container.xml: {e}"));
+        }
+        parsed => parsed,
+    };
+    let opf_path = container
         .ok()
         .and_then(|d| {
             d.descendants()
@@ -86,7 +93,8 @@ struct Book {
 
 /// The OPF's title and author, and its spine's XHTML paths (in the zip's naming) in order.
 fn spine(opf: &str, opf_dir: &str) -> Result<(Book, Vec<String>), String> {
-    let doc = roxmltree::Document::parse(opf).map_err(|e| format!("the OPF didn't parse: {e}"))?;
+    let doc = deckle_limits::parse_xml(opf, Default::default())
+        .map_err(|e| format!("the OPF didn't parse: {e}"))?;
     let text_of = |tag: &str| -> String {
         doc.descendants()
             .find(|n| n.has_tag_name(tag))
@@ -114,7 +122,7 @@ fn spine(opf: &str, opf_dir: &str) -> Result<(Book, Vec<String>), String> {
 
 /// The one `<img src>` of a page's XHTML.
 fn img_src(xhtml: &str) -> Option<String> {
-    let doc = roxmltree::Document::parse(xhtml).ok()?;
+    let doc = deckle_limits::parse_xml(xhtml, Default::default()).ok()?;
     doc.descendants()
         .find(|n| n.has_tag_name("img"))?
         .attribute("src")
@@ -474,6 +482,28 @@ mod tests {
         assert_eq!(
             from_epub(&epub, RM2, PAGE).unwrap_err(),
             "the comic has no pages"
+        );
+    }
+
+    /// A container.xml nested too deep says so, not "no OPF named in container.xml".
+    #[test]
+    fn a_container_nested_too_deep_says_so() {
+        let deep = format!(
+            "<container>{}{}</container>",
+            "<x>".repeat(300),
+            "</x>".repeat(300)
+        );
+        let mut zw = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zw.start_file(
+            "META-INF/container.xml",
+            zip::write::SimpleFileOptions::default(),
+        )
+        .unwrap();
+        zw.write_all(deep.as_bytes()).unwrap();
+        let epub = zw.finish().unwrap().into_inner();
+        assert_eq!(
+            from_epub(&epub, RM2, PAGE).unwrap_err(),
+            "container.xml: this file is nested more than 256 levels deep"
         );
     }
 

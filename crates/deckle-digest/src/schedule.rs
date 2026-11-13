@@ -678,7 +678,7 @@ fn watch_schedule(exe: &Path, config: &Path) -> Schedule {
 }
 
 fn task_action(xml: &str) -> Result<(String, String), String> {
-    let doc = roxmltree::Document::parse(xml).map_err(|e| e.to_string())?;
+    let doc = deckle_limits::parse_xml(xml, Default::default()).map_err(|e| e.to_string())?;
     let exec = doc
         .descendants()
         .find(|n| n.has_tag_name("Exec"))

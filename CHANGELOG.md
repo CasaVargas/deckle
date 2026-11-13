@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **A file nested too deep is refused instead of crashing Deckle.** An EPUB, Word, OpenDocument,
+  RTF, FictionBook or Kindle file nested more than 256 levels deep (tags in tags, RTF groups in
+  groups; real books stay under 30), or a KFX or KPF whose data nests more than 128 deep, used
+  to overflow the stack and close the app or the server. It's now refused with "this file is
+  nested more than 256 levels deep" (128 for KFX). A comic's ComicInfo.xml nested that deep is
+  ignored, as an unreadable one is. A story for The Daily nested that deep still prints: past
+  the limit its text is set plain, in the EPUB and in the PDF edition. A feed nested that deep
+  is reported as unreadable, like any feed that won't parse, and so is a feed whose XML
+  declaration made the feed reader stop the whole edition (a second declaration naming
+  another encoding): it now costs that feed only.
 - **A hostile zip can no longer crash Deckle or fill its memory.** An EPUB, KPF or CBZ whose
   entries claim an impossible size (a 1 KB file declaring 2^60 bytes aborted the app) or unpack
   past a limit is now refused with an error that names the limit: 256 MB for one file inside, 1

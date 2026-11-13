@@ -116,7 +116,8 @@ fn spine(epub: &[u8]) -> Result<Vec<String>, String> {
         String::from_utf8(bytes).map_err(|e| format!("{name}: {e}"))
     };
     let container = text("META-INF/container.xml")?;
-    let doc = roxmltree::Document::parse(&container).map_err(|e| e.to_string())?;
+    let doc =
+        deckle_limits::parse_xml(&container, Default::default()).map_err(|e| e.to_string())?;
     let opf_path = doc
         .descendants()
         .find(|n| n.has_tag_name("rootfile"))
@@ -124,7 +125,8 @@ fn spine(epub: &[u8]) -> Result<Vec<String>, String> {
         .ok_or("container.xml names no OPF")?
         .to_owned();
     let opf = text(&opf_path)?;
-    let doc = roxmltree::Document::parse(&opf).map_err(|e| format!("{opf_path}: {e}"))?;
+    let doc = deckle_limits::parse_xml(&opf, Default::default())
+        .map_err(|e| format!("{opf_path}: {e}"))?;
     let href = |id: &str| {
         doc.descendants()
             .find(|n| n.has_tag_name("item") && n.attribute("id") == Some(id))

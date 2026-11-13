@@ -143,6 +143,12 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
         return Err(DocxError::Corrupt(format!("{main} has no w:body")));
     };
     let blocks = body.body(w_body);
+    if body.too_deep {
+        return Err(DocxError::Corrupt(format!(
+            "{main}: {}",
+            deckle_limits::XmlError::TooDeep
+        )));
+    }
 
     let title = core
         .title

@@ -568,8 +568,8 @@ pub fn normalize(
             .map_err(NormalizeError::Xml)?;
     opf = fixed_opf;
     report.language_tags_fixed += fixed;
-    let package =
-        roxmltree::Document::parse(&opf).map_err(|e| NormalizeError::Xml(e.to_string()))?;
+    let package = deckle_limits::parse_xml(&opf, Default::default())
+        .map_err(|e| NormalizeError::Xml(e.to_string()))?;
     let mut seen = std::collections::HashSet::new();
     for item in package.descendants().filter(|n| {
         n.has_tag_name("item") && n.attribute("media-type") == Some("application/xhtml+xml")

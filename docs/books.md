@@ -32,6 +32,8 @@ styles.
   footnotes come through.
 - **DRM-free Kindle files** (`.mobi`, `.azw`, `.azw3`, `.prc`) rebuilt as real KFX with page
   numbers, X-Ray and Word Wise. DRM-protected files are refused, never decrypted.
+- A file nested more than 256 levels deep (tags in tags, groups in groups) is refused with a
+  message saying so. Real books stay under 30.
 - **PDFs, reflowed.** Columns read in order, even a journal's narrow gutter, running heads and
   page numbers dropped, broken words joined, citations kept in their sentence; tables, equations
   and figures kept as pictures. A paper's first page reads title, dates, authors, abstract.

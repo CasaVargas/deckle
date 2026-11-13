@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 deckle-digest.workspace = true
 deckle-readership.workspace = true
@@ -16,7 +17,6 @@ roxmltree.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 zip.workspace = true
-deckle-limits.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

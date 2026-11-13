@@ -665,7 +665,7 @@ pub fn rebuild(bytes: &[u8], out: &Path) -> Result<Rebuilt, MobiError> {
     let mut xhtml = Vec::new();
     for p in &parts {
         let text = utf8(&p.text);
-        if let Err(e) = roxmltree::Document::parse_with_options(
+        if let Err(e) = deckle_limits::parse_xml(
             &text,
             roxmltree::ParsingOptions {
                 allow_dtd: true,

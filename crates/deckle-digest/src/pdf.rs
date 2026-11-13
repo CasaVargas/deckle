@@ -1042,7 +1042,7 @@ fn body(d: &mut Doc, xhtml: &str, photos: &[Vec<u8>], assets: &[(String, Vec<u8>
         face: Face::Regular,
         size: d.t.body,
     };
-    match roxmltree::Document::parse(&wrapped) {
+    match deckle_limits::parse_xml(&wrapped, Default::default()) {
         Ok(doc) => {
             let mut runs = Vec::new();
             let mut cx = Walk {
@@ -3738,6 +3738,42 @@ mod tests {
             "{text:?}"
         );
         assert!(text.contains('\n'), "{text:?}");
+    }
+
+    /// A story nested 100,000 deep takes the text fallback and still prints, decided before
+    /// the parser recurses: on a 1 MiB stack, a parse that came first would abort the process.
+    #[test]
+    fn a_story_nested_too_deep_prints_as_text() {
+        let text = std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(|| {
+                let mut d = Doc {
+                    blocks: Vec::new(),
+                    images: Vec::new(),
+                    outline: Vec::new(),
+                    anchors: 0,
+                    t: Type::for_width(Screen::Remarkable2.page().0),
+                    photos: Photos::Gray,
+                    jump_end: None,
+                    front_end: 0,
+                    large_print: false,
+                };
+                let n = 100_000;
+                let xhtml = format!("<p>{}Deep words{}</p>", "<em>".repeat(n), "</em>".repeat(n));
+                body(&mut d, &xhtml, &[], &[]);
+                d.blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        Block::Para(p) => Some(p.runs.iter().map(|r| r.text.clone())),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect::<String>()
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(text.trim(), "Deep words");
     }
 
     #[test]

@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 use std::time::Duration;
 
+use deckle_limits::MAX_DEPTH;
 use regex::Regex;
 
 use crate::config::Photos;
@@ -212,6 +213,8 @@ struct Writer {
     words: usize,
     max_words: Option<usize>,
     teaser: Option<String>,
+    /// Elements the writer is inside. At [`MAX_DEPTH`] it stops descending (jloutsch/deckle#86).
+    depth: usize,
 }
 
 const SKIP: &[&str] = &[
@@ -272,12 +275,15 @@ impl Writer {
         resolve(&self.base, &src)
     }
 
-    /// Writes `node`'s children; returns the plain text written.
+    /// Writes `node`'s children; returns the plain text written. At [`MAX_DEPTH`] each child is
+    /// written as the plain text of its whole subtree, so a story nested deeper still prints.
     fn children(&mut self, node: &dom_query::NodeRef) -> String {
+        self.depth += 1;
         let mut text = String::new();
         for child in node.children() {
             text.push_str(&self.node(&child));
         }
+        self.depth -= 1;
         text
     }
 
@@ -329,7 +335,8 @@ impl Writer {
         if self.max_words.is_some_and(|m| self.words >= m) {
             return String::new();
         }
-        if node.is_text() {
+        // Past the depth limit an element is read as its text, all of it, flat.
+        if node.is_text() || (self.depth >= MAX_DEPTH && node.is_element()) {
             let t = node.text().to_string();
             let mut words: Vec<&str> = t.split_whitespace().collect();
             let mut cut = false;
@@ -466,6 +473,7 @@ pub fn extract_linted(
         words: 0,
         max_words,
         teaser: None,
+        depth: 0,
     };
     // The lead image goes first, above the text.
     if let Some(lead) = article.image.as_deref().and_then(|i| resolve(url, i))

@@ -7,12 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 thiserror.workspace = true
 encoding_rs.workspace = true
 regex.workspace = true
 roxmltree.workspace = true
 zip.workspace = true
-deckle-limits.workspace = true
 flate2 = "1"
 dom_query = "0.28"
 

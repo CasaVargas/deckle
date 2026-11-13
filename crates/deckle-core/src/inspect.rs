@@ -124,7 +124,8 @@ pub fn from_kindle(meta: &deckle_mobi::Meta, fallback_title: &str) -> BookInfo {
 pub fn inspect(path: &Path) -> Result<BookInfo, InspectError> {
     let mut epub = EpubReader::open(path)?;
     let opf = epub.read_string(&epub.opf_path.clone())?;
-    let doc = roxmltree::Document::parse(&opf).map_err(|e| InspectError::Xml(e.to_string()))?;
+    let doc = deckle_limits::parse_xml(&opf, Default::default())
+        .map_err(|e| InspectError::Xml(e.to_string()))?;
     let package = doc.root_element();
     let mut info = BookInfo {
         epub_version: attr(package, "version").unwrap_or("2.0").to_owned(),
@@ -400,7 +401,7 @@ fn relative_to_opf(base: &str, target: &str) -> String {
 }
 
 fn parse_nav_toc(xml: &str, nav_href: &str) -> Vec<TocEntry> {
-    let Ok(doc) = roxmltree::Document::parse(xml) else {
+    let Ok(doc) = deckle_limits::parse_xml(xml, Default::default()) else {
         return Vec::new();
     };
     let toc_nav = doc
@@ -447,7 +448,7 @@ fn parse_nav_toc(xml: &str, nav_href: &str) -> Vec<TocEntry> {
 }
 
 fn parse_ncx_toc(xml: &str, ncx_href: &str) -> Vec<TocEntry> {
-    let Ok(doc) = roxmltree::Document::parse(xml) else {
+    let Ok(doc) = deckle_limits::parse_xml(xml, Default::default()) else {
         return Vec::new();
     };
     let mut out = Vec::new();

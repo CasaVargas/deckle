@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Ion binary decoder, a port of the deserialize side of kfxlib's `ion_binary.py`.
 
+use std::cell::Cell;
+
+use deckle_limits::MAX_ION_DEPTH;
+
 use super::{BVM, Decimal, IonError, Struct, Sym, Timestamp, Value};
 use crate::symtab::SymbolTable;
 
@@ -155,11 +159,17 @@ impl Default for ValueBudget {
 pub(crate) struct Decoder<'s> {
     symtab: &'s SymbolTable,
     budget: &'s ValueBudget,
+    /// Values the decoder is inside; past [`MAX_ION_DEPTH`] the data is refused.
+    depth: Cell<usize>,
 }
 
 impl<'s> Decoder<'s> {
     pub(crate) fn new(symtab: &'s SymbolTable, budget: &'s ValueBudget) -> Self {
-        Decoder { symtab, budget }
+        Decoder {
+            symtab,
+            budget,
+            depth: Cell::new(0),
+        }
     }
 
     /// Resolves a symbol id; unknown ids become `$N` placeholders, as kfxlib does.
@@ -200,8 +210,20 @@ impl<'s> Decoder<'s> {
         Ok(out)
     }
 
-    /// Decodes one value; `None` for NOP padding.
+    /// Decodes one value; `None` for NOP padding. Every nested value (list, s-expression, struct
+    /// field, annotated value) comes through here and is counted.
     fn value(&self, c: &mut Cursor) -> Result<Option<Value>, IonError> {
+        let depth = self.depth.get();
+        if depth == MAX_ION_DEPTH {
+            return Err(IonError::TooDeep);
+        }
+        self.depth.set(depth + 1);
+        let v = self.value_in(c);
+        self.depth.set(depth);
+        v
+    }
+
+    fn value_in(&self, c: &mut Cursor) -> Result<Option<Value>, IonError> {
         let descriptor = c.u8()?;
         if descriptor == 0xE0 {
             return Err(IonError::Malformed(

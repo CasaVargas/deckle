@@ -5,6 +5,7 @@
 use std::collections::{HashMap, HashSet};
 
 use base64::Engine;
+use deckle_limits::MAX_DEPTH;
 use roxmltree::Node;
 
 use crate::styles::{Fmt, Styles, attr, child, local};
@@ -254,6 +255,11 @@ pub struct Body<'s> {
     pending_notes: Vec<usize>,
     pub title: Option<String>,
     pub warnings: Vec<String>,
+    /// Elements the walk is inside. The XML parse already refuses documents deeper than
+    /// [`MAX_DEPTH`]; this keeps the walk bounded whatever tree it is given.
+    depth: usize,
+    /// An element lay deeper than [`MAX_DEPTH`] and was not walked; the import is refused.
+    pub too_deep: bool,
 }
 
 impl<'s> Body<'s> {
@@ -272,6 +278,8 @@ impl<'s> Body<'s> {
             pending_notes: Vec::new(),
             title: None,
             warnings: Vec::new(),
+            depth: 0,
+            too_deep: false,
         };
         for d in text.descendants().filter(|d| d.is_element()) {
             if matches!(
@@ -335,7 +343,28 @@ impl<'s> Body<'s> {
         }
     }
 
+    /// Counts the walk's depth on the way into `inner`; past [`MAX_DEPTH`] it stops there.
+    fn deeper(&mut self, inner: impl FnOnce(&mut Self)) {
+        if self.depth == MAX_DEPTH {
+            self.too_deep = true;
+            return;
+        }
+        self.depth += 1;
+        inner(self);
+        self.depth -= 1;
+    }
+
     fn block(&mut self, c: Node, list_level: u8, list_style: Option<&str>, out: &mut Vec<Block>) {
+        self.deeper(|s| s.block_in(c, list_level, list_style, out));
+    }
+
+    fn block_in(
+        &mut self,
+        c: Node,
+        list_level: u8,
+        list_style: Option<&str>,
+        out: &mut Vec<Block>,
+    ) {
         match local(c) {
             "h" => {
                 let level = attr(c, "outline-level")
@@ -466,6 +495,10 @@ impl<'s> Body<'s> {
     }
 
     fn list(&mut self, list: Node, level: u8, style: Option<&str>, out: &mut Vec<Block>) {
+        self.deeper(|s| s.list_in(list, level, style, out));
+    }
+
+    fn list_in(&mut self, list: Node, level: u8, style: Option<&str>, out: &mut Vec<Block>) {
         let mut first = true;
         for item in list.children().filter(|i| i.is_element()) {
             if !matches!(local(item), "list-item" | "list-header") {
@@ -575,6 +608,10 @@ impl<'s> Body<'s> {
     }
 
     fn inline_node(&mut self, c: Node, f: Fmt, out: &mut Inline) {
+        self.deeper(|s| s.inline_node_in(c, f, out));
+    }
+
+    fn inline_node_in(&mut self, c: Node, f: Fmt, out: &mut Inline) {
         if c.is_text() {
             // ODF collapses white space; `text:s` carries the extra spaces.
             let t = c.text().unwrap_or("");
@@ -924,7 +961,39 @@ pub fn nest(items: &[(u8, bool, u32, &str)]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{nest, sanitize};
+    use std::collections::HashMap;
+
+    use super::{Body, Styles, nest, sanitize};
+
+    /// Spans nested `levels` deep in a paragraph, walked from a tree parsed without the depth
+    /// check: the walk's own count stops it past `MAX_DEPTH`.
+    fn too_deep(levels: usize) -> bool {
+        std::thread::Builder::new()
+            .stack_size(8 << 20)
+            .spawn(move || {
+                let xml = format!(
+                    "<text><p>{}deep{}</p></text>",
+                    "<span>".repeat(levels),
+                    "</span>".repeat(levels)
+                );
+                let doc = roxmltree::Document::parse(&xml).unwrap();
+                let styles = Styles::default();
+                let pictures = HashMap::new();
+                let text = doc.root_element();
+                let mut b = Body::new(&styles, &pictures, text);
+                b.body(text);
+                b.too_deep
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    }
+
+    #[test]
+    fn the_walk_stops_at_max_depth_whatever_tree_it_is_given() {
+        assert!(!too_deep(200));
+        assert!(too_deep(300));
+    }
 
     #[test]
     fn list_items_nest_by_level() {
