@@ -5,6 +5,7 @@
 mod auth;
 mod events;
 mod files;
+mod host;
 mod invoke;
 mod static_files;
 
@@ -24,6 +25,7 @@ use deckle_app::dispatch::Ctx;
 use tokio::sync::watch;
 
 pub use events::SseEvents;
+pub use host::host_allowed;
 
 /// How the web UI is served, from `DECKLE_WEB_*`.
 pub struct ServerConfig {
@@ -36,6 +38,9 @@ pub struct ServerConfig {
     pub web_dir: PathBuf,
     /// What the file browser may show: `/config`, `/data` and `DECKLE_WEB_ROOTS`.
     pub roots: Vec<PathBuf>,
+    /// `DECKLE_WEB_HOSTS`: public names the API also answers to, besides addresses and
+    /// names that can't be public (see [`host_allowed`]).
+    pub hosts: Vec<String>,
 }
 
 // By hand, so a logged config never shows the password.
@@ -48,6 +53,7 @@ impl fmt::Debug for ServerConfig {
             .field("auth_none", &self.auth_none)
             .field("web_dir", &self.web_dir)
             .field("roots", &self.roots)
+            .field("hosts", &self.hosts)
             .finish()
     }
 }
@@ -104,6 +110,14 @@ impl ServerConfig {
                     .map(PathBuf::from),
             );
         }
+        let hosts = var("DECKLE_WEB_HOSTS")
+            .map(|v| {
+                v.split(',')
+                    .map(|h| h.trim().to_owned())
+                    .filter(|h| !h.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(ServerConfig {
             bind,
             port,
@@ -111,6 +125,7 @@ impl ServerConfig {
             auth_none,
             web_dir,
             roots,
+            hosts,
         })
     }
 
@@ -175,14 +190,27 @@ fn build(server: Shared) -> Router {
             server.clone(),
             auth::require_session,
         ));
+    let host_check = middleware::from_fn_with_state(server.clone(), host::require_allowed_host);
+    // With a password, a rebinding page has no session and reaches only the login, where it
+    // could guess passwords from outside a LAN-only install. Without one it reaches it all.
+    let login = if server.cfg.auth_none {
+        post(auth::login)
+    } else {
+        post(auth::login).layer(host_check.clone())
+    };
     let api = Router::new()
-        .route("/login", post(auth::login))
+        .route("/login", login)
         .route("/logout", post(auth::logout))
         .route("/session", get(auth::session))
         .merge(private)
         // An unknown API path is an error, not the frontend's index page.
         .fallback(|| async { invoke::error(StatusCode::NOT_FOUND, "no such API".into()) })
         .layer(middleware::from_fn(auth::require_csrf_header));
+    let api = if server.cfg.auth_none {
+        api.layer(host_check)
+    } else {
+        api
+    };
     let site = Router::new()
         .nest("/api", api)
         .fallback_service(static_files::service(&server.cfg.web_dir));

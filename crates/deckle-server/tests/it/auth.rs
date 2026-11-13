@@ -307,6 +307,7 @@ fn from_env_reads_every_setting() {
             ("DECKLE_WEB_PASSWORD", ""),
             ("DECKLE_WEB_AUTH", "none"),
             ("DECKLE_WEB_ROOTS", "/mnt/books::/media"),
+            ("DECKLE_WEB_HOSTS", "books.example.com, ,deckle.example.org"),
         ]),
     )
     .unwrap();
@@ -318,6 +319,7 @@ fn from_env_reads_every_setting() {
         cfg.roots,
         ["/config", "/data", "/mnt/books", "/media"].map(std::path::PathBuf::from)
     );
+    assert_eq!(cfg.hosts, ["books.example.com", "deckle.example.org"]);
 
     for (k, v) in [
         ("DECKLE_WEB_PORT", "http"),

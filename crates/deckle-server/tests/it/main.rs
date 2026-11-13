@@ -4,6 +4,7 @@
 mod auth;
 mod events;
 mod files;
+mod host;
 mod invoke;
 mod serve;
 mod static_files;
@@ -50,6 +51,7 @@ pub fn config(dir: &Path, auth_none: bool) -> ServerConfig {
         auth_none,
         web_dir: web,
         roots: vec!["/config".into(), "/data".into()],
+        hosts: Vec::new(),
     }
 }
 

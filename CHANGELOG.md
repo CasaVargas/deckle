@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The web UI answers only to names you use.** It now refuses requests under a public host
+  name you haven't listed, so a web page can't reach a server on your network by pointing its
+  own name at it. Addresses, `localhost`, `tower`, `tower.local` and the like work as before; a
+  public name you use goes in `DECKLE_WEB_HOSTS`
+  ([docs/docker.md](docs/docker.md#the-names-it-answers-to)).
 - **News in your language.** Local, each other place, each interest and each Google News topic
   can read another country's edition of Google News: pick Deutschland, España, France, Italia or
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day

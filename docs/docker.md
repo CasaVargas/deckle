@@ -43,6 +43,7 @@ The image is `ghcr.io/casavargas/deckle`. `:latest` is the newest published rele
 | `DECKLE_WEB_PORT` | `8080` | The web UI's port inside the container. |
 | `DECKLE_WEB_BIND` | `0.0.0.0` | The address the web UI listens on inside the container. Outside the image the default is `127.0.0.1`. |
 | `DECKLE_WEB_ROOTS` | unset | More folders for the web UI's file picker, `:`-separated ([below](#files-uploads-and-downloads)). |
+| `DECKLE_WEB_HOSTS` | unset | Public host names you reach the web UI under, `,`-separated ([below](#the-names-it-answers-to)). |
 | `DECKLE_SMTP_PASSWORD` | unset | The password for `[email]`. |
 | `DECKLE_SITE_PASSWORD_<SITE>` | unset | A paper you subscribe to ([below](#email-to-kindle-and-passwords)). |
 | `DECKLE_BOOKMARKLET_URL` | unset | The address your browser reaches the bookmarklet at ([below](#the-bookmarklet-over-your-network)). |
@@ -160,8 +161,19 @@ Server-Sent Events stream, `/api/events`, sent with `X-Accel-Buffering: no` so n
 
 `DECKLE_WEB_AUTH=none` turns the login off, for a proxy that does its own (Authelia, Authentik,
 an SSO the proxy enforces). Only then: never publish the port directly, and let only the proxy
-reach it. With no login, a web page in any browser that can reach the port could also drive it
-through DNS rebinding.
+reach it.
+
+### The names it answers to
+
+The web UI answers to an IP address, `localhost`, a name without a dot (`tower`), and names
+ending `.local`, `.home.arpa`, `.internal` or `.localhost` (`tower.local`). Any other name gets
+"this server doesn't answer to that host name", because a web page you visit could otherwise
+point a name it owns at your server and drive it (DNS rebinding). With a password this is
+checked at login only; with `DECKLE_WEB_AUTH=none`, on every request.
+
+If you reach it under a public name, such as `books.example.com` through a proxy that passes the
+name on, list it: `DECKLE_WEB_HOSTS=books.example.com`. A proxy that sends its own internal name
+or address instead (nginx's default) needs nothing.
 
 ### What's off in the container
 
