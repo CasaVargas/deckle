@@ -6,6 +6,7 @@ mod events;
 mod files;
 mod host;
 mod invoke;
+mod programs;
 mod serve;
 mod static_files;
 

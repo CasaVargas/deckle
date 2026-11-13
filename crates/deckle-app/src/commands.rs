@@ -1510,9 +1510,12 @@ pub fn get_settings_masked(state: &AppState) -> Settings {
     s
 }
 
-/// [`set_settings`] for the web app: a key that comes back as [`MASKED_KEY`] keeps the saved one.
+/// [`set_settings`] for the web app: a key that comes back as [`MASKED_KEY`] keeps the saved one,
+/// and the Previewer's location is always the saved one. The server runs that program, so a
+/// browser must not choose it; set it in `settings.json` on the server.
 pub fn set_settings_masked(state: &AppState, mut settings: Settings) -> Result<(), String> {
     let saved = get_settings(state);
+    settings.previewer_path = saved.previewer_path.clone();
     let keep = |k: &mut String, saved: &str| {
         if k == MASKED_KEY {
             *k = saved.to_owned();

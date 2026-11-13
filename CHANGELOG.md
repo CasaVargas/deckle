@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The web app no longer chooses programs for the server.** The calibredb path is shown but
+  can't be changed from a browser, and the Kindle Previewer location is always the one saved on
+  the server. Set either in the server's files
+  ([docs/docker.md](docs/docker.md#whats-off-in-the-container)).
 - **The web UI answers only to names you use.** It now refuses requests under a public host
   name you haven't listed, so a web page can't reach a server on your network by pointing its
   own name at it. Addresses, `localhost`, `tower`, `tower.local` and the like work as before; a

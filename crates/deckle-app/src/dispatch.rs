@@ -86,8 +86,11 @@ commands! { ctx;
     calibre_create_columns {} => crate::calibre::calibre_create_columns(),
     calibre_set_password { password: String } => crate::calibre::calibre_set_password(password),
     calibre_writeback_confirm { keys: Vec<String> } => crate::calibre::calibre_writeback_confirm(keys),
-    calibre_writeback_set { patch: crate::calibre::WritebackPatch } =>
-        crate::calibre::calibre_writeback_set(patch),
+    calibre_writeback_set { patch: crate::calibre::WritebackPatch } => if ctx.web {
+        crate::calibre::calibre_writeback_set_web(patch)
+    } else {
+        crate::calibre::calibre_writeback_set(patch)
+    },
     calibre_writeback_status {} => Ok(crate::calibre::calibre_writeback_status()),
     calibre_writeback_write {} => crate::calibre::calibre_writeback_write(),
     capabilities {} => Ok(capabilities::capabilities(ctx.web, &ctx.state)),

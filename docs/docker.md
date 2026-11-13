@@ -187,6 +187,9 @@ These stay visible in the app, each with a one-line reason:
   ([below](#email-to-kindle-and-passwords)).
 - **Show in folder**: there's no file manager to open. Download the file instead.
 - **In-app updates**: pull a newer image tag and recreate the container.
+- **Choosing programs**: the web app can't change which Kindle Previewer or calibredb the server
+  runs. Set `previewer_path` in `/config/deckle/settings.json` or `calibredb` in
+  `/config/deckle/calibre-writeback.json`; both are found by themselves when unset.
 
 ### Files, uploads and downloads
 
