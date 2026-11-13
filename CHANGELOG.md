@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 — news in your language, and safer servers and fetching
 
 - **The bookmarklets ask before they save.** Save to paper and Save recipe now open a small
   Deckle window showing what they'll save, and save when you press **Save**. Before, the
