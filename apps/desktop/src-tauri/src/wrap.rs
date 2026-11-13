@@ -176,8 +176,18 @@ pub fn app_version() -> String {
 }
 
 #[tauri::command]
-pub fn capabilities(state: State<'_, AppState>) -> deckle_app::capabilities::Capabilities {
-    deckle_app::capabilities::capabilities(false, &state)
+pub async fn capabilities(
+    state: State<'_, AppState>,
+) -> Result<deckle_app::capabilities::Capabilities, String> {
+    // Looks for Kindle Previewer, which may start it: never on the main thread.
+    let settings_file = state.settings_file.clone();
+    blocking(move || {
+        Ok(deckle_app::capabilities::capabilities_at(
+            false,
+            &settings_file,
+        ))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -215,8 +225,11 @@ pub async fn import_articles(targets: Vec<String>) -> Result<Vec<BookRow>, Strin
 }
 
 #[tauri::command]
-pub fn list_devices(state: State<'_, AppState>) -> Vec<DeviceRow> {
-    deckle_app::commands::list_devices(&state)
+pub async fn list_devices(state: State<'_, AppState>) -> Result<Vec<DeviceRow>, String> {
+    // Asks the OS about each plugged-in reader (diskutil and ioreg, PowerShell, udevadm), which
+    // can take seconds: off the main thread, so the window keeps drawing.
+    let devices_file = state.devices_file.clone();
+    blocking(move || Ok(deckle_app::commands::device_rows(&devices_file))).await
 }
 
 #[tauri::command]
@@ -252,8 +265,10 @@ pub fn plan_books(
 }
 
 #[tauri::command]
-pub fn previewer_status(state: State<'_, AppState>) -> PreviewerStatus {
-    deckle_app::commands::previewer_status(&state)
+pub async fn previewer_status(state: State<'_, AppState>) -> Result<PreviewerStatus, String> {
+    // Starts Kindle Previewer to read its version the first time: off the main thread.
+    let settings_file = state.settings_file.clone();
+    blocking(move || Ok(deckle_app::commands::previewer_status_at(&settings_file))).await
 }
 
 #[tauri::command]
@@ -385,8 +400,9 @@ pub async fn library_search(query: String) -> Result<deckle_library::search::Rep
 // ---- kindle -------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn library_status() -> LibraryStatus {
-    deckle_app::kindle::library_status()
+pub async fn library_status() -> Result<LibraryStatus, String> {
+    // Counts the library by reading every book's sidecar: off the main thread.
+    blocking(|| Ok(deckle_app::kindle::library_status())).await
 }
 
 #[tauri::command]

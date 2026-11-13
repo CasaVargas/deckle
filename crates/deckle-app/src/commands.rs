@@ -1464,7 +1464,12 @@ pub fn plan_books(state: &AppState, books: Vec<RunRequest>, target: RunTarget) -
 }
 
 pub fn previewer_status(state: &AppState) -> PreviewerStatus {
-    let settings = load_settings_from(&state.settings_file);
+    previewer_status_at(&state.settings_file)
+}
+
+/// [`previewer_status`] from the settings file alone, for a caller off the main thread.
+pub fn previewer_status_at(settings_file: &Path) -> PreviewerStatus {
+    let settings = load_settings_from(settings_file);
     match previewer::locate(settings.previewer_path.as_deref().map(Path::new)) {
         Ok(p) => PreviewerStatus {
             found: true,

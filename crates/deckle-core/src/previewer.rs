@@ -196,7 +196,29 @@ pub fn locate_in(
     })
 }
 
+/// [`probe_version_uncached`], remembered per path and modified time: Previewer is a large app
+/// that takes seconds to start, and the desktop asks whether it's there at every launch and
+/// after each settings change. A reinstall changes the modified time, so it's asked again.
 fn probe_version(path: &Path) -> std::io::Result<String> {
+    type Seen = Vec<(PathBuf, Option<std::time::SystemTime>, String)>;
+    static SEEN: std::sync::Mutex<Seen> = std::sync::Mutex::new(Vec::new());
+    let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+    if let Some((_, _, v)) = SEEN
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|(p, m, _)| p == path && *m == modified)
+    {
+        return Ok(v.clone());
+    }
+    let version = probe_version_uncached(path)?;
+    let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+    seen.retain(|(p, _, _)| p != path);
+    seen.push((path.to_path_buf(), modified, version.clone()));
+    Ok(version)
+}
+
+fn probe_version_uncached(path: &Path) -> std::io::Result<String> {
     let o = crate::quiet::command(path).arg("--help").output()?;
     let text = format!(
         "{}{}",

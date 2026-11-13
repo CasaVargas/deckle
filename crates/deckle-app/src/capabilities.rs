@@ -25,9 +25,14 @@ pub struct Capabilities {
 }
 
 pub fn capabilities(web: bool, state: &AppState) -> Capabilities {
+    capabilities_at(web, &state.settings_file)
+}
+
+/// [`capabilities`] from the settings file alone, for a caller off the main thread.
+pub fn capabilities_at(web: bool, settings_file: &std::path::Path) -> Capabilities {
     Capabilities {
         web,
-        previewer: crate::commands::previewer_status(state).found,
+        previewer: crate::commands::previewer_status_at(settings_file).found,
         usb: !web || kindle_visible(),
         keychain: !web,
         updater: !web,

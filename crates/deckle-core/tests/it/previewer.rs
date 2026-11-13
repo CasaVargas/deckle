@@ -196,3 +196,44 @@ fn log_issues_keep_warnings_and_missing_media_notices() {
         ]
     );
 }
+
+/// A fake Previewer at `path` reporting `version`, counting its runs in `runs`.
+#[cfg(unix)]
+fn counting_previewer(path: &std::path::Path, runs: &std::path::Path, version: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let script = format!(
+        "#!/bin/sh\necho run >> '{}'\necho 'Kindle Previewer {version} Copyright (c) Amazon.com'\n",
+        runs.display()
+    );
+    std::fs::write(path, script).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn previewer_is_started_once_per_install_to_read_its_version() {
+    let dir = tempfile::tempdir().unwrap();
+    let (exe, runs) = (dir.path().join("previewer.sh"), dir.path().join("runs"));
+    let count = || {
+        std::fs::read_to_string(&runs)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    counting_previewer(&exe, &runs, "4.2.0");
+    // Previewer takes seconds to start; the app asks at launch and after each settings change
+    assert_eq!(locate(Some(&exe)).unwrap().version, "4.2.0");
+    assert_eq!(locate(Some(&exe)).unwrap().version, "4.2.0");
+    assert_eq!(count(), 1);
+    // a new install is a new file: asked again
+    counting_previewer(&exe, &runs, "4.3.0");
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+    std::fs::File::options()
+        .write(true)
+        .open(&exe)
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    assert_eq!(locate(Some(&exe)).unwrap().version, "4.3.0");
+    assert_eq!(count(), 2);
+}
