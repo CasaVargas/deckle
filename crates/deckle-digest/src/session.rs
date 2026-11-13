@@ -753,6 +753,7 @@ mod tests {
     pub(super) fn fixture(n: usize) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/", listener.local_addr().unwrap());
+        crate::fetch::allow_for_test(&url);
         let seen = Arc::new(Mutex::new(Vec::new()));
         let rec = seen.clone();
         std::thread::spawn(move || {
@@ -894,7 +895,9 @@ mod tests {
         a.get(&url).unwrap();
         // The same agent, holding the cookie, asks a different host name.
         let port = other.rsplit(':').next().unwrap();
-        a.get(&format!("http://localhost:{port}")).unwrap();
+        let other_name = format!("http://localhost:{port}");
+        crate::fetch::allow_for_test(&other_name);
+        a.get(&other_name).unwrap();
         let has = |r: &str| r.to_lowercase().contains("cookie: sess=abc");
         let seen = seen.lock().unwrap();
         assert!(!has(&seen[0]));
@@ -1465,6 +1468,7 @@ mod net_tests {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
+        crate::fetch::allow_for_test(&base);
         let loc = format!("{base}/final/");
         std::thread::spawn(move || {
             for i in 0..2 {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! Public-web transport for untrusted shared selections. The resolver returns the exact
 //! checked socket addresses consumed by TCP: no second DNS lookup or proxy can bypass it.
-use std::net::IpAddr;
+use crate::fetch::public_ip;
 use ureq::unversioned::resolver::{DefaultResolver, ResolvedSocketAddrs, Resolver};
 use ureq::unversioned::transport::{DefaultConnector, NextTimeout};
 
@@ -25,34 +25,6 @@ impl<R: Resolver> Resolver for PublicResolver<R> {
             return Err(ureq::Error::HostNotFound);
         }
         Ok(addresses)
-    }
-}
-fn public_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(v) => {
-            let [a, b, c, _] = v.octets();
-            !(a == 0
-                || a == 10
-                || a == 127
-                || a >= 224
-                || (a == 100 && (64..=127).contains(&b))
-                || (a == 169 && b == 254)
-                || (a == 172 && (16..=31).contains(&b))
-                || (a == 192 && b == 168)
-                || (a == 192 && b == 0)
-                || (a == 192 && b == 88 && c == 99)
-                || (a == 198 && (b == 18 || b == 19 || (b == 51 && c == 100)))
-                || (a == 203 && b == 0 && c == 113))
-        }
-        IpAddr::V6(v) => {
-            // Permit global unicast only; deny special-use/documentation and IPv4
-            // translation/tunnelling ranges rather than trusting their embedded address.
-            let s = v.segments();
-            (s[0] & 0xe000) == 0x2000
-                && s[0] != 0x2002
-                && !(s[0] == 0x2001 && (s[1] < 0x0200 || s[1] == 0x0db8))
-                && !(s[0] == 0x3fff && s[1] < 0x1000)
-        }
     }
 }
 pub(crate) fn agent(https_only: bool) -> ureq::Agent {

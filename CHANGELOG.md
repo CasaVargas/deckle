@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **The Daily fetches only public addresses.** A feed's link, a page's image or a redirect can no
+  longer point at your router, a NAS or a service on this computer and have it printed in the
+  paper. Feeds, calendars and subscriptions you set up on your own network keep working; anything
+  else there goes in `[fetch] allow_private`
+  ([docs/daily.md](docs/daily.md#feeds-on-your-own-network)).
 - **Wrong passwords slow only the address that sends them.** The web UI and KOReader over
   Wi-Fi now let each address get its password wrong five times, then make it wait, doubling up
   to five minutes. Someone guessing can no longer keep you out of the web UI, and the reader

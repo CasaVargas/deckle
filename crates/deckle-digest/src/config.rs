@@ -136,6 +136,9 @@ pub struct Config {
     /// while it's untouched.
     #[serde(skip_serializing_if = "DayConfig::is_default")]
     pub day: DayConfig,
+    /// What fetches may reach on your own network. Left out of a save while it's untouched.
+    #[serde(skip_serializing_if = "FetchConfig::is_default")]
+    pub fetch: FetchConfig,
     /// The puzzle page (puzzle design §6). Left out of a save while it's untouched.
     #[serde(skip_serializing_if = "PuzzleConfig::is_default")]
     pub puzzle: PuzzleConfig,
@@ -299,6 +302,7 @@ impl Default for Config {
             lottery: LotteryConfig::default(),
             horoscope: HoroscopeConfig::default(),
             onthisday: OnThisDayConfig::default(),
+            fetch: FetchConfig::default(),
             reading: ReadingConfig::default(),
             sync: SyncConfig::default(),
             email: EmailConfig::default(),
@@ -712,6 +716,34 @@ impl Default for LotteryConfig {
         LotteryConfig {
             games: vec!["powerball".into(), "megamillions".into()],
         }
+    }
+}
+
+/// `[fetch]`: the Daily fetches only public addresses, so a feed can't make this machine read
+/// a page on your network. A feed, calendar or subscription you configured at a private
+/// address or a local name (`nas.local`) is reached as is; anything else goes here.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct FetchConfig {
+    /// Origins on your network the Daily may fetch, e.g. `["http://nas.local:8080"]`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allow_private: Vec<String>,
+}
+
+impl FetchConfig {
+    pub fn is_default(&self) -> bool {
+        self.allow_private.is_empty()
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        for u in &self.allow_private {
+            if crate::fetch::Origin::of(u).is_none() {
+                return Err(format!(
+                    "[fetch] allow_private: {u:?} isn't an http:// or https:// address"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -1850,6 +1882,8 @@ impl Config {
         cfg.llm.validate()?;
         cfg.schedule.validate()?;
         validate_exports(&cfg.export)?;
+        cfg.fetch.validate()?;
+        crate::fetch::allow_config(&cfg);
         Ok(cfg)
     }
 

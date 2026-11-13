@@ -159,6 +159,30 @@ full_text = "lead"              # true, false or "lead"
   stories. Other places keep their own stories and only record their titles; Your Reading is never
   trimmed or recorded.
 
+#### Feeds on your own network
+
+The Daily fetches only public internet addresses, so a feed can't make your computer open a page
+on your network (your router, a NAS, a service on this machine) and print it. A feed, calendar or
+subscription you set up at a private address or a local name (`http://192.168.1.20/feed.xml`,
+`http://nas.local:8080`) is fetched as before, at exactly that address and port; a link inside it
+to anywhere else on your network is refused, and the story says "private address refused".
+Anything else on your network goes in:
+
+```toml
+[fetch]
+allow_private = ["http://nas.local:8080", "http://192.168.1.20"]
+```
+
+An address you type yourself (`deckle run http://nas.local/story`, the app's address field) may
+be on your network for that one fetch. Links the bookmarklet or the reading inbox sends are
+treated like a feed's.
+
+- With `HTTPS_PROXY` or `HTTP_PROXY` set, the proxy fetches the pages and its own rules apply;
+  Deckle doesn't check those addresses.
+- On an IPv6-only network with DNS64, addresses in `64:ff9b::/96` are judged by the IPv4 address
+  inside them. A network that uses `64:ff9b:1::/48` or its own private prefix for NAT64 needs
+  `allow_private`.
+
 ### Your interests
 
 A topic section gives you everyone's sports. An **interest** gives you yours: "Carolina

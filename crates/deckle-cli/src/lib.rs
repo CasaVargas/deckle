@@ -524,7 +524,11 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             title,
             author,
             out,
-        } => bind_cmd(json, &inputs, title, author, out, &deckle_digest::Http),
+        } => {
+            // Web addresses typed here may be on this network; links inside them may not.
+            let net = deckle_digest::Http::typed(inputs.iter().filter_map(|p| p.to_str()));
+            bind_cmd(json, &inputs, title, author, out, &net)
+        }
         cli::Command::Save {
             targets,
             title,
@@ -734,7 +738,10 @@ fn dispatch(cli: cli::Cli) -> Result<ExitCode, String> {
             }
             let reports: Vec<_> = epubs
                 .iter()
-                .map(|e| run_input(e, &opts, &deckle_digest::Http))
+                .map(|e| {
+                    let net = deckle_digest::Http::typed(e.to_str());
+                    run_input(e, &opts, &net)
+                })
                 .collect();
             let failed = reports.iter().filter(|r| r.error.is_some()).count();
             emit(json, &reports, || {
@@ -962,7 +969,7 @@ fn queue_one(
 ) -> Result<String, String> {
     let arg = input.to_string_lossy();
     let source = if deckle_digest::web_book::is_article(&arg) {
-        import_article(&arg, &deckle_digest::Http, &articles_dir())
+        import_article(&arg, &deckle_digest::Http::typed([&*arg]), &articles_dir())
             .map_err(|e| format!("import: {e}"))?
             .path
     } else {
@@ -3723,7 +3730,12 @@ fn digest(
                 save_jars_noted(&net);
                 r
             } else {
-                digest_lint(json, &page, &deckle_digest::Http, &[])
+                digest_lint(
+                    json,
+                    &page,
+                    &deckle_digest::Http::typed([page.as_str()]),
+                    &[],
+                )
             }
         }
         cli::DigestCommand::Subscribe {
@@ -5285,7 +5297,8 @@ fn send_to_reader(
             let arg = input.to_string_lossy();
             let r = (|| {
                 let source = if deckle_digest::web_book::is_article(&arg) {
-                    import_article(&arg, &deckle_digest::Http, &articles_dir())?.path
+                    import_article(&arg, &deckle_digest::Http::typed([&*arg]), &articles_dir())?
+                        .path
                 } else {
                     input.clone()
                 };
@@ -5365,7 +5378,8 @@ fn send_to_remarkable(
             let arg = input.to_string_lossy();
             let r = (|| {
                 let source = if deckle_digest::web_book::is_article(&arg) {
-                    import_article(&arg, &deckle_digest::Http, &articles_dir())?.path
+                    import_article(&arg, &deckle_digest::Http::typed([&*arg]), &articles_dir())?
+                        .path
                 } else {
                     input.clone()
                 };

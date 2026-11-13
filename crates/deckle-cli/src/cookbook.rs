@@ -153,7 +153,7 @@ fn add(
         match add::add(
             store,
             target,
-            &deckle_digest::Http,
+            &deckle_digest::Http::typed([target.as_str()]),
             &AddOptions { chapter, note },
             Utc::now(),
         ) {

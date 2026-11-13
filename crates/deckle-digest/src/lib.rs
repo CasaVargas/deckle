@@ -57,7 +57,7 @@ use serde::Serialize;
 pub use chrono;
 pub use chrono_tz;
 pub use config::{Config, SectionKind};
-pub use fetch::{Http, Net};
+pub use fetch::{Http, HttpTyped, Net, Origin};
 pub use publisher::Access;
 pub use session::SessionNet;
 pub use url;
