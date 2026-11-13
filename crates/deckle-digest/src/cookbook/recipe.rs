@@ -465,7 +465,7 @@ fn canonical(doc: &Document, base: &str) -> Option<String> {
     resolve(base, &href).filter(|u| u.starts_with("http"))
 }
 
-/// `href` against `base`: an http(s) address, or a file beside a saved page.
+/// `href` against `base`: an http(s) address, or a file in a saved page's own folder.
 fn resolve(base: &str, href: &str) -> Option<String> {
     let href = href.trim();
     if href.is_empty() || href.starts_with("data:") {
@@ -475,7 +475,45 @@ fn resolve(base: &str, href: &str) -> Option<String> {
     let joined = base.join(href).ok()?;
     match joined.scheme() {
         "http" | "https" => Some(joined.to_string()),
-        "file" if base.scheme() == "file" => Some(joined.to_string()),
+        "file" if base.scheme() == "file" => crate::article::beside_saved_page(&base, &joined),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve;
+
+    /// A saved page names its pictures in its own folder; nothing else on the disk.
+    #[cfg(unix)]
+    #[test]
+    fn a_saved_page_reaches_only_its_own_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let page_dir = root.join("saved");
+        std::fs::create_dir_all(page_dir.join("Pie_files")).unwrap();
+        std::fs::create_dir_all(root.join("private")).unwrap();
+        std::fs::write(page_dir.join("Pie.html"), "<html></html>").unwrap();
+        std::fs::write(page_dir.join("Pie_files/pie.jpg"), b"jpeg").unwrap();
+        let secret = root.join("private/secret.jpg");
+        std::fs::write(&secret, b"secret").unwrap();
+        std::os::unix::fs::symlink(&secret, page_dir.join("link.jpg")).unwrap();
+        let base = url::Url::from_file_path(page_dir.join("Pie.html"))
+            .unwrap()
+            .to_string();
+
+        assert!(resolve(&base, "Pie_files/pie.jpg").is_some());
+        let outside = url::Url::from_file_path(&secret).unwrap().to_string();
+        for href in [
+            outside.as_str(),
+            "../private/secret.jpg",
+            "Pie_files/../../private/secret.jpg",
+            "link.jpg",
+            "Pie_files/missing.jpg",
+        ] {
+            assert_eq!(resolve(&base, href), None, "{href}");
+        }
+        // A page from the web never names a file.
+        assert_eq!(resolve("https://example.com/pie", &outside), None);
     }
 }

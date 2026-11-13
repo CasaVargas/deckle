@@ -183,13 +183,17 @@ fn resolve(base: &str, href: &str) -> Option<String> {
     let url = base.join(href).ok()?;
     match url.scheme() {
         "http" | "https" => Some(url.to_string()),
-        "file" if base.scheme() == "file" => {
-            let dir = base.to_file_path().ok()?.parent()?.to_path_buf();
-            let path = url.to_file_path().ok()?;
-            (path.starts_with(&dir) && !href.contains("..")).then(|| url.to_string())
-        }
+        "file" if base.scheme() == "file" => beside_saved_page(&base, &url),
         _ => None,
     }
+}
+
+/// `url` when it is a file in the saved page `base`'s own folder or below it, links followed:
+/// a saved page can name its pictures, but not other files on this computer.
+pub(crate) fn beside_saved_page(base: &url::Url, url: &url::Url) -> Option<String> {
+    let dir = base.to_file_path().ok()?.parent()?.canonicalize().ok()?;
+    let path = url.to_file_path().ok()?.canonicalize().ok()?;
+    (path.starts_with(&dir) && path.is_file()).then(|| url.to_string())
 }
 
 /// The photo's identity for deduplication: scheme, host and path, without the query (CDNs

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A saved page's pictures come only from its own folder.** A recipe or article saved to disk
+  could name any file on the computer as its picture; now only files in the page's folder count,
+  links followed.
 - **The Daily fetches only public addresses.** A feed's link, a page's image or a redirect can no
   longer point at your router, a NAS or a service on this computer and have it printed in the
   paper. Feeds, calendars and subscriptions you set up on your own network keep working; anything
