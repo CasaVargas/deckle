@@ -7,7 +7,7 @@
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day
   can come from another language's Wikipedia (`[onthisday] language = "it"`). Leaving them
   alone keeps the US English edition and English Wikipedia
-  ([docs/daily.md](docs/daily.md#news-in-another-language)). Thanks to @antoblushadow.
+  ([docs/daily.md](docs/daily.md#news-in-another-language)). Thanks to [@antoblu99](https://github.com/antoblu99).
 
 ## 0.14.0 — the paper in color on a Colorsoft, and two-column PDFs read in order
 
