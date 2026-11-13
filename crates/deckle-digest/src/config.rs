@@ -116,6 +116,7 @@ pub struct Config {
     pub learning: LearningConfig,
     pub lottery: LotteryConfig,
     pub horoscope: HoroscopeConfig,
+    #[serde(skip_serializing_if = "OnThisDayConfig::is_default")]
     pub onthisday: OnThisDayConfig,
     pub reading: ReadingConfig,
     /// What `digest watch` does when a Kindle connects (auto-sync design §3).
@@ -831,8 +832,15 @@ pub struct HoroscopeConfig {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct OnThisDayConfig {
+    /// A Wikipedia language code, e.g. "it". None: English.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+}
+
+impl OnThisDayConfig {
+    pub fn is_default(&self) -> bool {
+        *self == OnThisDayConfig::default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -3249,6 +3257,16 @@ mod tests {
     fn topic_parse_is_case_insensitive() {
         assert_eq!(Topic::parse(" sports "), Some(Topic::Sports));
         assert_eq!(Topic::parse("golf"), None);
+    }
+
+    #[test]
+    fn on_this_day_stays_out_of_the_file_until_set() {
+        let text = toml::to_string(&Config::default()).unwrap();
+        assert!(!text.contains("[onthisday]"), "{text}");
+        let mut c = Config::default();
+        c.onthisday.language = Some("it".into());
+        let text = toml::to_string(&c).unwrap();
+        assert!(text.contains("[onthisday]\nlanguage = \"it\""), "{text}");
     }
 
     #[test]

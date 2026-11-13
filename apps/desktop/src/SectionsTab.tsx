@@ -573,21 +573,21 @@ function LocalBody({ draft, change, flush, onNotice }: { draft: DailyConfig; cha
           Search Google News for something else
         </button>
       )}
-        <GoogleNewsI18nParams
-          hl={draft.local.hl}
-          gl={draft.local.gl}
-          ceid={draft.local.ceid}
-          onChange={(params) =>
-            change(
-              (c) => ({
-                ...c,
-                local: { ...c.local, ...params },
-              }),
-              "typing"
-            )
-          }
-          onBlur={flush}
-        />
+      <GoogleNewsI18nParams
+        hl={draft.local.hl}
+        gl={draft.local.gl}
+        ceid={draft.local.ceid}
+        onChange={(params) =>
+          change(
+            (c) => ({
+              ...c,
+              local: { ...c.local, ...params },
+            }),
+            "typing"
+          )
+        }
+        onBlur={flush}
+      />
     </>
   );
 }

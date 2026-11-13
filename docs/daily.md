@@ -241,6 +241,29 @@ Each place is its own row in the page plan (its story budget is editable there) 
 you read, where a Drop suggestion removes just that place. Turning Local off turns the places off
 with it.
 
+### News in another language
+
+Google News has an edition per country and language. Local, each other place, each interest and
+each topic feed read the US English one unless you pick another under the section in the Daily
+tab (**Language & Region**: Deutschland, España, France, Italia, Brasil, or Custom). In
+`digest.toml` it's three keys, Google's own, on any of those sections:
+
+```toml
+[[interests]]
+name = "Juventus"
+hl = "it"                       # language
+gl = "IT"                       # country
+ceid = "IT:it"                  # edition: country:language
+```
+
+On this day reads English Wikipedia unless you give another language's code (`it`, `de`, `pt`,
+…). A code that isn't one prints the section as unavailable.
+
+```toml
+[onthisday]
+language = "it"
+```
+
 ### How far you read
 
 Each time a Kindle connects (`watch`, `push`, or the Devices tab), Deckle reads the reading

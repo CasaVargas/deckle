@@ -765,6 +765,42 @@ fn other_places_have_rows_tiles_and_headlines() {
     assert!(t.contains(&"Asheville, NC · 4 slots".to_owned()), "{t:?}");
 }
 
+#[test]
+fn another_place_reads_its_own_google_news_edition() {
+    use deckle_digest::config::PlaceNews;
+    let mut s = Setup::new();
+    s.cfg.local.places = vec![PlaceNews {
+        name: "Roma".into(),
+        google_news: "Roma".into(),
+        hl: Some("it".into()),
+        gl: Some("IT".into()),
+        ceid: Some("IT:it".into()),
+        feeds: Vec::new(),
+        max_items: None,
+    }];
+    let url = google_news_url(
+        "Roma",
+        s.cfg.local.max_age_hours,
+        Some("it"),
+        Some("IT"),
+        Some("IT:it"),
+    );
+    assert!(live_urls(&s.cfg).contains(&url), "{:?}", live_urls(&s.cfg));
+    s.live.feeds.insert(
+        url,
+        fetched(&[(
+            "Il Campidoglio approva il bilancio",
+            local(2026, 10, 22, 13, 0),
+        )]),
+    );
+    // the row reads the place's own edition from the cache, not Local's
+    let lead = s.plan().lead.unwrap();
+    assert_eq!(
+        lead.title.as_deref(),
+        Some("Il Campidoglio approva il bilancio")
+    );
+}
+
 // --- topic sections (Task 8) ---
 
 use deckle_digest::config::Topic;
