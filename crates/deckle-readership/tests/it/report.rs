@@ -511,12 +511,18 @@ fn other_places_are_their_own_rows_and_drop_alone() {
             google_news: "Asheville NC".into(),
             feeds: Vec::new(),
             max_items: None,
+            hl: None,
+            gl: None,
+            ceid: None,
         },
         deckle_digest::config::PlaceNews {
             name: "Boone".into(),
             google_news: "Boone NC".into(),
             feeds: Vec::new(),
             max_items: None,
+            hl: None,
+            gl: None,
+            ceid: None,
         },
     ];
     let r = deckle_readership::report(&State::default(), &c);

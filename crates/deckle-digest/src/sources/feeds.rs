@@ -9,7 +9,7 @@ use std::sync::{LazyLock, Mutex};
 use chrono::{DateTime, Local, Utc};
 use regex::Regex;
 
-use crate::config::{Config, FeedConfig, FullText, Topic};
+use crate::config::{Config, FeedConfig, FullText};
 use crate::fetch::{Net, encode};
 use crate::publisher::{Access, Walled};
 use crate::{Article, Section, article, esc};
@@ -28,15 +28,24 @@ pub struct Item {
 
 /// A Google News search limited to the last `max_age_hours` (rounded up to days): without
 /// `when:` the results are by relevance and mostly months old.
-pub fn google_news_url(query: &str, max_age_hours: u32) -> String {
+pub fn google_news_url(
+    query: &str,
+    max_age_hours: u32,
+    hl: Option<&str>,
+    gl: Option<&str>,
+    ceid: Option<&str>,
+) -> String {
     let query = if query.contains("when:") {
         query.to_owned()
     } else {
         format!("{query} when:{}d", max_age_hours.div_ceil(24).max(1))
     };
     format!(
-        "https://news.google.com/rss/search?q={}&hl=en-US&gl=US&ceid=US:en",
-        encode(&query)
+        "https://news.google.com/rss/search?q={}&hl={}&gl={}&ceid={}",
+        encode(&query),
+        encode(hl.filter(|s| !s.is_empty()).unwrap_or("en-US")),
+        encode(gl.filter(|s| !s.is_empty()).unwrap_or("US")),
+        encode(ceid.filter(|s| !s.is_empty()).unwrap_or("US:en")).replace("%3A", ":")
     )
 }
 
@@ -456,7 +465,20 @@ pub fn local_section(
     }
     let kicker = (!cfg.place.is_empty()).then(|| format!("News from around {}", cfg.place));
     let (search, feeds, max) = (&l.google_news, &l.feeds, l.max_items);
-    local_news("Local", kicker, search, feeds, max, cfg, now, net, taken)
+    local_news(
+        "Local",
+        kicker,
+        search,
+        feeds,
+        max,
+        cfg,
+        now,
+        net,
+        taken,
+        l.hl.as_deref(),
+        l.gl.as_deref(),
+        l.ceid.as_deref(),
+    )
 }
 
 /// Another place's local news (#102), built as Local is.
@@ -482,17 +504,24 @@ pub fn place_section(
         // A place keeps its own stories even when Local printed them: two towns rarely overlap,
         // and a place is built exactly as Local is (local places design §2).
         &HashSet::new(),
+        place.hl.as_deref(),
+        place.gl.as_deref(),
+        place.ceid.as_deref(),
     )
 }
 
 /// Google News searches (as briefs) and feeds, fetched, merged, deduplicated by title, newest
 /// first. Errors read "Google News: …" or "<host>: …"; one source failing leaves the others.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn fetch_merged(
     searches: &[String],
     feeds: &[String],
     max_age_hours: u32,
     now: DateTime<Utc>,
     net: &dyn Net,
+    hl: Option<&str>,
+    gl: Option<&str>,
+    ceid: Option<&str>,
 ) -> (Vec<Item>, Vec<String>) {
     let mut items = Vec::new();
     let mut errors = Vec::new();
@@ -501,7 +530,7 @@ pub(crate) fn fetch_merged(
             continue;
         }
         match net
-            .get(&google_news_url(search, max_age_hours))
+            .get(&google_news_url(search, max_age_hours, hl, gl, ceid))
             .and_then(|b| parse(&b, now, max_age_hours))
         {
             Ok((_, found)) => items.extend(as_briefs(found)),
@@ -537,6 +566,9 @@ fn local_news(
     now: DateTime<Utc>,
     net: &dyn Net,
     taken: &HashSet<String>,
+    hl: Option<&str>,
+    gl: Option<&str>,
+    ceid: Option<&str>,
 ) -> Section {
     let (mut items, errors) = fetch_merged(
         &[search.to_owned()],
@@ -544,6 +576,9 @@ fn local_news(
         cfg.local.max_age_hours,
         now,
         net,
+        hl,
+        gl,
+        ceid,
     );
     // A story an earlier section printed is dropped before the cut (whichever section comes
     // first in `sections` prints it), so Local refills from its next-newest items.
@@ -595,7 +630,9 @@ pub fn feed_section_with(
     if sources.is_empty() {
         return super::unavailable(&feed.name, "give a url, urls or topic");
     }
-    let topic_url = feed.topic.map(Topic::url);
+    let topic_url = feed
+        .topic
+        .map(|t| t.url(feed.hl.as_deref(), feed.gl.as_deref(), feed.ceid.as_deref()));
     let mut items = Vec::new();
     let mut errors = Vec::new();
     for url in &sources {
@@ -684,6 +721,9 @@ mod tests {
             72,
             now,
             &Two,
+            None,
+            None,
+            None,
         );
         assert_eq!(
             items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(),
@@ -696,7 +736,13 @@ mod tests {
 
     #[test]
     fn a_query_with_google_operators_encodes_and_gets_one_when() {
-        let url = google_news_url("\"Rust\" programming OR \"Rust language\" -game", 72);
+        let url = google_news_url(
+            "\"Rust\" programming OR \"Rust language\" -game",
+            72,
+            None,
+            None,
+            None,
+        );
         assert!(
             url.contains("q=%22Rust%22+programming+OR+%22Rust+language%22+-game+when%3A3d&"),
             "{url}"
@@ -721,10 +767,18 @@ mod tests {
     #[test]
     fn query_is_encoded() {
         assert_eq!(
-            google_news_url("Moore County NC", 72),
+            google_news_url("Moore County NC", 72, None, None, None),
             "https://news.google.com/rss/search?q=Moore+County+NC+when%3A3d&hl=en-US&gl=US&ceid=US:en"
         );
-        assert!(google_news_url("x when:1d", 72).contains("x+when%3A1d&"));
+        assert!(google_news_url("x when:1d", 72, None, None, None).contains("x+when%3A1d&"));
+    }
+
+    #[test]
+    fn google_news_url_i18n() {
+        assert_eq!(
+            google_news_url("Roma", 72, Some("it-IT"), Some("IT"), Some("IT:it")),
+            "https://news.google.com/rss/search?q=Roma+when%3A3d&hl=it-IT&gl=IT&ceid=IT:it"
+        );
     }
 
     /// A subscribed host serving `page` as a stranger would see it.

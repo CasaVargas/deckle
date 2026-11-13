@@ -16,6 +16,7 @@ import { topicTitle } from "./topics";
 import YourDay from "./YourDay";
 import type { DailyConfig, NextPaper, PagePlanRow, PlaceNews, PlaceRow } from "./types";
 import { SIGNS } from "./types";
+import { LOCALES, type Locale } from "./i18n";
 
 /** How an edit saves: switches and menus at once, typing once it pauses. */
 export type Change = (f: (c: DailyConfig) => DailyConfig, how?: "now" | "typing") => void;
@@ -174,6 +175,19 @@ export default function SectionsTab({
             </div>
             <p className="muted small">{draft.horoscope.signs.length === 0 ? "None chosen: all twelve." : "Only these signs."}</p>
           </>
+        );
+      case "onthisday":
+        return (
+          <WikipediaLanguage
+            language={draft.onthisday?.language}
+            onChange={(language) =>
+              change((c) => ({
+                ...c,
+                onthisday: { ...c.onthisday, language },
+              }))
+            }
+            onBlur={flush}
+          />
         );
       default:
         return <p className="muted small">Nothing to set: it's either in the paper or not.</p>;
@@ -391,6 +405,153 @@ function PlaceField({ draft, change, onNotice, note }: { draft: DailyConfig; cha
   );
 }
 
+const GOOGLE_NEWS_PRESETS: Record<Locale, { hl: string; gl: string; ceid: string }> = {
+  en: { hl: "en-US", gl: "US", ceid: "US:en" },
+  de: { hl: "de", gl: "DE", ceid: "DE:de" },
+  es: { hl: "es", gl: "ES", ceid: "ES:es" },
+  fr: { hl: "fr", gl: "FR", ceid: "FR:fr" },
+  it: { hl: "it", gl: "IT", ceid: "IT:it" },
+  "pt-BR": { hl: "pt-BR", gl: "BR", ceid: "BR:pt-419" },
+};
+
+function WikipediaLanguage({
+  language,
+  onChange,
+  onBlur,
+}: {
+  language?: string;
+  onChange: (language?: string) => void;
+  onBlur: () => void;
+}) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const selected = language ?? "en";
+  const custom = customOpen || !["en", "de", "es", "fr", "it", "pt"].includes(selected);
+
+  return (
+    <>
+      <label className="sec-field">
+        <span className="label">Wikipedia language</span>
+        <select
+          value={custom ? "custom" : selected}
+          onChange={(e) => {
+            const value = e.target.value;
+            setCustomOpen(value === "custom");
+            if (value !== "custom") onChange(value === "en" ? undefined : value);
+          }}
+        >
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Português</option>
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      {custom && (
+        <label className="sec-field">
+          <span className="label">Language code</span>
+          <input
+            value={language ?? ""}
+            placeholder="e.g. nl"
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={onBlur}
+            spellCheck={false}
+          />
+        </label>
+      )}
+    </>
+  );
+}
+
+function GoogleNewsI18nParams({
+  hl,
+  gl,
+  ceid,
+  onChange,
+  onBlur,
+}: {
+  hl?: string;
+  gl?: string;
+  ceid?: string;
+  onChange: (values: { hl?: string; gl?: string; ceid?: string }) => void;
+  onBlur: () => void;
+}) {
+  const [customOpen, setCustomOpen] = useState(false);
+  const selected =
+    hl === undefined && gl === undefined && ceid === undefined
+      ? "en"
+      : LOCALES.find(
+          ({ id }) =>
+            GOOGLE_NEWS_PRESETS[id].hl === hl &&
+            GOOGLE_NEWS_PRESETS[id].gl === gl &&
+            GOOGLE_NEWS_PRESETS[id].ceid === ceid
+        )?.id ?? "custom";
+  const custom = customOpen || selected === "custom";
+
+  return (
+    <>
+      <label className="sec-field">
+        <span className="label">Language & Region</span>
+        <select
+          value={custom ? "custom" : selected}
+          onChange={(e) => {
+            const id = e.target.value;
+            setCustomOpen(id === "custom");
+            if (id !== "custom") {
+              onChange(
+                id === "en"
+                  ? { hl: undefined, gl: undefined, ceid: undefined }
+                  : GOOGLE_NEWS_PRESETS[id as Locale]
+              );
+            }
+          }}
+        >
+          {LOCALES.map(({ id }) => (
+            <option key={id} value={id}>
+              {{
+                en: "United States – English",
+                de: "Deutschland – Deutsch",
+                es: "España – Español",
+                fr: "France – Français",
+                it: "Italia – Italiano",
+                "pt-BR": "Brasil – Português",
+              }[id]}
+            </option>
+          ))}
+          <option value="custom">Custom</option>
+        </select>
+      </label>
+      {custom && (
+        <div className="grid2">
+          {([
+            ["hl", "Language (HL)"],
+            ["gl", "Country (GL)"],
+            ["ceid", "Edition (CEID)"],
+          ] as const).map(([key, label]) => (
+            <label key={key}>
+              <span className="label">{label}</span>
+              <input
+                value={{ hl, gl, ceid }[key] ?? GOOGLE_NEWS_PRESETS.en[key]}
+                onChange={(e) =>
+                  onChange({
+                    hl: hl ?? "en-US",
+                    gl: gl ?? "US",
+                    ceid: ceid ?? "US:en",
+                    [key]: e.target.value,
+                  })
+                }
+                onBlur={onBlur}
+                spellCheck={false}
+              />
+            </label>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function LocalBody({ draft, change, flush, onNotice }: { draft: DailyConfig; change: Change; flush: () => void; onNotice: (m: string) => void }) {
   const search = draft.local.google_news;
   const [own, setOwn] = useState(!!search.trim() && search.trim().toLowerCase() !== draft.place.trim().toLowerCase());
@@ -412,6 +573,21 @@ function LocalBody({ draft, change, flush, onNotice }: { draft: DailyConfig; cha
           Search Google News for something else
         </button>
       )}
+        <GoogleNewsI18nParams
+          hl={draft.local.hl}
+          gl={draft.local.gl}
+          ceid={draft.local.ceid}
+          onChange={(params) =>
+            change(
+              (c) => ({
+                ...c,
+                local: { ...c.local, ...params },
+              }),
+              "typing"
+            )
+          }
+          onBlur={flush}
+        />
     </>
   );
 }
@@ -439,6 +615,13 @@ function TownBody({ index, draft, change, flush, fresh, onRemove }: { index: num
           />
         </label>
       </div>
+      <GoogleNewsI18nParams
+        hl={p.hl}
+        gl={p.gl}
+        ceid={p.ceid}
+        onChange={(params) => set((x) => ({ ...x, ...params }))}
+        onBlur={flush}
+      />
       <p className="muted small">
         Its own section after Local. Deckle searches Google News for the name unless you give a custom search. The weather stays
         on your town.
@@ -490,6 +673,23 @@ function InterestBody({ index, draft, change, flush, fresh, onRemove }: { index:
           <CommitField value={listText(it.not)} placeholder="Florida Panthers, hockey" onCommit={(v) => change((c) => setList(c, index, "not", v))} />
         </label>
       </div>
+      <GoogleNewsI18nParams
+        hl={it.hl}
+        gl={it.gl}
+        ceid={it.ceid}
+        onChange={(params) =>
+          change(
+            (c) => ({
+              ...c,
+              interests: (c.interests ?? []).map((x, i) =>
+                i === index ? { ...x, ...params } : x
+              ),
+            }),
+            "typing"
+          )
+        }
+        onBlur={flush}
+      />
       <button
         className="quiet"
         onClick={() => {
@@ -510,7 +710,16 @@ function FeedBody({ index, draft, change, flush, fresh, onRemove }: { index: num
   return (
     <>
       {f.topic ? (
-        <p className="muted small">A Google News topic: {topicTitle(f.topic)}.</p>
+        <>
+          <p className="muted small">A Google News topic: {topicTitle(f.topic)}.</p>
+          <GoogleNewsI18nParams
+            hl={f.hl}
+            gl={f.gl}
+            ceid={f.ceid}
+            onChange={(params) => set(params)}
+            onBlur={flush}
+          />
+        </>
       ) : (
         <div className="grid2">
           <label>

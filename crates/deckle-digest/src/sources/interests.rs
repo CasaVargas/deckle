@@ -94,6 +94,9 @@ pub fn interest_section(
         interest.max_age_hours,
         now,
         net,
+        interest.hl.as_deref(),
+        interest.gl.as_deref(),
+        interest.ceid.as_deref(),
     );
     items.retain(|i| relevant(interest, &i.title, &i.paragraphs.join(" ")));
     items.retain(|i| !taken.contains(&title_key(&i.title)));
