@@ -779,7 +779,7 @@ fn topic_feed_is_fetched_by_its_topic_url() {
         max_items: 5,
         ..Default::default()
     }];
-    let topic_url = Topic::Science.url();
+    let topic_url = Topic::Science.url(None, None, None);
     assert_eq!(live_urls(&c), std::slice::from_ref(&topic_url));
     let mut cache = LiveCache::default();
     assert_eq!(refresh(&c, &mut cache, t0(), &net), 1);

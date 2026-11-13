@@ -9,7 +9,7 @@ use std::sync::{LazyLock, Mutex};
 use chrono::{DateTime, Local, Utc};
 use regex::Regex;
 
-use crate::config::{Config, FeedConfig, FullText, Topic};
+use crate::config::{Config, FeedConfig, FullText};
 use crate::fetch::{Net, encode};
 use crate::publisher::{Access, Walled};
 use crate::{Article, Section, article, esc};
@@ -465,7 +465,20 @@ pub fn local_section(
     }
     let kicker = (!cfg.place.is_empty()).then(|| format!("News from around {}", cfg.place));
     let (search, feeds, max) = (&l.google_news, &l.feeds, l.max_items);
-    local_news("Local", kicker, search, feeds, max, cfg, now, net, taken, l.hl.as_deref(), l.gl.as_deref(), l.ceid.as_deref())
+    local_news(
+        "Local",
+        kicker,
+        search,
+        feeds,
+        max,
+        cfg,
+        now,
+        net,
+        taken,
+        l.hl.as_deref(),
+        l.gl.as_deref(),
+        l.ceid.as_deref(),
+    )
 }
 
 /// Another place's local news (#102), built as Local is.
@@ -493,7 +506,7 @@ pub fn place_section(
         &HashSet::new(),
         place.hl.as_deref(),
         place.gl.as_deref(),
-        place.ceid.as_deref()
+        place.ceid.as_deref(),
     )
 }
 
@@ -617,7 +630,9 @@ pub fn feed_section_with(
     if sources.is_empty() {
         return super::unavailable(&feed.name, "give a url, urls or topic");
     }
-    let topic_url = feed.topic.map(Topic::url);
+    let topic_url = feed
+        .topic
+        .map(|t| t.url(feed.hl.as_deref(), feed.gl.as_deref(), feed.ceid.as_deref()));
     let mut items = Vec::new();
     let mut errors = Vec::new();
     for url in &sources {
@@ -708,7 +723,7 @@ mod tests {
             &Two,
             None,
             None,
-            None
+            None,
         );
         assert_eq!(
             items.iter().map(|i| i.title.as_str()).collect::<Vec<_>>(),
@@ -721,7 +736,13 @@ mod tests {
 
     #[test]
     fn a_query_with_google_operators_encodes_and_gets_one_when() {
-        let url = google_news_url("\"Rust\" programming OR \"Rust language\" -game", 72, None, None, None);
+        let url = google_news_url(
+            "\"Rust\" programming OR \"Rust language\" -game",
+            72,
+            None,
+            None,
+            None,
+        );
         assert!(
             url.contains("q=%22Rust%22+programming+OR+%22Rust+language%22+-game+when%3A3d&"),
             "{url}"

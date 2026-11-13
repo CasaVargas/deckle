@@ -106,7 +106,7 @@ fn topic_feed(max: usize) -> FeedConfig {
 #[test]
 fn topic_feed_requests_the_topic_url() {
     let net = Fake::new(vec![(
-        Topic::Sports.url(),
+        Topic::Sports.url(None, None, None),
         rss(&[("Big game - Outlet", "https://x.example/1", 10)]),
     )]);
     let feed = FeedConfig {
@@ -114,7 +114,7 @@ fn topic_feed_requests_the_topic_url() {
         ..topic_feed(5)
     };
     let s = run(&feed, &net);
-    assert_eq!(net.seen(), [Topic::Sports.url()]);
+    assert_eq!(net.seen(), [Topic::Sports.url(None, None, None)]);
     assert_eq!(s.articles.len(), 1);
     assert_eq!(s.articles[0].title, "Big game");
     assert!(s.articles[0].meta.as_deref().unwrap().contains("Outlet"));
@@ -124,7 +124,7 @@ fn topic_feed_requests_the_topic_url() {
 fn sources_are_merged_and_deduped_by_title() {
     let net = Fake::new(vec![
         (
-            Topic::Sports.url(),
+            Topic::Sports.url(None, None, None),
             rss(&[
                 ("Alpha - Outlet", "https://x.example/a", 10),
                 ("Bravo - Outlet", "https://x.example/b", 8),
@@ -185,7 +185,7 @@ fn all_failing_is_unavailable() {
 #[test]
 fn lead_mode_fetches_only_the_top_story_whole() {
     let net = Fake::new(vec![(
-        Topic::Sports.url(),
+        Topic::Sports.url(None, None, None),
         rss(&[
             ("One - Outlet", "https://ok.example/1", 12),
             ("Two - Outlet", "https://ok.example/2", 11),
@@ -210,7 +210,7 @@ fn lead_mode_fetches_only_the_top_story_whole() {
 #[test]
 fn lead_mode_tries_the_next_story_when_the_first_cannot_be_read() {
     let net = Fake::new(vec![(
-        Topic::Sports.url(),
+        Topic::Sports.url(None, None, None),
         rss(&[
             ("One - Outlet", "https://bad.example/1", 12),
             ("Two - Outlet", "https://ok.example/2", 11),
@@ -247,7 +247,7 @@ fn lead_mode_gives_up_after_three_attempts() {
         .iter()
         .map(|(t, l, h)| (t.as_str(), l.as_str(), *h))
         .collect();
-    let net = Fake::new(vec![(Topic::Sports.url(), rss(&refs))]);
+    let net = Fake::new(vec![(Topic::Sports.url(None, None, None), rss(&refs))]);
     let feed = FeedConfig {
         full_text: Some(FullText::Lead),
         ..topic_feed(5)
@@ -388,7 +388,7 @@ fn titles(s: &deckle_digest::Section) -> Vec<&str> {
 fn shared_net(topic: &[(&str, &str, u32)]) -> Fake {
     Fake::new(vec![
         (url("local"), rss(&[("X", "https://x.example/x", 10)])),
-        (Topic::Sports.url(), rss(topic)),
+        (Topic::Sports.url(None, None, None), rss(topic)),
     ])
 }
 
@@ -473,7 +473,7 @@ fn reading_is_never_deduped() {
     q.add_url(page, None, "cli", now()).unwrap();
     let net = Fake::new(vec![
         (
-            Topic::Sports.url(),
+            Topic::Sports.url(None, None, None),
             rss(&[(
                 "Montgomery County standoff: Barricaded subject hospitalized, sheriff says",
                 "https://x.example/s",

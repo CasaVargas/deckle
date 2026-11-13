@@ -353,7 +353,7 @@ pub struct PlaceNews {
     /// A Google News search. Empty: the name, as typed.
     #[serde(default)]
     pub google_news: String,
-        /// Google News language override. None: en-US.
+    /// Google News language override. None: en-US.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hl: Option<String>,
     /// Google News country override. None: US.
@@ -456,10 +456,14 @@ impl Topic {
 
     /// The Google News topic feed. Google answers this with a 302 to a `/rss/topics/<id>`
     /// feed; the fetcher (ureq) follows redirects.
-    pub fn url(self) -> String {
+    pub fn url(self, hl: Option<&str>, gl: Option<&str>, ceid: Option<&str>) -> String {
+        use crate::fetch::encode;
         format!(
-            "https://news.google.com/rss/headlines/section/topic/{}?hl=en-US&gl=US&ceid=US:en",
-            self.slug()
+            "https://news.google.com/rss/headlines/section/topic/{}?hl={}&gl={}&ceid={}",
+            self.slug(),
+            encode(hl.filter(|s| !s.is_empty()).unwrap_or("en-US")),
+            encode(gl.filter(|s| !s.is_empty()).unwrap_or("US")),
+            encode(ceid.filter(|s| !s.is_empty()).unwrap_or("US:en")).replace("%3A", ":")
         )
     }
 }
@@ -532,7 +536,7 @@ pub struct FeedConfig {
     /// A Google News topic, merged in ahead of `url` and `urls`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub topic: Option<Topic>,
-        /// Google News language override. None: en-US.
+    /// Google News language override. None: en-US.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hl: Option<String>,
     /// Google News country override. None: US.
@@ -552,7 +556,9 @@ impl FeedConfig {
     /// Every feed URL for this section: the topic's, then `url`, then `urls`, without repeats.
     pub fn sources(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
-        let first = self.topic.map(Topic::url);
+        let first = self
+            .topic
+            .map(|t| t.url(self.hl.as_deref(), self.gl.as_deref(), self.ceid.as_deref()));
         let one = Some(self.url.trim().to_owned()).filter(|u| !u.is_empty());
         for u in first
             .into_iter()
@@ -590,7 +596,7 @@ pub struct InterestConfig {
     pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub query: String,
-        /// Google News language override. None: en-US.
+    /// Google News language override. None: en-US.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hl: Option<String>,
     /// Google News country override. None: US.
@@ -2393,7 +2399,7 @@ mod tests {
         let f = feed("[[feeds]]\nname = \"Sports\"\ntopic = \"SPORTS\"\n").unwrap();
         assert_eq!(f.max_items, 5);
         assert_eq!(f.full(false), FullText::Lead);
-        assert_eq!(f.sources(), [Topic::Sports.url()]);
+        assert_eq!(f.sources(), [Topic::Sports.url(None, None, None)]);
     }
 
     #[test]
@@ -2406,12 +2412,26 @@ mod tests {
         assert_eq!(
             f.sources(),
             [
-                Topic::World.url(),
+                Topic::World.url(None, None, None),
                 "https://a.example/f".into(),
                 "https://b.example/f".into()
             ]
         );
         assert_eq!(f.max_items, 7);
+    }
+
+    #[test]
+    fn topic_feed_i18n() {
+        let f = feed(
+            "[[feeds]]\nname = \"Technology\"\ntopic = \"TECHNOLOGY\"\n\
+            hl = \"it\"\ngl = \"IT\"\nceid = \"IT:it\"\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            f.sources(),
+            [Topic::Technology.url(Some("it"), Some("IT"), Some("IT:it"))]
+        );
     }
 
     #[test]
@@ -2500,7 +2520,7 @@ mod tests {
         assert!(text.contains("topic = \"SPORTS\""), "{text}");
         let back = Config::load(&path).unwrap();
         let f = back.feeds.iter().find(|f| f.name == "Sports").unwrap();
-        assert_eq!(f.sources(), vec![Topic::Sports.url()]);
+        assert_eq!(f.sources(), vec![Topic::Sports.url(None, None, None)]);
         assert_eq!(f.max_items, 5);
         assert_eq!(f.full(true), FullText::Lead);
         assert_eq!(back, cfg);
@@ -3170,10 +3190,11 @@ mod tests {
     #[test]
     fn topic_urls() {
         assert_eq!(
-            Topic::Technology.url(),
+            Topic::Technology.url(None, None, None),
             "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"
         );
-        let urls: std::collections::BTreeSet<String> = Topic::ALL.iter().map(|t| t.url()).collect();
+        let urls: std::collections::BTreeSet<String> =
+            Topic::ALL.iter().map(|t| t.url(None, None, None)).collect();
         assert_eq!(urls.len(), 8);
     }
 

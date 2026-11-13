@@ -648,7 +648,16 @@ function FeedBody({ index, draft, change, flush, fresh, onRemove }: { index: num
   return (
     <>
       {f.topic ? (
-        <p className="muted small">A Google News topic: {topicTitle(f.topic)}.</p>
+        <>
+          <p className="muted small">A Google News topic: {topicTitle(f.topic)}.</p>
+          <GoogleNewsI18nParams
+            hl={f.hl}
+            gl={f.gl}
+            ceid={f.ceid}
+            onChange={(params) => set(params)}
+            onBlur={flush}
+          />
+        </>
       ) : (
         <div className="grid2">
           <label>
