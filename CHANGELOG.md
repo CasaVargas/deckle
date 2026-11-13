@@ -8,6 +8,11 @@
   can come from another language's Wikipedia (`[onthisday] language = "it"`). Leaving them
   alone keeps the US English edition and English Wikipedia
   ([docs/daily.md](docs/daily.md#news-in-another-language)). Thanks to [@antoblu99](https://github.com/antoblu99).
+- **The window opens faster.** At launch Deckle was starting Kindle Previewer twice to read its
+  version, asking the system about each plugged-in reader, and counting the library, all before
+  the window could draw. These now run in the background, and Previewer is started once per
+  install instead of at every check. The device check every few seconds no longer stutters the
+  window either.
 
 ## 0.14.0 — the paper in color on a Colorsoft, and two-column PDFs read in order
 
