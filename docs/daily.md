@@ -800,6 +800,9 @@ deckle reader-server status      # on or off, and the URLs to type into KOReader
   KOReader's sync protocol sends exactly that MD5, so treat the file like a password.
 - It's plain HTTP on every network interface. Use it at home or over Tailscale, never open to the
   internet. `DECKLE_READER_SERVER_BIND` limits the address it listens on.
+- Five wrong passwords from one address are free; after that the address waits 1 s, then 2,
+  4, … up to five minutes, and each is logged with the address. Other readers are never kept
+  out by it.
 - **Progress sync:** in KOReader, Tools → Progress sync → Custom sync server, the sync URL; then
   Log in with the same username and password (registering is closed: the account is Deckle's).
   Each position lands in the paper's Readership, as `koreader/<device id>`, to the section, or

@@ -53,6 +53,7 @@ pub fn config(dir: &Path, auth_none: bool) -> ServerConfig {
         web_dir: web,
         roots: vec!["/config".into(), "/data".into()],
         hosts: Vec::new(),
+        trusted_proxies: Vec::new(),
     }
 }
 

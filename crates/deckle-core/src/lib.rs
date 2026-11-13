@@ -23,6 +23,7 @@ pub mod koreader_backup;
 pub mod koreader_plugins;
 pub mod koreader_shelves;
 pub mod koreader_store;
+pub mod limiter;
 pub mod matcher;
 pub mod metadata_fill;
 pub mod normalize;

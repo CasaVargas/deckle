@@ -7,6 +7,7 @@ mod events;
 mod files;
 mod host;
 mod invoke;
+mod peer;
 mod static_files;
 
 use std::fmt;
@@ -26,6 +27,7 @@ use tokio::sync::watch;
 
 pub use events::SseEvents;
 pub use host::host_allowed;
+pub use peer::Range;
 
 /// How the web UI is served, from `DECKLE_WEB_*`.
 pub struct ServerConfig {
@@ -41,6 +43,8 @@ pub struct ServerConfig {
     /// `DECKLE_WEB_HOSTS`: public names the API also answers to, besides addresses and
     /// names that can't be public (see [`host_allowed`]).
     pub hosts: Vec<String>,
+    /// `DECKLE_WEB_TRUSTED_PROXIES`: proxies whose `X-Forwarded-For` says who is signing in.
+    pub trusted_proxies: Vec<Range>,
 }
 
 // By hand, so a logged config never shows the password.
@@ -54,6 +58,7 @@ impl fmt::Debug for ServerConfig {
             .field("web_dir", &self.web_dir)
             .field("roots", &self.roots)
             .field("hosts", &self.hosts)
+            .field("trusted_proxies", &self.trusted_proxies)
             .finish()
     }
 }
@@ -118,6 +123,15 @@ impl ServerConfig {
                     .collect()
             })
             .unwrap_or_default();
+        let trusted_proxies = match var("DECKLE_WEB_TRUSTED_PROXIES") {
+            Some(v) => v
+                .split(',')
+                .filter(|r| !r.trim().is_empty())
+                .map(Range::parse)
+                .collect::<Result<_, _>>()
+                .map_err(|e| format!("DECKLE_WEB_TRUSTED_PROXIES: {e}"))?,
+            None => Vec::new(),
+        };
         Ok(ServerConfig {
             bind,
             port,
@@ -126,6 +140,7 @@ impl ServerConfig {
             web_dir,
             roots,
             hosts,
+            trusted_proxies,
         })
     }
 
@@ -146,7 +161,8 @@ pub(crate) struct Server {
     pub(crate) cfg: ServerConfig,
     pub(crate) ctx: Arc<Ctx>,
     pub(crate) sessions: auth::Sessions,
-    pub(crate) login_slots: Arc<tokio::sync::Semaphore>,
+    /// Failed logins per address.
+    pub(crate) limiter: deckle_core::limiter::FailureLimiter,
     /// Set on shutdown: ends the event streams, which would otherwise never finish.
     pub(crate) stop: watch::Sender<bool>,
     /// The most one uploaded file may hold, in bytes.
@@ -167,7 +183,7 @@ pub fn router_with_upload_limit(cfg: ServerConfig, ctx: Arc<Ctx>, upload_limit: 
         cfg,
         ctx,
         sessions: Default::default(),
-        login_slots: Arc::new(tokio::sync::Semaphore::new(auth::LOGIN_SLOTS)),
+        limiter: deckle_core::limiter::FailureLimiter::new("web UI"),
         stop: watch::channel(false).0,
         upload_limit,
     }))
@@ -234,7 +250,7 @@ pub async fn serve(
         cfg,
         ctx,
         sessions: Default::default(),
-        login_slots: Arc::new(tokio::sync::Semaphore::new(auth::LOGIN_SLOTS)),
+        limiter: deckle_core::limiter::FailureLimiter::new("web UI"),
         stop: stop.clone(),
         upload_limit: files::UPLOAD_LIMIT,
     });

@@ -119,6 +119,62 @@ pub fn kosync_ok(headers: &HeaderMap, s: &Settings) -> bool {
     user_ok & key_ok
 }
 
+/// Whether a request carries a sign-in at all. A client asks first without one to get the
+/// challenge; that isn't a wrong password.
+fn has_credentials(headers: &HeaderMap) -> bool {
+    let set = |k: &str| {
+        headers
+            .get(k)
+            .is_some_and(|v| !v.as_bytes().trim_ascii().is_empty())
+    };
+    set("authorization") || set("x-auth-user") || set("x-auth-key")
+}
+
+/// Counts wrong passwords per address (`deckle_core::limiter`): a few are free, then that
+/// address waits, doubling up to five minutes, and gets `429` with `Retry-After` meanwhile. The
+/// check is held only while the password is compared, so a reader fetching several covers at
+/// once is never turned away.
+pub(crate) async fn limit_failures(
+    axum::extract::State(ctx): axum::extract::State<std::sync::Arc<crate::Ctx>>,
+    // Absent when served without connect info (tests).
+    peer: Option<axum::Extension<axum::extract::ConnectInfo<std::net::SocketAddr>>>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if !has_credentials(req.headers()) {
+        return next.run(req).await;
+    }
+    let ip = peer.map_or(std::net::Ipv4Addr::UNSPECIFIED.into(), |c| c.0.0.ip());
+    let hold = match ctx.limiter.begin(ip) {
+        Err(refused) => {
+            let mut r = (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                "too many wrong passwords from here; try again later",
+            )
+                .into_response();
+            r.headers_mut().insert(
+                axum::http::header::RETRY_AFTER,
+                axum::http::HeaderValue::from(refused.retry_after_secs()),
+            );
+            return r;
+        }
+        Ok(attempt) => {
+            if either_ok(req.headers(), &ctx.settings) {
+                attempt.succeeded();
+                None
+            } else {
+                Some(attempt.failed())
+            }
+        }
+    };
+    if let Some(d) = hold.filter(|d| !d.is_zero()) {
+        tokio::time::sleep(d).await;
+    }
+    // The route still checks the sign-in its own way, and answers a wrong one as it always has.
+    next.run(req).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

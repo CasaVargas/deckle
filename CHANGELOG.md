@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Wrong passwords slow only the address that sends them.** The web UI and KOReader over
+  Wi-Fi now let each address get its password wrong five times, then make it wait, doubling up
+  to five minutes. Someone guessing can no longer keep you out of the web UI, and the reader
+  server, which didn't slow guessing at all, now does. Behind a reverse proxy, set
+  `DECKLE_WEB_TRUSTED_PROXIES` so each client is counted on its own
+  ([docs/docker.md](docs/docker.md#the-password)).
 - **The web app no longer chooses programs for the server.** The calibredb path is shown but
   can't be changed from a browser, and the Kindle Previewer location is always the one saved on
   the server. Set either in the server's files

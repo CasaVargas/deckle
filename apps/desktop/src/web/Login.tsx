@@ -24,7 +24,7 @@ export default function Login({ onIn }: { onIn: () => void }) {
         setPassword("");
         onIn();
       } else {
-        // 429 says so itself: too many login attempts; try again in a moment.
+        // 429 says so itself: too many failed logins from here; try again in a moment.
         setError(await errorOf(res));
       }
     } catch (err) {

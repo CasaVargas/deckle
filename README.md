@@ -315,6 +315,10 @@ Converting and sending a book is offline. Deckle goes online only for:
   <img src="docs/screenshots/readme/settings-online.jpg" width="720" alt="Settings, Online and privacy: each optional lookup with what it sends and where, and the two that always run, with what they carry">
 </p>
 
+KOReader over Wi-Fi (off until you turn it on) is a server, not a lookup: it listens on every
+network interface over plain HTTP, and its key file is as good as its password. Keep it at home
+or on Tailscale ([docs/daily.md](docs/daily.md#koreader-over-wi-fi)).
+
 The app lists all of it on one page, **Settings → Online & privacy**. A book sent with features
 carries an ASIN, so the Kindle itself may ask Amazon about it. That's the Kindle, not Deckle.
 Sending cover-first avoids it.
