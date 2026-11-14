@@ -815,9 +815,12 @@ function Deckle() {
             </div>
           )}
           {books.length === 0 && docked ? (
-            <div className="dock-empty muted">
-              <p>Nothing to send yet.</p>
-              <p className="small">Pick books from your library, or drop EPUBs, PDFs and Word documents here.</p>
+            <div className="dock-empty">
+              <div className="dock-empty-icon" aria-hidden="true">
+                <Icon name="download" size={18} />
+              </div>
+              <p className="dock-empty-title">Nothing to send yet</p>
+              <p className="muted small">Pick covers on the left, or drop EPUBs, PDFs and Word files here</p>
             </div>
           ) : books.length === 0 ? (
             <div className="dropzone-inner">
