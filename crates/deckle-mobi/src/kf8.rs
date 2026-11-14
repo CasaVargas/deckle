@@ -9,7 +9,6 @@
 //! refused, so an upgrade never replaces a good copy with a broken one.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -129,6 +128,14 @@ pub(crate) fn text_stream(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<V
         return Err(MobiError::Unsupported("it is DRM-protected".into()));
     }
     let length = be32(rec0, 4).unwrap_or(0) as usize;
+    if length as u64 > deckle_limits::MAX_MOBI_TEXT_BYTES {
+        return Err(MobiError::TooLarge(
+            "this book's text is",
+            deckle_limits::TooLarge {
+                limit: deckle_limits::MAX_MOBI_TEXT_BYTES,
+            },
+        ));
+    }
     let count = usize::from(be16(rec0, 8).unwrap_or(0));
     let header_len = be32(rec0, 20).unwrap_or(0);
     let flags = if header_len >= 0xE4 {
@@ -143,18 +150,27 @@ pub(crate) fn text_stream(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<V
         if n == 0 {
             return Err(MobiError::Corrupt("HUFF/CDIC text with no HUFF record"));
         }
+        if first.saturating_add(n) > db.len() {
+            return Err(MobiError::Corrupt(
+                "more HUFF/CDIC records than the file has",
+            ));
+        }
         let cdics: Vec<&[u8]> = (first + 1..first + n).map(|i| db.record(i)).collect();
         huff = Some(crate::text::Huff::new(db.record(first), &cdics)?);
     }
-    let mut out = Vec::with_capacity(length);
+    let mut out = Vec::with_capacity(length.min(deckle_limits::MAX_RESERVE));
     for i in 1..=count {
+        // What comes after the text's length is cut off below, so it isn't unpacked.
+        if out.len() >= length {
+            break;
+        }
         let rec = crate::text::trim_trailing(db.record(base + i), flags);
         match compression {
             1 => out.extend_from_slice(rec),
             2 => crate::text::palmdoc(rec, &mut out)?,
             17480 => {
                 let h = huff.as_mut().expect("read above");
-                out.extend(h.unpack(rec)?);
+                out.extend(h.unpack(rec, length - out.len())?);
             }
             _ => {
                 return Err(MobiError::Unsupported(format!(
@@ -330,8 +346,44 @@ fn image_type(b: &[u8]) -> Option<(&'static str, &'static str)> {
     }
 }
 
-/// A `FONT` record's font: its XOR obfuscation undone, then inflated.
-fn font(rec: &[u8]) -> Option<(Vec<u8>, &'static str, &'static str)> {
+/// A font's bytes, file extension and media type.
+type Font = (Vec<u8>, &'static str, &'static str);
+
+/// A `FONT` record's font: its XOR obfuscation undone, then inflated, at most `limit` bytes
+/// and through `fonts`, the book's total. `None` when it isn't a font; an error past a limit.
+fn font(
+    rec: &[u8],
+    fonts: &mut deckle_limits::Budget,
+    limit: u64,
+) -> Result<Option<Font>, MobiError> {
+    let Some((flags, mut data)) = font_data(rec) else {
+        return Ok(None);
+    };
+    if flags & 1 != 0 {
+        data = match fonts.read(flate2::read::ZlibDecoder::new(&data[..]), limit) {
+            Ok(out) => out,
+            Err(e) => match deckle_limits::TooLarge::in_io(&e) {
+                Some(t) if t.limit == limit => {
+                    return Err(MobiError::TooLarge("a font in this book is", t));
+                }
+                Some(t) => return Err(MobiError::TooLarge("this book's fonts are", t)),
+                None => return Ok(None),
+            },
+        };
+    }
+    let Some(head) = data.get(..4) else {
+        return Ok(None);
+    };
+    let (ext, mime) = match head {
+        b"OTTO" => ("otf", "font/otf"),
+        b"wOFF" => ("woff", "font/woff"),
+        _ => ("ttf", "font/ttf"),
+    };
+    Ok(Some((data, ext, mime)))
+}
+
+/// A `FONT` record's flags and its data, the XOR obfuscation undone.
+fn font_data(rec: &[u8]) -> Option<(u32, Vec<u8>)> {
     let flags = be32(rec, 8)?;
     let start = be32(rec, 12)? as usize;
     let xor_len = be32(rec, 16)? as usize;
@@ -343,29 +395,18 @@ fn font(rec: &[u8]) -> Option<(Vec<u8>, &'static str, &'static str)> {
             *b ^= key[i % xor_len];
         }
     }
-    if flags & 1 != 0 {
-        let mut out = Vec::new();
-        flate2::read::ZlibDecoder::new(&data[..])
-            .read_to_end(&mut out)
-            .ok()?;
-        data = out;
-    }
-    let (ext, mime) = match data.get(..4)? {
-        b"OTTO" => ("otf", "font/otf"),
-        b"wOFF" => ("woff", "font/woff"),
-        _ => ("ttf", "font/ttf"),
-    };
-    Some((data, ext, mime))
+    Some((flags, data))
 }
 
-pub(crate) fn resources(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Resources {
+pub(crate) fn resources(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Result<Resources, MobiError> {
     let mut out = Resources {
         files: BTreeMap::new(),
         list: Vec::new(),
     };
+    let mut fonts = deckle_limits::Budget::new(deckle_limits::MAX_FONTS_BYTES);
     let first = match be32(rec0, 0x6C) {
         Some(f) if f != NONE => f as usize,
-        _ => return out,
+        _ => return Ok(out),
     };
     // A joint file's resources are shared, counted from the file's start.
     let start = if image_type(db.record(base + first)).is_some()
@@ -398,7 +439,7 @@ pub(crate) fn resources(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Resources 
                 data: rec.to_vec(),
             });
         } else if rec.starts_with(b"FONT")
-            && let Some((data, ext, mime)) = font(rec)
+            && let Some((data, ext, mime)) = font(rec, &mut fonts, deckle_limits::MAX_FONT_BYTES)?
         {
             let name = format!("font{n:05}.{ext}");
             out.files.insert(n, (format!("../Fonts/{name}"), mime));
@@ -411,7 +452,7 @@ pub(crate) fn resources(db: &PalmDb<'_>, base: usize, rec0: &[u8]) -> Resources 
         n += 1;
         i += 1;
     }
-    out
+    Ok(out)
 }
 
 fn utf8(b: &[u8]) -> String {
@@ -544,7 +585,7 @@ pub fn rebuild(bytes: &[u8], out: &Path) -> Result<Rebuilt, MobiError> {
     }
 
     // Resources and flows.
-    let res = resources(&db, base, rec0);
+    let res = resources(&db, base, rec0)?;
     static EMBED: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"kindle:embed:([0-9A-Va-v]{4})(\?mime=[^'\x22)]*)?").unwrap());
     static FLOW: LazyLock<Regex> = LazyLock::new(|| {
@@ -624,7 +665,7 @@ pub fn rebuild(bytes: &[u8], out: &Path) -> Result<Rebuilt, MobiError> {
     let mut xhtml = Vec::new();
     for p in &parts {
         let text = utf8(&p.text);
-        if let Err(e) = roxmltree::Document::parse_with_options(
+        if let Err(e) = deckle_limits::parse_xml(
             &text,
             roxmltree::ParsingOptions {
                 allow_dtd: true,
@@ -757,6 +798,78 @@ pub(crate) fn fnv(b: &[u8]) -> u64 {
 mod tests {
     use super::*;
     use crate::fixture::{Kf8, build_kf8};
+    use std::io::Read;
+
+    /// A `FONT` record holding `font` zlib-compressed.
+    fn font_record(font: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        z.write_all(font).unwrap();
+        let mut rec = b"FONT".to_vec();
+        rec.extend(0u32.to_be_bytes()); // unpacked size
+        rec.extend(1u32.to_be_bytes()); // flags: zlib
+        rec.extend(24u32.to_be_bytes()); // data start
+        rec.extend([0u8; 8]); // no XOR key
+        rec.extend(z.finish().unwrap());
+        rec
+    }
+
+    #[test]
+    fn a_font_inflates_up_to_its_limit_and_the_books_total() {
+        let mut otf = b"OTTO".to_vec();
+        otf.resize(600, 0);
+        let rec = font_record(&otf);
+        let mut fonts = deckle_limits::Budget::new(1000);
+        // Over its own limit; then within it; then past the book's total.
+        let e = font(&rec, &mut fonts, 500).unwrap_err();
+        assert_eq!(e.to_string(), "a font in this book is more than 500 bytes");
+        let (data, ext, _) = font(&rec, &mut fonts, 700).unwrap().unwrap();
+        assert_eq!((data, ext), (otf.clone(), "otf"));
+        let e = font(&rec, &mut fonts, 700).unwrap_err();
+        assert_eq!(e.to_string(), "this book's fonts are more than 1000 bytes");
+        assert_eq!(fonts.used(), 600);
+    }
+
+    /// Record 0 of a MOBI header saying `compression`, text `length` and the HUFF record
+    /// `first`/count `n`.
+    fn rec0(compression: u16, length: u32, first: u32, n: u32) -> Vec<u8> {
+        let mut r = vec![0u8; 0x100];
+        r[0..2].copy_from_slice(&compression.to_be_bytes());
+        r[4..8].copy_from_slice(&length.to_be_bytes());
+        r[8..10].copy_from_slice(&1u16.to_be_bytes());
+        r[0x70..0x74].copy_from_slice(&first.to_be_bytes());
+        r[0x74..0x78].copy_from_slice(&n.to_be_bytes());
+        r
+    }
+
+    #[test]
+    fn a_text_length_past_the_limit_is_refused() {
+        let bytes = crate::fixture::palmdb(&[rec0(1, u32::MAX, 0, 0), b"text".to_vec()]);
+        let db = PalmDb::parse(&bytes).unwrap();
+        let e = text_stream(&db, 0, db.record(0)).unwrap_err();
+        assert_eq!(e.to_string(), "this book's text is more than 256 MB");
+    }
+
+    #[test]
+    fn a_huff_record_count_past_the_files_records_is_refused() {
+        let (huff, cdic) = crate::fixture::huff_tables(&[]);
+        let bytes =
+            crate::fixture::palmdb(&[rec0(17480, 4, 2, 0x0400_0000), b"text".to_vec(), huff, cdic]);
+        let db = PalmDb::parse(&bytes).unwrap();
+        assert!(matches!(
+            text_stream(&db, 0, db.record(0)),
+            Err(MobiError::Corrupt(_))
+        ));
+    }
+
+    #[test]
+    fn huff_text_stops_at_the_declared_length() {
+        let (huff, cdic) = crate::fixture::huff_tables(&[]);
+        let bytes =
+            crate::fixture::palmdb(&[rec0(17480, 4, 2, 2), b"text and more".to_vec(), huff, cdic]);
+        let db = PalmDb::parse(&bytes).unwrap();
+        assert_eq!(text_stream(&db, 0, db.record(0)).unwrap(), b"text");
+    }
 
     fn doc(title: &str, body: &str) -> String {
         format!(

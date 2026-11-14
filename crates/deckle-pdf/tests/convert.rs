@@ -212,6 +212,64 @@ fn a_scan_is_refused_with_a_reason() {
     }
 }
 
+/// A one-page PDF with `media_box` and a few lines of Helvetica text, written by hand.
+fn pdf_with_media_box(media_box: &str) -> Vec<u8> {
+    let mut text = String::from("BT /F1 12 Tf 72 720 Td 14 TL");
+    for i in 0..30 {
+        text.push_str(&format!(" (Line {i} of a page whose box is hostile.) '"));
+    }
+    text.push_str(" ET");
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+        format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox {media_box} /Contents 4 0 R \
+             /Resources << /Font << /F1 5 0 R >> >> >>"
+        ),
+        format!("<< /Length {} >>\nstream\n{text}\nendstream", text.len()),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_owned(),
+    ];
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for o in offsets {
+        pdf.extend(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    pdf
+}
+
+#[test]
+fn a_page_wider_than_any_pdf_allows_does_not_abort() {
+    // `/MediaBox [ -2147483648 0 612 792 ]` asked the layout for 20 GB and aborted.
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("wide.pdf");
+    std::fs::write(&src, pdf_with_media_box("[ -2147483648 0 612 792 ]")).unwrap();
+    // Imported or refused; either way the process is still here.
+    if let Err(e @ PdfError::NoEngine(_)) = convert(&src, &dir.path().join("wide.epub")) {
+        panic!("{e}\nrun tools/fetch-pdfium.sh first");
+    }
+    // An ordinary page of the same kind still imports.
+    let src = dir.path().join("letter.pdf");
+    std::fs::write(&src, pdf_with_media_box("[ 0 0 612 792 ]")).unwrap();
+    let out = dir.path().join("letter.epub");
+    match convert(&src, &out) {
+        Ok(_) => assert!(chapters(&out).contains("Line 29 of a page")),
+        Err(e) => panic!("{e}"),
+    }
+}
+
 #[test]
 fn not_a_pdf_is_unreadable() {
     let dir = tempfile::tempdir().unwrap();

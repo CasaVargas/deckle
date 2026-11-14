@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! RTF bytes to a tree of groups and tokens (RTF spec §2, Input).
 
+use deckle_limits::MAX_DEPTH;
+
 /// One token, or a `{…}` group of them.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
@@ -29,8 +31,9 @@ impl Node {
 }
 
 /// The parsed tree (the children of an implicit root) and whether braces were unbalanced
-/// (missing closers, extra closers).
-pub fn parse(bytes: &[u8]) -> (Vec<Node>, usize, usize) {
+/// (missing closers, extra closers). `None` when groups nest more than [`MAX_DEPTH`] deep: the
+/// tree is never built that deep, so walking it and dropping it (both recursive) stay bounded.
+pub fn parse(bytes: &[u8]) -> Option<(Vec<Node>, usize, usize)> {
     let mut stack: Vec<Vec<Node>> = vec![Vec::new()];
     let mut extra_close = 0;
     let mut i = 0;
@@ -38,6 +41,10 @@ pub fn parse(bytes: &[u8]) -> (Vec<Node>, usize, usize) {
     while i < bytes.len() {
         match bytes[i] {
             b'{' => {
+                // `stack` holds the root and every open group, so this is the new group's depth.
+                if stack.len() > MAX_DEPTH {
+                    return None;
+                }
                 stack.push(Vec::new());
                 i += 1;
             }
@@ -131,7 +138,7 @@ pub fn parse(bytes: &[u8]) -> (Vec<Node>, usize, usize) {
         let g = stack.pop().expect("a group");
         push(&mut stack, Node::Group(g));
     }
-    (stack.pop().expect("root"), missing_close, extra_close)
+    Some((stack.pop().expect("root"), missing_close, extra_close))
 }
 
 #[cfg(test)]
@@ -141,7 +148,7 @@ mod tests {
     #[test]
     fn tokens_and_groups() {
         let (tree, missing, extra) =
-            parse(b"{\\rtf1\\ansi {\\b bold\\b0} \\'e9\\u-3913 ?\\~x\\\n}");
+            parse(b"{\\rtf1\\ansi {\\b bold\\b0} \\'e9\\u-3913 ?\\~x\\\n}").unwrap();
         assert_eq!((missing, extra), (0, 0));
         let Node::Group(g) = &tree[0] else { panic!() };
         assert_eq!(g[0], Node::Word("rtf".into(), Some(1)));
@@ -165,9 +172,20 @@ mod tests {
 
     #[test]
     fn bin_reads_raw_bytes_and_braces_are_counted() {
-        let (tree, missing, extra) = parse(b"{\\pict\\bin3 {}\\x}}{\\b");
+        let (tree, missing, extra) = parse(b"{\\pict\\bin3 {}\\x}}{\\b").unwrap();
         assert_eq!((missing, extra), (1, 1));
         let Node::Group(g) = &tree[0] else { panic!() };
         assert_eq!(g[1], Node::Bin(b"{}\\".to_vec()));
+    }
+
+    #[test]
+    fn groups_nest_256_deep_and_no_deeper() {
+        let at = |n: usize| format!("{}x{}", "{".repeat(n), "}".repeat(n));
+        assert!(parse(at(256).as_bytes()).is_some());
+        assert!(parse(at(257).as_bytes()).is_none());
+        // Unclosed groups count too: the tree would be built that deep at the end.
+        assert!(parse("{".repeat(257).as_bytes()).is_none());
+        // Siblings are not nesting.
+        assert!(parse("{x}".repeat(10_000).as_bytes()).is_some());
     }
 }

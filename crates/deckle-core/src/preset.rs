@@ -70,7 +70,7 @@ impl Preset {
 /// Append the override after publisher styles. Replace only our marked style on reprocessing.
 /// XML ranges preserve all book markup, including inline language and note semantics.
 pub fn style_xhtml(text: &str, preset: Preset) -> Result<String, String> {
-    let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
+    let doc = deckle_limits::parse_xml(text, Default::default()).map_err(|e| e.to_string())?;
     let head = doc
         .root_element()
         .children()

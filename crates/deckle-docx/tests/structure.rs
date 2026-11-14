@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::io::Write;
 
-use deckle_docx::{ImportReport, to_epub};
+use deckle_docx::{DocxError, ImportReport, to_epub};
 
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
@@ -236,4 +236,26 @@ fn a_sentence_about_a_chapter_stays_text() {
     let (files, report) = import(&paras);
     assert!(!chapters(&files).concat().contains("<h1"));
     assert!(!guessed(&report));
+}
+
+/// Tables nested 100,000 deep are refused before the parser recurses (nesting-depth design):
+/// on a 1 MiB stack, a parse that came first would abort the process.
+#[test]
+fn tables_nested_a_hundred_thousand_deep_are_refused() {
+    let err = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let n = 100_000;
+            let mut deep = "<w:tbl><w:tr><w:tc>".repeat(n);
+            deep.push_str(&body("Inside"));
+            deep.push_str(&"</w:tc></w:tr></w:tbl>".repeat(n));
+            to_epub(&docx(&[deep]), "fallback").map(|_| ()).unwrap_err()
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(
+        matches!(&err, DocxError::Corrupt(m) if m.contains("nested more than 256 levels deep")),
+        "{err}"
+    );
 }

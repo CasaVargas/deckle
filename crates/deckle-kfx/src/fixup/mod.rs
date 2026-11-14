@@ -47,7 +47,11 @@ pub struct Book {
 
 impl Book {
     pub fn from_kpf(kpf: Kpf, container_id: &str) -> Self {
-        let source_epub = kpf.source_epub.as_deref().map(SourceEpub::parse);
+        let mut budget = kpf.budget;
+        let source_epub = kpf
+            .source_epub
+            .as_deref()
+            .map(|epub| SourceEpub::parse(epub, &mut budget));
         Book {
             fragments: kpf.fragments,
             symtab: kpf.symtab,

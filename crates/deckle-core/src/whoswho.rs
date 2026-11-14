@@ -154,9 +154,25 @@ pub fn add_with(
     ))
 }
 
+/// Every file of the EPUB `bytes`, refusing one that unpacks past the size limits.
 pub(crate) fn unzip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
-    use std::io::Read;
+    unzip_with(
+        bytes,
+        deckle_limits::MAX_ENTRY_BYTES,
+        deckle_limits::MAX_BOOK_BYTES,
+    )
+}
+
+fn unzip_with(
+    bytes: &[u8],
+    entry_limit: u64,
+    book_limit: u64,
+) -> Result<Vec<(String, Vec<u8>)>, String> {
+    use crate::epub::{check_declared_sizes, io_error, too_large};
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
+    check_declared_sizes(&zip, entry_limit, book_limit)
+        .map_err(|e| too_large(e, entry_limit).to_string())?;
+    let mut budget = deckle_limits::Budget::new(book_limit);
     let mut files = Vec::with_capacity(zip.len());
     for i in 0..zip.len() {
         let mut f = zip.by_index(i).map_err(|e| e.to_string())?;
@@ -164,8 +180,9 @@ pub(crate) fn unzip(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
             continue;
         }
         let name = f.name().map_err(|e| e.to_string())?.into_owned();
-        let mut data = Vec::with_capacity(f.size() as usize);
-        f.read_to_end(&mut data).map_err(|e| e.to_string())?;
+        let data = budget
+            .read(&mut f, entry_limit)
+            .map_err(|e| io_error(e, entry_limit).to_string())?;
         files.push((name, data));
     }
     Ok(files)
@@ -198,7 +215,8 @@ impl Book {
         let find = |n: &str| files.iter().find(|(f, _)| f == n).map(|(_, d)| d);
         let container = find("META-INF/container.xml").ok_or("no META-INF/container.xml")?;
         let container = String::from_utf8_lossy(container);
-        let doc = roxmltree::Document::parse(&container).map_err(|e| format!("container: {e}"))?;
+        let doc = deckle_limits::parse_xml(&container, Default::default())
+            .map_err(|e| format!("container: {e}"))?;
         let opf_path = doc
             .descendants()
             .find(|n| n.has_tag_name("rootfile"))
@@ -207,7 +225,8 @@ impl Book {
             .to_owned();
         let opf = find(&opf_path).ok_or_else(|| format!("{opf_path} is missing"))?;
         let opf = String::from_utf8_lossy(opf);
-        let doc = roxmltree::Document::parse(&opf).map_err(|e| format!("{opf_path}: {e}"))?;
+        let doc = deckle_limits::parse_xml(&opf, Default::default())
+            .map_err(|e| format!("{opf_path}: {e}"))?;
         let dir = dir_of(&opf_path).to_owned();
         let text = |tag: &str| {
             doc.descendants()
@@ -293,7 +312,7 @@ impl Book {
         };
         if let Some(path) = &self.nav
             && let Some(xml) = read(path)
-            && let Ok(doc) = roxmltree::Document::parse(&xml)
+            && let Ok(doc) = deckle_limits::parse_xml(&xml, Default::default())
         {
             for a in doc.descendants().filter(|n| n.tag_name().name() == "a") {
                 let (Some(href), label) = (a.attribute("href"), collect_text(a)) else {
@@ -309,7 +328,7 @@ impl Book {
         if out.is_empty()
             && let Some(path) = &self.ncx
             && let Some(xml) = read(path)
-            && let Ok(doc) = roxmltree::Document::parse(&xml)
+            && let Ok(doc) = deckle_limits::parse_xml(&xml, Default::default())
         {
             for np in doc
                 .descendants()
@@ -968,6 +987,32 @@ fn page(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use deckle_kfx::fixtures::{stored_epub as epub_with, stored_zip};
+
+    #[test]
+    fn an_entry_declaring_2_pow_60_bytes_is_refused() {
+        let e = unzip(&epub_with(&[("big.bin", b"tiny", 1 << 60)])).unwrap_err();
+        assert_eq!(e, "a file in this book unpacks to more than 256 MB");
+    }
+
+    #[test]
+    fn unpacking_stops_at_the_entry_and_book_limits() {
+        let k = vec![b'x'; 1000];
+        let zip = stored_zip(&[("a", &k, 1000), ("b", &k, 1000), ("c", &k, 1000)]);
+        assert_eq!(unzip_with(&zip, 10_000, 10_000).unwrap().len(), 3);
+        let e = unzip_with(&zip, 999, 10_000).unwrap_err();
+        assert_eq!(e, "a file in this book unpacks to more than 999 bytes");
+        let e = unzip_with(&zip, 1000, 2500).unwrap_err();
+        assert_eq!(e, "this book unpacks to more than 2500 bytes");
+    }
+
+    #[test]
+    fn unpacking_counts_what_is_read_not_what_is_declared() {
+        // Each entry declares 10 bytes and holds 1000: `zip` refuses the read.
+        let k = vec![b'x'; 1000];
+        let zip = stored_zip(&[("a", &k, 10)]);
+        assert!(unzip_with(&zip, 100, 100).is_err());
+    }
 
     #[test]
     fn relative_paths_climb_and_descend() {

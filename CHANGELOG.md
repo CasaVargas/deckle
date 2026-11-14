@@ -2,6 +2,46 @@
 
 ## Unreleased
 
+- **A file nested too deep is refused instead of crashing Deckle.** An EPUB, Word, OpenDocument,
+  RTF, FictionBook or Kindle file nested more than 256 levels deep (tags in tags, RTF groups in
+  groups; real books stay under 30), or a KFX or KPF whose data nests more than 128 deep, used
+  to overflow the stack and close the app or the server. It's now refused with "this file is
+  nested more than 256 levels deep" (128 for KFX). A comic's ComicInfo.xml nested that deep is
+  ignored, as an unreadable one is. A story for The Daily nested that deep still prints: past
+  the limit its text is set plain, in the EPUB and in the PDF edition. A feed nested that deep
+  is reported as unreadable, like any feed that won't parse, and so is a feed whose XML
+  declaration made the feed reader stop the whole edition (a second declaration naming
+  another encoding): it now costs that feed only.
+- **A hostile zip can no longer crash Deckle or fill its memory.** An EPUB, KPF or CBZ whose
+  entries claim an impossible size (a 1 KB file declaring 2^60 bytes aborted the app) or unpack
+  past a limit is now refused with an error that names the limit: 256 MB for one file inside, 1
+  GB for a whole book, 4 GB for a comic. Real books are far inside them; the limits are in
+  [docs/books.md](docs/books.md#size-limits).
+- **A hostile MOBI or AZW3 can no longer hang or crash an import.** Counts in the file are held
+  to what it holds (an index claiming four billion entries took minutes; a string length
+  panicked), its text stops unpacking at its stated length, at most 256 MB, and its fonts at 32
+  MB each and 256 MB together.
+- **Word documents, CBRs and text files have limits too.** A `.docx` that unpacks past 50 MB,
+  pictures included, is refused. A CBR is now read through bsdtar as a stream, each page at
+  most 256 MB and the comic 4 GB, instead of unpacked whole to a temp folder first; a page
+  with an absolute path, a `..` or a link is refused. A text file with more than 10,000
+  headings keeps the rest in its last chapter.
+- **Huge pages and pictures no longer exhaust memory.** A PDF page box wider than the PDF
+  specification allows (a 2 KB file asked for 20 GB and aborted) is laid out as 14,400 pt wide,
+  and a page rendered as a picture is held to 100 megapixels, rendered smaller when it's bigger;
+  one rendered page is kept while its figures are cut, not every page of the book.
+  A picture in a book, a chosen cover or a web photo over 100 megapixels is refused before it
+  is decoded. Comic pages keep `image`'s own 512 MiB limit on one decode; fitting a page to a
+  screen can briefly take about twice that.
+- **A hostile KFX or KPF is held to limits as it is read.** A symbol table claiming more
+  than a million symbols, an entity table whose rows add up to more than the file, and
+  positions or page ranges past what the book's text can hold (one a character, one an
+  element) are each refused. Pictures and fonts in the book hold no positions, so padding
+  them doesn't raise the limit. A book that decodes to more than 5,000,000 values (about
+  2.5 times the largest real book seen; about 1.6 GB of decoded tree) is refused as it is
+  read: a 500 KB KPF of repeated tiny values used 4.6 GB. A long name used many times counts
+  a value for every 64 bytes of each copy. The limit covers what is decoded, not the copies
+  the conversion makes of parts of it afterwards (jloutsch/deckle#79).
 - **A second paper no longer deletes the first one's editions on a Kobo or PocketBook.** Its
   files (`deckle-daily-kid-courier-…`) were counted as the main paper's editions and took their
   places, so every one of the main paper's editions was removed, the newest too. Now only a

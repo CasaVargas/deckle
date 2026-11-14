@@ -3,7 +3,7 @@
 //! no story teasers, so an imported sidecar has them unset; the weather line and the lead are
 //! read back from the front page, and the rest from the section pages.
 
-use std::io::{self, Read};
+use std::io;
 use std::path::Path;
 
 use chrono::NaiveDate;
@@ -47,9 +47,8 @@ fn section_of_href(href: &str) -> Option<usize> {
 }
 
 fn read_entry(zip: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<String> {
-    let mut s = String::new();
-    zip.by_name(name).ok()?.read_to_string(&mut s).ok()?;
-    Some(s)
+    let f = zip.by_name(name).ok()?;
+    String::from_utf8(deckle_limits::read_capped(f, deckle_limits::MAX_ENTRY_BYTES).ok()?).ok()
 }
 
 fn slug(title: &str) -> String {
@@ -88,7 +87,7 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
     // all of it when it's short. A section page's jump head or refer picks it up.
     let mut lead_text: Vec<String> = Vec::new();
     if let Some(front) = read_entry(&mut zip, "OEBPS/front.xhtml")
-        && let Ok(doc) = roxmltree::Document::parse(&front)
+        && let Ok(doc) = deckle_limits::parse_xml(&front, Default::default())
     {
         for n in doc.descendants().filter(|n| n.is_element()) {
             if has_class(n, "weather") && n.has_tag_name("p") {
@@ -147,7 +146,7 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
             break;
         };
         // A page that won't parse costs that page, not the edition.
-        let Ok(doc) = roxmltree::Document::parse(&page) else {
+        let Ok(doc) = deckle_limits::parse_xml(&page, Default::default()) else {
             continue;
         };
         let Some(body) = doc.descendants().find(|n| n.has_tag_name("body")) else {
@@ -206,7 +205,7 @@ pub fn sidecar_from_epub(epub: &Path, date: NaiveDate) -> io::Result<Sidecar> {
     // Older editions have no `h2.lead`: their first story link on the front page is the lead.
     if lead.is_none()
         && let Some(front) = read_entry(&mut zip, "OEBPS/front.xhtml")
-        && let Ok(doc) = roxmltree::Document::parse(&front)
+        && let Ok(doc) = deckle_limits::parse_xml(&front, Default::default())
     {
         lead = doc
             .descendants()

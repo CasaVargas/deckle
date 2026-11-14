@@ -39,6 +39,8 @@ pub enum DocxError {
     Corrupt(String),
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("this Word document unpacks to {0}")]
+    TooLarge(deckle_limits::TooLarge),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -141,6 +143,12 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
         return Err(DocxError::Corrupt(format!("{main} has no w:body")));
     };
     let blocks = body.body(w_body);
+    if body.too_deep {
+        return Err(DocxError::Corrupt(format!(
+            "{main}: {}",
+            deckle_limits::XmlError::TooDeep
+        )));
+    }
 
     let title = core
         .title

@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 thiserror.workspace = true
 zip.workspace = true
 rusqlite.workspace = true
@@ -19,3 +20,7 @@ uuid.workspace = true
 rand.workspace = true
 
 [dev-dependencies]
+
+[features]
+# `fixtures::stored_zip` and `stored_epub`, zips built byte by byte for other crates' tests.
+testing = []

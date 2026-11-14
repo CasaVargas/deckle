@@ -51,15 +51,20 @@ pub fn fit(bytes: &[u8], screen: Screen) -> Result<Option<Vec<u8>>, String> {
 /// passed through [`fit`]: what an EPUB reader gets (fixed-layout spec §5, §7.1). A page that
 /// won't decode stays as it was; the count of those comes back with the bytes.
 pub fn fit_epub(epub: &[u8], screen: Screen) -> Result<(Vec<u8>, usize), String> {
-    use std::io::{Read, Write};
+    use deckle_limits::{MAX_COMIC_BYTES, MAX_COMIC_PAGE_BYTES};
+    use std::io::Write;
     let mut zin = zip::ZipArchive::new(Cursor::new(epub)).map_err(|e| e.to_string())?;
+    crate::check_declared_sizes(&zin, MAX_COMIC_PAGE_BYTES, MAX_COMIC_BYTES)
+        .map_err(|e| e.to_string())?;
+    let mut budget = deckle_limits::Budget::new(MAX_COMIC_BYTES);
     let mut zout = zip::ZipWriter::new(Cursor::new(Vec::new()));
     let mut failed = 0;
     for i in 0..zin.len() {
         let mut f = zin.by_index(i).map_err(|e| e.to_string())?;
         let name = f.name().map_err(|e| e.to_string())?.into_owned();
-        let mut bytes = Vec::with_capacity(f.size() as usize);
-        f.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        let mut bytes = budget
+            .read(&mut f, MAX_COMIC_PAGE_BYTES)
+            .map_err(|e| format!("{name}: {e}"))?;
         let page = name.contains("/images/") && image::guess_format(&bytes).is_ok();
         if page {
             match fit(&bytes, screen) {

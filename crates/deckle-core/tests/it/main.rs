@@ -24,4 +24,5 @@ mod recaps;
 mod thumbnail;
 mod whoswho;
 mod wordwise;
+mod xml_boundary;
 mod xray;
