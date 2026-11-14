@@ -12,7 +12,7 @@ fn puzzles(args: &[&str]) -> std::process::Output {
         .unwrap()
 }
 
-const BOOK: &str = "Word Search 2026-11-01 0000.pdf";
+const BOOK: &str = "Word Search 2026-11-01 0007.pdf";
 
 #[test]
 fn puzzles_search_writes_a_pdf() {
@@ -198,7 +198,7 @@ fn puzzles_crossword_writes_a_pdf() {
         v["path"]
             .as_str()
             .unwrap()
-            .ends_with("Crossword 2026-11-01 0000.pdf"),
+            .ends_with("Crossword 2026-11-01 0007.pdf"),
         "{v}"
     );
     assert_eq!(v["puzzles"], 2);
@@ -247,7 +247,7 @@ fn puzzles_sudoku_writes_a_pdf() {
         v["path"]
             .as_str()
             .unwrap()
-            .ends_with("Sudoku 2026-11-01 0000.pdf"),
+            .ends_with("Sudoku 2026-11-01 0007.pdf"),
         "{v}"
     );
     assert_eq!(v["pages"], 4, "title, two puzzles, one page of answers");

@@ -4,6 +4,12 @@
 # build of Deckle (and `cargo test`) finds it. A release build looks beside the executable or in
 # DECKLE_PDFIUM instead (docs/superpowers/specs/2026-10-23-pdf-reflow-design.md §3).
 #
+# The checked archive and what it unpacks to are kept once per machine, in
+# $DECKLE_PDFIUM_CACHE or the user cache (~/Library/Caches/deckle/pdfium on macOS,
+# ~/.cache/deckle/pdfium elsewhere, %LOCALAPPDATA%\deckle\pdfium on Windows). A development
+# build looks there too, so every checkout and worktree finds it after one run anywhere, and a
+# second run downloads nothing.
+#
 #   tools/fetch-pdfium.sh            # this machine
 #   tools/fetch-pdfium.sh mac-arm64  # a named platform: linux-x64, linux-arm64, mac-arm64, mac-x64, win-x64
 set -euo pipefail
@@ -34,20 +40,51 @@ fi
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
 dest="$root/target/pdfium"
-archive="$(mktemp -d)/pdfium.tgz"
-curl -fsSL --retry 3 -o "$archive" \
-  "https://github.com/bblanchon/pdfium-binaries/releases/download/$TAG/pdfium-$platform.tgz"
-want="$(sha_for "$platform")"
-if command -v sha256sum >/dev/null; then
-  got="$(sha256sum "$archive" | cut -d' ' -f1)"
+
+# Must match crates/deckle-pdf/src/engine.rs `cache_dir` (a test there checks the tag).
+if [ -n "${DECKLE_PDFIUM_CACHE:-}" ]; then
+  cache="$DECKLE_PDFIUM_CACHE"
+elif [ "$(uname -s)" = Darwin ]; then
+  cache="$HOME/Library/Caches/deckle/pdfium"
+elif [ -n "${LOCALAPPDATA:-}" ]; then
+  cache="$LOCALAPPDATA/deckle/pdfium"
 else
-  got="$(shasum -a 256 "$archive" | cut -d' ' -f1)"
+  cache="${XDG_CACHE_HOME:-$HOME/.cache}/deckle/pdfium"
 fi
-if [ "$got" != "$want" ]; then
-  echo "PDFium archive checksum mismatch: got $got, want $want" >&2
-  exit 1
+# Git Bash: a C:\… path reads to tar as a file on a host named C, so make it /c/….
+if command -v cygpath >/dev/null; then
+  cache="$(cygpath -u "$cache")"
+fi
+here="$cache/${TAG//\//-}/$platform"
+archive="$here/pdfium.tgz"
+want="$(sha_for "$platform")"
+
+# Hashed from stdin: given a name with a backslash in it (a Windows cache path), sha256sum
+# puts a backslash in front of the hash.
+sha_of() {
+  if command -v sha256sum >/dev/null; then
+    sha256sum <"$1" | cut -d' ' -f1
+  else
+    shasum -a 256 <"$1" | cut -d' ' -f1
+  fi
+}
+
+if [ ! -f "$archive" ] || [ "$(sha_of "$archive")" != "$want" ]; then
+  mkdir -p "$here"
+  part="$archive.part"
+  curl -fsSL --retry 3 -o "$part" \
+    "https://github.com/bblanchon/pdfium-binaries/releases/download/$TAG/pdfium-$platform.tgz"
+  got="$(sha_of "$part")"
+  if [ "$got" != "$want" ]; then
+    rm -f "$part"
+    echo "PDFium archive checksum mismatch: got $got, want $want" >&2
+    exit 1
+  fi
+  mv "$part" "$archive"
+  rm -rf "$here/lib" "$here/bin" "$here/include"
+  tar xzf "$archive" -C "$here"
 fi
 rm -rf "$dest"
 mkdir -p "$dest"
 tar xzf "$archive" -C "$dest"
-echo "PDFium ($TAG, $platform) in $dest"
+echo "PDFium ($TAG, $platform) in $dest (kept in $here)"

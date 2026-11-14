@@ -194,3 +194,50 @@ fn a_sentence_opener_is_not_part_of_the_name_that_follows() {
         "mid-sentence capitals are a name: {labels:?}"
     );
 }
+
+#[test]
+fn an_honorific_is_stripped_only_as_a_word() {
+    // #56: `trim_start_matches("Dr.")`-style stripping without a space made "Drake" into "ake".
+    let text = runs(&[
+        "The ship of Francis Drake sailed at dawn, and Francis Drake watched the coast.",
+        "At noon the crew of Francis Drake rested, and then Francis Drake wrote home.",
+        "The letter was long, and Drake signed it. The men thought Drake was tired.",
+    ]);
+    let c = heuristic(&text, "en");
+    let drake = find(&c, "Francis Drake").expect("Francis Drake");
+    assert!(drake.aliases.iter().any(|a| a == "Drake"), "{drake:?}");
+    assert!(find(&c, "Drake").is_none());
+}
+
+#[test]
+fn many_distinct_names_are_found_quickly_and_the_same_way_each_time() {
+    // #56: every label was compared with every other: 4,000 names took a minute.
+    let name = |i: usize| {
+        let mut n = i + 26 * 27;
+        let mut s = String::new();
+        while n > 0 {
+            s.insert(0, (b'a' + (n % 26) as u8) as char);
+            n /= 26;
+        }
+        let mut c = s.chars();
+        c.next()
+            .unwrap()
+            .to_uppercase()
+            .chain(c)
+            .collect::<String>()
+    };
+    let paras: Vec<String> = (0..4000)
+        .map(|i| format!("Then {} met {} by the river.", name(i), name(i)))
+        .collect();
+    let text = runs(&paras.iter().map(String::as_str).collect::<Vec<_>>());
+    let started = std::time::Instant::now();
+    let a = heuristic(&text, "en");
+    assert!(started.elapsed().as_secs() < 20, "{:?}", started.elapsed());
+    let b = heuristic(&text, "en");
+    let key = |c: &[Candidate]| -> Vec<(String, Vec<String>)> {
+        c.iter()
+            .map(|x| (x.label.clone(), x.aliases.clone()))
+            .collect()
+    };
+    assert_eq!(key(&a), key(&b));
+}

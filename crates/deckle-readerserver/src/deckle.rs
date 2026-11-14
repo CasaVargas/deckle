@@ -99,14 +99,7 @@ pub async fn today(
             .into_response();
     }
     let catalog = (ctx.hooks.source)();
-    let newest = |main: bool| {
-        catalog
-            .papers
-            .iter()
-            .filter(|p| !main || p.main)
-            .max_by_key(|p| p.date)
-    };
-    let Some(paper) = newest(true).or_else(|| newest(false)) else {
+    let Some(paper) = opds::today_paper(&catalog) else {
         return StatusCode::NO_CONTENT.into_response();
     };
     let kepub = q.format.as_deref() == Some("kepub");

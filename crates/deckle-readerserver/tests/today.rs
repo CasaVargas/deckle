@@ -154,3 +154,41 @@ async fn with_no_main_paper_today_takes_any_papers_newest() {
     let t: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(t["file"], "kids-2026-10-31.epub");
 }
+
+#[tokio::test]
+async fn todays_url_downloads_when_newer_editions_of_other_papers_crowd_the_recent_list() {
+    // #31: the file lookup only looked through the newest few editions of all papers, so a
+    // main paper older than those could be named by `today` and then answer 404.
+    let tmp = tempfile::tempdir().unwrap();
+    let mut papers: Vec<Paper> = (1..=15)
+        .map(|d| {
+            paper(
+                tmp.path(),
+                &format!("kids-2026-11-{d:02}"),
+                (2026, 11, d),
+                false,
+            )
+        })
+        .collect();
+    papers.reverse();
+    papers.push(paper(
+        tmp.path(),
+        "deckle-daily-2026-10-31",
+        (2026, 10, 31),
+        true,
+    ));
+    let c = ctx(
+        Catalog {
+            papers,
+            books: Vec::new(),
+        },
+        tmp.path(),
+    );
+    let (status, body) = get(&c, "/deckle/v1/today", true).await;
+    assert_eq!(status, StatusCode::OK);
+    let t: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(t["date"], "2026-10-31");
+    let (status, bytes) = get(&c, t["url"].as_str().unwrap(), true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(t["size"].as_u64().unwrap() as usize, bytes.len());
+}

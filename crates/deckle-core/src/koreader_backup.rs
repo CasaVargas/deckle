@@ -538,8 +538,10 @@ fn write_atomic(from: &Path, to: &Path, modified: u64) -> Result<u64, String> {
     let mut src = std::fs::File::open(from).map_err(|e| e.to_string())?;
     let size = std::io::copy(&mut src, tmp.as_file_mut()).map_err(|e| e.to_string())?;
     let f = tmp.as_file();
-    f.set_modified(UNIX_EPOCH + Duration::from_secs(modified))
-        .map_err(|e| e.to_string())?;
+    let when = UNIX_EPOCH
+        .checked_add(Duration::from_secs(modified))
+        .ok_or("the backup gives it a modified time out of range")?;
+    f.set_modified(when).map_err(|e| e.to_string())?;
     f.sync_all().map_err(|e| e.to_string())?;
     tmp.persist(to).map_err(|e| e.error.to_string())?;
     Ok(size)

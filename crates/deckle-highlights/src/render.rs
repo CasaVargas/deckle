@@ -16,7 +16,20 @@ pub fn passage_start(text: &str) -> String {
 }
 
 fn yaml(s: &str) -> String {
-    if s.contains([':', '#', '"']) || s.starts_with(['-', '[', '{', '\'', '&', '*', '!', '|', '>'])
+    // A plain value YAML would read as something other than text (`1984`, `true`, `null`, `~`)
+    // is quoted too.
+    let not_text = s.is_empty()
+        || s.parse::<f64>().is_ok()
+        || s.trim() != s
+        || matches!(
+            s.to_ascii_lowercase().as_str(),
+            "true" | "false" | "yes" | "no" | "on" | "off" | "y" | "n" | "null" | "~"
+        );
+    if not_text
+        || s.contains([':', '#', '"'])
+        || s.starts_with([
+            '-', '[', '{', '\'', '&', '*', '!', '|', '>', '%', '@', '`', '?', ',',
+        ])
     {
         format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
     } else {

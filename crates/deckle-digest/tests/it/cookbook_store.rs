@@ -619,3 +619,40 @@ fn save_config_drops_a_removed_chapter_but_keeps_the_others_keys() {
     assert!(text.contains("color = \"red\""), "{text}");
     assert_eq!(store.config().unwrap(), cfg);
 }
+
+#[test]
+fn a_recipe_files_name_is_its_id_whatever_it_says_inside() {
+    // #76: the id inside the JSON built the path an edit was written to.
+    let (d, store) = store();
+    let saved = added(
+        store
+            .put(
+                recipe("Tomato soup", URL, &["Soup"]),
+                URL,
+                None,
+                None,
+                at(1),
+            )
+            .unwrap(),
+    );
+    let recipes = store.dir.join("recipes");
+    let original = recipes.join(format!("{}.json", saved.id));
+    let before = std::fs::read_to_string(&original).unwrap();
+    for (name, inner) in [
+        ("aaaaaaaaaaaa", "../../../escaped".to_owned()),
+        ("cccccccccccc", saved.id.clone()),
+    ] {
+        let mut v: serde_json::Value = serde_json::from_str(&before).unwrap();
+        v["id"] = serde_json::json!(inner);
+        std::fs::write(recipes.join(format!("{name}.json")), v.to_string()).unwrap();
+        let mut copy = store.find(name).unwrap().unwrap();
+        assert_eq!(copy.id, name);
+        copy.note = Some("edited".into());
+        store.update(&copy).unwrap();
+        let back = store.find(name).unwrap().unwrap();
+        assert_eq!(back.note.as_deref(), Some("edited"));
+    }
+    assert_eq!(std::fs::read_to_string(&original).unwrap(), before);
+    // `recipes/../../../escaped.json` is beside the test's own folder.
+    assert!(!d.path().parent().unwrap().join("escaped.json").exists());
+}

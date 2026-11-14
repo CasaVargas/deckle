@@ -2,6 +2,8 @@
 //! Entries grouped into books (highlights export design §4–5): overlapping highlights collapse to
 //! the latest, notes attach to their highlight, and every Deckle Daily edition shares one book.
 
+use std::collections::{BTreeMap, HashMap};
+
 use serde::Serialize;
 use sha1::{Digest, Sha1};
 
@@ -142,20 +144,39 @@ pub fn group(entries: Vec<Entry>) -> Vec<Book> {
 
 fn items(entries: Vec<Entry>) -> Vec<Item> {
     // Editions in order of first appearance, so a book's sections stay chronological.
-    let mut editions: Vec<String> = Vec::new();
+    let mut editions: HashMap<String, usize> = HashMap::new();
     for e in &entries {
-        if !editions.contains(&e.title) {
-            editions.push(e.title.clone());
-        }
+        let next = editions.len();
+        editions.entry(e.title.clone()).or_insert(next);
     }
     let (highlights, notes): (Vec<Entry>, Vec<Entry>) =
         entries.into_iter().partition(|e| e.kind == Kind::Highlight);
-    // An extended highlight is a new entry over the old range and text: keep the later one.
-    let mut kept: Vec<Entry> = Vec::new();
+    // An extended highlight is a new entry over the old range and text: keep the later one. Only
+    // a kept highlight of the same edition whose range meets the new one can be extended, so the
+    // kept ones are indexed by edition and start, and only those starting within the longest
+    // range so far of the new one's start are compared (#54: comparing all of them was quadratic).
+    let mut kept: Vec<Option<Entry>> = Vec::new();
+    let mut starts: HashMap<String, (u32, BTreeMap<u32, Vec<usize>>)> = HashMap::new();
     for h in highlights {
-        kept.retain(|k| !extends(k, &h));
-        kept.push(h);
+        if let Some((b0, b1)) = h.location {
+            let (longest, by_start) = starts.entry(h.title.clone()).or_default();
+            let from = b0.saturating_sub(*longest);
+            for (_, at) in by_start.range_mut(from..=b1.max(from)) {
+                at.retain(|&i| match &kept[i] {
+                    Some(k) if extends(k, &h) => {
+                        kept[i] = None;
+                        false
+                    }
+                    _ => true,
+                });
+            }
+            let (a, b) = (b0.min(b1), b0.max(b1));
+            *longest = (*longest).max(b - a);
+            by_start.entry(b0).or_default().push(kept.len());
+        }
+        kept.push(Some(h));
     }
+    let kept: Vec<Entry> = kept.into_iter().flatten().collect();
     // A Kindle keeps one note per location: editing or re-saving one appends a new entry and
     // leaves the old, so the latest at each location is the note.
     let mut latest: Vec<Entry> = Vec::new();
@@ -192,7 +213,7 @@ fn items(entries: Vec<Entry>) -> Vec<Item> {
     }
     items.sort_by_key(|i| {
         let e = i.entry();
-        let edition = editions.iter().position(|t| *t == e.title);
+        let edition = editions.get(&e.title).copied();
         (edition, e.location.is_none(), e.location.map(|(a, _)| a))
     });
     items

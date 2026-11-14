@@ -2,6 +2,19 @@
 
 ## 0.15.0 — news in your language, and safer servers and fetching
 
+- **A second paper no longer deletes the first one's editions on a Kobo or PocketBook.** Its
+  files (`deckle-daily-kid-courier-…`) were counted as the main paper's editions and took their
+  places, so every one of the main paper's editions was removed, the newest too. Now only a
+  paper's own dated editions count toward its `keep`, and each paper on the reader is pruned
+  by its own, as on a Kindle.
+- **A send no longer removes a different book from the Kindle.** Two books can get the same
+  Deckle ASIN, and sending one removed the other, with its notes and highlights. Deckle now
+  removes an older copy only when its title and author match too; another book with the same
+  ASIN stays, and the send says so.
+- **Long older Kindle books in other alphabets import.** A MOBI 6 book with no page breaks,
+  more than about 200 KB of text and letters outside ASCII (Cyrillic, Greek, accented Latin)
+  failed to import; it's now cut into parts between paragraphs as English
+  books are.
 - **The bookmarklets ask before they save.** Save to paper and Save recipe now open a small
   Deckle window showing what they'll save, and save when you press **Save**. Before, the
   bookmarklet carried a key the page you clicked it on could read, and with it any page could
@@ -18,9 +31,9 @@
   always did; before, a signed-in browser could list, copy or delete files elsewhere on the
   server. It also never writes into `/config/deckle`
   ([docs/docker.md](docs/docker.md#files-uploads-and-downloads)).
-- **A saved page's pictures come only from its own folder.** A recipe or article saved to disk
-  could name any file on the computer as its picture; now only files in the page's folder count,
-  links followed.
+- **A saved page's pictures stay in its own folder, links followed.** A link in a saved page's
+  folder could still point a recipe or story picture at any file on the computer; links are now
+  followed before the folder is checked.
 - **The Daily fetches only public addresses.** A feed's link, a page's image or a redirect can no
   longer point at your router, a NAS or a service on this computer and have it printed in the
   paper. Feeds, calendars and subscriptions you set up on your own network keep working; anything
@@ -52,6 +65,29 @@
   the window could draw. These now run in the background, and Previewer is started once per
   install instead of at every check. The device check every few seconds no longer stutters the
   window either.
+- **Eleven fixes from a review of the whole project.** Thanks to [@jloutsch](https://github.com/jloutsch),
+  who found and reproduced each one.
+  - Removing a book from a Kobo or PocketBook no longer deletes the highlights of another
+    format of the same name, and takes a KEPUB's own sidecar; a backup now copies a KEPUB's.
+  - A reMarkable backup keeps documents that share a name (`Notebook.tar`,
+    `Notebook (2).tar`) instead of writing one over the other and reporting both copied.
+  - "Make again" on a puzzle book makes the same book: its seed lost its last digits on the
+    way to the window. A different book never takes the name of one already there, and the
+    same book keeps the iPad bundles it was sent as.
+  - KOReader over Wi-Fi: today's paper always downloads, even when newer editions of other
+    papers fill the recent list (it answered 404).
+  - A Kitchen Book recipe saved from a page takes a picture only from the page's own folder,
+    as the paper's stories do, and a recipe file's name is its id, whatever the file says
+    inside.
+  - No more crashes on a footnote with `&amp;` before a curly quote, a KOReader backup with a
+    date out of range, or a clippings line that is a bare "- ".
+  - Highlights: a byte-order mark before any title no longer splits one book in two, a title
+    like `1984` or `True` is quoted in the note's frontmatter, and a book with tens of
+    thousands of highlights groups in a moment.
+  - X-Ray: "Drake" no longer loses its "Dr" before it's matched to "Francis Drake", names are
+    merged the same way on every run, and a book with thousands of names is read in seconds
+    instead of a minute.
+  - The Books tab opens quickly with a large calibre library (20,000 books took two minutes).
 
 ## 0.14.0 — the paper in color on a Colorsoft, and two-column PDFs read in order
 

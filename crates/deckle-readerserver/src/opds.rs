@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
 
-use crate::{Catalog, Ctx, auth};
+use crate::{Catalog, Ctx, Paper, auth};
 
 /// Recent papers listed.
 pub const RECENT: usize = 14;
@@ -189,7 +189,21 @@ pub async fn books(State(ctx): State<Arc<Ctx>>, headers: HeaderMap) -> Response 
     feed(ACQ, s)
 }
 
-/// The file with id `id` in the catalog of the moment, and the stem it downloads as.
+/// The edition `/deckle/v1/today` names: the newest of the main paper, or of any paper when the
+/// main one has none.
+pub(crate) fn today_paper(c: &Catalog) -> Option<&Paper> {
+    let newest = |main: bool| {
+        c.papers
+            .iter()
+            .filter(|p| !main || p.main)
+            .max_by_key(|p| p.date)
+    };
+    newest(true).or_else(|| newest(false))
+}
+
+/// The file with id `id` in the catalog of the moment, and the stem it downloads as. Today's
+/// edition is always found, even when newer editions of other papers push it out of the recent
+/// list, so the URL `/deckle/v1/today` gives never answers 404.
 pub(crate) fn lookup(c: &Catalog, id: &str) -> Option<(PathBuf, String)> {
     let stem = |p: &Path| {
         p.file_stem()
@@ -200,6 +214,7 @@ pub(crate) fn lookup(c: &Catalog, id: &str) -> Option<(PathBuf, String)> {
     c.papers
         .iter()
         .take(RECENT)
+        .chain(today_paper(c))
         .map(|p| (p.epub.clone(), p.stem.clone()))
         .chain(c.books.iter().take(BOOKS).map(|b| (b.clone(), stem(b))))
         .find(|(p, _)| file_id(p) == id)

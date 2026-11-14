@@ -1,0 +1,22 @@
+# Security updates for Rust and npm come from Dependabot security updates (repo setting);
+# `open-pull-requests-limit: 0` keeps routine version bumps for them off. GitHub Actions get
+# weekly bumps in one grouped PR, since the release job hands them the signing secrets.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+  - package-ecosystem: npm
+    directory: /apps/desktop
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 0
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

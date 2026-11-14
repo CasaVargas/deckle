@@ -174,7 +174,7 @@ fn dropped(error: &str) -> bool {
 
 /// An absolute photo or page URL. `file:` only for a saved page (a `file:` base), and only
 /// inside that page's own folder.
-fn resolve(base: &str, href: &str) -> Option<String> {
+pub(crate) fn resolve(base: &str, href: &str) -> Option<String> {
     let href = href.trim();
     if href.is_empty() || href.starts_with("data:") {
         return None;

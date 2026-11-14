@@ -15,6 +15,7 @@
 //!   marking it deleted (as the tablet's own trash does), and backs one up as a `.tar` of its
 //!   files (the document, its pages and its handwriting), which is what xochitl keeps.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -348,19 +349,6 @@ pub fn book_path(root: &Path, id: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// KOReader's sidecar folder for the book at `path`: `book.sdr` beside `book.epub`.
-fn sidecar_of(path: &Path) -> PathBuf {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let stem = name
-        .strip_suffix(".kepub.epub")
-        .or_else(|| name.rsplit_once('.').map(|(s, _)| s))
-        .unwrap_or(&name);
-    path.with_file_name(format!("{stem}.sdr"))
-}
-
 /// Removes the books `ids` from a Kobo or PocketBook. A Kobo's database is first copied into
 /// `backups` (`<stamp>-KoboReader.sqlite`); when that copy fails nothing is removed.
 pub fn remove_on_drive(reader: &Reader, ids: &[String], backups: &Path, stamp: &str) -> Removed {
@@ -391,10 +379,9 @@ pub fn remove_on_drive(reader: &Reader, ids: &[String], backups: &Path, stamp: &
         };
         match std::fs::remove_file(&path) {
             Ok(()) => {
-                let sdr = sidecar_of(&path);
-                if sdr.is_dir() {
-                    let _ = std::fs::remove_dir_all(&sdr);
-                }
+                // Only this book's own metadata file goes: one `.sdr` folder can hold another
+                // format's (`Dune.sdr` for both `Dune.epub` and `Dune.pdf`).
+                let _ = crate::koreader::remove_sidecar(&path);
                 out.removed.push(id.clone());
             }
             Err(e) => out.failed.push((id.clone(), e.to_string())),
@@ -437,9 +424,9 @@ pub fn backup_drive(reader: &Reader, dir: &Path) -> Backup {
             .map_or(Ok(()), std::fs::create_dir_all)
             .and_then(|_| std::fs::copy(&from, &to).map(|_| ()))
             .and_then(|_| {
-                let sdr = sidecar_of(&from);
+                let sdr = crate::koreader::sidecar_dir(&from);
                 match sdr.is_dir() {
-                    true => copy_dir(&sdr, &sidecar_of(&to)),
+                    true => copy_dir(&sdr, &crate::koreader::sidecar_dir(&to)),
                     false => Ok(()),
                 }
             });
@@ -589,6 +576,25 @@ fn safe_name(name: &str) -> String {
     }
 }
 
+/// A file name in `folder` no other document of this backup has taken: `Title.ext`, then
+/// `Title (2).ext` and so on. reMarkable titles need not be unique, and [`safe_name`] maps some
+/// different titles to one name; names are compared without case, as many disks do.
+fn unused_name(folder: &Path, title: &str, ext: &str, taken: &mut HashSet<String>) -> PathBuf {
+    let base = safe_name(title);
+    let mut n = 1;
+    loop {
+        let name = match n {
+            1 => format!("{base}.{ext}"),
+            n => format!("{base} ({n}).{ext}"),
+        };
+        let to = folder.join(&name);
+        if taken.insert(to.to_string_lossy().to_lowercase()) && !to.exists() {
+            return to;
+        }
+        n += 1;
+    }
+}
+
 /// Downloads every document of `lib` (from [`on_remarkable_web`]) as a PDF into `dir`, in its
 /// folders: the tablet draws the handwriting into each.
 pub fn backup_remarkable_web(r: &Remarkable, lib: &Library, dir: &Path) -> Backup {
@@ -596,13 +602,14 @@ pub fn backup_remarkable_web(r: &Remarkable, lib: &Library, dir: &Path) -> Backu
         dir: dir.to_path_buf(),
         ..Default::default()
     };
+    let mut taken = HashSet::new();
     for b in &lib.books {
         let folder = b
             .folder
             .split('/')
             .filter(|p| !p.is_empty())
             .fold(dir.to_path_buf(), |p, s| p.join(safe_name(s)));
-        let to = folder.join(format!("{}.pdf", safe_name(&b.title)));
+        let to = unused_name(&folder, &b.title, "pdf", &mut taken);
         let got = remarkable::download(r, &b.id).and_then(|bytes| {
             std::fs::create_dir_all(&folder)
                 .and_then(|_| std::fs::write(&to, bytes))
@@ -707,6 +714,7 @@ pub fn backup_remarkable_ssh(sh: &mut dyn Shell, lib: &Library, dir: &Path) -> B
         dir: dir.to_path_buf(),
         ..Default::default()
     };
+    let mut taken = HashSet::new();
     for b in &lib.books {
         if !is_uuid(&b.id) {
             out.failed
@@ -718,7 +726,7 @@ pub fn backup_remarkable_ssh(sh: &mut dyn Shell, lib: &Library, dir: &Path) -> B
             .split('/')
             .filter(|p| !p.is_empty())
             .fold(dir.to_path_buf(), |p, s| p.join(safe_name(s)));
-        let to = folder.join(format!("{}.tar", safe_name(&b.title)));
+        let to = unused_name(&folder, &b.title, "tar", &mut taken);
         let cmd = format!(
             "cd {} && tar -cf - $(ls -d {id} {id}.* 2>/dev/null)",
             remarkable_ssh::DIR,
@@ -806,6 +814,56 @@ mod tests {
         assert!(!tmp.path().join("Books/Fiction/Moby_Dick.sdr").exists());
         assert!(tmp.path().join(".hidden/secret.epub").exists());
         assert!(tmp.path().join("Books/cover.jpg").exists());
+    }
+
+    #[test]
+    fn remove_leaves_another_formats_sidecar_and_takes_a_kepubs_own() {
+        // #72: removing one format took the whole `<stem>.sdr`, which KOReader shares between
+        // formats of a name, and missed a KEPUB's `<name>.kepub.sdr`.
+        let (tmp, r) = drive();
+        let root = tmp.path();
+        let w = |p: &str, b: &[u8]| {
+            std::fs::create_dir_all(root.join(p).parent().unwrap()).unwrap();
+            std::fs::write(root.join(p), b).unwrap();
+        };
+        w("Books/Emma.pdf", b"%PDF");
+        w("Books/Emma.epub", b"EPUB");
+        w("Books/Emma.sdr/metadata.pdf.lua", b"--");
+        w("Books/Emma.sdr/metadata.epub.lua", b"--");
+        w("Books/Dune.kepub.epub", b"EPUB");
+        w("Books/Dune.kepub.sdr/metadata.epub.lua", b"--");
+        w("Books/Dune.pdf", b"%PDF");
+        w("Books/Dune.sdr/metadata.pdf.lua", b"--");
+        let ids = vec![
+            "Books/Emma.pdf".to_owned(),
+            "Books/Dune.kepub.epub".to_owned(),
+        ];
+        let out = remove_on_drive(&r, &ids, &root.join("backups"), "x");
+        assert_eq!(out.removed, ids);
+        assert!(!root.join("Books/Emma.sdr/metadata.pdf.lua").exists());
+        assert!(root.join("Books/Emma.sdr/metadata.epub.lua").is_file());
+        assert!(!root.join("Books/Dune.kepub.sdr").exists());
+        assert!(root.join("Books/Dune.sdr/metadata.pdf.lua").is_file());
+    }
+
+    #[test]
+    fn a_backup_takes_a_kepubs_sidecar() {
+        let (tmp, r) = drive();
+        let root = tmp.path();
+        std::fs::write(root.join("Books/Ulysses.kepub.epub"), b"EPUB").unwrap();
+        std::fs::create_dir_all(root.join("Books/Ulysses.kepub.sdr")).unwrap();
+        std::fs::write(
+            root.join("Books/Ulysses.kepub.sdr/metadata.epub.lua"),
+            b"--",
+        )
+        .unwrap();
+        let dest = tmp.path().join("out/backup");
+        let b = backup_drive(&r, &dest);
+        assert!(b.failed.is_empty(), "{:?}", b.failed);
+        assert!(
+            dest.join("Books/Ulysses.kepub.sdr/metadata.epub.lua")
+                .is_file()
+        );
     }
 
     #[test]
@@ -933,5 +991,39 @@ mod tests {
                 .iter()
                 .any(|c| c.contains("systemctl restart xochitl"))
         );
+    }
+
+    #[test]
+    fn a_remarkable_backup_keeps_documents_that_share_a_name() {
+        // #73: titles need not be unique and `safe_name` maps `a/b` and `a_b` alike; each
+        // document overwrote the one before and both were reported copied.
+        let mut sh = Fake {
+            meta: String::new(),
+            ran: Vec::new(),
+        };
+        let book = |id: &str, title: &str| Book {
+            id: id.into(),
+            title: title.into(),
+            ..Default::default()
+        };
+        let lib = Library {
+            books: vec![
+                book("d1", "Notebook"),
+                book("d2", "Notebook"),
+                book("d3", "a/b"),
+                book("d4", "a_b"),
+            ],
+            ..Default::default()
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let b = backup_remarkable_ssh(&mut sh, &lib, tmp.path());
+        assert_eq!(b.failed, []);
+        assert_eq!(
+            b.copied,
+            ["Notebook.tar", "Notebook (2).tar", "a_b.tar", "a_b (2).tar"]
+        );
+        for f in &b.copied {
+            assert!(tmp.path().join(f).is_file(), "{f}");
+        }
     }
 }

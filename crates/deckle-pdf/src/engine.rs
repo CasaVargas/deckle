@@ -17,9 +17,38 @@ const RENDER_SCALE: f32 = 2.0;
 /// `DECKLE_PDFIUM`: the PDFium library file, or the folder it is in.
 pub const ENV: &str = "DECKLE_PDFIUM";
 
+/// The PDFium build `tools/fetch-pdfium.sh` pins (its `TAG`, with `/` as `-`).
+pub const PINNED: &str = "chromium-8111";
+
+/// Where `tools/fetch-pdfium.sh` keeps PDFium for every checkout on this machine:
+/// `DECKLE_PDFIUM_CACHE`, else the user cache, then the pinned build and this platform.
+fn cache_dir(var: impl Fn(&str) -> Option<PathBuf>) -> Option<PathBuf> {
+    let base = if let Some(c) = var("DECKLE_PDFIUM_CACHE") {
+        c
+    } else if cfg!(target_os = "macos") {
+        var("HOME")?.join("Library/Caches/deckle/pdfium")
+    } else if cfg!(windows) {
+        var("LOCALAPPDATA")?.join("deckle").join("pdfium")
+    } else {
+        var("XDG_CACHE_HOME")
+            .or_else(|| var("HOME").map(|h| h.join(".cache")))?
+            .join("deckle/pdfium")
+    };
+    let platform = match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "mac-arm64",
+        ("macos", "x86_64") => "mac-x64",
+        ("linux", "x86_64") => "linux-x64",
+        ("linux", "aarch64") => "linux-arm64",
+        ("windows", "x86_64") => "win-x64",
+        _ => return None,
+    };
+    Some(base.join(PINNED).join(platform))
+}
+
 /// Where PDFium may be, in order: `DECKLE_PDFIUM`, beside the executable, the app bundle's
 /// `Frameworks` (macOS), and in a development build the workspace's `target/pdfium`, where
-/// `tools/fetch-pdfium.sh` puts it.
+/// `tools/fetch-pdfium.sh` puts it, then the machine's copy that script keeps, so a fresh
+/// checkout or worktree needs no run of its own.
 pub fn candidates() -> Vec<PathBuf> {
     let name = Pdfium::pdfium_platform_library_name();
     let mut out = Vec::new();
@@ -38,6 +67,31 @@ pub fn candidates() -> Vec<PathBuf> {
         let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/pdfium");
         out.push(target.join("lib").join(&name));
         out.push(target.join("bin").join(&name));
+        let now = |k: &str| {
+            std::env::var_os(k)
+                .filter(|v| !v.is_empty())
+                .map(PathBuf::from)
+        };
+        // As the build saw it too: a test may run Deckle with a home folder of its own.
+        let built = |k: &str| {
+            match k {
+                "DECKLE_PDFIUM_CACHE" => option_env!("DECKLE_PDFIUM_CACHE"),
+                "HOME" => option_env!("HOME"),
+                "LOCALAPPDATA" => option_env!("LOCALAPPDATA"),
+                "XDG_CACHE_HOME" => option_env!("XDG_CACHE_HOME"),
+                _ => None,
+            }
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+        };
+        for cache in [cache_dir(now), cache_dir(built)].into_iter().flatten() {
+            for dir in ["lib", "bin"] {
+                let p = cache.join(dir).join(&name);
+                if !out.contains(&p) {
+                    out.push(p);
+                }
+            }
+        }
     }
     out
 }
@@ -349,6 +403,18 @@ fn read_page(page: &PdfPage) -> Result<Page, PdfiumError> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_shared_copy_is_the_build_the_script_pins() {
+        let script = include_str!("../../../tools/fetch-pdfium.sh");
+        let tag = script
+            .lines()
+            .find_map(|l| l.strip_prefix("TAG=\""))
+            .and_then(|t| t.strip_suffix('"'))
+            .expect("TAG in tools/fetch-pdfium.sh");
+        assert_eq!(super::PINNED, tag.replace('/', "-"));
+    }
+
     use super::math_font;
 
     #[test]

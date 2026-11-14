@@ -75,3 +75,22 @@ fn a_broken_entry_reports_its_line_and_keeps_the_rest() {
     assert_eq!(p.error.as_ref().unwrap().line, 7);
     assert_eq!(p.entries[1].text, "three");
 }
+
+#[test]
+fn a_bare_dash_line_is_an_entry_without_a_kind_not_a_panic() {
+    // #54: `meta[2..]` on a trimmed "-" panicked.
+    let p = parse(b"Walden (Thoreau)\n- \n\ntext\n==========\n");
+    assert_eq!(p.entries.len() + usize::from(p.error.is_some()), 1);
+}
+
+#[test]
+fn a_byte_order_mark_before_a_later_title_is_the_same_book() {
+    let p = parse(
+        "\u{feff}Walden (Thoreau)\n- Your Highlight on Location 1-2 | Added on Monday, March 3, 2025 9:00:00 AM\n\none\n==========\n\
+         \u{feff}Walden (Thoreau)\n- Your Highlight on Location 5-6 | Added on Monday, March 3, 2025 9:01:00 AM\n\ntwo\n==========\n"
+            .as_bytes(),
+    );
+    assert!(p.error.is_none(), "{:?}", p.error);
+    assert_eq!(p.entries.len(), 2);
+    assert!(p.entries.iter().all(|e| e.title == "Walden"));
+}
