@@ -108,8 +108,15 @@ fn entry(block: &[(usize, &str)], parsed: &mut Parsed) {
         .join("\n")
         .trim()
         .to_owned();
-    let (title, author) = title_author(title.trim());
-    let parts: Vec<&str> = meta[2..].split('|').map(str::trim).collect();
+    // A Kindle may put a byte-order mark before any entry's title, not only the file's first.
+    let (title, author) =
+        title_author(title.trim_matches(|c: char| c.is_whitespace() || c == '\u{FEFF}'));
+    let parts: Vec<&str> = meta
+        .get(2..)
+        .unwrap_or_default()
+        .split('|')
+        .map(str::trim)
+        .collect();
     let first = parts.first().copied().unwrap_or_default();
     let kind = if first.contains("Highlight") {
         Some(Kind::Highlight)

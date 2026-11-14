@@ -465,17 +465,8 @@ fn canonical(doc: &Document, base: &str) -> Option<String> {
     resolve(base, &href).filter(|u| u.starts_with("http"))
 }
 
-/// `href` against `base`: an http(s) address, or a file beside a saved page.
+/// `href` against `base`: an http(s) address, or a file in the saved page's own folder. The same
+/// check as a story's photos (#65: a saved page could name any image on the disk).
 fn resolve(base: &str, href: &str) -> Option<String> {
-    let href = href.trim();
-    if href.is_empty() || href.starts_with("data:") {
-        return None;
-    }
-    let base = url::Url::parse(base).ok()?;
-    let joined = base.join(href).ok()?;
-    match joined.scheme() {
-        "http" | "https" => Some(joined.to_string()),
-        "file" if base.scheme() == "file" => Some(joined.to_string()),
-        _ => None,
-    }
+    crate::article::resolve(base, href)
 }

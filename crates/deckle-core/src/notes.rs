@@ -213,7 +213,9 @@ fn visible_text(markup: &str) -> String {
         if let Some(m) = rest.strip_prefix('<') {
             rest = &rest[1 + markup_len(m)..];
         } else if rest.starts_with('&')
-            && let Some(semi) = rest[..rest.len().min(12)].find(';')
+            && let Some(semi) = rest.as_bytes()[..rest.len().min(12)]
+                .iter()
+                .position(|&b| b == b';')
         {
             let ent = &rest[1..semi];
             let ch = match ent {
@@ -652,6 +654,19 @@ fn list_number(doc: &Doc, text: &str, block: usize) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn an_entity_before_a_multi_byte_character_does_not_panic() {
+        // #43: the entity search cut the text at byte 12, inside the curly quote.
+        let mut docs = vec![(
+            "text.xhtml".to_string(),
+            "<html><body><p>Text.<sup><a href=\"#fn2\" id=\"fr2\">[2]</a></sup></p>\
+             <div class=\"footnotes\"><p id=\"fn2\"><a href=\"#fr2\">[2]</a> Smith &amp; Co. \
+             \u{201c}Annual report\u{201d}, 1999.</p></div></body></html>"
+                .to_string(),
+        )];
+        convert(&mut docs);
+    }
     use super::*;
 
     fn one(body: &str) -> (String, NotesReport) {
