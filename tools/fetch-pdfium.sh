@@ -51,6 +51,10 @@ elif [ -n "${LOCALAPPDATA:-}" ]; then
 else
   cache="${XDG_CACHE_HOME:-$HOME/.cache}/deckle/pdfium"
 fi
+# Git Bash: a C:\… path reads to tar as a file on a host named C, so make it /c/….
+if command -v cygpath >/dev/null; then
+  cache="$(cygpath -u "$cache")"
+fi
 here="$cache/${TAG//\//-}/$platform"
 archive="$here/pdfium.tgz"
 want="$(sha_for "$platform")"
