@@ -386,7 +386,8 @@ pnpm tauri build                                   # installers in target/releas
 ```
 
 The app ships with the PDFium library it needs; a source build of the CLI gets it with
-`tools/fetch-pdfium.sh` (or `DECKLE_PDFIUM`). Releases: [docs/release.md](docs/release.md). Word
+`tools/fetch-pdfium.sh` (or `DECKLE_PDFIUM`), once per machine: every checkout and worktree
+finds that copy. Releases: [docs/release.md](docs/release.md). Word
 Wise database builder: [data/wordwise/README.md](data/wordwise/README.md).
 
 ## Built with AI
