@@ -334,6 +334,8 @@ fn a_saved_page_names_a_picture_only_in_its_own_folder() {
     // Real paths of this system, so `file:` addresses mean the same on Windows.
     let tmp = tempfile::tempdir().unwrap();
     let page_path = tmp.path().join("Inbox").join("Recipes").join("soup.html");
+    // A saved page's folder exists; the check follows links in it, so it reads the disk.
+    std::fs::create_dir_all(page_path.parent().unwrap()).unwrap();
     let base = url::Url::from_file_path(&page_path).unwrap().to_string();
     let beside = parse_recipe(&page("soup_files/pic.jpg"), &base).unwrap();
     let pic = tmp
