@@ -2,7 +2,7 @@
 //! Heuristic entity extraction for the no-LLM path: recurring capitalized names and places,
 //! merged across aliases, with first-mention quotes and KFX positions.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use deckle_kfx::text::Run;
 use regex::Regex;
@@ -436,22 +436,45 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
         groups.entry(m.text.clone()).or_default().push(m);
     }
     // Everything recurring is a candidate; stop words were excluded while scanning.
-    let keep: Vec<(String, Vec<&Mention>)> = groups.into_iter().collect();
+    // Sorted, so the merge below goes the same way on every run (#56: HashMap order varied it).
+    let mut keep: Vec<(String, Vec<&Mention>)> = groups.into_iter().collect();
+    keep.sort_by(|a, b| a.0.cmp(&b.0));
     // Alias merge: a single-word form that is a token of a multi-word form joins it.
     let mut labels: Vec<String> = keep.iter().map(|(l, _)| l.clone()).collect();
     labels.sort_by_key(|l| std::cmp::Reverse(l.len()));
     let counts: HashMap<&str, usize> = keep.iter().map(|(l, v)| (l.as_str(), v.len())).collect();
     let mut canonical: HashMap<String, String> = HashMap::new();
-    let strip = |s: &str| {
-        HONORIFICS.iter().fold(s.to_owned(), |acc, h| {
-            acc.trim_start_matches(h).trim().to_owned()
-        })
-    };
+    let strip = |s: &str| without_honorifics(s);
     let has_honorific = |s: &str| {
         HONORIFICS
             .iter()
             .any(|h| s.strip_prefix(h).is_some_and(|r| r.starts_with(' ')))
     };
+    // Each label's stripped form and whether it has an honorific, worked out once; and the
+    // labels a bare token could join, by that token (#56: every label was compared with every
+    // other, rebuilding both each time).
+    let stripped: HashMap<&str, String> = labels.iter().map(|l| (l.as_str(), strip(l))).collect();
+    let honored: HashMap<&str, bool> = labels
+        .iter()
+        .map(|l| (l.as_str(), has_honorific(l)))
+        .collect();
+    let mut joinable: HashMap<&str, Vec<usize>> = HashMap::new();
+    for (i, o) in labels.iter().enumerate() {
+        let b = stripped[o.as_str()].as_str();
+        let mut tokens: Vec<&str> = if b.contains(' ') {
+            b.split(' ').collect()
+        } else {
+            Vec::new()
+        };
+        if honored[o.as_str()] {
+            tokens.push(b);
+        }
+        tokens.sort_unstable();
+        tokens.dedup();
+        for t in tokens {
+            joinable.entry(t).or_default().push(i);
+        }
+    }
     for l in &labels {
         let base = strip(l);
         // "Mr. Bennet" is a different person from "Elizabeth Bennet": honorific forms and full
@@ -470,17 +493,16 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
             // a token too rare to stand alone joins any matching form rather than being lost
             my_count < 2 || (c >= 3 && c * 3 >= my_count)
         };
-        let mut candidates: Vec<&String> = labels
-            .iter()
+        let mut candidates: Vec<&String> = joinable
+            .get(base.as_str())
+            .into_iter()
+            .flatten()
+            .map(|&i| &labels[i])
             .filter(|o| *o != l && is_canonical(o) && frequent(o))
-            .filter(|o| {
-                (has_honorific(o) && strip(o) == base)
-                    || (strip(o).contains(' ') && strip(o).split(' ').any(|t| t == base))
-            })
             .collect();
         candidates.sort_by_key(|o| {
             (
-                !has_honorific(o),
+                !honored[o.as_str()],
                 std::cmp::Reverse(counts.get(o.as_str()).copied().unwrap_or(0)),
             )
         });
@@ -506,7 +528,7 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
     };
     type Merged = (Vec<(i64, i64)>, Vec<String>, Option<(usize, i64)>);
     let mut merged: HashMap<String, Merged> = HashMap::new();
-    let known: std::collections::HashSet<&str> = keep.iter().map(|(l, _)| l.as_str()).collect();
+    let known: HashSet<&str> = keep.iter().map(|(l, _)| l.as_str()).collect();
     for (label, v) in &keep {
         // A one-off full name ("Elizabeth Bennet") is not an entity of its own, but each of its
         // words that *is* a recurring name still counts as a mention of that name.
@@ -544,6 +566,7 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
             }
         }
     }
+    let speakers = speakers(runs);
     let mut out: Vec<Candidate> = merged
         .into_iter()
         .filter(|(_, (occ, _, _))| occ.len() >= 2)
@@ -563,7 +586,7 @@ pub fn heuristic(runs: &[Run], lang: &str) -> Vec<Candidate> {
                         .iter()
                         .any(|h| a.strip_prefix(h).is_some_and(|r| r.starts_with(' ')))
                 });
-            let speaks = speaks(runs, &label) || aliases.iter().any(|a| speaks(runs, a));
+            let speaks = speaks(&speakers, &label) || aliases.iter().any(|a| speaks(&speakers, a));
             let kind = if honorific || speaks {
                 EntityKind::Person
             } else {
@@ -619,18 +642,49 @@ const SPEECH_VERBS: [&str; 16] = [
     "shouted",
 ];
 
-/// Does the name appear directly before or after a speech verb anywhere? (novel heuristic)
-fn speaks(runs: &[Run], name: &str) -> bool {
-    let bare = HONORIFICS.iter().fold(name.to_owned(), |acc, h| {
-        acc.trim_start_matches(h).trim().to_owned()
-    });
-    let last = bare.rsplit(' ').next().unwrap_or(&bare);
-    if last.is_empty() {
-        return false;
-    }
-    runs.iter().any(|r| {
-        SPEECH_VERBS.iter().any(|v| {
-            r.text.contains(&format!("{last} {v}")) || r.text.contains(&format!("{v} {last}"))
-        })
+/// `s` without the honorifics it starts with: "Mr. Darcy" is "Darcy". An honorific counts only
+/// when a space follows it, so "Drake" and "Mississippi" keep their letters (#56).
+fn without_honorifics(s: &str) -> String {
+    HONORIFICS.iter().fold(s.to_owned(), |acc, h| {
+        match acc.strip_prefix(h).filter(|r| r.starts_with(' ')) {
+            Some(rest) => rest.trim().to_owned(),
+            None => acc,
+        }
     })
+}
+
+/// Every word that stands directly before or after a speech verb, read in one pass over the
+/// text (#56: each name searched the whole text for each verb).
+fn speakers(runs: &[Run]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for r in runs {
+        let words: Vec<&str> = r.text.split(' ').collect();
+        for pair in words.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let verb = |w: &str| {
+                let w = w.trim_end_matches(|c: char| !c.is_alphanumeric());
+                SPEECH_VERBS.contains(&w)
+            };
+            if verb(b) {
+                out.insert(
+                    a.trim_start_matches(|c: char| !c.is_alphanumeric())
+                        .to_owned(),
+                );
+            }
+            if SPEECH_VERBS.contains(&a) {
+                out.insert(
+                    b.trim_end_matches(|c: char| !c.is_alphanumeric())
+                        .to_owned(),
+                );
+            }
+        }
+    }
+    out
+}
+
+/// Does the name appear directly before or after a speech verb anywhere? (novel heuristic)
+fn speaks(speakers: &HashSet<String>, name: &str) -> bool {
+    let bare = without_honorifics(name);
+    let last = bare.rsplit(' ').next().unwrap_or(&bare);
+    !last.is_empty() && speakers.contains(last)
 }

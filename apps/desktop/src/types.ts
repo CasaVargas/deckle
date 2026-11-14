@@ -1115,7 +1115,8 @@ export interface PuzzleBookRequest {
   words: string;
   quotes: string;
   picture: string | null;
-  seed: number | null;
+  /** As text: a seed is a 64-bit number, more than a JavaScript number holds. */
+  seed: string | null;
   date: string;
   /** Where the theme words come from (Puzzles tab design §2). */
   theme: PuzzleTheme;
@@ -1153,7 +1154,7 @@ export type PuzzleDto =
 export interface PuzzlePreview {
   title: string;
   subtitle: string;
-  seed: number;
+  seed: string;
   date: string;
   pages: number;
   warnings: string[];
@@ -1172,7 +1173,7 @@ export interface MadePuzzleBook {
   title: string;
   subtitle: string;
   date: string;
-  seed: number;
+  seed: string;
   pages: number;
   puzzles: number;
   bytes: number;
