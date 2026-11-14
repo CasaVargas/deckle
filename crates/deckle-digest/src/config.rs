@@ -1873,7 +1873,7 @@ feeds = []
 
 impl Config {
     pub fn parse(text: &str) -> Result<Self, String> {
-        let mut cfg: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+        let mut cfg: Config = toml::from_str(text).map_err(|e| toml_error(text, &e))?;
         cfg.normalize();
         cfg.normalize_subscriptions()?;
         cfg.normalize_subscribed()?;
@@ -1983,6 +1983,48 @@ impl Config {
     }
 }
 
+/// A TOML error a person can be shown: where it is and what's wrong, without the line itself.
+/// The parsers' own messages quote the damaged line, and a line can hold a secret such as the
+/// calendar's private address (GHSA-h56r-2j2r-9j78).
+pub(crate) fn toml_error(text: &str, e: &dyn TomlProblem) -> String {
+    match e.span() {
+        Some(span) => {
+            let before = &text[..span.start.min(text.len())];
+            let line = before.matches('\n').count() + 1;
+            let column = before.rsplit('\n').next().unwrap_or("").chars().count() + 1;
+            format!(
+                "TOML error at line {line}, column {column}: {}",
+                e.message()
+            )
+        }
+        None => format!("TOML error: {}", e.message()),
+    }
+}
+
+/// What [`toml_error`] needs from either parser's error.
+pub(crate) trait TomlProblem {
+    fn message(&self) -> &str;
+    fn span(&self) -> Option<std::ops::Range<usize>>;
+}
+
+impl TomlProblem for toml::de::Error {
+    fn message(&self) -> &str {
+        toml::de::Error::message(self)
+    }
+    fn span(&self) -> Option<std::ops::Range<usize>> {
+        toml::de::Error::span(self)
+    }
+}
+
+impl TomlProblem for toml_edit::TomlError {
+    fn message(&self) -> &str {
+        toml_edit::TomlError::message(self)
+    }
+    fn span(&self) -> Option<std::ops::Range<usize>> {
+        toml_edit::TomlError::span(self)
+    }
+}
+
 /// Writes `cfg` into the `digest.toml` at `path`, keeping what a person wrote: comments, key
 /// order and every value that didn't change stay as they are. A missing file starts from
 /// [`STARTER`] (Daily design §5c).
@@ -2012,7 +2054,7 @@ pub fn save(path: &Path, cfg: &Config) -> Result<(), String> {
     };
     let mut doc: toml_edit::DocumentMut = text
         .parse()
-        .map_err(|e| format!("{}: {e}", path.display()))?;
+        .map_err(|e| format!("{}: {}", path.display(), toml_error(&text, &e)))?;
     let mut new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
     // Another paper's file never holds the household settings it inherits (many papers §3),
     // and stays as short as it was written: a key it lacks is added only when it isn't the
@@ -2250,6 +2292,30 @@ pub fn default_path() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+
+    /// GHSA-h56r-2j2r-9j78: a damaged line is never quoted, since it can hold a secret such as
+    /// the calendar's private address. The error names the file, line and column instead.
+    #[test]
+    fn a_damaged_line_is_named_not_quoted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("digest.toml");
+        std::fs::write(
+            &path,
+            "[calendar]\nurl = \"https://calendar.example/private/FAKESECRET-ics\n",
+        )
+        .unwrap();
+        let load = Config::load(&path).unwrap_err();
+        let save = save(&path, &Config::default()).unwrap_err();
+        for err in [&load, &save] {
+            assert!(!err.contains("FAKESECRET"), "{err}");
+            assert!(err.contains("digest.toml"), "{err}");
+            assert!(err.contains("line 2, column"), "{err}");
+        }
+        // A damaged value further in on a later line.
+        let err = Config::parse("name = \"Paper\"\n\n  bad = = 1\n").unwrap_err();
+        assert!(err.contains("line 3, column 9"), "{err}");
+        assert!(!err.contains("bad"), "{err}");
+    }
     use super::*;
 
     #[test]
