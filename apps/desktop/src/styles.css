@@ -617,13 +617,21 @@ input[type=checkbox] { padding: 0; }
 .library-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 10px; }
 .library-head h2 { font-family: ui-serif, Georgia, serif; font-size: 20px; margin: 0; }
 .lib-items { display: flex; flex-direction: column; gap: 18px; }
-.lib-series-line { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
-.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 14px 12px; }
+.lib-series { --cover-h: calc((136px - 14px) * 1.5); }
+.lib-series-line { font-size: 12px; font-weight: 400; letter-spacing: .02em; color: var(--muted); margin: 0 0 8px; }
+.lib-series-line b { color: var(--fg); font-weight: 600; }
+.lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 18px 14px; align-items: start; }
+.lib-series .lib-grid { display: flex; flex-wrap: wrap; align-items: flex-start; }
+.lib-series .lib-card { width: 136px; }
 .lib-card { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 6px; background: transparent; border: 1px solid transparent; border-radius: 10px; text-align: left; min-width: 0; }
 .lib-card:hover { background: color-mix(in srgb, var(--line) 45%, transparent); }
 .lib-card.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
 .lib-card:disabled { opacity: 0.55; }
-.lib-cover { position: relative; aspect-ratio: 2 / 3; border-radius: 4px; overflow: hidden; background: var(--line); box-shadow: 0 1px 3px rgb(0 0 0 / 0.18); }
+.lib-cover { position: relative; aspect-ratio: 2 / 3; border-radius: 3px 4px 4px 3px; overflow: hidden; background: var(--line); box-shadow: inset 0 1px 0 rgb(255 255 255 / .08), 0 8px 18px rgb(0 0 0 / .22), 0 2px 4px rgb(0 0 0 / .2); }
+.lib-cover::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: rgb(0 0 0 / .18); z-index: 1; pointer-events: none; }
+@media (prefers-color-scheme: dark) {
+  .lib-cover { box-shadow: inset 0 1px 0 rgb(255 255 255 / .08), 0 8px 18px rgb(0 0 0 / .5), 0 2px 4px rgb(0 0 0 / .5); }
+}
 .lib-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .lib-cover .cover-placeholder { width: 100%; height: 100%; display: grid; place-items: center; font-family: ui-serif, Georgia, serif; font-size: 30px; color: var(--muted); }
 .lib-index { position: absolute; left: 6px; top: 6px; min-width: 18px; padding: 1px 5px; border-radius: 9px; background: rgb(0 0 0 / 0.62); color: #fff; font-size: 11px; text-align: center; }
@@ -631,8 +639,11 @@ input[type=checkbox] { padding: 0; }
 .lib-title { font-size: 13px; font-weight: 600; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .lib-author, .lib-foot { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lib-foot { font-size: 11px; }
-.lib-gap { aspect-ratio: 2 / 3; border: 1px dashed var(--line); border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; margin: 6px; text-align: center; padding: 6px; }
-.lib-gap > span:first-child { font-family: ui-serif, Georgia, serif; font-size: 24px; color: var(--muted); }
+.lib-stub { position: relative; width: 16px; height: var(--cover-h); margin-top: 7px; border-radius: 3px; background: repeating-linear-gradient(180deg, var(--line) 0 2px, color-mix(in srgb, var(--line) 60%, var(--bg)) 2px 4px); }
+.lib-stub > span { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 9px; color: var(--muted); }
+.lib-fold { width: 122px; height: var(--cover-h); margin: 7px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 4px; background: color-mix(in srgb, var(--line) 40%, var(--bg)); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; text-align: center; color: var(--muted); }
+.lib-fold > b { font-family: ui-serif, Georgia, serif; font-size: 22px; font-weight: 500; color: var(--fg); }
+.lib-fold > span { font-size: 10px; line-height: 1.25; }
 .link-title { background: none; border: 0; padding: 0; color: inherit; text-align: left; cursor: pointer; min-width: 0; }
 .link-title:hover { text-decoration: underline; text-underline-offset: 3px; }
 

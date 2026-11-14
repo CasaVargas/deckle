@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import { fromLabel, libraryItems, seriesLine } from "./libraryView";
+import { fromLabel, libraryItems, seriesLine, shelfSlots } from "./libraryView";
 import type { LibraryFilter, LibraryItem } from "./libraryView";
 import type { BookSearchReport, CatalogEntry, CatalogView } from "./types";
 
@@ -196,15 +196,24 @@ export default function Library({ catalog, hasKindle, queued, query, busy, onAdd
           {items.map((it) =>
             it.kind === "series" ? (
               <div key={`series:${it.key}`} className="lib-series">
-                <h3 className="lib-series-line">{seriesLine(it)}</h3>
+                <h3 className="lib-series-line">
+                  {(([name, rest]) => (rest ? <><b>{name}</b> · {rest}</> : <b>{name}</b>))(seriesLine(it).split(" · "))}
+                </h3>
                 <div className="lib-grid">
-                  {it.books.map(card)}
-                  {it.missing.map((n) => (
-                    <div key={`gap-${n}`} className="lib-gap" title={`No. ${n} isn't in your library`}>
-                      <span>{n}</span>
-                      <span className="muted small">Not in your library</span>
-                    </div>
-                  ))}
+                  {shelfSlots(it).map((s) =>
+                    s.kind === "book" ? (
+                      card(s.book)
+                    ) : s.kind === "stub" ? (
+                      <div key={`stub-${s.n}`} className="lib-stub" title={`No. ${s.n} isn't in your library`}>
+                        <span>{s.n}</span>
+                      </div>
+                    ) : (
+                      <div key={`fold-${s.from}`} className="lib-fold" title={`Nos. ${s.from}–${s.to} aren't in your library`}>
+                        <b>{`${s.from}–${s.to}`}</b>
+                        <span>not in your library</span>
+                      </div>
+                    ),
+                  )}
                 </div>
               </div>
             ) : null,
