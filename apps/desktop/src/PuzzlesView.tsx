@@ -136,7 +136,7 @@ export default function PuzzlesView({ onNotice, device, deviceTarget, onOpenSett
       if (asBundle) loadBooks();
     } catch (e) {
       const msg = String(e);
-      if (!replace && /already there/.test(msg) && window.confirm(`${book.title} is already there${asBundle ? ", for the iPad" : ""}. Replace it? Ink on the old one may stay.`)) {
+      if (!replace && /already there/.test(msg) && (await platform.confirm(`${book.title} is already there${asBundle ? ", for the iPad" : ""}. Replace it? Ink on the old one may stay.`))) {
         await send(book, target, true, asBundle);
         return;
       }

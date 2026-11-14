@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The desktop app asks again before removing or replacing.** Remove on a Kobo, PocketBook or
+  reMarkable deleted the chosen books at once, and sending a puzzle book that was already there
+  replaced it, ink and all, without asking "Replace it?". Both now show the question and wait for
+  the answer (jloutsch/deckle#88). The web app always asked.
 - **A second paper no longer deletes the first one's editions on a Kobo or PocketBook.** Its
   files (`deckle-daily-kid-courier-…`) were counted as the main paper's editions and took their
   places, so every one of the main paper's editions was removed, the newest too. Now only a
