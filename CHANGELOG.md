@@ -13,6 +13,29 @@
   the window could draw. These now run in the background, and Previewer is started once per
   install instead of at every check. The device check every few seconds no longer stutters the
   window either.
+- **Eleven fixes from a review of the whole project.** Thanks to [@jloutsch](https://github.com/jloutsch),
+  who found and reproduced each one.
+  - Removing a book from a Kobo or PocketBook no longer deletes the highlights of another
+    format of the same name, and takes a KEPUB's own sidecar; a backup now copies a KEPUB's.
+  - A reMarkable backup keeps documents that share a name (`Notebook.tar`,
+    `Notebook (2).tar`) instead of writing one over the other and reporting both copied.
+  - "Make again" on a puzzle book makes the same book: its seed lost its last digits on the
+    way to the window. A different book never takes the name of one already there, and the
+    same book keeps the iPad bundles it was sent as.
+  - KOReader over Wi-Fi: today's paper always downloads, even when newer editions of other
+    papers fill the recent list (it answered 404).
+  - A Kitchen Book recipe saved from a page takes a picture only from the page's own folder,
+    as the paper's stories do, and a recipe file's name is its id, whatever the file says
+    inside.
+  - No more crashes on a footnote with `&amp;` before a curly quote, a KOReader backup with a
+    date out of range, or a clippings line that is a bare "- ".
+  - Highlights: a byte-order mark before any title no longer splits one book in two, a title
+    like `1984` or `True` is quoted in the note's frontmatter, and a book with tens of
+    thousands of highlights groups in a moment.
+  - X-Ray: "Drake" no longer loses its "Dr" before it's matched to "Francis Drake", names are
+    merged the same way on every run, and a book with thousands of names is read in seconds
+    instead of a minute.
+  - The Books tab opens quickly with a large calibre library (20,000 books took two minutes).
 
 ## 0.14.0 — the paper in color on a Colorsoft, and two-column PDFs read in order
 

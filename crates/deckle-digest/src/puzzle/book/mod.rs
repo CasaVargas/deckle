@@ -938,7 +938,10 @@ fn make_search(
 /// `<Title> <YYYY-MM-DD> <seed4>.pdf`, filesystem-safe and at most 120 characters: two books
 /// never share a name, so one never lands on another's ink (puzzle books §5.2).
 pub fn file_name(b: &Book) -> String {
-    let tail = format!(" {} {:04x}.pdf", b.date, b.seed >> 48);
+    // All 64 bits folded into the four hex digits: the top 16 alone named every small seed
+    // `0000` (#77).
+    let fold = (0..4).fold(0u64, |acc, i| acc ^ (b.seed >> (16 * i))) & 0xffff;
+    let tail = format!(" {} {fold:04x}.pdf", b.date);
     let title = deckle_core::deliver::sanitize(&b.title);
     let title = if title.is_empty() {
         "Puzzles".to_owned()
@@ -1479,9 +1482,17 @@ mod tests {
     #[test]
     fn file_name_is_dated_and_seeded() {
         let mut b = make(&opts(1, 8), Words::embedded()).unwrap();
-        b.seed = 0x7f3a_0000_0000_0001;
+        b.seed = 0x7f3a_0000_0000_0000;
         assert_eq!(file_name(&b), "Word Search 2026-11-01 7f3a.pdf");
         b.title = "Tech: A/B?".into();
         assert_eq!(file_name(&b), "Tech_ A_B_ 2026-11-01 7f3a.pdf");
+        // Small seeds name different books.
+        let names: Vec<String> = [1, 2]
+            .map(|s| {
+                b.seed = s;
+                file_name(&b)
+            })
+            .into();
+        assert_ne!(names[0], names[1]);
     }
 }

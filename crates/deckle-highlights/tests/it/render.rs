@@ -209,3 +209,35 @@ fn notes_at_one_location_keep_only_the_latest() {
     assert_eq!(notes[0].text, "Oops!!");
     assert_eq!(render_new_file(&books[0]).matches("- Note:").count(), 1);
 }
+
+#[test]
+fn a_title_yaml_would_read_as_a_number_or_a_word_is_quoted() {
+    for (title, line) in [
+        ("1984", "title: \"1984\""),
+        ("True", "title: \"True\""),
+        ("null", "title: \"null\""),
+        ("Walden", "title: Walden"),
+    ] {
+        let mut e = highlight_at(1);
+        e.title = title.into();
+        let books = group(vec![e]);
+        let out = render_new_file(&books[0]);
+        assert!(out.lines().any(|l| l == line), "{title}: {out}");
+    }
+}
+
+#[test]
+fn many_highlights_in_one_book_group_quickly_and_extensions_still_collapse() {
+    // #54: every highlight was compared with every kept one.
+    let mut entries: Vec<Entry> = (0..40_000).map(|i| highlight_at(i * 10)).collect();
+    let mut longer = highlight_at(100);
+    longer.location = Some((100, 105));
+    longer.text = "passage at 100, and more".into();
+    entries.push(longer);
+    let started = std::time::Instant::now();
+    let books = group(entries);
+    assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+    let items = &books[0].items;
+    assert_eq!(items.len(), 40_000);
+    assert!(items.iter().all(|i| i.entry().text != "passage at 100"));
+}
