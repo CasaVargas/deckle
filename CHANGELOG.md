@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **A fresh-paper folder can move to another paper.** Reconnecting a folder to a different
+  paper, or to a paper deleted and made again, used to stop fresh-paper requests for every
+  paper. Once the old paper's last request finishes, Deckle now removes its fresh editions and
+  request statuses from the folder and connects the new one. A problem with one folder no
+  longer holds up the others. ([daily.md](docs/daily.md#a-folder-belongs-to-another-producer))
+- **Starting the app and the watcher together on a new computer works every time.** The
+  private `producer.json` appears only once it is complete, so the second one to start reads
+  it instead of failing. If an older version left it empty, the message now says to delete it.
+  On a disk without hard links (FAT, some network drives) the file is written in place, and a
+  crash during that first write leaves it empty, with the same message.
+- **Refused requests no longer pile up.** A refused fresh-paper request is forgotten after
+  three days instead of thirty, leaving its status in the folder, and is never queued again. A
+  request first seen long after it expired gets one `expired` status. Statuses are rewritten
+  only when they change, plus once every five minutes. A folder holding 1,000 finished
+  requests leaves new ones unanswered, and the watcher log says so, until older ones age out.
+- **Finished fresh-paper build folders are removed.** Each build left a folder in Deckle's
+  private `press/jobs`; it's now removed when the build is recorded, and old ones are cleared
+  when the watcher starts.
 - **A second paper no longer deletes the first one's editions on a Kobo or PocketBook.** Its
   files (`deckle-daily-kid-courier-…`) were counted as the main paper's editions and took their
   places, so every one of the main paper's editions was removed, the newest too. Now only a

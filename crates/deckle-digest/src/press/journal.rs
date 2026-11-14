@@ -106,6 +106,11 @@ impl PressJournal {
     pub(crate) fn ensure_healthy(&self) -> Result<(), PressError> {
         if self.healthy { Ok(()) } else { Err(storage()) }
     }
+    /// False once a commit failed part-way: what is on disk is uncertain until the journal is
+    /// opened again, and every write is refused.
+    pub fn is_healthy(&self) -> bool {
+        self.healthy
+    }
     fn atomic(&self, name: &str, bytes: &[u8]) -> Result<(), PressError> {
         let temporary = self.root.join(format!("{name}.tmp"));
         let mut file = OpenOptions::new()

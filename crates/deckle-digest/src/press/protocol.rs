@@ -35,17 +35,29 @@ pub enum PressErrorCode {
     ProtocolConflict,
 }
 /// Safe to expose to compatible clients; never contains provider or OS error text.
+/// `detail` is a local explanation for this machine's owner (it may name a local path); it
+/// is never written into shared controls, which carry only `code`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PressError {
     pub code: PressErrorCode,
+    pub detail: Option<String>,
 }
 impl PressError {
     pub fn new(code: PressErrorCode) -> Self {
-        Self { code }
+        Self { code, detail: None }
+    }
+    pub fn with_detail(code: PressErrorCode, detail: impl Into<String>) -> Self {
+        Self {
+            code,
+            detail: Some(detail.into()),
+        }
     }
 }
 impl std::fmt::Display for PressError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(detail) = &self.detail {
+            return f.write_str(detail);
+        }
         f.write_str(match self.code {
             PressErrorCode::Busy => "The press is busy; try again later",
             PressErrorCode::ClockMismatch => "Check the device clock and try again",

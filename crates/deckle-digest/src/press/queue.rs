@@ -309,11 +309,23 @@ impl PressJournal {
         self.ensure_healthy()?;
         let root = std::fs::canonicalize(binding.root).map_err(|_| journal::storage())?;
         let mut data = self.data.clone();
-        if data.bindings.iter().any(|b| {
+        if let Some(old) = data.bindings.iter().find(|b| {
             b.root == root
                 && (b.producer_id != binding.producer_id || b.paper_id != binding.paper_id)
         }) {
-            return Err(conflict());
+            // One folder, one paper: the folder moves to the new paper only once nothing of
+            // the old one is left, so no accepted request is ever delivered as another paper.
+            let old = PressBinding {
+                root: old.root.clone(),
+                producer_id: old.producer_id,
+                paper_id: old.paper_id,
+            };
+            let new = PressBinding {
+                root,
+                producer_id: binding.producer_id,
+                paper_id: binding.paper_id,
+            };
+            return super::retention::replace_binding(self, &old, new, enabled, stopped);
         }
         if let Some(b) = data.bindings.iter_mut().find(|b| {
             b.producer_id == binding.producer_id && b.paper_id == binding.paper_id && b.root == root
@@ -540,6 +552,10 @@ impl PressJournal {
             .find(|j| j.id == lease.job_id)
             .map(|j| j.input.clone())
             .ok_or_else(conflict)
+    }
+    /// Whether the journal still records this job, finished or not.
+    pub fn holds_job(&self, job_id: Uuid) -> bool {
+        self.data.jobs.iter().any(|j| j.id == job_id)
     }
     pub fn active(&self) -> Option<JobLease> {
         self.data
@@ -788,6 +804,95 @@ fn expire_queued(data: &mut JournalData, now: DateTime<Utc>) -> Result<bool, Pre
     Ok(changed)
 }
 
+/// When a refusal is forgotten: three days after it was first seen, and for a request with
+/// the protocol's 24-hour lifetime not before 48 hours past its expiry, so a request from a
+/// clock that runs ahead cannot become valid while it is still remembered. Any other
+/// lifetime was refused as a clock mismatch, and its `expires_at` cannot be trusted.
+fn refusal_forgotten_at(e: &Entry) -> DateTime<Utc> {
+    let seen = e.first_seen + Duration::hours(72);
+    if e.request.expires_at - e.request.created_at == Duration::hours(24)
+        && let Some(expiry) = e.request.expires_at.checked_add_signed(Duration::hours(48))
+    {
+        return seen.max(expiry);
+    }
+    seen
+}
+fn same_binding(b: &PressBinding, root: &Path, producer: Uuid, paper: Uuid) -> bool {
+    b.root == root && b.producer_id == producer && b.paper_id == paper
+}
+impl PressJournal {
+    /// Whether this binding still has work that is not finished: a pending, building or
+    /// publishing request, or an unfinished job.
+    pub(crate) fn binding_busy(&self, b: &PressBinding) -> bool {
+        self.data.entries.iter().any(|e| {
+            same_binding(b, &e.root, e.request.producer_id, e.request.paper_id)
+                && !terminal(e.status.state)
+        }) || self
+            .data
+            .jobs
+            .iter()
+            .any(|j| same_binding(b, &j.root, j.producer, j.paper) && !j.terminal)
+    }
+    /// Request IDs the journal holds for this binding.
+    pub(crate) fn binding_requests(&self, b: &PressBinding) -> Vec<Uuid> {
+        self.data
+            .entries
+            .iter()
+            .filter(|e| same_binding(b, &e.root, e.request.producer_id, e.request.paper_id))
+            .map(|e| e.request.request_id)
+            .collect()
+    }
+    /// One commit: drop everything of `old` and bind its folder to `new`. The caller has
+    /// already removed every output and status file `old` had.
+    pub(crate) fn commit_replacement(
+        &mut self,
+        old: &PressBinding,
+        new: PressBinding,
+        enabled: bool,
+        stopped: bool,
+    ) -> Result<(), PressError> {
+        self.ensure_healthy()?;
+        if self.binding_busy(old) {
+            return Err(conflict());
+        }
+        let mut data = self.data.clone();
+        data.entries
+            .retain(|e| !same_binding(old, &e.root, e.request.producer_id, e.request.paper_id));
+        data.jobs
+            .retain(|j| !same_binding(old, &j.root, j.producer, j.paper));
+        data.outputs
+            .retain(|o| !same_binding(old, &o.lease.root, o.lease.producer_id, o.lease.paper_id));
+        data.bindings
+            .retain(|b| !same_binding(old, &b.root, b.producer_id, b.paper_id));
+        data.bindings.push(Binding {
+            root: new.root,
+            producer_id: new.producer_id,
+            paper_id: new.paper_id,
+            enabled,
+            stopped,
+        });
+        self.commit(data)
+    }
+}
+/// Terminal entries one folder may hold before its new requests are left unanswered. A
+/// backstop: entries are never forgotten early, since a live request would be built again.
+pub const HISTORY_CAP: usize = 1000;
+impl PressJournal {
+    /// Whether this folder's terminal entries have reached `HISTORY_CAP`.
+    pub fn history_full(&self, binding: &PressBinding) -> bool {
+        self.data
+            .entries
+            .iter()
+            .filter(|e| {
+                e.root == binding.root
+                    && e.request.producer_id == binding.producer_id
+                    && e.request.paper_id == binding.paper_id
+                    && terminal(e.status.state)
+            })
+            .count()
+            >= HISTORY_CAP
+    }
+}
 fn rejection_code(code: PressErrorCode) -> bool {
     matches!(
         code,
@@ -897,8 +1002,10 @@ impl PressJournal {
             message: None,
         };
         // Already-known IDs returned above retain their full reconciliation history.
-        // Unknown controls at the terminal horizon do not renew their journal lifetime.
-        if code == PressErrorCode::Expired && now - request.expires_at >= Duration::days(30) {
+        // A request first seen 48 hours or more after it expired (its lifetime is 24 hours,
+        // or it would be a clock mismatch) is not journaled: the caller writes this status
+        // once, and the status file then stands for the answer.
+        if code == PressErrorCode::Expired && now - request.expires_at >= Duration::hours(48) {
             return Ok(status);
         }
         let mut data = self.data.clone();
@@ -1039,13 +1146,24 @@ impl PressJournal {
     pub(crate) fn forget_old(
         &mut self,
         now: DateTime<Utc>,
+        skip: &std::collections::HashSet<PathBuf>,
         mut remove_status: impl FnMut(&PressBinding, Uuid) -> Result<(), PressError>,
     ) -> Result<(), PressError> {
         self.ensure_healthy()?;
         let mut data = self.data.clone();
+        let before = (data.entries.len(), data.outputs.len(), data.jobs.len());
+        // A refusal (no job) is forgotten sooner and keeps its status file: the scan never
+        // journals a request whose status file exists, so it cannot come back.
+        let refusals: std::collections::HashSet<_> = data
+            .entries
+            .iter()
+            .filter(|e| e.status.job_id.is_none() && now >= refusal_forgotten_at(e))
+            .map(|e| e.request.request_id)
+            .collect();
         let old: std::collections::HashSet<_> = data
             .entries
             .iter()
+            .filter(|e| e.status.job_id.is_some())
             .filter(|e| terminal(e.status.state) && now - e.status.updated_at >= Duration::days(30))
             .filter(|e| {
                 !data.outputs.iter().any(|o| {
@@ -1065,9 +1183,10 @@ impl PressJournal {
                 self.binding_for_request(e.request.request_id)
                     .map(|b| (b, e.request.request_id))
             })
+            .filter(|(b, _)| !skip.contains(&b.root))
             .collect();
         let mut error = None;
-        let mut completed = std::collections::HashSet::new();
+        let mut completed = refusals;
         for (binding, id) in removed {
             match remove_status(&binding, id) {
                 Ok(()) => {
@@ -1093,7 +1212,10 @@ impl PressJournal {
                 || data.entries.iter().any(|e| e.status.job_id == Some(j.id))
                 || data.outputs.iter().any(|o| o.lease.job_id == j.id)
         });
-        self.commit(data)?;
+        // Nothing to forget is the usual case on every tick: no commit then.
+        if (data.entries.len(), data.outputs.len(), data.jobs.len()) != before {
+            self.commit(data)?;
+        }
         error.map_or(Ok(()), Err)
     }
 }

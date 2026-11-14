@@ -3935,6 +3935,7 @@ fn digest(
                     Err(_) => {}
                 }
                 say_once(
+                    "press",
                     &mut press_error,
                     press_supervisor.tick(&papers, deckle_digest::chrono::Utc::now()),
                 );
@@ -3944,6 +3945,7 @@ fn digest(
                 shelves_publisher.tick();
                 scan_inbox(&cfg, true);
                 say_once(
+                    "cookbook",
                     &mut build_error,
                     cookbook_delivery::rebuild_if_dirty(&cookbook, None).map(|built| {
                         if let Some(b) = built {
@@ -3966,6 +3968,7 @@ fn digest(
                 if let Some(id) = &cookbook_kindle {
                     let on = actions.push && cfg.sync.for_device(id).cookbook;
                     say_once(
+                        "cookbook",
                         &mut offer_error,
                         cookbook_delivery::offer(&cookbook, &queue, id, on).map(|_| ()),
                     );
@@ -4082,15 +4085,25 @@ mod prune_tests {
     }
 }
 
-/// Says a cookbook error once: again only when it changes, or after a success.
-fn say_once(said: &mut Option<String>, r: Result<(), String>) {
+/// Says a watcher error once, after its `label` (`press`, `cookbook`): again only when it
+/// changes, or after a success.
+fn say_once(label: &str, said: &mut Option<String>, r: Result<(), String>) {
+    if let Some(line) = once_line(label, said, r) {
+        eprintln!("{line}");
+    }
+}
+fn once_line(label: &str, said: &mut Option<String>, r: Result<(), String>) -> Option<String> {
     match r {
-        Ok(()) => *said = None,
-        Err(e) if said.as_ref() != Some(&e) => {
-            eprintln!("cookbook: {e}");
-            *said = Some(e);
+        Ok(()) => {
+            *said = None;
+            None
         }
-        Err(_) => {}
+        Err(e) if said.as_ref() != Some(&e) => {
+            let line = format!("{label}: {e}");
+            *said = Some(e);
+            Some(line)
+        }
+        Err(_) => None,
     }
 }
 
@@ -6694,6 +6707,23 @@ mod tests {
     use super::*;
     use deckle_core::pipeline::XRayMode;
     use deckle_digest::reading::Outcome;
+
+    #[test]
+    fn watcher_errors_carry_their_own_label_once() {
+        let mut said = None;
+        let press = || Err::<(), _>("fresh-paper folder /x: request history full".to_owned());
+        assert_eq!(
+            once_line("press", &mut said, press()).as_deref(),
+            Some("press: fresh-paper folder /x: request history full")
+        );
+        assert_eq!(once_line("press", &mut said, press()), None, "said once");
+        assert_eq!(once_line("press", &mut said, Ok(())), None);
+        let mut said = None;
+        assert_eq!(
+            once_line("cookbook", &mut said, Err("no recipes".into())).as_deref(),
+            Some("cookbook: no recipes")
+        );
+    }
 
     #[test]
     fn recaps_line_counts_chapters_and_pages() {
