@@ -23,7 +23,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::deliver::{
-    Conn, DeliverError, DeliverOptions, Target, deliver_named_on, prune_named_on_except,
+    Conn, DeliverError, DeliverOptions, Target, deliver_named_on, deliver_named_reporting,
+    prune_named_on_except,
 };
 use crate::devices::DeviceProfile;
 use crate::inspect::BookInfo;
@@ -42,6 +43,13 @@ pub struct Queue {
 pub struct FlushReport {
     /// Device paths written.
     pub delivered: Vec<PathBuf>,
+    /// `(entry name, why)` for each entry that didn't go; it stays queued for the next push.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub failed: Vec<(String, String)>,
+    /// The device went away mid-push (its last `failed` entry says how): nothing more was sent
+    /// and the rest stay queued.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
     /// Old editions removed from the device.
     pub pruned: Vec<String>,
     /// `<name>: <warning>` from finishing prepared books.
@@ -451,15 +459,21 @@ impl Queue {
         conn: &mut Conn<'_>,
         prune: Option<&Prune>,
     ) -> Result<FlushReport, DeliverError> {
-        self.flush_with(conn, prune, &Finishing::default(), &mut |_, _, _| {})
+        self.flush_with(conn, prune, &[], &Finishing::default(), &mut |_, _, _| {})
     }
 
     /// [`Queue::flush_on`], finishing prepared books with `finishing` and calling `progress`
-    /// before each entry.
+    /// before each entry. `papers` (with `prune`) names the papers whose dated editions may be
+    /// queued twice, as a Kindle book and as a PDF.
+    ///
+    /// An entry that fails is in `failed` and stays queued; the others still go. Only the device
+    /// going away ([`DeliverError::stops_push`]) stops the loop. What runs after it (dropping a
+    /// twin, the prune) is a warning when it fails. `Err` only when nothing could start.
     pub fn flush_with(
         &self,
         conn: &mut Conn<'_>,
         prune: Option<&Prune>,
+        papers: &[Prune],
         finishing: &Finishing,
         progress: &mut Progress<'_>,
     ) -> Result<FlushReport, DeliverError> {
@@ -474,49 +488,133 @@ impl Queue {
                 _ => pending.push(entry),
             }
         }
-        // An edition queued as both a Kindle book and a PDF goes as the one this Kindle takes;
-        // the other is dropped once it has gone.
+        // A paper's dated edition queued as both a Kindle book and a PDF goes as the one this
+        // Kindle takes; the other (its twin) is dropped once its partner has gone.
+        let prefixes: Vec<&str> = prune
+            .into_iter()
+            .chain(papers)
+            .map(|p| p.prefix.as_str())
+            .filter(|p| !p.is_empty())
+            .collect();
         let names: Vec<String> = pending.iter().map(|e| queue_name(e)).collect();
-        let (pending, twins): (Vec<PathBuf>, Vec<PathBuf>) =
-            pending.into_iter().partition(|entry| {
-                let name = queue_name(entry);
-                let (stem, other) = match (name.strip_suffix(".kfx"), name.strip_suffix(".pdf")) {
-                    (Some(stem), _) if !is_prepared(entry) && finishing.paper_pdf => (stem, "pdf"),
-                    (_, Some(stem)) if !finishing.paper_pdf => (stem, "kfx"),
-                    _ => return true,
-                };
-                !names.contains(&format!("{stem}.{other}"))
-            });
-        for (i, entry) in pending.iter().enumerate() {
-            let io = |source| DeliverError::Io {
-                path: entry.clone(),
-                source,
+        let partner_of = |entry: &Path| -> Option<String> {
+            let name = queue_name(entry);
+            if !prefixes.iter().any(|p| crate::deliver::is_dated(&name, p)) {
+                return None;
+            }
+            let (stem, other) = match (name.strip_suffix(".kfx"), name.strip_suffix(".pdf")) {
+                (Some(stem), _) if !is_prepared(entry) && finishing.paper_pdf => (stem, "pdf"),
+                (_, Some(stem)) if !finishing.paper_pdf => (stem, "kfx"),
+                _ => return None,
             };
+            let partner = format!("{stem}.{other}");
+            names.contains(&partner).then_some(partner)
+        };
+        let (twins, pending): (Vec<PathBuf>, Vec<PathBuf>) =
+            pending.into_iter().partition(|e| partner_of(e).is_some());
+        let mut sent: Vec<String> = Vec::new();
+        let mut failed: Vec<PathBuf> = Vec::new();
+        for (i, entry) in pending.iter().enumerate() {
             let name = queue_name(entry);
             progress(i + 1, pending.len(), &name);
-            let path = if is_prepared(entry) {
-                let (path, warnings) = deliver_prepared(entry, &name, conn, finishing)?;
-                report
-                    .warnings
-                    .extend(warnings.into_iter().map(|w| format!("{name}: {w}")));
-                path
-            } else {
-                let bytes = std::fs::read(entry).map_err(io)?;
-                deliver_named_on(&bytes, &name, conn, &DeliverOptions::default())?
-            };
-            report.delivered.push(path);
-            remove_entry(entry).map_err(io)?;
+            match self.deliver_entry(entry, &name, conn, finishing, &mut report) {
+                Ok(()) => sent.push(name),
+                Err(e) => {
+                    report.failed.push((name, e.to_string()));
+                    if e.stops_push() {
+                        report.stopped = true;
+                        break;
+                    }
+                    failed.push(entry.clone());
+                }
+            }
         }
+        if report.stopped {
+            // Nothing more can go: twins and partners all stay queued.
+            return Ok(report);
+        }
+        // A twin goes in place of a partner that failed; the partner then leaves the outbox,
+        // or a later push would send both forms.
+        let mut stand_ins = Vec::new();
         for twin in &twins {
-            remove_entry(twin).map_err(|source| DeliverError::Io {
-                path: twin.clone(),
-                source,
-            })?;
+            let partner = partner_of(twin).expect("a twin has a partner");
+            if sent.contains(&partner) {
+                if let Err(e) = remove_entry(twin) {
+                    report.warnings.push(format!(
+                        "{}: not removed from the outbox: {e}",
+                        queue_name(twin)
+                    ));
+                }
+            } else if let Some(p) = failed.iter().find(|p| queue_name(p) == partner) {
+                stand_ins.push((twin, p.clone()));
+            }
+        }
+        let total = pending.len() + stand_ins.len();
+        for (i, (twin, partner)) in stand_ins.into_iter().enumerate() {
+            let name = queue_name(twin);
+            let partner_name = queue_name(&partner);
+            progress(pending.len() + i + 1, total, &name);
+            if let Err(e) = self.deliver_entry(twin, &name, conn, finishing, &mut report) {
+                report.failed.push((name, e.to_string()));
+                if e.stops_push() {
+                    report.stopped = true;
+                    return Ok(report);
+                }
+                continue;
+            }
+            let why = match report.failed.iter().position(|(n, _)| *n == partner_name) {
+                Some(at) => report.failed.remove(at).1,
+                None => String::new(),
+            };
+            let removed = match remove_entry(&partner) {
+                Ok(()) => "taken out of the outbox".to_owned(),
+                Err(e) => format!("not taken out of the outbox ({e})"),
+            };
+            report.warnings.push(format!(
+                "{partner_name}: not sent ({why}); {name} went in its place and it was {removed}"
+            ));
         }
         if let Some(p) = prune {
-            report.pruned = prune_named_on_except(conn, &p.prefix, p.keep, &p.exempt)?;
+            match prune_named_on_except(conn, &p.prefix, p.keep, &p.exempt) {
+                Ok(pruned) => report.pruned = pruned,
+                Err(e) => report
+                    .warnings
+                    .push(format!("old editions not removed: {e}")),
+            }
         }
         Ok(report)
+    }
+
+    /// Delivers one entry and takes it out of the queue; warnings go into `report`.
+    fn deliver_entry(
+        &self,
+        entry: &Path,
+        name: &str,
+        conn: &mut Conn<'_>,
+        finishing: &Finishing,
+        report: &mut FlushReport,
+    ) -> Result<(), DeliverError> {
+        let (path, warnings) = if is_prepared(entry) {
+            deliver_prepared(entry, name, conn, finishing)?
+        } else {
+            let bytes = std::fs::read(entry).map_err(|source| DeliverError::Io {
+                path: entry.to_path_buf(),
+                source,
+            })?;
+            let d = deliver_named_reporting(&bytes, name, conn, &DeliverOptions::default())?;
+            (d.path, d.warnings)
+        };
+        report
+            .warnings
+            .extend(warnings.into_iter().map(|w| format!("{name}: {w}")));
+        report.delivered.push(path);
+        if let Err(e) = remove_entry(entry) {
+            report.warnings.push(format!(
+                "{name}: delivered, but not removed from the outbox, so a later push sends it \
+                 again: {e}"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -737,6 +835,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&Target::Folder(kindle.clone())),
                     Some(&prune),
+                    &[],
                     &finishing,
                     &mut |_, _, _| {},
                 )
@@ -749,6 +848,193 @@ mod tests {
             // old papers of either kind count toward `keep`
             assert_eq!(r.pruned, ["deckle-daily-2026-11-01.kfx"]);
         }
+    }
+
+    fn paper_prune() -> Prune {
+        Prune {
+            prefix: "deckle-daily-".into(),
+            keep: 7,
+            ..Default::default()
+        }
+    }
+
+    fn queued(q: &Queue) -> Vec<String> {
+        q.pending()
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn one_bad_entry_costs_only_that_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("p");
+        std::fs::write(&src, b"KFX").unwrap();
+        q.add(&src, "a.kfx", None).unwrap();
+        // A prepared book with nothing in it: no prepared.json, no fallback.
+        std::fs::create_dir_all(q.dir.join("b.book")).unwrap();
+        q.add(&src, "c.kfx", None).unwrap();
+        q.add(&src, "deckle-daily-2026-11-03.kfx", None).unwrap();
+        let kindle = tmp.path().join("kindle");
+        let r = q
+            .flush_with(
+                &mut Conn::new(&Target::Folder(kindle.clone())),
+                None,
+                &[paper_prune()],
+                &Finishing::default(),
+                &mut |_, _, _| {},
+            )
+            .unwrap();
+        assert_eq!(r.delivered.len(), 3, "{r:?}");
+        assert!(kindle.join("deckle-daily-2026-11-03.kfx").exists());
+        assert_eq!(r.failed.len(), 1, "{r:?}");
+        assert_eq!(r.failed[0].0, "b.kfx");
+        assert!(!r.stopped);
+        assert_eq!(queued(&q), ["b.book"], "it waits for the next push");
+    }
+
+    #[test]
+    fn a_book_and_a_pdf_of_one_stem_both_go() {
+        for pdf in [false, true] {
+            let tmp = tempfile::tempdir().unwrap();
+            let q = Queue::new(tmp.path().join("outbox"));
+            let src = tmp.path().join("p");
+            std::fs::write(&src, b"BOOK").unwrap();
+            q.add(&src, "Night Train.kfx", None).unwrap();
+            q.add(&src, "Night Train.pdf", None).unwrap();
+            let kindle = tmp.path().join("kindle");
+            let finishing = Finishing {
+                paper_pdf: pdf,
+                ..Default::default()
+            };
+            let r = q
+                .flush_with(
+                    &mut Conn::new(&Target::Folder(kindle.clone())),
+                    None,
+                    &[paper_prune()],
+                    &finishing,
+                    &mut |_, _, _| {},
+                )
+                .unwrap();
+            assert_eq!(r.delivered.len(), 2, "{pdf}");
+            assert!(kindle.join("Night Train.kfx").exists());
+            assert!(kindle.join("Night Train.pdf").exists());
+        }
+    }
+
+    #[test]
+    fn a_twin_whose_partner_fails_goes_in_its_place() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("p");
+        std::fs::write(&src, b"%PDF").unwrap();
+        // The Kindle book won't go (an empty prepared book); its PDF twin does instead.
+        std::fs::create_dir_all(q.dir.join("deckle-daily-2026-11-03.book")).unwrap();
+        q.add(&src, "deckle-daily-2026-11-03.pdf", None).unwrap();
+        let kindle = tmp.path().join("kindle");
+        let mut seen = Vec::new();
+        let r = q
+            .flush_with(
+                &mut Conn::new(&Target::Folder(kindle.clone())),
+                None,
+                &[paper_prune()],
+                &Finishing::default(),
+                &mut |i, n, name| seen.push((i, n, name.to_owned())),
+            )
+            .unwrap();
+        assert_eq!(r.delivered, [kindle.join("deckle-daily-2026-11-03.pdf")]);
+        assert!(r.failed.is_empty(), "taken out of the outbox: {r:?}");
+        assert!(
+            r.warnings
+                .iter()
+                .any(|w| w.starts_with("deckle-daily-2026-11-03.kfx: not sent")),
+            "{:?}",
+            r.warnings
+        );
+        assert!(q.pending().is_empty(), "the partner is no longer queued");
+        assert_eq!(
+            seen.last().unwrap(),
+            &(2, 2, "deckle-daily-2026-11-03.pdf".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_locked_book_on_the_kindle_costs_only_its_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("p");
+        std::fs::write(&src, b"KFX").unwrap();
+        for n in ["a.kfx", "b.kfx", "c.kfx"] {
+            q.add(&src, n, None).unwrap();
+        }
+        let root = tmp.path().join("mount");
+        std::fs::create_dir_all(root.join("documents")).unwrap();
+        std::fs::create_dir_all(root.join("system")).unwrap();
+        std::fs::write(root.join("documents/b.kfx"), b"OLD").unwrap();
+        let target = Target::MassStorage(crate::deliver::Device {
+            root: root.clone(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: None,
+        });
+        // b.kfx is locked in Finder: renaming over it is refused.
+        crate::deliver::FAIL_RENAME_OF.with(|f| *f.borrow_mut() = Some("b.kfx".into()));
+        let r = q.flush_with(
+            &mut Conn::new(&target),
+            None,
+            &[],
+            &Finishing::default(),
+            &mut |_, _, _| {},
+        );
+        crate::deliver::FAIL_RENAME_OF.with(|f| *f.borrow_mut() = None);
+        let r = r.unwrap();
+        assert!(!r.stopped, "{r:?}");
+        assert_eq!(r.delivered.len(), 2, "{r:?}");
+        assert_eq!(
+            r.failed,
+            [(
+                "b.kfx".to_owned(),
+                "b.kfx on the Kindle is locked or read-only; unlock or delete it".to_owned()
+            )]
+        );
+        assert_eq!(std::fs::read(root.join("documents/b.kfx")).unwrap(), b"OLD");
+        assert_eq!(queued(&q), ["b.kfx"]);
+    }
+
+    #[test]
+    fn an_unplugged_kindle_stops_the_push_and_keeps_the_outbox() {
+        let tmp = tempfile::tempdir().unwrap();
+        let q = Queue::new(tmp.path().join("outbox"));
+        let src = tmp.path().join("p");
+        std::fs::write(&src, b"KFX").unwrap();
+        q.add(&src, "a.kfx", None).unwrap();
+        q.add(&src, "b.kfx", None).unwrap();
+        // A fixed mount point: the folder is there, the Kindle isn't.
+        let root = tmp.path().join("Kindle");
+        std::fs::create_dir_all(&root).unwrap();
+        let target = Target::MassStorage(crate::deliver::Device {
+            root: root.clone(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: None,
+        });
+        let r = q
+            .flush_with(
+                &mut Conn::new(&target),
+                Some(&paper_prune()),
+                &[],
+                &Finishing::default(),
+                &mut |_, _, _| {},
+            )
+            .unwrap();
+        assert!(r.stopped);
+        assert_eq!(r.failed.len(), 1, "one error, not one per entry: {r:?}");
+        assert!(r.delivered.is_empty());
+        assert_eq!(queued(&q), ["a.kfx", "b.kfx"]);
+        assert!(std::fs::read_dir(&root).unwrap().next().is_none());
     }
 
     #[test]
@@ -947,6 +1233,7 @@ mod tests {
             .flush_with(
                 &mut Conn::new(&Target::Folder(dad)),
                 None,
+                &[],
                 &Finishing::default(),
                 &mut |_, _, _| {},
             )
@@ -1119,6 +1406,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&target),
                     None,
+                    &[],
                     &uncached(tmp.path()),
                     &mut |i, n, name| seen.push(format!("{i}/{n} {name}")),
                 )
@@ -1158,6 +1446,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&target),
                     None,
+                    &[],
                     &uncached(tmp.path()),
                     &mut |_, _, _| {},
                 )
@@ -1222,7 +1511,7 @@ mod tests {
             };
             let r = {
                 let mut conn = Conn::with_opener(&target, fake::open);
-                q.flush_with(&mut conn, Some(&prune), &finishing, &mut |_, _, _| {})
+                q.flush_with(&mut conn, Some(&prune), &[], &finishing, &mut |_, _, _| {})
                     .unwrap()
             };
             assert_eq!(
@@ -1273,6 +1562,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&target),
                     None,
+                    &[],
                     &uncached(tmp.path()),
                     &mut |_, _, _| {},
                 )
@@ -1305,6 +1595,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&Target::Folder(kindle.clone())),
                     None,
+                    &[],
                     &uncached(tmp.path()),
                     &mut |_, _, _| {},
                 )
@@ -1333,6 +1624,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&dad),
                     None,
+                    &[],
                     &uncached(tmp.path()),
                     &mut |_, _, _| {},
                 )
@@ -1345,6 +1637,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&mom),
                     None,
+                    &[],
                     &uncached(tmp.path()),
                     &mut |_, _, _| {},
                 )
@@ -1385,6 +1678,7 @@ mod tests {
                 .flush_with(
                     &mut Conn::new(&Target::Folder(tmp.path().join("k"))),
                     None,
+                    &[],
                     &uncached(tmp.path()),
                     &mut |_, _, _| opened.set(opened.get() + 1),
                 )

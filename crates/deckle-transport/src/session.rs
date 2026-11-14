@@ -4,8 +4,8 @@
 use std::any::Any;
 
 use crate::ptp::{
-    Container, ContainerKind, DeviceInfo, ObjectInfo, PtpError, StorageInfo, decode_u32_array, fmt,
-    op, rsp,
+    Container, ContainerKind, DeviceInfo, ObjectInfo, PtpError, StorageInfo, decode_u32_array,
+    encode_string, fmt, op, prop, rsp,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -41,7 +41,13 @@ pub enum MtpError {
     Missing(&'static str),
     #[error("the Kindle has no documents folder; nothing was written")]
     NoDocumentsFolder,
+    /// The data phase ended before the length it announced: a cable pulled mid-read.
+    #[error("the device sent {got} of {expected} bytes and stopped")]
+    ShortData { got: usize, expected: usize },
 }
+
+/// A container's header: length, kind, code, transaction id.
+const HEADER_LEN: usize = 12;
 
 /// PTP response: a session is already open (a previous run did not close it).
 pub const RSP_SESSION_ALREADY_OPEN: u16 = 0x201E;
@@ -82,7 +88,8 @@ impl Mtp {
         buf.truncate(n);
         let (c, mut payload) = Container::decode(&buf)?;
         if c.kind == ContainerKind::Data {
-            let total = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
+            let announced = u32::from_le_bytes(buf[..4].try_into().unwrap());
+            let total = announced as usize;
             let mut have = buf.len();
             while have < total {
                 let mut more = vec![0u8; READ_CHUNK.min(total - have)];
@@ -92,6 +99,14 @@ impl Mtp {
                 }
                 payload.extend_from_slice(&more[..n]);
                 have += n;
+            }
+            // Fewer bytes than announced is never the whole file. 0xFFFFFFFF means the device
+            // didn't know the length (a file over 4 GB): the data ends where it ends.
+            if announced != u32::MAX && have < total {
+                return Err(MtpError::ShortData {
+                    got: have.saturating_sub(HEADER_LEN),
+                    expected: total.saturating_sub(HEADER_LEN),
+                });
             }
         }
         Ok((c, payload))
@@ -351,6 +366,29 @@ impl Mtp {
             }
         }
         Ok(Some(at))
+    }
+
+    /// GetObjectPropDesc: whether property `code` of objects of `format` can be set (its
+    /// GetSet byte is 1).
+    pub fn object_prop_settable(&mut self, code: u16, format: u16) -> Result<bool, MtpError> {
+        let (data, _) = self.transact(
+            op::GET_OBJECT_PROP_DESC,
+            &[u32::from(code), u32::from(format)],
+            None,
+        )?;
+        let data = data.ok_or(MtpError::Missing("object property description"))?;
+        // Property code (u16), data type (u16), then GetSet (u8).
+        Ok(data.get(4).ok_or(PtpError::Truncated)? == &1)
+    }
+
+    /// Renames an object: SetObjectPropValue on its ObjectFileName.
+    pub fn rename(&mut self, handle: u32, name: &str) -> Result<(), MtpError> {
+        self.transact(
+            op::SET_OBJECT_PROP_VALUE,
+            &[handle, u32::from(prop::OBJECT_FILE_NAME)],
+            Some(&encode_string(name)),
+        )
+        .map(|_| ())
     }
 
     pub fn delete(&mut self, handle: u32) -> Result<(), MtpError> {

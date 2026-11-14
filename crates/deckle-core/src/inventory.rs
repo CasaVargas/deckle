@@ -406,7 +406,7 @@ fn space_of(root: &Path) -> Option<Space> {
 }
 
 fn mtp_err(e: MtpError) -> DeliverError {
-    DeliverError::Mtp(e.to_string())
+    DeliverError::from(e)
 }
 
 fn list_mtp(
@@ -551,7 +551,7 @@ fn walk(
         }),
         Target::Mtp(_) => match conn.mtp() {
             Some(Ok(dev)) => list_mtp(dev, want, cache, deep),
-            Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+            Some(Err(e)) => Err(DeliverError::from(e)),
             None => unreachable!("an MTP target always has a connection"),
         },
     }
@@ -587,7 +587,7 @@ pub fn remove_on(conn: &mut Conn<'_>, file: &str) -> Result<Vec<String>, Deliver
         Target::Mtp(_) => {
             return match conn.mtp() {
                 Some(Ok(dev)) => remove_mtp(dev, &parts),
-                Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+                Some(Err(e)) => Err(DeliverError::from(e)),
                 None => unreachable!("an MTP target always has a connection"),
             };
         }
@@ -670,7 +670,7 @@ pub fn read_book_on(conn: &mut Conn<'_>, file: &str) -> Result<BookFiles, Delive
         Target::Mtp(_) => {
             return match conn.mtp() {
                 Some(Ok(dev)) => read_book_mtp(dev, &parts),
-                Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+                Some(Err(e)) => Err(DeliverError::from(e)),
                 None => unreachable!("an MTP target always has a connection"),
             };
         }
@@ -761,68 +761,165 @@ pub fn copy_out(conn: &mut Conn<'_>, file: &str, dest: &Path) -> Result<(), Deli
 /// Puts a book [`copy_out`] kept back as `documents/<file>`, with its `.sdr` files. An existing
 /// file of that name is overwritten.
 pub fn copy_in(conn: &mut Conn<'_>, src: &Path, file: &str) -> Result<(), DeliverError> {
+    copy_in_book(conn, src, file)?;
+    copy_in_sdr(conn, src, file)
+}
+
+/// [`copy_in`]'s book file alone. A copy that fails leaves what was there.
+pub fn copy_in_book(conn: &mut Conn<'_>, src: &Path, file: &str) -> Result<(), DeliverError> {
     let parts = check_file(file)?;
     let name = *parts.last().expect("checked: at least one part");
-    let io = |path: PathBuf| move |source| DeliverError::Io { path, source };
     let book_path = src.join(name);
-    let book = std::fs::read(&book_path).map_err(io(book_path.clone()))?;
+    let book = std::fs::read(&book_path).map_err(|source| DeliverError::Io {
+        path: book_path,
+        source,
+    })?;
+    let Some(docs) = docs_dir(conn.target)? else {
+        let dev = match conn.mtp() {
+            Some(Ok(dev)) => dev,
+            Some(Err(e)) => return Err(DeliverError::from(e)),
+            None => unreachable!("an MTP target always has a connection"),
+        };
+        let (_, folders) = parts.split_last().expect("checked");
+        let (storage, parent) = mtp_parent(dev, folders)?;
+        // A leftover that couldn't be removed is harmless: the next send tries again.
+        let _ = crate::deliver::mtp_send_replacing(dev, storage, parent, name, &book, 0)?;
+        return Ok(());
+    };
+    let path: PathBuf = parts.iter().fold(docs, |p, s| p.join(s));
+    // Written beside and renamed: a failed copy leaves what was there.
+    crate::deliver::write_file(&path, &book)?;
+    Ok(())
+}
+
+/// [`copy_in`]'s `.sdr` files alone (the reading position and notes), into the book's `.sdr`
+/// folder. Nothing to do when none were kept.
+pub fn copy_in_sdr(conn: &mut Conn<'_>, src: &Path, file: &str) -> Result<(), DeliverError> {
+    let parts = check_file(file)?;
+    let name = *parts.last().expect("checked: at least one part");
     let sdr_src = src.join(sdr_name(name));
     let mut sdr = Vec::new();
     for n in names_in(&sdr_src) {
         let p = sdr_src.join(&n);
         if p.is_file() {
-            sdr.push((n, std::fs::read(&p).map_err(io(p.clone()))?));
+            let bytes = std::fs::read(&p).map_err(|source| DeliverError::Io {
+                path: p.clone(),
+                source,
+            })?;
+            sdr.push((n, bytes));
         }
     }
-    let docs = match conn.target {
-        Target::Folder(dir) => dir.clone(),
-        Target::MassStorage(dev) => dev.root.join("documents"),
-        Target::Mtp(_) => {
-            let dev = match conn.mtp() {
-                Some(Ok(dev)) => dev,
-                Some(Err(e)) => return Err(DeliverError::Mtp(e.to_string())),
-                None => unreachable!("an MTP target always has a connection"),
-            };
-            let (_, folders) = parts.split_last().expect("checked");
-            let (storage, parent) = mtp_parent(dev, folders)?;
-            if let Some(h) = dev.find_child(storage, parent, name).map_err(mtp_err)? {
+    if sdr.is_empty() {
+        return Ok(());
+    }
+    let Some(docs) = docs_dir(conn.target)? else {
+        let dev = match conn.mtp() {
+            Some(Ok(dev)) => dev,
+            Some(Err(e)) => return Err(DeliverError::from(e)),
+            None => unreachable!("an MTP target always has a connection"),
+        };
+        let (_, folders) = parts.split_last().expect("checked");
+        let (storage, parent) = mtp_parent(dev, folders)?;
+        let folder = dev
+            .ensure_folder(storage, parent, &sdr_name(name))
+            .map_err(mtp_err)?;
+        // Delete, then send: a known limit for `.sdr` files. The kept copy on the computer
+        // stays until a put back succeeds, so a failed send can be tried again.
+        for (n, bytes) in &sdr {
+            if let Some(h) = dev.find_child(storage, folder, n).map_err(mtp_err)? {
                 dev.delete(h).map_err(mtp_err)?;
             }
-            dev.send_file(storage, parent, name, &book)
-                .map_err(mtp_err)?;
-            if !sdr.is_empty() {
-                let folder = dev
-                    .ensure_folder(storage, parent, &sdr_name(name))
-                    .map_err(mtp_err)?;
-                for (n, bytes) in &sdr {
-                    if let Some(h) = dev.find_child(storage, folder, n).map_err(mtp_err)? {
-                        dev.delete(h).map_err(mtp_err)?;
-                    }
-                    dev.send_file(storage, folder, n, bytes).map_err(mtp_err)?;
-                }
-            }
-            return Ok(());
+            dev.send_file(storage, folder, n, bytes).map_err(mtp_err)?;
         }
+        return Ok(());
     };
-    let path: PathBuf = parts.iter().fold(docs, |p, s| p.join(s));
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(io(dir.to_path_buf()))?;
-    }
-    std::fs::write(&path, &book).map_err(io(path.clone()))?;
-    if !sdr.is_empty() {
-        let dir = path.with_extension("sdr");
-        std::fs::create_dir_all(&dir).map_err(io(dir.clone()))?;
-        for (n, bytes) in &sdr {
-            let p = dir.join(n);
-            std::fs::write(&p, bytes).map_err(io(p.clone()))?;
-        }
+    let dir = parts
+        .iter()
+        .fold(docs, |p, s| p.join(s))
+        .with_extension("sdr");
+    for (n, bytes) in &sdr {
+        crate::deliver::write_file(&dir.join(n), bytes)?;
     }
     Ok(())
+}
+
+/// The `documents` folder on disk to write into: a folder export, or a mass-storage Kindle that
+/// is still there (an error when it was unplugged); `None` over MTP.
+fn docs_dir(target: &Target) -> Result<Option<PathBuf>, DeliverError> {
+    match target {
+        Target::Folder(dir) => Ok(Some(dir.clone())),
+        Target::MassStorage(dev) => {
+            crate::deliver::kindle_still_there(&dev.root)?;
+            Ok(Some(dev.root.join("documents")))
+        }
+        Target::Mtp(_) => Ok(None),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copy_in_that_fails_half_way_leaves_the_book_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kept = tmp.path().join("kept");
+        std::fs::create_dir_all(&kept).unwrap();
+        std::fs::write(kept.join("Old.azw3"), b"the kept copy").unwrap();
+        let shelf = tmp.path().join("shelf");
+        std::fs::create_dir_all(&shelf).unwrap();
+        std::fs::write(shelf.join("Old.azw3"), b"on the Kindle").unwrap();
+        let target = Target::Folder(shelf.clone());
+        crate::deliver::FAIL_WRITE_AFTER.with(|f| f.set(Some(2)));
+        let r = copy_in(&mut Conn::new(&target), &kept, "Old.azw3");
+        crate::deliver::FAIL_WRITE_AFTER.with(|f| f.set(None));
+        assert!(r.is_err());
+        assert_eq!(
+            std::fs::read(shelf.join("Old.azw3")).unwrap(),
+            b"on the Kindle"
+        );
+        assert_eq!(names_in(&shelf), ["Old.azw3"]);
+    }
+
+    #[test]
+    fn a_copy_in_to_an_unplugged_kindle_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let kept = tmp.path().join("kept");
+        std::fs::create_dir_all(kept.join("Old.sdr")).unwrap();
+        std::fs::write(kept.join("Old.azw3"), b"the kept copy").unwrap();
+        std::fs::write(kept.join("Old.sdr/old.yjf"), b"position").unwrap();
+        // A fixed mount point: the folder is there, the Kindle isn't.
+        let mount = tmp.path().join("Kindle");
+        std::fs::create_dir_all(&mount).unwrap();
+        let target = Target::MassStorage(crate::deliver::Device {
+            root: mount.clone(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: None,
+        });
+        let mut conn = Conn::new(&target);
+        assert!(
+            copy_in_book(&mut conn, &kept, "Old.azw3")
+                .unwrap_err()
+                .stops_push()
+        );
+        assert!(
+            copy_in_sdr(&mut conn, &kept, "Old.azw3")
+                .unwrap_err()
+                .stops_push()
+        );
+        assert!(names_in(&mount).is_empty());
+        // A folder isn't a device: it's made as before.
+        let folder = tmp.path().join("export");
+        copy_in(
+            &mut Conn::new(&Target::Folder(folder.clone())),
+            &kept,
+            "Old.azw3",
+        )
+        .unwrap();
+        assert!(folder.join("Old.sdr/old.yjf").is_file());
+    }
 
     #[test]
     fn only_books_inside_documents_can_be_removed() {

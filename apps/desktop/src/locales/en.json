@@ -75,5 +75,9 @@
   "settings.language.label": "Language",
   "settings.language.note": "The app's own words. The paper and your books keep their own language.",
   "settings.language.draft": "Each translation starts as an AI draft that readers correct.",
-  "settings.language.help": "Help translate"
+  "settings.language.help": "Help translate",
+  "daily.run.notSent": "Not sent: {name} ({why})",
+  "daily.run.notSentNote": "These wait in the outbox and go with the next push.",
+  "daily.run.missedKindle": "This paper didn't reach your Kindle. It waits in the outbox and goes with the next push.",
+  "daily.run.missedReader": "This paper didn't reach your Kobo or PocketBook. It waits in the outbox and goes with the next push."
 }

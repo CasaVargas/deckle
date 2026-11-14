@@ -115,6 +115,74 @@ pub enum DeliverError {
     /// Not a book Deckle may touch, or not there (inventory remove).
     #[error("{0}")]
     Refused(String),
+    /// The device is gone: the MTP session or cable failed, or the drive was unplugged. A push
+    /// stops here instead of failing once per entry.
+    #[error("{0}")]
+    Gone(String),
+}
+
+impl DeliverError {
+    /// The device itself is gone, so nothing more can go this session; any other error belongs
+    /// to one file (the Kindle refused it or is full, the entry can't be read).
+    pub fn stops_push(&self) -> bool {
+        matches!(self, DeliverError::Gone(_))
+    }
+
+    /// [`From<MtpError>`] with the step and file it failed on.
+    fn mtp_at(what: &str, e: MtpError) -> Self {
+        match e {
+            MtpError::Response { .. } => DeliverError::Mtp(format!("{what}: {e}")),
+            _ => DeliverError::Gone(format!("MTP: {what}: {e}")),
+        }
+    }
+}
+
+/// An answer from the device (a refused file, a full Kindle) costs one file; anything else
+/// means the session or the cable is gone, or the Kindle has no `documents` folder.
+impl From<MtpError> for DeliverError {
+    fn from(e: MtpError) -> Self {
+        match e {
+            MtpError::Response { .. } => DeliverError::Mtp(e.to_string()),
+            _ => DeliverError::Gone(format!("MTP: {e}")),
+        }
+    }
+}
+
+/// A Kindle mounted as a drive is still there: `documents/` and `system/`, as [`detect_in`]
+/// finds it. A fixed mount point leaves an empty folder after unplugging, which a write would
+/// fill on the computer's own disk.
+fn kindle_present(root: &Path) -> bool {
+    root.join("documents").is_dir() && root.join("system").is_dir()
+}
+
+/// The drive refused a write as a whole: mounted read-only, or its folder isn't writable. Every
+/// other book would fail the same way, so a push stops instead of trying each.
+pub(crate) fn drive_refuses(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+    )
+}
+
+/// `Ok` while the mass-storage Kindle at `root` is still there; else the error that stops
+/// whatever was writing to it. Every write to a mass-storage Kindle asks this first.
+pub(crate) fn kindle_still_there(root: &Path) -> Result<(), DeliverError> {
+    if kindle_present(root) {
+        Ok(())
+    } else {
+        Err(DeliverError::Gone(format!(
+            "the Kindle at {} is no longer connected",
+            root.display()
+        )))
+    }
+}
+
+/// A delivered book: where it went, and what went wrong once it was in place (a sidecar, a
+/// system file or the thumbnail that couldn't be written). The book itself is delivered.
+#[derive(Clone, Debug)]
+pub struct Delivered {
+    pub path: PathBuf,
+    pub warnings: Vec<String>,
 }
 
 const MAX_FILENAME_LEN: usize = 120;
@@ -301,49 +369,103 @@ pub fn deliver_on(
     deliver_named_on(kfx, &device_filename(info), conn, opts)
 }
 
-/// [`deliver_on`] under a caller-chosen file name (dated editions use sortable names).
+/// [`deliver_on`] under a caller-chosen file name (dated editions use sortable names). What
+/// went wrong after the book was in place goes to stderr; [`deliver_named_reporting`] returns it.
 pub fn deliver_named_on(
     kfx: &[u8],
     name: &str,
     conn: &mut Conn<'_>,
     opts: &DeliverOptions,
 ) -> Result<PathBuf, DeliverError> {
+    let d = deliver_named_reporting(kfx, name, conn, opts)?;
+    for w in &d.warnings {
+        eprintln!("{name}: {w}");
+    }
+    Ok(d.path)
+}
+
+/// [`deliver_named_on`], returning what went wrong once the book was in place as warnings: an
+/// `Err` means the book itself didn't go, and the copy already there is as it was.
+pub fn deliver_named_reporting(
+    kfx: &[u8],
+    name: &str,
+    conn: &mut Conn<'_>,
+    opts: &DeliverOptions,
+) -> Result<Delivered, DeliverError> {
     let name = name.to_owned();
+    let mut warnings = Vec::new();
+    let mut warn = |r: Result<(), DeliverError>| {
+        if let Err(e) = r {
+            warnings.push(e.to_string());
+        }
+    };
     match conn.target {
         Target::Folder(dir) => {
+            remove_leftovers(dir);
             let path = write_file(&dir.join(&name), kfx)?;
-            write_sidecars(&path, &opts.sidecars)?;
-            write_system_files(dir, &opts.system_files)?;
-            Ok(path)
+            warn(write_sidecars(&path, &opts.sidecars));
+            warn(write_system_files(dir, &opts.system_files));
+            Ok(Delivered { path, warnings })
         }
         Target::MassStorage(dev) => {
-            let path = write_file(&dev.root.join("documents").join(&name), kfx)?;
-            write_sidecars(&path, &opts.sidecars)?;
-            write_system_files(&dev.root, &opts.system_files)?;
+            kindle_still_there(&dev.root)?;
+            remove_leftovers(&dev.root.join("documents"));
+            let path = dev.root.join("documents").join(&name);
+            // `documents/` itself refusing (mounted read-only) stops a push; one locked book is
+            // that book's failure alone.
+            write_beside_at(&path, kfx).map_err(|b| {
+                if b.folder_refuses() {
+                    DeliverError::Gone(format!(
+                        "the Kindle at {} can't be written to: {}",
+                        dev.root.display(),
+                        b.into_inner()
+                    ))
+                } else if b.locked() {
+                    DeliverError::Refused(format!(
+                        "{name} on the Kindle is locked or read-only; unlock or delete it"
+                    ))
+                } else {
+                    DeliverError::Io {
+                        path: path.clone(),
+                        source: b.into_inner(),
+                    }
+                }
+            })?;
+            warn(write_sidecars(&path, &opts.sidecars));
+            warn(write_system_files(&dev.root, &opts.system_files));
             if let Some((thumb_name, jpeg)) = &opts.thumbnail {
-                crate::thumbnail::install(&dev.root, thumb_name, jpeg)
-                    .map_err(|e| DeliverError::Thumbnail(e.to_string()))?;
+                warn(
+                    crate::thumbnail::install(&dev.root, thumb_name, jpeg)
+                        .map(|_| ())
+                        .map_err(|e| DeliverError::Thumbnail(e.to_string())),
+                );
             }
             let _ = crate::thumbnail::sync(&dev.root);
-            Ok(path)
+            Ok(Delivered { path, warnings })
         }
         Target::Mtp(mtp) => {
             let serial = mtp.serial.clone();
             match conn.mtp() {
                 Some(Ok(dev)) => deliver_mtp(kfx, &name, serial, dev, opts),
-                Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+                Some(Err(e)) => Err(DeliverError::from(e)),
                 None => unreachable!("an MTP target always has a connection"),
             }
         }
     }
 }
 
+/// Writes each file it can; the first error is returned once all were tried.
 fn write_system_files(root: &Path, files: &[(Vec<String>, Vec<u8>)]) -> Result<(), DeliverError> {
+    let mut first = Ok(());
     for (parts, bytes) in files {
         let path = parts.iter().fold(root.to_path_buf(), |p, s| p.join(s));
-        write_file(&path, bytes)?;
+        if let Err(e) = write_file(&path, bytes)
+            && first.is_ok()
+        {
+            first = Err(e);
+        }
     }
-    Ok(())
+    first
 }
 
 /// `<book>.sdr/<name>` files beside a delivered KFX (book first, sidecars after).
@@ -367,18 +489,159 @@ fn write_sidecars(book: &Path, sidecars: &[(String, Vec<u8>)]) -> Result<(), Del
     Ok(())
 }
 
-fn write_file(path: &Path, data: &[u8]) -> Result<PathBuf, DeliverError> {
-    let io = |source: std::io::Error| DeliverError::Io {
+/// [`write_beside`], its error naming `path`.
+pub(crate) fn write_file(path: &Path, data: &[u8]) -> Result<PathBuf, DeliverError> {
+    write_beside(path, data).map_err(|source| DeliverError::Io {
         path: path.to_path_buf(),
         source,
-    };
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(io)?;
-    }
-    let mut f = std::fs::File::create(path).map_err(io)?;
-    f.write_all(data).map_err(io)?;
-    f.sync_all().map_err(io)?;
+    })?;
     Ok(path.to_path_buf())
+}
+
+/// Writes `data` to `path` so that `path` only ever holds the old file or the whole new one: the
+/// bytes go to a hidden `.<name>.<pid>.part` beside it, flushed to the drive, then renamed over
+/// it in one step. On any error the `.part` file is removed and the old file was never touched.
+/// The process id keeps two Deckle processes off one temporary file.
+pub(crate) fn write_beside(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    write_beside_at(path, data).map_err(Beside::into_inner)
+}
+
+/// Where [`write_beside_at`] failed.
+#[derive(Debug)]
+pub(crate) enum Beside {
+    /// The folder refused the temporary file: nothing can be written there (mounted read-only,
+    /// a folder that isn't writable).
+    Folder(std::io::Error),
+    /// The temporary file was made, then the write, the flush or the rename failed: this file
+    /// alone (a locked book refuses the rename).
+    File(std::io::Error),
+}
+
+impl Beside {
+    pub(crate) fn into_inner(self) -> std::io::Error {
+        match self {
+            Beside::Folder(e) | Beside::File(e) => e,
+        }
+    }
+
+    /// The device can't be written to at all: a push stops here.
+    pub(crate) fn folder_refuses(&self) -> bool {
+        matches!(self, Beside::Folder(e) if drive_refuses(e))
+    }
+
+    /// The book already there refused to be replaced: locked or read-only.
+    pub(crate) fn locked(&self) -> bool {
+        matches!(self, Beside::File(e) if e.kind() == std::io::ErrorKind::PermissionDenied)
+    }
+}
+
+/// [`write_beside`], saying whether the folder or the file failed.
+pub(crate) fn write_beside_at(path: &Path, data: &[u8]) -> Result<(), Beside> {
+    let dir = path.parent().unwrap_or(Path::new(""));
+    if !dir.as_os_str().is_empty() {
+        std::fs::create_dir_all(dir).map_err(Beside::Folder)?;
+    }
+    let name = path
+        .file_name()
+        .ok_or_else(|| Beside::File(std::io::Error::other("no file name")))?
+        .to_string_lossy();
+    let mut part = dir.join(format!(".{name}.{}.part", std::process::id()));
+    let mut f = match std::fs::File::create(&part) {
+        Ok(f) => f,
+        // A stale, read-only `.part` an earlier process with this id left: try one other name
+        // (still digits, so a later cleanup finds it) before calling the folder unwritable.
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos());
+            part = dir.join(format!(".{name}.{nanos}.part"));
+            std::fs::File::create(&part).map_err(Beside::Folder)?
+        }
+        Err(e) => return Err(Beside::Folder(e)),
+    };
+    let written = (|| {
+        write_data(&mut f, data)?;
+        f.sync_all()?;
+        drop(f);
+        #[cfg(test)]
+        if FAIL_RENAME_OF.with(|f| f.borrow().as_deref() == Some(&*name)) {
+            return Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        }
+        std::fs::rename(&part, path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&part);
+    }
+    written.map_err(Beside::File)
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Tests: the next writes stop with an error after this many bytes (a full drive, a pulled
+    /// cable).
+    pub(crate) static FAIL_WRITE_AFTER: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+    /// Tests: renaming onto this file name is refused as a locked file is (`chflags uchg` in
+    /// Finder gives EPERM).
+    pub(crate) static FAIL_RENAME_OF: std::cell::RefCell<Option<String>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+fn write_data(f: &mut std::fs::File, data: &[u8]) -> std::io::Result<()> {
+    #[cfg(test)]
+    if let Some(n) = FAIL_WRITE_AFTER.with(std::cell::Cell::get) {
+        f.write_all(&data[..n.min(data.len())])?;
+        return Err(std::io::Error::other("the write stopped half-way"));
+    }
+    f.write_all(data)
+}
+
+/// The extensions of what Deckle writes into `documents/` or `Deckle/`.
+const BOOK_EXTENSIONS: &[&str] = &["kfx", "azw3", "azw", "mobi", "prc", "pdf", "txt", "epub"];
+
+/// Only the shapes Deckle writes: `.<book>.<digits>.part` ([`write_beside`]) and `.<epub>.tmp`
+/// (an older Deckle's Kobo and PocketBook deliveries), where `<book>` has a book's extension. A
+/// folder the owner picked may hold their own `.notes.tmp`.
+fn is_deckle_temp(file: &str) -> bool {
+    let Some(rest) = file.strip_prefix('.') else {
+        return false;
+    };
+    if let Some(book) = rest.strip_suffix(".tmp") {
+        return book.ends_with(".epub");
+    }
+    let Some((book, pid)) = rest.strip_suffix(".part").and_then(|r| r.rsplit_once('.')) else {
+        return false;
+    };
+    !pid.is_empty()
+        && pid.bytes().all(|b| b.is_ascii_digit())
+        && book
+            .rsplit_once('.')
+            .is_some_and(|(stem, ext)| !stem.is_empty() && BOOK_EXTENSIONS.contains(&ext))
+}
+
+/// A temporary file [`write_beside`] (`.<name>.<pid>.part`) or an older Deckle (`.<name>.tmp`)
+/// left in `dir` when a cable was pulled, older than an hour, so another Deckle's live write is
+/// spared. Run at the start of a delivery to that folder.
+pub(crate) fn remove_leftovers(dir: &Path) {
+    const AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        if !is_deckle_temp(&e.file_name().to_string_lossy()) {
+            continue;
+        }
+        let old = e
+            .metadata()
+            .ok()
+            .filter(|m| m.is_file())
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > AGE);
+        if old {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
 }
 
 /// `XRAY.entities.<ASIN>.asc`
@@ -391,6 +654,160 @@ pub fn is_deckle_sidecar(name: &str) -> bool {
     is_xray_sidecar(name) || (name.starts_with("LanguageLayer.") && name.ends_with(".kll"))
 }
 
+/// Room left free on an MTP Kindle beyond what a send needs: it writes its own index files after.
+const MTP_MARGIN: u64 = 1 << 20;
+
+/// In an error when the copy already on the Kindle was removed before the send failed, which
+/// happens only on a Kindle that can't rename over MTP.
+pub const OLD_COPY_REMOVED: &str = "the old copy had been removed first";
+
+/// `<name>.<n>.part`: a temporary name [`mtp_send_replacing`] gave a send.
+fn is_part_of(file: &str, name: &str) -> bool {
+    let lower = file.to_ascii_lowercase();
+    lower
+        .strip_prefix(&format!("{}.", name.to_ascii_lowercase()))
+        .and_then(|rest| rest.strip_suffix(".part"))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The Kindle can rename a file: it lists SetObjectPropValue and GetObjectPropDesc, and says
+/// a file's name can be set. Not known for any Kindle yet (`docs/devices.md`).
+fn can_rename(dev: &mut Mtp) -> bool {
+    use deckle_transport::ptp::{fmt, op, prop};
+    dev.device_info().is_ok_and(|i| {
+        i.supports(op::SET_OBJECT_PROP_VALUE) && i.supports(op::GET_OBJECT_PROP_DESC)
+    }) && dev
+        .object_prop_settable(prop::OBJECT_FILE_NAME, fmt::UNDEFINED)
+        .unwrap_or(false)
+}
+
+/// Deletes `parent/<name>` if it's there; for cleaning up after a failure, so errors are moot.
+fn remove_if_there(dev: &mut Mtp, storage: u32, parent: u32, name: &str) {
+    if let Ok(Some(h)) = dev.find_child(storage, parent, name) {
+        let _ = dev.delete(h);
+    }
+}
+
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1_000_000.0)
+}
+
+/// Sends `bytes` as `parent/<name>`, replacing a file of that name so that a failed send leaves
+/// the old copy whole (device delivery safety design). `extra` is what's sent with it (the
+/// sidecars), for the room check. Returns warnings.
+///
+/// 0. Leftover `<name>.<n>.part` files are earlier failed sends when `<name>` is there, and
+///    are deleted; without `<name>` one may be the only copy, so they stay until the new copy
+///    is in place.
+/// 1. Not enough room fails before anything is touched. (Unknown free space doesn't.)
+/// 2. The book goes as `<name>.<n>.part`, a number no leftover has; 3. the old copy is
+///    deleted; 4. the `.part` is renamed to `<name>`.
+/// 5. A send that fails removes its `.part`: the old copy is as it was.
+/// 6. A rename that fails leaves the new copy whole under its `.part` name; the error says so.
+///
+/// A Kindle that can't rename gets the old way, with the room check: delete, then send. A
+/// failed send there has lost the old copy, and the error says [`OLD_COPY_REMOVED`]; after a
+/// pulled cable a partial file may stay under the book's name until the next send.
+pub(crate) fn mtp_send_replacing(
+    dev: &mut Mtp,
+    storage: u32,
+    parent: u32,
+    name: &str,
+    bytes: &[u8],
+    extra: u64,
+) -> Result<Vec<String>, DeliverError> {
+    let m = DeliverError::from;
+    let mut warnings = Vec::new();
+    let children = dev.list(storage, parent).map_err(m)?;
+    let existing = children
+        .iter()
+        .find(|(_, i)| i.filename.eq_ignore_ascii_case(name))
+        .map(|(h, i)| (*h, u64::from(i.size)));
+    let leftovers: Vec<(u32, String)> = children
+        .iter()
+        .filter(|(_, i)| is_part_of(&i.filename, name))
+        .map(|(h, i)| (*h, i.filename.clone()))
+        .collect();
+    let part = (1..)
+        .map(|n| format!("{name}.{n}.part"))
+        .find(|p| !leftovers.iter().any(|(_, f)| f.eq_ignore_ascii_case(p)))
+        .expect("a free number");
+    let rename = can_rename(dev);
+    if let Ok(s) = dev.storage_info(storage) {
+        let need = bytes.len() as u64 + extra + MTP_MARGIN;
+        // Without a rename the old copy goes first, so its room counts.
+        let free = match (rename, existing) {
+            (false, Some((_, old))) => s.free_bytes.saturating_add(old),
+            _ => s.free_bytes,
+        };
+        if free < need {
+            return Err(DeliverError::Mtp(format!(
+                "not enough room on the Kindle for {name}: it needs {}, {} is free; the copy \
+                 already there is as it was",
+                megabytes(need),
+                megabytes(free)
+            )));
+        }
+    }
+    if existing.is_some() {
+        for (h, _) in &leftovers {
+            dev.delete(*h).map_err(m)?;
+        }
+    }
+    let at = |what: String| move |e: MtpError| DeliverError::mtp_at(&what, e);
+    if rename {
+        let sent = match dev.send_file(storage, parent, &part, bytes) {
+            Ok(h) => h,
+            Err(e) => {
+                remove_if_there(dev, storage, parent, &part);
+                return Err(at(format!("sending documents/{name}"))(e));
+            }
+        };
+        if let Some((old, _)) = existing
+            && let Err(e) = dev.delete(old)
+        {
+            remove_if_there(dev, storage, parent, &part);
+            return Err(at(format!("removing the old documents/{name}"))(e));
+        }
+        dev.rename(sent, name).map_err(at(format!(
+            "renaming documents/{part} to {name} (the new copy stays on the Kindle as {part} \
+             until this book is sent again{})",
+            if existing.is_some() {
+                format!("; {OLD_COPY_REMOVED}")
+            } else {
+                String::new()
+            }
+        )))?;
+    } else {
+        if let Some((old, _)) = existing {
+            dev.delete(old).map_err(m)?;
+        }
+        if let Err(e) = dev.send_file(storage, parent, name, bytes) {
+            // Try to take half a book off the book's name. With the session still up this works;
+            // after a pulled cable it can't, and the partial file stays under the name until the
+            // next send of this book replaces it.
+            remove_if_there(dev, storage, parent, name);
+            let what = match existing {
+                Some(_) => format!(
+                    "sending documents/{name} ({OLD_COPY_REMOVED}: this Kindle can't rename \
+                     over MTP; send the book again)"
+                ),
+                None => format!("sending documents/{name}"),
+            };
+            return Err(at(what)(e));
+        }
+    }
+    // The new copy is in place: a leftover kept for want of `<name>` can go.
+    if existing.is_none() {
+        for (h, file) in leftovers {
+            if let Err(e) = dev.delete(h) {
+                warnings.push(format!("documents/{file} not removed: {e}"));
+            }
+        }
+    }
+    Ok(warnings)
+}
+
 /// Sends the book into the Kindle's `documents` folder over MTP, replacing a same-named file.
 /// Returns a pseudo path `mtp://<serial>/documents/<name>`.
 fn deliver_mtp(
@@ -399,32 +816,54 @@ fn deliver_mtp(
     serial: Option<String>,
     dev: &mut Mtp,
     opts: &DeliverOptions,
-) -> Result<PathBuf, DeliverError> {
-    let sidecars = &opts.sidecars;
-    let m = |e: &dyn std::fmt::Display| DeliverError::Mtp(e.to_string());
-    // The step and file in the error: the Kindle answers a refused write with a bare code.
-    let step = |what: String| move |e: MtpError| DeliverError::Mtp(format!("{what}: {e}"));
-    let storages = dev.storages().map_err(|e| m(&e))?;
+) -> Result<Delivered, DeliverError> {
+    let m = DeliverError::from;
+    let storages = dev.storages().map_err(m)?;
     let storage = *storages
         .first()
         .ok_or_else(|| DeliverError::Mtp("device reports no storage".into()))?;
-    let docs = dev.find_documents(storage).map_err(|e| m(&e))?;
-    if let Some(existing) = dev.find_child(storage, docs, name).map_err(|e| m(&e))? {
-        dev.delete(existing).map_err(|e| m(&e))?;
+    let docs = dev.find_documents(storage).map_err(m)?;
+    let extras: usize = opts.sidecars.iter().map(|(_, b)| b.len()).sum::<usize>()
+        + opts
+            .system_files
+            .iter()
+            .map(|(_, b)| b.len())
+            .sum::<usize>();
+    let mut warnings = mtp_send_replacing(dev, storage, docs, name, kfx, extras as u64)?;
+    // The book is in place: what fails from here is a warning.
+    if let Err(e) = mtp_extras(dev, storage, docs, name, opts) {
+        warnings.push(e.to_string());
     }
-    dev.send_file(storage, docs, name, kfx)
-        .map_err(step(format!("sending documents/{name}")))?;
+    Ok(Delivered {
+        path: PathBuf::from(format!(
+            "mtp://{}/documents/{name}",
+            serial.unwrap_or_else(|| "kindle".into())
+        )),
+        warnings,
+    })
+}
+
+/// The book's sidecars (yesterday's removed first) and the system files, after the book.
+fn mtp_extras(
+    dev: &mut Mtp,
+    storage: u32,
+    docs: u32,
+    name: &str,
+    opts: &DeliverOptions,
+) -> Result<(), DeliverError> {
+    let sidecars = &opts.sidecars;
+    let m = DeliverError::from;
+    // The step and file in the error: the Kindle answers a refused write with a bare code.
+    let step = |what: String| move |e: MtpError| DeliverError::mtp_at(&what, e);
     let sdr_name = Path::new(name)
         .with_extension("sdr")
         .to_string_lossy()
         .into_owned();
-    let existing_sdr = dev
-        .find_child(storage, docs, &sdr_name)
-        .map_err(|e| m(&e))?;
+    let existing_sdr = dev.find_child(storage, docs, &sdr_name).map_err(m)?;
     if let Some(sdr) = existing_sdr {
-        for (h, info) in dev.list(storage, sdr).map_err(|e| m(&e))? {
+        for (h, info) in dev.list(storage, sdr).map_err(m)? {
             if is_deckle_sidecar(&info.filename) {
-                dev.delete(h).map_err(|e| m(&e))?;
+                dev.delete(h).map_err(m)?;
             }
         }
     }
@@ -441,7 +880,7 @@ fn deliver_mtp(
         }
     }
     if !opts.system_files.is_empty() {
-        let root = dev.object_info(docs).map_err(|e| m(&e))?.parent;
+        let root = dev.object_info(docs).map_err(m)?.parent;
         for (parts, bytes) in &opts.system_files {
             let Some((file, folders)) = parts.split_last() else {
                 continue;
@@ -452,17 +891,14 @@ fn deliver_mtp(
                     .ensure_folder(storage, at, f)
                     .map_err(step(format!("creating {}", parts.join("/"))))?;
             }
-            if let Some(old) = dev.find_child(storage, at, file).map_err(|e| m(&e))? {
-                dev.delete(old).map_err(|e| m(&e))?;
+            if let Some(old) = dev.find_child(storage, at, file).map_err(m)? {
+                dev.delete(old).map_err(m)?;
             }
             dev.send_file(storage, at, file, bytes)
                 .map_err(step(format!("sending {}", parts.join("/"))))?;
         }
     }
-    Ok(PathBuf::from(format!(
-        "mtp://{}/documents/{name}",
-        serial.unwrap_or_else(|| "kindle".into())
-    )))
+    Ok(())
 }
 
 /// The names to remove so that only the `keep` greatest (by name) `<prefix>….kfx` files are
@@ -535,7 +971,7 @@ pub fn prune_named_on_except(
         Target::Mtp(_) => {
             return match conn.mtp() {
                 Some(Ok(dev)) => prune_mtp(dev, prefix, keep, exempt),
-                Some(Err(e)) => Err(DeliverError::Mtp(e.to_string())),
+                Some(Err(e)) => Err(DeliverError::from(e)),
                 None => unreachable!("an MTP target always has a connection"),
             };
         }
@@ -566,7 +1002,7 @@ fn prune_mtp(
     keep: usize,
     exempt: &[String],
 ) -> Result<Vec<String>, DeliverError> {
-    let m = |e: MtpError| DeliverError::Mtp(e.to_string());
+    let m = DeliverError::from;
     let storage = *dev
         .storages()
         .map_err(m)?
@@ -588,7 +1024,7 @@ fn prune_mtp(
         for (handle, info) in &children {
             if info.filename == *name || info.filename == sdr_name {
                 dev.delete(*handle).map_err(|e| {
-                    DeliverError::Mtp(format!("deleting documents/{}: {e}", info.filename))
+                    DeliverError::mtp_at(&format!("deleting documents/{}", info.filename), e)
                 })?;
             }
         }
@@ -667,10 +1103,342 @@ mod tests {
         );
     }
 
+    /// What's in `dir`, sorted.
+    fn names(dir: &Path) -> Vec<String> {
+        let mut n: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        n.sort();
+        n
+    }
+
+    #[test]
+    fn a_write_that_fails_half_way_leaves_the_old_file_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let book = tmp.path().join("A - Book.kfx");
+        std::fs::write(&book, b"the old copy").unwrap();
+        FAIL_WRITE_AFTER.with(|f| f.set(Some(4)));
+        let r = write_file(&book, b"the new copy, longer");
+        FAIL_WRITE_AFTER.with(|f| f.set(None));
+        assert!(matches!(r, Err(DeliverError::Io { .. })), "{r:?}");
+        assert_eq!(std::fs::read(&book).unwrap(), b"the old copy");
+        assert_eq!(names(tmp.path()), ["A - Book.kfx"], "no .part is left");
+        // A write that goes through replaces it, again with nothing left beside it.
+        write_file(&book, b"the new copy").unwrap();
+        assert_eq!(std::fs::read(&book).unwrap(), b"the new copy");
+        assert_eq!(names(tmp.path()), ["A - Book.kfx"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stale_read_only_part_of_this_process_doesnt_read_as_a_refusing_drive() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let book = tmp.path().join("a.kfx");
+        // Left by an earlier process that had this one's id, and read-only.
+        let stale = tmp
+            .path()
+            .join(format!(".a.kfx.{}.part", std::process::id()));
+        std::fs::write(&stale, b"HALF").unwrap();
+        std::fs::set_permissions(&stale, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let r = write_beside_at(&book, b"BOOK");
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(std::fs::read(&book).unwrap(), b"BOOK");
+    }
+
+    #[test]
+    fn a_failed_resend_to_a_folder_keeps_the_old_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = Target::Folder(tmp.path().to_path_buf());
+        let mut conn = Conn::new(&target);
+        let opts = DeliverOptions::default();
+        deliver_named_on(b"edition one", "paper.kfx", &mut conn, &opts).unwrap();
+        FAIL_WRITE_AFTER.with(|f| f.set(Some(3)));
+        let r = deliver_named_on(b"edition two", "paper.kfx", &mut conn, &opts);
+        FAIL_WRITE_AFTER.with(|f| f.set(None));
+        assert!(r.is_err());
+        assert_eq!(
+            std::fs::read(tmp.path().join("paper.kfx")).unwrap(),
+            b"edition one"
+        );
+        assert_eq!(names(tmp.path()), ["paper.kfx"]);
+    }
+
+    fn kindle_at(root: &Path) -> Target {
+        Target::MassStorage(Device {
+            root: root.to_path_buf(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: true,
+            firmware: None,
+            serial: None,
+        })
+    }
+
+    #[test]
+    fn a_thumbnail_that_wont_write_is_a_warning_once_the_book_is_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("documents")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("system")).unwrap();
+        // A file where the thumbnails folder goes: the thumbnail can't be written.
+        std::fs::write(tmp.path().join("system/thumbnails"), b"").unwrap();
+        let opts = DeliverOptions {
+            thumbnail: Some(("thumbnail_X_PDOC_portrait.jpg".into(), b"jpg".to_vec())),
+            ..Default::default()
+        };
+        let target = kindle_at(tmp.path());
+        let d = deliver_named_reporting(b"book", "a.kfx", &mut Conn::new(&target), &opts).unwrap();
+        assert_eq!(d.path, tmp.path().join("documents/a.kfx"));
+        assert_eq!(std::fs::read(&d.path).unwrap(), b"book");
+        assert_eq!(d.warnings.len(), 1, "{:?}", d.warnings);
+        assert!(d.warnings[0].starts_with("thumbnail"), "{:?}", d.warnings);
+    }
+
+    #[test]
+    fn an_unplugged_kindle_at_a_fixed_mount_point_gets_nothing() {
+        // The mount point stays as an empty folder after the Kindle is unplugged.
+        let tmp = tempfile::tempdir().unwrap();
+        let target = kindle_at(tmp.path());
+        let e = deliver_named_on(b"x", "a.kfx", &mut Conn::new(&target), &Default::default())
+            .unwrap_err();
+        assert!(e.stops_push(), "{e}");
+        assert_eq!(names(tmp.path()), Vec::<String>::new(), "nothing written");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_kindle_that_cant_be_written_to_stops_a_push() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let docs = tmp.path().join("documents");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::create_dir_all(tmp.path().join("system")).unwrap();
+        // Mounted read-only (a dirty FAT volume on macOS): every book would fail alike.
+        std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let target = kindle_at(tmp.path());
+        let r = deliver_named_on(b"x", "a.kfx", &mut Conn::new(&target), &Default::default());
+        std::fs::set_permissions(&docs, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let e = r.unwrap_err();
+        assert!(e.stops_push(), "{e}");
+    }
+
+    #[test]
+    fn a_lost_session_stops_a_push_and_a_refused_file_does_not() {
+        let gone = [
+            MtpError::Transport(TransportError::Timeout),
+            MtpError::NoDocumentsFolder,
+        ];
+        for e in gone {
+            let d = DeliverError::from(e);
+            assert!(d.stops_push(), "{d}");
+            assert!(d.to_string().starts_with("MTP: "), "{d}");
+        }
+        let refused = DeliverError::from(MtpError::Response {
+            op: op::SEND_OBJECT,
+            code: 0x200C,
+        });
+        assert!(!refused.stops_push());
+        assert!(refused.to_string().starts_with("MTP: "), "{refused}");
+        let io = DeliverError::Io {
+            path: "/x".into(),
+            source: std::io::Error::other("full"),
+        };
+        assert!(!io.stops_push());
+    }
+
+    #[test]
+    fn a_folder_keeps_temporary_files_that_arent_deckles() {
+        let tmp = tempfile::tempdir().unwrap();
+        let hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        for n in [
+            ".notes.tmp",
+            ".download.part",
+            ".x.7.part",
+            ".old.kfx.42.part",
+            ".old.epub.tmp",
+        ] {
+            let f = std::fs::File::create(tmp.path().join(n)).unwrap();
+            f.set_modified(hours_ago).unwrap();
+        }
+        let target = Target::Folder(tmp.path().to_path_buf());
+        deliver_named_on(
+            b"x",
+            "c.kfx",
+            &mut Conn::new(&target),
+            &DeliverOptions::default(),
+        )
+        .unwrap();
+        // Only the shapes Deckle writes: `.<book>.<digits>.part` and `.<epub>.tmp`.
+        assert_eq!(
+            names(tmp.path()),
+            [".download.part", ".notes.tmp", ".x.7.part", "c.kfx"]
+        );
+    }
+
+    #[test]
+    fn a_delivery_clears_temporary_files_older_than_an_hour() {
+        let tmp = tempfile::tempdir().unwrap();
+        let docs = tmp.path().join("documents");
+        std::fs::create_dir_all(&docs).unwrap();
+        std::fs::create_dir_all(tmp.path().join("system")).unwrap();
+        let hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        for n in [
+            ".a.kfx.123.part",
+            ".b.kepub.epub.tmp",
+            ".live.kfx.9.part",
+            "keep.part",
+        ] {
+            let f = std::fs::File::create(docs.join(n)).unwrap();
+            if n != ".live.kfx.9.part" {
+                f.set_modified(hours_ago).unwrap();
+            }
+        }
+        let target = Target::MassStorage(Device {
+            root: tmp.path().to_path_buf(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: None,
+        });
+        deliver_named_on(
+            b"x",
+            "c.kfx",
+            &mut Conn::new(&target),
+            &DeliverOptions::default(),
+        )
+        .unwrap();
+        // Another Deckle's live write is spared, and so is a name that isn't Deckle's.
+        assert_eq!(names(&docs), [".live.kfx.9.part", "c.kfx", "keep.part"]);
+    }
+
     #[test]
     fn a_folder_conn_has_no_mtp_session() {
         let target = Target::Folder(PathBuf::from("/nowhere"));
         assert!(Conn::new(&target).mtp().is_none());
+    }
+}
+
+#[cfg(test)]
+mod mtp_send_tests {
+    use deckle_transport::ptp::op;
+
+    use super::*;
+    use crate::fake_mtp as fake;
+
+    fn kindle() -> Target {
+        Target::Mtp(MtpInfo {
+            vendor_id: deckle_transport::usb::AMAZON_VENDOR_ID,
+            product_id: 1,
+            serial: Some("G0001".into()),
+            product: Some("Kindle".into()),
+            bus: 1,
+            address: 2,
+        })
+    }
+
+    fn send(bytes: &[u8]) -> Result<Delivered, DeliverError> {
+        let target = kindle();
+        let mut conn = Conn::with_opener(&target, fake::open);
+        deliver_named_reporting(bytes, "a.kfx", &mut conn, &DeliverOptions::default())
+    }
+
+    /// Sent since the last reset, not counting the session itself.
+    fn sent(code: u16) -> bool {
+        fake::ops().contains(&code)
+    }
+
+    #[test]
+    fn a_resend_goes_beside_the_old_copy_and_is_renamed_over_it() {
+        fake::reset(&[]);
+        fake::put_bytes("a.kfx", b"OLD");
+        send(b"NEW").unwrap();
+        assert_eq!(fake::documents(), ["a.kfx"]);
+        assert_eq!(fake::bytes("a.kfx").unwrap(), b"NEW");
+        assert!(sent(op::SET_OBJECT_PROP_VALUE));
+    }
+
+    #[test]
+    fn too_little_room_fails_before_anything_is_deleted() {
+        fake::reset(&[]);
+        fake::put_bytes("a.kfx", b"OLD");
+        fake::set_free(1000);
+        let e = send(&[7; 2000]).unwrap_err();
+        assert!(e.to_string().contains("not enough room"), "{e}");
+        assert!(!e.stops_push());
+        assert!(!sent(op::DELETE_OBJECT) && !sent(op::SEND_OBJECT_INFO));
+        assert_eq!(fake::bytes("a.kfx").unwrap(), b"OLD");
+    }
+
+    #[test]
+    fn a_send_that_fails_leaves_the_old_copy_and_no_part() {
+        fake::reset(&[]);
+        fake::put_bytes("a.kfx", b"OLD");
+        fake::fail_next_send();
+        let e = send(b"NEW COPY").unwrap_err();
+        assert!(!e.stops_push(), "{e}");
+        assert!(!e.to_string().contains(OLD_COPY_REMOVED), "{e}");
+        assert_eq!(fake::documents(), ["a.kfx"]);
+        assert_eq!(fake::bytes("a.kfx").unwrap(), b"OLD");
+    }
+
+    #[test]
+    fn a_kindle_that_cant_rename_gets_delete_then_send() {
+        fake::reset(&[]);
+        fake::no_rename();
+        fake::put_bytes("a.kfx", b"OLD");
+        send(b"NEW").unwrap();
+        assert_eq!(fake::documents(), ["a.kfx"]);
+        assert_eq!(fake::bytes("a.kfx").unwrap(), b"NEW");
+        assert!(!sent(op::SET_OBJECT_PROP_VALUE));
+
+        // A failed send there loses the old copy, and says so.
+        fake::reset(&[]);
+        fake::no_rename();
+        fake::put_bytes("a.kfx", b"OLD");
+        fake::fail_next_send();
+        let e = send(b"NEW COPY").unwrap_err();
+        assert!(e.to_string().contains(OLD_COPY_REMOVED), "{e}");
+        assert_eq!(fake::documents(), Vec::<String>::new(), "no half book");
+    }
+
+    #[test]
+    fn without_rename_the_old_copys_room_counts() {
+        fake::reset(&[]);
+        fake::no_rename();
+        fake::put_bytes("a.kfx", &[1; 3 << 20]);
+        fake::set_free(2 << 20);
+        // 3 MB and the margin go, 2 MB are free: it fits once the old 3 MB copy is gone.
+        send(&[2; 3 << 20]).unwrap();
+        assert_eq!(fake::bytes("a.kfx").unwrap(), [2; 3 << 20]);
+        // A Kindle that renames keeps the old copy during the send: the same is refused.
+        fake::reset(&[]);
+        fake::put_bytes("a.kfx", &[1; 3 << 20]);
+        fake::set_free(2 << 20);
+        assert!(send(&[2; 3 << 20]).is_err());
+    }
+
+    #[test]
+    fn a_leftover_part_beside_the_book_doesnt_block_the_next_send() {
+        fake::reset(&[]);
+        fake::put_bytes("a.kfx", b"OLD");
+        fake::put_bytes("a.kfx.1.part", b"HALF");
+        send(b"NEW").unwrap();
+        assert_eq!(fake::documents(), ["a.kfx"]);
+        assert_eq!(fake::bytes("a.kfx").unwrap(), b"NEW");
+    }
+
+    #[test]
+    fn a_leftover_part_without_its_book_is_kept_until_a_send_goes() {
+        fake::reset(&[]);
+        // Perhaps the only copy (a rename that failed), perhaps half of one.
+        fake::put_bytes("a.kfx.1.part", b"MAYBE");
+        fake::fail_next_send();
+        send(b"NEW").unwrap_err();
+        assert_eq!(fake::documents(), ["a.kfx.1.part"], "nothing under a.kfx");
+        assert_eq!(fake::bytes("a.kfx.1.part").unwrap(), b"MAYBE");
+        send(b"NEW").unwrap();
+        assert_eq!(fake::documents(), ["a.kfx"]);
+        assert_eq!(fake::bytes("a.kfx").unwrap(), b"NEW");
     }
 }
 

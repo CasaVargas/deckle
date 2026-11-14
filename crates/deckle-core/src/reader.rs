@@ -97,6 +97,21 @@ impl Reader {
     fn folder(&self) -> PathBuf {
         self.root().join(FOLDER)
     }
+
+    /// The reader is still mounted: the marker it was found by is there (a Kobo's
+    /// `.kobo/KoboReader.sqlite`, a PocketBook's `system/explorer-3` or `system/config`), not just
+    /// the root folder. A fixed mount point leaves an empty folder after unplugging, and a
+    /// delivery would then make `Deckle/` on the computer's own disk.
+    pub fn present(&self) -> bool {
+        let root = self.root();
+        match self {
+            Reader::Kobo(_) => root.join(".kobo").join("KoboReader.sqlite").is_file(),
+            Reader::PocketBook(_) => {
+                root.join("system").join("explorer-3").is_dir()
+                    || root.join("system").join("config").is_dir()
+            }
+        }
+    }
 }
 
 /// What the OPF of a fixed-layout EPUB says about it.
@@ -214,21 +229,52 @@ pub fn any_seen(file: &Path) -> bool {
 }
 
 /// Writes `bytes` to `Deckle/<name>` through a hidden temporary file, flushed to the drive
-/// before it's renamed, so an unplugged reader never holds half a book.
+/// before it's renamed, so an unplugged reader never holds half a book
+/// ([`crate::deliver::write_beside`]). Temporary files an earlier pulled cable left go first.
+/// A book already there that refuses to be replaced is said as locked.
 pub fn deliver(reader: &Reader, bytes: &[u8], name: &str) -> std::io::Result<PathBuf> {
-    use std::io::Write;
-    let dir = reader.folder();
-    std::fs::create_dir_all(&dir)?;
-    let to = dir.join(name);
-    let tmp = dir.join(format!(".{name}.tmp"));
-    {
-        let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(bytes)?;
-        f.sync_all()?;
+    deliver_at(reader, bytes, name).map_err(|b| {
+        if b.locked() {
+            std::io::Error::other(locked(reader, name))
+        } else {
+            b.into_inner()
+        }
+    })
+}
+
+/// What a push says of a book on `reader` that can't be replaced.
+pub(crate) fn locked(reader: &Reader, name: &str) -> String {
+    format!(
+        "{name} on the {} is locked or read-only; unlock or delete it",
+        reader.name()
+    )
+}
+
+/// [`deliver`], saying whether `Deckle/` or the one file failed
+/// ([`crate::deliver::Beside`]).
+pub(crate) fn deliver_at(
+    reader: &Reader,
+    bytes: &[u8],
+    name: &str,
+) -> Result<PathBuf, crate::deliver::Beside> {
+    use crate::deliver::Beside;
+    // Before anything is made: unplugged from a fixed mount point, the root is an empty folder
+    // on the computer's own disk.
+    if !reader.present() {
+        return Err(Beside::Folder(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "the {} at {} is no longer connected",
+                reader.name(),
+                reader.root().display()
+            ),
+        )));
     }
-    std::fs::rename(&tmp, &to).inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })?;
+    let dir = reader.folder();
+    std::fs::create_dir_all(&dir).map_err(Beside::Folder)?;
+    crate::deliver::remove_leftovers(&dir);
+    let to = dir.join(name);
+    crate::deliver::write_beside_at(&to, bytes)?;
     Ok(to)
 }
 
@@ -497,6 +543,16 @@ mod tests {
                 .join("deckle-daily-2026-09-01.kepub.epub")
                 .is_file()
         );
+    }
+
+    #[test]
+    fn an_unplugged_reader_at_a_fixed_mount_point_gets_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let k = Reader::Kobo(fake_kobo(tmp.path(), ""));
+        // Unplugged: the mount point stays, as an empty folder.
+        std::fs::remove_dir_all(tmp.path().join(".kobo")).unwrap();
+        assert!(deliver(&k, b"KEPUB", "a.kepub.epub").is_err());
+        assert!(std::fs::read_dir(tmp.path()).unwrap().next().is_none());
     }
 
     #[test]
