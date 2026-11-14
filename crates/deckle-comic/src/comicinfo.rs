@@ -20,7 +20,7 @@ impl ComicInfo {
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Self::default();
         };
-        let Ok(doc) = roxmltree::Document::parse(text) else {
+        let Ok(doc) = deckle_limits::parse_xml(text, Default::default()) else {
             return Self::default();
         };
         let field = |name: &str| {
@@ -70,5 +70,26 @@ mod tests {
     fn manga_yes_alone_keeps_left_to_right_and_junk_is_empty() {
         assert!(!ComicInfo::parse(b"<ComicInfo><Manga>Yes</Manga></ComicInfo>").right_to_left);
         assert_eq!(ComicInfo::parse(b"not xml"), ComicInfo::default());
+    }
+
+    /// Elements nested 100,000 deep are the same as no file, refused before the parser
+    /// recurses: on a 1 MiB stack, a parse that came first would abort the process.
+    #[test]
+    fn elements_nested_a_hundred_thousand_deep_are_the_same_as_none() {
+        let info = std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(|| {
+                let n = 100_000;
+                let xml = format!(
+                    "<ComicInfo><Title>Deep</Title>{}{}</ComicInfo>",
+                    "<x>".repeat(n),
+                    "</x>".repeat(n)
+                );
+                ComicInfo::parse(xml.as_bytes())
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+        assert_eq!(info, ComicInfo::default());
     }
 }

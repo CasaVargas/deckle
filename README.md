@@ -165,7 +165,8 @@ shows it beside the queue with covers, groups series with the gaps called out, s
 your library, your Kindles and past sends, and tells you which books on a Kindle it could now
 build better.
 
-Every format, and the book styles, are in [docs/books.md](docs/books.md).
+Every format, and the book styles, are in [docs/books.md](docs/books.md). Files over
+[these sizes](docs/books.md#size-limits) are refused.
 
 ## The Kitchen Book
 
@@ -229,6 +230,9 @@ PocketBook plugged in, or a reMarkable over its USB web interface or SSH.
 - **Words to Anki.** The words you looked up, as flashcards with the sentence you met them in.
 - **Several Kindles in one home.** Name each Kindle, then send a book to *Mom's Kindle* even when
   it's in her bag: it waits until that Kindle connects.
+- **A failed send keeps what's there.** A book sent again goes in only once it's whole, so a full
+  reader or a pulled cable leaves the old copy, and one book that won't go doesn't hold up the
+  rest. One limit over MTP is in [docs/devices.md](docs/devices.md#re-sending-over-a-book-already-there).
 
 The details, reader by reader, are in [docs/readers.md](docs/readers.md#the-devices-tab).
 

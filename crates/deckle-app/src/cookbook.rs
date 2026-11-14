@@ -309,7 +309,7 @@ fn data_url(jpeg: &[u8]) -> String {
 
 /// `jpeg` (or any image) scaled to fit `w` x `h`, as a JPEG data URL.
 fn thumbnail(bytes: &[u8], w: u32, h: u32) -> Option<String> {
-    let small = image::load_from_memory(bytes).ok()?.thumbnail(w, h);
+    let small = deckle_core::image_cap::load(bytes).ok()?.thumbnail(w, h);
     let mut out = Vec::new();
     small
         .to_rgb8()

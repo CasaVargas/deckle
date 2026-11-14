@@ -43,6 +43,10 @@ pub enum ComicError {
     NoBsdtar,
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("this comic unpacks to {0}")]
+    TooLarge(deckle_limits::TooLarge),
+    #[error("page {0} is {1}")]
+    PageTooLarge(String, deckle_limits::TooLarge),
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -216,7 +220,8 @@ pub fn convert_with(
 
 /// Where the pages come from.
 enum Source {
-    Zip(zip::ZipArchive<std::fs::File>),
+    /// A CBZ, and the most bytes one page may unpack to.
+    Zip(zip::ZipArchive<std::fs::File>, u64),
     Folder(PathBuf),
     /// A CBR unpacked into a temp folder, removed with the source.
     Unpacked(tempfile::TempDir),
@@ -231,6 +236,16 @@ fn starts_with(path: &Path, magic: &[u8]) -> std::io::Result<bool> {
 
 impl Source {
     fn open(path: &Path) -> Result<Self, ComicError> {
+        Self::open_with(
+            path,
+            deckle_limits::MAX_COMIC_PAGE_BYTES,
+            deckle_limits::MAX_COMIC_BYTES,
+        )
+    }
+
+    /// A zip is refused when an entry declares more than `page_limit` bytes or all of them
+    /// more than `total_limit`; `zip` then stops each entry at its declared size.
+    fn open_with(path: &Path, page_limit: u64, total_limit: u64) -> Result<Self, ComicError> {
         if path.is_dir() {
             return Ok(Source::Folder(path.to_path_buf()));
         }
@@ -242,15 +257,15 @@ impl Source {
             return Ok(Source::Unpacked(dir));
         }
         let file = std::fs::File::open(path)?;
-        zip::ZipArchive::new(file)
-            .map(Source::Zip)
-            .map_err(|e| ComicError::NotZip(e.to_string()))
+        let zip = zip::ZipArchive::new(file).map_err(|e| ComicError::NotZip(e.to_string()))?;
+        check_declared_sizes(&zip, page_limit, total_limit)?;
+        Ok(Source::Zip(zip, page_limit))
     }
 
     /// Every file, as a `/`-separated path, skipping hidden files and macOS resource forks.
     fn names(&self) -> Vec<String> {
         let names = match self {
-            Source::Zip(z) => z
+            Source::Zip(z, _) => z
                 .file_names()
                 .flatten()
                 .filter(|n| !n.ends_with('/'))
@@ -273,16 +288,19 @@ impl Source {
 
     fn read(&mut self, name: &str) -> Result<Vec<u8>, ComicError> {
         match self {
-            Source::Zip(z) => {
-                let mut f = z.by_name(name).map_err(|e| match e {
+            Source::Zip(z, page_limit) => {
+                let f = z.by_name(name).map_err(|e| match e {
                     zip::result::ZipError::UnsupportedArchive(m) if m.contains("Password") => {
                         ComicError::Protected(name.to_owned())
                     }
                     e => ComicError::NotZip(e.to_string()),
                 })?;
-                let mut bytes = Vec::with_capacity(f.size() as usize);
-                f.read_to_end(&mut bytes)?;
-                Ok(bytes)
+                deckle_limits::read_capped(f, *page_limit).map_err(|e| {
+                    match deckle_limits::TooLarge::in_io(&e) {
+                        Some(t) => ComicError::PageTooLarge(name.to_owned(), t),
+                        None => e.into(),
+                    }
+                })
             }
             Source::Folder(_) | Source::Unpacked(_) => Ok(std::fs::read(self.root().join(name))?),
         }
@@ -293,9 +311,33 @@ impl Source {
         match self {
             Source::Folder(root) => root,
             Source::Unpacked(dir) => dir.path(),
-            Source::Zip(_) => Path::new(""),
+            Source::Zip(..) => Path::new(""),
         }
     }
+}
+
+/// Fails when an entry of `zip` declares more than `page_limit` bytes unpacked, or all of them
+/// together more than `total_limit`: the cheap check before anything is read.
+pub(crate) fn check_declared_sizes<R: Read + std::io::Seek>(
+    zip: &zip::ZipArchive<R>,
+    page_limit: u64,
+    total_limit: u64,
+) -> Result<(), ComicError> {
+    let mut total = deckle_limits::Budget::new(total_limit);
+    for i in 0..zip.len() {
+        let Ok(entry) = zip.by_index_data(i) else {
+            continue;
+        };
+        if entry.size() > page_limit {
+            let name = entry.name().map(|n| n.into_owned()).unwrap_or_default();
+            return Err(ComicError::PageTooLarge(
+                name,
+                deckle_limits::TooLarge { limit: page_limit },
+            ));
+        }
+        total.add(entry.size()).map_err(ComicError::TooLarge)?;
+    }
+    Ok(())
 }
 
 /// Files under `dir`, as paths relative to the folder being imported; three levels at most.
@@ -687,7 +729,54 @@ const CONTAINER: &str = "<?xml version=\"1.0\"?>\n<container version=\"1.0\" \
 
 #[cfg(test)]
 mod tests {
-    use super::is_language_tag;
+    use super::*;
+    use deckle_kfx::fixtures::stored_zip;
+
+    fn cbz(entries: &[(&str, &[u8], u64)]) -> tempfile::NamedTempFile {
+        let f = tempfile::Builder::new().suffix(".cbz").tempfile().unwrap();
+        std::fs::write(f.path(), stored_zip(entries)).unwrap();
+        f
+    }
+
+    #[test]
+    fn a_page_declaring_2_pow_60_bytes_is_refused() {
+        let src = cbz(&[("1.png", b"tiny", 1 << 60)]);
+        let out = tempfile::NamedTempFile::new().unwrap();
+        let e = convert_with(src.path(), out.path(), None).unwrap_err();
+        assert_eq!(e.to_string(), "page 1.png is more than 256 MB");
+    }
+
+    #[test]
+    fn declared_sizes_past_the_comic_limit_are_refused() {
+        let page = vec![0u8; 600];
+        let src = cbz(&[("1.png", &page, 600), ("2.png", &page, 600)]);
+        assert!(Source::open_with(src.path(), 1000, 2000).is_ok());
+        let e = Source::open_with(src.path(), 1000, 1000).err().unwrap();
+        assert_eq!(e.to_string(), "this comic unpacks to more than 1000 bytes");
+        let e = Source::open_with(src.path(), 500, 2000).err().unwrap();
+        assert_eq!(e.to_string(), "page 1.png is more than 500 bytes");
+    }
+
+    #[test]
+    fn a_page_read_stops_at_the_page_limit() {
+        // Declares 10 bytes and holds 600: `zip` refuses it once past 10.
+        let page = vec![0u8; 600];
+        let src = cbz(&[("1.png", &page, 10)]);
+        let mut s = Source::open_with(src.path(), 100, 1000).unwrap();
+        assert!(s.read("1.png").is_err());
+    }
+
+    #[test]
+    fn fit_epub_refuses_a_declared_2_pow_60_entry() {
+        let epub = deckle_kfx::fixtures::stored_epub(&[("OEBPS/images/1.png", b"tiny", 1 << 60)]);
+        let screen = pages::Screen {
+            width: 100,
+            height: 100,
+            color: false,
+        };
+        let e = pages::fit_epub(&epub, screen).unwrap_err();
+        assert!(e.contains("more than 256 MB"), "{e}");
+    }
 
     #[test]
     fn language_tags() {

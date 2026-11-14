@@ -20,7 +20,7 @@ use text::{Item, escape, gutenberg, items, language_tag};
 pub type Files = Vec<(String, Vec<u8>)>;
 
 /// Larger than any real book; anything bigger is almost certainly not one.
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_IMPORT_BYTES;
 /// A book with no headings is split into files of about this size, so Previewer gets
 /// reasonably sized chapters.
 const SPLIT_BYTES: usize = 200_000;
@@ -106,6 +106,16 @@ fn is_binary(text: &str) -> bool {
 /// The EPUB's files in zip order (`mimetype` first). `fallback_title` is used when the text has
 /// no Gutenberg `Title:`.
 pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportReport), TxtError> {
+    to_epub_with(bytes, fallback_title, deckle_limits::MAX_TXT_CHAPTERS)
+}
+
+/// [`to_epub`] with at most `max_chapters` chapters and contents entries: past it the text
+/// stays in the last chapter.
+fn to_epub_with(
+    bytes: &[u8],
+    fallback_title: &str,
+    max_chapters: usize,
+) -> Result<(Files, ImportReport), TxtError> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err(TxtError::TooLarge(bytes.len() as u64));
     }
@@ -151,7 +161,9 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
                 subtitle,
             } => {
                 heading_no += 1;
-                if !files_html.last().expect("one file").is_empty() {
+                // Past the limit a heading starts no file of its own (size-limits design).
+                let room = files_html.len() < max_chapters;
+                if room && !files_html.last().expect("one file").is_empty() {
                     files_html.push(String::new());
                     file_titles.push(None);
                 }
@@ -160,11 +172,15 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
                     None => text.clone(),
                 };
                 let name = chapter_name(files_html.len() - 1);
-                contents.push((
-                    *level,
-                    format!("<a href=\"{name}#h{heading_no}\">{}</a>", escape(&label)),
-                ));
-                *file_titles.last_mut().expect("one file") = Some(label);
+                if contents.len() < max_chapters {
+                    contents.push((
+                        *level,
+                        format!("<a href=\"{name}#h{heading_no}\">{}</a>", escape(&label)),
+                    ));
+                }
+                if room {
+                    *file_titles.last_mut().expect("one file") = Some(label);
+                }
                 let sub = subtitle
                     .as_deref()
                     .map(|s| format!("<br/><span class=\"subtitle\">{}</span>", escape(s)))
@@ -179,7 +195,11 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
             Item::Scene => "<hr class=\"scene\"/>".into(),
         };
         let current = files_html.last().expect("one file");
-        if !has_headings && !current.is_empty() && current.len() + html.len() > SPLIT_BYTES {
+        if !has_headings
+            && !current.is_empty()
+            && current.len() + html.len() > SPLIT_BYTES
+            && files_html.len() < max_chapters
+        {
             files_html.push(String::new());
             file_titles.push(None);
         }
@@ -347,7 +367,45 @@ hr.scene::after { content: \"* * *\"; display: block; text-align: center; }
 
 #[cfg(test)]
 mod tests {
-    use super::nest;
+    use super::{nest, to_epub, to_epub_with};
+
+    fn chapters_of(text: &str, max: usize) -> (Vec<String>, String) {
+        let (files, _) = to_epub_with(text.as_bytes(), "T", max).unwrap();
+        let chapters = files
+            .iter()
+            .filter(|(n, _)| n.starts_with("OEBPS/chapter-"))
+            .map(|(_, b)| String::from_utf8(b.clone()).unwrap())
+            .collect();
+        let nav = files.iter().find(|(n, _)| n == "OEBPS/nav.xhtml").unwrap();
+        (chapters, String::from_utf8(nav.1.clone()).unwrap())
+    }
+
+    #[test]
+    fn past_the_chapter_limit_the_rest_stays_in_the_last_chapter() {
+        let text: String = ["I", "II", "III", "IV", "V"]
+            .iter()
+            .map(|n| format!("CHAPTER {n}\n\nThe text of chapter {n}.\n\n"))
+            .collect();
+        let (all, nav) = chapters_of(&text, 100);
+        assert_eq!((all.len(), nav.matches("<li>").count()), (5, 5));
+        let (capped, nav) = chapters_of(&text, 3);
+        assert_eq!((capped.len(), nav.matches("<li>").count()), (3, 3));
+        let last = &capped[2];
+        for n in ["III", "IV", "V"] {
+            assert!(
+                last.contains(&format!("The text of chapter {n}.")),
+                "{last}"
+            );
+        }
+        assert!(last.contains("<title>CHAPTER III</title>"), "{last}");
+        // The limit in use is the shared one.
+        assert_eq!(
+            to_epub(text.as_bytes(), "T").unwrap().0,
+            to_epub_with(text.as_bytes(), "T", deckle_limits::MAX_TXT_CHAPTERS)
+                .unwrap()
+                .0
+        );
+    }
 
     #[test]
     fn contents_nest_by_level() {

@@ -368,7 +368,7 @@ pub fn scaled(n: &Nonogram, size: usize) -> Nonogram {
 /// A picture file (PNG, JPEG, GIF, WebP) as a `size`×`size` nonogram: greyscale, scaled to
 /// fit, the darker half shaded. `title` is printed with the answer.
 pub fn from_picture(bytes: &[u8], size: usize, title: &str) -> Result<Nonogram, String> {
-    let img = image::load_from_memory(bytes).map_err(|e| format!("not a picture: {e}"))?;
+    let img = deckle_core::image_cap::load(bytes).map_err(|e| format!("not a picture: {e}"))?;
     let grey = img.to_luma8();
     let (w, h) = (grey.width() as usize, grey.height() as usize);
     if w == 0 || h == 0 {

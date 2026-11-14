@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 
+use deckle_limits::XmlError;
 use roxmltree::{Document, Node};
 use sha2::{Digest, Sha256};
 
@@ -23,7 +24,7 @@ use styles::{Styles, attr, child, local};
 pub type Files = Vec<(String, Vec<u8>)>;
 
 /// Larger than any real document; anything bigger is almost certainly not one.
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_IMPORT_BYTES;
 const TEXT: &str = "application/vnd.oasis.opendocument.text";
 const TEMPLATE: &str = "application/vnd.oasis.opendocument.text-template";
 
@@ -167,13 +168,15 @@ fn read_zip(bytes: &[u8]) -> Result<Package, OdtError> {
     })
 }
 
-fn parse<'i>(xml: &'i str, part: &str) -> Result<Document<'i>, OdtError> {
-    let options = roxmltree::ParsingOptions {
+fn options<'i>() -> roxmltree::ParsingOptions<'i> {
+    roxmltree::ParsingOptions {
         allow_dtd: true,
         ..Default::default()
-    };
-    Document::parse_with_options(xml, options)
-        .map_err(|e| OdtError::Corrupt(format!("{part}: {e}")))
+    }
+}
+
+fn parse<'i>(xml: &'i str, part: &str) -> Result<Document<'i>, OdtError> {
+    deckle_limits::parse_xml(xml, options()).map_err(|e| OdtError::Corrupt(format!("{part}: {e}")))
 }
 
 struct Meta {
@@ -256,7 +259,14 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
             files: HashMap::new(),
         };
         (
-            parse(flat, "the flat document").map_err(|_| OdtError::NotOdf)?,
+            // XML that won't parse is not ODF; XML refused for its depth or entities says so.
+            match deckle_limits::parse_xml(flat, options()) {
+                Ok(doc) => doc,
+                Err(e @ (XmlError::TooDeep | XmlError::EntityMarkup)) => {
+                    return Err(OdtError::Corrupt(format!("the flat document: {e}")));
+                }
+                Err(_) => return Err(OdtError::NotOdf),
+            },
             None,
             None,
         )
@@ -293,6 +303,12 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
     };
     let mut body = Body::new(&styles, &package.files, text);
     let blocks = body.body(text);
+    if body.too_deep {
+        return Err(OdtError::Corrupt(format!(
+            "content.xml: {}",
+            deckle_limits::XmlError::TooDeep
+        )));
+    }
 
     let title = meta
         .title

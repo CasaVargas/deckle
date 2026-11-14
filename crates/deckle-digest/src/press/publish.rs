@@ -34,12 +34,18 @@ pub(crate) fn binding(lease: &JobLease) -> PressBinding {
     }
 }
 pub(crate) fn check_binding(b: &PressBinding) -> Result<(), PressError> {
+    check_folder(b)?;
+    setup::owned_manifest(b)?.ok_or_else(conflict)?;
+    Ok(())
+}
+/// Every `check_binding` check except the owned manifest. Used only when replacing a
+/// binding, where the manifest already names the new paper.
+pub(crate) fn check_folder(b: &PressBinding) -> Result<(), PressError> {
     directory(&b.root, false)?;
     if fs::canonicalize(&b.root).map_err(|_| storage())? != b.root {
         return Err(conflict());
     }
     directory(&b.root.join(".deckle-press"), false)?;
-    setup::owned_manifest(b)?.ok_or_else(conflict)?;
     Ok(())
 }
 pub(crate) fn editions(b: &PressBinding, create: bool) -> Result<PathBuf, PressError> {
@@ -315,7 +321,7 @@ pub fn publish_result(
         pinned.validate()
     })?;
     let status = j.job_status(l.job_id).ok_or_else(conflict)?;
-    flush_statuses(j)?;
+    flush_job_statuses(j, l)?;
     Ok(status)
 }
 /// Reconcile only an already-existing, completely verified output using the journal's
@@ -350,8 +356,20 @@ pub fn recover_result(
         Ok(())
     })?;
     let s = j.job_status(l.job_id).ok_or_else(conflict)?;
-    flush_statuses(j)?;
+    flush_job_statuses(j, l)?;
     Ok(Some(s))
+}
+/// Only this job's statuses: another folder's trouble is not this publication's failure.
+/// The worker's own flush writes the rest.
+fn flush_job_statuses(j: &PressJournal, l: &JobLease) -> Result<(), PressError> {
+    for s in j
+        .statuses()
+        .into_iter()
+        .filter(|s| s.job_id == Some(l.job_id))
+    {
+        flush_status(j, s)?;
+    }
+    Ok(())
 }
 /// Retry every committed snapshot independently. An unavailable/foreign folder cannot
 /// block healthy folders; return the first failure after attempting all status writes.
@@ -364,6 +382,66 @@ pub fn flush_statuses(j: &mut PressJournal) -> Result<(), PressError> {
         }
     }
     error.map_or(Ok(()), Err)
+}
+/// Write only statuses that changed since their last successful write. `flushed` records
+/// what was written; the caller keeps it across journal reopens and clears it for a full
+/// flush, which rewrites a status file removed by hand or by a sync tool.
+/// Statuses of folders in `skip` (a folder whose configured paper could not be registered)
+/// are left for later.
+pub fn flush_changed(
+    j: &mut PressJournal,
+    flushed: &mut std::collections::HashMap<Uuid, PressStatus>,
+    skip: &std::collections::HashSet<PathBuf>,
+) -> Result<(), PressError> {
+    j.ensure_healthy()?;
+    let statuses = j.statuses();
+    flushed.retain(|id, _| statuses.iter().any(|s| s.request_id == *id));
+    let mut error = None;
+    for s in statuses {
+        if flushed.get(&s.request_id) == Some(&s)
+            || j.binding_for_request(s.request_id)
+                .is_some_and(|b| skip.contains(&b.root))
+        {
+            continue;
+        }
+        match flush_status(j, s.clone()) {
+            Ok(()) => {
+                flushed.insert(s.request_id, s);
+            }
+            Err(e) => {
+                error.get_or_insert(e);
+            }
+        }
+    }
+    error.map_or(Ok(()), Err)
+}
+/// Whether anything is at this request's status path. The status file is the record that
+/// the request was answered, so a request that has one is never journaled again.
+pub fn status_written(b: &PressBinding, request_id: Uuid) -> bool {
+    fs::symlink_metadata(
+        b.root
+            .join(format!(".deckle-press/status/{request_id}.json")),
+    )
+    .is_ok()
+}
+/// Write a status the journal does not keep (a request first seen long after it expired).
+/// Never replaces an existing file.
+pub fn write_unjournaled_status(b: &PressBinding, s: &PressStatus) -> Result<(), PressError> {
+    check_binding(b)?;
+    let parent = b.root.join(".deckle-press/status");
+    directory(&parent, true)?;
+    let pinned = Dir::open(&parent)?;
+    let temp = format!(".{}-{}.tmp", s.request_id, Uuid::new_v4());
+    let bytes = serde_json::to_vec(s).map_err(|_| storage())?;
+    pinned.write_new(Path::new(&temp), &bytes)?;
+    let linked = check_binding(b).and_then(|()| {
+        pinned.link_new(
+            Path::new(&temp),
+            Path::new(&format!("{}.json", s.request_id)),
+        )
+    });
+    let _ = pinned.remove(Path::new(&temp), false);
+    linked
 }
 pub(crate) fn flush_status(j: &PressJournal, s: PressStatus) -> Result<(), PressError> {
     let b = j.binding_for_request(s.request_id).ok_or_else(conflict)?;

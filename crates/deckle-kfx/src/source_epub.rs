@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The few facts kfxlib reads back from the source EPUB inside a KPF (`original_source_epub.py`).
 
-use std::io::Read;
+use deckle_limits::{Budget, MAX_ENTRY_BYTES};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SourceEpub {
@@ -14,27 +14,27 @@ pub struct SourceEpub {
 }
 
 impl SourceEpub {
-    /// Parses the OPF of an EPUB held in memory. Any failure yields the default (empty) facts.
-    pub fn parse(epub: &[u8]) -> SourceEpub {
-        Self::try_parse(epub).unwrap_or_default()
+    /// Parses the OPF of an EPUB held in memory, reading through `budget` (what is left of the
+    /// KPF's). Any failure, a read past the budget among them, yields the default (empty) facts.
+    pub fn parse(epub: &[u8], budget: &mut Budget) -> SourceEpub {
+        Self::try_parse(epub, budget).unwrap_or_default()
     }
 
-    fn try_parse(epub: &[u8]) -> Option<SourceEpub> {
+    fn try_parse(epub: &[u8], budget: &mut Budget) -> Option<SourceEpub> {
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(epub)).ok()?;
-        let mut container = String::new();
-        zip.by_name("META-INF/container.xml")
-            .ok()?
-            .read_to_string(&mut container)
-            .ok()?;
-        let cdoc = roxmltree::Document::parse(&container).ok()?;
+        let mut read = |name: &str| -> Option<String> {
+            let f = zip.by_name(name).ok()?;
+            String::from_utf8(budget.read(f, MAX_ENTRY_BYTES).ok()?).ok()
+        };
+        let container = read("META-INF/container.xml")?;
+        let cdoc = deckle_limits::parse_xml(&container, Default::default()).ok()?;
         let opf_path = cdoc
             .descendants()
             .find(|n| n.has_tag_name("rootfile"))
             .and_then(|n| n.attribute("full-path"))?
             .to_owned();
-        let mut opf = String::new();
-        zip.by_name(&opf_path).ok()?.read_to_string(&mut opf).ok()?;
-        let doc = roxmltree::Document::parse(&opf).ok()?;
+        let opf = read(&opf_path)?;
+        let doc = deckle_limits::parse_xml(&opf, Default::default()).ok()?;
         let metadata = doc.descendants().find(|n| n.has_tag_name("metadata"))?;
         let mut out = SourceEpub::default();
         let mut seq: Vec<(i64, String)> = Vec::new();
@@ -101,5 +101,34 @@ impl SourceEpub {
             }
         }
         Some(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_epub_is_read_through_what_is_left_of_the_kpf_budget() {
+        let epub = crate::fixtures::stored_epub(&[]);
+        let mut budget = Budget::new(deckle_limits::MAX_BOOK_BYTES);
+        assert_eq!(SourceEpub::parse(&epub, &mut budget).authors, ["A. Writer"]);
+        assert!(budget.used() > 0);
+        // Too little left for the OPF: the facts are empty, as for any unreadable EPUB.
+        let mut budget = Budget::new(300);
+        assert_eq!(SourceEpub::parse(&epub, &mut budget), SourceEpub::default());
+    }
+
+    #[test]
+    fn an_opf_declaring_2_pow_60_bytes_reads_no_more_than_the_budget() {
+        const C: &[u8] =
+            br#"<container><rootfiles><rootfile full-path="o.opf"/></rootfiles></container>"#;
+        let epub = crate::fixtures::stored_zip(&[
+            ("META-INF/container.xml", C, C.len() as u64),
+            ("o.opf", &[b' '; 5000], 1 << 60),
+        ]);
+        let mut budget = Budget::new(1000);
+        assert_eq!(SourceEpub::parse(&epub, &mut budget), SourceEpub::default());
+        assert!(budget.used() <= 1000);
     }
 }

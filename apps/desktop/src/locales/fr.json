@@ -75,5 +75,9 @@
   "settings.language.label": "Langue",
   "settings.language.note": "Les textes de l’application. Le journal et vos livres gardent leur propre langue.",
   "settings.language.draft": "Chaque traduction commence par un brouillon d’IA que des lecteurs corrigent.",
-  "settings.language.help": "Aider à traduire"
+  "settings.language.help": "Aider à traduire",
+  "daily.run.notSent": "Non envoyé : {name} ({why})",
+  "daily.run.notSentNote": "Ils attendent dans la boîte d’envoi et partiront au prochain envoi.",
+  "daily.run.missedKindle": "Ce journal n’est pas arrivé sur votre Kindle. Il attend dans la boîte d’envoi et partira au prochain envoi.",
+  "daily.run.missedReader": "Ce journal n’est pas arrivé sur votre Kobo ou PocketBook. Il attend dans la boîte d’envoi et partira au prochain envoi."
 }

@@ -23,7 +23,7 @@ pub struct ImportReport {
     pub warnings: Vec<String>,
 }
 
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_IMPORT_BYTES;
 const MAX_NOTES: usize = 1000;
 
 pub fn is_markdown_file(path: &Path) -> bool {

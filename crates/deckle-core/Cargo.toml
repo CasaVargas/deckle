@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 language-tags = "0.3"
 fs4 = "0.13"
 deckle-kfx.workspace = true
@@ -45,6 +46,7 @@ ureq.workspace = true
 rusqlite.workspace = true
 
 [dev-dependencies]
+deckle-kfx = { workspace = true, features = ["testing"] }
 
 [features]
 # The stand-in SSH tablet of `remarkable_ssh::fake`, for other crates' tests.

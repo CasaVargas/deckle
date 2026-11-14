@@ -63,7 +63,7 @@ pub const BUILTIN: &[&str] = &[
 ];
 
 /// The largest plugin archive Deckle takes, unpacked.
-pub const MAX_BYTES: u64 = 20 * 1024 * 1024;
+pub const MAX_BYTES: u64 = deckle_limits::MAX_PLUGIN_BYTES;
 /// Where replaced and removed plugins are kept, in KOReader's folder.
 pub const BACKUP_DIR: &str = "deckle-backup/plugins";
 /// Where Deckle remembers each plugin's source, in KOReader's folder.
@@ -542,7 +542,7 @@ fn unzip(bytes: &[u8]) -> Result<Files, String> {
         if name.starts_with('/') || name.split('/').any(|p| p == "..") || name.contains(':') {
             return Err(format!("the archive has an unsafe path: {name}"));
         }
-        total += f.size();
+        total = total.saturating_add(f.size());
         if total > MAX_BYTES {
             return Err("the archive is over 20 MB unpacked".into());
         }
@@ -964,6 +964,18 @@ fn keep(data: &Path, name: &str, folder: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_declared_size_of_u64_max_is_refused_without_overflow() {
+        let zip = deckle_kfx::fixtures::stored_zip(&[
+            ("a.koplugin/main.lua", b"x", 1),
+            ("a.koplugin/big", b"y", u64::MAX),
+        ]);
+        assert_eq!(
+            unzip(&zip).unwrap_err(),
+            "the archive is over 20 MB unpacked"
+        );
+    }
 
     #[test]
     fn ssh_is_built_in() {

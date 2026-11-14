@@ -47,12 +47,18 @@ identify coalesced work. Only `published` and `result_removed` carry a required
 `edition.json` bytes; clients independently check it and all listed assets before
 Ready. Publication is local and may arrive before assets through sync.
 
+A status file already present for a request ID means the producer does not process that
+request, whoever wrote the file. This adds no new power: anyone who can write the folder can
+already delete the request itself.
+
 `result_removed` also requires `removed_at` and the safe message
 `Fresh edition is no longer available; print another`. Other states omit these
 tombstone fields. A tombstone supersedes published status. Keep it for 30 days
 after removal. Producer pruning retains the newest seven fresh editions, every
 published result for at least 48 hours, and all outputs referenced by pending
 jobs. Client-owned requests/returns and scheduled bundles are outside that pruning.
+Reconnecting a folder to another paper removes the old paper's fresh editions and
+statuses at once, without those 30-day, seven-edition and 48-hour periods.
 
 Safe `error_code` values are `busy`, `clock_mismatch`, `expired`, `disabled`,
 `presses_stopped`, `unsupported`, `source_failure`, `build_failed`, `timed_out`,
@@ -77,7 +83,7 @@ requirements. The Rust integration tests cover runtime clock and routing checks.
 
 ### Shared storage and bounded recovery
 
-Producer shared writes and deletions pin the selected directory hierarchy and reject ancestor replacement. An unstarted job rechecks persisted local opt-in and exact export binding after acquiring the build lock. Recovery checks for a verifiable committed output before enforcing the persisted deadline; unavailable or corrupt output cannot extend that deadline or hold the global slot after workers have been reaped. Retention completes safe work in available bindings before reporting errors from unavailable historical bindings. Unknown expired requests with `now >= expires_at + 30 days` are ignored without deleting client-owned controls; known request IDs retain normal reconciliation.
+Producer shared writes and deletions pin the selected directory hierarchy and reject ancestor replacement. An unstarted job rechecks persisted local opt-in and exact export binding after acquiring the build lock. Recovery checks for a verifiable committed output before enforcing the persisted deadline; unavailable or corrupt output cannot extend that deadline or hold the global slot after workers have been reaped. Retention completes safe work in available bindings before reporting errors from unavailable historical bindings. A request whose status file already exists is never queued again: the status is the answer. A refused request (one with no job) is remembered for three days after the producer first saw it, and, with the 24-hour lifetime, until 48 hours after `expires_at`; then the producer forgets it and leaves its status file in place. An unknown request first seen 48 hours or more after `expires_at` gets one `expired` status and is not otherwise recorded. These status files stay until the folder is cleaned; client-owned controls are never deleted. Known request IDs retain normal reconciliation. When a folder holds 1,000 finished requests, the producer leaves its new requests unanswered until older ones age out (accepted requests are remembered for 30 days).
 
 ### Selected-article reading editions
 

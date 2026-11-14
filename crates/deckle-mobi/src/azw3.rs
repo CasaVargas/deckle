@@ -166,7 +166,11 @@ fn shared_resources(db: &PalmDb<'_>) -> Vec<usize> {
 fn with_exth(rec0: &[u8], set: &[(u32, Vec<u8>)], drop: &[u32]) -> Result<Vec<u8>, MobiError> {
     let at = PALMDOC_HEADER + header_len(rec0);
     let (title_at, title_len) = match (be32(rec0, TITLE_OFFSET), be32(rec0, TITLE_LENGTH)) {
-        (Some(a), Some(l)) if (a + l) as usize <= rec0.len() && a as usize >= at => {
+        (Some(a), Some(l))
+            if a.checked_add(l)
+                .is_some_and(|end| end as usize <= rec0.len())
+                && a as usize >= at =>
+        {
             (a as usize, l as usize)
         }
         _ => return Err(MobiError::Corrupt("the full name is outside record 0")),

@@ -79,7 +79,7 @@ export default function ReaderView({ reader, onNotice }: Props) {
 
   const remove = async () => {
     const ids = [...chosen];
-    if (!ids.length || !window.confirm(removeConfirm(reader, ids.length))) return;
+    if (!ids.length || !(await platform.confirm(removeConfirm(reader, ids.length)))) return;
     setWorking("removing");
     try {
       const r = await api.readersRemove(reader.key, ids);

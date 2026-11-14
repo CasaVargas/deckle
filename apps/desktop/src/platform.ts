@@ -26,6 +26,9 @@ export interface Platform {
   /** Desktop: nothing. Web: download what the backend wrote. */
   afterSave(path: string): Promise<void>;
   openUrl(url: string): Promise<void>;
+  /** Asks before something can't be undone; true only for OK. Desktop: Tauri's dialog, since the
+   * dialog plugin turns `window.confirm` into an async function whose Promise is always truthy. */
+  confirm(message: string): Promise<boolean>;
   homeDir(): Promise<string>;
   /** `over(true)` while files hover the window, `over(false)` when they leave or land; then `drop`.
    * `failed` says why dropped files couldn't be taken (web: the upload failed). */

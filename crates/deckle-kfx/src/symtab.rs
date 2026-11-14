@@ -105,7 +105,7 @@ impl SymbolTable {
                     return Err(IonError::Malformed(format!("unknown shared table {name}")));
                 }
                 if let Some(m) = imp.get("max_id").and_then(Value::as_int) {
-                    max_id = (m as u32).saturating_sub(import_adjust);
+                    max_id = checked_max_id(m)?.saturating_sub(import_adjust);
                 }
             }
         }
@@ -128,7 +128,24 @@ impl SymbolTable {
         // kfxlib only logs a mismatch between the stored max_id and the symbol count.
         Ok(t)
     }
+}
 
+/// A `max_id` the file declares, refused past
+/// [`MAX_KFX_SYMBOLS`](deckle_limits::MAX_KFX_SYMBOLS): each id is a table entry, made before
+/// any symbol is read.
+pub(crate) fn checked_max_id(m: i64) -> Result<u32, IonError> {
+    u32::try_from(m)
+        .ok()
+        .filter(|m| *m <= deckle_limits::MAX_KFX_SYMBOLS)
+        .ok_or_else(|| {
+            IonError::Malformed(format!(
+                "symbol table max_id {m} is past the limit of {}",
+                deckle_limits::MAX_KFX_SYMBOLS
+            ))
+        })
+}
+
+impl SymbolTable {
     fn push(&mut self, sym: Option<String>) -> u32 {
         let id = self.symbols.len() as u32;
         if let Some(s) = &sym {

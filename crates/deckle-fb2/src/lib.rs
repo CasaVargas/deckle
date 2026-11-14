@@ -19,7 +19,7 @@ use render::{Renderer, chapter_name, child, elements, escape, name, text_of};
 pub type Files = Vec<(String, Vec<u8>)>;
 
 /// Larger than any real book; anything bigger is almost certainly not one.
-const MAX_BYTES: u64 = 50 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_IMPORT_BYTES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Fb2Error {
@@ -275,8 +275,7 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
         allow_dtd: true,
         ..Default::default()
     };
-    let doc = roxmltree::Document::parse_with_options(&text, options)
-        .map_err(|e| Fb2Error::Xml(e.to_string()))?;
+    let doc = deckle_limits::parse_xml(&text, options).map_err(|e| Fb2Error::Xml(e.to_string()))?;
     let root = doc.root_element();
     if name(root) != "FictionBook" {
         return Err(Fb2Error::NotFb2(name(root).to_owned()));
@@ -325,6 +324,9 @@ pub fn to_epub(bytes: &[u8], fallback_title: &str) -> Result<(Files, ImportRepor
     }
     r.notes(&notes);
     r.resolve_links();
+    if r.too_deep {
+        return Err(Fb2Error::Xml(deckle_limits::XmlError::TooDeep.to_string()));
+    }
     warnings.append(&mut r.warnings);
 
     let mut contents = std::mem::take(&mut r.contents);

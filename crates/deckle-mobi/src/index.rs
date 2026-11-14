@@ -72,7 +72,8 @@ fn tagx(rec: &[u8], start: usize) -> (usize, Vec<[u8; 4]>) {
     if rec.get(start..start + 4) != Some(b"TAGX") {
         return (0, Vec::new());
     }
-    let first = be32(rec, start + 4).unwrap_or(12) as usize;
+    // The block's length, held to the record: rows past its end aren't there to read.
+    let first = (be32(rec, start + 4).unwrap_or(12) as usize).min(rec.len() - start);
     let control = be32(rec, start + 8).unwrap_or(0) as usize;
     let mut rows = Vec::new();
     let mut i = 12;
@@ -180,8 +181,9 @@ fn ctoc(rec: &[u8], base: u64, out: &mut BTreeMap<u64, Vec<u8>>) {
     while at < rec.len() && rec[at] != 0 {
         let Some((n, len)) = vwi(rec, at) else { break };
         let s = at + n;
-        let e = (s + len as usize).min(rec.len());
-        out.insert(base + at as u64, rec[s..e].to_vec());
+        let e = s.saturating_add(len as usize).min(rec.len());
+        let Some(text) = rec.get(s..e) else { break };
+        out.insert(base + at as u64, text.to_vec());
         at = e;
     }
 }
@@ -193,18 +195,23 @@ pub fn read(db: &PalmDb<'_>, base: usize, first: usize) -> Result<Index, MobiErr
     let h = header(head)?;
     let (control, table) = tagx(head, h.len);
     let mut index = Index::default();
-    for j in 0..h.nctoc {
+    // Counts the file declares, held to the records it has (size-limits design, rule 3).
+    let after = db.len().saturating_sub(base + first + 1);
+    let count = h.count.min(after);
+    for j in 0..h.nctoc.min(after - count) {
         ctoc(
-            db.record(base + first + h.count + 1 + j),
+            db.record(base + first + count + 1 + j),
             (j as u64) << 16,
             &mut index.ctoc,
         );
     }
-    for i in 1..=h.count {
+    for i in 1..=count {
         let rec = db.record(base + first + i);
         let rh = header(rec)?;
         let idxt = rh.start;
-        let mut starts: Vec<usize> = (0..rh.count)
+        // Two bytes an offset after "IDXT".
+        let fits = rec.len().saturating_sub(idxt.saturating_add(4)) / 2;
+        let mut starts: Vec<usize> = (0..rh.count.min(fits))
             .filter_map(|j| be16(rec, idxt + 4 + 2 * j).map(usize::from))
             .collect();
         starts.push(idxt);
@@ -225,6 +232,54 @@ pub fn read(db: &PalmDb<'_>, base: usize, first: usize) -> Result<Index, MobiErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An INDX record of `len` header bytes with `count` at field 5 and `nctoc` at field 12.
+    fn indx(count: u32, nctoc: u32) -> Vec<u8> {
+        let mut r = vec![0u8; 0xC0];
+        r[..4].copy_from_slice(b"INDX");
+        r[4..8].copy_from_slice(&0xC0u32.to_be_bytes());
+        r[24..28].copy_from_slice(&count.to_be_bytes());
+        r[52..56].copy_from_slice(&nctoc.to_be_bytes());
+        r
+    }
+
+    #[test]
+    fn counts_past_the_records_there_are_clamped() {
+        // The header claims 2^32 - 1 index records and CTOC records, the one index record
+        // 2^32 - 1 entries: only what the file holds is read, at once.
+        let mut data = indx(u32::MAX, 0);
+        data[20..24].copy_from_slice(&0xC0u32.to_be_bytes()); // IDXT at the header's end
+        data.extend(b"IDXT");
+        let bytes = crate::fixture::palmdb(&[b"rec0".to_vec(), indx(u32::MAX, u32::MAX), data]);
+        let db = PalmDb::parse(&bytes).unwrap();
+        let start = std::time::Instant::now();
+        let index = read(&db, 0, 1).unwrap();
+        assert!(index.entries.len() <= 2, "{}", index.entries.len());
+        assert!(start.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_tagx_length_past_its_record_is_held_to_the_record() {
+        // A TAGX block claiming 4 GB: one row is there, the rest is not looped over.
+        let mut rec = b"TAGX".to_vec();
+        rec.extend(u32::MAX.to_be_bytes());
+        rec.extend(1u32.to_be_bytes());
+        rec.extend([1, 1, 0x01, 0]);
+        let start = std::time::Instant::now();
+        let (control, rows) = tagx(&rec, 0);
+        assert_eq!((control, rows), (1, vec![[1, 1, 0x01, 0]]));
+        assert!(start.elapsed() < std::time::Duration::from_millis(100));
+    }
+
+    #[test]
+    fn a_ctoc_string_longer_than_its_record_does_not_panic() {
+        // A length of about 2^63 at offset 0, then one byte.
+        let mut rec = vec![0x7F; 9];
+        rec.extend([0xFF, b'a']);
+        let mut out = BTreeMap::new();
+        ctoc(&rec, 0, &mut out);
+        assert_eq!(out.get(&0).map(Vec::len), Some(1));
+    }
 
     #[test]
     fn variable_width_integers_end_on_the_high_bit() {

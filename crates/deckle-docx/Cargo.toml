@@ -7,12 +7,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 thiserror.workspace = true
 zip.workspace = true
 roxmltree.workspace = true
 sha2.workspace = true
 
 [dev-dependencies]
+deckle-kfx = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 roxmltree.workspace = true
 zip.workspace = true

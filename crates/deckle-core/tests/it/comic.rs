@@ -516,6 +516,7 @@ fn a_queued_comic_flushes_as_azw3_and_so_does_its_fallback() {
         q.flush_with(
             &mut Conn::new(&Target::Folder(kindle.to_path_buf())),
             None,
+            &[],
             &finishing,
             &mut |_, _, _| {},
         )

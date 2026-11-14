@@ -305,6 +305,30 @@ fn refusals() {
     ));
 }
 
+/// `cite` nested 100,000 deep is refused before the parser recurses (nesting-depth design): on
+/// a 1 MiB stack, a parse that came first would abort the process.
+#[test]
+fn cites_nested_a_hundred_thousand_deep_are_refused() {
+    let e = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(|| {
+            let n = 100_000;
+            let mut fb2 = String::from("<FictionBook><body><section>");
+            fb2.push_str(&"<cite>".repeat(n));
+            fb2.push_str("<p>Inside</p>");
+            fb2.push_str(&"</cite>".repeat(n));
+            fb2.push_str("</section></body></FictionBook>");
+            err(fb2.as_bytes())
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(
+        matches!(&e, Fb2Error::Xml(m) if m == "this file is nested more than 256 levels deep"),
+        "{e}"
+    );
+}
+
 #[test]
 fn a_zip_must_hold_exactly_one_fb2() {
     let zip_of = |names: &[&str]| {

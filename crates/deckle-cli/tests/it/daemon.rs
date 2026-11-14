@@ -111,6 +111,40 @@ fn due_paper_prints_once() {
     assert_eq!(mtime, again);
 }
 
+/// One bad entry waiting in the Kobo's outbox, for some other book, doesn't make the morning's
+/// run a failure: the edition went, so the daemon counts it printed and doesn't run it again.
+#[test]
+fn an_unrelated_bad_entry_still_counts_as_printed() {
+    let (_tmp, home) = setup(AT_0530);
+    // The daemon's mount root is a Kobo.
+    let kobo = home.join("mounts");
+    std::fs::create_dir_all(kobo.join(".kobo")).unwrap();
+    rusqlite::Connection::open(kobo.join(".kobo/KoboReader.sqlite"))
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE content (ContentID TEXT, ContentType TEXT, Title TEXT, \
+             Attribution TEXT, ___PercentRead INTEGER, DateLastRead TEXT, ReadStatus INTEGER, \
+             BookID TEXT);",
+        )
+        .unwrap();
+    let outbox = if cfg!(target_os = "macos") {
+        home.join("Library/Caches/deckle/outbox-epub")
+    } else {
+        home.join("cache/deckle/outbox-epub")
+    };
+    std::fs::create_dir_all(outbox.join("broken.epub")).unwrap();
+    let o = daemon(&home, "06:00");
+    assert!(o.status.success(), "{}", text(&o.stderr));
+    let paper = kobo.join(format!("Deckle/deckle-daily-{}.kepub.epub", today()));
+    assert!(paper.is_file(), "{}", text(&o.stderr));
+    assert_eq!(
+        state(&home)["printed"]["main"],
+        today(),
+        "{}",
+        text(&o.stderr)
+    );
+}
+
 fn mtime(p: &Path) -> std::time::SystemTime {
     std::fs::metadata(p).unwrap().modified().unwrap()
 }

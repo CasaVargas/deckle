@@ -44,7 +44,7 @@ pub fn normalize_opf(
     text: &str,
     warnings: &mut Vec<String>,
 ) -> Result<(String, String, u32), String> {
-    let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
+    let doc = deckle_limits::parse_xml(text, Default::default()).map_err(|e| e.to_string())?;
     let metadata = doc
         .root_element()
         .children()
@@ -138,7 +138,7 @@ pub fn normalize_xhtml(
     book_language: &str,
     warnings: &mut Vec<String>,
 ) -> Result<(String, u32), String> {
-    let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
+    let doc = deckle_limits::parse_xml(text, Default::default()).map_err(|e| e.to_string())?;
     let root = doc.root_element();
     if root.tag_name().name() != "html"
         || !matches!(root.tag_name().namespace(), None | Some(XHTML))
@@ -214,7 +214,7 @@ pub fn normalize_xhtml(
 
 /// Missing `alt` is different from an intentionally empty `alt`. No descriptions are inferred.
 pub fn missing_alt(text: &str) -> Result<u32, String> {
-    let doc = roxmltree::Document::parse(text).map_err(|e| e.to_string())?;
+    let doc = deckle_limits::parse_xml(text, Default::default()).map_err(|e| e.to_string())?;
     Ok(doc
         .descendants()
         .filter(|n| {

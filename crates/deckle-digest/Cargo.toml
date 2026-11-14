@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+deckle-limits = { workspace = true, features = ["xml"] }
 serde.workspace = true
 serde_json.workspace = true
 ureq.workspace = true
@@ -16,6 +17,8 @@ image = { workspace = true, features = ["gif", "webp"] }
 toml = "1"
 toml_edit = { version = "0.25", features = ["serde"] }
 feed-rs = "3"
+# The reader feed-rs parses with, run first on its own to check a feed's nesting depth.
+quick-xml = { version = "0.42", features = ["encoding"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 ab_glyph = "0.2"
 html-escape = "0.2"
@@ -57,6 +60,8 @@ keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# The feed tests write feeds in legacy encodings (Shift_JIS, GBK, Big5, ...).
+encoding_rs = "0.8.42"
 # The PDF edition's tests read it back through PDFium.
 deckle-pdf.workspace = true
 # The edition bundle's tests validate it against its JSON Schema, offline.

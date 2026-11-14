@@ -2,7 +2,7 @@
 // The desktop host: Tauri's dialogs, opener, webview drops, updater and process plugins.
 import { homeDir } from "@tauri-apps/api/path";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { confirm, open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check } from "@tauri-apps/plugin-updater";
@@ -26,6 +26,7 @@ export const desktop: Platform = {
   },
   afterSave: async () => {},
   openUrl: (url) => openUrl(url),
+  confirm: (message) => confirm(message, { kind: "warning" }),
   homeDir,
   onFileDrop: (h) =>
     getCurrentWebview().onDragDropEvent((ev) => {

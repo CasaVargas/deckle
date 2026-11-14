@@ -75,5 +75,9 @@
   "settings.language.label": "Idioma",
   "settings.language.note": "Los textos de la aplicación. El periódico y tus libros conservan su propio idioma.",
   "settings.language.draft": "Cada traducción empieza como un borrador de IA que corrigen los lectores.",
-  "settings.language.help": "Ayudar a traducir"
+  "settings.language.help": "Ayudar a traducir",
+  "daily.run.notSent": "No enviado: {name} ({why})",
+  "daily.run.notSentNote": "Esperan en la bandeja de salida y se envían con el próximo envío.",
+  "daily.run.missedKindle": "Este periódico no llegó a tu Kindle. Espera en la bandeja de salida y se envía con el próximo envío.",
+  "daily.run.missedReader": "Este periódico no llegó a tu Kobo o PocketBook. Espera en la bandeja de salida y se envía con el próximo envío."
 }

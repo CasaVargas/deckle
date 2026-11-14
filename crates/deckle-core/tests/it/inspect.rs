@@ -125,6 +125,27 @@ fn adept_encryption_of_content_is_drm() {
     assert!(matches!(inspect(f.path()), Err(InspectError::Drm)));
 }
 
+/// An encryption.xml nested too deep says so, not "DRM-protected"; one that is merely broken
+/// still counts as DRM.
+#[test]
+fn encryption_xml_nested_too_deep_says_so() {
+    let deep = format!(
+        "<encryption>{}{}</encryption>",
+        "<x>".repeat(300),
+        "</x>".repeat(300)
+    );
+    let f = variant(&[("META-INF/encryption.xml", deep.as_bytes())]);
+    match inspect(f.path()) {
+        Err(InspectError::Xml(m)) => assert_eq!(
+            m,
+            "META-INF/encryption.xml: this file is nested more than 256 levels deep"
+        ),
+        other => panic!("expected the depth error, got {other:?}"),
+    }
+    let f = variant(&[("META-INF/encryption.xml", b"<encryption><unclosed>")]);
+    assert!(matches!(inspect(f.path()), Err(InspectError::Drm)));
+}
+
 #[test]
 fn a_finished_kfx_reports_title_type_and_cover() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/mini");

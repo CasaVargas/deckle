@@ -31,7 +31,7 @@ pub fn thumbnail_name(content_id: &str, cde: CdeType) -> String {
 
 /// Scales the cover to `height` pixels tall and encodes it as baseline JPEG.
 pub fn render(cover: &[u8], height: u32) -> Result<Vec<u8>, ThumbnailError> {
-    let img = image::load_from_memory(cover).map_err(|e| ThumbnailError::Decode(e.to_string()))?;
+    let img = crate::image_cap::load(cover).map_err(|e| ThumbnailError::Decode(e.to_string()))?;
     let width = ((f64::from(img.width()) * f64::from(height)) / f64::from(img.height()))
         .round()
         .max(1.0) as u32;

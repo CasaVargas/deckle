@@ -133,7 +133,7 @@ fn without_photos(xhtml: &str) -> String {
     let html = body.inner_html().replace("&nbsp;", "&#160;");
     // The HTML serializer writes `<br>`; XHTML wants `<br/>`.
     let out = VOID.replace_all(&html, "<$1$2/>").into_owned();
-    if roxmltree::Document::parse(&format!("<div>{out}</div>")).is_ok() {
+    if deckle_limits::parse_xml(&format!("<div>{out}</div>"), Default::default()).is_ok() {
         return out;
     }
     // Block boundaries become line breaks, the rest of the markup goes, and each line is a

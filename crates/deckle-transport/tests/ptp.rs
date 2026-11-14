@@ -3,7 +3,7 @@
 //! bulk transport (no hardware).
 use deckle_transport::ptp::{
     Container, ContainerKind, DeviceInfo, ObjectInfo, PtpError, decode_string, decode_u32_array,
-    encode_string, op, rsp,
+    encode_string, fmt, op, prop, rsp,
 };
 use deckle_transport::session::{Mtp, Transport, TransportError};
 
@@ -411,13 +411,118 @@ fn get_object_downloads_a_multi_chunk_file() {
     assert_eq!(mtp.get_object(0x42).unwrap(), payload);
 }
 
+#[test]
+fn get_object_that_ends_short_is_an_error() {
+    // The data phase announces 1,000 bytes and ends after 100.
+    let mut short = data(op::GET_OBJECT, 1, &[7u8; 1000]);
+    short.truncate(12 + 100);
+    let fake = Fake {
+        script: vec![
+            (
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
+            ),
+            (
+                cmd(op::GET_OBJECT, 1, &[0x42]),
+                vec![short, Vec::new(), ok(op::GET_OBJECT, 1, &[])],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut mtp = Mtp::new(Box::new(fake));
+    mtp.open_session().unwrap();
+    let e = mtp.get_object(0x42).unwrap_err();
+    assert!(e.to_string().contains("100 of 1000"), "{e}");
+}
+
+#[test]
+fn a_data_phase_of_unknown_length_is_taken_as_it_ends() {
+    let mut open = data(op::GET_OBJECT, 1, &[7u8; 100]);
+    open[..4].copy_from_slice(&u32::MAX.to_le_bytes());
+    let fake = Fake {
+        script: vec![
+            (
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
+            ),
+            (
+                cmd(op::GET_OBJECT, 1, &[0x42]),
+                vec![open, Vec::new(), ok(op::GET_OBJECT, 1, &[])],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut mtp = Mtp::new(Box::new(fake));
+    mtp.open_session().unwrap();
+    assert_eq!(mtp.get_object(0x42).unwrap(), [7u8; 100]);
+}
+
 fn sample_device_info() -> DeviceInfo {
     DeviceInfo {
         manufacturer: "Amazon".into(),
         model: "Kindle Scribe".into(),
         device_version: "5.18.1.0.1".into(),
         serial_number: "G0X1".into(),
+        operations: vec![op::GET_OBJECT, op::SEND_OBJECT, op::SET_OBJECT_PROP_VALUE],
     }
+}
+
+#[test]
+fn device_info_keeps_the_operations_the_device_supports() {
+    let info = DeviceInfo::decode(&sample_device_info().encode()).unwrap();
+    assert!(info.supports(op::SET_OBJECT_PROP_VALUE));
+    assert!(!info.supports(op::GET_OBJECT_PROP_DESC));
+}
+
+#[test]
+fn rename_sets_the_object_file_name_and_prop_desc_says_whether_it_can() {
+    let mut desc = Vec::new();
+    desc.extend_from_slice(&prop::OBJECT_FILE_NAME.to_le_bytes());
+    desc.extend_from_slice(&0xFFFFu16.to_le_bytes()); // a string
+    desc.push(1); // get and set
+    desc.extend(deckle_transport::ptp::encode_string(""));
+    desc.extend_from_slice(&0u32.to_le_bytes()); // group
+    desc.push(0); // no form
+    let name = deckle_transport::ptp::encode_string("a.kfx");
+    let mut set = data(op::SET_OBJECT_PROP_VALUE, 2, &name);
+    // The data phase follows the command as its own write.
+    let set_cmd = cmd(
+        op::SET_OBJECT_PROP_VALUE,
+        2,
+        &[0x42, u32::from(prop::OBJECT_FILE_NAME)],
+    );
+    let fake = Fake {
+        script: vec![
+            (
+                cmd(op::OPEN_SESSION, 0, &[1]),
+                vec![ok(op::OPEN_SESSION, 0, &[])],
+            ),
+            (
+                cmd(
+                    op::GET_OBJECT_PROP_DESC,
+                    1,
+                    &[u32::from(prop::OBJECT_FILE_NAME), u32::from(fmt::UNDEFINED)],
+                ),
+                vec![
+                    data(op::GET_OBJECT_PROP_DESC, 1, &desc),
+                    ok(op::GET_OBJECT_PROP_DESC, 1, &[]),
+                ],
+            ),
+            (set_cmd, Vec::new()),
+            (
+                std::mem::take(&mut set),
+                vec![ok(op::SET_OBJECT_PROP_VALUE, 2, &[])],
+            ),
+        ],
+        ..Default::default()
+    };
+    let mut mtp = Mtp::new(Box::new(fake));
+    mtp.open_session().unwrap();
+    assert!(
+        mtp.object_prop_settable(prop::OBJECT_FILE_NAME, fmt::UNDEFINED)
+            .unwrap()
+    );
+    mtp.rename(0x42, "a.kfx").unwrap();
 }
 
 #[test]

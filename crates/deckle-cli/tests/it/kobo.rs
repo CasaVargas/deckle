@@ -192,3 +192,68 @@ fn a_push_sends_what_waits_in_the_kobo_outbox() {
         String::from_utf8_lossy(&o.stdout)
     );
 }
+
+#[test]
+fn a_paper_the_kobo_refuses_fails_the_run_and_is_named() {
+    let (_tmp, home, root) = setup("sections = [\"horoscope\"]\n");
+    // A folder where the paper goes: the Kobo can't take it, though it's still connected.
+    std::fs::create_dir_all(root.join("Deckle/deckle-daily-2026-10-23.kepub.epub/x")).unwrap();
+    let o = deckle(&home, &root)
+        .args(["--json", "digest", "run", "--date", "2026-10-23"])
+        .output()
+        .unwrap();
+    assert!(
+        !o.status.success(),
+        "{}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["reader"]["edition_missed"], true, "{v}");
+    assert_ne!(v["reader"]["edition_sent"], true, "{v}");
+}
+
+/// The EPUB outbox under `home`, as `digest run` finds it with the test's environment.
+fn epub_outbox(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/Caches/deckle/outbox-epub")
+    } else if cfg!(target_os = "windows") {
+        // `LOCALAPPDATA` is `home` in these tests.
+        home.join("deckle/outbox-epub")
+    } else {
+        home.join("cache/deckle/outbox-epub")
+    }
+}
+
+#[test]
+fn an_unrelated_bad_entry_doesnt_fail_the_morning_run() {
+    let (_tmp, home, root) = setup("sections = [\"horoscope\"]\n");
+    // An entry nobody can send: a folder where a book should be.
+    std::fs::create_dir_all(epub_outbox(&home).join("broken.epub")).unwrap();
+    let o = deckle(&home, &root)
+        .args(["--json", "digest", "run", "--date", "2026-10-23"])
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(
+        v["reader"]["flush"]["failed"][0][0], "broken.kepub.epub",
+        "{v}"
+    );
+    assert_eq!(v["edition_sent"], true, "{v}");
+    // Per device: it went to the Kobo, and no Kindle was there to take it.
+    assert_eq!(v["reader"]["edition_sent"], true, "{v}");
+    assert_ne!(v["outcome"]["edition_sent"], true, "{v}");
+    assert!(
+        root.join("Deckle/deckle-daily-2026-10-23.kepub.epub")
+            .is_file()
+    );
+    // Still queued, and said again on every push, which succeeds.
+    let o = deckle(&home, &root)
+        .args(["digest", "push"])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(o.status.success(), "{out}");
+    assert!(out.contains("not sent: broken.kepub.epub"), "{out}");
+    assert!(epub_outbox(&home).join("broken.epub").is_dir());
+}

@@ -84,6 +84,20 @@ bookmarklet drops its link there too. See [the cookbook](cookbook.md).
 No Kindle plugged in at build time? The edition waits in the outbox and goes over on the next
 `push`, or as soon as you plug in while `watch` is running.
 
+One entry that won't go doesn't hold up the rest: the push sends everything else and prints
+`not sent: <name>: <why>` for it. It stays in the outbox and is tried again, and named again,
+on every push until it goes or you remove it. Only a reader that's unplugged mid-push, one that
+can't be written to at all (a drive mounted read-only) or a lost MTP session stops the push,
+with one message, and what wasn't sent stays queued. A single book on the reader that's locked
+or read-only only costs that book: it's named, with "unlock or delete it". `digest push` exits with an error only then;
+`digest run` only when its own edition didn't go (a stop before it went counts, one after
+doesn't), so the scheduler doesn't print the paper again for another book's sake. A run also
+counts as failed while any connected reader hasn't got the edition, even if another has: the
+scheduler's next run is what sends it again, and it sends it again, in place of the copy
+already there, to the readers that have it too. When a
+paper's edition is queued both as a Kindle book and as a PDF and the one this Kindle takes
+fails, the other goes in its place and the failed one leaves the outbox.
+
 Long reads and Inbox books are finished for the Kindle that takes them: the slow Previewer step
 runs when they're queued, and the push picks PDOC or EBOK for that Kindle (and the per-Kindle
 mode you set in the app), adding X-Ray and Word Wise where it ships as EBOK. That step stays
@@ -1309,6 +1323,11 @@ Deckle never silently takes ownership. To deliberately reconnect an existing fol
 3. On the new producing computer, check the selected paper and folder, then retry setup. Reopen
    or refresh the compatible client's selected folder after the new advertisement syncs.
 
+When the folder moves to a different paper on the same computer, Deckle removes the old paper's
+fresh editions and request statuses from it at once, after the old paper's last request finishes.
+If an edition folder holds a file Deckle did not write (such as `.DS_Store`), Deckle leaves it and
+the watcher log names that folder: remove it by hand and the move completes.
+
 If the old computer is unavailable, first ensure it cannot resume its watcher or write to this
 folder. Do not remove another active producer's record. A duplicate folder mapping to another
 paper on this computer must also be removed or corrected before setup can succeed.
@@ -1332,12 +1351,17 @@ paper on this computer must also be removed or corrected before setup can succee
 - **No response:** check both devices' clocks, the stopped-presses setting, that the same folder
   is selected, and that the cloud provider has uploaded and downloaded hidden control files.
   A visible request file is not proof it reached the producer. Let the client report expiry or
-  offer its explicit retry; do not delete control files to force another build.
+  offer its explicit retry; do not delete control files to force another build. If the watcher
+  log says "request history full", that folder already holds 1,000 finished requests, and new
+  ones wait until older ones age out.
 - **Identity unavailable:** restore this installation's private request state before reconnecting.
   It lives under Deckle's persistent application configuration directory in `press/`, separate
   from synced folders and disposable caches. Do not copy a producer identity between computers
   or manually edit it. After reinstalling without that state, use the deliberate disconnect
-  procedure above before creating a new ownership record.
+  procedure above before creating a new ownership record. If the message says `producer.json` is
+  empty or damaged and this computer has no fresh-paper folders yet, delete that file and start
+  Deckle again. On a disk without hard links (FAT, some network drives), a crash while Deckle
+  first writes that file leaves it empty in this way.
 
 ## The AI editor
 

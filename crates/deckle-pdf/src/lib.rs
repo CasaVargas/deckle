@@ -17,7 +17,7 @@ use std::path::Path;
 pub use engine::ENV;
 
 /// Larger than any real book a person would read on a Kindle.
-const MAX_BYTES: u64 = 200 * 1024 * 1024;
+const MAX_BYTES: u64 = deckle_limits::MAX_PDF_BYTES;
 
 /// Said with every PDF import: the reader should know what to check.
 pub const QUALITY_NOTE: &str = "reflowed from a PDF: the text is rebuilt from the page layout, \

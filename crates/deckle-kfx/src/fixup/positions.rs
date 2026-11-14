@@ -80,7 +80,10 @@ pub fn collect_position_map_info(book: &mut Book) -> Result<Vec<ContentChunk>, F
             .and_then(Value::as_list)
             .cloned()
             .unwrap_or_default();
-        contains.push(Value::List(vec![Value::Int(count + 1), Value::Int(0)]));
+        contains.push(Value::List(vec![
+            Value::Int(count.saturating_add(1)),
+            Value::Int(0),
+        ]));
         let (mut pid, mut eid, mut eid_offset) = (0i64, 0i64, 0i64);
         for (i, pi) in contains.iter().enumerate() {
             let (next_pid, next_eid, next_offset) = match pi {
@@ -108,7 +111,7 @@ pub fn collect_position_map_info(book: &mut Book) -> Result<Vec<ContentChunk>, F
                     pid: pid + section_start_pid,
                     eid,
                     eid_offset,
-                    length: next_pid - pid,
+                    length: next_pid.saturating_sub(pid),
                     section: section.clone(),
                 });
             }
@@ -123,7 +126,48 @@ pub fn collect_position_map_info(book: &mut Book) -> Result<Vec<ContentChunk>, F
         }
         section_start_pid += count;
     }
+    check_positions(book, &pos_info)?;
     Ok(pos_info)
+}
+
+/// How many positions the book's content can hold (size-limits design): a position a character
+/// of text and one for each element. Counted over the storylines (`$259`), the text (`$145`)
+/// and the section page templates (`$260`, whose elements a fixed-layout book positions) as
+/// every string's characters plus one for every other value, so it is never below the real
+/// count; resources hold no positions and don't count.
+pub(crate) fn content_size(book: &Book) -> u64 {
+    fn weigh(v: &Value) -> u64 {
+        match v {
+            Value::String(s) => s.chars().count() as u64,
+            Value::List(items) | Value::SExp(items) => {
+                items.iter().fold(1u64, |t, v| t.saturating_add(weigh(v)))
+            }
+            Value::Struct(s) => s.iter().fold(1u64, |t, (_, v)| t.saturating_add(weigh(v))),
+            Value::Annotated { value, .. } => weigh(value),
+            _ => 1,
+        }
+    }
+    let kinds = [Sym::new("$259"), Sym::new("$145"), Sym::new("$260")];
+    book.fragments
+        .iter()
+        .filter(|f| kinds.contains(&f.ftype))
+        .fold(0u64, |t, f| t.saturating_add(weigh(&f.value)))
+}
+
+/// Locations and pages are made a position at a time: positions past what the content can hold
+/// are declared, not real, and are refused.
+pub(crate) fn check_positions(book: &Book, pos_info: &[ContentChunk]) -> Result<(), FixupError> {
+    let total = pos_info
+        .iter()
+        .fold(0u64, |t, c| t.saturating_add(c.length.max(0) as u64));
+    let held = content_size(book);
+    if total > held {
+        return Err(FixupError::Malformed(format!(
+            "the book's positions add up to {total}, more than the {held} its text and \
+             elements can hold"
+        )));
+    }
+    Ok(())
 }
 
 /// Iteration order of a CPython `set` of small non-negative ints built by inserting `values`

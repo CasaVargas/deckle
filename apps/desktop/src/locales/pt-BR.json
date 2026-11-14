@@ -75,5 +75,9 @@
   "settings.language.label": "Idioma",
   "settings.language.note": "Os textos do app. O jornal e seus livros mantêm o próprio idioma.",
   "settings.language.draft": "Cada tradução começa como um rascunho de IA que os leitores corrigem.",
-  "settings.language.help": "Ajudar a traduzir"
+  "settings.language.help": "Ajudar a traduzir",
+  "daily.run.notSent": "Não enviado: {name} ({why})",
+  "daily.run.notSentNote": "Eles esperam na caixa de saída e vão no próximo envio.",
+  "daily.run.missedKindle": "Este jornal não chegou ao seu Kindle. Ele espera na caixa de saída e vai no próximo envio.",
+  "daily.run.missedReader": "Este jornal não chegou ao seu Kobo ou PocketBook. Ele espera na caixa de saída e vai no próximo envio."
 }

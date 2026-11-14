@@ -693,3 +693,21 @@ pub fn build_mobi6(b: &Mobi6<'_>) -> Vec<u8> {
 fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
     hay.windows(needle.len()).position(|w| w == needle)
 }
+
+/// A BOOKMOBI PalmDB of exactly `records`, for tests that need fields no real book would have.
+pub fn palmdb(records: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = vec![0u8; 78];
+    out[60..68].copy_from_slice(b"BOOKMOBI");
+    out[76..78].copy_from_slice(&(records.len() as u16).to_be_bytes());
+    let mut at = 78 + records.len() * 8 + 2;
+    for (i, r) in records.iter().enumerate() {
+        out.extend((at as u32).to_be_bytes());
+        out.extend([0, (i >> 16) as u8, (i >> 8) as u8, i as u8]);
+        at += r.len();
+    }
+    out.extend([0, 0]);
+    for r in records {
+        out.extend(r);
+    }
+    out
+}

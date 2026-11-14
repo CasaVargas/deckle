@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-use deckle_kfx::ion::{Decimal, Sym, Value, decode_annotated, decode_single};
+use deckle_kfx::ion::{Decimal, IonError, Sym, Value, decode_annotated, decode_single};
 use deckle_kfx::symtab::SymbolTable;
 
 fn hex(s: &str) -> Vec<u8> {
@@ -183,4 +183,64 @@ fn decodes_every_ion_fragment_blob_in_mini_kdf() {
     }
     assert_eq!(total, 81, "fragment rows in the mini KDF");
     assert!(decoded >= 75, "decoded {decoded}");
+}
+
+/// An Ion stream of one empty list inside `n - 1` more lists, `n` values deep.
+fn nested_lists(n: usize) -> Vec<u8> {
+    fn var_uint(mut v: usize) -> Vec<u8> {
+        let mut out = vec![(v & 0x7f) as u8 | 0x80];
+        v >>= 7;
+        while v > 0 {
+            out.insert(0, (v & 0x7f) as u8);
+            v >>= 7;
+        }
+        out
+    }
+    // Body lengths from the innermost list out, then written from the outermost in.
+    let mut lengths = Vec::with_capacity(n);
+    let mut inner = 0;
+    for _ in 0..n {
+        lengths.push(inner);
+        inner += 1 + var_uint(inner).len();
+    }
+    let mut out = vec![0xE0, 0x01, 0x00, 0xEA];
+    for &len in lengths.iter().rev() {
+        out.push(0xBE);
+        out.extend(var_uint(len));
+    }
+    out
+}
+
+/// Lists nested 100,000 deep are refused by the decoder's depth count (nesting-depth design).
+/// The count sits inside the recursion, so this runs on an 8 MiB stack: the limit, not the
+/// stack, must be what stops it.
+#[test]
+fn lists_nested_a_hundred_thousand_deep_are_refused() {
+    let err = std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(|| decode_single(&nested_lists(100_000), &st()).unwrap_err())
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(matches!(err, IonError::TooDeep), "{err}");
+    assert_eq!(
+        err.to_string(),
+        "this file is nested more than 128 levels deep"
+    );
+}
+
+#[test]
+fn lists_nested_128_deep_decode_and_129_are_refused() {
+    let mut v = decode_single(&nested_lists(128), &st()).unwrap();
+    let mut depth = 1;
+    while let Value::List(mut items) = v {
+        let Some(inner) = items.pop() else { break };
+        v = inner;
+        depth += 1;
+    }
+    assert_eq!(depth, 128);
+    assert!(matches!(
+        decode_single(&nested_lists(129), &st()),
+        Err(IonError::TooDeep)
+    ));
 }

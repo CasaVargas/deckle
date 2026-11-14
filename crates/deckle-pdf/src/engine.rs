@@ -2,7 +2,6 @@
 //! PDFium: finding the library, reading a document into [`Page`]s and cutting pictures out of a
 //! rendered page (PDF spec §3).
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -124,7 +123,10 @@ pub fn pdfium() -> Result<&'static Pdfium, PdfError> {
 /// An open document and the pages it renders, kept for cutting pictures.
 pub struct Document<'a> {
     doc: PdfDocument<'a>,
-    rendered: HashMap<usize, image::DynamicImage>,
+    /// The page last rendered for its pictures, with the scale it was rendered at
+    /// ([`RENDER_SCALE`], or less for a huge page). One page only: figures are cut in page
+    /// order, and each rendering can be up to 100 megapixels.
+    rendered: Option<(usize, image::DynamicImage, f32)>,
 }
 
 /// Title and author from the document's info, when they look like a person wrote them.
@@ -167,7 +169,7 @@ impl<'a> Document<'a> {
         })?;
         Ok(Document {
             doc,
-            rendered: HashMap::new(),
+            rendered: None,
         })
     }
 
@@ -230,23 +232,33 @@ impl<'a> Document<'a> {
     pub fn render(&self, index: usize, height: u32) -> Result<image::DynamicImage, PdfError> {
         let err = |e: PdfiumError| PdfError::Unreadable(e.to_string());
         let page = self.doc.pages().get(index as PdfPageIndex).map_err(err)?;
-        let config = PdfRenderConfig::new()
-            .set_target_height(height as Pixels)
-            .set_clear_color(PdfColor::WHITE)
-            .render_form_data(true);
+        let (w, h) = (page.width().value, page.height().value);
+        let wanted = height as f32 / h.abs().max(1.0);
+        let scale = fitting_scale(w, h, wanted);
+        let config = if scale < wanted {
+            PdfRenderConfig::new().scale_page_by_factor(scale)
+        } else {
+            PdfRenderConfig::new().set_target_height(height as Pixels)
+        }
+        .set_clear_color(PdfColor::WHITE)
+        .render_form_data(true);
         page.render_with_config(&config)
             .map_err(err)?
             .as_image()
             .map_err(err)
     }
 
-    /// `rect` on page `index` as a PNG, rendered at [`RENDER_SCALE`].
+    /// `rect` on page `index` as a PNG, rendered at [`RENDER_SCALE`] (less for a page too large
+    /// for it).
     pub fn picture(&mut self, index: usize, rect: Rect) -> Result<Vec<u8>, PdfError> {
         let err = |e: PdfiumError| PdfError::Unreadable(e.to_string());
-        if !self.rendered.contains_key(&index) {
+        if self.rendered.as_ref().is_none_or(|(at, ..)| *at != index) {
+            // The last page's picture goes first, so only one is ever held.
+            self.rendered = None;
             let page = self.doc.pages().get(index as PdfPageIndex).map_err(err)?;
+            let scale = fitting_scale(page.width().value, page.height().value, RENDER_SCALE);
             let config = PdfRenderConfig::new()
-                .scale_page_by_factor(RENDER_SCALE)
+                .scale_page_by_factor(scale)
                 .set_clear_color(PdfColor::WHITE)
                 .render_form_data(true);
             let image = page
@@ -254,10 +266,10 @@ impl<'a> Document<'a> {
                 .map_err(err)?
                 .as_image()
                 .map_err(err)?;
-            self.rendered.insert(index, image);
+            self.rendered = Some((index, image, scale));
         }
-        let image = &self.rendered[&index];
-        let px = |v: f32| (v.max(0.0) * RENDER_SCALE).round() as u32;
+        let (_, image, scale) = self.rendered.as_ref().expect("rendered above");
+        let px = |v: f32| (v.max(0.0) * scale).round() as u32;
         let x = px(rect.x0).min(image.width().saturating_sub(1));
         let y = px(rect.y0).min(image.height().saturating_sub(1));
         let w = px(rect.width()).clamp(1, image.width() - x);
@@ -304,6 +316,24 @@ fn hidden_text(page: &PdfPage) -> Hidden {
         (false, true) => Hidden::All,
         (true, true) => Hidden::Some,
     }
+}
+
+/// The scale, at most `wanted`, at which a `w` × `h` point page renders within
+/// [`MAX_PDF_RENDER_PIXELS`](deckle_limits::MAX_PDF_RENDER_PIXELS) (size-limits design): a page
+/// too large for `wanted` renders smaller, not refused.
+fn fitting_scale(w: f32, h: f32, wanted: f32) -> f32 {
+    let max = deckle_limits::MAX_PDF_RENDER_PIXELS as f64;
+    let (w, h) = (f64::from(w.abs().max(1.0)), f64::from(h.abs().max(1.0)));
+    let pixels = |s: f64| (w * s).ceil() * (h * s).ceil();
+    let mut s = f64::from(wanted);
+    if pixels(s) > max {
+        s = (max / (w * h)).sqrt();
+        // Each side is rounded up to whole pixels: a thin page's short side most of all.
+        while pixels(s) > max {
+            s *= 0.9;
+        }
+    }
+    s as f32
 }
 
 fn read_page(page: &PdfPage) -> Result<Page, PdfiumError> {
@@ -393,7 +423,9 @@ fn read_page(page: &PdfPage) -> Result<Page, PdfiumError> {
         }
     }
     Ok(Page {
-        width,
+        // The layout's gutter and channel tables have a row a point across the page: held to
+        // the PDF specification's largest page, whatever the MediaBox says.
+        width: width.clamp(0.0, deckle_limits::MAX_PDF_PAGE_POINTS),
         height,
         glyphs,
         images,
@@ -415,7 +447,50 @@ mod tests {
         assert_eq!(super::PINNED, tag.replace('/', "-"));
     }
 
-    use super::math_font;
+    use super::{Document, Rect, fitting_scale, math_font, pdfium};
+
+    #[test]
+    fn only_the_page_being_cut_stays_rendered() {
+        // Figures come in page order, so one rendered page is kept at a time, not one a page
+        // (each up to 100 megapixels).
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf/book.pdf");
+        let pdfium = pdfium().expect("run tools/fetch-pdfium.sh first");
+        let mut doc = Document::open(pdfium, &path).unwrap();
+        assert!(doc.page_count() >= 2, "{}", doc.page_count());
+        let rect = Rect {
+            x0: 10.0,
+            y0: 10.0,
+            x1: 60.0,
+            y1: 40.0,
+        };
+        for page in [0, 0, 1] {
+            doc.picture(page, rect).unwrap();
+            assert_eq!(doc.rendered.iter().count(), 1, "after page {page}");
+        }
+        // A page cut again after another is rendered again, the same.
+        let again = doc.picture(1, rect).unwrap();
+        assert_eq!(again, doc.picture(1, rect).unwrap());
+        assert_eq!(doc.rendered.iter().count(), 1);
+    }
+
+    #[test]
+    fn a_page_renders_within_the_pixel_limit() {
+        let px = |w: f64, h: f64, s: f32| (w * f64::from(s)).ceil() * (h * f64::from(s)).ceil();
+        // A letter page at 2× is far inside: the wanted scale stands.
+        assert_eq!(fitting_scale(612.0, 792.0, 2.0), 2.0);
+        // The largest page the PDF specification allows, and a hostile MediaBox.
+        for (w, h) in [(14_400.0, 14_400.0), (2_147_484_260.0, 792.0), (1.0, 1e12)] {
+            let s = fitting_scale(w as f32, h as f32, 2.0);
+            assert!(s < 2.0 && s > 0.0, "{w}×{h}: {s}");
+            assert!(
+                px(w, h, s) <= deckle_limits::MAX_PDF_RENDER_PIXELS as f64,
+                "{w}×{h}"
+            );
+        }
+        // No size, or a negative one, renders as the wanted scale.
+        assert_eq!(fitting_scale(0.0, -5.0, 2.0), 2.0);
+    }
 
     #[test]
     fn math_fonts_by_name() {

@@ -14,12 +14,25 @@ pub mod op {
     pub const DELETE_OBJECT: u16 = 0x100B;
     pub const SEND_OBJECT_INFO: u16 = 0x100C;
     pub const SEND_OBJECT: u16 = 0x100D;
+    /// MTP: what an object property is and whether it can be set.
+    pub const GET_OBJECT_PROP_DESC: u16 = 0x9802;
+    /// MTP: sets an object property (the file name, to rename).
+    pub const SET_OBJECT_PROP_VALUE: u16 = 0x9804;
 }
 
 /// Response codes.
 pub mod rsp {
     pub const OK: u16 = 0x2001;
+    pub const GENERAL_ERROR: u16 = 0x2002;
+    pub const OPERATION_NOT_SUPPORTED: u16 = 0x2005;
+    pub const INCOMPLETE_TRANSFER: u16 = 0x2007;
+    pub const STORE_FULL: u16 = 0x200C;
     pub const INVALID_DATASET: u16 = 0xA806;
+}
+
+/// MTP object property codes.
+pub mod prop {
+    pub const OBJECT_FILE_NAME: u16 = 0xDC07;
 }
 
 /// Object formats.
@@ -165,8 +178,8 @@ pub fn decode_u32_array(bytes: &[u8]) -> Result<Vec<u32>, PtpError> {
         .collect())
 }
 
-/// The strings of the DeviceInfo dataset (GetDeviceInfo, PIMA 15740 §5.5.1); the operation,
-/// event, property and format arrays before them are skipped.
+/// The strings of the DeviceInfo dataset (GetDeviceInfo, PIMA 15740 §5.5.1) and the operations
+/// the device supports; the event, property and format arrays are skipped.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeviceInfo {
     pub manufacturer: String,
@@ -174,10 +187,18 @@ pub struct DeviceInfo {
     /// The firmware version on a Kindle.
     pub device_version: String,
     pub serial_number: String,
+    /// The operation codes the device lists as supported.
+    pub operations: Vec<u16>,
 }
 
 impl DeviceInfo {
-    /// A minimal dataset (no supported operations); the device side, for tests.
+    /// The device lists operation `code` as supported.
+    pub fn supports(&self, code: u16) -> bool {
+        self.operations.contains(&code)
+    }
+
+    /// A minimal dataset (its operations, no events, properties or formats); the device side,
+    /// for tests.
     pub fn encode(&self) -> Vec<u8> {
         let mut o = Vec::new();
         o.extend_from_slice(&100u16.to_le_bytes()); // standard version
@@ -185,7 +206,11 @@ impl DeviceInfo {
         o.extend_from_slice(&100u16.to_le_bytes()); // vendor extension version
         o.extend(encode_string(""));
         o.extend_from_slice(&0u16.to_le_bytes()); // functional mode
-        for _ in 0..5 {
+        o.extend_from_slice(&(self.operations.len() as u32).to_le_bytes());
+        for code in &self.operations {
+            o.extend_from_slice(&code.to_le_bytes());
+        }
+        for _ in 0..4 {
             o.extend_from_slice(&0u32.to_le_bytes()); // empty u16 arrays
         }
         for s in [
@@ -212,9 +237,21 @@ impl DeviceInfo {
         string(&mut at)?; // vendor extension description
         at += 2; // functional mode
         // operations, events, device properties, capture formats, playback formats
-        for _ in 0..5 {
+        let mut operations = Vec::new();
+        for i in 0..5 {
             let count = bytes.get(at..at + 4).ok_or(PtpError::Truncated)?;
             let n = u32::from_le_bytes(count.try_into().unwrap()) as usize;
+            if i == 0 {
+                let codes = bytes
+                    .get(at + 4..at + 4 + 2 * n)
+                    .ok_or(PtpError::Truncated)?;
+                operations = codes
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|c| u16::from_le_bytes(*c))
+                    .collect();
+            }
             at += 4 + 2 * n;
         }
         Ok(DeviceInfo {
@@ -222,6 +259,7 @@ impl DeviceInfo {
             model: string(&mut at)?,
             device_version: string(&mut at)?,
             serial_number: string(&mut at)?,
+            operations,
         })
     }
 }

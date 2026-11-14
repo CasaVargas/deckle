@@ -32,31 +32,11 @@ import { anyKindleHint } from "./papersView";
 import { keepUnfinished, savable } from "./subscriptions";
 import type { ExportConfig, PressSetupStatus, DailyConfig, DailyState, Day, EditionPreview, EmailConfig, EmailStatus, NextPaper, PagePlanRow, PapersView, ReadershipView, ReadingEntry, RunResult } from "./types";
 import { DEFAULT_EMAIL } from "./types";
+import { useT } from "./i18n";
+import { editionMissedOn, notSent, runFailed, summary } from "./runResult";
 
 /** Amazon's Manage Your Content and Devices: the approved-sender list and the emailed Docs. */
 const MYCD = "https://www.amazon.com/mycd";
-
-function summary(r: RunResult, send: boolean): string {
-  if (!r.ok && !r.report) return r.log || "Something went wrong.";
-  const build = send ? r.report?.build : r.report;
-  const parts: string[] = [];
-  if (build?.title) parts.push(build.title);
-  if (send) {
-    const run = r.report?.run;
-    const outcome = r.report?.outcome;
-    if (r.report?.emailed) parts.push(`Emailed to ${r.report.emailed}.`);
-    if (r.report?.email_error) parts.push(`Email failed: ${r.report.email_error}. Sent over USB instead.`);
-    parts.push(...exportParts(r.report?.exports));
-    const rm = remarkablePart(r.report);
-    if (rm) parts.push(rm);
-    if (run?.error) parts.push(`Not converted: ${run.error}`);
-    else if (outcome?.flush?.delivered?.length) parts.push("Sent to your Kindle.");
-    else if (outcome?.queued) parts.push("Waiting for your Kindle: it goes over when you plug it in.");
-  } else {
-    parts.push("Preview built. Saved articles stay saved until you send.");
-  }
-  return parts.join(" — ");
-}
 
 function counts(r: RunResult, send: boolean): { title: string; items: number; unavailable: string | null }[] {
   const build = send ? r.report?.build : r.report;
@@ -86,6 +66,7 @@ export default function DailyView({
   onOpenSettings?: (page: SettingsPage) => void;
 }) {
   const caps = useCapabilities();
+  const t = useT();
   const [state, setState] = useState<DailyState | null>(null);
   const [draft, setDraft] = useState<DailyConfig | null>(null);
   // Saving as you go (Daily tab redesign §4): the newest edit is in draftRef; `seq` counts edits,
@@ -608,8 +589,22 @@ export default function DailyView({
                 onDelivery={() => setRoom("delivery")}
               >
                 {result && (
-                  <div className={`run-result ${result.r.ok ? "ok" : "fail"}`}>
+                  <div className={`run-result ${runFailed(result.r) ? "fail" : "ok"}`}>
                     <div>{summary(result.r, result.send)}</div>
+                    {result.send &&
+                      editionMissedOn(result.r).map((d) => (
+                        <p key={d}>{t(d === "kindle" ? "daily.run.missedKindle" : "daily.run.missedReader")}</p>
+                      ))}
+                    {result.send && notSent(result.r.report).length > 0 && (
+                      <div className="not-sent">
+                        <ul>
+                          {notSent(result.r.report).map((n) => (
+                            <li key={n.name}>{t("daily.run.notSent", { name: n.name, why: n.why })}</li>
+                          ))}
+                        </ul>
+                        <p className="muted small">{t("daily.run.notSentNote")}</p>
+                      </div>
+                    )}
                     <div className="section-counts">
                       {counts(result.r, result.send).map((s) => (
                         <span key={s.title} className={s.unavailable && s.items === 0 ? "warn" : ""} title={s.unavailable ?? ""}>

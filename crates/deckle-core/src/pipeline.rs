@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::compat::{self, SendUse};
 use crate::cover_rule::{AsinChoice, Decision, DeviceClass, MatchResult, Override, decide};
-use crate::deliver::{Conn, DeliverError, DeliverOptions, Target, deliver_named_on, deliver_on};
+use crate::deliver::{Conn, DeliverError, DeliverOptions, Target, deliver_named_reporting};
 use crate::devices::TransportKind;
 use crate::inspect::{BookInfo, inspect};
 use crate::matcher::{Fetcher, MatchOutcome, match_book};
@@ -577,7 +577,7 @@ pub(crate) fn cover_for(
 /// An image file as a JPEG cover.
 fn picked_cover(path: &Path) -> Result<GeneratedCover, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    let img = image::load_from_memory(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    let img = crate::image_cap::load(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
     Ok(GeneratedCover {
         style: "picked".into(),
         jpeg: crate::normalize::encode_jpeg(&img, 90)?,
@@ -928,12 +928,20 @@ pub fn finish_with(
         report,
         on_stage,
         "deliver",
-        match &prepared.name {
-            Some(name) => deliver_named_on(&out.bytes, name, conn, &deliver_opts),
-            None => deliver_on(&out.bytes, &info, conn, &deliver_opts),
-        },
+        deliver_named_reporting(
+            &out.bytes,
+            &prepared
+                .name
+                .clone()
+                .unwrap_or_else(|| crate::deliver::device_filename(&info)),
+            conn,
+            &deliver_opts,
+        ),
         report
     );
+    // The book is on the Kindle: a sidecar or thumbnail that didn't go is a warning.
+    report.warnings.extend(delivered.warnings);
+    let delivered = delivered.path;
     replace_older_copies(
         conn,
         &mut report,
@@ -1082,9 +1090,11 @@ fn finish_fixed_layout(
         report,
         on_stage,
         "deliver",
-        deliver_named_on(&azw3, &name, conn, &deliver_opts),
+        deliver_named_reporting(&azw3, &name, conn, &deliver_opts),
         report
     );
+    report.warnings.extend(delivered.warnings);
+    let delivered = delivered.path;
     replace_older_copies(
         conn,
         &mut report,
@@ -1260,6 +1270,7 @@ mod tests {
                     model: "Kindle Scribe".into(),
                     device_version: "5.18.1.0.1".into(),
                     serial_number: "G0X1".into(),
+                    operations: Vec::new(),
                 };
                 self.0
                     .push(reply(ContainerKind::Data, c.code).encode(&info.encode()));

@@ -5,7 +5,9 @@
 use sha1::{Digest, Sha1};
 
 use crate::fragment::{CONTAINER_FRAGMENT_TYPES, Fragment, FragmentList, is_raw_type};
-use crate::ion::{IonError, Struct, Sym, Value, decode_annotated, decode_single, encode_single};
+use crate::ion::{
+    IonError, Struct, Sym, Value, ValueBudget, decode_annotated_in, decode_single_in, encode_single,
+};
 use crate::symtab::{SYSTEM_SYMBOL_COUNT, SymbolTable};
 
 const SIGNATURE: &[u8; 4] = b"CONT";
@@ -88,6 +90,11 @@ fn slice(data: &[u8], off: usize, len: usize) -> Result<&[u8], ContainerError> {
 
 /// Parses a monolithic KFX file.
 pub fn read_kfx(data: &[u8]) -> Result<KfxDoc, ContainerError> {
+    read_kfx_in(data, &ValueBudget::default())
+}
+
+/// [`read_kfx`], counting the Ion values decoded against `values`.
+fn read_kfx_in(data: &[u8], values: &ValueBudget) -> Result<KfxDoc, ContainerError> {
     if data.len() < MIN_LENGTH {
         return Err(if data.starts_with(SIGNATURE) {
             ContainerError::Truncated
@@ -107,7 +114,8 @@ pub fn read_kfx(data: &[u8]) -> Result<KfxDoc, ContainerError> {
     let cinfo_len = u32le(&data[14..18]) as usize;
 
     let base = SymbolTable::yj_default();
-    let cinfo = decode_single(slice(data, cinfo_off, cinfo_len)?, &base)?;
+    // One budget of decoded values for the whole container.
+    let cinfo = decode_single_in(slice(data, cinfo_off, cinfo_len)?, &base, values)?;
     let mut cinfo = cinfo
         .as_struct()
         .cloned()
@@ -131,10 +139,11 @@ pub fn read_kfx(data: &[u8]) -> Result<KfxDoc, ContainerError> {
     let mut symtab = base;
     if sym_len > 0 {
         let off = sym_off.ok_or(ContainerError::Truncated)? as usize;
-        let (_, table) = decode_annotated(
+        let (_, table) = decode_annotated_in(
             slice(data, off, sym_len as usize)?,
             &symtab,
             Some("$ion_symbol_table"),
+            values,
         )?;
         symtab = SymbolTable::from_container_table(&table)?;
         // store the raw (KDF-style) form, as kfxlib does after subtracting the system count
@@ -168,13 +177,22 @@ pub fn read_kfx(data: &[u8]) -> Result<KfxDoc, ContainerError> {
             tbl_off.ok_or(ContainerError::Truncated)? as usize,
             tbl_len as usize,
         )?;
+        // Rows may all point at one entity: together they can't hold more than the file.
+        let mut held = deckle_limits::Budget::new(data.len() as u64);
+        for row in table.as_chunks::<24>().0 {
+            held.add(u64le(&row[16..24])).map_err(|_| {
+                ContainerError::Malformed("entities add up to more than the file".into())
+            })?;
+        }
         for row in table.as_chunks::<24>().0 {
             let id_idnum = u32le(&row[0..4]);
             let type_idnum = u32le(&row[4..8]);
-            let ent_off = header_len + u64le(&row[8..16]) as usize;
+            let ent_off = header_len
+                .checked_add(u64le(&row[8..16]) as usize)
+                .ok_or(ContainerError::Truncated)?;
             let ent_len = u64le(&row[16..24]) as usize;
             let ent = slice(data, ent_off, ent_len)?;
-            entities.push(read_entity(ent, id_idnum, type_idnum, &symtab)?);
+            entities.push(read_entity(ent, id_idnum, type_idnum, &symtab, values)?);
             entity_refs.push(Value::List(vec![
                 Value::Int(i64::from(type_idnum)),
                 Value::Int(i64::from(id_idnum)),
@@ -196,8 +214,12 @@ pub fn read_kfx(data: &[u8]) -> Result<KfxDoc, ContainerError> {
 
     if fc_len > 0 {
         let off = fc_off.ok_or(ContainerError::Truncated)? as usize;
-        let (_, caps) =
-            decode_annotated(slice(data, off, fc_len as usize)?, &symtab, Some("$593"))?;
+        let (_, caps) = decode_annotated_in(
+            slice(data, off, fc_len as usize)?,
+            &symtab,
+            Some("$593"),
+            values,
+        )?;
         fragments.push(Fragment::root("$593", caps));
     }
     for e in entities {
@@ -217,6 +239,7 @@ fn read_entity(
     id_idnum: u32,
     type_idnum: u32,
     symtab: &SymbolTable,
+    values: &ValueBudget,
 ) -> Result<Fragment, ContainerError> {
     if ent.len() < 10 || &ent[..4] != ENTITY_SIGNATURE {
         return Err(ContainerError::Malformed("bad entity signature".into()));
@@ -237,7 +260,7 @@ fn read_entity(
     let value = if is_raw_type(ftype.as_str()) {
         Value::Blob(payload.to_vec())
     } else {
-        decode_single(payload, symtab)?
+        decode_single_in(payload, symtab, values)?
     };
     // An annotated singleton unwraps to its value (kfxlib KfxContainerEntity.deserialize).
     let (fid, value) = match value {
@@ -485,4 +508,59 @@ fn write_entity(f: &Fragment, symtab: &SymbolTable) -> Result<Vec<u8>, Container
         ent.extend_from_slice(&encode_single(&f.value, symtab)?);
     }
     Ok(ent)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ion::decode_single;
+
+    #[test]
+    fn a_container_shares_one_value_budget() {
+        // The golden decodes 2,332 values across its info, symbol table and entities; a budget
+        // of 1,000 is spent partway through, wherever that falls.
+        let data =
+            std::fs::read(crate::fixtures::path("deckle-mini-pdoc-nopages.golden.kfx")).unwrap();
+        let values = ValueBudget::new(1_000);
+        let e = read_kfx_in(&data, &values).err().unwrap();
+        assert!(
+            matches!(
+                e,
+                ContainerError::Ion(IonError::TooManyValues { limit: 1_000 })
+            ),
+            "{e}"
+        );
+        assert_eq!(values.used(), 1_000);
+        let values = ValueBudget::default();
+        read_kfx_in(&data, &values).unwrap();
+        assert_eq!(values.used(), 2_332);
+    }
+
+    #[test]
+    fn entity_rows_that_add_up_past_the_file_are_refused() {
+        let mut data =
+            std::fs::read(crate::fixtures::path("deckle-mini-pdoc-nopages.golden.kfx")).unwrap();
+        assert!(read_kfx(&data).is_ok());
+        // Every row of the entity table pointed at the whole entity area.
+        let header_len = u32le(&data[6..10]) as usize;
+        let (cinfo_off, cinfo_len) = (u32le(&data[10..14]), u32le(&data[14..18]));
+        let cinfo = decode_single(
+            slice(&data, cinfo_off as usize, cinfo_len as usize).unwrap(),
+            &SymbolTable::yj_default(),
+        )
+        .unwrap();
+        let c = cinfo.as_struct().unwrap();
+        let off = c.get("$413").and_then(Value::as_int).unwrap() as usize;
+        let len = c.get("$414").and_then(Value::as_int).unwrap() as usize;
+        let area = (data.len() - header_len) as u64;
+        for row in data[off..off + len].as_chunks_mut::<24>().0 {
+            row[8..16].copy_from_slice(&0u64.to_le_bytes());
+            row[16..24].copy_from_slice(&area.to_le_bytes());
+        }
+        let e = read_kfx(&data).err().unwrap();
+        assert!(
+            e.to_string().contains("add up to more than the file"),
+            "{e}"
+        );
+    }
 }

@@ -216,6 +216,10 @@ pub struct PutBack {
 
 /// Puts the old copy of `old_file` back on the connection's Kindle and removes Deckle's copy,
 /// then forgets the upgrade and its kept folder.
+///
+/// The book goes in first, so a failed copy leaves the upgrade as it was; then Deckle's copy
+/// comes out, which takes the `.sdr` folder the two names may share (`X.kfx`, `X.azw3`); then
+/// the kept `.sdr` goes in. Whatever fails, the record and the kept copy stay for a retry.
 pub fn put_back(conn: &mut Conn<'_>, config: &Path, old_file: &str) -> Result<PutBack, String> {
     let device = crate::device_ref(conn.target).key;
     let mut all = Upgrades::load(config);
@@ -231,14 +235,22 @@ pub fn put_back(conn: &mut Conn<'_>, config: &Path, old_file: &str) -> Result<Pu
         restored: format!("documents/{old_file}"),
         ..Default::default()
     };
+    deckle_core::inventory::copy_in_book(conn, &record.kept, old_file)
+        .map_err(|e| format!("{e}; nothing on the Kindle changed"))?;
     if let Some(new) = record.new_file.as_deref().filter(|n| *n != old_file) {
         match deckle_core::inventory::remove_on(conn, new) {
             Ok(removed) => out.removed = removed,
             Err(DeliverError::Refused(_)) => {}
-            Err(e) => return Err(format!("removing {new}: {e}")),
+            Err(e) => {
+                return Err(format!(
+                    "the old copy is back, but Deckle's {new} couldn't be removed: {e}"
+                ));
+            }
         }
     }
-    deckle_core::inventory::copy_in(conn, &record.kept, old_file).map_err(|e| e.to_string())?;
+    deckle_core::inventory::copy_in_sdr(conn, &record.kept, old_file).map_err(|e| {
+        format!("the book is back, but its reading position and notes were not restored: {e}")
+    })?;
     all.upgrades.remove(i);
     all.save(config)?;
     let _ = std::fs::remove_dir_all(&record.kept);
@@ -444,6 +456,112 @@ mod tests {
         assert!(!partway(Some(0.0)) && !partway(Some(0.01)));
         assert!(partway(Some(0.48)));
         assert!(!partway(Some(0.99)));
+    }
+
+    /// A folder Kindle holding Deckle's upgrade `new` (with `new`'s `.sdr`), the old copy kept
+    /// on the computer as `old` with its reading data, and the record of it.
+    fn upgraded(tmp: &Path, old: &str, new: &str) -> (deckle_core::deliver::Target, PathBuf) {
+        let kindle = tmp.join("kindle");
+        let new_sdr = kindle.join(Path::new(new).with_extension("sdr"));
+        std::fs::create_dir_all(&new_sdr).unwrap();
+        std::fs::write(kindle.join(new), b"NEW").unwrap();
+        std::fs::write(new_sdr.join("new.yjf"), b"NEW POSITION").unwrap();
+        let kept = tmp.join("kept");
+        let old_sdr = kept.join(Path::new(old).with_extension("sdr"));
+        std::fs::create_dir_all(&old_sdr).unwrap();
+        std::fs::write(kept.join(old), b"OLD").unwrap();
+        std::fs::write(old_sdr.join("old.yjf"), b"OLD POSITION").unwrap();
+        let target = deckle_core::deliver::Target::Folder(kindle);
+        let config = tmp.join("library.json");
+        let mut all = Upgrades::default();
+        all.upgrades.push(UpgradeRecord {
+            device: crate::device_ref(&target).key,
+            old_file: old.into(),
+            new_file: Some(new.into()),
+            title: "Emma".into(),
+            source: "/c/Emma.epub".into(),
+            origin: None,
+            kept,
+            at: "2026-11-12T09:00:00Z".into(),
+        });
+        all.save(&config).unwrap();
+        (target, config)
+    }
+
+    #[test]
+    fn a_put_back_whose_copy_fails_keeps_the_upgrade_and_its_record() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (target, config) = upgraded(tmp.path(), "Emma.azw3", "Austen, Jane - Emma.kfx");
+        // The kept book is gone from the computer: the copy in fails.
+        std::fs::remove_file(tmp.path().join("kept/Emma.azw3")).unwrap();
+        let r = put_back(&mut Conn::new(&target), &config, "Emma.azw3");
+        assert!(r.is_err());
+        let kindle = tmp.path().join("kindle");
+        assert_eq!(
+            std::fs::read(kindle.join("Austen, Jane - Emma.kfx")).unwrap(),
+            b"NEW"
+        );
+        assert!(kindle.join("Austen, Jane - Emma.sdr/new.yjf").is_file());
+        assert_eq!(Upgrades::load(&config).upgrades.len(), 1);
+    }
+
+    #[test]
+    fn a_put_back_to_an_unplugged_kindle_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (_, config) = upgraded(tmp.path(), "Emma.azw3", "Austen, Jane - Emma.kfx");
+        // The same upgrade, recorded for a mass-storage Kindle now unplugged from a fixed
+        // mount point.
+        let mount = tmp.path().join("mount");
+        std::fs::create_dir_all(&mount).unwrap();
+        let target = deckle_core::deliver::Target::MassStorage(deckle_core::deliver::Device {
+            root: mount.clone(),
+            model_hint: "Kindle".into(),
+            thumbnails_writable: false,
+            firmware: None,
+            serial: Some("G000TEST".into()),
+        });
+        let mut all = Upgrades::load(&config);
+        all.upgrades[0].device = crate::device_ref(&target).key;
+        all.save(&config).unwrap();
+        let e = put_back(&mut Conn::new(&target), &config, "Emma.azw3").unwrap_err();
+        let left: Vec<_> = std::fs::read_dir(&mount)
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        assert!(left.is_empty(), "{e}: {left:?}");
+        assert_eq!(Upgrades::load(&config).upgrades.len(), 1);
+    }
+
+    #[test]
+    fn a_put_back_whose_reading_data_fails_keeps_the_record_for_a_retry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (target, config) = upgraded(tmp.path(), "Emma.azw3", "Austen, Jane - Emma.kfx");
+        // A file where the `.sdr` folder goes: the reading data can't be written.
+        let kindle = tmp.path().join("kindle");
+        std::fs::write(kindle.join("Emma.sdr"), b"").unwrap();
+        let e = put_back(&mut Conn::new(&target), &config, "Emma.azw3").unwrap_err();
+        assert!(e.contains("reading position"), "{e}");
+        assert_eq!(std::fs::read(kindle.join("Emma.azw3")).unwrap(), b"OLD");
+        assert_eq!(Upgrades::load(&config).upgrades.len(), 1);
+        assert!(tmp.path().join("kept/Emma.azw3").is_file());
+    }
+
+    #[test]
+    fn a_put_back_to_a_name_sharing_the_sdr_keeps_the_restored_reading_data() {
+        let tmp = tempfile::tempdir().unwrap();
+        // X.kfx and X.azw3 share one X.sdr/ folder.
+        let (target, config) = upgraded(tmp.path(), "Emma.azw3", "Emma.kfx");
+        let out = put_back(&mut Conn::new(&target), &config, "Emma.azw3").unwrap();
+        let kindle = tmp.path().join("kindle");
+        assert_eq!(std::fs::read(kindle.join("Emma.azw3")).unwrap(), b"OLD");
+        assert!(!kindle.join("Emma.kfx").exists());
+        assert_eq!(
+            std::fs::read(kindle.join("Emma.sdr/old.yjf")).unwrap(),
+            b"OLD POSITION"
+        );
+        assert!(out.removed.contains(&"documents/Emma.kfx".to_owned()));
+        assert!(Upgrades::load(&config).upgrades.is_empty());
     }
 
     #[test]

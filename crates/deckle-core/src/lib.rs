@@ -13,6 +13,7 @@ pub mod devices;
 pub mod epub;
 #[cfg(test)]
 mod fake_mtp;
+pub mod image_cap;
 pub mod import;
 pub mod inspect;
 pub mod inventory;

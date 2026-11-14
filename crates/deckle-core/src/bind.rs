@@ -68,7 +68,7 @@ struct Item {
 type ItemRef = (String, bool);
 
 fn manifest_and_spine(opf: &str) -> Result<(Vec<Item>, Vec<ItemRef>), String> {
-    let doc = roxmltree::Document::parse(opf).map_err(|e| e.to_string())?;
+    let doc = deckle_limits::parse_xml(opf, Default::default()).map_err(|e| e.to_string())?;
     let attr = |n: roxmltree::Node, name: &str| {
         n.attributes()
             .find(|a| a.name() == name)
@@ -99,7 +99,7 @@ fn obfuscated(reader: &mut EpubReader) -> HashSet<String> {
     let Ok(xml) = reader.read_string("META-INF/encryption.xml") else {
         return HashSet::new();
     };
-    let Ok(doc) = roxmltree::Document::parse(&xml) else {
+    let Ok(doc) = deckle_limits::parse_xml(&xml, Default::default()) else {
         return HashSet::new();
     };
     doc.descendants()

@@ -356,3 +356,53 @@ fn unknown_language_falls_back_to_english() {
             .any(|w| w.contains("unknown language code 9999"))
     );
 }
+
+/// `open` repeated 100,000 times around a word, closed as often, imported on a 1 MiB stack: the
+/// lexer refuses it before any tree or walk recursion could abort the process.
+fn nested_100_000(open: &str) -> RtfError {
+    let open = open.to_owned();
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(move || {
+            let n = 100_000;
+            let rtf = format!("{{\\rtf1\\ansi {}deep{}}}", open.repeat(n), "}".repeat(n));
+            to_epub(rtf.as_bytes(), "stem").map(|_| ()).unwrap_err()
+        })
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+#[test]
+fn groups_nested_a_hundred_thousand_deep_are_refused() {
+    let e = nested_100_000("{\\b ");
+    assert!(matches!(e, RtfError::TooDeep), "{e}");
+    assert_eq!(
+        e.to_string(),
+        "this file is nested more than 256 levels deep"
+    );
+}
+
+#[test]
+fn footnotes_nested_a_hundred_thousand_deep_are_refused() {
+    let e = nested_100_000("{\\footnote ");
+    assert!(matches!(e, RtfError::TooDeep), "{e}");
+}
+
+#[test]
+fn groups_nested_256_deep_import_and_257_are_refused() {
+    // The document's own `{\rtf1` is the first level.
+    let at = |n: usize| {
+        format!(
+            "{{\\rtf1\\ansi {}deep{}}}",
+            "{\\b ".repeat(n - 1),
+            "}".repeat(n - 1)
+        )
+    };
+    let (files, _) = import_bytes(at(256).as_bytes());
+    assert!(text(&files, "OEBPS/chapter-001.xhtml").contains("deep"));
+    assert!(matches!(
+        to_epub(at(257).as_bytes(), "stem").map(|_| ()),
+        Err(RtfError::TooDeep)
+    ));
+}
