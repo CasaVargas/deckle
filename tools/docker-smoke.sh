@@ -150,7 +150,7 @@ expect 401 "invoke without the cookie" -X POST -H 'X-Deckle: 1' "${json[@]}" -d 
     "$base/api/invoke/app_version"
 expect 403 "invoke without X-Deckle" -b "$jar" -X POST "${json[@]}" -d '{}' \
     "$base/api/invoke/app_version"
-grep -q "failed login from" <<<"$(docker logs "$name-web" 2>&1)" \
+grep -q "failed sign-in from" <<<"$(docker logs "$name-web" 2>&1)" \
     || fail "the failed login wasn't logged"
 docker rm -f "$name-web" >/dev/null
 echo "docker-smoke: web UI on 8080: page, login, app_version $version, daily_state"

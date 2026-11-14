@@ -473,6 +473,7 @@ fn resolve(base: &str, href: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::resolve;
 
     /// A saved page names its pictures in its own folder; nothing else on the disk.
