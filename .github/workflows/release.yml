@@ -246,7 +246,9 @@ jobs:
           set -euo pipefail
           tools/release-notes.sh "$TAG" > "$RUNNER_TEMP/release-notes.md"
           { echo 'body<<RELEASE_NOTES_EOF'; cat "$RUNNER_TEMP/release-notes.md"; echo 'RELEASE_NOTES_EOF'; } >> "$GITHUB_OUTPUT"
-      - uses: tauri-apps/tauri-action@v1
+      # v0, not v1: v1 writes latest.json with API asset links (api.github.com/…/assets/<id>)
+      # instead of /releases/download/<tag>/ ones, which check-updater-json refuses (0.15.0).
+      - uses: tauri-apps/tauri-action@v0
         if: github.event.inputs.dry_run != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
