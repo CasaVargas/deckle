@@ -4,7 +4,9 @@ use super::safe_io::Dir;
 use super::*;
 use super::{
     journal::storage,
-    publish::{archive, binding, check_binding, directory, editions, sync_dir, verify},
+    publish::{
+        archive, binding, check_binding, check_folder, directory, editions, sync_dir, verify,
+    },
 };
 use chrono::{DateTime, Duration, Utc};
 use std::fs;
@@ -236,12 +238,24 @@ fn remove_bundle(
 /// Keep seven newest per folder, every result under 48 hours, and all unpublished
 /// intents. Tombstones are committed and shared before deleting either owned copy.
 pub fn prune_results(j: &mut PressJournal, now: DateTime<Utc>) -> Result<(), PressError> {
+    prune_results_except(j, now, &std::collections::HashSet::new())
+}
+/// `prune_results`, leaving alone the folders in `skip` (a folder whose configured paper
+/// could not be registered: its outputs still belong to the paper bound there).
+pub fn prune_results_except(
+    j: &mut PressJournal,
+    now: DateTime<Utc>,
+    skip: &std::collections::HashSet<std::path::PathBuf>,
+) -> Result<(), PressError> {
     j.ensure_healthy()?;
     let mut error = None;
     let mut outputs = j.outputs();
     outputs.sort_by_key(|o| std::cmp::Reverse((o.published_at, o.result.edition_id)));
     let mut counts = std::collections::HashMap::new();
-    for o in outputs {
+    for o in outputs
+        .into_iter()
+        .filter(|o| !skip.contains(&o.lease.root))
+    {
         let outcome = (|| -> Result<(), PressError> {
             let active = j.active();
             for stage in &o.stages {
@@ -328,28 +342,176 @@ pub fn prune_results(j: &mut PressJournal, now: DateTime<Utc>) -> Result<(), Pre
             error.get_or_insert(e);
         }
     }
-    let expired = j.forget_old(now, |b, id| {
+    let expired = j.forget_old(now, skip, |b, id| {
         check_binding(b)?;
-        let parent = b.root.join(".deckle-press/status");
-        directory(&parent, false)?;
-        let path = parent.join(format!("{id}.json"));
-        match fs::symlink_metadata(&path) {
-            Ok(m) if m.file_type().is_file() => {
-                let pinned = Dir::open(&parent)?;
-                pinned.remove(
-                    std::path::Path::new(path.file_name().ok_or_else(super::publish::conflict)?),
-                    false,
-                )
-            }
-            Ok(_) => Err(PressError::new(PressErrorCode::ProtocolConflict)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(_) => Err(storage()),
-        }
+        remove_status(b, id)
     });
     if let Err(e) = expired {
         error.get_or_insert(e);
     }
     error.map_or(Ok(()), Err)
+}
+fn remove_status(b: &PressBinding, id: Uuid) -> Result<(), PressError> {
+    let parent = b.root.join(".deckle-press/status");
+    directory(&parent, false)?;
+    let path = parent.join(format!("{id}.json"));
+    match fs::symlink_metadata(&path) {
+        Ok(m) if m.file_type().is_file() => {
+            let pinned = Dir::open(&parent)?;
+            pinned.remove(
+                std::path::Path::new(path.file_name().ok_or_else(super::publish::conflict)?),
+                false,
+            )
+        }
+        Ok(_) => Err(PressError::new(PressErrorCode::ProtocolConflict)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(storage()),
+    }
+}
+
+fn exists(path: &std::path::Path) -> Result<bool, PressError> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(_) => Err(storage()),
+    }
+}
+
+/// Move a folder from paper `old` to paper `new` (one folder, one paper). Allowed only when
+/// `old` has nothing in progress and the folder's owned manifest names `new`. Then every
+/// output the journal recorded for `old` is deleted, whatever its age or count, through the
+/// same verified deletion as pruning, but without the owned-manifest test (the manifest now
+/// names `new`); the other folder checks stay. Each deletion commits on its own, so a crash
+/// part-way resumes on the next try. Then `old`'s status files go, and one commit drops
+/// `old`'s entries, jobs and outputs and adds `new`. Nothing is taken from the manifest or
+/// a folder listing, and a file Deckle cannot verify is never deleted: the error names it.
+pub(crate) fn replace_binding(
+    j: &mut PressJournal,
+    old: &PressBinding,
+    new: PressBinding,
+    enabled: bool,
+    stopped: bool,
+) -> Result<(), PressError> {
+    j.ensure_healthy()?;
+    let refuse = |why: String| {
+        PressError::with_detail(
+            PressErrorCode::ProtocolConflict,
+            format!(
+                "fresh-paper folder {} is still connected to another paper: {why}",
+                old.root.display()
+            ),
+        )
+    };
+    if old.producer_id != new.producer_id {
+        return Err(super::publish::conflict());
+    }
+    if j.binding_busy(old) {
+        return Err(refuse(
+            "it has requests in progress, and moves once they finish".into(),
+        ));
+    }
+    match setup::owned_manifest(&new) {
+        Ok(Some(_)) => (),
+        Err(e) if e.code == PressErrorCode::StorageUnavailable => return Err(e),
+        _ => {
+            return Err(refuse(
+                "its .deckle-press/producer.json does not name the new paper".into(),
+            ));
+        }
+    }
+    check_folder(old)?;
+    let now = Utc::now();
+    let editions = old.root.join(".deckle-press/editions");
+    let archives = fs::canonicalize(j.local_root())
+        .map_err(|_| storage())?
+        .join("archive")
+        .join(old.paper_id.to_string());
+    for o in j
+        .outputs()
+        .into_iter()
+        .filter(|o| binding(&o.lease) == *old)
+    {
+        let shared = old.root.join(&o.result.bundle);
+        let unremovable = |path: &std::path::Path| {
+            refuse(format!(
+                "{} could not be removed. Deckle deletes only what it can verify; if it is \
+                 not wanted, remove that folder by hand",
+                path.display()
+            ))
+        };
+        for stage in &o.stages {
+            let parent = if stage.local {
+                if !exists(&archives)? {
+                    continue;
+                }
+                archive(j, &o.lease, false)?.parent().unwrap().to_owned()
+            } else {
+                if !exists(&editions)? {
+                    continue;
+                }
+                directory(&editions, false)?;
+                editions.clone()
+            };
+            let path = parent.join(&stage.name);
+            match fs::symlink_metadata(&path) {
+                Ok(m) if m.file_type().is_dir() => {
+                    remove_stage(&path)
+                        .and_then(|()| sync_dir(&parent))
+                        .map_err(|_| unremovable(&path))?;
+                }
+                Ok(_) => return Err(unremovable(&path)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+                Err(_) => return Err(storage()),
+            }
+        }
+        let local = |j: &PressJournal| -> Result<Option<std::path::PathBuf>, PressError> {
+            Ok(if exists(&archives)? {
+                Some(archive(j, &o.lease, false)?)
+            } else {
+                None
+            })
+        };
+        if o.published_at.is_none() {
+            // An intent never published; if its bundle is in the folder anyway, it was never
+            // recorded as published, so it is not deleted here.
+            if exists(&shared)? {
+                return Err(unremovable(&shared));
+            }
+            if let Some(path) = local(j)? {
+                remove_bundle(j, &path, &o, true).map_err(|_| unremovable(&path))?;
+            }
+            j.forget_intent(o.lease.job_id)?;
+            continue;
+        }
+        if o.deleted {
+            continue;
+        }
+        if o.removed_at.is_none() {
+            j.mark_removed(o.result.edition_id, now)?;
+        }
+        if exists(&editions)? {
+            directory(&editions, false)?;
+            remove_bundle(j, &shared, &o, false).map_err(|_| unremovable(&shared))?;
+        }
+        if let Some(path) = local(j)? {
+            remove_bundle(j, &path, &o, true).map_err(|_| unremovable(&path))?;
+        }
+        j.mark_deleted(o.result.edition_id, now)?;
+    }
+    // Status files go before the commit that forgets them, so a crash leaves no orphan.
+    if exists(&old.root.join(".deckle-press/status"))? {
+        for id in j.binding_requests(old) {
+            remove_status(old, id).map_err(|_| {
+                refuse(format!(
+                    "{} could not be removed",
+                    old.root
+                        .join(format!(".deckle-press/status/{id}.json"))
+                        .display()
+                ))
+            })?;
+        }
+    }
+    j.commit_replacement(old, new, enabled, stopped)
 }
 
 // Staging is producer-recorded. Pin every directory before descending or unlinking;
@@ -514,9 +676,11 @@ mod tests {
         )
         .unwrap();
         fs::remove_dir(&other.root).unwrap();
-        assert!(prune_results(&mut j, now() + Duration::days(31)).is_err());
+        // Forgetting a refusal leaves its status file alone, so the unavailable folder is
+        // not touched at all.
+        prune_results(&mut j, now() + Duration::days(31)).unwrap();
         assert!(!b.root.join(&o.result.bundle).exists());
-        assert!(j.status(request.request_id).is_some());
+        assert!(j.status(request.request_id).is_none());
         let bytes = fs::read(b.root.join(format!(".deckle-press/status/{id}.json"))).unwrap();
         let status: PressStatus = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(status.state, PressState::ResultRemoved);
