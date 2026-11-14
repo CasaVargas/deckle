@@ -629,7 +629,8 @@ pub fn finish(
 
 /// Removes Deckle's older copies of this book under other names, now that the new one is
 /// written (Kindle-updates design §4): the files `named` (the library's records) and, on mass
-/// storage and folders, other KFX with the same generated ASIN. Store books are never touched.
+/// storage and folders, other books with the same generated ASIN, title and authors (one with
+/// only the ASIN in common stays, with a warning). Store books are never touched.
 fn replace_older_copies(
     conn: &mut Conn<'_>,
     report: &mut RunReport,
@@ -646,9 +647,25 @@ fn replace_older_copies(
     if crate::inventory::is_generated_asin(asin) && !matches!(conn.target, Target::Mtp(_)) {
         let cache = crate::wordwise::default_cache_dir().join("inventory");
         if let Ok(inv) = crate::inventory::list_on(conn, Some(&cache)) {
+            // A generated ASIN has four characters of hash, so another book can share it
+            // (issue #42): the title and authors must match the new copy's too.
+            let new_key = inv
+                .books
+                .iter()
+                .find(|b| b.file == new_name)
+                .and_then(same_book_key);
             for b in inv.books {
-                if b.asin.as_deref() == Some(asin) && b.file != new_name && !old.contains(&b.file) {
+                if b.asin.as_deref() != Some(asin) || b.file == new_name || old.contains(&b.file) {
+                    continue;
+                }
+                if new_key.is_some() && same_book_key(&b) == new_key {
                     old.push(b.file);
+                } else {
+                    report.warnings.push(format!(
+                        "{} stays on the Kindle: it has this book's ASIN but another title or \
+                         author. If it's an older copy of this book, remove it by hand.",
+                        b.file
+                    ));
                 }
             }
         }
@@ -676,6 +693,34 @@ fn replace_older_copies(
                 .push(format!("the older copy {file} is still on the Kindle: {e}")),
         }
     }
+}
+
+/// What tells two books on the Kindle with the same generated ASIN apart: the title and the
+/// authors, by their words: case, punctuation and order don't count, so an author stored as
+/// `Testwright, Jane` by one send and `Jane Testwright` by another is the same. `None` without
+/// a title.
+fn same_book_key(book: &crate::inventory::DeviceBook) -> Option<(String, Vec<String>)> {
+    let words = |s: &str| -> Vec<String> {
+        s.split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_lowercase)
+            .collect()
+    };
+    let title = words(book.title.as_deref()?).join(" ");
+    if title.is_empty() {
+        return None;
+    }
+    let mut authors: Vec<String> = book
+        .authors
+        .iter()
+        .map(|a| {
+            let mut w = words(a);
+            w.sort();
+            w.join(" ")
+        })
+        .collect();
+    authors.sort();
+    Some((title, authors))
 }
 
 /// [`finish`] with the fetcher for the Word Wise database (a push passes one that refuses).
