@@ -1078,6 +1078,78 @@ fn a_send_replaces_deckles_older_copy_under_another_name() {
     );
 }
 
+#[test]
+#[cfg(unix)] // the fake Previewer is a shell script
+fn a_send_keeps_another_book_that_shares_its_generated_asin() {
+    use deckle_kfx::convert::{ConvertOptions, kpf_to_kfx};
+    // Generated ASINs have four characters of hash: two books can share one (issue #42).
+    assert_eq!(
+        deckle_kfx::metadata::generate_asin(b"urn:isbn:9780140000161"),
+        deckle_kfx::metadata::generate_asin(b"urn:isbn:9780140000643")
+    );
+    let out = tempfile::tempdir().unwrap();
+    let epub = deckle_kfx::fixtures::path("deckle-mini.epub");
+    let info = deckle_core::inspect::inspect(&epub).unwrap();
+    let asin = deckle_kfx::metadata::generate_asin(&deckle_core::pipeline::asin_seed(&info));
+    // Another book, with its own title and author, that happens to have this book's ASIN.
+    let other = kpf_to_kfx(
+        &deckle_kfx::fixtures::path("deckle-mini.kpf"),
+        &ConvertOptions {
+            asin: Some(asin.clone()),
+            title: Some("A Different Book".into()),
+            authors: Some(vec!["Someone Else".into()]),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::write(
+        out.path().join("Else, Someone - A Different Book.kfx"),
+        &other.bytes,
+    )
+    .unwrap();
+    std::fs::create_dir_all(out.path().join("Else, Someone - A Different Book.sdr")).unwrap();
+    std::fs::write(
+        out.path()
+            .join("Else, Someone - A Different Book.sdr/x.asc"),
+        b"x",
+    )
+    .unwrap();
+    let opts = RunOptions {
+        keep_work_dir: false,
+        ..fill_opts(out.path(), false)
+    };
+    let report = run(&epub, &opts);
+    assert_eq!(report.error, None, "{report:?}");
+    assert!(report.replaced.is_empty(), "{:?}", report.replaced);
+    assert!(
+        out.path()
+            .join("Else, Someone - A Different Book.sdr/x.asc")
+            .exists()
+    );
+    let mut left: Vec<String> = std::fs::read_dir(out.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            "Else, Someone - A Different Book.kfx",
+            "Else, Someone - A Different Book.sdr",
+            "Testwright, Jane - Deckle Mini Fixture.kfx"
+        ]
+    );
+    assert!(
+        report
+            .warnings
+            .iter()
+            .any(|w| w.contains("Else, Someone - A Different Book.kfx")),
+        "{:?}",
+        report.warnings
+    );
+}
+
 /// Options for the mini fixture through the fake Previewer to a folder, with the metadata fill
 /// on or off.
 #[cfg(unix)]

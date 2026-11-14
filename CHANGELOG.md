@@ -11,6 +11,10 @@
   name, so adding `home/notes.txt` replaced the book from `work/notes.txt`. Such a file now
   updates a book only when it's the same file or the library's own copy; anything else is filed
   as a new book. An EPUB with the publisher's identifier still updates its book in place.
+- **A send no longer removes a different book from the Kindle.** Two books can get the same
+  Deckle ASIN, and sending one removed the other, with its notes and highlights. Deckle now
+  removes an older copy only when its title and author match too; another book with the same
+  ASIN stays, and the send says so.
 - **Long older Kindle books in other alphabets import.** A MOBI 6 book with no page breaks,
   more than about 200 KB of text and letters outside ASCII (Cyrillic, Greek, accented Latin)
   failed to import; it's now cut into parts between paragraphs as English
