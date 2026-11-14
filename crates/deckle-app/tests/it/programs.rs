@@ -99,7 +99,10 @@ fn scan(dir: &Path, crates: &Path, found: &mut BTreeMap<String, usize>) {
             }
             scan(&path, crates, found);
         } else if path.extension().is_some_and(|e| e == "rs") {
-            let text = std::fs::read_to_string(&path).unwrap();
+            // A Windows checkout ends its lines with CRLF.
+            let text = std::fs::read_to_string(&path)
+                .unwrap()
+                .replace("\r\n", "\n");
             // Unit tests at the end of a file don't count.
             let code = text.split("#[cfg(test)]\nmod tests").next().unwrap();
             let n: usize = PATTERNS.iter().map(|p| code.matches(p).count()).sum();

@@ -738,6 +738,13 @@ fn a_silent_connection_doesnt_keep_a_reader_out() {
     let Ok(listener) = TcpListener::bind("[::]:0") else {
         return; // no IPv6 here
     };
+    // Windows makes an IPv6 socket IPv6-only, so 127.0.0.1 can't reach it; checked on another
+    // socket, so the server sees no extra connection.
+    let probe = TcpListener::bind("[::]:0").unwrap();
+    if TcpStream::connect(("127.0.0.1", probe.local_addr().unwrap().port())).is_err() {
+        return;
+    }
+    drop(probe);
     let port = listener.local_addr().unwrap().port();
     let _srv = server_on(
         listener,
