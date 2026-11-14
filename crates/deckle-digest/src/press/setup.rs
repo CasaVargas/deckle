@@ -155,6 +155,8 @@ fn resolve_binding(
         .paper_id
         .filter(|id| !id.is_nil())
         .ok_or_else(unsupported)?;
+    // In the web UI's server, only a folder it may use.
+    crate::inbox::saved_path("[[exports]] dir", &export.dir).map_err(|_| storage())?;
     let root = fs::canonicalize(root_path(&export.dir)).map_err(|_| storage())?;
     if !root.is_dir() {
         return Err(storage());

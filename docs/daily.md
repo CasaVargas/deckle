@@ -52,7 +52,10 @@ saves from your phone. The queue is a plain file, `reading.jsonl`, next to `dige
 
 `deckle save --bookmarklet` prints two bookmarklets: **Save to paper** (above) and **Save recipe**,
 which sends the page to the cookbook instead (see below). Both send only the page's address and
-title, never its contents, and both need `digest watch` running.
+title, never its contents, and both need `digest watch` running. Each opens a small Deckle window
+that shows what it's about to save; press **Save** there. A page you click a bookmarklet on can
+open that window but can't press its button, so no page can add to your reading by itself.
+Bookmarklets made before this still work and show the same window.
 
 In the app, **Open the install page** (on the Daily tab's Reading room, the Cookbook's Add page,
 and the welcome on first launch) writes `bookmarklets.html` next to `digest.toml` and opens it in
@@ -172,6 +175,30 @@ full_text = "lead"              # true, false or "lead"
   a story whose title an earlier news section already printed, then refill from their next-newest
   stories. Other places keep their own stories and only record their titles; Your Reading is never
   trimmed or recorded.
+
+#### Feeds on your own network
+
+The Daily fetches only public internet addresses, so a feed can't make your computer open a page
+on your network (your router, a NAS, a service on this machine) and print it. A feed, calendar or
+subscription you set up at a private address or a local name (`http://192.168.1.20/feed.xml`,
+`http://nas.local:8080`) is fetched as before, at exactly that address and port; a link inside it
+to anywhere else on your network is refused, and the story says "private address refused".
+Anything else on your network goes in:
+
+```toml
+[fetch]
+allow_private = ["http://nas.local:8080", "http://192.168.1.20"]
+```
+
+An address you type yourself (`deckle run http://nas.local/story`, the app's address field) may
+be on your network for that one fetch. Links the bookmarklet or the reading inbox sends are
+treated like a feed's.
+
+- With `HTTPS_PROXY` or `HTTP_PROXY` set, the proxy fetches the pages and its own rules apply;
+  Deckle doesn't check those addresses.
+- On an IPv6-only network with DNS64, addresses in `64:ff9b::/96` are judged by the IPv4 address
+  inside them. A network that uses `64:ff9b:1::/48` or its own private prefix for NAT64 needs
+  `allow_private`.
 
 ### Your interests
 
@@ -814,6 +841,9 @@ deckle reader-server status      # on or off, and the URLs to type into KOReader
   KOReader's sync protocol sends exactly that MD5, so treat the file like a password.
 - It's plain HTTP on every network interface. Use it at home or over Tailscale, never open to the
   internet. `DECKLE_READER_SERVER_BIND` limits the address it listens on.
+- Five wrong passwords from one address are free; after that the address waits 1 s, then 2,
+  4, … up to five minutes, and each is logged with the address. Other readers are never kept
+  out by it.
 - **Progress sync:** in KOReader, Tools → Progress sync → Custom sync server, the sync URL; then
   Log in with the same username and password (registering is closed: the account is Deckle's).
   Each position lands in the paper's Readership, as `koreader/<device id>`, to the section, or
@@ -868,7 +898,16 @@ deckle wireless status           # listening or not, the address, readers seen, 
 - **One reader at a time,** as with calibre. A second one is told Deckle is busy. A session ends
   after 15 minutes with nothing to do, or when the reader disconnects.
 - **The password** is kept as is in `wireless.json` beside `digest.toml`, readable only by you,
-  because calibre's challenge needs it. Only addresses on your home network are answered.
+  because calibre's challenge needs it. Only addresses on your home network are answered. It's
+  optional, but it is what keeps other devices on your network from taking the connection:
+  without one, any of them can connect as a reader and keep yours waiting. Five wrong passwords
+  from one address are free; then that address waits, doubling up to five minutes.
+- **Connecting:** a reader has 10 seconds to finish connecting (and give the password), and
+  until it has, it doesn't hold the connection, so a device that connects and says nothing keeps
+  no one out. Four can be connecting at once, one per address. The same reader reconnecting
+  after a Wi-Fi drop takes over its old session.
+- **Limits:** a reader's book list may name up to 50,000 books, and Deckle remembers the last 32
+  readers it has seen.
 - **If calibre's own wireless server is on,** it already has port 9090 and the broadcast ports:
   give Deckle another port and type the address on the reader, or turn calibre's off.
 - **Who runs it:** the watcher, like the reader server. `deckle wireless serve` runs it in the

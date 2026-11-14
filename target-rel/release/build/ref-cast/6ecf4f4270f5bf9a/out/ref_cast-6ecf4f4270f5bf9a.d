@@ -1,0 +1,14 @@
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/6ecf4f4270f5bf9a/out/ref_cast-6ecf4f4270f5bf9a.d: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/custom.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/layout.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/trivial.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/private.rs /Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/a047c1b9f72cbc5a/out/private.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/6ecf4f4270f5bf9a/out/libref_cast-6ecf4f4270f5bf9a.rlib: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/custom.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/layout.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/trivial.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/private.rs /Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/a047c1b9f72cbc5a/out/private.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/6ecf4f4270f5bf9a/out/libref_cast-6ecf4f4270f5bf9a.rmeta: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/custom.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/layout.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/trivial.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/private.rs /Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/a047c1b9f72cbc5a/out/private.rs
+
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/lib.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/custom.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/layout.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/trivial.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/private.rs:
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/a047c1b9f72cbc5a/out/private.rs:
+
+# env-dep:OUT_DIR=/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/ref-cast/a047c1b9f72cbc5a/out

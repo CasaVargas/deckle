@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.15.0 — news in your language, and safer servers and fetching
 
 - **A fresh-paper folder can move to another paper.** Reconnecting a folder to a different
   paper, or to a paper deleted and made again, used to stop fresh-paper requests for every
@@ -126,6 +126,55 @@
   more than about 200 KB of text and letters outside ASCII (Cyrillic, Greek, accented Latin)
   failed to import; it's now cut into parts between paragraphs as English
   books are.
+- **The bookmarklets ask before they save.** Save to paper and Save recipe now open a small
+  Deckle window showing what they'll save, and save when you press **Save**. Before, the
+  bookmarklet carried a key the page you clicked it on could read, and with it any page could
+  add to your reading. Bookmarklets you already have keep working
+  ([docs/daily.md](docs/daily.md)).
+- **calibre's wireless connection can't be held by a silent device.** A reader now takes the
+  connection only once it has finished connecting (10 seconds at most), so a device that
+  connects and says nothing no longer keeps every reader out. A wrong password slows that
+  address, the same reader reconnecting after a Wi-Fi drop takes over its old session, and a
+  reader's book list and the readers remembered are capped. A password is still optional; the
+  card now says what it protects ([docs/daily.md](docs/daily.md#calibres-wireless-connection-books-over-wi-fi)).
+- **The web app keeps to its folders.** Every path it sends, and every folder saved in its
+  settings, now has to lie in `/config`, `/data` or `DECKLE_WEB_ROOTS`, as the file browser
+  always did; before, a signed-in browser could list, copy or delete files elsewhere on the
+  server. It also never writes into `/config/deckle`
+  ([docs/docker.md](docs/docker.md#files-uploads-and-downloads)).
+- **A saved page's pictures stay in its own folder, links followed.** A link in a saved page's
+  folder could still point a recipe or story picture at any file on the computer; links are now
+  followed before the folder is checked.
+- **The Daily fetches only public addresses.** A feed's link, a page's image or a redirect can no
+  longer point at your router, a NAS or a service on this computer and have it printed in the
+  paper. Feeds, calendars and subscriptions you set up on your own network keep working; anything
+  else there goes in `[fetch] allow_private`
+  ([docs/daily.md](docs/daily.md#feeds-on-your-own-network)).
+- **Wrong passwords slow only the address that sends them.** The web UI and KOReader over
+  Wi-Fi now let each address get its password wrong five times, then make it wait, doubling up
+  to five minutes. Someone guessing can no longer keep you out of the web UI, and the reader
+  server, which didn't slow guessing at all, now does. Behind a reverse proxy, set
+  `DECKLE_WEB_TRUSTED_PROXIES` so each client is counted on its own
+  ([docs/docker.md](docs/docker.md#the-password)).
+- **The web app no longer chooses programs for the server.** The calibredb path is shown but
+  can't be changed from a browser, and the Kindle Previewer location is always the one saved on
+  the server. Set either in the server's files
+  ([docs/docker.md](docs/docker.md#whats-off-in-the-container)).
+- **The web UI answers only to names you use.** It now refuses requests under a public host
+  name you haven't listed, so a web page can't reach a server on your network by pointing its
+  own name at it. Addresses, `localhost`, `tower`, `tower.local` and the like work as before; a
+  public name you use goes in `DECKLE_WEB_HOSTS`
+  ([docs/docker.md](docs/docker.md#the-names-it-answers-to)).
+- **A mistake in `digest.toml` is named, not quoted.** The error gives the file, line and column
+  and what's wrong, without the line itself, which could hold your calendar's private address
+  and end up in a bug report. The same goes for `cookbook.toml`.
+- **A `.kpf` can't make a conversion take gigabytes.** A structure the book names many times
+  was copied in each time; the copies now count toward the same limit as the rest of the book,
+  and a book past it is refused. Page numbers no longer copy the book's text, at four bytes a
+  character for every place that names it; they read it where it is.
+- **One deeply nested page can't hold up the paper.** A story, recipe or publisher page nested
+  thousands of levels deep took minutes to hours to read, and the edition waited for it. Past
+  256 levels, a page is now read flat, its text kept.
 - **News in your language.** Local, each other place, each interest and each Google News topic
   can read another country's edition of Google News: pick Deutschland, España, France, Italia or
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day

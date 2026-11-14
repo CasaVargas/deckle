@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useCapabilities } from "../capabilities";
 import type { WritebackColumns, WritebackPatch, WritebackStatus } from "../types";
 import { FIELDS, blocker, changeLine, noColumns, shown } from "../writebackView";
 import { Row, Switch } from "./Row";
@@ -16,6 +17,7 @@ export default function CalibreWriteback() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [password, setPassword] = useState("");
+  const caps = useCapabilities();
 
   useEffect(() => {
     api.calibreWritebackStatus().then(setS, (e) => setError(String(e)));
@@ -124,8 +126,9 @@ export default function CalibreWriteback() {
             </form>
           )}
         </div>
-        <Row label="calibredb" note={s.calibredb ?? "Not found"}>
-          <input defaultValue={wb.calibredb ?? ""} placeholder="Found by itself" spellCheck={false} onBlur={(e) => e.target.value !== (wb.calibredb ?? "") && set({ calibredb: e.target.value })} aria-label="calibredb path" />
+        {/* The server runs calibredb, so a browser can't say which one: it's set on the server. */}
+        <Row label="calibredb" note={caps.web ? `${s.calibredb ?? "Not found"}. Set "calibredb" in calibre-writeback.json on the server to change it.` : (s.calibredb ?? "Not found")}>
+          {!caps.web && <input defaultValue={wb.calibredb ?? ""} placeholder="Found by itself" spellCheck={false} onBlur={(e) => e.target.value !== (wb.calibredb ?? "") && set({ calibredb: e.target.value })} aria-label="calibredb path" />}
         </Row>
       </details>
 

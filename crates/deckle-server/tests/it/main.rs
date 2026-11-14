@@ -4,7 +4,9 @@
 mod auth;
 mod events;
 mod files;
+mod host;
 mod invoke;
+mod programs;
 mod serve;
 mod static_files;
 
@@ -34,6 +36,7 @@ pub fn ctx(dir: &Path) -> Arc<Ctx> {
         events: Arc::new(SseEvents),
         exe: PathBuf::from("/opt/deckle/deckle"),
         web: true,
+        roots: Some(vec![dir.to_path_buf()]),
     })
 }
 
@@ -50,6 +53,8 @@ pub fn config(dir: &Path, auth_none: bool) -> ServerConfig {
         auth_none,
         web_dir: web,
         roots: vec!["/config".into(), "/data".into()],
+        hosts: Vec::new(),
+        trusted_proxies: Vec::new(),
     }
 }
 

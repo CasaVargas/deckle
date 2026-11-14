@@ -82,6 +82,7 @@ export default function WirelessCard({
               </button>
             )}
           </form>
+          {view && !view.password_set && <p className="small muted">Without one, another device on your network can take the connection and keep your reader waiting.</p>}
         </div>
       </div>
       <label className="inline">

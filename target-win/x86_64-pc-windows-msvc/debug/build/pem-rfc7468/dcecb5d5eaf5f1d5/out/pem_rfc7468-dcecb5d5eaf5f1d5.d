@@ -1,0 +1,10 @@
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-win/x86_64-pc-windows-msvc/debug/build/pem-rfc7468/dcecb5d5eaf5f1d5/out/pem_rfc7468-dcecb5d5eaf5f1d5.d: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/decoder.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/encoder.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/error.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/grammar.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/../README.md
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-win/x86_64-pc-windows-msvc/debug/build/pem-rfc7468/dcecb5d5eaf5f1d5/out/libpem_rfc7468-dcecb5d5eaf5f1d5.rmeta: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/decoder.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/encoder.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/error.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/grammar.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/../README.md
+
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/lib.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/decoder.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/encoder.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/error.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/grammar.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pem-rfc7468-1.0.0/src/../README.md:

@@ -59,7 +59,7 @@ pub struct Recipe {
 /// Reads the recipe on a page. `url` is where the page came from (`file://…` for a saved
 /// page). Fails with the web-article reason when a page without recipe data is a stub.
 pub fn parse_recipe(html: &str, url: &str) -> Result<Recipe, String> {
-    let doc = Document::from(html);
+    let doc = Document::from(&*crate::shallow::shallow(html));
     let source_url = canonical(&doc, url).unwrap_or_else(|| url.to_owned());
     let site_name = meta(&doc, "og:site_name")
         .map(|s| clean(&s))
@@ -469,4 +469,44 @@ fn canonical(doc: &Document, base: &str) -> Option<String> {
 /// check as a story's photos (#65: a saved page could name any image on the disk).
 fn resolve(base: &str, href: &str) -> Option<String> {
     crate::article::resolve(base, href)
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(unix)]
+    use super::resolve;
+
+    /// A saved page names its pictures in its own folder; nothing else on the disk.
+    #[cfg(unix)]
+    #[test]
+    fn a_saved_page_reaches_only_its_own_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let page_dir = root.join("saved");
+        std::fs::create_dir_all(page_dir.join("Pie_files")).unwrap();
+        std::fs::create_dir_all(root.join("private")).unwrap();
+        std::fs::write(page_dir.join("Pie.html"), "<html></html>").unwrap();
+        std::fs::write(page_dir.join("Pie_files/pie.jpg"), b"jpeg").unwrap();
+        let secret = root.join("private/secret.jpg");
+        std::fs::write(&secret, b"secret").unwrap();
+        std::os::unix::fs::symlink(&secret, page_dir.join("link.jpg")).unwrap();
+        let base = url::Url::from_file_path(page_dir.join("Pie.html"))
+            .unwrap()
+            .to_string();
+
+        assert!(resolve(&base, "Pie_files/pie.jpg").is_some());
+        // Not there (yet): judged by its folder, and loading it later just finds nothing.
+        assert!(resolve(&base, "Pie_files/missing.jpg").is_some());
+        let outside = url::Url::from_file_path(&secret).unwrap().to_string();
+        for href in [
+            outside.as_str(),
+            "../private/secret.jpg",
+            "Pie_files/../../private/secret.jpg",
+            "link.jpg",
+        ] {
+            assert_eq!(resolve(&base, href), None, "{href}");
+        }
+        // A page from the web never names a file.
+        assert_eq!(resolve("https://example.com/pie", &outside), None);
+    }
 }

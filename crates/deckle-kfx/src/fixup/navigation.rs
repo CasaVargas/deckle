@@ -148,10 +148,17 @@ pub fn fix_navigation(book: &mut Book) {
     }
 }
 
-/// eid -> text for every storyline entry that carries `$155` and a `$145` reference.
-fn storyline_texts(book: &Book) -> HashMap<i64, Vec<char>> {
-    let mut contents: HashMap<String, Vec<String>> = HashMap::new();
-    for f in book.fragments.all(&Sym::new("$145")) {
+/// eid -> text for every storyline entry that carries `$155` and a `$145` reference. The texts
+/// are the book's own, borrowed: ids that name one text share it, and nothing is copied
+/// (GHSA-9x4g-wpmp-f465: a `Vec<char>` per id held 4 bytes a character, once per id).
+fn storyline_texts(book: &Book) -> HashMap<i64, &str> {
+    let mut contents: HashMap<&str, Vec<&str>> = HashMap::new();
+    for f in book
+        .fragments
+        .0
+        .iter()
+        .filter(|f| f.ftype.as_str() == "$145")
+    {
         if let (Some(fid), Some(list)) = (
             &f.fid,
             f.value
@@ -160,15 +167,17 @@ fn storyline_texts(book: &Book) -> HashMap<i64, Vec<char>> {
                 .and_then(Value::as_list),
         ) {
             contents.insert(
-                fid.0.clone(),
-                list.iter()
-                    .filter_map(|v| v.as_str().map(str::to_owned))
-                    .collect(),
+                fid.0.as_str(),
+                list.iter().filter_map(Value::as_str).collect(),
             );
         }
     }
     let mut out = HashMap::new();
-    fn walk(v: &Value, contents: &HashMap<String, Vec<String>>, out: &mut HashMap<i64, Vec<char>>) {
+    fn walk<'a>(
+        v: &'a Value,
+        contents: &HashMap<&'a str, Vec<&'a str>>,
+        out: &mut HashMap<i64, &'a str>,
+    ) {
         match v {
             Value::Annotated { value, .. } => walk(value, contents, out),
             Value::List(items) | Value::SExp(items) => {
@@ -177,21 +186,21 @@ fn storyline_texts(book: &Book) -> HashMap<i64, Vec<char>> {
             Value::Struct(s) => {
                 if let (Some(Value::Int(eid)), Some(text)) = (s.get("$155"), s.get("$145")) {
                     let resolved = match text {
-                        Value::String(t) => Some(t.clone()),
+                        Value::String(t) => Some(t.as_str()),
                         Value::Struct(r) => {
-                            let name = r.get("name").and_then(Value::as_sym).map(|s| s.0.clone());
+                            let name = r.get("name").and_then(Value::as_sym);
                             let idx = r.get("$403").and_then(Value::as_int);
                             match (name, idx) {
-                                (Some(n), Some(i)) => {
-                                    contents.get(&n).and_then(|l| l.get(i as usize)).cloned()
-                                }
+                                (Some(n), Some(i)) => usize::try_from(i)
+                                    .ok()
+                                    .and_then(|i| contents.get(n.0.as_str())?.get(i).copied()),
                                 _ => None,
                             }
                         }
                         _ => None,
                     };
                     if let Some(t) = resolved {
-                        out.entry(*eid).or_insert_with(|| t.chars().collect());
+                        out.entry(*eid).or_insert(t);
                     }
                 }
                 for (_, fv) in s.iter() {
@@ -201,7 +210,12 @@ fn storyline_texts(book: &Book) -> HashMap<i64, Vec<char>> {
             _ => {}
         }
     }
-    for f in book.fragments.all(&Sym::new("$259")) {
+    for f in book
+        .fragments
+        .0
+        .iter()
+        .filter(|f| f.ftype.as_str() == "$259")
+    {
         walk(&f.value, &contents, &mut out);
     }
     out
@@ -231,9 +245,43 @@ fn page_template_eids(book: &Book) -> HashSet<i64> {
     out
 }
 
+/// The character at a position in a text, found by moving from the last one asked for. The page
+/// finder asks near where it last asked, so a text is walked about once, without a copy.
+struct CharCursor<'a> {
+    text: &'a str,
+    /// Character index and byte offset of the cursor.
+    at: usize,
+    byte: usize,
+}
+
+impl<'a> CharCursor<'a> {
+    fn new(text: &'a str) -> Self {
+        CharCursor {
+            text,
+            at: 0,
+            byte: 0,
+        }
+    }
+
+    /// The `i`th character, `None` past the end.
+    fn get(&mut self, i: usize) -> Option<char> {
+        while self.at < i {
+            let c = self.text[self.byte..].chars().next()?;
+            self.byte += c.len_utf8();
+            self.at += 1;
+        }
+        while self.at > i {
+            let c = self.text[..self.byte].chars().next_back()?;
+            self.byte -= c.len_utf8();
+            self.at -= 1;
+        }
+        self.text[self.byte..].chars().next()
+    }
+}
+
 fn determine_pages(
     pos_info: &[ContentChunk],
-    texts: &HashMap<i64, Vec<char>>,
+    texts: &HashMap<i64, &str>,
     template_eids: &HashSet<i64>,
     positions_per_page: i64,
 ) -> (Vec<Value>, usize) {
@@ -251,14 +299,14 @@ fn determine_pages(
             next_page_pid = chunk.pid;
             new_section_pages += 1;
         }
-        let text = texts.get(&chunk.eid);
+        let mut text = texts.get(&chunk.eid).map(|t| CharCursor::new(t));
         let mut min_chunk_offset = 0i64;
         loop {
             let mut chunk_offset = (next_page_pid - chunk.pid).max(0);
             if chunk_offset >= chunk.length {
                 break;
             }
-            if let Some(t) = text
+            if let Some(t) = text.as_mut()
                 && t.get(chunk_offset as usize)
                     .is_some_and(|c| !c.is_whitespace())
             {
@@ -587,6 +635,18 @@ mod tests {
     use super::*;
     use crate::fragment::FragmentList;
     use crate::symtab::SymbolTable;
+
+    /// The cursor gives what indexing a `Vec<char>` gave, moving either way, in any alphabet.
+    #[test]
+    fn char_cursor_matches_indexing() {
+        let text = "a b\u{e9}\u{4e2d}\u{1f600} z";
+        let chars: Vec<char> = text.chars().collect();
+        let mut c = CharCursor::new(text);
+        for i in [0, 3, 5, 1, 6, 4, 2, 7, 9, 0, 100, 5] {
+            assert_eq!(c.get(i), chars.get(i).copied(), "{i}");
+        }
+        assert_eq!(CharCursor::new("").get(0), None);
+    }
 
     /// A book of `text` characters of cheap repeated text, with `$264` as given.
     fn book(text: usize, sections: Vec<(&str, Vec<Value>)>) -> Book {

@@ -1,0 +1,11 @@
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-win/x86_64-pc-windows-msvc/debug/build/sha1/47551b608c03ed39/out/sha1-47551b608c03ed39.d: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/block_api.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/consts.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/../README.md /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress/soft.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress/x86_sha.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-win/x86_64-pc-windows-msvc/debug/build/sha1/47551b608c03ed39/out/libsha1-47551b608c03ed39.rmeta: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/block_api.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/consts.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/../README.md /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress/soft.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress/x86_sha.rs
+
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/lib.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/block_api.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/consts.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/../README.md:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress/soft.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha1-0.11.0/src/compress/x86_sha.rs:

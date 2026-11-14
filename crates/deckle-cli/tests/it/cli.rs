@@ -475,7 +475,7 @@ fn save_duplicate_says_so() {
 }
 
 #[test]
-fn bookmarklet_prints_javascript_with_token() {
+fn bookmarklet_prints_javascript_without_a_token() {
     let dir = tempfile::tempdir().unwrap();
     let q = dir.path().join("reading.jsonl");
     let (ok, text) = save(&q, &["--bookmarklet"]);
@@ -484,10 +484,11 @@ fn bookmarklet_prints_javascript_with_token() {
         .lines()
         .find(|l| l.starts_with("javascript:"))
         .unwrap_or_default();
-    assert!(js.contains("127.0.0.1:47219/save?token="), "{text}");
-    // The token is stable across calls.
-    let (_, again) = save(&q, &["--bookmarklet"]);
-    assert!(again.contains(js));
+    // It runs inside the page it's clicked on, so it carries no token; Deckle's own page asks.
+    assert!(js.contains("127.0.0.1:47219/save?url="), "{text}");
+    assert!(!text.contains("token"), "{text}");
+    // The listener's token is still made, for that page.
+    assert!(dir.path().join("bookmarklet.token").exists());
 }
 
 #[test]
@@ -502,22 +503,13 @@ fn bookmarklet_prints_save_recipe_beside_save_to_paper() {
         .collect();
     assert_eq!(scripts.len(), 2, "{text}");
     assert!(!scripts[0].contains("kind="), "the paper's comes first");
-    assert!(scripts[1].contains("&kind=recipe&url="), "{text}");
-    let token = |js: &str| js.split("token=").nth(1).map(|t| t[..32].to_owned());
-    assert_eq!(token(scripts[0]), token(scripts[1]), "one token for both");
+    assert!(scripts[1].contains("/save?kind=recipe&url="), "{text}");
 }
 
 #[test]
-fn bookmarklet_page_prints_the_install_page_with_the_same_token() {
+fn bookmarklet_page_prints_the_install_page() {
     let dir = tempfile::tempdir().unwrap();
     let q = dir.path().join("reading.jsonl");
-    let (ok, js) = save(&q, &["--bookmarklet"]);
-    assert!(ok, "{js}");
-    let token = js
-        .split("token=")
-        .nth(1)
-        .map(|t| t[..32].to_owned())
-        .unwrap();
     let (ok, page) = save(&q, &["--bookmarklet", "--page"]);
     assert!(ok, "{page}");
     assert!(page.starts_with("<!doctype html>"), "{page}");
@@ -525,8 +517,8 @@ fn bookmarklet_page_prints_the_install_page_with_the_same_token() {
         page.contains("Drag each button to your bookmarks bar"),
         "{page}"
     );
-    // Two links and two Copy buttons; Save recipe carries the token twice.
-    assert_eq!(page.matches(&token).count(), 6, "{page}");
+    let token = std::fs::read_to_string(dir.path().join("bookmarklet.token")).unwrap();
+    assert!(!page.contains(token.trim()), "the page carries no token");
     // --page needs --bookmarklet.
     let (ok, text) = save(&q, &["--page"]);
     assert!(!ok && text.contains("--bookmarklet"), "{text}");

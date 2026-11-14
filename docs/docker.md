@@ -32,7 +32,7 @@ docker compose logs deckle
 Open `http://<server>:8080` and log in with that password.
 
 The image is `ghcr.io/casavargas/deckle`. `:latest` is the newest published release; `:<version>`
-(for example `:0.14.0`, no leading `v`) pins one.
+(for example `:0.15.0`, no leading `v`) pins one.
 
 | Setting | Default | |
 |---|---|---|
@@ -43,6 +43,8 @@ The image is `ghcr.io/casavargas/deckle`. `:latest` is the newest published rele
 | `DECKLE_WEB_PORT` | `8080` | The web UI's port inside the container. |
 | `DECKLE_WEB_BIND` | `0.0.0.0` | The address the web UI listens on inside the container. Outside the image the default is `127.0.0.1`. |
 | `DECKLE_WEB_ROOTS` | unset | More folders for the web UI's file picker, `:`-separated ([below](#files-uploads-and-downloads)). |
+| `DECKLE_WEB_TRUSTED_PROXIES` | unset | Your reverse proxy's address or range, `,`-separated, so logins are counted per client ([below](#the-password)). |
+| `DECKLE_WEB_HOSTS` | unset | Public host names you reach the web UI under, `,`-separated ([below](#the-names-it-answers-to)). |
 | `DECKLE_SMTP_PASSWORD` | unset | The password for `[email]`. |
 | `DECKLE_SITE_PASSWORD_<SITE>` | unset | A paper you subscribe to ([below](#email-to-kindle-and-passwords)). |
 | `DECKLE_BOOKMARKLET_URL` | unset | The address your browser reaches the bookmarklet at ([below](#the-bookmarklet-over-your-network)). |
@@ -146,9 +148,17 @@ install set up before the web UI keeps working with no change.
 
 There are no user accounts: one password logs you in. Use 12 or more characters; a shorter one
 works, with a warning in the log. A login lasts 30 days in that browser, but logins are kept in
-memory, so restarting the container logs everyone out. At most four logins are checked at once
-and a wrong one is answered slowly; more get "too many login attempts; try again in a moment".
-Each failed login is logged with the address it came from.
+memory, so restarting the container logs everyone out. Five wrong passwords from one address
+are free; after that the address waits 1 s, then 2, 4, … up to five minutes, and gets "too many
+failed logins from here" meanwhile. Someone guessing from another address never keeps you out.
+Failed logins are logged with the address they came from.
+
+Behind a reverse proxy, every login comes from the proxy's address, so one wrong guess from
+anywhere would slow everyone's. Set `DECKLE_WEB_TRUSTED_PROXIES` to the proxy's address (or
+range, e.g. `172.18.0.5` or `10.0.0.0/24`) and Deckle counts each client by the address the
+proxy puts in `X-Forwarded-For`. List only your proxies: not a whole Docker network, where a
+client connecting directly can appear as the network's gateway. Without the setting the header
+is ignored, and the log says so once when it sees one.
 
 The web UI speaks plain HTTP. For anything beyond your home network, put it behind a reverse
 proxy with TLS (Traefik, Caddy, nginx, Nginx Proxy Manager, Unraid's SWAG); the login cookie is
@@ -160,8 +170,19 @@ Server-Sent Events stream, `/api/events`, sent with `X-Accel-Buffering: no` so n
 
 `DECKLE_WEB_AUTH=none` turns the login off, for a proxy that does its own (Authelia, Authentik,
 an SSO the proxy enforces). Only then: never publish the port directly, and let only the proxy
-reach it. With no login, a web page in any browser that can reach the port could also drive it
-through DNS rebinding.
+reach it.
+
+### The names it answers to
+
+The web UI answers to an IP address, `localhost`, a name without a dot (`tower`), and names
+ending `.local`, `.home.arpa`, `.internal` or `.localhost` (`tower.local`). Any other name gets
+"this server doesn't answer to that host name", because a web page you visit could otherwise
+point a name it owns at your server and drive it (DNS rebinding). With a password this is
+checked at login only; with `DECKLE_WEB_AUTH=none`, on every request.
+
+If you reach it under a public name, such as `books.example.com` through a proxy that passes the
+name on, list it: `DECKLE_WEB_HOSTS=books.example.com`. A proxy that sends its own internal name
+or address instead (nginx's default) needs nothing.
 
 ### What's off in the container
 
@@ -175,13 +196,20 @@ These stay visible in the app, each with a one-line reason:
   ([below](#email-to-kindle-and-passwords)).
 - **Show in folder**: there's no file manager to open. Download the file instead.
 - **In-app updates**: pull a newer image tag and recreate the container.
+- **Choosing programs**: the web app can't change which Kindle Previewer or calibredb the server
+  runs. Set `previewer_path` in `/config/deckle/settings.json` or `calibredb` in
+  `/config/deckle/calibre-writeback.json`; both are found by themselves when unset.
 
 ### Files, uploads and downloads
 
 The file picker shows the server's folders, not your computer's: `/config`, `/data`, and any
 folders in `DECKLE_WEB_ROOTS`, separated by `:` (paths inside the container, so mount them
 first, e.g. `-v /mnt/user/books:/books` and `DECKLE_WEB_ROOTS=/books`). Nothing outside them is
-shown or served.
+shown or served, and nothing the web app does reads, writes or deletes outside them: a book, a
+folder to send to, a backup, the Inbox, the Morgue, an export folder, the library. A folder saved
+before (or typed into a config file) that lies outside stops working in the web app, and the log
+names the setting; the desktop app is unchanged. The web app never writes into Deckle's own
+settings folder, `/config/deckle`.
 
 A file you upload from your computer lands in `/data/Deckle/Uploads/<id>/<name>`, up to 512 MiB
 each. Uploads aren't cleaned up automatically: delete old ones from `/data/Deckle/Uploads` when

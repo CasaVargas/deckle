@@ -592,8 +592,9 @@ pub fn bookmarklet() -> Result<String, String> {
     let cfg = Config::load(&config_path()).ok();
     let q = queue_for(cfg.as_ref());
     let dir = q.path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let token = deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
-    Ok(deckle_digest::bookmarklet::javascript(&token))
+    // The listener's token, made if it's new; the bookmarklets don't carry it.
+    deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
+    Ok(deckle_digest::bookmarklet::javascript())
 }
 
 /// The install page (welcome design §4.2), written as `bookmarklets.html` next to the token;
@@ -602,9 +603,10 @@ pub fn bookmarklet_page_write() -> Result<PathBuf, String> {
     let cfg = Config::load(&config_path()).ok();
     let q = queue_for(cfg.as_ref());
     let dir = q.path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let token = deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
+    // The listener's token, made if it's new; the bookmarklets don't carry it.
+    deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
     let path = dir.join("bookmarklets.html");
-    std::fs::write(&path, deckle_digest::bookmarklet::install_page(&token))
+    std::fs::write(&path, deckle_digest::bookmarklet::install_page())
         .map_err(|e| format!("can't write {}: {e}", path.display()))?;
     Ok(path)
 }
@@ -628,8 +630,9 @@ pub fn recipe_bookmarklet() -> Result<String, String> {
     let cfg = Config::load(&config_path()).ok();
     let q = queue_for(cfg.as_ref());
     let dir = q.path.parent().unwrap_or(Path::new(".")).to_path_buf();
-    let token = deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
-    Ok(deckle_digest::bookmarklet::recipe_javascript(&token))
+    // The listener's token, made if it's new; the bookmarklets don't carry it.
+    deckle_digest::bookmarklet::token(&dir).map_err(|e| e.to_string())?;
+    Ok(deckle_digest::bookmarklet::recipe_javascript())
 }
 
 pub fn edition_preview(paper: Option<String>) -> Option<Preview> {

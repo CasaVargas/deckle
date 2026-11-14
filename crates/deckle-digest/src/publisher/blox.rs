@@ -161,7 +161,7 @@ fn origin(site: &str) -> String {
 /// page's own (`form.user-login-form`, which The Gazette serves since 2026-10), else the first
 /// form with a password field.
 fn login_form(html: &str) -> Option<(String, Vec<(String, String)>)> {
-    let doc = Document::from(html);
+    let doc = Document::from(&*crate::shallow::shallow(html));
     let form = [
         "form#access-modal-login-form",
         "form.user-login-form",
@@ -200,7 +200,7 @@ impl Publisher for Blox {
     /// A stranger's page renders both header blocks (CSS hides one), so only a filled-in
     /// screen name means signed in.
     fn signed_in(&self, html: &str) -> bool {
-        Document::from(html)
+        Document::from(&*crate::shallow::shallow(html))
             .select(".tn-user-screenname")
             .nodes()
             .iter()
@@ -248,7 +248,7 @@ impl Publisher for Blox {
     }
 
     fn unlock(&self, html: &str, ent: &Entitlement) -> Option<String> {
-        let doc = Document::from(html);
+        let doc = Document::from(&*crate::shallow::shallow(html));
         let blocks = doc.select(ENCRYPTED);
         if blocks.is_empty() {
             // Nothing to decode: a free story, as the site served it.

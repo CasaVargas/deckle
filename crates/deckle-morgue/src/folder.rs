@@ -96,7 +96,14 @@ impl Morgue {
     /// The Morgue `cfg` names. Another paper's editions are kept in a folder of their own,
     /// `<folder>/<slug>/`, since every paper's are named by date (many papers §3).
     pub fn from_config(cfg: &Config) -> Morgue {
-        let root = deckle_digest::inbox::expand_home(&cfg.morgue.folder);
+        let root = deckle_digest::inbox::saved_path("[morgue] folder", &cfg.morgue.folder)
+            .unwrap_or_else(|e| {
+                // In the web UI's server, a folder outside its own: the default one instead.
+                eprintln!("{e}; keeping editions in the default Morgue");
+                deckle_digest::inbox::expand_home(
+                    &deckle_digest::config::MorgueConfig::default().folder,
+                )
+            });
         Morgue {
             root: match &cfg.paper {
                 None => root,

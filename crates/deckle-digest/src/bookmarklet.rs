@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //! The bookmarklet (save-to-paper design §4): `deckle digest watch` listens on
-//! `127.0.0.1:47219` by default; the bookmarklet opens `/save?token=…&url=…&title=…` in a small
-//! popup, which avoids the browser's mixed-content and CORS rules. The token keeps other local
-//! pages from adding to the queue blindly.
+//! `127.0.0.1:47219` by default; the bookmarklet opens `/save?url=…&title=…` in a small popup,
+//! which avoids the browser's mixed-content and CORS rules. That page, on the listener's own
+//! origin, shows what would be saved and saves it only when its **Save** is pressed, with a
+//! `POST` that carries the token and Deckle's own `Origin` (bookmarklet confirm design,
+//! `docs/superpowers/specs/2026-11-13-bookmarklet-confirm-design.md`). The bookmarklet itself
+//! carries no token: it runs inside the page it's clicked on, which could read it.
 //!
 //! A second bookmarklet, **Save recipe**, carries the recipe from the page you're looking at
 //! (cookbook design §8.3, amended): the page's recipe data travels in the fragment of a popup
@@ -82,47 +85,47 @@ pub fn token(dir: &Path) -> std::io::Result<String> {
     Ok(t)
 }
 
-/// The popup script; `kind` is an extra query parameter (with its leading `&`), or empty.
-fn script(origin: &str, token: &str, kind: &str) -> String {
+/// The popup script. It carries no token: the page it runs in could read it.
+fn script(origin: &str) -> String {
     format!(
-        "javascript:(()=>{{window.open('{origin}/save?token={token}{kind}&url='+\
+        "javascript:(()=>{{window.open('{origin}/save?url='+\
          encodeURIComponent(location.href)+'&title='+encodeURIComponent(document.title),\
-         'deckle','width=420,height=200')}})()"
+         'deckle','width=420,height=240')}})()"
     )
 }
 
 /// The bookmarklet to drag to the bookmarks bar.
-pub fn javascript(token: &str) -> String {
-    script(&origin(), token, "")
+pub fn javascript() -> String {
+    script(&origin())
 }
 
 /// **Save recipe**: the page's `ld+json` blocks that mention `Recipe`, with its address, title,
 /// canonical, `og:image` and `og:site_name`, as JSON in the fragment of a `/recipe` popup.
 /// Nothing else leaves the page. With no such block, the address alone (`kind=recipe`).
-pub fn recipe_javascript(token: &str) -> String {
-    recipe_script(&origin(), token)
+pub fn recipe_javascript() -> String {
+    recipe_script(&origin())
 }
 
-fn recipe_script(origin: &str, token: &str) -> String {
+fn recipe_script(origin: &str) -> String {
     format!(
         "javascript:(()=>{{const q=s=>document.querySelector(s),u=encodeURIComponent,\
          o='{origin}',b=[...document.querySelectorAll('script[type=\"application/ld+json\"]')]\
          .map(s=>s.textContent).filter(t=>t.includes('Recipe'));\
-         window.open(b.length?o+'/recipe?token={token}\\x23'+u(JSON.stringify({{url:location.href,\
+         window.open(b.length?o+'/recipe\\x23'+u(JSON.stringify({{url:location.href,\
          title:document.title,canonical:(q('link[rel=canonical]')||{{}}).href||'',\
          image:(q('meta[property=\"og:image\"]')||{{}}).content||'',\
          site:(q('meta[property=\"og:site_name\"]')||{{}}).content||'',blocks:b}})):\
-         o+'/save?token={token}&kind=recipe&url='+u(location.href)+'&title='+u(document.title),\
-         'deckle','width=420,height=200')}})()"
+         o+'/save?kind=recipe&url='+u(location.href)+'&title='+u(document.title),\
+         'deckle','width=420,height=240')}})()"
     )
 }
 
 /// The install page (welcome design §4.2): both bookmarklets as real links to drag to the
 /// bookmarks bar, how to show the bar in each browser (the one the page is open in picked out),
 /// and *Copy* for a browser that won't take a drag. The desktop app writes it to a file and
-/// opens it; it carries the token, as the bookmarklets do, and nothing else.
-pub fn install_page(token: &str) -> String {
-    install_page_with(&javascript(token), &recipe_javascript(token))
+/// opens it; like the bookmarklets, it carries no token.
+pub fn install_page() -> String {
+    install_page_with(&javascript(), &recipe_javascript())
 }
 
 fn install_page_with(paper: &str, recipe: &str) -> String {
@@ -203,22 +206,27 @@ fn web_address(u: &str) -> bool {
     (u.starts_with("http://") || u.starts_with("https://")) && !u.chars().any(char::is_control)
 }
 
-/// The `/recipe` popup: reads the recipe from its own fragment, clears it, POSTs it here and
-/// shows the answer. `token` is 32 hex characters, so it needs no escaping.
+/// The `/recipe` popup: reads the recipe from its own fragment, clears it, and POSTs it here
+/// when **Save** is pressed, then shows the answer. `token` is 32 hex characters, so it needs no
+/// escaping; this page is on the listener's origin, so the page that opened it can't read it.
 fn recipe_popup(token: &str) -> String {
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>Deckle</title>\
          <style>body{{font:16px Georgia,serif;margin:24px;color:#1f1b16;background:#f6f3ee}}\
          h1{{font-size:20px;margin:0 0 8px}}p{{margin:0 0 16px;color:#7a7169}}\
          button{{font:inherit;padding:4px 14px}}</style></head><body>\
-         <h1 id=\"h\">Saving…</h1><p id=\"d\"></p><button onclick=\"window.close()\">Close</button>\
+         <h1 id=\"h\">Save this recipe to your cookbook?</h1><p id=\"d\"></p>\
+         <button id=\"s\" autofocus>Save</button> <button onclick=\"window.close()\">Close</button>\
          <script>const show=(h,d,ok)=>{{document.getElementById('h').textContent=h;\
          document.getElementById('d').textContent=d;if(ok)setTimeout(()=>window.close(),2500)}};\
          const f=location.hash.slice(1);history.replaceState(null,'',location.pathname+location.search);\
-         if(!f)show('Not saved','The page sent nothing: run `deckle save --bookmarklet` again.');\
-         else fetch('/recipe?token={token}',{{method:'POST',headers:{{'Content-Type':'application/json'}},\
-         body:decodeURIComponent(f)}}).then(r=>r.json().then(m=>show(m.heading,m.detail,r.ok)))\
-         .catch(()=>show('Not saved','Deckle didn\\'t answer: is `deckle digest watch` running?'))\
+         const btn=document.getElementById('s');\
+         if(!f){{btn.remove();show('Not saved','The page sent nothing: run `deckle save --bookmarklet` again.')}}\
+         else{{try{{document.getElementById('d').textContent=JSON.parse(decodeURIComponent(f)).title||''}}catch(e){{}}\
+         btn.onclick=()=>{{btn.disabled=true;fetch('/recipe?token={token}',{{method:'POST',\
+         headers:{{'Content-Type':'application/json'}},body:decodeURIComponent(f)}})\
+         .then(r=>r.json().then(m=>{{btn.remove();show(m.heading,m.detail,r.ok)}}))\
+         .catch(()=>show('Not saved','Deckle didn\\'t answer: is `deckle digest watch` running?'))}}}}\
          </script></body></html>"
     )
 }
@@ -279,7 +287,8 @@ fn write_whole(recipes_inbox: &Path, name: &str, body: &str) -> Result<(), Strin
         })
 }
 
-/// One `/recipe` request → status, content type and body. `GET` is the popup (token checked);
+/// One `/recipe` request → status, content type and body. `GET` is the popup, which saves
+/// nothing until its button is pressed;
 /// `POST` carries the recipe as JSON, from the listener's own origin only, and becomes
 /// `<slug>.html` in `recipes_inbox` for the Inbox scan. Nothing is fetched here.
 pub fn handle_recipe(
@@ -321,8 +330,7 @@ pub fn handle_recipe_for(
         == Some(token);
     let stale = "This bookmarklet is out of date: run `deckle save --bookmarklet` again.";
     match method {
-        "GET" if ok_token => (200, HTML, recipe_popup(token)),
-        "GET" => (403, HTML, page("Not saved", stale)),
+        "GET" => (200, HTML, recipe_popup(token)),
         "POST" => {
             if !ok_token {
                 return (403, JSON, answer("Not saved", stale));
@@ -434,79 +442,111 @@ fn write_recipe_link(recipes_inbox: &Path, url: &str, title: Option<&str>) -> Re
     )
 }
 
-/// One request line (`GET /save?… HTTP/1.1`) → status and HTML body. An article is queued
-/// for the paper; with `kind=recipe` a link file goes into `recipes_inbox` instead, and
-/// nothing is fetched here.
-pub fn handle(
+/// The `/save` confirmation: what would be saved, and a **Save** that posts it back here with
+/// the token. On the listener's origin, so the page the bookmarklet ran in can't read it.
+fn confirm_page(token: &str, url: &str, title: Option<&str>, kind: &str) -> String {
+    let heading = if kind == "recipe" {
+        "Save this recipe to your cookbook?"
+    } else {
+        "Save this to tomorrow's paper?"
+    };
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Deckle</title>\
+         <style>body{{font:16px Georgia,serif;margin:24px;color:#1f1b16;background:#f6f3ee}}\
+         h1{{font-size:20px;margin:0 0 8px}}p{{margin:0 0 16px;color:#7a7169;overflow-wrap:anywhere}}\
+         button{{font:inherit;padding:4px 14px}}</style></head><body>\
+         <h1>{}</h1><p>{}</p>\
+         <form method=\"post\" action=\"/save\">\
+         <input type=\"hidden\" name=\"token\" value=\"{}\">\
+         <input type=\"hidden\" name=\"url\" value=\"{}\">\
+         <input type=\"hidden\" name=\"title\" value=\"{}\">\
+         <input type=\"hidden\" name=\"kind\" value=\"{}\">\
+         <button type=\"submit\" autofocus>Save</button> \
+         <button type=\"button\" onclick=\"window.close()\">Close</button></form></body></html>",
+        esc(heading),
+        esc(title.filter(|t| !t.is_empty()).unwrap_or(url)),
+        esc(token),
+        esc(url),
+        esc(title.unwrap_or("")),
+        esc(kind),
+    )
+}
+
+/// The value of `name` in `a=1&b=2` (a query or a form body), decoded.
+fn field(pairs: &str, name: &str) -> Option<String> {
+    pairs
+        .split('&')
+        .find_map(|kv| kv.strip_prefix(&format!("{name}=")))
+        .map(decode)
+}
+
+/// One `/save` request → status and HTML body. `GET` (what the bookmarklet opens) saves
+/// nothing: it answers the confirmation page. `POST` (that page's **Save**) needs the token and
+/// Deckle's own `Origin`; then an article is queued for the paper, or with `kind=recipe` a link
+/// file goes into `recipes_inbox`. Nothing is fetched here.
+#[allow(clippy::too_many_arguments)]
+pub fn handle_for(
     request_line: &str,
+    origin: Option<&str>,
+    body: &[u8],
     token: &str,
     queue: &ReadingQueue,
     recipes_inbox: &Path,
+    accepted: &[String],
     now: DateTime<Utc>,
 ) -> (u16, String) {
     let mut parts = request_line.split_whitespace();
-    let (Some("GET"), Some(target)) = (parts.next(), parts.next()) else {
+    let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
         return (404, page("Not found", ""));
     };
-    let Some(query) = target.strip_prefix("/save?") else {
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    if path != "/save" {
         return (404, page("Not found", ""));
-    };
-    let param = |name: &str| {
-        query
-            .split('&')
-            .find_map(|kv| kv.strip_prefix(&format!("{name}=")))
-            .map(decode)
-    };
-    if param("token").as_deref() != Some(token) {
-        return (
-            403,
-            page(
-                "Not saved",
-                "This bookmarklet is out of date: run `deckle save --bookmarklet` again.",
-            ),
-        );
     }
-    let Some(url) = param("url").filter(|u| u.starts_with("http://") || u.starts_with("https://"))
-    else {
-        return (
+    let form = String::from_utf8_lossy(body);
+    let pairs: &str = match method {
+        "GET" => query,
+        "POST" => &form,
+        _ => return (404, page("Not found", "")),
+    };
+    let stale = "This bookmarklet is out of date: run `deckle save --bookmarklet` again.";
+    let no_address = || {
+        (
             400,
             page(
                 "Not saved",
                 "That page has no web address Deckle can fetch.",
             ),
-        );
+        )
     };
-    let title = param("title");
-    match param("kind").as_deref() {
-        None | Some("") | Some("article") => {}
-        Some("recipe") => {
-            // A line break would put a second address in the link file.
-            if url.chars().any(char::is_control) {
-                return (
-                    400,
-                    page(
-                        "Not saved",
-                        "That page has no web address Deckle can fetch.",
-                    ),
-                );
-            }
-            return match write_recipe_link(recipes_inbox, &url, title.as_deref()) {
-                Ok(()) => (
-                    200,
-                    page("Sent to your cookbook", "It appears after the next scan."),
-                ),
-                Err(e) => (500, page("Not saved", &e)),
-            };
-        }
-        Some(_) => {
-            return (
-                400,
-                page(
-                    "Not saved",
-                    "This bookmarklet is out of date: run `deckle save --bookmarklet` again.",
-                ),
-            );
-        }
+    let Some(url) = field(pairs, "url").filter(|u| web_address(u)) else {
+        return no_address();
+    };
+    let title = field(pairs, "title").filter(|t| !t.is_empty());
+    let kind = match field(pairs, "kind").as_deref() {
+        None | Some("") | Some("article") => "article",
+        Some("recipe") => "recipe",
+        Some(_) => return (400, page("Not saved", stale)),
+    };
+    if method == "GET" {
+        return (200, confirm_page(token, &url, title.as_deref(), kind));
+    }
+    if field(pairs, "token").as_deref() != Some(token)
+        || !origin.is_some_and(|o| accepted.iter().any(|a| a == o))
+    {
+        return (
+            403,
+            page("Not saved", "Only Deckle's own page can save here."),
+        );
+    }
+    if kind == "recipe" {
+        return match write_recipe_link(recipes_inbox, &url, title.as_deref()) {
+            Ok(()) => (
+                200,
+                page("Sent to your cookbook", "It appears after the next scan."),
+            ),
+            Err(e) => (500, page("Not saved", &e)),
+        };
     }
     match queue.add_url(&url, title.as_deref(), "bookmarklet", now) {
         Ok(Added::New(_)) => (
@@ -519,6 +559,28 @@ pub fn handle(
         Ok(Added::Duplicate(_)) => (200, page("Already saved", title.as_deref().unwrap_or(&url))),
         Err(e) => (500, page("Not saved", &e)),
     }
+}
+
+/// [`handle_for`] with the loopback origins (`DECKLE_BOOKMARKLET_URL` unset).
+pub fn handle(
+    request_line: &str,
+    origin: Option<&str>,
+    body: &[u8],
+    token: &str,
+    queue: &ReadingQueue,
+    recipes_inbox: &Path,
+    now: DateTime<Utc>,
+) -> (u16, String) {
+    handle_for(
+        request_line,
+        origin,
+        body,
+        token,
+        queue,
+        recipes_inbox,
+        &accepted_origins(&loopback_origin()),
+        now,
+    )
 }
 
 /// One request as the listener reads it: the method, the target, the `Origin` header and the
@@ -585,7 +647,16 @@ pub fn serve(queue: ReadingQueue, token: String, recipes_inbox: PathBuf) -> std:
                 &accepted,
             )
         } else {
-            let (status, body) = handle(&req.line, &token, &queue, &recipes_inbox, Utc::now());
+            let (status, body) = handle_for(
+                &req.line,
+                req.origin.as_deref(),
+                &req.body,
+                &token,
+                &queue,
+                &recipes_inbox,
+                &accepted,
+                Utc::now(),
+            );
             (status, "text/html; charset=utf-8", body)
         };
         let reason = match status {
@@ -616,75 +687,115 @@ mod tests {
         "2026-10-20T14:03:11Z".parse().unwrap()
     }
 
-    #[test]
-    fn good_request_queues_and_says_saved() {
-        let dir = tempfile::tempdir().unwrap();
-        let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
-        let (status, body) = handle(
-            "GET /save?token=abc&url=https%3A%2F%2Fex.com%2Fa%3Fx%3D1&title=A%20%26%20B HTTP/1.1",
+    const ORIGIN: Option<&str> = Some("http://127.0.0.1:47219");
+
+    /// What the bookmarklet opens.
+    fn get(q: &ReadingQueue, inbox: &Path, query: &str) -> (u16, String) {
+        handle(
+            &format!("GET /save?{query} HTTP/1.1"),
+            None,
+            b"",
             "abc",
-            &q,
-            dir.path(),
+            q,
+            inbox,
             now(),
-        );
-        assert_eq!(status, 200);
-        assert!(body.contains("Saved to tomorrow&#39;s paper"), "{body}");
-        assert!(body.contains("A &amp; B"), "title is escaped: {body}");
-        let e = &q.load()[0];
-        assert_eq!(e.url.as_deref(), Some("https://ex.com/a?x=1"));
-        assert_eq!(e.source, "bookmarklet");
-        let (_, again) = handle(
-            "GET /save?token=abc&url=https%3A%2F%2Fex.com%2Fa%3Fx%3D1 HTTP/1.1",
+        )
+    }
+
+    /// What the confirmation page's Save sends.
+    fn post(q: &ReadingQueue, inbox: &Path, body: &str, origin: Option<&str>) -> (u16, String) {
+        handle(
+            "POST /save HTTP/1.1",
+            origin,
+            body.as_bytes(),
             "abc",
-            &q,
-            dir.path(),
+            q,
+            inbox,
             now(),
-        );
-        assert!(again.contains("Already saved"), "{again}");
+        )
     }
 
     #[test]
-    fn wrong_or_missing_token_is_403() {
+    fn opening_asks_first_and_saves_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
-        for line in [
-            "GET /save?token=nope&url=https%3A%2F%2Fex.com HTTP/1.1",
-            "GET /save?url=https%3A%2F%2Fex.com HTTP/1.1",
+        // Old bookmarklets still carry a token: it's ignored, and the same page appears.
+        for query in [
+            "url=https%3A%2F%2Fex.com%2Fa%3Fx%3D1&title=A%20%26%20B",
+            "token=old&url=https%3A%2F%2Fex.com%2Fa%3Fx%3D1&title=A%20%26%20B",
         ] {
-            assert_eq!(handle(line, "abc", &q, dir.path(), now()).0, 403, "{line}");
+            let (status, body) = get(&q, dir.path(), query);
+            assert_eq!(status, 200);
+            assert!(
+                body.contains("Save this to tomorrow&#39;s paper?"),
+                "{body}"
+            );
+            assert!(body.contains("A &amp; B"), "title is escaped: {body}");
+            assert!(body.contains("name=\"token\" value=\"abc\""), "{body}");
+            assert!(body.contains("method=\"post\" action=\"/save\""), "{body}");
         }
         assert!(q.load().is_empty());
     }
 
     #[test]
-    fn non_get_or_other_path_is_404() {
+    fn saving_from_deckles_page_queues_and_says_saved() {
         let dir = tempfile::tempdir().unwrap();
         let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
-        assert_eq!(
-            handle(
-                "POST /save?token=abc HTTP/1.1",
-                "abc",
-                &q,
-                dir.path(),
-                now()
-            )
-            .0,
-            404
-        );
-        assert_eq!(
-            handle("GET /other HTTP/1.1", "abc", &q, dir.path(), now()).0,
-            404
-        );
-        assert_eq!(handle("garbage", "abc", &q, dir.path(), now()).0, 404);
+        let body = "token=abc&url=https%3A%2F%2Fex.com%2Fa%3Fx%3D1&title=A+%26+B&kind=";
+        let (status, page) = post(&q, dir.path(), body, ORIGIN);
+        assert_eq!(status, 200);
+        assert!(page.contains("Saved to tomorrow&#39;s paper"), "{page}");
+        let e = &q.load()[0];
+        assert_eq!(e.url.as_deref(), Some("https://ex.com/a?x=1"));
+        assert_eq!(e.title.as_deref(), Some("A & B"));
+        assert_eq!(e.source, "bookmarklet");
+        let (_, again) = post(&q, dir.path(), body, ORIGIN);
+        assert!(again.contains("Already saved"), "{again}");
     }
 
     #[test]
-    fn token_is_created_once_and_reused() {
+    fn saving_needs_the_token_and_deckles_own_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
+        let url = "url=https%3A%2F%2Fex.com";
+        for (body, origin) in [
+            (format!("token=nope&{url}"), ORIGIN),
+            (url.to_owned(), ORIGIN),
+            (format!("token=abc&{url}"), None),
+            (format!("token=abc&{url}"), Some("https://evil.example")),
+        ] {
+            assert_eq!(
+                post(&q, dir.path(), &body, origin).0,
+                403,
+                "{body} {origin:?}"
+            );
+        }
+        assert!(q.load().is_empty());
+    }
+
+    #[test]
+    fn other_methods_and_paths_are_404() {
+        let dir = tempfile::tempdir().unwrap();
+        let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
+        for line in ["PUT /save HTTP/1.1", "GET /other HTTP/1.1", "garbage"] {
+            assert_eq!(
+                handle(line, ORIGIN, b"", "abc", &q, dir.path(), now()).0,
+                404,
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn token_is_created_once_and_reused_and_no_bookmarklet_carries_it() {
         let dir = tempfile::tempdir().unwrap();
         let a = token(dir.path()).unwrap();
         assert_eq!(a.len(), 32);
         assert_eq!(token(dir.path()).unwrap(), a);
-        assert!(javascript(&a).contains(&format!("127.0.0.1:47219/save?token={a}&url=")));
+        assert!(javascript().contains("127.0.0.1:47219/save?url="));
+        for js in [javascript(), recipe_javascript(), install_page()] {
+            assert!(!js.contains("token"), "{js}");
+        }
     }
 
     fn recipe_files(inbox: &Path) -> Vec<String> {
@@ -704,11 +815,19 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
         let inbox = dir.path().join("Inbox/Recipes");
-        let line = "GET /save?token=abc&kind=recipe&url=https%3A%2F%2Fex.com%2Fr%3Fx%3D1&title=Mom%27s%20Best%20Pie%20%26%20More HTTP/1.1";
-        let (status, body) = handle(line, "abc", &q, &inbox, now());
+        let query = "kind=recipe&url=https%3A%2F%2Fex.com%2Fr%3Fx%3D1&title=Mom%27s%20Best%20Pie%20%26%20More";
+        let (status, page) = get(&q, &inbox, query);
         assert_eq!(status, 200);
-        assert!(body.contains("Sent to your cookbook"), "{body}");
-        assert!(body.contains("It appears after the next scan."), "{body}");
+        assert!(
+            page.contains("Save this recipe to your cookbook?"),
+            "{page}"
+        );
+        assert!(!inbox.exists(), "asking writes nothing");
+        let body = format!("token=abc&{query}");
+        let (status, page) = post(&q, &inbox, &body, ORIGIN);
+        assert_eq!(status, 200);
+        assert!(page.contains("Sent to your cookbook"), "{page}");
+        assert!(page.contains("It appears after the next scan."), "{page}");
         assert_eq!(recipe_files(&inbox), ["mom-s-best-pie-more.url"]);
         // Never fetched, never queued for the paper.
         assert!(q.load().is_empty());
@@ -723,7 +842,7 @@ mod tests {
             ["https://ex.com/r?x=1"]
         );
         // The same title again gets its own name.
-        handle(line, "abc", &q, &inbox, now());
+        post(&q, &inbox, &body, ORIGIN);
         assert_eq!(
             recipe_files(&inbox),
             ["mom-s-best-pie-more (2).url", "mom-s-best-pie-more.url"]
@@ -734,25 +853,26 @@ mod tests {
     fn recipe_file_is_named_for_the_host_without_a_title() {
         let dir = tempfile::tempdir().unwrap();
         let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
-        for line in [
-            "GET /save?token=abc&kind=recipe&url=https%3A%2F%2Fwww.ex.com%2Fr HTTP/1.1",
-            "GET /save?token=abc&kind=recipe&url=https%3A%2F%2Fwww.ex.com%2Fr&title=%20%21%21 HTTP/1.1",
+        for body in [
+            "token=abc&kind=recipe&url=https%3A%2F%2Fwww.ex.com%2Fr",
+            "token=abc&kind=recipe&url=https%3A%2F%2Fwww.ex.com%2Fr&title=%20%21%21",
         ] {
-            assert_eq!(handle(line, "abc", &q, dir.path(), now()).0, 200);
+            assert_eq!(post(&q, dir.path(), body, ORIGIN).0, 200);
         }
         assert_eq!(recipe_files(dir.path()), ["ex-com (2).url", "ex-com.url"]);
     }
 
     #[test]
-    fn recipe_kind_needs_token() {
+    fn recipe_kind_needs_token_and_origin() {
         let dir = tempfile::tempdir().unwrap();
         let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
         let inbox = dir.path().join("Recipes");
-        for line in [
-            "GET /save?token=nope&kind=recipe&url=https%3A%2F%2Fex.com HTTP/1.1",
-            "GET /save?kind=recipe&url=https%3A%2F%2Fex.com HTTP/1.1",
+        for (body, origin) in [
+            ("token=nope&kind=recipe&url=https%3A%2F%2Fex.com", ORIGIN),
+            ("kind=recipe&url=https%3A%2F%2Fex.com", ORIGIN),
+            ("token=abc&kind=recipe&url=https%3A%2F%2Fex.com", None),
         ] {
-            assert_eq!(handle(line, "abc", &q, &inbox, now()).0, 403, "{line}");
+            assert_eq!(post(&q, &inbox, body, origin).0, 403, "{body}");
         }
         assert!(!inbox.exists(), "nothing written");
     }
@@ -762,13 +882,15 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
         let inbox = dir.path().join("Recipes");
-        for line in [
-            "GET /save?token=abc&kind=recipe&url=about%3Ablank HTTP/1.1",
+        for query in [
+            "kind=recipe&url=about%3Ablank",
             // a line break would add a second address to the link file
-            "GET /save?token=abc&kind=recipe&url=https%3A%2F%2Fex.com%2F%0D%0AURL%3Dhttps%3A%2F%2Fevil.test HTTP/1.1",
-            "GET /save?token=abc&kind=cake&url=https%3A%2F%2Fex.com HTTP/1.1",
+            "kind=recipe&url=https%3A%2F%2Fex.com%2F%0D%0AURL%3Dhttps%3A%2F%2Fevil.test",
+            "kind=cake&url=https%3A%2F%2Fex.com",
         ] {
-            assert_eq!(handle(line, "abc", &q, &inbox, now()).0, 400, "{line}");
+            assert_eq!(get(&q, &inbox, query).0, 400, "{query}");
+            let body = format!("token=abc&{query}");
+            assert_eq!(post(&q, &inbox, &body, ORIGIN).0, 400, "{query}");
         }
         assert!(recipe_files(&inbox).is_empty());
         assert!(q.load().is_empty());
@@ -779,15 +901,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let q = ReadingQueue::new(dir.path().join("reading.jsonl"));
         let inbox = dir.path().join("Recipes");
-        let (status, body) = handle(
-            "GET /save?token=abc&url=https%3A%2F%2Fex.com%2Fa HTTP/1.1",
-            "abc",
-            &q,
-            &inbox,
-            now(),
-        );
+        let (status, page) = post(&q, &inbox, "token=abc&url=https%3A%2F%2Fex.com%2Fa", ORIGIN);
         assert_eq!(status, 200);
-        assert!(body.contains("Saved to tomorrow&#39;s paper"), "{body}");
+        assert!(page.contains("Saved to tomorrow&#39;s paper"), "{page}");
         assert_eq!(q.load().len(), 1);
         assert!(
             !inbox.exists(),
@@ -797,11 +913,11 @@ mod tests {
 
     #[test]
     fn recipe_javascript_carries_the_recipe_or_falls_back_to_the_address() {
-        let js = recipe_javascript("abc");
+        let js = recipe_javascript();
         assert!(js.starts_with("javascript:"), "{js}");
         assert!(js.contains("127.0.0.1:47219"), "{js}");
         assert!(
-            js.contains(r"/recipe?token=abc\x23'+u("),
+            js.contains(r"/recipe\x23'+u("),
             "the data rides in the fragment: {js}"
         );
         // A `javascript:` bookmark is a URL: a literal `#` would end it, a `%` would be decoded.
@@ -811,10 +927,7 @@ mod tests {
             js.contains("t.includes('Recipe')"),
             "only blocks that mention a recipe: {js}"
         );
-        assert!(
-            js.contains("/save?token=abc&kind=recipe&url="),
-            "the fallback: {js}"
-        );
+        assert!(js.contains("/save?kind=recipe&url="), "the fallback: {js}");
         for never in [
             "innerHTML",
             "outerHTML",
@@ -826,29 +939,20 @@ mod tests {
             assert!(!js.contains(never), "{never}: {js}");
         }
         assert!(!js.contains('\n'), "one line, so it pastes as a bookmark");
-        assert!(
-            !javascript("abc").contains("kind="),
-            "the paper's is unchanged"
-        );
+        assert!(!javascript().contains("kind="), "the paper's is unchanged");
     }
 
     #[test]
     fn the_install_page_carries_both_bookmarklets_as_links() {
-        let page = install_page("abc");
-        let paper = esc(&javascript("abc"));
-        let recipe = esc(&recipe_javascript("abc"));
+        let page = install_page();
+        let paper = esc(&javascript());
+        let recipe = esc(&recipe_javascript());
         assert!(page.contains(&format!("href=\"{paper}\"")), "{page}");
         assert!(page.contains(&format!("href=\"{recipe}\"")), "{page}");
         assert!(page.contains(&format!("data-copy=\"{paper}\"")), "{page}");
         assert!(page.contains(&format!("data-copy=\"{recipe}\"")), "{page}");
-        // The token is in the two links and the two Copy buttons, and nowhere else (Save recipe
-        // carries it twice: its popup and its fallback).
-        let per = |js: &str| js.matches("abc").count();
-        assert_eq!(per(&javascript("abc")), 1);
-        assert_eq!(per(&recipe_javascript("abc")), 2);
-        assert_eq!(page.matches("abc").count(), 2 * (1 + 2), "{page}");
         // Save recipe quotes its selectors: unescaped, the attribute would end there.
-        assert!(recipe_javascript("abc").contains('"'));
+        assert!(recipe_javascript().contains('"'));
         assert!(
             recipe.contains("&quot;") && !recipe.contains('"'),
             "{recipe}"
@@ -860,14 +964,12 @@ mod tests {
         assert!(!page.contains('\n'), "one line, as the popups are");
     }
 
-    const ORIGIN: Option<&str> = Some("http://127.0.0.1:47219");
-
     #[test]
     fn javascript_uses_public_url() {
         let o = origin_from(Some("https://deckle.home.lan/"));
         assert_eq!(o, "https://deckle.home.lan", "trailing slash stripped");
-        assert!(script(&o, "abc", "").contains("https://deckle.home.lan/save?token=abc&url="));
-        assert!(recipe_script(&o, "abc").contains("o='https://deckle.home.lan',"));
+        assert!(script(&o).contains("https://deckle.home.lan/save?url="));
+        assert!(recipe_script(&o).contains("o='https://deckle.home.lan',"));
     }
 
     #[test]
@@ -918,20 +1020,21 @@ mod tests {
         r#"{"@type":"Recipe","name":"Pie","description":"</script><script>alert(1)</script>"}"#;
 
     #[test]
-    fn recipe_popup_needs_the_token() {
+    fn the_recipe_popup_opens_without_a_token_and_saves_on_its_button() {
         let dir = tempfile::tempdir().unwrap();
-        let (status, kind, body) = handle_recipe("GET", "token=abc", None, b"", "abc", dir.path());
-        assert_eq!((status, kind), (200, "text/html; charset=utf-8"));
-        assert!(body.contains("fetch('/recipe?token=abc'"), "{body}");
-        assert!(body.contains("location.hash"), "{body}");
-        assert_eq!(
-            handle_recipe("GET", "token=nope", None, b"", "abc", dir.path()).0,
-            403
-        );
+        // Old bookmarklets send a token, new ones none: the same popup either way.
+        for query in ["", "token=old"] {
+            let (status, kind, body) = handle_recipe("GET", query, None, b"", "abc", dir.path());
+            assert_eq!((status, kind), (200, "text/html; charset=utf-8"));
+            assert!(body.contains("fetch('/recipe?token=abc'"), "{body}");
+            assert!(body.contains("location.hash"), "{body}");
+            assert!(body.contains("btn.onclick="), "posts only on Save: {body}");
+        }
         assert_eq!(
             handle_recipe("PUT", "token=abc", ORIGIN, b"", "abc", dir.path()).0,
             404
         );
+        assert!(recipe_files(dir.path()).is_empty());
     }
 
     #[test]

@@ -81,28 +81,157 @@ async fn login_sets_a_strict_http_only_cookie() {
     );
 }
 
+/// A login from `addr`, as a real socket would give it.
+fn login_from(
+    addr: &str,
+    password: &str,
+    xff: Option<&str>,
+) -> axum::http::Request<axum::body::Body> {
+    let mut req = post(
+        "/api/login",
+        &json!({ "password": password }).to_string(),
+        None,
+    );
+    if let Some(x) = xff {
+        req.headers_mut()
+            .insert("x-forwarded-for", x.parse().unwrap());
+    }
+    let addr: std::net::SocketAddr = addr.parse().unwrap();
+    req.extensions_mut()
+        .insert(axum::extract::ConnectInfo(addr));
+    req
+}
+
 #[tokio::test]
-async fn login_wrong_password_is_slow() {
+async fn five_wrong_passwords_are_free_then_that_address_waits() {
     let tmp = tempfile::tempdir().unwrap();
     let app = app(tmp.path(), false);
-    for pw in ["correct hors", "", "correct horse!"] {
-        let start = Instant::now();
-        let r = send(
-            &app,
-            post("/api/login", &json!({ "password": pw }).to_string(), None),
-        )
-        .await;
-        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
-        assert!(
-            start.elapsed() >= Duration::from_secs(1),
-            "{:?}",
-            start.elapsed()
-        );
+    let start = Instant::now();
+    for _ in 0..6 {
+        let r = send(&app, login_from("192.168.1.50:1000", "nope", None)).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{}", r.body);
         assert!(r.headers.get("set-cookie").is_none());
     }
-    let cookie = login(&app).await;
-    let r = send(&app, post("/api/invoke/app_version", "{}", Some(&cookie))).await;
-    assert_eq!(r.status, StatusCode::OK);
+    // Wrong guesses are no longer each held back a second.
+    assert!(
+        start.elapsed() < Duration::from_secs(1),
+        "{:?}",
+        start.elapsed()
+    );
+    // The 6th failure starts a wait, even for the right password from there.
+    let r = send(&app, login_from("192.168.1.50:1001", PASSWORD, None)).await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS, "{}", r.body);
+    assert_eq!(r.headers["retry-after"], "1");
+    assert_eq!(r.headers["x-content-type-options"], "nosniff");
+    // Another address is untouched.
+    let r = send(&app, login_from("192.168.1.2:1000", PASSWORD, None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+    // After the wait, the right password works and clears the count.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let r = send(&app, login_from("192.168.1.50:1002", PASSWORD, None)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+}
+
+#[tokio::test]
+async fn a_thousand_parallel_guesses_from_one_address_get_a_handful_checked() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path(), false);
+    let mut tries = tokio::task::JoinSet::new();
+    for i in 0..1000 {
+        let app = app.clone();
+        tries.spawn(async move {
+            send(
+                &app,
+                login_from("203.0.113.9:1", &format!("guess {i}"), None),
+            )
+            .await
+            .status
+        });
+    }
+    let (mut checked, mut refused) = (0, 0);
+    while let Some(status) = tries.join_next().await {
+        match status.unwrap() {
+            StatusCode::UNAUTHORIZED => checked += 1,
+            StatusCode::TOO_MANY_REQUESTS => refused += 1,
+            other => panic!("{other}"),
+        }
+    }
+    // Five free, the one that starts the wait, and one more at most in flight beside it.
+    assert!(checked <= 7, "{checked} checked");
+    assert_eq!(checked + refused, 1000);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_owner_signs_in_while_someone_else_guesses() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path(), false);
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut guessers = tokio::task::JoinSet::new();
+    for c in 0..8 {
+        let app = app.clone();
+        guessers.spawn(async move {
+            while Instant::now() < deadline {
+                send(
+                    &app,
+                    login_from("203.0.113.9:1", &format!("guess {c}"), None),
+                )
+                .await;
+                tokio::task::yield_now().await;
+            }
+        });
+    }
+    let mut ok = 0;
+    while Instant::now() < deadline {
+        let r = send(&app, login_from("192.168.1.2:5", PASSWORD, None)).await;
+        assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+        ok += 1;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(ok >= 5, "{ok}");
+    while guessers.join_next().await.is_some() {}
+}
+
+#[tokio::test]
+async fn behind_a_listed_proxy_each_client_counts_on_its_own() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cfg = crate::config(tmp.path(), false);
+    cfg.trusted_proxies = vec![deckle_server::Range::parse("172.18.0.0/16").unwrap()];
+    let app = deckle_server::router(cfg, crate::ctx(tmp.path()));
+    for _ in 0..8 {
+        send(
+            &app,
+            login_from("172.18.0.2:1", "nope", Some("203.0.113.9")),
+        )
+        .await;
+    }
+    let r = send(
+        &app,
+        login_from("172.18.0.2:1", PASSWORD, Some("203.0.113.9")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
+    let r = send(
+        &app,
+        login_from("172.18.0.2:1", PASSWORD, Some("198.51.100.4")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.body);
+
+    // Without the setting the header changes nothing: everyone is the proxy.
+    let app = crate::app(tmp.path(), false);
+    for _ in 0..8 {
+        send(
+            &app,
+            login_from("172.18.0.2:1", "nope", Some("203.0.113.9")),
+        )
+        .await;
+    }
+    let r = send(
+        &app,
+        login_from("172.18.0.2:1", PASSWORD, Some("198.51.100.4")),
+    )
+    .await;
+    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
 }
 
 /// Over a real socket, where the handler gets the peer's address to log (`--no-capture`
@@ -125,71 +254,6 @@ async fn failed_login_is_logged_with_peer() {
     assert!(reply.starts_with("HTTP/1.1 401"), "{reply}");
     stop.send(()).unwrap();
     server.await.unwrap().unwrap();
-}
-
-#[tokio::test]
-async fn parallel_logins_are_capped_with_429() {
-    let tmp = tempfile::tempdir().unwrap();
-    let app = app(tmp.path(), false);
-    let cookie = login(&app).await;
-    let start = Instant::now();
-    let mut tries = tokio::task::JoinSet::new();
-    for i in 0..20 {
-        let app = app.clone();
-        tries.spawn(async move {
-            let body = json!({ "password": format!("guess {i}") }).to_string();
-            let r = send(&app, post("/api/login", &body, None)).await;
-            (r.status, r.body, r.headers, start.elapsed())
-        });
-    }
-    let (mut wrong, mut busy) = (0, 0);
-    while let Some(got) = tries.join_next().await {
-        let (status, body, headers, _) = got.unwrap();
-        match status {
-            StatusCode::UNAUTHORIZED => wrong += 1,
-            StatusCode::TOO_MANY_REQUESTS => {
-                busy += 1;
-                assert_eq!(
-                    serde_json::from_str::<Value>(&body).unwrap(),
-                    json!({"error": "too many login attempts; try again in a moment"})
-                );
-                assert_eq!(headers["x-content-type-options"], "nosniff");
-            }
-            other => panic!("{other}: {body}"),
-        }
-    }
-    assert!(wrong <= 4, "{wrong} checked at once");
-    assert_eq!(wrong + busy, 20);
-    // The slots free up, and a session from before was never affected.
-    login(&app).await;
-    let r = send(&app, post("/api/invoke/app_version", "{}", Some(&cookie))).await;
-    assert_eq!(r.status, StatusCode::OK);
-}
-
-/// A wrong guess answers only after the delay, so a client could hang up as soon as no quick
-/// success comes back; its slot must stay taken for the full delay anyway.
-#[tokio::test]
-async fn abandoned_failed_logins_still_hold_their_slot() {
-    let tmp = tempfile::tempdir().unwrap();
-    let app = app(tmp.path(), false);
-    let mut tries = Vec::new();
-    for i in 0..4 {
-        let app = app.clone();
-        tries.push(tokio::spawn(async move {
-            let body = json!({ "password": format!("guess {i}") }).to_string();
-            send(&app, post("/api/login", &body, None)).await
-        }));
-    }
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    for t in tries {
-        t.abort();
-        assert!(t.await.is_err_and(|e| e.is_cancelled()));
-    }
-    let body = json!({ "password": PASSWORD }).to_string();
-    let r = send(&app, post("/api/login", &body, None)).await;
-    assert_eq!(r.status, StatusCode::TOO_MANY_REQUESTS);
-    tokio::time::sleep(Duration::from_millis(1300)).await;
-    login(&app).await;
 }
 
 #[tokio::test]
@@ -307,6 +371,8 @@ fn from_env_reads_every_setting() {
             ("DECKLE_WEB_PASSWORD", ""),
             ("DECKLE_WEB_AUTH", "none"),
             ("DECKLE_WEB_ROOTS", "/mnt/books::/media"),
+            ("DECKLE_WEB_HOSTS", "books.example.com, ,deckle.example.org"),
+            ("DECKLE_WEB_TRUSTED_PROXIES", "10.0.0.5, 172.18.0.0/16"),
         ]),
     )
     .unwrap();
@@ -318,10 +384,13 @@ fn from_env_reads_every_setting() {
         cfg.roots,
         ["/config", "/data", "/mnt/books", "/media"].map(std::path::PathBuf::from)
     );
+    assert_eq!(cfg.hosts, ["books.example.com", "deckle.example.org"]);
+    assert_eq!(cfg.trusted_proxies.len(), 2);
 
     for (k, v) in [
         ("DECKLE_WEB_PORT", "http"),
         ("DECKLE_WEB_BIND", "localhost"),
+        ("DECKLE_WEB_TRUSTED_PROXIES", "10.0.0.0/40"),
     ] {
         let err =
             ServerConfig::from_lookup("/web".into(), env(&[("DECKLE_WEB_PASSWORD", "pw"), (k, v)]))

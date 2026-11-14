@@ -114,6 +114,8 @@ impl Serve {
             // Uploads (always under /data) fail too.
             eprintln!("web UI: no file roots; the file browser shows nothing");
         }
+        // Before the daemon starts: what it and every CLI it runs may touch.
+        deckle_core::confine::set_roots(&cfg.roots);
         Some(cfg)
     }
 }
@@ -131,7 +133,8 @@ fn serve_web(cfg: ServerConfig, stop: tokio::sync::oneshot::Receiver<bool>) {
             return;
         }
     };
-    let result = rt.block_on(deckle_server::serve(cfg, Arc::new(ctx()), async {
+    let roots = cfg.roots.clone();
+    let result = rt.block_on(deckle_server::serve(cfg, Arc::new(ctx(roots)), async {
         // A daemon that stopped stops the server. One that failed holds no signal handlers,
         // so the web UI stays up (to fix the config) and stops on its own signal.
         if stop.await != Ok(true) {
@@ -173,7 +176,7 @@ async fn stop_signal() {
 
 /// The app's state as the desktop app keeps it: its `settings.json` and `devices.json` (which
 /// `digest push`/`watch` read too) in the same config folder.
-fn ctx() -> Ctx {
+fn ctx(roots: Vec<PathBuf>) -> Ctx {
     let devices_file = deckle_core::devices::default_registry_file();
     let settings_file = devices_file
         .parent()
@@ -190,5 +193,6 @@ fn ctx() -> Ctx {
         events: Arc::new(SseEvents),
         exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("deckle-web")),
         web: true,
+        roots: Some(roots),
     }
 }

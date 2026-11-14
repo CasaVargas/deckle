@@ -279,7 +279,7 @@ pub fn shelf_on(
             space,
         )
     });
-    let sources = Sources::gather(&LibraryConfig::load(config), home().as_deref());
+    let sources = Sources::gather(&LibraryConfig::load(config).usable(), home().as_deref());
     let mut books: Vec<DeviceBookRow> = sort(shelved, &sources, |b| {
         deckle_readership::parse_yjf(b)
             .ok()

@@ -9,6 +9,9 @@ use serde_json::Value;
 
 /// The largest JSON message taken from a device.
 pub const MAX_JSON: usize = 16 * 1024 * 1024;
+/// The largest taken before the reader has finished its handshake (and given the password):
+/// a stranger on the network can't make Deckle set aside 16 MiB.
+pub const MAX_HANDSHAKE_JSON: usize = 64 * 1024;
 
 /// calibre's opcodes (`driver.py`'s `opcodes`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -105,6 +108,11 @@ fn bad(why: impl Into<String>) -> io::Error {
 
 /// Reads one message: its opcode (as sent, known or not) and its argument.
 pub fn read(r: &mut impl Read) -> io::Result<(u64, Value)> {
+    read_max(r, MAX_JSON).map(|(code, arg, _)| (code, arg))
+}
+
+/// [`read`], refusing a message longer than `max`; also says how long it was.
+pub fn read_max(r: &mut impl Read, max: usize) -> io::Result<(u64, Value, usize)> {
     let mut digits = Vec::new();
     let mut byte = [0u8; 1];
     loop {
@@ -119,7 +127,7 @@ pub fn read(r: &mut impl Read) -> io::Result<(u64, Value)> {
         .ok()
         .and_then(|d| d.parse().ok())
         .ok_or_else(|| bad("not a calibre message (no length)"))?;
-    if len == 0 || len > MAX_JSON {
+    if len == 0 || len > max {
         return Err(bad(format!("a message of {len} bytes")));
     }
     let mut json = vec![0u8; len];
@@ -132,7 +140,7 @@ pub fn read(r: &mut impl Read) -> io::Result<(u64, Value)> {
             let code = a[0]
                 .as_u64()
                 .ok_or_else(|| bad("the opcode isn't a number"))?;
-            Ok((code, arg))
+            Ok((code, arg, len))
         }
         _ => Err(bad("not [opcode, argument]")),
     }

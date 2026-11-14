@@ -1,0 +1,8 @@
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-win/x86_64-pc-windows-msvc/debug/build/windows-threading/79f63c8b46d5fede/out/windows_threading-79f63c8b46d5fede.d: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/bindings.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/pool.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/../readme.md
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-win/x86_64-pc-windows-msvc/debug/build/windows-threading/79f63c8b46d5fede/out/libwindows_threading-79f63c8b46d5fede.rmeta: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/bindings.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/pool.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/../readme.md
+
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/lib.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/bindings.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/pool.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/windows-threading-0.2.1/src/../readme.md:

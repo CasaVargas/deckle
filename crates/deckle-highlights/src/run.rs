@@ -60,6 +60,8 @@ pub fn export_clippings(
             "highlights: no folder set; run `deckle highlights export --to <dir>` once".into(),
         );
     };
+    // In the web UI's server, only a folder it may use, however the state came to name it.
+    deckle_core::confine::check_saved("highlights folder", &folder.to_string_lossy())?;
     let parsed = parse(clippings);
     let report = export(&group(parsed.entries), &folder, &mut state);
     if let Some(dir) = state_path.parent() {

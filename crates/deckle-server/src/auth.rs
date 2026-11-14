@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::header::{COOKIE, SET_COOKIE};
+use axum::http::header::{COOKIE, RETRY_AFTER, SET_COOKIE};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -24,10 +24,6 @@ use crate::invoke::error;
 
 const COOKIE_NAME: &str = "deckle_session";
 const SESSION_LIFE: Duration = Duration::from_secs(30 * 24 * 60 * 60);
-/// Every wrong password costs this long, so guessing online is slow.
-const FAILURE_DELAY: Duration = Duration::from_secs(1);
-/// Password checks in flight at once; more get `429`.
-pub(crate) const LOGIN_SLOTS: usize = 4;
 
 /// Session tokens and when each expires. Restarting the server logs everyone out.
 #[derive(Default)]
@@ -146,32 +142,34 @@ pub(crate) async fn login(
     if server.cfg.auth_none {
         return Json(json!({ "ok": true })).into_response();
     }
-    // A few checks at a time, each failure holding its slot for the delay: guessing in
-    // parallel gets LOGIN_SLOTS tries a second, not one per connection.
-    let Ok(permit) = server.login_slots.clone().try_acquire_owned() else {
-        return error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "too many login attempts; try again in a moment".into(),
-        );
+    // Counted per address, so someone guessing slows only themselves (deckle_core::limiter).
+    // The socket's address, or the client a listed proxy names; never a header otherwise.
+    let socket = peer.map_or(
+        std::net::Ipv4Addr::UNSPECIFIED.into(),
+        |Extension(ConnectInfo(a))| a.ip(),
+    );
+    let who = crate::peer::client(socket, &headers, &server.cfg.trusted_proxies);
+    let attempt = match server.limiter.begin(who) {
+        Ok(a) => a,
+        Err(refused) => {
+            let mut r = error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many failed logins from here; try again in a moment".into(),
+            );
+            r.headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from(refused.retry_after_secs()));
+            return r;
+        }
     };
     let expected = server.cfg.password.as_deref().unwrap_or_default();
     if expected.is_empty() || !password_matches(expected, &password) {
-        // The socket's address, never X-Forwarded-For, which the client writes.
-        match peer {
-            Some(Extension(ConnectInfo(addr))) => eprintln!("web UI: failed login from {addr}"),
-            None => eprintln!("web UI: failed login"),
+        let hold = attempt.failed();
+        if !hold.is_zero() {
+            tokio::time::sleep(hold).await;
         }
-        // A success answers at once, so a client could hang up when none comes and free the
-        // slot early; a task of its own keeps it taken for the whole delay. Waiting for that
-        // task, not a sleep of our own, frees the slot before the answer goes out.
-        let hold = tokio::spawn(async move {
-            tokio::time::sleep(FAILURE_DELAY).await;
-            drop(permit);
-        });
-        let _ = hold.await;
         return error(StatusCode::UNAUTHORIZED, "wrong password".into());
     }
-    drop(permit);
+    attempt.succeeded();
     match server.sessions.create() {
         Ok(token) => {
             let set = cookie(&headers, &token, SESSION_LIFE.as_secs());

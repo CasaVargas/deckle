@@ -179,7 +179,7 @@ fn load(path: &str) -> Result<&'static [u8], String> {
     if let Some(bytes) = cache.get(path) {
         return Ok(bytes);
     }
-    let full = crate::inbox::expand_home(path);
+    let full = crate::inbox::saved_path("masthead", path)?;
     let bytes = std::fs::read(&full).map_err(|e| format!("{}: {e}", full.display()))?;
     // TrueType outlines only: the PDF edition embeds them as they are.
     if !(bytes.starts_with(&[0, 1, 0, 0]) || bytes.starts_with(b"true")) {

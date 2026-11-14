@@ -58,10 +58,10 @@ pub const MAX_KFX_SYMBOLS: u32 = 1_000_000;
 /// KFX, KPF: Ion values (and annotations, and a unit for every 64 bytes of symbol text copied)
 /// decoded from one file. About 2.5 times the most seen in a real file: up to 466,499 in a real
 /// library, 1,971,808 in a 17 MB KFX generated from a long test book. A decoded value measured
-/// about 320 bytes in memory, so the tree can reach about 1.6 GB at the limit. This bounds what
-/// the decoder builds only: the fix-ups afterwards copy parts of the tree and are not counted
-/// (a `$608` structure cloned per `$146` reference, the whole fragment list cloned for writing,
-/// the text of each eid as a `Vec<char>` for page numbers); jloutsch/deckle#79 tracks those.
+/// about 320 bytes in memory, so the tree can reach about 1.6 GB at the limit. The `$608`
+/// structures the fix-up copies in, one per `$146` reference, count against a second budget of
+/// the same size (GHSA-vmh5-733r-v936). The whole fragment list cloned for writing is not
+/// counted; jloutsch/deckle#79 tracks it.
 pub const MAX_ION_VALUES: u64 = 5_000_000;
 /// ODT, FB2, RTF, TXT, MOBI and Markdown: the file (ODT: unpacked), read whole.
 pub const MAX_IMPORT_BYTES: u64 = 50 * MB;

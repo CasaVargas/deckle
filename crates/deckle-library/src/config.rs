@@ -65,6 +65,30 @@ impl LibraryConfig {
             .unwrap_or_default()
     }
 
+    /// The config as it may be used now. In the web UI's server, a folder outside the server's
+    /// own (saved before that rule, or edited by hand) is left out and said, naming the
+    /// setting; the file keeps it. Elsewhere the config is as saved.
+    pub fn usable(mut self) -> Self {
+        if deckle_core::confine::roots().is_none() {
+            return self;
+        }
+        let ok = |setting: &str, p: &PathBuf| match deckle_core::confine::check_saved(
+            setting,
+            &p.to_string_lossy(),
+        ) {
+            Ok(_) => true,
+            Err(e) => {
+                eprintln!("library: {e}");
+                false
+            }
+        };
+        self.root = self.root.filter(|p| ok("library root", p));
+        self.calibre = self.calibre.filter(|p| ok("calibre library", p));
+        self.watch = self.watch.filter(|p| ok("watched folder", p));
+        self.find_in.retain(|p| ok("originals folder", p));
+        self
+    }
+
     pub fn save(&self, path: &Path) -> Result<(), String> {
         let json = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
         crate::write_atomic(path, &json)

@@ -15,10 +15,13 @@ use std::process::Command;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// A `Command` for `program` that opens no console window on Windows.
+/// A `Command` for `program` that opens no console window on Windows. In the web UI's server
+/// it also carries the folders the server may use, so a CLI it starts keeps to them too
+/// ([`crate::confine`]).
 pub fn command(program: impl AsRef<OsStr>) -> Command {
     let mut cmd = Command::new(program);
     hide(&mut cmd);
+    crate::confine::child(&mut cmd);
     cmd
 }
 

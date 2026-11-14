@@ -61,7 +61,8 @@ pub struct Loaded {
 
 /// The household settings a paper file may not set, as `[sync]` or `[email] smtp_host`.
 fn household_key(text: &str) -> Result<Option<String>, String> {
-    let table: toml::Table = toml::from_str(text).map_err(|e| e.to_string())?;
+    let table: toml::Table =
+        toml::from_str(text).map_err(|e| crate::config::toml_error(text, &e))?;
     for key in ["sync", "reading", "reader_server", "wireless"] {
         if table.contains_key(key) {
             return Ok(Some(format!("[{key}]")));

@@ -1,0 +1,1 @@
+{"$message_type":"unused_extern","lint_level":"force-warn","unused_extern_names":["bitflags","block_padding","crypto_bigint","ecdsa","getrandom","ghash","inout","keccak","module_lattice","pbkdf2","polyval","salsa20","scrypt","sha3","typenum","universal_hash"]}

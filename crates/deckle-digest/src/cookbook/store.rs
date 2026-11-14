@@ -195,7 +195,13 @@ impl Store {
     pub fn config(&self) -> Result<BookConfig, String> {
         let path = self.config_path();
         match std::fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text).map_err(|e| format!("{}: {e}", path.display())),
+            Ok(text) => toml::from_str(&text).map_err(|e| {
+                format!(
+                    "{}: {}",
+                    path.display(),
+                    crate::config::toml_error(&text, &e)
+                )
+            }),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BookConfig::default()),
             Err(e) => Err(format!("{}: {e}", path.display())),
         }
@@ -212,9 +218,13 @@ impl Store {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
             Err(e) => return Err(format!("{}: {e}", path.display())),
         };
-        let mut doc: toml_edit::DocumentMut = text
-            .parse()
-            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut doc: toml_edit::DocumentMut = text.parse().map_err(|e| {
+            format!(
+                "{}: {}",
+                path.display(),
+                crate::config::toml_error(&text, &e)
+            )
+        })?;
         let mut new = toml_edit::ser::to_document(cfg).map_err(|e| e.to_string())?;
         spread_tables(new.as_table_mut());
         // An empty endpoint or model isn't serialized: clearing one must still remove it.

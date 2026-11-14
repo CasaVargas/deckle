@@ -80,6 +80,8 @@ pub struct Ctx {
     pub sync_lock: tokio::sync::Mutex<()>,
     /// Files lately served, with their SHA-256, so what `today` describes is what downloads.
     pub served: std::sync::Mutex<Vec<deckle::Key>>,
+    /// Wrong passwords, per address.
+    pub limiter: deckle_core::limiter::FailureLimiter,
 }
 
 impl Ctx {
@@ -89,6 +91,15 @@ impl Ctx {
             hooks,
             sync_lock: tokio::sync::Mutex::new(()),
             served: std::sync::Mutex::new(Vec::new()),
+            limiter: deckle_core::limiter::FailureLimiter::new("reader server"),
+        }
+    }
+
+    /// [`Ctx::new`] with the limiter on a test's clock.
+    pub fn with_clock(settings: Settings, hooks: Hooks, clock: deckle_core::limiter::Clock) -> Ctx {
+        Ctx {
+            limiter: deckle_core::limiter::FailureLimiter::with_clock("reader server", clock),
+            ..Ctx::new(settings, hooks)
         }
     }
 }
@@ -115,6 +126,10 @@ pub fn router(ctx: Arc<Ctx>) -> Router {
         .route("/syncs/progress", axum::routing::put(sync::update))
         .route("/syncs/progress/{document}", get(sync::get_progress))
         .route("/deckle/v1/today", get(deckle::today))
+        .layer(axum::middleware::from_fn_with_state(
+            ctx.clone(),
+            auth::limit_failures,
+        ))
         .with_state(ctx)
 }
 
@@ -138,7 +153,9 @@ pub fn serve_blocking(
             // The watcher's thread is synchronous: wait for its word off the runtime.
             let _ = tokio::task::spawn_blocking(move || stop.recv()).await;
         };
-        axum::serve(listener, router(ctx))
+        // The peer's address, which failed sign-ins are counted against.
+        let app = router(ctx).into_make_service_with_connect_info::<SocketAddr>();
+        axum::serve(listener, app)
             .with_graceful_shutdown(stopped)
             .await
     })

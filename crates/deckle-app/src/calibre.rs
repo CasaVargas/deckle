@@ -56,6 +56,19 @@ fn update(f: impl FnOnce(&mut Writeback) -> Result<(), String>) -> Result<Status
     Ok(writeback::status(&p))
 }
 
+/// The browser's message when it tries to choose calibredb.
+pub const CALIBREDB_NOT_IN_WEB: &str = "the web app can't change which calibredb the server runs: \
+     set \"calibredb\" in calibre-writeback.json on the server";
+
+/// [`calibre_writeback_set`] for the web app: the server runs calibredb, so a browser may not
+/// say which program that is.
+pub fn calibre_writeback_set_web(patch: WritebackPatch) -> Result<Status, String> {
+    if patch.calibredb.is_some() {
+        return Err(CALIBREDB_NOT_IN_WEB.into());
+    }
+    calibre_writeback_set(patch)
+}
+
 pub fn calibre_writeback_set(patch: WritebackPatch) -> Result<Status, String> {
     update(|wb| {
         if let Some(c) = patch.columns {

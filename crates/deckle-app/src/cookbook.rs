@@ -740,7 +740,9 @@ fn illustrate_run(
 /// Fetches and reads a recipe from a web address, a link file's path or a saved page's path,
 /// writing nothing.
 pub fn cookbook_preview(target: String) -> Result<PreviewDto, String> {
-    preview_dto(&store(), &deckle_digest::Http, target.trim())
+    // An address typed into the app may be on this network; links inside the page may not.
+    let target = target.trim();
+    preview_dto(&store(), &deckle_digest::Http::typed([target]), target)
 }
 
 /// Adds (or updates) the recipe at `target`. `chapter` is a chapter id, else it is filed by its
@@ -754,7 +756,7 @@ pub fn cookbook_add(
 ) -> Result<SavedDto, String> {
     add_dto(
         &store(),
-        &deckle_digest::Http,
+        &deckle_digest::Http::typed([target.trim()]),
         target.trim(),
         chapter.as_deref(),
         note.as_deref(),

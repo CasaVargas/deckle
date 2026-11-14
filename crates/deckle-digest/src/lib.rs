@@ -42,6 +42,7 @@ pub mod schedule;
 pub mod seasons;
 pub mod secret;
 pub mod session;
+pub mod shallow;
 pub mod shelf;
 pub mod showers;
 pub mod sources;
@@ -57,7 +58,7 @@ use serde::Serialize;
 pub use chrono;
 pub use chrono_tz;
 pub use config::{Config, SectionKind};
-pub use fetch::{Http, Net};
+pub use fetch::{Http, HttpTyped, Net, Origin};
 pub use publisher::Access;
 pub use session::SessionNet;
 pub use url;
@@ -606,7 +607,9 @@ pub fn gather_with_editor(
                         .iter()
                         .filter(|e| e.format == config::ExportFormat::Bundle)
                     {
-                        let root = inbox::expand_home(e.dir.trim());
+                        let Ok(root) = inbox::saved_path("[[exports]] dir", &e.dir) else {
+                            continue;
+                        };
                         found.extend(returns::read_dir(&root, yesterday));
                     }
                     store.mark_search(yesterday, &found);

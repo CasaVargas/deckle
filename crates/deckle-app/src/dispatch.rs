@@ -29,9 +29,130 @@ pub struct Ctx {
     pub exe: PathBuf,
     /// Serving the web UI: no file manager, keychain, updater or system scheduler.
     pub web: bool,
+    /// In the web UI, the folders a path from the browser must lie in (`/config`, `/data`,
+    /// `DECKLE_WEB_ROOTS`); `None` on the desktop, where the owner picked each path.
+    pub roots: Option<Vec<PathBuf>>,
 }
 
 const NOT_IN_WEB: &str = "not available in the web app";
+
+/// A path from the frontend. On the desktop it is used as given (the owner chose it in a file
+/// dialog); in the web UI it must lie inside [`Ctx::roots`]. It can only be read through
+/// [`UiPath::read`] or [`UiPath::write`], so a command can't forget the check.
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub struct UiPath(String);
+
+/// A path, or an `http(s)://` address (a saved page, or a story to fetch).
+#[derive(Deserialize)]
+#[serde(transparent)]
+pub struct UiPathOrUrl(String);
+
+impl UiPath {
+    /// The path, for a command that reads it.
+    pub fn read(self, ctx: &Ctx) -> Result<String, String> {
+        ctx.path(&self.0)
+    }
+
+    /// The path, for a command that writes there.
+    pub fn write(self, ctx: &Ctx) -> Result<String, String> {
+        ctx.write_path(&self.0)
+    }
+}
+
+impl UiPathOrUrl {
+    pub fn read(self, ctx: &Ctx) -> Result<String, String> {
+        // As `web_book::source` tells them apart: anything else is a file.
+        if self.0.starts_with("http://") || self.0.starts_with("https://") {
+            Ok(self.0)
+        } else {
+            ctx.path(&self.0)
+        }
+    }
+}
+
+fn read_all<T>(
+    ctx: &Ctx,
+    v: Vec<T>,
+    f: fn(T, &Ctx) -> Result<String, String>,
+) -> Result<Vec<String>, String> {
+    v.into_iter().map(|p| f(p, ctx)).collect()
+}
+
+impl Ctx {
+    /// `raw` as a command may use it: as given on the desktop; in the web UI, resolved and
+    /// inside the roots.
+    pub fn path(&self, raw: &str) -> Result<String, String> {
+        match &self.roots {
+            None => Ok(raw.to_owned()),
+            Some(roots) => {
+                let roots: Vec<PathBuf> =
+                    roots.iter().filter_map(|r| r.canonicalize().ok()).collect();
+                deckle_core::confine::confine_to(&roots, raw)
+                    .map(|p| p.to_string_lossy().into_owned())
+            }
+        }
+    }
+
+    /// [`Ctx::path`] for somewhere a command writes. In the web UI that is never Deckle's own
+    /// settings folder, whose files say which programs the server runs.
+    pub fn write_path(&self, raw: &str) -> Result<String, String> {
+        let p = self.path(raw)?;
+        if self.roots.is_some()
+            && let Some(dir) = self
+                .state
+                .settings_file
+                .parent()
+                .and_then(|d| d.canonicalize().ok())
+            && std::path::Path::new(&p).starts_with(&dir)
+        {
+            return Err(format!("{raw}: inside Deckle's own settings folder"));
+        }
+        Ok(p)
+    }
+
+    /// The target with a folder's path checked: a send writes there.
+    fn target(&self, t: RunTarget) -> Result<RunTarget, String> {
+        match t {
+            RunTarget::Folder { path } => Ok(RunTarget::Folder {
+                path: self.write_path(&path)?,
+            }),
+            other => Ok(other),
+        }
+    }
+
+    /// Each book's file, checked.
+    fn books(&self, books: Vec<RunRequest>) -> Result<Vec<RunRequest>, String> {
+        books
+            .into_iter()
+            .map(|mut b| {
+                b.path = UiPathOrUrl(b.path).read(self)?;
+                Ok(b)
+            })
+            .collect()
+    }
+
+    /// A saved path being set again: checked when it changed, left to its use when the owner
+    /// is only saving it back as it was (it may predate the check, or be hand-edited).
+    fn saved(
+        &self,
+        new: Option<String>,
+        old: Option<&str>,
+        write: bool,
+    ) -> Result<Option<String>, String> {
+        match new {
+            Some(n) if self.roots.is_some() && !n.trim().is_empty() && Some(n.as_str()) != old => {
+                if write {
+                    self.write_path(&n)
+                } else {
+                    self.path(&n)
+                }
+                .map(|_| Some(n))
+            }
+            other => Ok(other),
+        }
+    }
+}
 
 /// Runs `command` with `args` (an object of camelCase keys; `null` for none). Blocks.
 pub fn dispatch(ctx: &Ctx, command: &str, args: Value) -> Result<Value, String> {
@@ -73,10 +194,10 @@ macro_rules! commands {
 
 commands! { ctx;
     app_version {} => Ok(commands::app_version()),
-    bind_books { paths: Vec<String>, title: String, author: Option<String> } =>
-        commands::bind_books(paths, title, author),
-    book_preflight { path: String, cover: Option<CoverChoice> } =>
-        books::book_preflight(&ctx.state, path, cover),
+    bind_books { paths: Vec<UiPathOrUrl>, title: String, author: Option<String> } =>
+        commands::bind_books(read_all(ctx, paths, UiPathOrUrl::read)?, title, author),
+    book_preflight { path: UiPath, cover: Option<CoverChoice> } =>
+        books::book_preflight(&ctx.state, path.read(ctx)?, cover),
     bookmarklet {} => daily::bookmarklet(),
     bookmarklet_page_open {} => if ctx.web {
         Err(NOT_IN_WEB.to_owned())
@@ -86,13 +207,16 @@ commands! { ctx;
     calibre_create_columns {} => crate::calibre::calibre_create_columns(),
     calibre_set_password { password: String } => crate::calibre::calibre_set_password(password),
     calibre_writeback_confirm { keys: Vec<String> } => crate::calibre::calibre_writeback_confirm(keys),
-    calibre_writeback_set { patch: crate::calibre::WritebackPatch } =>
-        crate::calibre::calibre_writeback_set(patch),
+    calibre_writeback_set { patch: crate::calibre::WritebackPatch } => if ctx.web {
+        crate::calibre::calibre_writeback_set_web(patch)
+    } else {
+        crate::calibre::calibre_writeback_set(patch)
+    },
     calibre_writeback_status {} => Ok(crate::calibre::calibre_writeback_status()),
     calibre_writeback_write {} => crate::calibre::calibre_writeback_write(),
     capabilities {} => Ok(capabilities::capabilities(ctx.web, &ctx.state)),
-    cookbook_add { target: String, chapter: Option<String>, note: Option<String>, picture: Option<Picture> } =>
-        cookbook::cookbook_add(target, chapter, note, picture),
+    cookbook_add { target: UiPathOrUrl, chapter: Option<String>, note: Option<String>, picture: Option<Picture> } =>
+        cookbook::cookbook_add(target.read(ctx)?, chapter, note, picture),
     cookbook_book {} => cookbook::cookbook_book(),
     cookbook_delivery {} => Ok(cookbook::cookbook_delivery()),
     cookbook_illustrate { id: Option<String>, all: bool, redraw: bool } =>
@@ -101,7 +225,7 @@ commands! { ctx;
         cookbook::cookbook_illustrate_stop();
         Ok(())
     },
-    cookbook_preview { target: String } => cookbook::cookbook_preview(target),
+    cookbook_preview { target: UiPathOrUrl } => cookbook::cookbook_preview(target.read(ctx)?),
     cookbook_preview_book {} => cookbook::cookbook_preview_book(),
     cookbook_remove { id: String } => cookbook::cookbook_remove(id),
     cookbook_save_config { cfg: ConfigDto } => cookbook::cookbook_save_config(cfg),
@@ -116,20 +240,27 @@ commands! { ctx;
     daily_next_refresh { paper: Option<String> } => next::daily_next_refresh(paper),
     daily_run { send: bool, paper: Option<String> } =>
         daily::daily_run(ctx.events.clone(), ctx.exe.clone(), send, paper),
-    daily_save { config: Config, paper: Option<String> } => daily::daily_save(config, paper),
+    daily_save { config: Config, paper: Option<String> } => {
+        crate::confine_saved::daily(ctx, &config, paper.as_deref())?;
+        daily::daily_save(config, paper)
+    },
     daily_setup {} => daily::daily_setup(),
     daily_state { paper: Option<String> } => Ok(daily::daily_state(paper)),
-    device_backup { target: RunTarget, into: Option<String> } => kindle::device_backup(target, into),
-    device_books { target: RunTarget } => kindle::device_books(target),
+    device_backup { target: RunTarget, into: Option<UiPath> } =>
+        kindle::device_backup(ctx.target(target)?, into.map(|p| p.write(ctx)).transpose()?),
+    device_books { target: RunTarget } => kindle::device_books(ctx.target(target)?),
     device_edit_source { target: RunTarget, file: String } =>
-        upgrades::device_edit_source(target, file),
-    device_put_back { target: RunTarget, file: String } => upgrades::device_put_back(target, file),
-    device_rebuild { target: RunTarget, files: Vec<String> } => upgrades::device_rebuild(target, files),
-    device_remove { target: RunTarget, file: String } => kindle::device_remove(target, file),
+        upgrades::device_edit_source(ctx.target(target)?, file),
+    device_put_back { target: RunTarget, file: String } =>
+        upgrades::device_put_back(ctx.target(target)?, file),
+    device_rebuild { target: RunTarget, files: Vec<String> } =>
+        upgrades::device_rebuild(ctx.target(target)?, files),
+    device_remove { target: RunTarget, file: String } => kindle::device_remove(ctx.target(target)?, file),
     device_remove_many { target: RunTarget, files: Vec<String> } =>
-        kindle::device_remove_many(target, files),
-    device_restore { target: RunTarget, dir: String } => kindle::device_restore(target, dir),
-    device_upgrades { target: RunTarget } => upgrades::device_upgrades(target),
+        kindle::device_remove_many(ctx.target(target)?, files),
+    device_restore { target: RunTarget, dir: UiPath } =>
+        kindle::device_restore(ctx.target(target)?, dir.read(ctx)?),
+    device_upgrades { target: RunTarget } => upgrades::device_upgrades(ctx.target(target)?),
     edition_preview { paper: Option<String> } => Ok(daily::edition_preview(paper)),
     email_set_password { password: String } => if ctx.web {
         let _ = password;
@@ -145,49 +276,67 @@ commands! { ctx;
     } else {
         commands::get_settings(&ctx.state)
     }),
-    highlights_set { folder: Option<String>, clippings: bool } => kindle::highlights_set(folder, clippings),
+    highlights_set { folder: Option<String>, clippings: bool } => {
+        let old = kindle::highlights_status().folder;
+        kindle::highlights_set(ctx.saved(folder, old.as_deref(), true)?, clippings)
+    },
     highlights_status {} => Ok(kindle::highlights_status()),
-    highlights_write { target: RunTarget } => kindle::highlights_write(target),
-    import_articles { targets: Vec<String> } => Ok(commands::import_articles(targets)),
-    inspect_books { paths: Vec<String> } => Ok(commands::inspect_books(paths)),
+    highlights_write { target: RunTarget } => kindle::highlights_write(ctx.target(target)?),
+    import_articles { targets: Vec<UiPathOrUrl> } =>
+        Ok(commands::import_articles(read_all(ctx, targets, UiPathOrUrl::read)?)),
+    inspect_books { paths: Vec<UiPath> } => Ok(commands::inspect_books(read_all(ctx, paths, UiPath::read)?)),
     interests_accept { key: String, paper: Option<String> } => readership::interests_accept(key, paper),
     interests_dismiss { key: String, paper: Option<String> } => readership::interests_dismiss(key, paper),
-    koreader_install { folder: Option<String>, source: String } =>
-        crate::koreader::koreader_install(folder, source),
-    koreader_preview { folder: Option<String>, source: String } =>
-        crate::koreader::koreader_preview(folder, source),
-    koreader_remove { folder: Option<String>, name: String } =>
-        crate::koreader::koreader_remove(folder, name),
-    koreader_rollback { folder: Option<String>, name: String } =>
-        crate::koreader::koreader_rollback(folder, name),
-    koreader_set_enabled { folder: Option<String>, name: String, on: bool } =>
-        crate::koreader::koreader_set_enabled(folder, name, on),
-    koreader_set_patches { folder: Option<String>, on: bool } =>
-        crate::koreader::koreader_set_patches(folder, on),
-    koreader_status { folder: Option<String> } => Ok(crate::koreader::koreader_status(folder)),
+    koreader_install { folder: Option<UiPath>, source: String } =>
+        crate::koreader::koreader_install(folder.map(|f| f.write(ctx)).transpose()?, plugin_source(ctx, source)?),
+    koreader_preview { folder: Option<UiPath>, source: String } =>
+        crate::koreader::koreader_preview(folder.map(|f| f.write(ctx)).transpose()?, plugin_source(ctx, source)?),
+    koreader_remove { folder: Option<UiPath>, name: String } =>
+        crate::koreader::koreader_remove(folder.map(|f| f.write(ctx)).transpose()?, name),
+    koreader_rollback { folder: Option<UiPath>, name: String } =>
+        crate::koreader::koreader_rollback(folder.map(|f| f.write(ctx)).transpose()?, name),
+    koreader_set_enabled { folder: Option<UiPath>, name: String, on: bool } =>
+        crate::koreader::koreader_set_enabled(folder.map(|f| f.write(ctx)).transpose()?, name, on),
+    koreader_set_patches { folder: Option<UiPath>, on: bool } =>
+        crate::koreader::koreader_set_patches(folder.map(|f| f.write(ctx)).transpose()?, on),
+    koreader_status { folder: Option<UiPath> } => Ok(crate::koreader::koreader_status(folder.map(|f| f.write(ctx)).transpose()?)),
     koreader_store_list {} => Ok(crate::koreader::koreader_store_list()),
     koreader_store_readme { repo: String } => crate::koreader::koreader_store_readme(repo),
     koreader_store_search { text: String, updated: bool } =>
         crate::koreader::koreader_store_search(text, updated),
-    koreader_store_updates { folder: Option<String> } =>
-        crate::koreader::koreader_store_updates(folder),
-    koreader_update { folder: Option<String>, name: String } =>
-        crate::koreader::koreader_update(folder, name),
+    koreader_store_updates { folder: Option<UiPath> } =>
+        crate::koreader::koreader_store_updates(folder.map(|f| f.write(ctx)).transpose()?),
+    koreader_update { folder: Option<UiPath>, name: String } =>
+        crate::koreader::koreader_update(folder.map(|f| f.write(ctx)).transpose()?, name),
     library_catalog { device: Option<String> } => Ok(books::library_catalog(device)),
-    library_covers { paths: Vec<String> } => Ok(books::library_covers(paths)),
-    library_fix_details { dir: String, details: Details } => books::library_fix_details(dir, details),
-    library_read_details { dir: String } => books::library_read_details(dir),
+    library_covers { paths: Vec<UiPath> } => Ok(books::library_covers(read_all(ctx, paths, UiPath::read)?)),
+    library_fix_details { dir: UiPath, details: Details } =>
+        books::library_fix_details(dir.write(ctx)?, details),
+    library_read_details { dir: UiPath } => books::library_read_details(dir.read(ctx)?),
     library_search { query: String } => Ok(books::library_search(query)),
     library_sent_kindles {} => Ok(books::library_sent_kindles()),
-    library_set { root: Option<String>, auto_add: bool } => kindle::library_set(root, auto_add),
+    library_set { root: Option<String>, auto_add: bool } => {
+        let old = kindle::library_status().root;
+        kindle::library_set(ctx.saved(root, old.as_deref(), true)?, auto_add)
+    },
     library_sources {} => Ok(upgrades::library_sources()),
-    library_sources_set { find_in_calibre: bool, calibre: Option<String>, folders: Vec<String> } =>
-        upgrades::library_sources_set(find_in_calibre, calibre, folders),
+    library_sources_set { find_in_calibre: bool, calibre: Option<String>, folders: Vec<String> } => {
+        let old = upgrades::library_sources();
+        let calibre = ctx.saved(calibre, old.calibre.as_deref(), false)?;
+        for f in &folders {
+            let was = old.folders.iter().any(|o| o == f);
+            ctx.saved(Some(f.clone()), was.then_some(f.as_str()), false)?;
+        }
+        upgrades::library_sources_set(find_in_calibre, calibre, folders)
+    },
     library_status {} => Ok(kindle::library_status()),
-    library_suggest_details { dir: String, asked: bool } =>
-        books::library_suggest_details(&ctx.state, dir, asked),
+    library_suggest_details { dir: UiPath, asked: bool } =>
+        books::library_suggest_details(&ctx.state, dir.read(ctx)?, asked),
     library_watch_scan {} => books::library_watch_scan(),
-    library_watch_set { dir: Option<String> } => books::library_watch_set(dir),
+    library_watch_set { dir: Option<String> } => {
+        let old = upgrades::library_sources().watch;
+        books::library_watch_set(ctx.saved(dir, old.as_deref(), false)?)
+    },
     list_devices {} => Ok(commands::list_devices(&ctx.state)),
     llm_check { endpoint: String, model: String } => Ok(crate::llm::llm_check(endpoint, model)),
     llm_pull { endpoint: String, model: String } =>
@@ -212,7 +361,7 @@ commands! { ctx;
     paper_create { title: String, reader: String } => daily::paper_create(title, reader),
     papers_list {} => daily::papers_list(),
     plan_books { books: Vec<RunRequest>, target: RunTarget } =>
-        Ok(commands::plan_books(&ctx.state, books, target)),
+        Ok(commands::plan_books(&ctx.state, ctx.books(books)?, ctx.target(target)?)),
     press_setup { paper: Option<String>, export_index: usize, enabled: bool, expected: Option<ExpectedExport> } =>
         press::press_setup(paper, export_index, enabled, expected, &ctx.exe),
     press_stop { on: bool, paper: Option<String> } => next::press_stop(on, paper),
@@ -221,11 +370,11 @@ commands! { ctx;
     puzzles_kinds {} => Ok(crate::puzzles::puzzles_kinds()),
     puzzles_list {} => Ok(crate::puzzles::puzzles_list()),
     puzzles_make { request: crate::puzzles::BookRequest } =>
-        crate::puzzles::puzzles_make(ctx.events.clone(), request),
+        crate::puzzles::puzzles_make(ctx.events.clone(), puzzle_request(ctx, request)?),
     puzzles_preview { request: crate::puzzles::BookRequest } =>
-        crate::puzzles::puzzles_preview(request),
-    puzzles_send { path: String, target: RunTarget, replace: bool, as_bundle: Option<bool> } =>
-        crate::puzzles::puzzles_send(path, target, replace, as_bundle.unwrap_or(false)),
+        crate::puzzles::puzzles_preview(puzzle_request(ctx, request)?),
+    puzzles_send { path: UiPath, target: RunTarget, replace: bool, as_bundle: Option<bool> } =>
+        crate::puzzles::puzzles_send(path.read(ctx)?, ctx.target(target)?, replace, as_bundle.unwrap_or(false)),
     puzzles_sources {} => Ok(crate::puzzles::puzzles_sources()),
     puzzles_sunday_get { paper: Option<String> } => crate::puzzles::puzzles_sunday_get(paper),
     puzzles_sunday_set { paper: Option<String>, config: deckle_digest::config::PuzzlesConfig } =>
@@ -233,7 +382,8 @@ commands! { ctx;
     reader_server_set_password { password: String } =>
         crate::reader_server::reader_server_set_password(password),
     reader_server_status {} => Ok(crate::reader_server::reader_server_status()),
-    readers_backup { key: String, into: Option<String> } => crate::readers::readers_backup(key, into),
+    readers_backup { key: String, into: Option<UiPath> } =>
+        crate::readers::readers_backup(key, into.map(|p| p.write(ctx)).transpose()?),
     readers_edit { key: String, id: String, edit: crate::commands::BookEdit } =>
         crate::readers::readers_edit(key, id, edit),
     readers_last_backup { key: String } => Ok(crate::readers::readers_last_backup(key)),
@@ -255,7 +405,7 @@ commands! { ctx;
         commands::reveal(path)
     },
     run_books { books: Vec<RunRequest>, target: RunTarget } =>
-        commands::run_books(ctx.events.clone(), &ctx.state, books, target),
+        commands::run_books(ctx.events.clone(), &ctx.state, ctx.books(books)?, ctx.target(target)?),
     schedule_get {} => if ctx.web {
         deckle_digest::schedule::daemon_status()
     } else {
@@ -308,14 +458,42 @@ commands! { ctx;
         commands::take_preloaded_target(&ctx.state)
     }),
     wireless_cancel { id: String } => crate::wireless::wireless_cancel(id),
-    wireless_queue { reader: String, paths: Vec<String> } =>
-        crate::wireless::wireless_queue(reader, paths),
+    wireless_queue { reader: String, paths: Vec<UiPath> } =>
+        crate::wireless::wireless_queue(reader, read_all(ctx, paths, UiPath::read)?),
     wireless_remove { reader: String, lpaths: Vec<String> } =>
         crate::wireless::wireless_remove(reader, lpaths),
     wireless_set_password { password: Option<String> } =>
         crate::wireless::wireless_set_password(password),
     wireless_status {} => Ok(crate::wireless::wireless_status()),
-    words_anki { target: RunTarget, to: String } => kindle::words_anki(target, to),
+    words_anki { target: RunTarget, to: UiPath } => kindle::words_anki(ctx.target(target)?, to.write(ctx)?),
+}
+
+/// A KOReader plugin's source: a name, a GitHub repository, or a zip or folder on disk, which
+/// is checked.
+fn plugin_source(ctx: &Ctx, source: String) -> Result<String, String> {
+    let t = source.trim();
+    if ctx.roots.is_none() || t == deckle_core::koreader_plugins::DECKLE {
+        return Ok(source);
+    }
+    if t.starts_with('/') || t.starts_with('~') || std::path::Path::new(t).is_absolute() {
+        return ctx.path(t);
+    }
+    if std::path::Path::new(t).exists() {
+        // Relative to the server's own folder: never meant from a browser.
+        return Err(format!("{t}: {}", deckle_core::confine::OUTSIDE));
+    }
+    Ok(source)
+}
+
+/// A puzzle book's picture file, checked.
+fn puzzle_request(
+    ctx: &Ctx,
+    mut r: crate::puzzles::BookRequest,
+) -> Result<crate::puzzles::BookRequest, String> {
+    if let Some(p) = r.picture.take().filter(|p| !p.trim().is_empty()) {
+        r.picture = Some(UiPath(p).read(ctx)?);
+    }
+    Ok(r)
 }
 
 /// Saves the paper's `[schedule] at` (its days kept) for the daemon; nothing is installed.

@@ -75,6 +75,17 @@ pub fn is_book(path: &Path) -> bool {
 }
 
 /// `~/…` → the home folder.
+/// A folder or file a config names, `~` expanded. In the web UI's server it must lie in the
+/// server's folders (`deckle_core::confine`); the error names `setting`, which the owner then
+/// changes in the file.
+pub fn saved_path(setting: &str, p: &str) -> Result<PathBuf, String> {
+    if deckle_core::confine::roots().is_some() {
+        deckle_core::confine::check_saved(setting, p.trim())
+    } else {
+        Ok(expand_home(p.trim()))
+    }
+}
+
 pub fn expand_home(p: &str) -> PathBuf {
     match (p.strip_prefix("~/"), std::env::var_os("HOME")) {
         (Some(rest), Some(home)) => PathBuf::from(home).join(rest),
