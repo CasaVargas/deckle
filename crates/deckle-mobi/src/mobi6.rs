@@ -354,14 +354,21 @@ fn split_large(html: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = html;
     while rest.len() > SPLIT_BYTES {
-        let window = &rest[SPLIT_BYTES.min(rest.len())..];
+        // Start the search on a character boundary at or before SPLIT_BYTES. The lowercase copy
+        // changes only ASCII bytes, so its offsets are the window's, and a cut just after an
+        // ASCII tag is on a boundary too.
+        let mut from = SPLIT_BYTES;
+        while !rest.is_char_boundary(from) {
+            from -= 1;
+        }
+        let window = &rest[from..];
         let lower = window.to_ascii_lowercase();
         let cut = ["</p>", "</div>"]
             .iter()
             .filter_map(|t| lower.find(t).map(|i| i + t.len()))
             .min();
         let Some(cut) = cut else { break };
-        let at = SPLIT_BYTES + cut;
+        let at = from + cut;
         out.push(rest[..at].to_owned());
         rest = &rest[at..];
     }
@@ -680,6 +687,14 @@ mod tests {
         let parts = split_large(&p);
         assert!(parts.len() >= 2);
         assert!(parts.iter().all(|s| s.ends_with("</p>")));
+        assert_eq!(parts.concat(), p);
+    }
+
+    #[test]
+    fn large_pieces_split_on_a_character_boundary() {
+        let p = format!("a{}", format!("<p>{}</p>", "Ж".repeat(1000)).repeat(150));
+        let parts = split_large(&p);
+        assert!(parts.len() >= 2);
         assert_eq!(parts.concat(), p);
     }
 }

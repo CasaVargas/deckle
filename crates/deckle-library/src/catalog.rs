@@ -3,6 +3,7 @@
 //! own library, calibre and your folders, one entry a book, with its series and the Kindles it
 //! has been sent to.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -45,15 +46,39 @@ fn norm(s: &str) -> String {
         .collect()
 }
 
-/// What makes two entries the same book: the ISBN, else title and first author.
-fn same(a: &Entry, b: &Entry) -> bool {
-    if let (Some(x), Some(y)) = (&a.isbn, &b.isbn)
-        && norm(x) == norm(y)
-    {
-        return true;
+/// The entries kept so far, by what makes two the same book.
+#[derive(Default)]
+struct Seen {
+    paths: HashSet<PathBuf>,
+    isbns: HashSet<String>,
+    names: HashSet<(String, String)>,
+}
+
+impl Seen {
+    fn add(&mut self, e: &Entry) {
+        self.paths.insert(e.path.clone());
+        if let Some(i) = &e.isbn {
+            self.isbns.insert(norm(i));
+        }
+        if !e.title.is_empty() {
+            self.names.insert(name_key(e));
+        }
     }
-    let first = |e: &Entry| e.authors.first().map(|s| norm(s)).unwrap_or_default();
-    !a.title.is_empty() && norm(&a.title) == norm(&b.title) && first(a) == first(b)
+
+    fn has(&self, e: &Entry) -> bool {
+        self.paths.contains(&e.path)
+            || e.isbn
+                .as_ref()
+                .is_some_and(|i| self.isbns.contains(&norm(i)))
+            || self.names.contains(&name_key(e))
+    }
+}
+
+/// Title and first author, compared without case or punctuation. Two entries are the same book
+/// when their ISBNs match, else when these do (and the kept one has a title).
+fn name_key(e: &Entry) -> (String, String) {
+    let first = e.authors.first().map(|s| norm(s)).unwrap_or_default();
+    (norm(&e.title), first)
 }
 
 /// Deckle's library first, then calibre's and your folders' books that aren't in it. `upgrades`
@@ -84,6 +109,10 @@ pub fn catalog(library: Option<&Library>, sources: &Sources, upgrades: &Upgrades
             }
         })
         .collect();
+    // Each kept entry's path, ISBN and name, so each source is looked up rather than compared
+    // with every entry so far (#85: quadratic in the books).
+    let mut seen = Seen::default();
+    out.iter().for_each(|e| seen.add(e));
     for s in &sources.list {
         let entry = Entry {
             path: s.path.clone(),
@@ -99,15 +128,20 @@ pub fn catalog(library: Option<&Library>, sources: &Sources, upgrades: &Upgrades
             sent_to: Vec::new(),
             added: None,
         };
-        if !out.iter().any(|e| e.path == entry.path || same(e, &entry)) {
+        if !seen.has(&entry) {
+            seen.add(&entry);
             out.push(entry);
         }
     }
+    let mut at: HashMap<PathBuf, usize> = HashMap::new();
+    for (i, e) in out.iter().enumerate() {
+        at.entry(e.path.clone()).or_insert(i);
+    }
     for u in &upgrades.upgrades {
-        if let Some(e) = out.iter_mut().find(|e| e.path == u.source)
-            && !e.sent_to.contains(&u.device)
+        if let Some(&i) = at.get(&u.source)
+            && !out[i].sent_to.contains(&u.device)
         {
-            e.sent_to.push(u.device.clone());
+            out[i].sent_to.push(u.device.clone());
         }
     }
     out
@@ -197,5 +231,22 @@ mod tests {
         assert!(all[0].library_dir.is_some());
         assert_eq!(all[2].sent_to, ["mtp:scribe"]);
         assert_eq!(all[1].series.as_ref().unwrap().index, Some(2.0));
+    }
+
+    #[test]
+    fn a_large_calibre_library_is_catalogued_quickly() {
+        // #85: each book was compared with every entry so far, rebuilding its keys each time.
+        let list: Vec<Source> = (0..20_000)
+            .map(|i| source(&format!("Book {i}"), Origin::Calibre, None))
+            .chain([source("Book 7", Origin::Folder, None)])
+            .collect();
+        let sources = Sources {
+            list,
+            warnings: Vec::new(),
+        };
+        let started = std::time::Instant::now();
+        let all = catalog(None, &sources, &Upgrades::default());
+        assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
+        assert_eq!(all.len(), 20_000, "the folder's Book 7 is calibre's");
     }
 }

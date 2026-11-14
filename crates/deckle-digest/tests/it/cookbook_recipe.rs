@@ -322,3 +322,35 @@ fn total_overflow_is_dropped_not_panicked() {
 fn iso_durations_that_overflow_are_none() {
     assert_eq!(iso_minutes("P1000000000000000W10000000000000000D"), None);
 }
+
+#[test]
+fn a_saved_page_names_a_picture_only_in_its_own_folder() {
+    // #65: a saved page could name any image on the disk as the recipe's picture.
+    let page = |image: &str| {
+        format!(
+            r#"<html><head><script type="application/ld+json">{{"@type":"Recipe","name":"Soup","image":"{image}","recipeIngredient":["water"],"recipeInstructions":["Boil."]}}</script></head><body></body></html>"#
+        )
+    };
+    // Real paths of this system, so `file:` addresses mean the same on Windows.
+    let tmp = tempfile::tempdir().unwrap();
+    let page_path = tmp.path().join("Inbox").join("Recipes").join("soup.html");
+    let base = url::Url::from_file_path(&page_path).unwrap().to_string();
+    let beside = parse_recipe(&page("soup_files/pic.jpg"), &base).unwrap();
+    let pic = tmp
+        .path()
+        .join("Inbox")
+        .join("Recipes")
+        .join("soup_files")
+        .join("pic.jpg");
+    assert_eq!(
+        beside.image_url,
+        Some(url::Url::from_file_path(&pic).unwrap().to_string())
+    );
+    let elsewhere = url::Url::from_file_path(tmp.path().join("Pictures").join("me.jpg"))
+        .unwrap()
+        .to_string();
+    for outside in ["../../Pictures/me.jpg", elsewhere.as_str()] {
+        let r = parse_recipe(&page(outside), &base).unwrap();
+        assert_eq!(r.image_url, None, "{outside}");
+    }
+}

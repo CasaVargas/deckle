@@ -226,3 +226,34 @@ fn a_backup_never_lands_on_an_existing_folder() {
     kobo(&src);
     assert!(backup(&src, tmp.path(), "Kobo", "now").is_err());
 }
+
+#[test]
+fn a_modified_time_out_of_range_fails_that_sidecar_without_a_panic() {
+    // #46: `UNIX_EPOCH + Duration` panicked on a manifest time past what the system can hold.
+    let tmp = tempfile::tempdir().unwrap();
+    let (src, dst) = (tmp.path().join("KOBOeReader"), tmp.path().join("PB632"));
+    kobo(&src);
+    let dir = tmp.path().join("backups/Kobo/2026-10-30 101500");
+    backup(&src, &dir, "Kobo", "2026-10-30T10:15:00Z").unwrap();
+    let manifest = dir.join("manifest.json");
+    let mut m: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest).unwrap()).unwrap();
+    for f in m["files"].as_array_mut().unwrap() {
+        f["modified"] = serde_json::json!(18446744073709551000u64);
+    }
+    std::fs::write(&manifest, serde_json::to_vec(&m).unwrap()).unwrap();
+    std::fs::create_dir_all(dst.join("applications/koreader")).unwrap();
+    std::fs::create_dir_all(dst.join("Books")).unwrap();
+    std::fs::copy(src.join("Books/Walden.epub"), dst.join("Books/Walden.epub")).unwrap();
+    let r = restore(&dir, &dst, Options::default()).unwrap();
+    let w = r
+        .sidecars
+        .iter()
+        .find(|i| i.book == "Books/Walden.epub")
+        .unwrap();
+    assert_eq!(w.outcome, Outcome::Failed);
+    assert!(
+        w.error.as_deref().unwrap().contains("out of range"),
+        "{w:?}"
+    );
+}

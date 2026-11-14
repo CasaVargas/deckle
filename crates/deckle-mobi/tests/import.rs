@@ -276,3 +276,25 @@ fn import_is_deterministic() {
         import(&common::mini6(Compression::Huff)).0
     );
 }
+
+#[test]
+fn a_long_book_in_cyrillic_without_page_breaks_is_split_whole() {
+    // 150,000 two-byte letters in paragraphs, no <mbp:pagebreak>: over 300,000 bytes, and the
+    // leading "a" puts byte 200,000 of the body inside a letter.
+    let para = format!("<p>{}</p>", "Ж".repeat(1000));
+    let html = format!("<html><body>a{}</body></html>", para.repeat(150));
+    let bytes = build_mobi6(&Mobi6 {
+        title: "Long Cyrillic",
+        html: &html,
+        ..Default::default()
+    });
+    let (files, report) = import(&bytes);
+    assert!(report.parts >= 2, "{} parts", report.parts);
+    let parts: String = files
+        .iter()
+        .filter(|(k, _)| k.contains("Text/"))
+        .map(|(_, v)| String::from_utf8(v.clone()).unwrap())
+        .collect();
+    assert_eq!(parts.matches('Ж').count(), 150_000);
+    assert_eq!(parts.matches(&para).count(), 150);
+}
