@@ -730,6 +730,28 @@ fn press_worker_poisoned_snapshot_reopens_before_recovering() {
     assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 #[test]
+fn press_worker_failed_journal_write_while_registering_is_retried_at_once() {
+    // A journal write that fails while a folder is registered is the journal's, not the
+    // folder's: once the write can go, the folder works on the next tick, not after the
+    // minute a refused folder move waits.
+    let f = fixture("Registration write");
+    let blocked = f.root.join("journal/journal.backup.json.tmp");
+    std::fs::create_dir_all(&blocked).unwrap();
+    let mut w = PressSupervisor::with_options(f.options.clone());
+    let end = Instant::now() + Duration::from_secs(15);
+    let mut observed = false;
+    while Instant::now() < end {
+        if w.tick(std::slice::from_ref(&f.cfg), Utc::now()).is_err() {
+            observed = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(observed, "the failed journal write should surface");
+    std::fs::remove_dir(blocked).unwrap();
+    until(&f, &mut w, PressState::Published);
+}
+#[test]
 fn press_worker_private_state_cannot_be_placed_in_shared_export() {
     let mut f = fixture("Bad local root");
     let invalid = f.binding.root.join("private-state");

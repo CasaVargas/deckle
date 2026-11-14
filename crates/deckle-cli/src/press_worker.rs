@@ -587,6 +587,12 @@ impl Engine {
                         enabled,
                         stopped,
                     ) {
+                        // A journal write that failed is not this folder's refusal: the step
+                        // fails, the journal is opened again and the registration is retried
+                        // on the next tick, as for any other write.
+                        if !self.journal.as_ref().unwrap().is_healthy() {
+                            return Err(e);
+                        }
                         self.held.insert(
                             binding.root.clone(),
                             (
