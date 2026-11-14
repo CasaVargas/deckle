@@ -4,7 +4,7 @@
 use super::{Book, FixupError, float_to_decimal};
 use crate::consts::{EID_REFERENCES, GENERIC_CREATOR_VERSIONS, format_symbol};
 use crate::fragment::Fragment;
-use crate::ion::{Struct, Sym, Value};
+use crate::ion::{IonError, Struct, Sym, Value, ValueBudget};
 
 fn kv(key: &str, value: Value) -> Value {
     let mut s = Struct::new();
@@ -44,7 +44,9 @@ pub fn fix_structural(book: &mut Book) -> Result<(), FixupError> {
         }
     }
 
-    // 2. Per-fragment Ion fix-ups (everything but `$270`).
+    // 2. Per-fragment Ion fix-ups (everything but `$270`). The `$608` structures copied in
+    // count against the same limit as the values decoded (GHSA-vmh5-733r-v936).
+    let copies = Copies::default();
     let n = book.fragments.len();
     for i in 0..n {
         let (ftype, fid) = {
@@ -55,8 +57,11 @@ pub fn fix_structural(book: &mut Book) -> Result<(), FixupError> {
             continue;
         }
         let value = std::mem::replace(&mut book.fragments.0[i].value, Value::Null);
-        let fixed = fix_ion(book, &ftype, fid.as_ref(), value, None);
+        let fixed = fix_ion(book, &copies, &ftype, fid.as_ref(), value, None);
         book.fragments.0[i].value = fixed;
+        if let Some(e) = copies.refused.take() {
+            return Err(e.into());
+        }
     }
 
     // 3. `$266` anchors: drop a zero `$143` offset.
@@ -96,9 +101,17 @@ pub fn fix_structural(book: &mut Book) -> Result<(), FixupError> {
     Ok(())
 }
 
+/// What the `$608` structures copied in have cost, and the error once they cost too much.
+#[derive(Default)]
+struct Copies {
+    budget: ValueBudget,
+    refused: std::cell::Cell<Option<IonError>>,
+}
+
 /// Recursive port of kfxlib `kpf_fix_fragment._fix_ion_data`.
 fn fix_ion(
     book: &mut Book,
+    copies: &Copies,
     ftype: &Sym,
     fid: Option<&Sym>,
     value: Value,
@@ -107,12 +120,12 @@ fn fix_ion(
     match value {
         Value::Annotated { annots, value } => {
             if annots.len() == 1 && annots[0].as_str() == "$608" {
-                return fix_ion(book, ftype, fid, *value, container);
+                return fix_ion(book, copies, ftype, fid, *value, container);
             }
             let annots = annots
                 .into_iter()
                 .map(
-                    |a| match fix_ion(book, ftype, fid, Value::Symbol(a), None) {
+                    |a| match fix_ion(book, copies, ftype, fid, Value::Symbol(a), None) {
                         Value::Symbol(s) => s,
                         _ => unreachable!(),
                     },
@@ -120,7 +133,7 @@ fn fix_ion(
                 .collect();
             Value::Annotated {
                 annots,
-                value: Box::new(fix_ion(book, ftype, fid, *value, container)),
+                value: Box::new(fix_ion(book, copies, ftype, fid, *value, container)),
             }
         }
         Value::List(items) => {
@@ -135,7 +148,11 @@ fn fix_ion(
                     && let Value::Symbol(s) = &item
                     && let Some(structure) = book.fragments.get(&Sym::new("$608"), Some(s))
                 {
-                    item = structure.value.clone();
+                    match copies.budget.charge_copy(&structure.value) {
+                        Ok(()) => item = structure.value.clone(),
+                        // Left as the reference; the fragment's caller refuses the book.
+                        Err(e) => copies.refused.set(Some(e)),
+                    }
                 }
                 if (ftype.as_str() == "$609" && container == Some("contains_list_") && i == 1)
                     || (ftype.as_str() == "$538"
@@ -143,20 +160,20 @@ fn fix_ion(
                 {
                     item = symbol_id(book, item);
                 }
-                out.push(fix_ion(book, ftype, fid, item, list_container));
+                out.push(fix_ion(book, copies, ftype, fid, item, list_container));
             }
             Value::List(out)
         }
         Value::SExp(items) => Value::SExp(
             items
                 .into_iter()
-                .map(|v| fix_ion(book, ftype, fid, v, None))
+                .map(|v| fix_ion(book, copies, ftype, fid, v, None))
                 .collect(),
         ),
         Value::Struct(s) => {
             let mut out = Struct::new();
             for (fk, fv) in s.0 {
-                let mut fv = fix_ion(book, ftype, fid, fv, Some(fk.as_str()));
+                let mut fv = fix_ion(book, copies, ftype, fid, fv, Some(fk.as_str()));
                 let mut fk = fk;
                 let key = fk.as_str();
                 if key == "$597" {

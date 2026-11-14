@@ -168,6 +168,9 @@
 - **A mistake in `digest.toml` is named, not quoted.** The error gives the file, line and column
   and what's wrong, without the line itself, which could hold your calendar's private address
   and end up in a bug report. The same goes for `cookbook.toml`.
+- **A `.kpf` can't make a conversion take gigabytes.** A structure the book names many times
+  was copied in each time; the copies now count toward the same limit as the rest of the book,
+  and a book past it is refused.
 - **News in your language.** Local, each other place, each interest and each Google News topic
   can read another country's edition of Google News: pick Deutschland, España, France, Italia or
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day

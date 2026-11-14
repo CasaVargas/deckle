@@ -138,6 +138,24 @@ impl ValueBudget {
         self.charge_n(1)
     }
 
+    /// Counts a copy of `v`, as decoding it would have: each value and annotation, and a unit
+    /// for every 64 bytes of text or data. Fails (counting nothing) past the limit.
+    pub(crate) fn charge_copy(&self, v: &Value) -> Result<(), IonError> {
+        fn units(v: &Value) -> u64 {
+            let bytes = |n: usize| (n as u64).div_ceil(SYMBOL_TEXT_PER_UNIT);
+            1 + match v {
+                Value::Symbol(s) => bytes(s.0.len()),
+                Value::String(t) => bytes(t.len()),
+                Value::Clob(b) | Value::Blob(b) => bytes(b.len()),
+                Value::List(items) | Value::SExp(items) => items.iter().map(units).sum(),
+                Value::Struct(s) => s.0.iter().map(|(k, v)| bytes(k.0.len()) + units(v)).sum(),
+                Value::Annotated { annots, value } => annots.len() as u64 + units(value),
+                _ => 0,
+            }
+        }
+        self.charge_n(units(v))
+    }
+
     /// Counts `n` more, failing (and counting nothing) past the limit.
     fn charge_n(&self, n: u64) -> Result<(), IonError> {
         let used = self.used.get().saturating_add(n);
