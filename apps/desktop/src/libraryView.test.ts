@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { matchesMetadata, libraryItems, missingNumbers, ranges, seriesKey, seriesLine, shelfSlots, type SeriesGroup } from "./libraryView";
+import { matchesMetadata, libraryItems, missingNumbers, ranges, seriesKey, seriesLine, shelfSlots, ownedNumbers, type SeriesGroup } from "./libraryView";
 import type { CatalogEntry } from "./types";
 
 const e = (title: string, over: Partial<CatalogEntry> = {}): CatalogEntry => ({
@@ -47,6 +47,8 @@ describe("series", () => {
     const items = libraryItems(books, "", "not-on-kindle", true);
     expect(items.map((i) => (i.kind === "series" ? i.books.length : i.book.title))).toEqual(["Anathem", 4]);
     expect((items[1] as SeriesGroup).missing).toEqual([5, 6]);
+    // The count is the whole series', whatever the filter hides.
+    expect(seriesLine(items[1] as SeriesGroup)).toBe("The Expanse · you have 5 of 7");
     expect(libraryItems(books, "stephenson", "all", true).map((i) => (i.kind === "book" ? i.book.title : ""))).toEqual(["Anathem"]);
     expect(libraryItems(books, "", "all", false)).toHaveLength(7);
   });
@@ -60,7 +62,10 @@ it("searches metadata across fields with case and accent folding", () => {
 });
 
 const slotBook = (i: number | null) => e(`B${i}`, { series: i == null ? null : { name: "S", index: i } });
-const group = (idx: (number | null)[], missing: number[]): SeriesGroup => ({ kind: "series", key: "s", name: "S", books: idx.map(slotBook), missing });
+const group = (idx: (number | null)[], missing: number[]): SeriesGroup => {
+  const books = idx.map(slotBook);
+  return { kind: "series", key: "s", name: "S", books, missing, owned: ownedNumbers(books) };
+};
 const shape = (g: SeriesGroup) =>
   shelfSlots(g).map((s) => (s.kind === "book" ? `b${s.book.series?.index ?? "-"}` : s.kind === "stub" ? `s${s.n}` : `f${s.from}-${s.to}`));
 

@@ -12,6 +12,8 @@ export interface SeriesGroup {
   books: CatalogEntry[];
   /** Whole numbers from 1 to the highest owned that no book has. */
   missing: number[];
+  /** Distinct whole numbers owned, counting books a filter hides. */
+  owned: number;
 }
 
 export type LibraryItem = SeriesGroup | { kind: "book"; book: CatalogEntry };
@@ -51,8 +53,12 @@ export function ranges(nums: number[]): string {
 
 /** "The Expanse · you have 5 of 7"; just the name when no book has a whole number. */
 export function seriesLine(g: SeriesGroup): string {
-  const owned = new Set(g.books.map((b) => b.series?.index).filter((i): i is number => i != null && Number.isInteger(i))).size;
-  return owned ? `${g.name} · you have ${owned} of ${owned + g.missing.length}` : g.name;
+  return g.owned ? `${g.name} · you have ${g.owned} of ${g.owned + g.missing.length}` : g.name;
+}
+
+/** Distinct whole series numbers among `books`. */
+export function ownedNumbers(books: CatalogEntry[]): number {
+  return new Set(books.map((b) => b.series?.index).filter((i): i is number => i != null && Number.isInteger(i))).size;
 }
 
 /** One place on a series' shelf: a book, one missing number, or a run of three or more. */
@@ -111,7 +117,7 @@ export function libraryItems(entries: CatalogEntry[], query: string, filter: Lib
     if (shown.length === 0) continue;
     const order = (b: CatalogEntry) => b.series?.index ?? Number.POSITIVE_INFINITY;
     shown.sort((a, b) => order(a) - order(b) || byTitle(a.title, b.title));
-    items.push({ kind: "series", key, name: all[0].series!.name, books: shown, missing: missingNumbers(all.map((b) => b.series?.index ?? null)) });
+    items.push({ kind: "series", key, name: all[0].series!.name, books: shown, missing: missingNumbers(all.map((b) => b.series?.index ?? null)), owned: ownedNumbers(all) });
   }
   const name = (i: LibraryItem) => (i.kind === "series" ? i.name : i.book.title).replace(/^(the|a|an)\s+/i, "");
   return items.sort((a, b) => byTitle(name(a), name(b)));
