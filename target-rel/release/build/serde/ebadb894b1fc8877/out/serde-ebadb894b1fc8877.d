@@ -1,0 +1,14 @@
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/ebadb894b1fc8877/out/serde-ebadb894b1fc8877.d: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/5ef567c7443dd176/out/private.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/ebadb894b1fc8877/out/libserde-ebadb894b1fc8877.rlib: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/5ef567c7443dd176/out/private.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/ebadb894b1fc8877/out/libserde-ebadb894b1fc8877.rmeta: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/5ef567c7443dd176/out/private.rs
+
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs:
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/5ef567c7443dd176/out/private.rs:
+
+# env-dep:OUT_DIR=/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/serde/5ef567c7443dd176/out

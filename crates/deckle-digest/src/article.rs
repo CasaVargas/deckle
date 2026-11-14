@@ -465,7 +465,10 @@ pub fn extract_linted(
     url: &str,
     max_words: Option<usize>,
 ) -> Option<(Extracted, Vec<String>)> {
-    let mut readability = dom_smoothie::Readability::new(html, Some(url), None).ok()?;
+    // Parsing and readability slow down with nesting: past the limit, read flat
+    // (GHSA-5mmx-qpc6-3x6r).
+    let html = crate::shallow::shallow(html);
+    let mut readability = dom_smoothie::Readability::new(&*html, Some(url), None).ok()?;
     let article = readability.parse().ok()?;
     let mut lead_kept = false;
     let mut w = Writer {
@@ -938,6 +941,32 @@ pub fn pull_quote(text: &str, words: usize) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A story page of `depth` nested `<div>`s around one word, after twenty paragraphs.
+    fn nested(depth: usize) -> String {
+        let para =
+            "<p>".to_owned() + &"Plenty of ordinary words in this paragraph. ".repeat(8) + "</p>";
+        format!(
+            "<html><body><article>{}<p>{}text{}</p></article></body></html>",
+            para.repeat(20),
+            "<div>".repeat(depth),
+            "</div>".repeat(depth)
+        )
+    }
+
+    /// GHSA-5mmx-qpc6-3x6r: parsing and readability slow down with nesting depth, so one page
+    /// of 20,000 nested `<div>`s stalled an edition for more than ten minutes. Past the limit
+    /// the page is read flat, at once.
+    #[test]
+    fn a_page_nested_too_deep_is_read_flat_at_once() {
+        for depth in [50, 20_000] {
+            let start = std::time::Instant::now();
+            let x = extract(&nested(depth), "https://example.com/a").unwrap();
+            assert!(x.xhtml.contains("Plenty of ordinary words"), "{depth}");
+            let took = start.elapsed();
+            assert!(took < Duration::from_secs(10), "{depth}: {took:?}");
+        }
+    }
 
     /// A PNG claiming `w` × `h` 16-bit RGBA, with a few bytes of picture data.
     fn png_claiming(w: u32, h: u32) -> Vec<u8> {

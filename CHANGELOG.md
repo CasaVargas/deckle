@@ -172,6 +172,9 @@
   was copied in each time; the copies now count toward the same limit as the rest of the book,
   and a book past it is refused. Page numbers no longer copy the book's text, at four bytes a
   character for every place that names it; they read it where it is.
+- **One deeply nested page can't hold up the paper.** A story, recipe or publisher page nested
+  thousands of levels deep took minutes to hours to read, and the edition waited for it. Past
+  256 levels, a page is now read flat, its text kept.
 - **News in your language.** Local, each other place, each interest and each Google News topic
   can read another country's edition of Google News: pick Deutschland, España, France, Italia or
   Brasil under the section in the Daily tab, or set `hl`, `gl` and `ceid` by hand. On this day

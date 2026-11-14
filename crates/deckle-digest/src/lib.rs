@@ -42,6 +42,7 @@ pub mod schedule;
 pub mod seasons;
 pub mod secret;
 pub mod session;
+pub mod shallow;
 pub mod shelf;
 pub mod showers;
 pub mod sources;

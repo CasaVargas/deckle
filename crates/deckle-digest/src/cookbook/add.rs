@@ -95,7 +95,7 @@ fn fetch_error(e: String, url: &str) -> AddError {
 /// The address a **Save recipe** page was carried from (`<meta name="deckle:source">`, cookbook
 /// design §8.3): the recipe is keyed and resolved by it, not by the file's path.
 fn carried_source(html: &str) -> Option<String> {
-    let doc = dom_query::Document::from(html);
+    let doc = dom_query::Document::from(&*crate::shallow::shallow(html));
     let u = doc
         .select(r#"meta[name="deckle:source"]"#)
         .nodes()

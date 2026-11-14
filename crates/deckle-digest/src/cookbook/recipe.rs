@@ -59,7 +59,7 @@ pub struct Recipe {
 /// Reads the recipe on a page. `url` is where the page came from (`file://…` for a saved
 /// page). Fails with the web-article reason when a page without recipe data is a stub.
 pub fn parse_recipe(html: &str, url: &str) -> Result<Recipe, String> {
-    let doc = Document::from(html);
+    let doc = Document::from(&*crate::shallow::shallow(html));
     let source_url = canonical(&doc, url).unwrap_or_else(|| url.to_owned());
     let site_name = meta(&doc, "og:site_name")
         .map(|s| clean(&s))

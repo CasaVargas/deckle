@@ -1,0 +1,11 @@
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/inout/c392d508aeb2651a/out/inout-c392d508aeb2651a.d: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/errors.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout_buf.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/reserved.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/inout/c392d508aeb2651a/out/libinout-c392d508aeb2651a.rlib: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/errors.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout_buf.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/reserved.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/inout/c392d508aeb2651a/out/libinout-c392d508aeb2651a.rmeta: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/errors.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout_buf.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/reserved.rs
+
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/lib.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/errors.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/inout_buf.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/inout-0.2.5/src/reserved.rs:

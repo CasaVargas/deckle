@@ -1,0 +1,11 @@
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/keyring/2aebc613e3c51bfa/out/keyring-2aebc613e3c51bfa.d: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/mock.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/macos.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/credential.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/error.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/keyring/2aebc613e3c51bfa/out/libkeyring-2aebc613e3c51bfa.rlib: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/mock.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/macos.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/credential.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/error.rs
+
+/Volumes/DATA/CasaVargas/deckle-ghsa-merge/target-rel/release/build/keyring/2aebc613e3c51bfa/out/libkeyring-2aebc613e3c51bfa.rmeta: /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/lib.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/mock.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/macos.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/credential.rs /Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/error.rs
+
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/lib.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/mock.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/macos.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/credential.rs:
+/Users/jonathan/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/keyring-3.6.3/src/error.rs:

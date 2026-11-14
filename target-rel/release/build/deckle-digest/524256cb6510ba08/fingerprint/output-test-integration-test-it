@@ -1,0 +1,1 @@
+{"$message_type":"unused_extern","lint_level":"force-warn","unused_extern_names":["ab_glyph","deckle_limits","deunicode","dom_smoothie","encoding_rs","feed_rs","flate2","html_escape","hypher","iana_time_zone","keyring","lettre","pdf_writer","quick_xml","rand","regex","rrule","toml_edit","ureq","zeroize"]}
