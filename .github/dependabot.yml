@@ -20,3 +20,7 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+    ignore:
+      # v1 changed latest.json's download links (release.yml); move to it on purpose.
+      - dependency-name: tauri-apps/tauri-action
+        update-types: ["version-update:semver-major"]
