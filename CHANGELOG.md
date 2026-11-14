@@ -11,6 +11,11 @@
   name, so adding `home/notes.txt` replaced the book from `work/notes.txt`. Such a file now
   updates a book only when it's the same file or the library's own copy; anything else is filed
   as a new book. An EPUB with the publisher's identifier still updates its book in place.
+- **A second paper no longer deletes the first one's editions on a Kobo or PocketBook.** Its
+  files (`deckle-daily-kid-courier-…`) were counted as the main paper's editions and took their
+  places, so every one of the main paper's editions was removed, the newest too. Now only a
+  paper's own dated editions count toward its `keep`, and each paper on the reader is pruned
+  by its own, as on a Kindle.
 - **A send no longer removes a different book from the Kindle.** Two books can get the same
   Deckle ASIN, and sending one removed the other, with its notes and highlights. Deckle now
   removes an older copy only when its title and author match too; another book with the same
