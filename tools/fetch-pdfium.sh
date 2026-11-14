@@ -55,11 +55,13 @@ here="$cache/${TAG//\//-}/$platform"
 archive="$here/pdfium.tgz"
 want="$(sha_for "$platform")"
 
+# Hashed from stdin: given a name with a backslash in it (a Windows cache path), sha256sum
+# puts a backslash in front of the hash.
 sha_of() {
   if command -v sha256sum >/dev/null; then
-    sha256sum "$1" | cut -d' ' -f1
+    sha256sum <"$1" | cut -d' ' -f1
   else
-    shasum -a 256 "$1" | cut -d' ' -f1
+    shasum -a 256 <"$1" | cut -d' ' -f1
   fi
 }
 
