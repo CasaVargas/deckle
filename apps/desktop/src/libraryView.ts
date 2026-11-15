@@ -12,6 +12,8 @@ export interface SeriesGroup {
   books: CatalogEntry[];
   /** Whole numbers from 1 to the highest owned that no book has. */
   missing: number[];
+  /** Distinct whole numbers owned, counting books a filter hides. */
+  owned: number;
 }
 
 export type LibraryItem = SeriesGroup | { kind: "book"; book: CatalogEntry };
@@ -49,18 +51,39 @@ export function ranges(nums: number[]): string {
   return out.join(", ");
 }
 
-function list(nums: number[]): string {
-  if (nums.length <= 2) return nums.join(" and ");
-  return `${nums.slice(0, -1).join(", ")} and ${nums[nums.length - 1]}`;
+/** "The Expanse · you have 5 of 7"; just the name when no book has a whole number. */
+export function seriesLine(g: SeriesGroup): string {
+  return g.owned ? `${g.name} · you have ${g.owned} of ${g.owned + g.missing.length}` : g.name;
 }
 
-/** "The Expanse, 1–4 · 5 isn't in your library". */
-export function seriesLine(g: SeriesGroup): string {
-  const whole = g.books.map((b) => b.series?.index).filter((i): i is number => i != null && Number.isInteger(i));
-  const head = whole.length ? `${g.name}, ${ranges(whole)}` : g.name;
-  if (g.missing.length === 0) return head;
-  const many = g.missing.length > 1;
-  return `${head} · ${list(g.missing)} ${many ? "aren't" : "isn't"} in your library`;
+/** Distinct whole series numbers among `books`. */
+export function ownedNumbers(books: CatalogEntry[]): number {
+  return new Set(books.map((b) => b.series?.index).filter((i): i is number => i != null && Number.isInteger(i))).size;
+}
+
+/** One place on a series' shelf: a book, one missing number, or a run of three or more. */
+export type ShelfSlot = { kind: "book"; book: CatalogEntry } | { kind: "stub"; n: number } | { kind: "fold"; from: number; to: number };
+
+/** A series' books with its missing numbers where they'd stand: runs of three or more fold into one. */
+export function shelfSlots(g: SeriesGroup): ShelfSlot[] {
+  const gaps: ShelfSlot[][] = [];
+  const nums = [...g.missing].sort((a, b) => a - b);
+  for (let i = 0; i < nums.length; ) {
+    let j = i;
+    while (j + 1 < nums.length && nums[j + 1] === nums[j] + 1) j++;
+    gaps.push(j - i >= 2 ? [{ kind: "fold", from: nums[i], to: nums[j] }] : nums.slice(i, j + 1).map((n) => ({ kind: "stub", n })));
+    i = j + 1;
+  }
+  const first = (run: ShelfSlot[]) => (run[0].kind === "fold" ? run[0].from : run[0].kind === "stub" ? run[0].n : 0);
+  const out: ShelfSlot[] = [];
+  let k = 0;
+  for (const book of g.books) {
+    const idx = book.series?.index;
+    while (k < gaps.length && idx != null && first(gaps[k]) < idx) out.push(...gaps[k++]);
+    out.push({ kind: "book", book });
+  }
+  while (k < gaps.length) out.push(...gaps[k++]);
+  return out;
 }
 
 export function matchesMetadata(title: string, authors: string[], series: string | null, query: string): boolean {
@@ -94,7 +117,7 @@ export function libraryItems(entries: CatalogEntry[], query: string, filter: Lib
     if (shown.length === 0) continue;
     const order = (b: CatalogEntry) => b.series?.index ?? Number.POSITIVE_INFINITY;
     shown.sort((a, b) => order(a) - order(b) || byTitle(a.title, b.title));
-    items.push({ kind: "series", key, name: all[0].series!.name, books: shown, missing: missingNumbers(all.map((b) => b.series?.index ?? null)) });
+    items.push({ kind: "series", key, name: all[0].series!.name, books: shown, missing: missingNumbers(all.map((b) => b.series?.index ?? null)), owned: ownedNumbers(all) });
   }
   const name = (i: LibraryItem) => (i.kind === "series" ? i.name : i.book.title).replace(/^(the|a|an)\s+/i, "");
   return items.sort((a, b) => byTitle(name(a), name(b)));

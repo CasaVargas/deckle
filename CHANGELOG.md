@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The Books screen looks better.** Bigger covers with depth, headings in a book serif, a
+  series' missing books as slim markers in their place (a long run as one "1–5" tile), and an
+  empty To send that shows where to drop books.
+
 ## 0.15.0 — news in your language, and safer servers and fetching
 
 - **A fresh-paper folder can move to another paper.** Reconnecting a folder to a different

@@ -9,3 +9,6 @@ dist
 /.superpowers
 /apps/desktop/src-tauri/pdfium
 /apps/desktop/src-tauri/liquid-glass
+
+# Brainstorming mockups (visual companion)
+.superpowers/
