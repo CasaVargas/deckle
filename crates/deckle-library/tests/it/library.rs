@@ -221,6 +221,41 @@ fn a_pdf_is_kept_as_it_is() {
 }
 
 #[test]
+fn a_scanned_pdfs_row_is_read_without_making_its_book() {
+    // Needs PDFium: tools/fetch-pdfium.sh, or DECKLE_PDFIUM.
+    let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/pdf");
+    let shown = |i: &deckle_core::inspect::BookInfo| {
+        let authors: Vec<String> = i.creators.iter().map(|c| c.name.clone()).collect();
+        (i.title.clone(), authors, i.fixed_layout)
+    };
+    for name in ["ocr-scan.pdf", "scan.pdf"] {
+        let pdf = fixtures.join(name);
+        let quick = deckle_library::row_info(&pdf).unwrap();
+        let full = deckle_library::book_info(&pdf).unwrap();
+        // What a Books row shows is the same either way.
+        assert_eq!(shown(&quick), shown(&full), "{name}");
+        assert!(quick.fixed_layout, "{name}");
+        // The full book has a page file for every page; the row made none.
+        assert!(!full.spine.is_empty(), "{name}");
+        assert!(quick.spine.is_empty(), "{name}: pages were rendered");
+    }
+    assert_eq!(
+        deckle_library::row_info(&fixtures.join("ocr-scan.pdf"))
+            .unwrap()
+            .title,
+        "A Scanned Picture Book"
+    );
+    // A PDF with text is still read from the book it imports as.
+    let book = fixtures.join("book.pdf");
+    let quick = deckle_library::row_info(&book).unwrap();
+    assert_eq!(
+        shown(&quick),
+        shown(&deckle_library::book_info(&book).unwrap())
+    );
+    assert!(!quick.spine.is_empty());
+}
+
+#[test]
 fn scan_adopts_bare_and_loose_books_and_reports_problems() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("Library");

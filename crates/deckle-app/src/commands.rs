@@ -579,8 +579,9 @@ pub fn book_row(path: &Path) -> BookRow {
         .unwrap_or_default();
     // A Word document or text file shows the metadata of the EPUB it imports as; the pipeline
     // imports it again when it runs. Its cover is the generated one, made at run time.
+    // A scanned PDF's pages are rendered only then.
     let inspected = if is_imported(path) {
-        deckle_library::book_info(path)
+        deckle_library::row_info(path)
     } else {
         inspect(path).map_err(|e| e.to_string())
     };

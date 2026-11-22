@@ -5,6 +5,9 @@
 - **The Books screen looks better.** Bigger covers with depth, headings in a book serif, a
   series' missing books as slim markers in their place (a long run as one "1–5" tile), and an
   empty To send that shows where to drop books.
+- **A scanned PDF is added at once.** Adding one to Books rendered every page before its row
+  appeared, about half a minute for a 300-page scan, and the send rendered them again. The row
+  now reads the PDF's title and author only; the pages are rendered once, when the book is sent.
 
 ## 0.15.0 — news in your language, and safer servers and fetching
 
