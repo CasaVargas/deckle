@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Security updates.** The app updater now uses zip 9.0.5, which fixes a critical flaw in
+  how zip files are read (the Windows updater unpacks one), and the test runner moves to vitest
+  4.1.12.
 - **The Books screen looks better.** Bigger covers with depth, headings in a book serif, a
   series' missing books as slim markers in their place (a long run as one "1–5" tile), and an
   empty To send that shows where to drop books.
