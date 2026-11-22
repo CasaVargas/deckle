@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The AI page tells an OpenAI endpoint by its host.** An endpoint was taken for OpenAI's own
+  whenever `api.openai.com` appeared anywhere in it, even in the path of a server on your network.
+  The page now goes by the hostname to say whether text leaves this computer.
 - **Security updates.** The app updater now uses zip 9.0.5, which fixes a critical flaw in
   how zip files are read (the Windows updater unpacks one), and the test runner moves to vitest
   4.1.12.

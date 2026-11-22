@@ -32,6 +32,16 @@ describe("the three choices", () => {
     expect(sendsOnline({ llm_provider: "openai", llm_endpoint: "" })).toBe(true);
     expect(sendsOnline({ llm_provider: "anthropic", llm_endpoint: "" })).toBe(true);
   });
+
+  it("knows OpenAI by the endpoint's host, not by text anywhere in it", () => {
+    const openai = (llm_endpoint: string) => ({ llm_provider: "openai" as const, llm_endpoint });
+    expect(sendsOnline(openai("https://api.openai.com/v1"))).toBe(true);
+    expect(sendsOnline(openai("api.openai.com/v1"))).toBe(true);
+    expect(sendsOnline(openai("http://nas.local:8080/api.openai.com/v1"))).toBe(false);
+    expect(sendsOnline(openai("https://api.openai.com.example.net/v1"))).toBe(false);
+    expect(providerName(openai("https://api.openai.com/v1"))).toBe("OpenAI");
+    expect(providerName(openai("http://nas.local:8080/api.openai.com"))).toBe("your own server");
+  });
   it("summarises the page in a line", () => {
     expect(aiSummary(base)).toBe("Off");
     expect(aiSummary({ ...base, llm_provider: "ollama" }, "qwen3:4b")).toBe("On this Mac: qwen3:4b through Ollama");
