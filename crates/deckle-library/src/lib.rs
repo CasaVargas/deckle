@@ -104,6 +104,39 @@ pub fn is_source(path: &Path) -> bool {
             .is_some_and(|e| e.eq_ignore_ascii_case("epub"))
 }
 
+/// What a Books row shows of `path` (title, authors, fixed layout): as [`book_info`], but a scanned
+/// PDF is read from its own document facts. Making its book renders every page, which the send
+/// does anyway. A scan's identifiers and spine are left empty, so this is not for identity.
+pub fn row_info(path: &Path) -> Result<BookInfo, String> {
+    if !deckle_pdf::is_pdf(path) {
+        return book_info(path);
+    }
+    let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let epub = dir.path().join("imported.epub");
+    match deckle_pdf::convert(path, &epub) {
+        Ok(_) => deckle_core::inspect::inspect(&epub).map_err(|e| e.to_string()),
+        Err(deckle_pdf::PdfError::Scanned) => {
+            let scan = deckle_pdf::scan_info(path).map_err(|e| e.to_string())?;
+            // As the comic it is sent as: named after the file when the PDF has no title.
+            let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+            Ok(BookInfo {
+                title: scan.title.unwrap_or_else(|| stem.into_owned()),
+                creators: scan
+                    .author
+                    .into_iter()
+                    .map(|name| deckle_core::inspect::Creator {
+                        name,
+                        file_as: None,
+                    })
+                    .collect(),
+                fixed_layout: true,
+                ..Default::default()
+            })
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// The book's metadata: the EPUB's, or the EPUB a Word document, text file, PDF or comic imports
 /// as.
 pub fn book_info(path: &Path) -> Result<BookInfo, String> {

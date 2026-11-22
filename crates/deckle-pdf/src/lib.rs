@@ -100,6 +100,22 @@ pub fn render_scan(pdf: &Path, dir: &Path) -> Result<Scan, PdfError> {
     })
 }
 
+/// The PDF's own title, author and page count, with no page rendered: what a Books row says of a
+/// scan before it is sent.
+pub fn scan_info(pdf: &Path) -> Result<Scan, PdfError> {
+    let size = std::fs::metadata(pdf)?.len();
+    if size > MAX_BYTES {
+        return Err(PdfError::TooLarge(size));
+    }
+    let doc = engine::Document::open(engine::pdfium()?, pdf)?;
+    let info = doc.info();
+    Ok(Scan {
+        title: info.title,
+        author: info.author,
+        pages: doc.page_count(),
+    })
+}
+
 /// Inputs the importer takes: `.pdf`, any case.
 pub fn is_pdf(path: &Path) -> bool {
     path.extension()
