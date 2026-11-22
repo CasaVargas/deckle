@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **The AI page tells an OpenAI endpoint by its host.** An endpoint was taken for OpenAI's own
+  whenever `api.openai.com` appeared anywhere in it, even in the path of a server on your network.
+  The page now goes by the hostname to say whether text leaves this computer.
 - **The Books screen looks better.** Bigger covers with depth, headings in a book serif, a
   series' missing books as slim markers in their place (a long run as one "1–5" tile), and an
   empty To send that shows where to drop books.

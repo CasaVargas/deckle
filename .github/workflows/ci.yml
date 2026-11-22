@@ -8,6 +8,9 @@ on:
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
+# Read-only token for every job; a job that needs more says so itself.
+permissions:
+  contents: read
 jobs:
   # Which parts a pull request touches. A job it doesn't touch is skipped, and a skipped job
   # counts as passed for required checks. A push to main runs everything.

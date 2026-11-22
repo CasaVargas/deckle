@@ -16,13 +16,23 @@ export function choose(s: Settings, choice: AiChoice): Settings {
   return s.llm_provider === "anthropic" || s.llm_provider === "openai" ? s : { ...s, llm_provider: "anthropic", llm_model: "", llm_endpoint: "" };
 }
 
+/** Whether `endpoint` is OpenAI's own API host, by hostname, not by substring. */
+function isOpenAiHost(endpoint: string): boolean {
+  const url = /^[a-z][a-z0-9+.-]*:\/\//i.test(endpoint) ? endpoint : `https://${endpoint}`;
+  try {
+    return new URL(url).hostname === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
 /** "Anthropic", "Ollama on this Mac", …: the provider as the other pages name it. */
 export function providerName(s: Pick<Settings, "llm_provider" | "llm_endpoint">): string {
   switch (s.llm_provider) {
     case "anthropic":
       return "Anthropic";
     case "openai":
-      return s.llm_endpoint.trim() && !s.llm_endpoint.includes("api.openai.com") ? "your own server" : "OpenAI";
+      return s.llm_endpoint.trim() && !isOpenAiHost(s.llm_endpoint.trim()) ? "your own server" : "OpenAI";
     case "ollama":
       return s.llm_endpoint.trim() && !/localhost|127\.0\.0\.1/.test(s.llm_endpoint) ? "Ollama on your network" : "Ollama on this Mac";
     default:
@@ -36,7 +46,7 @@ export function sendsOnline(s: Pick<Settings, "llm_provider" | "llm_endpoint">):
   if (s.llm_provider === "anthropic") return true;
   if (s.llm_provider === "ollama") return false;
   const e = s.llm_endpoint.trim();
-  return !e || e.includes("api.openai.com");
+  return !e || isOpenAiHost(e);
 }
 
 export const gb = (bytes: number) => `${(bytes / 1e9).toFixed(1)} GB`;
