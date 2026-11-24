@@ -860,6 +860,7 @@ fn a_list_too_small_leaves_the_search_out() {
     assert_eq!(p.search, None);
 }
 
+/// Pinned to the embedded list: re-pinned when it dropped its adult words and clues (#357).
 #[test]
 fn existing_days_keep_their_mini_and_ladder() {
     let p = make(
@@ -870,12 +871,12 @@ fn existing_days_keep_their_mini_and_ladder() {
     );
     assert_eq!(
         p.rows,
-        Some(["##GOT", "DRIVE", "RAVEN", "AVERT", "GER##"].map(String::from))
+        Some(["##PUP", "CHORE", "ROUGE", "INNER", "BED##"].map(String::from))
     );
     assert_eq!(
         p.ladder.map(|l| l.path),
         Some(
-            ["hard", "bard", "bare", "base", "ease", "easy"]
+            ["card", "care", "dare", "dame", "game"]
                 .map(String::from)
                 .to_vec()
         )

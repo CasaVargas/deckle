@@ -7,7 +7,8 @@ use std::io::Write;
 
 use deckle_wordwise::lexicon::Lexicon;
 use deckle_wordwise_build::{
-    build, crossword_words, difficulty, load_wordfreq, puzzle_words, short_def, zipf,
+    adult_clue, build, clue_terms, crossword_words, difficulty, load_wordfreq, puzzle_words,
+    short_def, zipf,
 };
 
 fn freq() -> HashMap<String, f64> {
@@ -287,6 +288,99 @@ fn puzzle_clue_never_contains_answer() {
     for (w, c) in &list {
         assert!(!c.to_lowercase().contains(w.as_str()), "{w}: {c}");
     }
+}
+
+/// A clean answer whose first everyday sense is adult takes its next sense's clue; with no
+/// clean sense it's out. Clue terms come from the blocklist's `clue:` lines.
+#[test]
+fn puzzle_words_skip_adult_clues() {
+    const ADULT: &str = r#"{"word":"punk","pos":"noun","lang_code":"en","senses":[{"glosses":["A passive or effeminate homosexual man."]},{"glosses":["A style of loud, fast rock music."]}]}
+{"word":"lewd","pos":"adj","lang_code":"en","senses":[{"glosses":["Lascivious, sexually promiscuous, rude."]}]}
+{"word":"puppy","pos":"noun","lang_code":"en","senses":[{"glosses":["A young dog, especially before sexual maturity."]}]}
+"#;
+    let freq: HashMap<String, f64> = [("punk", 3.8), ("lewd", 3.1), ("puppy", 3.9)]
+        .into_iter()
+        .map(|(w, z)| (w.to_owned(), z))
+        .collect();
+    let blocklist: HashSet<String> = ["clue:homosexual", "clue:lascivious", "clue:sexual desire"]
+        .iter()
+        .map(|w| (*w).to_owned())
+        .collect();
+    let list = puzzle_words(ADULT.as_bytes(), &freq, &blocklist);
+    let clue = |w: &str| list.iter().find(|(x, _)| x == w).map(|(_, c)| c.as_str());
+    assert_eq!(clue("punk"), Some("A style of loud, fast rock music"));
+    assert_eq!(clue("lewd"), None);
+    // whole words: "sexual maturity" isn't "sexual desire"
+    assert_eq!(
+        clue("puppy"),
+        Some("A young dog, especially before sexual maturity")
+    );
+    // without the clue terms the first sense is the clue
+    let open = puzzle_words(ADULT.as_bytes(), &freq, &HashSet::new());
+    assert!(open.iter().any(|(w, _)| w == "lewd"));
+}
+
+#[test]
+fn adult_clue_matches_whole_words() {
+    let terms = ["lascivious", "sexual desire"];
+    assert!(adult_clue("Lascivious, sexually promiscuous, rude", &terms));
+    assert!(adult_clue("SEXUAL DESIRE in mammals", &terms));
+    assert!(!adult_clue("A young dog, before sexual maturity", &terms));
+    assert!(!adult_clue("Unlasciviousness", &terms));
+    assert!(!adult_clue("Anything", &[]));
+}
+
+/// The real blocklist keeps the reported entries out of the build.
+#[test]
+fn shipped_blocklist_blocks_the_reported_entries() {
+    let blocklist: HashSet<String> = include_str!("../puzzle-blocklist.txt")
+        .lines()
+        .map(|l| l.trim().to_lowercase())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .collect();
+    assert!(blocklist.contains("lewd"));
+    let terms = clue_terms(&blocklist);
+    assert!(adult_clue("Lascivious, sexually promiscuous, rude", &terms));
+    assert!(adult_clue("A passive or effeminate homosexual man", &terms));
+    assert!(!adult_clue(
+        "A young dog, especially before sexual maturity",
+        &terms
+    ));
+    // the second skim: adult and bodily answers, and blocked words inside clues
+    for word in ["pubic", "randy", "poo", "fecal", "fart", "sperm"] {
+        assert!(blocklist.contains(word), "{word}");
+    }
+    for clue in [
+        "Damn",
+        "To prick",
+        "Synonym of booty",
+        "Of, or relating to the area of the body adjacent to the pubis or the pubes",
+        "A lavatory: a room used for urination and defecation",
+    ] {
+        assert!(adult_clue(clue, &terms), "{clue}");
+    }
+}
+
+/// A blocklisted word is a clue term too: a clean answer whose first sense names one takes its
+/// next sense's clue, with no `clue:` line needed.
+#[test]
+fn puzzle_words_skip_clues_holding_blocked_words() {
+    const DAMN: &str = r#"{"word":"darn","pos":"verb","lang_code":"en","senses":[{"glosses":["Damn."]},{"glosses":["To mend by weaving yarn across a hole."]}]}
+"#;
+    let freq: HashMap<String, f64> = [("darn".to_owned(), 3.5)].into_iter().collect();
+    let blocklist: HashSet<String> = ["damn".to_owned()].into_iter().collect();
+    let list = puzzle_words(DAMN.as_bytes(), &freq, &blocklist);
+    let clue = list
+        .iter()
+        .find(|(w, _)| w == "darn")
+        .map(|(_, c)| c.as_str());
+    assert_eq!(clue, Some("To mend by weaving yarn across a hole"));
+    let open = puzzle_words(DAMN.as_bytes(), &freq, &HashSet::new());
+    let clue = open
+        .iter()
+        .find(|(w, _)| w == "darn")
+        .map(|(_, c)| c.as_str());
+    assert_eq!(clue, Some("Damn"));
 }
 
 /// Crosswords take longer words than the 5×5 mini, each with its frequency.
