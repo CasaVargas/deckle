@@ -699,7 +699,7 @@ mod tests {
                 &mut day_rng(3)
             )
         );
-        assert_eq!(fnv(&all), 0xfa4c_1fbb_bb58_c13a, "{:#x}", fnv(&all));
+        assert_eq!(fnv(&all), 0xf00e_3afa_1bdf_7893, "{:#x}", fnv(&all));
     }
 
     /// The letters along `(dr, dc)` from `(row, col)` in a `size`-square grid, if they fit.

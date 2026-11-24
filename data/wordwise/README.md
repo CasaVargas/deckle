@@ -29,7 +29,8 @@ gzip -9 -n -c words.tsv > crates/deckle-digest/assets/puzzle/words.tsv.gz
 
 Then skim 50 random lines (`shuf -n 50 words.tsv`), add anything objectionable or unguessable
 to `puzzle-blocklist.txt`, and rebuild. A word goes in as itself; a term no clue may hold goes in
-as `clue:term` (whole words, ignoring case: `clue:lascivious`, `clue:sexual desire`). The builder
+as `clue:term` (whole words, ignoring case: `clue:lascivious`, `clue:sexual desire`); every
+listed word is a clue term as well, so "dang" clued "Damn" is out once `damn` is listed. The builder
 clues such a word from its next sense, and the app also drops, as it loads the list, any
 blocklisted word or clue-term clue the checked-in list still holds.
 

@@ -871,12 +871,12 @@ fn existing_days_keep_their_mini_and_ladder() {
     );
     assert_eq!(
         p.rows,
-        Some(["##BUG", "RAISE", "ANGER", "STORM", "HIT##"].map(String::from))
+        Some(["##PUP", "CHORE", "ROUGE", "INNER", "BED##"].map(String::from))
     );
     assert_eq!(
         p.ladder.map(|l| l.path),
         Some(
-            ["rise", "rife", "fife", "file", "fill", "fall"]
+            ["card", "care", "dare", "dame", "game"]
                 .map(String::from)
                 .to_vec()
         )

@@ -346,6 +346,41 @@ fn shipped_blocklist_blocks_the_reported_entries() {
         "A young dog, especially before sexual maturity",
         &terms
     ));
+    // the second skim: adult and bodily answers, and blocked words inside clues
+    for word in ["pubic", "randy", "poo", "fecal", "fart", "sperm"] {
+        assert!(blocklist.contains(word), "{word}");
+    }
+    for clue in [
+        "Damn",
+        "To prick",
+        "Synonym of booty",
+        "Of, or relating to the area of the body adjacent to the pubis or the pubes",
+        "A lavatory: a room used for urination and defecation",
+    ] {
+        assert!(adult_clue(clue, &terms), "{clue}");
+    }
+}
+
+/// A blocklisted word is a clue term too: a clean answer whose first sense names one takes its
+/// next sense's clue, with no `clue:` line needed.
+#[test]
+fn puzzle_words_skip_clues_holding_blocked_words() {
+    const DAMN: &str = r#"{"word":"darn","pos":"verb","lang_code":"en","senses":[{"glosses":["Damn."]},{"glosses":["To mend by weaving yarn across a hole."]}]}
+"#;
+    let freq: HashMap<String, f64> = [("darn".to_owned(), 3.5)].into_iter().collect();
+    let blocklist: HashSet<String> = ["damn".to_owned()].into_iter().collect();
+    let list = puzzle_words(DAMN.as_bytes(), &freq, &blocklist);
+    let clue = list
+        .iter()
+        .find(|(w, _)| w == "darn")
+        .map(|(_, c)| c.as_str());
+    assert_eq!(clue, Some("To mend by weaving yarn across a hole"));
+    let open = puzzle_words(DAMN.as_bytes(), &freq, &HashSet::new());
+    let clue = open
+        .iter()
+        .find(|(w, _)| w == "darn")
+        .map(|(_, c)| c.as_str());
+    assert_eq!(clue, Some("Damn"));
 }
 
 /// Crosswords take longer words than the 5×5 mini, each with its frequency.

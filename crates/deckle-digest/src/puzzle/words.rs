@@ -32,13 +32,14 @@ pub fn blocklist() -> &'static HashSet<String> {
     })
 }
 
-/// The blocklist's clue terms (its `clue:` lines), each as a padded run of lowercase words
-/// (" sexual desire "), parsed once.
+/// The blocklist's clue terms — its `clue:` lines and every blocklisted word, since a word the
+/// grid never takes is no word for its clue either ("dang": "Damn") — each as a padded run of
+/// lowercase words (" sexual desire "), parsed once.
 fn clue_terms() -> &'static [String] {
     static TERMS: OnceLock<Vec<String>> = OnceLock::new();
     TERMS.get_or_init(|| {
         blocklist_lines()
-            .filter_map(|l| l.strip_prefix(CLUE_PREFIX).map(padded_words))
+            .map(|l| padded_words(l.strip_prefix(CLUE_PREFIX).unwrap_or(&l)))
             .filter(|t| !t.trim().is_empty())
             .collect()
     })
@@ -54,7 +55,7 @@ fn padded_words(s: &str) -> String {
     format!(" {} ", w.join(" "))
 }
 
-/// Whether a clue holds a blocklist clue term as whole words, ignoring case and punctuation —
+/// Whether a clue holds a blocklisted word or clue term as whole words, ignoring case and punctuation —
 /// the rule `data/wordwise` builds the list by (its `adult_clue`), kept here too so a list
 /// built before a term was added still loads clean.
 pub fn adult_clue(clue: &str) -> bool {
@@ -167,12 +168,16 @@ mod tests {
              fudge\tA soft candy made of SEXY sugar\n\
              puppy\tA young dog, especially before sexual maturity\n\
              hen\tA female chicken, especially a sexually mature one\n\
+             dang\tDamn\n\
+             prog\tTo prick\n\
+             pubic\tOf the area adjacent to the PUBES\n\
              leaf\tA green organ\n",
         );
         // a blocklisted answer, whatever its clue
         assert!(!w.contains("lewd") && !w.contains("busty"));
         // a clean answer with an adult clue: terms match whole words in any case
-        for word in ["punk", "rut", "fudge"] {
+        // a blocklisted word inside a clue is an adult clue too
+        for word in ["punk", "rut", "fudge", "dang", "prog", "pubic"] {
             assert!(!w.contains(word), "{word}");
         }
         // a term is whole words: "sexual maturity" is not "sexual desire"
@@ -190,21 +195,52 @@ mod tests {
             "A young dog, especially before sexual maturity"
         ));
         assert!(!adult_clue("Cheap and vulgar tastelessness"));
+        // a blocklisted word is a clue term too, as a whole word
+        assert!(adult_clue("Damn") && adult_clue("Synonym of booty"));
+        assert!(!adult_clue("Damnation") && !adult_clue("A hellebore"));
     }
 
     #[test]
     fn embedded_list_has_no_adult_entries() {
         let w = Words::embedded();
         // the 2026-11-24 report (LEWD in a paper's mini) and its neighbours in the built list
+        // and the second skim: adult answers, and clean answers clued with blocked words
         for word in [
-            "lewd", "busty", "pimp", "punk", "lust", "rut", "molly", "date",
+            "lewd", "busty", "pimp", "punk", "lust", "rut", "molly", "date", "pubic", "randy",
+            "poo", "fecal", "fart", "sperm", "dang", "darn", "prog", "loot",
         ] {
             assert!(!w.contains(word), "{word}");
         }
+        // terms checked apart from the blocklist, so a word dropped from it shows up here
+        const NEVER_IN_A_CLUE: [&str; 18] = [
+            "damn",
+            "prick",
+            "booty",
+            "pubes",
+            "pubis",
+            "feces",
+            "sperm",
+            "semen",
+            "penis",
+            "vagina",
+            "anus",
+            "breasts",
+            "lustful",
+            "lascivious",
+            "prostitute",
+            "whore",
+            "urine",
+            "vomit",
+        ];
         for n in 3..=5 {
             for word in w.of_len(n) {
+                let clue = w.clue(word).unwrap();
                 assert!(!blocklist().contains(word), "{word}");
-                assert!(!adult_clue(w.clue(word).unwrap()), "{word}");
+                assert!(!adult_clue(clue), "{word}: {clue}");
+                let clue = padded_words(clue);
+                for t in NEVER_IN_A_CLUE {
+                    assert!(!clue.contains(&format!(" {t} ")), "{word}: {clue}");
+                }
             }
         }
     }

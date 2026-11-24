@@ -379,11 +379,12 @@ fn puzzle_clue(gloss: &str) -> String {
 /// A blocklist line that bans a term from clues rather than a word: `clue:lascivious`.
 pub const CLUE_PREFIX: &str = "clue:";
 
-/// The blocklist's clue terms: its `clue:` lines, without the prefix.
+/// The blocklist's clue terms: its `clue:` lines without the prefix, and every blocklisted
+/// word, since a word the grid never takes is no word for a clue either ("dang": "Damn").
 pub fn clue_terms(blocklist: &HashSet<String>) -> Vec<&str> {
     let mut t: Vec<&str> = blocklist
         .iter()
-        .filter_map(|b| b.strip_prefix(CLUE_PREFIX))
+        .map(|b| b.strip_prefix(CLUE_PREFIX).unwrap_or(b))
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .collect();

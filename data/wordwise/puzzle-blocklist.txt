@@ -5,8 +5,9 @@
 #
 # A `clue:` line is a term no clue may hold (a whole word or phrase, ignoring case and
 # punctuation): a clean answer can take an adult clue from the dictionary ("punk": "A passive
-# or effeminate homosexual man"). The builder clues such a word from its next sense; the app
-# leaves out any listed word whose clue holds one.
+# or effeminate homosexual man"). Every listed word is a clue term as well ("dang": "Damn").
+# The builder clues such a word from its next sense; the app leaves out any word whose clue
+# holds one.
 
 # profanity and sexual terms
 anal
@@ -129,6 +130,25 @@ lewd
 lusty
 pimp
 pimps
+# adult and bodily words found in the built list (2026-11-24, second pass)
+fart
+farts
+fecal
+feces
+faeces
+gypsy
+kink
+poo
+poos
+pubic
+pubis
+puke
+randy
+spank
+sperm
+sperms
+urine
+vomit
 # violence and death that don't belong on a breakfast page
 kill
 kills
@@ -147,7 +167,8 @@ xxx
 lynch
 kinda
 sus
-# clue terms (2026-11-24, from the daily mini's LEWD: "Lascivious, sexually promiscuous, rude")
+# clue terms (2026-11-24, from the daily mini's LEWD: "Lascivious, sexually promiscuous, rude").
+# Every word above is a clue term too: no clue may hold it ("Damn", "To prick", "...the pubes").
 clue:anus
 clue:arousal
 clue:breasts
@@ -187,3 +208,5 @@ clue:testicle
 clue:testicles
 clue:vagina
 clue:whore
+clue:defecation
+clue:urination
