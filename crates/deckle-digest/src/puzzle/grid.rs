@@ -531,6 +531,38 @@ mod tests {
         check(words, &f);
     }
 
+    /// A list holding blocked words and adult clues never fills a mini with them, even when
+    /// they're the day's theme words, which a fill places first.
+    #[test]
+    fn blocked_words_never_fill_a_grid() {
+        let base = Words::embedded();
+        let mut tsv: String = (3..=5)
+            .flat_map(|n| base.of_len(n))
+            .map(|w| format!("{w}\t{}\n", base.clue(w).unwrap()))
+            .collect();
+        let blocked = [
+            ("lewd", "Lascivious, sexually promiscuous, rude"),
+            ("busty", "Having large breasts"),
+            ("pimp", "To act as a procurer of prostitutes"),
+            ("punk", "A passive or effeminate homosexual man"),
+            ("lust", "A feeling driven by sexual arousal"),
+            ("rut", "Sexual desire in any of many mammals"),
+        ];
+        for (w, c) in blocked {
+            tsv.push_str(&format!("{w}\t{c}\n"));
+        }
+        let words = Words::from_tsv(&tsv);
+        let seeds: Vec<String> = blocked.iter().map(|(w, _)| (*w).to_owned()).collect();
+        for day in 0..10 {
+            let f = fill(&words, &seeds, &mut day_rng(day), CAP)
+                .unwrap_or_else(|| panic!("day {day} didn't fill"));
+            check(&words, &f);
+            for (_, a) in &f.answers {
+                assert!(!seeds.contains(a), "day {day}: {a}");
+            }
+        }
+    }
+
     #[test]
     fn tiny_list_gives_up() {
         let words = Words::from_tsv("card\tA piece of paper\nleaf\tA green organ\n");

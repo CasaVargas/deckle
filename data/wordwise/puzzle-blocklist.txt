@@ -2,6 +2,11 @@
 # Seeded from the common English profanity lists (LDNOOBW and the crossword "breakfast test"),
 # then the by-eye skim of the built list. Only 3–5 letter words matter, but forms are listed
 # so a later length change can't let one in.
+#
+# A `clue:` line is a term no clue may hold (a whole word or phrase, ignoring case and
+# punctuation): a clean answer can take an adult clue from the dictionary ("punk": "A passive
+# or effeminate homosexual man"). The builder clues such a word from its next sense; the app
+# leaves out any listed word whose clue holds one.
 
 # profanity and sexual terms
 anal
@@ -117,6 +122,13 @@ whore
 wog
 wop
 wops
+# adult words found in the built list (2026-11-24)
+busty
+kinky
+lewd
+lusty
+pimp
+pimps
 # violence and death that don't belong on a breakfast page
 kill
 kills
@@ -135,3 +147,43 @@ xxx
 lynch
 kinda
 sus
+# clue terms (2026-11-24, from the daily mini's LEWD: "Lascivious, sexually promiscuous, rude")
+clue:anus
+clue:arousal
+clue:breasts
+clue:brothel
+clue:copulate
+clue:copulation
+clue:erotic
+clue:fornicate
+clue:fornication
+clue:genital
+clue:genitals
+clue:homosexual
+clue:intercourse
+clue:lascivious
+clue:lewd
+clue:masturbate
+clue:masturbation
+clue:obscene
+clue:orgasm
+clue:penis
+clue:pornographic
+clue:pornography
+clue:procurer
+clue:promiscuity
+clue:promiscuous
+clue:prostitute
+clue:prostitutes
+clue:prostitution
+clue:semen
+clue:sexual desire
+clue:sexual arousal
+clue:sexual intercourse
+clue:sexually promiscuous
+clue:sexy
+clue:slut
+clue:testicle
+clue:testicles
+clue:vagina
+clue:whore

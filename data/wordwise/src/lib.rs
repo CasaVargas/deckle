@@ -107,7 +107,8 @@ pub struct ListRules {
 /// The word list for the puzzle page (puzzle design §4): lowercase a–z words of 3 to 5 letters
 /// at zipf 3.0 or more, each with the short definition of its first everyday sense as the clue,
 /// sorted by word. Proper nouns, abbreviations, marked senses, plain inflections of a kept
-/// word, blocklisted words and clues that give the answer away are left out.
+/// word, blocklisted words and clues that give the answer away are left out. A clue holding a
+/// blocklist `clue:` term is no clue: the word takes its next sense's (see [`adult_clue`]).
 pub fn puzzle_words(
     jsonl: impl BufRead,
     freq: &HashMap<String, f64>,
@@ -166,6 +167,7 @@ pub fn word_list(
     // (word, part of speech) → that sense's clue, for an inflection to take
     let mut forms: BTreeMap<String, (String, String, &'static str)> = BTreeMap::new();
     let mut by_pos: HashMap<(String, String), String> = HashMap::new();
+    let clue_terms = clue_terms(blocklist);
     for line in jsonl.lines() {
         let line = match line {
             Ok(l) => l,
@@ -289,6 +291,7 @@ pub fn word_list(
             c.chars().next().is_some_and(char::is_uppercase)
                 && c.chars().count() <= MAX_CLUE
                 && !gives_away(word, c)
+                && !adult_clue(c, &clue_terms)
         });
         if let Some(c) = clue {
             by_pos
@@ -371,6 +374,41 @@ fn puzzle_clue(gloss: &str) -> String {
     } else {
         short_def(&g)
     }
+}
+
+/// A blocklist line that bans a term from clues rather than a word: `clue:lascivious`.
+pub const CLUE_PREFIX: &str = "clue:";
+
+/// The blocklist's clue terms: its `clue:` lines, without the prefix.
+pub fn clue_terms(blocklist: &HashSet<String>) -> Vec<&str> {
+    let mut t: Vec<&str> = blocklist
+        .iter()
+        .filter_map(|b| b.strip_prefix(CLUE_PREFIX))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+    t.sort_unstable();
+    t
+}
+
+/// Whether a clue holds one of `terms` as whole words, ignoring case and punctuation:
+/// "Lascivious, sexually promiscuous, rude" holds "lascivious" and "sexually promiscuous";
+/// "A young dog, especially before sexual maturity" holds neither "sexual desire" nor "sexy".
+/// `deckle_digest::puzzle::words` applies the same rule to the built list as it loads.
+pub fn adult_clue(clue: &str, terms: &[&str]) -> bool {
+    let words = |s: &str| -> String {
+        let w: Vec<String> = s
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_lowercase)
+            .collect();
+        format!(" {} ", w.join(" "))
+    };
+    let clue = words(clue);
+    terms.iter().any(|t| {
+        let t = words(t);
+        !t.trim().is_empty() && clue.contains(&t)
+    })
 }
 
 /// A clue gives its answer away when the answer is anywhere in it, ignoring case: "roses",

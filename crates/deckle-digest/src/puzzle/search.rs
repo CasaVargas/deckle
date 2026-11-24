@@ -680,7 +680,8 @@ mod tests {
     }
 
     /// The Daily's searches, frozen before the generator took options (puzzle books §5.1):
-    /// sixty days and a themed day hash the same as they did.
+    /// sixty days and a themed day hash the same as they did. Refrozen when the list dropped
+    /// its adult words and clues (#357): a different list is a different search.
     #[test]
     fn daily_output_is_unchanged() {
         let words = Words::embedded();
@@ -698,7 +699,7 @@ mod tests {
                 &mut day_rng(3)
             )
         );
-        assert_eq!(fnv(&all), 0x0027_5806_7bba_6e66, "{:#x}", fnv(&all));
+        assert_eq!(fnv(&all), 0xfa4c_1fbb_bb58_c13a, "{:#x}", fnv(&all));
     }
 
     /// The letters along `(dr, dc)` from `(row, col)` in a `size`-square grid, if they fit.

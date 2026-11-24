@@ -10,16 +10,56 @@ static EMBEDDED: &[u8] = include_bytes!("../../assets/puzzle/words.tsv.gz");
 /// The words the list is built without, also kept out of the word search's filler letters.
 static BLOCKLIST: &str = include_str!("../../../../data/wordwise/puzzle-blocklist.txt");
 
-/// The puzzle blocklist (lowercase; `#` lines and blanks skipped), parsed once.
+/// A blocklist line naming a term no clue may hold, not a word: `clue:lascivious`.
+const CLUE_PREFIX: &str = "clue:";
+
+/// The blocklist's lines, lowercase, comments and blanks skipped.
+fn blocklist_lines() -> impl Iterator<Item = String> {
+    BLOCKLIST
+        .lines()
+        .map(|l| l.split('#').next().unwrap_or("").trim().to_lowercase())
+        .filter(|l| !l.is_empty())
+}
+
+/// The puzzle blocklist's words (lowercase; `#` lines, blanks and `clue:` terms skipped),
+/// parsed once.
 pub fn blocklist() -> &'static HashSet<String> {
     static SET: OnceLock<HashSet<String>> = OnceLock::new();
     SET.get_or_init(|| {
-        BLOCKLIST
-            .lines()
-            .map(|l| l.split('#').next().unwrap_or("").trim().to_lowercase())
-            .filter(|l| !l.is_empty())
+        blocklist_lines()
+            .filter(|l| !l.starts_with(CLUE_PREFIX))
             .collect()
     })
+}
+
+/// The blocklist's clue terms (its `clue:` lines), each as a padded run of lowercase words
+/// (" sexual desire "), parsed once.
+fn clue_terms() -> &'static [String] {
+    static TERMS: OnceLock<Vec<String>> = OnceLock::new();
+    TERMS.get_or_init(|| {
+        blocklist_lines()
+            .filter_map(|l| l.strip_prefix(CLUE_PREFIX).map(padded_words))
+            .filter(|t| !t.trim().is_empty())
+            .collect()
+    })
+}
+
+/// Text as its lowercase words, one space apart and padded: "Lascivious, rude" → " lascivious rude ".
+fn padded_words(s: &str) -> String {
+    let w: Vec<String> = s
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(str::to_lowercase)
+        .collect();
+    format!(" {} ", w.join(" "))
+}
+
+/// Whether a clue holds a blocklist clue term as whole words, ignoring case and punctuation —
+/// the rule `data/wordwise` builds the list by (its `adult_clue`), kept here too so a list
+/// built before a term was added still loads clean.
+pub fn adult_clue(clue: &str) -> bool {
+    let clue = padded_words(clue);
+    clue_terms().iter().any(|t| clue.contains(t.as_str()))
 }
 
 #[derive(Clone, Debug, Default)]
@@ -43,7 +83,9 @@ impl Words {
         })
     }
 
-    /// `word<TAB>clue` lines; anything else (blank, no tab, not 3–5 lowercase letters) is skipped.
+    /// `word<TAB>clue` lines; anything else (blank, no tab, not 3–5 lowercase letters) is skipped,
+    /// and so is a blocklisted word or a clue holding a blocklist clue term: the daily mini is a
+    /// family paper's, whatever the list was built with.
     pub fn from_tsv(text: &str) -> Words {
         let mut w = Words::default();
         for line in text.lines() {
@@ -54,6 +96,8 @@ impl Words {
                 || !word.bytes().all(|b| b.is_ascii_lowercase())
                 || clue.trim().is_empty()
                 || w.clues.contains_key(word)
+                || blocklist().contains(word)
+                || adult_clue(clue)
             {
                 continue;
             }
@@ -111,5 +155,57 @@ mod tests {
         assert_eq!(w.clue("leaf"), Some("A green organ"));
         assert_eq!(w.of_len(4), ["card", "leaf"]);
         assert!(w.of_len(3).is_empty() && w.of_len(9).is_empty());
+    }
+
+    #[test]
+    fn from_tsv_leaves_out_blocked_words_and_adult_clues() {
+        let w = Words::from_tsv(
+            "lewd\tLascivious, sexually promiscuous, rude\n\
+             busty\tHaving large breasts\n\
+             punk\tA passive or effeminate homosexual man\n\
+             rut\tSexual desire in any of many mammals\n\
+             fudge\tA soft candy made of SEXY sugar\n\
+             puppy\tA young dog, especially before sexual maturity\n\
+             hen\tA female chicken, especially a sexually mature one\n\
+             leaf\tA green organ\n",
+        );
+        // a blocklisted answer, whatever its clue
+        assert!(!w.contains("lewd") && !w.contains("busty"));
+        // a clean answer with an adult clue: terms match whole words in any case
+        for word in ["punk", "rut", "fudge"] {
+            assert!(!w.contains(word), "{word}");
+        }
+        // a term is whole words: "sexual maturity" is not "sexual desire"
+        assert!(w.contains("puppy") && w.contains("hen") && w.contains("leaf"));
+        assert_eq!(w.of_len(5), ["puppy"]);
+    }
+
+    #[test]
+    fn blocklist_keeps_clue_terms_apart() {
+        assert!(blocklist().contains("lewd"));
+        assert!(blocklist().iter().all(|b| !b.starts_with(CLUE_PREFIX)));
+        assert!(adult_clue("Lascivious, sexually promiscuous, rude"));
+        assert!(adult_clue("To act as a procurer of prostitutes"));
+        assert!(!adult_clue(
+            "A young dog, especially before sexual maturity"
+        ));
+        assert!(!adult_clue("Cheap and vulgar tastelessness"));
+    }
+
+    #[test]
+    fn embedded_list_has_no_adult_entries() {
+        let w = Words::embedded();
+        // the 2026-11-24 report (LEWD in a paper's mini) and its neighbours in the built list
+        for word in [
+            "lewd", "busty", "pimp", "punk", "lust", "rut", "molly", "date",
+        ] {
+            assert!(!w.contains(word), "{word}");
+        }
+        for n in 3..=5 {
+            for word in w.of_len(n) {
+                assert!(!blocklist().contains(word), "{word}");
+                assert!(!adult_clue(w.clue(word).unwrap()), "{word}");
+            }
+        }
     }
 }
