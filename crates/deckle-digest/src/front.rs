@@ -87,14 +87,32 @@ impl FrontPlan {
 /// Tiles under the lead.
 const TILES: usize = 10;
 
-/// The lead by [`lead`], then the round-robin headlines of the news sections, minus the lead.
+/// Words that mark a recurring feature (a horoscope, the lottery numbers, an almanac) rather
+/// than news, whichever feed carried it in.
+const RECURRING_WORDS: [&str; 5] = ["horoscope", "horoscopes", "lottery", "lotto", "almanac"];
+
+/// Whether a story title names a recurring feature (horoscopes, lottery results, the almanac,
+/// tonight's sky), which never takes a front-page tile: the paper has its own sections for those.
+pub fn is_recurring_feature(title: &str) -> bool {
+    let lower = title.to_lowercase().replace(['\u{2018}', '\u{2019}'], "'");
+    if lower.contains("tonight's sky") {
+        return true;
+    }
+    lower
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|w| RECURRING_WORDS.contains(&w))
+}
+
+/// The lead by [`lead`], then the round-robin headlines of the news sections, minus the lead
+/// and any recurring feature ([`is_recurring_feature`]).
 pub fn front_plan(g: &Gathered) -> FrontPlan {
     let lead = crate::cover::lead_of(g);
     let tiles = g
         .edition
-        .headlines(&g.news, TILES + 1)
+        .headlines(&g.news, usize::MAX)
         .into_iter()
         .filter(|&t| Some(t) != lead)
+        .filter(|&(s, a)| !is_recurring_feature(&g.edition.sections[s].articles[a].title))
         .take(TILES)
         .collect();
     FrontPlan { lead, tiles }
@@ -262,6 +280,54 @@ mod tests {
         ]);
         let p = front_plan(&g);
         assert_eq!(&p.tiles[..2], &[(1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn recurring_features_are_recognised() {
+        for t in [
+            "Your horoscope for Tuesday: Aries",
+            "Leo Horoscope, November 24",
+            "Daily Horoscopes",
+            "Lottery results for Monday night",
+            "Powerball and Lotto numbers",
+            "The Old Farmer's Almanac: what to plant now",
+            "Tonight\u{2019}s Sky: Jupiter at opposition",
+        ] {
+            assert!(is_recurring_feature(t), "{t}");
+        }
+        for t in [
+            "Council approves new library",
+            "Slottery Street reopens",
+            "Sky high prices tonight at the market",
+        ] {
+            assert!(!is_recurring_feature(t), "{t}");
+        }
+    }
+
+    #[test]
+    fn horoscope_in_entertainment_feed_takes_no_tile() {
+        let mut ent = many("feeds:Entertainment", 0);
+        ent.articles = vec![
+            story("Your Aries horoscope for today", false),
+            story("Festival line-up announced", false),
+        ];
+        let g = big(vec![many("local", 2), ent]);
+        let p = front_plan(&g);
+        assert_eq!(p.lead, Some((0, 0)));
+        assert!(!p.contains(1, 0), "horoscope took a tile: {:?}", p.tiles);
+        assert_eq!(p.tiles, [(0, 1), (1, 1)]);
+    }
+
+    #[test]
+    fn recurring_features_do_not_shrink_the_front_page() {
+        let mut ent = many("feeds:Entertainment", 0);
+        ent.articles = (0..12)
+            .map(|i| story(&format!("Lottery results, draw {i}"), false))
+            .collect();
+        let g = big(vec![many("local", 20), ent]);
+        let p = front_plan(&g);
+        assert_eq!(p.tiles.len(), 10);
+        assert!(p.tiles.iter().all(|&(s, _)| s == 0));
     }
 
     #[test]
