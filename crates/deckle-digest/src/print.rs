@@ -178,6 +178,10 @@ fn skybox(g: &Gathered, front: &FrontPlan) -> Vec<Teaser> {
         if s.key == "weather" || is_nudge(&s.key) || s.articles.is_empty() || front.contains(i, 0) {
             continue;
         }
+        // A news section led by a recurring feature has nothing to tease from the front page.
+        if g.news.contains(&i) && crate::front::is_recurring_feature(&s.articles[0].title) {
+            continue;
+        }
         out.push(Teaser {
             section: i,
             article: 0,
@@ -675,6 +679,30 @@ mod tests {
         assert_eq!(at, vec![2, 4, 5]);
         assert_eq!(sky[0].title, "READING");
         assert_eq!(sky[0].text, "reading story 0");
+    }
+
+    #[test]
+    fn the_skybox_skips_a_feed_led_by_a_recurring_feature() {
+        let mut ent = section("feeds:Entertainment", &["", ""]);
+        ent.articles[0].title = "Your Aries horoscope for today".into();
+        let g = gathered(vec![
+            section("reading", &[""]),
+            section("weather", &[""]),
+            section("local", &[""]),
+            section("feeds:World", &[""]),
+            ent,
+            section("puzzle", &[""]),
+            section("onthisday", &[""]),
+        ]);
+        let front = crate::front::front_plan(&g);
+        assert!(!front.contains(4, 0));
+        let sky = skybox(&g, &front);
+        assert!(
+            sky.iter().all(|t| t.section != 4),
+            "horoscope teased: {:?}",
+            sky.iter().map(|t| &t.text).collect::<Vec<_>>()
+        );
+        assert!(!sky.is_empty());
     }
 
     #[test]

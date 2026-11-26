@@ -11,7 +11,7 @@ use serde::Serialize;
 use super::live::{LiveCache, LiveItem};
 use super::{History, WeekDay};
 use crate::config::{Config, SectionKind, Units, section_key, subscribed_key, subscribed_sections};
-use crate::front::{Candidate, Tier, lead};
+use crate::front::{Candidate, Tier, is_recurring_feature, lead};
 use crate::press::{Press, press};
 use crate::reading::{Entry, State};
 use crate::sources::feeds::{google_news_url, title_key};
@@ -665,7 +665,14 @@ pub fn plan(i: &Inputs) -> NextPaper {
             }
             _ => continue,
         };
-        candidates.extend((0..n).map(|article| Candidate {
+        // a feed's recurring feature never leads, as in the press
+        let recurring = |a: usize| {
+            tier != Tier::Reading
+                && r.stories
+                    .as_ref()
+                    .is_some_and(|items| is_recurring_feature(&items[a].title))
+        };
+        candidates.extend((0..n).filter(|&a| !recurring(a)).map(|article| Candidate {
             tier,
             section: s,
             article,
@@ -737,9 +744,12 @@ pub fn plan(i: &Inputs) -> NextPaper {
             | SectionKind::Subscribed => {
                 match r.stories.as_deref() {
                     Some(items) if !items.is_empty() => {
-                        // its newest headline, unless that one leads the paper
-                        if let Some((_, item)) =
-                            items.iter().enumerate().find(|(a, _)| !is_lead(*a))
+                        // its newest headline, unless that one leads the paper or is a
+                        // recurring feature
+                        if let Some((_, item)) = items
+                            .iter()
+                            .enumerate()
+                            .find(|(a, it)| !is_lead(*a) && !is_recurring_feature(&it.title))
                         {
                             tiles.push(Tile {
                                 key: r.row.key.clone(),

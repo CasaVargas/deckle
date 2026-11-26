@@ -43,7 +43,8 @@ pub fn lead(c: &[Candidate]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-/// Every story of the news sections and Your Reading, in paper order.
+/// Every story of the news sections and Your Reading, in paper order, except a news section's
+/// recurring features ([`is_recurring_feature`]), which never lead.
 pub fn candidates(g: &Gathered) -> Vec<Candidate> {
     let mut sections: Vec<usize> = g.news.iter().copied().chain(g.reading).collect();
     sections.sort_unstable();
@@ -59,6 +60,9 @@ pub fn candidates(g: &Gathered) -> Vec<Candidate> {
             Tier::Feed
         };
         for (a, art) in section.articles.iter().enumerate() {
+            if tier != Tier::Reading && is_recurring_feature(&art.title) {
+                continue;
+            }
             out.push(Candidate {
                 tier,
                 section: s,
@@ -89,13 +93,23 @@ const TILES: usize = 10;
 
 /// Words that mark a recurring feature (a horoscope, the lottery numbers, an almanac) rather
 /// than news, whichever feed carried it in.
-const RECURRING_WORDS: [&str; 5] = ["horoscope", "horoscopes", "lottery", "lotto", "almanac"];
+const RECURRING_WORDS: [&str; 6] = [
+    "horoscope",
+    "horoscopes",
+    "lottery",
+    "lotto",
+    "powerball",
+    "almanac",
+];
+
+/// Phrases that mark one, such as a lottery result naming only its game.
+const RECURRING_PHRASES: [&str; 3] = ["tonight's sky", "mega millions", "winning numbers"];
 
 /// Whether a story title names a recurring feature (horoscopes, lottery results, the almanac,
 /// tonight's sky), which never takes a front-page tile: the paper has its own sections for those.
 pub fn is_recurring_feature(title: &str) -> bool {
     let lower = title.to_lowercase().replace(['\u{2018}', '\u{2019}'], "'");
-    if lower.contains("tonight's sky") {
+    if RECURRING_PHRASES.iter().any(|p| lower.contains(p)) {
         return true;
     }
     lower
@@ -103,16 +117,23 @@ pub fn is_recurring_feature(title: &str) -> bool {
         .any(|w| RECURRING_WORDS.contains(&w))
 }
 
-/// The lead by [`lead`], then the round-robin headlines of the news sections, minus the lead
-/// and any recurring feature ([`is_recurring_feature`]).
-pub fn front_plan(g: &Gathered) -> FrontPlan {
-    let lead = crate::cover::lead_of(g);
-    let tiles = g
-        .edition
+/// The round-robin headlines of the news sections ([`crate::Edition::headlines`]), at most
+/// `max`, minus any recurring feature ([`is_recurring_feature`]).
+pub fn news_headlines(g: &Gathered, max: usize) -> Vec<(usize, usize)> {
+    g.edition
         .headlines(&g.news, usize::MAX)
         .into_iter()
-        .filter(|&t| Some(t) != lead)
         .filter(|&(s, a)| !is_recurring_feature(&g.edition.sections[s].articles[a].title))
+        .take(max)
+        .collect()
+}
+
+/// The lead by [`lead`], then the [`news_headlines`], minus the lead.
+pub fn front_plan(g: &Gathered) -> FrontPlan {
+    let lead = crate::cover::lead_of(g);
+    let tiles = news_headlines(g, TILES + 1)
+        .into_iter()
+        .filter(|&t| Some(t) != lead)
         .take(TILES)
         .collect();
     FrontPlan { lead, tiles }
@@ -292,6 +313,8 @@ mod tests {
             "Powerball and Lotto numbers",
             "The Old Farmer's Almanac: what to plant now",
             "Tonight\u{2019}s Sky: Jupiter at opposition",
+            "Powerball winning numbers for Saturday, Nov. 22",
+            "Mega Millions winning numbers for Tuesday",
         ] {
             assert!(is_recurring_feature(t), "{t}");
         }
@@ -316,6 +339,31 @@ mod tests {
         assert_eq!(p.lead, Some((0, 0)));
         assert!(!p.contains(1, 0), "horoscope took a tile: {:?}", p.tiles);
         assert_eq!(p.tiles, [(0, 1), (1, 1)]);
+    }
+
+    #[test]
+    fn a_recurring_feature_never_leads() {
+        let mut ent = many("feeds:Entertainment", 0);
+        ent.articles = vec![
+            story("Your Aries horoscope for today", true),
+            story("Festival line-up announced", false),
+        ];
+        let g = big(vec![many("local", 0), ent]);
+        assert_eq!(crate::cover::lead_of(&g), Some((1, 1)));
+        let p = front_plan(&g);
+        assert_eq!(p.lead, Some((1, 1)));
+        assert!(p.tiles.is_empty(), "{:?}", p.tiles);
+    }
+
+    #[test]
+    fn recurring_features_are_left_off_the_cover_headlines() {
+        let mut ent = many("feeds:Entertainment", 0);
+        ent.articles = vec![
+            story("Powerball winning numbers for Saturday", false),
+            story("Festival line-up announced", false),
+        ];
+        let g = big(vec![many("local", 1), ent]);
+        assert_eq!(news_headlines(&g, 12), [(0, 0), (1, 1)]);
     }
 
     #[test]

@@ -95,7 +95,8 @@ function.
    grids). Each cell is one story: the section name in small caps, the linked headline, the
    source line. The stories are `Edition::headlines`' round-robin (the top story of each news
    section, then the seconds), minus the lead and any recurring feature (a title naming a
-   horoscope, lottery or lotto, almanac, or "tonight's sky", whichever feed it came through),
+   horoscope, lottery, lotto or Powerball, almanac, "Mega Millions", "winning numbers" or
+   "tonight's sky", whichever feed it came through),
    up to 10, filling cells left-to-right in rows.
 4. **Inside today:** the existing index of sections with item counts, linking to each section
    front.

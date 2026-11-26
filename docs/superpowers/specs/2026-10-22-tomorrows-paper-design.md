@@ -199,6 +199,10 @@ the lead is the first news headline (Local and feeds interleaved), and saved art
    feeds: its first story with an opening paragraph, else its first.
 3. Otherwise there's no lead.
 
+A news section's recurring feature (a horoscope, lottery result, almanac or "tonight's sky"
+item, by `front::is_recurring_feature`) is never a candidate, in the press or the preview; the
+section's next story stands in for it.
+
 The cover keeps up to two saved articles at the top of its grid, skipping the one that leads.
 The preview can't know opening paragraphs (saved articles aren't fetched yet, briefs have none),
 so it counts every story as having one. **The preview predicts the leading section; the story
