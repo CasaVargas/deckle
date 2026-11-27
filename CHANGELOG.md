@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Horoscopes stay off the front page.** A horoscope, lottery result, almanac or "tonight's
+  sky" item arriving through a news feed such as Entertainment could take one of the front
+  page's headline tiles, lead the paper when there was no local story, or be teased above the
+  masthead. Recurring features like these now never reach the front page, the cover's
+  headlines or Tomorrow's paper; the next news stories take their place.
+
 - **The AI page tells an OpenAI endpoint by its host.** An endpoint was taken for OpenAI's own
   whenever `api.openai.com` appeared anywhere in it, even in the path of a server on your network.
   The page now goes by the hostname to say whether text leaves this computer.

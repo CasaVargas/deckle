@@ -126,7 +126,9 @@ The lead (from `front_plan`) jumps when its story has more after its opening:
 Up to three teasers, from sections in page-plan order:
 
 - Weather and nudges are skipped (weather is already in the ear).
-- So is any section whose first article is already the lead or a tile.
+- So is any section whose first article is already the lead or a tile, and any news section
+  whose first article is a recurring feature (`front::is_recurring_feature`): that story never
+  reaches the front page, teaser included. The paper's own Horoscope section is still teased.
 - Each teaser is the section's title in capitals plus its first article's title, shortened at
   a word to 48 characters with an ellipsis. Your Reading's teaser says "whole" after the title
   when the piece prints whole.

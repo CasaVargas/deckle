@@ -440,7 +440,7 @@ pub fn render(g: &Gathered) -> Result<Vec<u8>, String> {
         y += 10.0;
     }
 
-    let heads = e.headlines(&g.news, HEADLINES);
+    let heads = crate::front::news_headlines(g, HEADLINES);
     let label = |s: usize, a: usize| {
         let section = &e.sections[s];
         match section.articles[a]

@@ -414,6 +414,26 @@ fn feed_leads_line() {
 }
 
 #[test]
+fn a_recurring_feature_neither_leads_nor_takes_a_tile() {
+    let mut s = Setup::new();
+    s.live.feeds.insert(
+        SCIENCE.into(),
+        fetched(&[
+            ("Your Aries horoscope for today", local(2026, 10, 22, 14, 0)),
+            ("Comet brightens", local(2026, 10, 22, 13, 0)),
+        ]),
+    );
+    assert_eq!(
+        s.plan().lead.unwrap().title.as_deref(),
+        Some("Comet brightens")
+    );
+    s.queue = two_saved(); // so Science is a tile, not the lead
+    let p = s.plan();
+    let t = p.tiles.iter().find(|t| t.key == "feeds:Science").unwrap();
+    assert_eq!(t.title.as_deref(), Some("Comet brightens"));
+}
+
+#[test]
 fn a_feed_with_no_source_is_a_row_not_a_crash() {
     let mut s = Setup::new();
     s.cfg.feeds.push(FeedConfig {

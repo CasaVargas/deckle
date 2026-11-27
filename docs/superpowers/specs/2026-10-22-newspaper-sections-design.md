@@ -94,7 +94,10 @@ function.
    not reliably support CSS columns; tables are already used for the weather strip and puzzle
    grids). Each cell is one story: the section name in small caps, the linked headline, the
    source line. The stories are `Edition::headlines`' round-robin (the top story of each news
-   section, then the seconds), minus the lead, up to 10, filling cells left-to-right in rows.
+   section, then the seconds), minus the lead and any recurring feature (a title naming a
+   horoscope, lottery, lotto or Powerball, almanac, "Mega Millions", "winning numbers" or
+   "tonight's sky", whichever feed it came through),
+   up to 10, filling cells left-to-right in rows.
 4. **Inside today:** the existing index of sections with item counts, linking to each section
    front.
 
