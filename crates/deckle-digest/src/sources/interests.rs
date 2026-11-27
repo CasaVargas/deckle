@@ -90,6 +90,7 @@ pub fn interest_section(
     }
     let (mut items, errors) = fetch_merged(
         &interest.searches(),
+        false,
         &interest.feeds,
         interest.max_age_hours,
         now,

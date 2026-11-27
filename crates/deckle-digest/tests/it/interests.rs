@@ -306,18 +306,22 @@ fn a_story_shared_with_local_or_an_earlier_interest_prints_once_and_the_later_re
             local_url,
             rss(&[
                 (
-                    "Panthers parade in Carthage - Gazette",
+                    "Panthers parade in Moore County - Gazette",
                     "https://ok.example/l1",
                     12,
                 ),
-                ("County fair opens - Gazette", "https://ok.example/l2", 11),
+                (
+                    "Moore County fair opens - Gazette",
+                    "https://ok.example/l2",
+                    11,
+                ),
             ]),
         ),
         (
             search("\"Panthers\""),
             rss(&[
                 (
-                    "Panthers parade in Carthage - Gazette",
+                    "Panthers parade in Moore County - Gazette",
                     "https://ok.example/l1",
                     12,
                 ),
@@ -360,7 +364,7 @@ fn a_story_shared_with_local_or_an_earlier_interest_prints_once_and_the_later_re
     // Young's story went nowhere else, so Young prints it and refills to 2.
     assert_eq!(
         titles(section("local")),
-        ["Panthers parade in Carthage", "County fair opens"]
+        ["Panthers parade in Moore County", "Moore County fair opens"]
     );
     assert_eq!(
         titles(section("interests:Panthers")),

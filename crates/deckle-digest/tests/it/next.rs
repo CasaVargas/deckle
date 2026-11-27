@@ -144,16 +144,14 @@ fn live_briefs_and_age_window() {
         .iter()
         .map(|i| (i.title.as_str(), i.source.as_deref()))
         .collect();
-    // split into headline and source; the 10-day-old one is past Local's 48 hours
+    // split into headline and source; the 10-day-old one is past Local's 48 hours, and the leaf
+    // story never names Linden Falls, so Local's search leaves it out as the press does (#358)
     assert_eq!(
         titles,
-        [
-            (
-                "Linden Falls council votes on the bridge",
-                Some("The Linden Ledger")
-            ),
-            ("Leaf season peaks on the ridge", Some("WXII")),
-        ]
+        [(
+            "Linden Falls council votes on the bridge",
+            Some("The Linden Ledger")
+        )]
     );
     let s = &cache.feeds[SCIENCE];
     assert_eq!(s.title.as_deref(), Some("Science Daily Brief"));
@@ -1072,4 +1070,87 @@ fn subscribed_is_off_when_no_group_exists() {
     let p = Setup::new().plan();
     assert!(p.plan.iter().all(|r| r.kind != SectionKind::Subscribed));
     assert!(p.off.iter().all(|r| r.kind != SectionKind::Subscribed));
+}
+
+// --- Local keeps only stories about the place (#358) ---
+
+/// A Google News search for Linden Falls: the newest story is national and names the town only
+/// deep in its teaser; the other two name it in the title and in the first sentence.
+fn local_search_net(url: &str) -> Result<Vec<u8>, String> {
+    if url.starts_with("https://news.google.com/") {
+        Ok(include_bytes!("../fixtures/googlenews-local.xml").to_vec())
+    } else {
+        Err(format!("offline: {url}"))
+    }
+}
+
+#[test]
+fn the_preview_and_the_press_leave_out_the_same_national_story() {
+    use deckle_digest::config::PlaceNews;
+    let mut s = Setup::new();
+    s.cfg.feeds.clear();
+    s.cfg.full_text = false;
+    s.cfg.local.google_news = "Linden Falls NC".into();
+    s.cfg.local.places = vec![PlaceNews {
+        name: "Linden Falls, NC".into(),
+        google_news: "\"Linden Falls\" NC".into(),
+        feeds: Vec::new(),
+        max_items: None,
+        hl: None,
+        gl: None,
+        ceid: None,
+    }];
+    let at = now().with_timezone(&Utc);
+    refresh(&s.cfg, &mut s.live, at, &local_search_net);
+    let p = s.plan();
+
+    let press = deckle_digest::sources::feeds::local_section(
+        &s.cfg,
+        at,
+        &local_search_net,
+        &std::collections::HashSet::new(),
+    );
+    let printed: Vec<&str> = press.articles.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(
+        printed,
+        [
+            "Linden Falls council votes on the bridge",
+            "River bridge reopens after repairs"
+        ]
+    );
+    let place = deckle_digest::sources::feeds::place_section(
+        &s.cfg.local.places[0],
+        &s.cfg,
+        at,
+        &local_search_net,
+    );
+    let place_printed: Vec<&str> = place.articles.iter().map(|a| a.title.as_str()).collect();
+    assert_eq!(place_printed, printed);
+
+    // the preview's cached headlines are the press's stories, the farm bill left out of both
+    for (q, url) in [
+        ("Linden Falls NC", live_urls(&s.cfg)[0].clone()),
+        ("\"Linden Falls\" NC", live_urls(&s.cfg)[1].clone()),
+    ] {
+        assert!(url.contains("news.google.com"), "{q}: {url}");
+        let cached: Vec<&str> = s.live.feeds[&url]
+            .items
+            .iter()
+            .map(|i| i.title.as_str())
+            .collect();
+        assert_eq!(cached, printed, "{q}");
+    }
+    // and Local leads the preview with the story the press leads with, counting the same stories
+    let lead = p.lead.clone().unwrap();
+    assert_eq!(lead.key, "local");
+    assert_eq!(lead.title.as_deref(), Some(printed[0]));
+    assert_eq!(
+        lead.kicker,
+        format!("LOCAL · {} NEW SINCE 05:30", printed.len())
+    );
+    assert!(
+        labels(&p).iter().all(|l| !l.contains("farm bill")),
+        "{:?}",
+        labels(&p)
+    );
 }
