@@ -253,6 +253,115 @@ pub fn as_briefs(items: Vec<Item>) -> Vec<Item> {
         .collect()
 }
 
+/// Words that name a kind of place, not the place: "Moore County" is also "Moore".
+const PLACE_KINDS: &[&str] = &[
+    "county", "parish", "borough", "city", "town", "township", "village",
+];
+
+/// The place a local Google News search names, as the phrases a story about it would use:
+/// each `OR` alternative without operators (`when:3d`, `site:…`, `-word`), quotes or a trailing
+/// two-letter state code, plus its head ("Moore County NC" → "Moore County", "Moore"). Empty
+/// when nothing is left, e.g. for an operator-only search.
+pub fn place_terms(search: &str) -> Vec<String> {
+    let mut terms: Vec<String> = Vec::new();
+    let unquoted = search.replace(['"', '“', '”', '(', ')'], " ");
+    let mut part: Vec<&str> = Vec::new();
+    let mut flush = |part: &mut Vec<&str>| {
+        let mut words: Vec<String> = part
+            .drain(..)
+            .map(|w| w.trim_matches(|c: char| c == ',' || c == ';').to_owned())
+            .filter(|w| !w.is_empty())
+            .collect();
+        if words.len() > 1
+            && words
+                .last()
+                .is_some_and(|w| w.len() == 2 && w.chars().all(|c| c.is_ascii_alphabetic()))
+        {
+            words.pop();
+        }
+        if words.is_empty() {
+            return;
+        }
+        let mut push = |t: String| {
+            if !terms.iter().any(|x| x.eq_ignore_ascii_case(&t)) {
+                terms.push(t);
+            }
+        };
+        push(words.join(" "));
+        if words.len() > 1
+            && words
+                .last()
+                .is_some_and(|w| PLACE_KINDS.contains(&w.to_lowercase().as_str()))
+        {
+            push(words[..words.len() - 1].join(" "));
+        }
+    };
+    for word in unquoted.split_whitespace() {
+        if word == "OR" || word == "|" {
+            flush(&mut part);
+        } else if !(word.starts_with('-') || word.contains(':')) {
+            part.push(word);
+        }
+    }
+    flush(&mut part);
+    terms
+}
+
+/// The item names one of `terms` in its headline or the first sentence of its teaser: a story
+/// that mentions the town only in passing is not local news. The outlet is not the story: a
+/// Google News title's " - Source" and the source the teaser repeats are left out, so "The New
+/// York Times" does not make a national story New York City's.
+pub fn mentions_place(item: &Item, terms: &[String]) -> bool {
+    let (headline, source) = match &item.source {
+        Some(s) => (item.title.as_str(), Some(s.as_str())),
+        None => match item.title.rsplit_once(" - ") {
+            Some((head, source)) => (head.trim(), Some(source.trim())),
+            None => (item.title.as_str(), None),
+        },
+    };
+    let teaser = item
+        .paragraphs
+        .iter()
+        .find(|p| !p.trim().is_empty())
+        .map(|p| match source {
+            Some(s) if !s.is_empty() => p.replace(s, " "),
+            _ => p.clone(),
+        })
+        .unwrap_or_default();
+    let first = first_sentence(&teaser);
+    terms.iter().any(|t| {
+        super::interests::contains_phrase(headline, t)
+            || super::interests::contains_phrase(first, t)
+    })
+}
+
+/// Up to and including the first full stop, question or exclamation mark followed by a space.
+fn first_sentence(p: &str) -> &str {
+    let p = p.trim();
+    p.char_indices()
+        .find(|&(i, c)| {
+            matches!(c, '.' | '!' | '?')
+                && p[i + c.len_utf8()..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_whitespace)
+        })
+        .map_or(p, |(i, c)| &p[..i + c.len_utf8()])
+}
+
+/// A local search's results, only those about the searched place (#358). A search with no
+/// place to find (see [`place_terms`]) keeps everything.
+pub fn about_the_place(items: Vec<Item>, search: &str) -> Vec<Item> {
+    let terms = place_terms(search);
+    if terms.is_empty() {
+        return items;
+    }
+    items
+        .into_iter()
+        .filter(|i| mentions_place(i, &terms))
+        .collect()
+}
+
 static DROP_BLOCKS: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?is)<(script|style|figure|iframe)\b.*?</(script|style|figure|iframe)>").unwrap()
 });
@@ -662,9 +771,12 @@ pub fn place_section(
 
 /// Google News searches (as briefs) and feeds, fetched, merged, deduplicated by title, newest
 /// first. Errors read "Google News: …" or "<host>: …"; one source failing leaves the others.
+/// With `local`, a search keeps only the stories about its place ([`about_the_place`]); feeds
+/// are never filtered.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn fetch_merged(
     searches: &[String],
+    local: bool,
     feeds: &[String],
     max_age_hours: u32,
     now: DateTime<Utc>,
@@ -683,7 +795,14 @@ pub(crate) fn fetch_merged(
             .get(&google_news_url(search, max_age_hours, hl, gl, ceid))
             .and_then(|b| parse(&b, now, max_age_hours))
         {
-            Ok((_, found)) => items.extend(as_briefs(found)),
+            Ok((_, found)) => {
+                let found = if local {
+                    about_the_place(found, search)
+                } else {
+                    found
+                };
+                items.extend(as_briefs(found))
+            }
             Err(e) => errors.push(format!("Google News: {e}")),
         }
     }
@@ -722,6 +841,7 @@ fn local_news(
 ) -> Section {
     let (mut items, errors) = fetch_merged(
         &[search.to_owned()],
+        true,
         feeds,
         cfg.local.max_age_hours,
         now,
@@ -864,6 +984,7 @@ mod tests {
         let now = "2026-10-20T22:00:00Z".parse().unwrap();
         let (items, errors) = fetch_merged(
             &["Alpha".into()],
+            false,
             &[
                 "https://f.example/rss".into(),
                 "https://bad.example/rss".into(),
@@ -882,6 +1003,216 @@ mod tests {
         assert_eq!(items[1].source.as_deref(), Some("WXII"));
         assert_eq!(items[0].source.as_deref(), Some("The Feed"));
         assert_eq!(errors, ["bad.example: offline"]);
+    }
+
+    /// A Google News search for "Linden Falls NC": a national story that names the town only
+    /// deep in its teaser, one with the town in its title, one with it in its first sentence.
+    const LOCAL_SEARCH: &[u8] = include_bytes!("../../tests/fixtures/googlenews-local.xml");
+    /// A `[local] feeds` paper whose story never names the town.
+    const LOCAL_FEED: &str = "https://ledger.example/rss";
+
+    fn local_net(url: &str) -> Result<Vec<u8>, String> {
+        if url.starts_with("https://news.google.com/") {
+            Ok(LOCAL_SEARCH.to_vec())
+        } else if url == LOCAL_FEED {
+            Ok(
+                b"<rss version=\"2.0\"><channel><title>The Ledger</title><item>\
+                 <title>Pumpkin festival this weekend</title><link>https://ledger.example/p</link>\
+                 <pubDate>Thu, 22 Oct 2026 15:00:00 +0000</pubDate></item></channel></rss>"
+                    .to_vec(),
+            )
+        } else {
+            Err(format!("offline: {url}"))
+        }
+    }
+
+    fn local_cfg(search: &str) -> Config {
+        let mut cfg = Config::default();
+        cfg.local.google_news = search.into();
+        cfg.full_text = false;
+        cfg
+    }
+
+    fn local_now() -> DateTime<Utc> {
+        "2026-10-22T19:08:00Z".parse().unwrap()
+    }
+
+    fn section_titles(s: &Section) -> Vec<&str> {
+        s.articles.iter().map(|a| a.title.as_str()).collect()
+    }
+
+    #[test]
+    fn place_terms_come_from_the_search() {
+        assert_eq!(place_terms("Moore County NC"), ["Moore County", "Moore"]);
+        assert_eq!(
+            place_terms("\"Moore County\", NC when:1d"),
+            ["Moore County", "Moore"]
+        );
+        assert_eq!(place_terms("Linden Falls NC"), ["Linden Falls"]);
+        assert_eq!(
+            place_terms("\"Southern Pines\" OR \"Aberdeen NC\" -golf site:example.com"),
+            ["Southern Pines", "Aberdeen"]
+        );
+        assert_eq!(place_terms("Roma"), ["Roma"]);
+        assert!(place_terms("").is_empty());
+        assert!(place_terms("when:1d").is_empty());
+        assert!(place_terms("  \"\" when:2d site:example.com ").is_empty());
+    }
+
+    #[test]
+    fn a_national_story_that_names_the_town_in_passing_is_not_local() {
+        let s = local_section(
+            &local_cfg("Linden Falls NC"),
+            local_now(),
+            &local_net,
+            &HashSet::new(),
+        );
+        // the title match and the first-sentence match stay; the farm bill goes
+        assert_eq!(
+            section_titles(&s),
+            [
+                "Linden Falls council votes on the bridge",
+                "River bridge reopens after repairs"
+            ]
+        );
+    }
+
+    #[test]
+    fn local_feeds_are_not_filtered() {
+        let mut cfg = local_cfg("Linden Falls NC");
+        cfg.local.feeds = vec![LOCAL_FEED.into()];
+        let s = local_section(&cfg, local_now(), &local_net, &HashSet::new());
+        assert_eq!(
+            section_titles(&s),
+            [
+                "Linden Falls council votes on the bridge",
+                "River bridge reopens after repairs",
+                "Pumpkin festival this weekend"
+            ]
+        );
+    }
+
+    #[test]
+    fn another_place_is_filtered_as_local_is() {
+        let place = crate::config::PlaceNews {
+            name: "Linden Falls, NC".into(),
+            google_news: String::new(),
+            feeds: vec![LOCAL_FEED.into()],
+            max_items: None,
+            hl: None,
+            gl: None,
+            ceid: None,
+        };
+        let s = place_section(&place, &local_cfg(""), local_now(), &local_net);
+        assert_eq!(
+            section_titles(&s),
+            [
+                "Linden Falls council votes on the bridge",
+                "River bridge reopens after repairs",
+                "Pumpkin festival this weekend"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_search_with_no_place_to_find_keeps_every_story() {
+        for search in ["when:1d", "\"\" when:2d"] {
+            let s = local_section(&local_cfg(search), local_now(), &local_net, &HashSet::new());
+            assert_eq!(
+                section_titles(&s),
+                [
+                    "Senate passes the farm bill after a long night",
+                    "Linden Falls council votes on the bridge",
+                    "River bridge reopens after repairs"
+                ],
+                "{search}"
+            );
+        }
+        // and the filter itself keeps everything when given no terms
+        let items = vec![item()];
+        assert_eq!(about_the_place(items.clone(), "when:1d"), items);
+        assert_eq!(about_the_place(items.clone(), ""), items);
+    }
+
+    /// Google News as it really comes: "Headline - Source" titles and a teaser that is the
+    /// headline, two no-break spaces and the outlet in a `<font>`.
+    const CITY_OUTLET: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss version=\"2.0\"><channel>\
+        <title>\"New York City\" - Google News</title>\
+        <item><title>Senate passes the farm bill after a long night - The New York Times</title>\
+        <link>https://news.google.com/rss/articles/national</link><pubDate>Thu, 22 Oct 2026 18:00:00 GMT</pubDate>\
+        <description>&lt;a href=\"https://news.google.com/rss/articles/national\" target=\"_blank\"&gt;Senate passes the farm bill after a long night&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color=\"#6f6f6f\"&gt;The New York Times&lt;/font&gt;</description>\
+        <source url=\"https://www.nytimes.com\">The New York Times</source></item>\
+        <item><title>Fed holds rates steady - New York Post</title>\
+        <link>https://news.google.com/rss/articles/fed</link><pubDate>Thu, 22 Oct 2026 17:30:00 GMT</pubDate>\
+        <description>&lt;a href=\"https://news.google.com/rss/articles/fed\" target=\"_blank\"&gt;Fed holds rates steady&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color=\"#6f6f6f\"&gt;New York Post&lt;/font&gt;</description>\
+        <source url=\"https://nypost.com\">New York Post</source></item>\
+        <item><title>New York City subway fares rise in January - The New York Times</title>\
+        <link>https://news.google.com/rss/articles/subway</link><pubDate>Thu, 22 Oct 2026 17:00:00 GMT</pubDate>\
+        <description>&lt;a href=\"https://news.google.com/rss/articles/subway\" target=\"_blank\"&gt;New York City subway fares rise in January&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color=\"#6f6f6f\"&gt;The New York Times&lt;/font&gt;</description>\
+        <source url=\"https://www.nytimes.com\">The New York Times</source></item>\
+        </channel></rss>";
+
+    #[test]
+    fn a_city_named_outlet_does_not_make_a_national_story_local() {
+        let net = |url: &str| -> Result<Vec<u8>, String> {
+            if url.starts_with("https://news.google.com/") {
+                Ok(CITY_OUTLET.to_vec())
+            } else {
+                Err(format!("offline: {url}"))
+            }
+        };
+        // the starter search: its terms are "New York City" and "New York"
+        let s = local_section(
+            &local_cfg("New York City"),
+            local_now(),
+            &net,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            section_titles(&s),
+            ["New York City subway fares rise in January"]
+        );
+        // and on a raw item, before the source is split off the title
+        let terms = place_terms("New York City");
+        let raw = |title: &str, teaser: &str| Item {
+            title: title.into(),
+            source: None,
+            paragraphs: vec![teaser.into()],
+            ..item()
+        };
+        assert!(!mentions_place(
+            &raw(
+                "Senate passes the farm bill - The New York Times",
+                "Senate passes the farm bill\u{a0}\u{a0}The New York Times"
+            ),
+            &terms
+        ));
+        assert!(mentions_place(
+            &raw(
+                "Rents climb in New York - The New York Times",
+                "Rents climb in New York\u{a0}\u{a0}The New York Times"
+            ),
+            &terms
+        ));
+    }
+
+    #[test]
+    fn only_the_first_sentence_of_the_teaser_counts() {
+        let terms = place_terms("Linden Falls NC");
+        let with = |p: &str| Item {
+            title: "Farm bill passes".into(),
+            paragraphs: vec![p.into()],
+            ..item()
+        };
+        assert!(mentions_place(
+            &with("Linden Falls voted today. More later."),
+            &terms
+        ));
+        assert!(!mentions_place(
+            &with("Congress voted today. Linden Falls waits."),
+            &terms
+        ));
+        assert!(!mentions_place(&with("Congress voted today."), &terms));
     }
 
     #[test]
@@ -1261,6 +1592,7 @@ mod tests {
         }
         let (items, errors) = fetch_merged(
             &[],
+            false,
             &[
                 "https://bad.example/rss".into(),
                 "https://good.example/rss".into(),

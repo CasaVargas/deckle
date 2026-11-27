@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::fetch::Net;
-use crate::sources::feeds::{as_briefs, google_news_url, parse};
+use crate::sources::feeds::{about_the_place, as_briefs, google_news_url, parse};
 
 /// Minutes a URL rests between fetches.
 pub const REFRESH_EVERY_MIN: i64 = 30;
@@ -68,6 +68,9 @@ struct Source {
     max_age_hours: u32,
     max_items: usize,
     briefs: bool,
+    /// A local search (Local's or another place's): only its stories about the place are kept,
+    /// as the press keeps them (#358).
+    place: Option<String>,
 }
 
 /// The feed URL the press reads for one `[[subscribed]]` slug, so the preview shares its cache.
@@ -93,6 +96,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
             // spares: Local drops what an earlier section printed, then refills
             max_items: cfg.local.max_items.saturating_add(SPARE),
             briefs: true,
+            place: Some(cfg.local.google_news.clone()),
         });
     }
     for url in &cfg.local.feeds {
@@ -101,6 +105,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
             max_age_hours: cfg.local.max_age_hours,
             max_items: cfg.local.max_items.saturating_add(SPARE),
             briefs: false,
+            place: None,
         });
     }
     // other places' local news (#102), under Local's age window
@@ -118,6 +123,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
                 max_age_hours: cfg.local.max_age_hours,
                 max_items,
                 briefs: true,
+                place: Some(p.search().to_owned()),
             });
         }
         for url in &p.feeds {
@@ -126,6 +132,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
                 max_age_hours: cfg.local.max_age_hours,
                 max_items,
                 briefs: false,
+                place: None,
             });
         }
     }
@@ -143,6 +150,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
                 max_age_hours: i.max_age_hours,
                 max_items: i.max_items.saturating_add(SPARE),
                 briefs: true,
+                place: None,
             });
         }
         for url in &i.feeds {
@@ -151,6 +159,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
                 max_age_hours: i.max_age_hours,
                 max_items: i.max_items.saturating_add(SPARE),
                 briefs: false,
+                place: None,
             });
         }
     }
@@ -166,6 +175,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
                 url,
                 max_age_hours: cfg.max_age_hours,
                 max_items: f.max_items.saturating_add(SPARE),
+                place: None,
             });
         }
     }
@@ -177,6 +187,7 @@ fn sources(cfg: &Config) -> Vec<Source> {
             max_age_hours: g.max_age_hours.unwrap_or(cfg.local.max_age_hours),
             max_items: max_items.saturating_add(SPARE),
             briefs: false,
+            place: None,
         });
     }
     out
@@ -210,6 +221,11 @@ pub fn refresh(cfg: &Config, cache: &mut LiveCache, now: DateTime<Utc>, net: &dy
             .and_then(|b| parse(&b, now, s.max_age_hours))
         {
             Ok((title, items)) => {
+                // a local search keeps only its place's stories before the cut, as the press does
+                let items = match &s.place {
+                    Some(q) => about_the_place(items, q),
+                    None => items,
+                };
                 let mut items = if s.briefs { as_briefs(items) } else { items };
                 items.truncate(s.max_items);
                 Fetched {

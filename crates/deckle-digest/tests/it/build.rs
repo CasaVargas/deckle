@@ -78,7 +78,10 @@ fn read_zip(path: &PathBuf) -> zip::ZipArchive<std::fs::File> {
 
 #[test]
 fn every_section_fills_from_fixtures() {
-    let g = gather(&config(), date(), now(), &fake);
+    let mut c = config();
+    // a town the fixture's in-window stories name: Local keeps only stories about it (#358)
+    c.local.google_news = "Candor NC".into();
+    let g = gather(&c, date(), now(), &fake);
     let titles: Vec<_> = g
         .edition
         .sections
@@ -448,11 +451,10 @@ fn place(name: &str, search: &str) -> PlaceNews {
 #[test]
 fn places_print_after_local_each_from_its_own_search() {
     let mut c = config();
-    c.local.places = vec![
-        place("Asheville, NC", "Asheville NC"),
-        place("Boone, NC", ""),
-    ];
-    c.local.places[1].feeds = vec!["https://boone.example/rss".into()]; // offline in the fake
+    // the town the fixture's in-window stories name: a place keeps only stories about it (#358)
+    c.local.google_news = "Candor NC".into();
+    c.local.places = vec![place("Candor, NC", "Candor NC"), place("Candor", "")];
+    c.local.places[1].feeds = vec!["https://candor.example/rss".into()]; // offline in the fake
     let asked = std::sync::Mutex::new(Vec::<String>::new());
     let net = |url: &str| {
         asked.lock().unwrap().push(url.to_owned());
@@ -463,29 +465,26 @@ fn places_print_after_local_each_from_its_own_search() {
     let at = keys.iter().position(|k| *k == "local").unwrap();
     assert_eq!(
         &keys[at..at + 3],
-        ["local", "local:Asheville, NC", "local:Boone, NC"]
+        ["local", "local:Candor, NC", "local:Candor"]
     );
-    let asheville = &g.edition.sections[at + 1];
-    assert_eq!(asheville.title, "Asheville, NC");
+    let candor = &g.edition.sections[at + 1];
+    assert_eq!(candor.title, "Candor, NC");
     assert_eq!(
-        asheville.kicker.as_deref(),
-        Some("News from around Asheville, NC")
+        candor.kicker.as_deref(),
+        Some("News from around Candor, NC")
     );
-    assert!(!asheville.articles.is_empty());
-    // its own search; Boone, with none, searches its name
+    assert!(!candor.articles.is_empty());
+    // its own search; the second, with none, searches its name
     let asked = asked.lock().unwrap();
-    assert!(
-        asked.iter().any(|u| u.contains("q=Asheville+NC")),
-        "{asked:?}"
-    );
+    assert!(asked.iter().any(|u| u.contains("q=Candor+NC")), "{asked:?}");
     let searches = asked
         .iter()
         .filter(|u| u.starts_with("https://news.google.com/rss/search"))
         .count();
     assert_eq!(searches, 3, "{asked:?}");
-    // Boone's feed is down: its name's search still prints, and nothing else is touched
-    let boone = &g.edition.sections[at + 2];
-    assert!(!boone.articles.is_empty(), "{boone:?}");
+    // the second's feed is down: its name's search still prints, and nothing else is touched
+    let named = &g.edition.sections[at + 2];
+    assert!(!named.articles.is_empty(), "{named:?}");
     assert!(g.edition.sections[at].unavailable.is_none());
     // all three are news, but only Local is the local tier
     assert!(g.news.contains(&(at + 1)) && g.news.contains(&(at + 2)));
@@ -510,19 +509,18 @@ fn searches_for(c: &Config) -> (Vec<String>, deckle_digest::Gathered) {
 #[test]
 fn a_place_with_only_a_name_searches_its_name() {
     let mut c = config();
-    c.local.places = vec![place("Pinehurst, NC", "  ")];
+    // the town the fixture's in-window stories name: a place keeps only stories about it (#358)
+    c.local.places = vec![place("Candor, NC", "  ")];
     let (searches, g) = searches_for(&c);
     assert!(
-        searches
-            .iter()
-            .any(|u| u.contains("q=Pinehurst%2C+NC+when")),
+        searches.iter().any(|u| u.contains("q=Candor%2C+NC+when")),
         "{searches:?}"
     );
     let s = g
         .edition
         .sections
         .iter()
-        .find(|s| s.key == "local:Pinehurst, NC")
+        .find(|s| s.key == "local:Candor, NC")
         .unwrap();
     assert!(s.unavailable.is_none(), "{s:?}");
     assert!(!s.articles.is_empty());
@@ -581,7 +579,10 @@ fn places_follow_local_off() {
 fn place_budget_defaults_to_locals() {
     let mut c = config();
     c.local.max_items = 2;
-    c.local.places = vec![place("A", "Asheville NC"), place("B", "Boone NC")];
+    // places the fixture's stories name, over a month of them: a place keeps only the stories
+    // about it (#358)
+    c.local.max_age_hours = 24 * 30;
+    c.local.places = vec![place("A", "Moore County NC"), place("B", "Candor NC")];
     c.local.places[1].max_items = Some(1);
     c.full_text = false;
     let g = gather(&c, date(), now(), &fake);
