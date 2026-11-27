@@ -307,17 +307,30 @@ pub fn place_terms(search: &str) -> Vec<String> {
     terms
 }
 
-/// The item names one of `terms` in its title or the first sentence of its teaser: a story
-/// that mentions the town only in passing is not local news.
+/// The item names one of `terms` in its headline or the first sentence of its teaser: a story
+/// that mentions the town only in passing is not local news. The outlet is not the story: a
+/// Google News title's " - Source" and the source the teaser repeats are left out, so "The New
+/// York Times" does not make a national story New York City's.
 pub fn mentions_place(item: &Item, terms: &[String]) -> bool {
-    let first = item
+    let (headline, source) = match &item.source {
+        Some(s) => (item.title.as_str(), Some(s.as_str())),
+        None => match item.title.rsplit_once(" - ") {
+            Some((head, source)) => (head.trim(), Some(source.trim())),
+            None => (item.title.as_str(), None),
+        },
+    };
+    let teaser = item
         .paragraphs
         .iter()
         .find(|p| !p.trim().is_empty())
-        .map(|p| first_sentence(p))
+        .map(|p| match source {
+            Some(s) if !s.is_empty() => p.replace(s, " "),
+            _ => p.clone(),
+        })
         .unwrap_or_default();
+    let first = first_sentence(&teaser);
     terms.iter().any(|t| {
-        super::interests::contains_phrase(&item.title, t)
+        super::interests::contains_phrase(headline, t)
             || super::interests::contains_phrase(first, t)
     })
 }
@@ -1119,6 +1132,68 @@ mod tests {
         let items = vec![item()];
         assert_eq!(about_the_place(items.clone(), "when:1d"), items);
         assert_eq!(about_the_place(items.clone(), ""), items);
+    }
+
+    /// Google News as it really comes: "Headline - Source" titles and a teaser that is the
+    /// headline, two no-break spaces and the outlet in a `<font>`.
+    const CITY_OUTLET: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?><rss version=\"2.0\"><channel>\
+        <title>\"New York City\" - Google News</title>\
+        <item><title>Senate passes the farm bill after a long night - The New York Times</title>\
+        <link>https://news.google.com/rss/articles/national</link><pubDate>Thu, 22 Oct 2026 18:00:00 GMT</pubDate>\
+        <description>&lt;a href=\"https://news.google.com/rss/articles/national\" target=\"_blank\"&gt;Senate passes the farm bill after a long night&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color=\"#6f6f6f\"&gt;The New York Times&lt;/font&gt;</description>\
+        <source url=\"https://www.nytimes.com\">The New York Times</source></item>\
+        <item><title>Fed holds rates steady - New York Post</title>\
+        <link>https://news.google.com/rss/articles/fed</link><pubDate>Thu, 22 Oct 2026 17:30:00 GMT</pubDate>\
+        <description>&lt;a href=\"https://news.google.com/rss/articles/fed\" target=\"_blank\"&gt;Fed holds rates steady&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color=\"#6f6f6f\"&gt;New York Post&lt;/font&gt;</description>\
+        <source url=\"https://nypost.com\">New York Post</source></item>\
+        <item><title>New York City subway fares rise in January - The New York Times</title>\
+        <link>https://news.google.com/rss/articles/subway</link><pubDate>Thu, 22 Oct 2026 17:00:00 GMT</pubDate>\
+        <description>&lt;a href=\"https://news.google.com/rss/articles/subway\" target=\"_blank\"&gt;New York City subway fares rise in January&lt;/a&gt;&amp;nbsp;&amp;nbsp;&lt;font color=\"#6f6f6f\"&gt;The New York Times&lt;/font&gt;</description>\
+        <source url=\"https://www.nytimes.com\">The New York Times</source></item>\
+        </channel></rss>";
+
+    #[test]
+    fn a_city_named_outlet_does_not_make_a_national_story_local() {
+        let net = |url: &str| -> Result<Vec<u8>, String> {
+            if url.starts_with("https://news.google.com/") {
+                Ok(CITY_OUTLET.to_vec())
+            } else {
+                Err(format!("offline: {url}"))
+            }
+        };
+        // the starter search: its terms are "New York City" and "New York"
+        let s = local_section(
+            &local_cfg("New York City"),
+            local_now(),
+            &net,
+            &HashSet::new(),
+        );
+        assert_eq!(
+            section_titles(&s),
+            ["New York City subway fares rise in January"]
+        );
+        // and on a raw item, before the source is split off the title
+        let terms = place_terms("New York City");
+        let raw = |title: &str, teaser: &str| Item {
+            title: title.into(),
+            source: None,
+            paragraphs: vec![teaser.into()],
+            ..item()
+        };
+        assert!(!mentions_place(
+            &raw(
+                "Senate passes the farm bill - The New York Times",
+                "Senate passes the farm bill\u{a0}\u{a0}The New York Times"
+            ),
+            &terms
+        ));
+        assert!(mentions_place(
+            &raw(
+                "Rents climb in New York - The New York Times",
+                "Rents climb in New York\u{a0}\u{a0}The New York Times"
+            ),
+            &terms
+        ));
     }
 
     #[test]
